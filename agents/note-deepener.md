@@ -34,9 +34,9 @@ Read and follow these skills during work:
 
 ### 1. Read and Assess
 
-Read the target note. Run the promote-gate assessment (6 criteria: depth, sourcing, linking, voice, atomicity, source integrity). State the tier and specific gaps.
+Read the target note. Run the promote-gate assessment (6 criteria: depth, sourcing, linking, voice, atomicity, source integrity). For `[synthesis]`-tagged notes, Sourcing and Source Integrity are exempt per the promote-gate skill -- assess on the remaining 4. State the tier and specific gaps.
 
-If the note is already deep on all 6 criteria, say so and stop. Don't rewrite for the sake of it.
+If the note already passes all applicable criteria, say so and stop. Don't rewrite for the sake of it.
 
 ### 2. Check Overlap
 
@@ -119,9 +119,11 @@ Run the counter-argument-linking check from the skill. If this note challenges a
 ### 8. Route and Write
 
 Run the promote-gate assessment on the finished note:
-- All 6 pass → write to `3-permanent/`, delete original if it was in a different folder
+- All applicable criteria pass → write to `3-permanent/`, delete original if it was in a different folder
 - 3-4 pass → write to `1-fleeting/`, delete original if it was in inbox
 - ≤ 2 pass → overwrite in place (still needs work)
+
+For `[synthesis]`-tagged notes, "all applicable" means 4/4 (Sourcing and Source Integrity exempt).
 
 Use `Write` tool for all file operations. Use `Bash rm` to delete originals after promotion. Never use Obsidian MCP tools.
 

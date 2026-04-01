@@ -26,9 +26,10 @@ You will receive:
 
 1. Read the promote-gate skill.
 2. Read each note using the `Read` tool.
-3. Score against the six promote-gate criteria using scoring mode (weak/solid/strong).
-4. Assign a maturity tier (shallow/medium/deep).
-5. Recommend an action.
+3. Run the promote-gate pass/fail assessment (6 criteria). For `[synthesis]`-tagged notes, Sourcing and Source Integrity are exempt -- assess on the remaining 4.
+4. Score the two orthogonal dimensions from promote-gate scoring mode: claim_specificity (0-2) and source_grounded (0-2).
+5. Derive maturity tier from the note-level score (shallow < 0.4, medium 0.4-0.7, deep > 0.7).
+6. Recommend an action.
 
 For linking assessment, use `node {{PLUGIN}}/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps — notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
 
@@ -39,11 +40,12 @@ Return structured results:
 ```
 ## Scores
 
-| Note | Tier | Depth | Sourcing | Linking | Voice | Atomicity | Issues |
-|------|------|-------|----------|---------|-------|-----------|--------|
-| [[note-name]] | shallow | 1/3 | 0/3 | 1/3 | 2/3 | 3/3 | no sources, topic-as-title |
-| [[note-name]] | medium | 2/3 | 2/3 | 1/3 | 3/3 | 3/3 | weak links |
-| [[note-name]] | deep | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 | — |
+| Note | Tier | Specificity | Grounded | Gate | Issues |
+|------|------|-------------|----------|------|--------|
+| [[note-name]] | shallow | 0 | 0 | 2/6 | no sources, topic-as-title |
+| [[note-name]] | medium | 1 | 2 | 5/6 | voice fails |
+| [[note-name]] | deep | 2 | 2 | 6/6 | — |
+| [[note-name]] [synthesis] | deep | 2 | 1 | 4/4 | — |
 
 ## Recommendations
 
@@ -53,13 +55,18 @@ Return structured results:
 | [[note-name]] | promote → 3-permanent/ | meets quality bar |
 | [[note-name]] | split | covers two distinct ideas |
 | [[note-name]] | merge with [[other]] | overlapping topic |
+| [[note-name]] | source-attach | factual claim, no citation |
 ```
+
+- **Specificity**: claim_specificity (0 = vague, 1 = bounded, 2 = falsifiable)
+- **Grounded**: source_grounded (0 = none, 1 = vault-linked, 2 = externally cited)
+- **Gate**: pass count out of applicable criteria (6 for sourced notes, 4 for synthesis notes)
 
 ## Calibration Examples
 
 Read these three examples before scoring any notes. They anchor what each tier looks like in practice.
 
-**SHALLOW example** (score: depth 2, sourcing 1, linking 2, voice 2, atomicity 3 = 10/15):
+**SHALLOW example** (specificity: 1, grounded: 0, gate: 3/6 — depth pass, linking pass, atomicity pass):
 ```markdown
 ---
 tags: [react, hooks]
@@ -85,9 +92,9 @@ In Strict Mode development, the full cycle runs twice: setup, cleanup, setup. Th
 
 Related: [[useeffect-runs-after-paint-not-after-mount]], [[render-and-commit-are-separate-phases]]
 ```
-Why this is shallow/medium: Good depth and atomicity. But `source: discovery` is not a real citation. The title describes behavior rather than stating an insight. Two links present but no specific sourcing.
+Why this is shallow: Claims are bounded (specificity 1) — describes a real mechanism with order — but `source: discovery` is not a real citation (grounded 0). The title describes behavior rather than stating an insight (voice fails). Two links present but no external sourcing.
 
-**MEDIUM example** (score: depth 2, sourcing 3, linking 2, voice 3, atomicity 3 = 13/15):
+**MEDIUM example** (specificity: 1, grounded: 2, gate: 5/6 — linking weak):
 ```markdown
 ---
 tags: [graphql, apollo]
@@ -105,9 +112,9 @@ Custom keys via `keyFields: ["sku"]` in typePolicies. `keyFields: false` disable
 
 **Source:** [Apollo cache configuration docs](https://www.apollographql.com/docs/react/caching/cache-configuration), [Demystifying Cache Normalization](https://www.apollographql.com/blog/demystifying-cache-normalization)
 ```
-Why this is medium: Strong voice (claim-as-title, compressed). Specific clickable sources. Atomic. But only one wiki-link and the body is practical reference rather than rich analysis. Depth is solid but not deep.
+Why this is medium: Strong voice (claim-as-title, compressed). Specific clickable sources (grounded 2). Atomic. But claims are bounded not falsifiable (specificity 1) — describes how the cache works, not a testable prediction. Only one wiki-link (linking weak).
 
-**DEEP example** (score: depth 3, sourcing 3, linking 3, voice 3, atomicity 3 = 15/15):
+**DEEP example** (specificity: 2, grounded: 1, gate: 6/6):
 ```markdown
 ---
 tags: [epistemology, voice]
@@ -126,7 +133,7 @@ Three independent lineages converge on the same structure:
 
 See also: [[compression-carries-more-weight-than-expression]], [[paradox-is-epistemological-honesty-not-rhetoric]], [[the-note-is-not-the-knowledge-it-is-the-door]]
 ```
-Why this is deep: Rich multi-paragraph body with specific named sources across three traditions. Three wiki-links. Compressed voice with no filler. Single atomic idea (apophatic method) explored through multiple lenses.
+Why this is deep: Falsifiable claim (specificity 2) — "negative definition is a cross-cultural convergent structure" is testable against the historical record. Sources are named traditions and thinkers linked through vault notes (grounded 1 — vault-linked, not externally cited URLs). Rich multi-paragraph body. Three wiki-links. Compressed voice. Single atomic idea explored through multiple lenses.
 
 **Use these as your reference points.** When in doubt, compare the note you are scoring to these three examples.
 

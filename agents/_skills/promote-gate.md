@@ -16,7 +16,7 @@ Before running the criteria assessment, classify the note by source status:
 | Source status | Route |
 |---------------|-------|
 | Has external source citation (URL, DOI, PMID) | Standard gate below |
-| No source, but note is synthesis/author inference (cross-note connection, personal pattern recognition, design decision) | Tag `[synthesis]` in frontmatter, exempt from Sourcing criterion |
+| No source, but note is synthesis/author inference (cross-note connection, personal pattern recognition, design decision) | Tag `[synthesis]` in frontmatter, exempt from Sourcing and Source Integrity criteria |
 | No source, but note makes a factual claim that should be verifiable | Block: do not score. Return `→ source-attach workflow` and stop |
 
 Detection heuristic for synthesis vs factual:
@@ -42,13 +42,15 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 | Passes | Destination | Rewrite? |
 |--------|-------------|----------|
-| All 6 | `3-permanent/` | No — write as-is |
-| 5 of 6 (voice fails) | `3-permanent/` | Yes — rewrite in persona voice |
-| 5 of 6 (source integrity fails) | `1-fleeting/` | No — **cannot promote with unverified sources** |
-| 4-5 of 6 | `1-fleeting/` | No |
-| ≤ 3 of 6 | `0-inbox/` | No |
+| All applicable criteria pass | `3-permanent/` | No — write as-is |
+| All but voice pass | `3-permanent/` | Yes — rewrite in persona voice |
+| Source integrity fails (non-synthesis notes only) | `1-fleeting/` | No — **cannot promote with unverified sources** |
+| 3-4 of applicable pass | `1-fleeting/` | No |
+| ≤ half of applicable pass | `0-inbox/` | No |
 
-**Hard block:** Source Integrity failure always blocks promotion to `3-permanent/`, regardless of other criteria. A beautifully written, well-linked, deep note with a fabricated citation is worse than a shallow inbox note — it looks authoritative while being wrong.
+For `[synthesis]`-tagged notes, "all applicable" = 4 criteria (Sourcing and Source Integrity exempt). For all other notes, "all applicable" = 6.
+
+**Hard block:** Source Integrity failure always blocks promotion to `3-permanent/` for non-synthesis notes. A beautifully written, well-linked, deep note with a fabricated citation is worse than a shallow inbox note — it looks authoritative while being wrong.
 
 ## Scoring Mode
 
