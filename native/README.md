@@ -20,7 +20,7 @@ ll-search index <vault-path> <db-path> [--force]
 ll-search query <db-path> "search terms" [--top N]
 ll-search similar <db-path> <note-path> [--top N]
 ll-search cluster <db-path> [--threshold 0.85]
-ll-search discriminate <db-path> [--threshold 0.78] [paths...]
+ll-search discriminate <db-path> [--threshold 0.85] [paths...]
 ll-search embed "text"
 ll-search status <db-path> <vault-path>
 ll-search version

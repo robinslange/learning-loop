@@ -43,7 +43,7 @@ After completing the search and before compiling the output:
 
 1. Read the discrimination skill: `{{PLUGIN}}/agents/_skills/discrimination.md`
 2. Collect all note paths found during search
-3. Run: `node {{PLUGIN}}/scripts/vault-search.mjs discriminate <paths> --threshold 0.85`
+3. Run: `node {{PLUGIN}}/scripts/vault-search.mjs discriminate <paths>`
    - Pass the note paths as space-separated arguments
    - If more than 20 notes, pass only the top 20 most relevant
 4. For each returned pair, read both notes and apply the discrimination skill's three-outcome assessment

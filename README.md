@@ -118,7 +118,7 @@ node scripts/vault-search.mjs cluster --threshold 0.72
 node scripts/vault-search.mjs index [--force] [--watch] [--sync]
 
 # Find confusable note pairs
-node scripts/vault-search.mjs discriminate <paths> --threshold 0.85
+node scripts/vault-search.mjs discriminate <paths>
 
 # Batch search+rerank+discriminate (used by /reflect)
 node scripts/vault-search.mjs reflect-scan "query1" "query2" --top 5
