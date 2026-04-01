@@ -49,16 +49,17 @@ If the session was purely routine (config change, typo fix, quick lookup), say s
 
 Identify what was learned. Categories:
 
-| Category | Example | Destination |
-|---|---|---|
-| **Correction received** | "Don't mock the DB in these tests" | Auto-memory (feedback) |
-| **Preference revealed** | "I prefer X approach over Y" | Auto-memory (user/feedback) |
-| **Decision made** | "We chose Postgres over SQLite because..." | Obsidian vault |
-| **Problem solved** | "The build failed because X, fixed by Y" | Obsidian vault |
-| **Pattern discovered** | "This pagination pattern works across projects" | Obsidian vault |
-| **Domain insight** | "Resto Druid HoT uptime benchmarks are..." | Obsidian vault |
-| **Project context** | "Auth rewrite is driven by compliance, not tech debt" | Auto-memory (project) |
-| **Cross-project connection** | "Same caching problem exists in Kinso and Solenoid" | Obsidian vault + links |
+| Category | Example | Destination | Confidence |
+|---|---|---|---|
+| **Correction received** | "Don't mock the DB in these tests" | Auto-memory (feedback) | strong |
+| **Preference revealed** | "I prefer X approach over Y" | Auto-memory (user/feedback) | strong |
+| **Decision made** | "We chose Postgres over SQLite because..." | Obsidian vault | - |
+| **Problem solved** | "The build failed because X, fixed by Y" | Obsidian vault | - |
+| **Pattern discovered** | "This pagination pattern works across projects" | Obsidian vault | - |
+| **Domain insight** | "Resto Druid HoT uptime benchmarks are..." | Obsidian vault | - |
+| **Project context** | "Auth rewrite is driven by compliance, not tech debt" | Auto-memory (project) | medium |
+| **Cross-project connection** | "Same caching problem exists in Kinso and Solenoid" | Obsidian vault + links | - |
+| **Implicit pattern** | User always runs tests before committing (observed 3+ times, never stated) | Auto-memory (feedback) | weak |
 
 List each learning as a single line.
 
@@ -91,6 +92,11 @@ Using the reflect-scan results from Step 2.5:
 
 **For auto-memory items:**
 - Follow the auto-memory format (frontmatter with name, description, type + content)
+- Set `confidence` in frontmatter based on signal strength:
+  - `strong`: user explicitly stated the preference or correction ("I always want...", "Don't ever...", "No, do it this way")
+  - `medium`: user corrected your output (changed X to Y, rejected an approach) or provided project context
+  - `weak`: pattern inferred from repeated behavior (observed 3+ times but never explicitly stated by user)
+- Existing memories without a confidence field default to `medium` throughout the system
 - Feedback memories: lead with the rule, then Why and How to apply
 - Project memories: lead with the fact, then Why and How to apply
 - Update MEMORY.md index
