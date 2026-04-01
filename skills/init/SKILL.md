@@ -202,9 +202,24 @@ Generate Ed25519 keypair via `ll-search` (the Rust binary handles key generation
 
 ### 4b: Network Connection
 
-Check for Tailscale. If not installed, guide installation (brew for macOS, curl for Linux). Ask for Headscale auth key (provided by network admin). Connect to the coordination server. Verify with `tailscale status`.
+Check for Tailscale. If not installed, guide installation (brew for macOS, curl for Linux). Ask for Headscale auth key (provided by the hub admin). Connect to the coordination server. Verify with `tailscale status`.
 
 If no auth key available, skip -- they can re-run init later.
+
+### 4b.1: Hub Registration
+
+The hub requires manual peer registration by the hub admin. There is no self-registration endpoint.
+
+After generating the identity in 4a, display the pubkey and instruct the user:
+
+```
+Your public key: ed25519:SvMMcogkaIkiuhxU7BeBkW77KvXBizV8mSYhVGzUrGo=
+
+Send this key to the hub admin. They will register you on the hub.
+You can re-run /learning-loop:init to test connectivity once registered.
+```
+
+Do not attempt to register the peer on the hub. Do not claim registration succeeded unless a sync test (step 11 in Phase 1) actually succeeds.
 
 ### 4c: Visibility Rules
 
@@ -225,7 +240,7 @@ Write `{{PLUGIN_DATA}}/federation/config.json` with identity, visibility, peers,
 
 ### 4f: First Export and Test
 
-Run `ll-search export-index`. Report counts. Test sync with hub if network is connected.
+Run `ll-search export-index`. Report counts. If network is connected, attempt a sync test. If sync fails with an auth error, this likely means the hub admin hasn't registered the peer yet -- say so clearly and suggest re-running init after registration.
 
 ---
 
