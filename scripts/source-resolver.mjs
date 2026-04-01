@@ -250,20 +250,67 @@ function inferSampleSize(abstractLower) {
 
 // --- Cascading Resolver ---
 
+function extractAuthorFromQuery(query) {
+  const m = query.match(/^([A-Za-z\u00C0-\u024F-]+(?:\s+et\s+al\.?)?)/);
+  return m ? m[1].replace(/\s+et\s+al\.?/, '') : null;
+}
+
+function bestAuthorMatch(candidates, claimedAuthor) {
+  if (!claimedAuthor || candidates.length === 0) return candidates[0] || null;
+  for (const c of candidates) {
+    const authors = c.authors || [];
+    if (authors.length > 0 && authorMatches(claimedAuthor, authors)) return c;
+  }
+  return null;
+}
+
 async function resolveSource(query) {
-  const pmids = await pubmedSearch(query);
+  const claimedAuthor = extractAuthorFromQuery(query);
+
+  // PubMed: try field-qualified search first, then fall back to free text
+  const authorField = claimedAuthor ? claimedAuthor + '[Author]' : '';
+  const yearMatch = query.match(/((?:19|20)\d{2})/);
+  const yearField = yearMatch ? yearMatch[1] + '[Date - Publication]' : '';
+  const qualifiedQuery = [authorField, yearField].filter(Boolean).join(' AND ');
+
+  if (qualifiedQuery) {
+    const pmids = await pubmedSearch(qualifiedQuery, 5);
+    if (pmids.length > 0) {
+      const candidates = [];
+      for (const pmid of pmids.slice(0, 3)) {
+        const r = await pubmedFetch(pmid);
+        if (r) candidates.push(r);
+      }
+      const match = bestAuthorMatch(candidates, claimedAuthor);
+      if (match) return { resolved: true, ...match };
+    }
+  }
+
+  // PubMed free-text fallback
+  const pmids = await pubmedSearch(query, 5);
   if (pmids.length > 0) {
-    const result = await pubmedFetch(pmids[0]);
-    if (result) return { resolved: true, ...result };
+    const candidates = [];
+    for (const pmid of pmids.slice(0, 3)) {
+      const r = await pubmedFetch(pmid);
+      if (r) candidates.push(r);
+    }
+    const match = bestAuthorMatch(candidates, claimedAuthor);
+    if (match) return { resolved: true, ...match };
   }
 
   await sleep(200);
-  const s2Results = await semanticScholarSearch(query);
-  if (s2Results.length > 0) return { resolved: true, ...s2Results[0] };
+  const s2Results = await semanticScholarSearch(query, 5);
+  if (s2Results.length > 0) {
+    const match = bestAuthorMatch(s2Results, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
 
   await sleep(200);
-  const crResults = await crossrefSearch(query);
-  if (crResults.length > 0) return { resolved: true, ...crResults[0] };
+  const crResults = await crossrefSearch(query, 5);
+  if (crResults.length > 0) {
+    const match = bestAuthorMatch(crResults, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
 
   return { resolved: false, query };
 }
@@ -475,10 +522,24 @@ function extractSourcesFromNote(content) {
   return sources;
 }
 
+function extractNoteTopicKeywords(content) {
+  const titleMatch = content.match(/^#\s+(.+)$/m);
+  if (!titleMatch) return '';
+  return titleMatch[1]
+    .replace(/[-_]/g, ' ')
+    .replace(/\b(is|are|the|a|an|and|or|but|not|for|in|on|of|to|with|by|from|as|at|vs|has|have|had|was|were|be|been)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 4)
+    .join(' ');
+}
+
 async function verifyNote(notePath) {
   const content = readFileSync(notePath, 'utf-8');
   const sources = extractSourcesFromNote(content);
   const noteFilename = basename(notePath);
+  const topicKeywords = extractNoteTopicKeywords(content);
   const results = [];
 
   for (const src of sources) {
@@ -521,7 +582,10 @@ async function verifyNote(notePath) {
         result = { verified: false, error: `Could not resolve ${src.pmc}`, metadata: null };
       }
     } else if (src.claimedAuthor && src.claimedYear) {
-      const resolved = await resolveSource(`${src.claimedAuthor} ${src.claimedYear}`);
+      const query = topicKeywords
+        ? `${src.claimedAuthor} ${src.claimedYear} ${topicKeywords}`
+        : `${src.claimedAuthor} ${src.claimedYear}`;
+      const resolved = await resolveSource(query);
       if (resolved.resolved) {
         const issues = [];
         const resolvedAuthors = resolved.authors || [];

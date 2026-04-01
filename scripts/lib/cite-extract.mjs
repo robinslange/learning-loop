@@ -30,6 +30,8 @@ const NOT_AUTHORS = new Set([
 function isAuthorToken(token) {
   if (token.pos !== 'PROPN') return false;
   if (NOT_AUTHORS.has(token.text.toLowerCase())) return false;
+  // Reject single characters and initials (e.g., "L.", "A.", "N.")
+  if (token.text.replace(/\./g, '').length < 2) return false;
   return true;
 }
 
@@ -72,10 +74,14 @@ export function extractAuthorYearCitations(text) {
         }
       }
 
-      // Look for year after author sequence (skip punctuation between)
+      // Look for year after author sequence (skip punctuation, initials like "L.", "A. C.")
       let yearIdx = j;
-      while (yearIdx < tokens.length && /^[,()\s]$/.test(tokens[yearIdx].text)) {
-        yearIdx++;
+      while (yearIdx < tokens.length) {
+        const tk = tokens[yearIdx];
+        if (/^[,()\s]$/.test(tk.text)) { yearIdx++; continue; }
+        // Skip initials (single letter + optional period)
+        if (tk.pos === 'PROPN' && tk.text.replace(/\./g, '').length < 2) { yearIdx++; continue; }
+        break;
       }
 
       if (yearIdx < tokens.length && tokens[yearIdx].pos === 'NUM' && YEAR_RE.test(tokens[yearIdx].text)) {
