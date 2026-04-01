@@ -1,0 +1,11 @@
+{
+  "name": "learning-loop",
+  "version": "1.7.1",
+  "description": "Self-improving learning loop across Claude sessions — retrieval, capture, consolidation, and cross-project transfer",
+  "author": {
+    "name": "Robin"
+  },
+  "repository": "https://github.com/robinslange/learning-loop",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": ["learning", "knowledge-management", "zettelkasten", "obsidian", "second-brain"]
+}
