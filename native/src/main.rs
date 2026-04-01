@@ -40,7 +40,7 @@ enum Commands {
     },
     Discriminate {
         db_path: String,
-        #[arg(long, default_value_t = 0.78)]
+        #[arg(long, default_value_t = 0.85)]
         threshold: f32,
         paths: Vec<String>,
     },
