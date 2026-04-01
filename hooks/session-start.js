@@ -2,11 +2,11 @@
 // Learning Loop — SessionStart hook
 // Injects context from auto-memory and recent Obsidian captures to prime retrieval.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
@@ -237,6 +237,7 @@ if (existsSync(patternsFile)) {
 }
 
 // 8. Record session start time and snapshot memory file list
+const sessionId = randomBytes(4).toString('hex');
 writeFileSync(join(tmp, 'learning-loop-session-start'), String(Math.floor(Date.now() / 1000)));
 if (projectDir) {
   const encodedPath = projectDir.replace(/[/\\]/g, '-');
@@ -244,21 +245,30 @@ if (projectDir) {
   try {
     const files = readdirSync(memDir).filter((f) => f.endsWith('.md'));
     writeFileSync(join(tmp, 'learning-loop-memory-snapshot'), JSON.stringify(files));
+    // Persist retrieval snapshot for /dream decay tracking
+    try {
+      const retrievalDir = join(pluginData, 'retrieval');
+      mkdirSync(retrievalDir, { recursive: true });
+      const entry = JSON.stringify({
+        ts: new Date().toISOString(),
+        session_id: sessionId,
+        memories: files,
+      });
+      appendFileSync(join(retrievalDir, `access-${new Date().toISOString().slice(0, 7)}.jsonl`), entry + '\n');
+    } catch {}
   } catch {}
 }
 
-// 9. Generate session ID
-const sessionId = randomBytes(4).toString('hex');
+// 9. Write session ID
 writeFileSync(join(tmp, 'learning-loop-session-id'), sessionId);
 
-// 10. Emit session-start provenance event (fire and forget)
+// 10. Emit session-start provenance event
 try {
-  const child = spawn(
+  execFileSync(
     'node',
     [join(PLUGIN_DIR, 'scripts', 'provenance.mjs'), JSON.stringify({ agent: 'session', action: 'session-start', source: 'hook' })],
-    { detached: true, stdio: 'ignore' }
+    { timeout: 3000, stdio: 'ignore' }
   );
-  child.unref();
 } catch {}
 
 // Output as JSON for additionalContext injection
