@@ -81,6 +81,13 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    - Both contain the same specific rule or preference
    When in doubt, don't merge. Conservative merging prevents information loss.
 
+   **For each MERGE candidate pair, classify the relationship:**
+   - **Redundant**: both say the same thing differently. Action: merge, keep the clearer version.
+   - **Complementary**: both are about the same subject but add different information. Action: merge, preserve all information from both.
+   - **Contradictory**: they assert opposite rules or facts about the same subject. Action: flag for RESOLVE in Phase 3. Do not merge.
+
+   Report contradiction count separately in the signal summary.
+
 3. **Flag PRUNE candidates.**
    - Orphaned index entries (from Phase 1)
    - Project memories where the described project state is clearly outdated (references a version that has shipped, a decision that has been reversed, a sprint that has ended)
@@ -99,18 +106,14 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    - Memory files containing relative temporal references: "yesterday", "today", "last week", "next Monday", "Thursday", "this sprint", or similar
    - Use the file's modification date as the anchor for conversion
 
-6. **Flag CONTRADICTION candidates.**
-   - Two memories within the same type group that assert opposite rules or facts about the same subject
-   - Do NOT plan to resolve these. Just flag them for the report.
-
-7. **Present the signal summary and ask for approval before proceeding:**
+6. **Present the signal summary and ask for approval before proceeding:**
    ```
    Dream signal:
-   - MERGE: N candidate pairs
+   - MERGE: N candidate pairs (N redundant, N complementary, N contradictory)
    - PRUNE: N candidates (N orphaned, N stale)
    - COMPRESS: N candidates (N also over size limit)
    - DATE NORMALIZE: N candidates
-   - CONTRADICTIONS: N flagged (will not auto-resolve)
+   - CONTRADICTIONS: N flagged (-> RESOLVE in Phase 3)
 
    Proceed with consolidation? [yes/no]
    ```
@@ -155,12 +158,15 @@ If lock file already exists, abort with message: "Another dream is in progress. 
 
 **MERGE:**
 - For each candidate pair, read both files fully
-- Generate a merged version that preserves ALL information from both (rules, reasons, examples)
+- Check the classification from Phase 2:
+  - **Redundant pairs**: generate a merged version keeping the clearer phrasing. Drop the weaker version's text entirely.
+  - **Complementary pairs**: generate a merged version that preserves ALL information from both (rules, reasons, examples).
+  - **Contradictory pairs**: skip. These go to RESOLVE (below).
 - Keep the frontmatter of the more recently modified file
-- Update the description to cover both files' scope
+- Update the description to cover the merged scope
 - Write the merged content to the newer file using Edit
 - Move the older file to `_archived/` subdirectory (create if needed with mkdir -p)
-- Log the merge with reason
+- Log the merge with reason and classification
 
 **COMPRESS:**
 - For each flagged file, read the full content
