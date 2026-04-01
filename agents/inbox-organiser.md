@@ -22,6 +22,7 @@ Read and follow these skills during triage:
 - `{{PLUGIN}}/agents/_skills/counter-argument-linking.md` — detect and link challenge notes
 - `{{PLUGIN}}/agents/_skills/capture-rules.md` — what belongs in the vault and note format rules
 - `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
+- `{{PLUGIN}}/agents/_skills/fleeting-sweep.md` — sweep 1-fleeting/ for archival candidates (Step 8)
 
 ## Process
 
@@ -73,7 +74,7 @@ Name each cluster by its dominant theme. Single-note clusters are fine.
 
 For each cluster, process all its inbox notes together:
 
-**a) Run promote-gate** on each note (the 5-criterion pass/fail from the skill). This is faster than spawning note-scorer agents for obvious cases.
+**a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria — assess them on the remaining four. This is faster than spawning note-scorer agents for obvious cases.
 
 **b) Detect counter-arguments** using the counter-argument-linking skill. Within a cluster, check if any note challenges another note in the same cluster or in the promoted folders (1-fleeting, 3-permanent).
 
@@ -174,32 +175,7 @@ Remaining: [R] in inbox
 
 ### 8. Fleeting Sweep
 
-After inbox processing, sweep `1-fleeting/` for archival candidates. Run:
-
-```bash
-bash {{PLUGIN}}/scripts/fleeting-sweep.sh {{VAULT}}/
-```
-
-Output is TSV: `TYPE\tNAME\tDETAIL`. The script finds:
-- **PROMOTED**: 2+ inbound links from `3-permanent/` (insight absorbed)
-- **STALE**: project-slug filename, zero inbound links, >60 days old
-
-It automatically skips counterpoint notes (`challenged:`/`challenges:` in frontmatter).
-
-Present archival candidates in a table:
-
-```
-## Fleeting Sweep
-
-| Note | Reason | Detail |
-|------|--------|--------|
-| bacopa-effects-grow-over-weeks | promoted | 3 permanent refs |
-| solenoid-hero-copy | stale project note | 0 refs, 90 days old |
-
-Archive these [N] notes to `_archive/1-fleeting/`? (y/n)
-```
-
-Archival is **gated** — wait for user approval. On approval, `mv` each file to `_archive/1-fleeting/`.
+After inbox processing, run the fleeting sweep per `{{PLUGIN}}/agents/_skills/fleeting-sweep.md`.
 
 ### 9. Final Report
 
