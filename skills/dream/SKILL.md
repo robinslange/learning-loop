@@ -28,7 +28,7 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 ```bash
 {{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"MEMORY_FILENAME"}'
 ```
-Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`, `link`.
+Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`, `link`, `abstract`.
 
 **At session end, run provenance consolidation:**
 ```bash
@@ -104,6 +104,20 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
     Unlike MERGE, LINK never combines files. It adds `related:` frontmatter pointing memories at each other.
 
+2c. **Flag ABSTRACT candidates.**
+    Identify clusters of 4+ memories within the same type group that describe variations of the same underlying pattern. Examples:
+    - 5 feedback memories about code style preferences that could be abstracted into "Robin's code style philosophy"
+    - 4 project memories about different services that share the same architectural pattern
+    - 3 feedback memories about LLM failure modes that describe a general principle
+
+    For each cluster, note:
+    - The memories in the cluster (by filename)
+    - The candidate abstraction (one sentence describing the higher-order pattern)
+    - Which specific memories would be ARCHIVED after abstraction (only those fully subsumed by the abstraction)
+    - Which specific memories would REMAIN (those with unique detail not captured by the abstraction)
+
+    Conservative threshold: only flag clusters where the abstraction clearly captures a real pattern, not a coincidental grouping. If in doubt, don't abstract.
+
 3. **Flag PRUNE candidates.**
    - Orphaned index entries (from Phase 1)
    - Project memories where the described project state is clearly outdated (references a version that has shipped, a decision that has been reversed, a sprint that has ended)
@@ -135,6 +149,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    - COMPRESS: N candidates (N also over size limit)
    - LINK: N candidate pairs
    - DATE NORMALIZE: N candidates
+   - ABSTRACT: N clusters (N source memories)
    - CONTRADICTIONS: N flagged (-> RESOLVE in Phase 3)
 
    Proceed with consolidation? [yes/no]
@@ -144,7 +159,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
 ### Phase 3: Consolidate
 
-Process in strict order: DATE NORMALIZE, MERGE, RESOLVE, COMPRESS, PRUNE, LINK.
+Process in strict order: DATE NORMALIZE, MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK.
 
 **Safety: Create lock file first.**
 ```bash
@@ -205,6 +220,27 @@ Processes contradictory pairs flagged by MERGE. For each pair:
 
 4. Log every resolution with the contradiction type and action taken.
 
+**ABSTRACT:**
+- For each flagged cluster, present the proposed abstraction to the human-in-the-loop gate:
+  ```
+  ABSTRACT proposal:
+  Cluster: [list of N memory filenames]
+  Abstraction: "[one-sentence pattern]"
+  Archive: [files fully subsumed]
+  Keep: [files with unique detail]
+  Proceed? [yes/no/skip]
+  ```
+  Wait for user confirmation per cluster. This is a separate gate from the Phase 2 approval because abstraction is lossy and irreversible.
+
+- If approved:
+  - Write a new memory file named with the pattern (e.g., `feedback_code_style_philosophy.md`)
+  - Frontmatter: `type` matches the cluster's type, `confidence: strong` (validated by user), `abstracted_from:` lists the source filenames
+  - Body: the abstraction as a clear rule/principle, with Why and How to apply lines
+  - Body must reference the specific source memories that were synthesized ("Synthesized from N memories about X, Y, Z")
+  - Archive the fully-subsumed source files to `_archived/`
+  - Leave the unique-detail files in place, add `related:` pointing to the new abstraction
+  - Log with full cluster membership and which files were archived vs kept
+
 **COMPRESS:**
 - For each flagged file, read the full content
 - Rewrite the body to preserve: the rule/fact, the Why line, the How to apply line
@@ -257,6 +293,7 @@ rm -f /tmp/learning-loop-dream-lock
    Scanned: N memory files (N feedback, N project, N user, N reference)
    Merged: N pairs
    Resolved: N contradictions (N temporal, N preference, N disambiguated)
+   Abstracted: N clusters (N sources -> N abstractions)
    Compressed: N files
    Pruned: N entries
    Linked: N pairs
