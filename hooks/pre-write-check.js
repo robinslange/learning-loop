@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve, sep, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
@@ -65,7 +65,8 @@ function extractWikilinks(body) {
   const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
   let m;
   while ((m = re.exec(body)) !== null) {
-    links.add(m[1].trim());
+    const target = m[1].split('#')[0].trim();
+    if (target) links.add(target);
   }
   return [...links];
 }
@@ -77,8 +78,8 @@ function noteExistsInVault(name, vaultRoot) {
   for (const dir of VAULT_DIRS) {
     const dirPath = join(vaultRoot, dir);
     try {
-      const files = readdirSync(dirPath);
-      if (files.includes(target)) return true;
+      const files = readdirSync(dirPath, { recursive: true });
+      if (files.some(f => basename(f) === target)) return true;
     } catch {}
   }
   return false;
