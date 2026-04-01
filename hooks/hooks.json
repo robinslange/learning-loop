@@ -1,5 +1,5 @@
 {
-  "description": "Learning Loop lifecycle hooks — retrieval on start, consolidation nudge on stop, preservation on compact",
+  "description": "Learning Loop lifecycle hooks — retrieval, consolidation, vault write validation, backlinks",
   "hooks": {
     "SessionStart": [
       {
@@ -34,6 +34,18 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "matcher": "Write|Edit|Agent|Skill",
@@ -41,6 +53,16 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-provenance.js\"",
+            "timeout": 3
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-write-backlink.js\"",
             "timeout": 3
           }
         ]
