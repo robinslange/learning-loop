@@ -28,7 +28,7 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 ```bash
 {{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"MEMORY_FILENAME"}'
 ```
-Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`.
+Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`, `link`.
 
 **At session end, run provenance consolidation:**
 ```bash
@@ -94,6 +94,16 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
    Report contradiction count separately in the signal summary.
 
+2b. **Flag LINK candidates.**
+    Compare memory descriptions across type groups (not just within). Flag pairs where:
+    - A feedback memory references the same tool/concept as a project memory
+    - A reference memory points to something directly relevant to a project memory
+    - Two memories in different type groups share a keyword or concept but aren't duplicates
+
+    This is a lightweight scan over descriptions only, not full file content. If the memory directory has 50+ files, limit comparison to the 30 most recently modified to keep Phase 2 fast.
+
+    Unlike MERGE, LINK never combines files. It adds `related:` frontmatter pointing memories at each other.
+
 3. **Flag PRUNE candidates.**
    - Orphaned index entries (from Phase 1)
    - Project memories where the described project state is clearly outdated (references a version that has shipped, a decision that has been reversed, a sprint that has ended)
@@ -123,6 +133,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    - MERGE: N candidate pairs (N redundant, N complementary, N contradictory)
    - PRUNE: N candidates (N orphaned, N stale, N low-retrieval)
    - COMPRESS: N candidates (N also over size limit)
+   - LINK: N candidate pairs
    - DATE NORMALIZE: N candidates
    - CONTRADICTIONS: N flagged (-> RESOLVE in Phase 3)
 
@@ -133,7 +144,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
 ### Phase 3: Consolidate
 
-Process in strict order: DATE NORMALIZE, MERGE, RESOLVE, COMPRESS, PRUNE.
+Process in strict order: DATE NORMALIZE, MERGE, RESOLVE, COMPRESS, PRUNE, LINK.
 
 **Safety: Create lock file first.**
 ```bash
@@ -208,6 +219,16 @@ Processes contradictory pairs flagged by MERGE. For each pair:
   "Archived: low retrieval (0 accesses in N sessions, confidence: weak/medium)"
 - For archived files older than 90 days: leave them (manual cleanup, not automated in v1)
 
+**LINK:**
+- For each flagged pair, add a `related:` field to both files' frontmatter listing the other file:
+  ```yaml
+  related:
+    - feedback_graphite_workflow.md
+  ```
+- If a `related:` field already exists, append to it (don't duplicate existing entries)
+- Use Edit tool to update frontmatter in place
+- Log each link with the shared concept that justified it
+
 **Remove lock file when done:**
 ```bash
 rm -f /tmp/learning-loop-dream-lock
@@ -238,6 +259,7 @@ rm -f /tmp/learning-loop-dream-lock
    Resolved: N contradictions (N temporal, N preference, N disambiguated)
    Compressed: N files
    Pruned: N entries
+   Linked: N pairs
    Dates normalized: N
    Index: N lines (was N)
    Unresolved: N contradictions (need user input)
