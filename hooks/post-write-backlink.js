@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, appendFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, appendFileSync, readdirSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
 import { homedir } from 'node:os';
 
