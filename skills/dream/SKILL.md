@@ -7,7 +7,7 @@ description: 'Consolidate auto-memory between sessions. Usage: /learning-loop:dr
 
 ## Overview
 
-Consolidates the current project's auto-memory files. Merges near-duplicates, prunes stale entries, compresses verbose memories, normalizes relative dates to absolute, and rebuilds the MEMORY.md index. The auto-memory equivalent of what `/inbox` does for the vault.
+Consolidates the current project's auto-memory files using seven operators: conflict-aware MERGE, RESOLVE (contradiction handling), ABSTRACT (higher-order pattern synthesis), COMPRESS, confidence-aware PRUNE (with retrieval-based decay), cross-type LINK, and DATE NORMALIZE. Rebuilds the MEMORY.md index. The auto-memory equivalent of what `/inbox` does for the vault.
 
 ## When to Use
 
