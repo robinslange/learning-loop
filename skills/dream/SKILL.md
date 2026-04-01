@@ -1,6 +1,6 @@
 ---
 name: dream
-description: 'Consolidate auto-memory between sessions. Usage: /learning-loop:dream (no args). Four-phase cycle: Orient, Gather Signal, Consolidate, Prune Index. Merges duplicates, prunes stale entries, compresses verbose memories, normalizes dates, rebuilds MEMORY.md.'
+description: 'Consolidate auto-memory between sessions. Usage: /learning-loop:dream (no args). Four-phase cycle: Orient, Gather Signal, Consolidate, Prune Index. Seven operators: MERGE (conflict-aware), RESOLVE, ABSTRACT, COMPRESS, PRUNE (retrieval-based decay), LINK, DATE NORMALIZE. Rebuilds MEMORY.md.'
 ---
 
 # Dream — Auto-Memory Consolidation
@@ -33,7 +33,7 @@ Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`, `l
 **At session end, run provenance consolidation:**
 ```bash
 node {{PLUGIN}}/scripts/provenance-consolidate.mjs
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"session-end","merged":N,"pruned":N,"compressed":N}'
+{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N}'
 ```
 
 Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook does not capture these, so per-target events are retained.
@@ -70,6 +70,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    Dreaming: [project name]
    Memory files: N (N feedback, N project, N user, N reference)
    Index entries: N (N orphaned)
+   Retrieval data: N sessions tracked (or "not yet available")
    ```
 
 ### Phase 2: Gather Signal
@@ -144,15 +145,18 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 6. **Present the signal summary and ask for approval before proceeding:**
    ```
    Dream signal:
-   - MERGE: N candidate pairs (N redundant, N complementary, N contradictory)
-   - PRUNE: N candidates (N orphaned, N stale, N low-retrieval)
-   - COMPRESS: N candidates (N also over size limit)
-   - LINK: N candidate pairs
    - DATE NORMALIZE: N candidates
+   - MERGE: N candidate pairs (N redundant, N complementary, N contradictory -> RESOLVE)
+   - RESOLVE: N contradictions to attempt
    - ABSTRACT: N clusters (N source memories)
-   - CONTRADICTIONS: N flagged (-> RESOLVE in Phase 3)
+   - COMPRESS: N candidates (N also over size limit)
+   - PRUNE: N candidates (N orphaned, N stale, N low-retrieval)
+   - LINK: N candidate pairs
+
+   Retrieval data: N sessions tracked (or "not yet available")
 
    Proceed with consolidation? [yes/no]
+   Note: ABSTRACT has a separate per-cluster gate in Phase 3.
    ```
 
    Wait for user confirmation using AskUserQuestion. This is the human-in-the-loop gate.
@@ -176,15 +180,30 @@ If lock file already exists, abort with message: "Another dream is in progress. 
 - `filename.md`: "last Thursday" -> "2026-03-20"
 
 ### MERGE
-- `feedback_a.md` + `feedback_b.md` -> `feedback_a.md` (archived feedback_b.md)
+- `feedback_a.md` + `feedback_b.md` -> `feedback_a.md` [redundant] (archived feedback_b.md)
   - Reason: both describe the same GraphQL import convention
 
+### RESOLVE
+- `feedback_x.md` vs `feedback_y.md` [temporal] -> updated feedback_y.md, archived feedback_x.md
+  - Conflict: "use SQLite" vs "use Postgres"
+  - Resolution: migration happened 2026-03-15, kept newer
+
+### ABSTRACT
+- Cluster: feedback_a.md, feedback_b.md, feedback_c.md, feedback_d.md -> feedback_code_economy.md
+  - Pattern: "Robin prefers minimal code with no speculative abstractions"
+  - Archived: feedback_a.md, feedback_b.md (fully subsumed)
+  - Kept: feedback_c.md, feedback_d.md (unique detail)
+
 ### COMPRESS
-- `project_kinso.md`: 24 lines -> 12 lines
+- `project_kinso.md`: 24 lines / 1,840 chars -> 12 lines / 920 chars
 
 ### PRUNE
 - Removed orphaned index entry: `deleted_file.md`
-- Archived: `project_old_sprint.md` -> `_archived/project_old_sprint.md`
+- Archived: `project_old_sprint.md` -> `_archived/` (stale)
+- Archived: `feedback_weak_pattern.md` -> `_archived/` (low retrieval, 0/10 sessions, confidence: weak)
+
+### LINK
+- `feedback_graphite_workflow.md` <-> `project_kinso.md` (shared: Graphite CLI workflow)
 ```
 
 **DATE NORMALIZE:**
