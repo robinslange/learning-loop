@@ -183,7 +183,7 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 
 ## Federation (experimental)
 
-A curated knowledge network for sharing insights across vaults. Federation is invite-only -- a network admin provisions your access. See [interchange.live](https://interchange.live) for more.
+A curated knowledge network for sharing insights across vaults. Federation is invite-only -- a hub admin provisions your network access and registers your identity on the hub. See [interchange.live](https://interchange.live) for more.
 
 ### What you get
 
@@ -200,10 +200,11 @@ Each peer exports a filtered index of their vault (respecting visibility rules) 
 
 Federation is configured during `/learning-loop:init` (Phase 4):
 
-1. Connect to the network with a pre-auth key (provided by a network admin)
+1. Connect to the network with a pre-auth key (provided by the hub admin)
 2. Generate an Ed25519 identity
-3. Configure visibility rules
-4. Register with the hub and test sync
+3. Send your public key to the hub admin for registration (manual step -- there is no self-registration)
+4. Configure visibility rules
+5. Test sync (re-run `/learning-loop:init` after the admin confirms registration)
 
 ### Visibility rules
 
