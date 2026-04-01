@@ -90,6 +90,11 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 4. **Flag COMPRESS candidates.**
    - Memory files with body content exceeding 15 lines (after frontmatter)
 
+4b. **Flag SIZE LIMIT candidates.**
+    - Feedback and user memories exceeding 500 characters (body only, after frontmatter)
+    - Project and reference memories exceeding 1,000 characters (body only, after frontmatter)
+    - These overlap with COMPRESS candidates but use a stricter threshold. A 14-line file at 600 chars would be caught by SIZE LIMIT but not COMPRESS (which triggers at 15 lines). Both are resolved by the same COMPRESS operation in Phase 3.
+
 5. **Flag DATE NORMALIZE candidates.**
    - Memory files containing relative temporal references: "yesterday", "today", "last week", "next Monday", "Thursday", "this sprint", or similar
    - Use the file's modification date as the anchor for conversion
@@ -103,7 +108,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    Dream signal:
    - MERGE: N candidate pairs
    - PRUNE: N candidates (N orphaned, N stale)
-   - COMPRESS: N candidates
+   - COMPRESS: N candidates (N also over size limit)
    - DATE NORMALIZE: N candidates
    - CONTRADICTIONS: N flagged (will not auto-resolve)
 
