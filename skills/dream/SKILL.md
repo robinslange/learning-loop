@@ -28,7 +28,7 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 ```bash
 {{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"MEMORY_FILENAME"}'
 ```
-Where ACTION is one of: `merge`, `prune`, `compress`, `normalize`.
+Where ACTION is one of: `merge`, `resolve`, `prune`, `compress`, `normalize`.
 
 **At session end, run provenance consolidation:**
 ```bash
@@ -122,7 +122,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
 ### Phase 3: Consolidate
 
-Process in strict order: DATE NORMALIZE, MERGE, COMPRESS, PRUNE.
+Process in strict order: DATE NORMALIZE, MERGE, RESOLVE, COMPRESS, PRUNE.
 
 **Safety: Create lock file first.**
 ```bash
@@ -168,6 +168,21 @@ If lock file already exists, abort with message: "Another dream is in progress. 
 - Move the older file to `_archived/` subdirectory (create if needed with mkdir -p)
 - Log the merge with reason and classification
 
+**RESOLVE:**
+Processes contradictory pairs flagged by MERGE. For each pair:
+
+1. Read both files fully. Identify the specific claim that conflicts.
+
+2. Classify the contradiction type:
+   - **Temporal**: one was true before, the other is true now (e.g., "project uses SQLite" vs "project uses Postgres" after a migration). Resolution: update the newer memory to include the transition ("migrated from SQLite to Postgres on YYYY-MM-DD"), archive the older.
+   - **Preference reversal**: user changed their mind (e.g., "prefer tabs" then later "prefer spaces"). Resolution: keep only the newer preference. Archive the older with a note in _dream_log.md.
+   - **Genuine conflict**: both might still be true in different contexts (e.g., "use gt submit" for Kinso vs "use git push" for personal projects). Resolution: do NOT merge. Add a `context:` line to each memory clarifying when it applies. Log the disambiguation.
+   - **Unresolvable**: can't determine which is correct without user input. Resolution: flag in report, do not modify either file.
+
+3. For temporal and preference-reversal resolutions, lower the archived memory's effective confidence by one tier in the log (this doesn't modify the file since it's being archived, but documents the reasoning).
+
+4. Log every resolution with the contradiction type and action taken.
+
 **COMPRESS:**
 - For each flagged file, read the full content
 - Rewrite the body to preserve: the rule/fact, the Why line, the How to apply line
@@ -207,16 +222,17 @@ rm -f /tmp/learning-loop-dream-lock
    Dream complete.
    Scanned: N memory files (N feedback, N project, N user, N reference)
    Merged: N pairs
+   Resolved: N contradictions (N temporal, N preference, N disambiguated)
    Compressed: N files
    Pruned: N entries
    Dates normalized: N
    Index: N lines (was N)
-   Flagged for review: N contradictions
+   Unresolved: N contradictions (need user input)
    ```
 
 5. If contradictions were flagged, list them:
    ```
-   Contradictions to review:
+   Contradictions needing user input:
    - feedback_x.md says "use gt submit" vs feedback_y.md says "use git push" — which is current?
    ```
 
