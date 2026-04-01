@@ -59,6 +59,12 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
 
 5. Read MEMORY.md. Extract all `[filename](filename)` links. Check each link resolves to an actual file. Flag orphaned pointers (link exists, file doesn't).
 
+5b. Check for retrieval tracking data:
+    ```bash
+    ls $PLUGIN_DATA/retrieval/access-*.jsonl 2>/dev/null | tail -3
+    ```
+    If files exist, count total sessions tracked. Report: "Retrieval data: N sessions tracked" or "Retrieval data: not yet available"
+
 6. Report the orient summary:
    ```
    Dreaming: [project name]
@@ -93,6 +99,11 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    - Project memories where the described project state is clearly outdated (references a version that has shipped, a decision that has been reversed, a sprint that has ended)
    - **Version-superseded project memories**: when `project_X_v15.md`, `project_X_v16.md`, and `project_X_v17.md` all exist, the older versions are superseded. Archive all but the latest version. Check that the latest version's "How to apply" doesn't reference the older versions as current state.
    - Files in `_archived/` older than 90 days (second-order archive cleanup)
+   - **Low-retrieval memories**: if retrieval tracking data exists at `$PLUGIN_DATA/retrieval/access-*.jsonl`, scan the last 10 sessions. Memory files that appear in zero session snapshots across those 10 sessions are low-retrieval candidates. Apply confidence-aware thresholds:
+     - `confidence: weak` + zero retrievals in 10 sessions: flag for pruning
+     - `confidence: medium` + zero retrievals in 15 sessions: flag for pruning
+     - `confidence: strong`: never auto-prune based on retrieval alone (only prune if content is stale)
+   - If no retrieval data exists yet, skip this criterion. It activates after enough sessions accumulate data.
 
 4. **Flag COMPRESS candidates.**
    - Memory files with body content exceeding 15 lines (after frontmatter)
@@ -110,7 +121,7 @@ Note: Dream operates on auto-memory files, not vault notes. The PostToolUse hook
    ```
    Dream signal:
    - MERGE: N candidate pairs (N redundant, N complementary, N contradictory)
-   - PRUNE: N candidates (N orphaned, N stale)
+   - PRUNE: N candidates (N orphaned, N stale, N low-retrieval)
    - COMPRESS: N candidates (N also over size limit)
    - DATE NORMALIZE: N candidates
    - CONTRADICTIONS: N flagged (-> RESOLVE in Phase 3)
@@ -193,6 +204,8 @@ Processes contradictory pairs flagged by MERGE. For each pair:
 **PRUNE:**
 - For orphaned index entries: no file action needed (Phase 4 rebuilds index from scratch)
 - For stale project memories: move to `_archived/` subdirectory
+- For low-retrieval prunes: move to `_archived/` with a note in _dream_log.md:
+  "Archived: low retrieval (0 accesses in N sessions, confidence: weak/medium)"
 - For archived files older than 90 days: leave them (manual cleanup, not automated in v1)
 
 **Remove lock file when done:**
