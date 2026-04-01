@@ -14,7 +14,7 @@ data/
 .config-applied
 .config-state
 
-docs/plans/
+docs/
 
 federation/.seed
 federation/data/
