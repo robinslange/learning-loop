@@ -63,6 +63,14 @@ The agent returns a structured report with before/after comparison, maturity tra
 
 If the agent flagged uncaptured sources, suggest `/literature` for each.
 
+## Resolving Verification Markers
+
+If the note contains write-time verification markers, prioritize resolving them:
+
+- `[unresolved]` -- search for the source via web search. If found, add the URL/DOI and remove the marker. If genuinely unfindable, either find an alternative source for the claim or remove the claim.
+- `[unverified]` -- run `node {{PLUGIN}}/scripts/source-resolver.mjs verify-note <path>` to see the specific issue. Fix the author/year, then remove the marker.
+- `[not in abstract]` -- fetch the full source (web fetch the URL or DOI page). If the number appears in the full text, remove the marker. If it doesn't, either correct the number or add scope qualification.
+
 ## Key Principles
 
 - **The skill is thin.** All logic lives in the `note-deepener` agent and its `_skills/`.

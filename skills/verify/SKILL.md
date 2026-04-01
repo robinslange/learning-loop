@@ -283,6 +283,16 @@ Agent (subagent_type: "learning-loop:note-verifier"):
 - One agent handles up to ~5 notes (URL fetching is slow)
 - For larger sets, split evenly and launch multiple agents in parallel
 
+## Verification Markers
+
+Notes processed by the updated note-writer may contain inline markers from write-time verification:
+
+- `[unresolved]` -- source not found in any database. Verify manually: search the web, check if it's a non-academic source.
+- `[unverified]` -- source found but metadata mismatch persisted. Run `verify-note` on the note and inspect the specific issue.
+- `[not in abstract]` -- number not confirmable from abstract alone. Fetch the full text if accessible, or check the number against the source page via web fetch.
+
+When reporting, include marker counts in the summary. These markers indicate the write-time check already ran. Focus verification effort on resolving the markers rather than re-checking what already passed.
+
 ## Key Principles
 
 - **Verify, don't rewrite.** Report issues. Fixing is `/deepen`'s job.
