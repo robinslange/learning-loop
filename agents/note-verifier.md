@@ -64,7 +64,15 @@ This searches PubMed → Semantic Scholar → CrossRef. If found, report the cor
 
 ### 2b. Claim-vs-Abstract Check
 
-For each source where the resolver returned an abstract:
+For quantitative claims, run the mechanical checker first:
+
+```bash
+node {{PLUGIN}}/scripts/source-resolver.mjs check-claims <note-path>
+```
+
+This extracts specific numbers from the note body and checks whether each appears in the source's abstract. Use results to prioritize which claims need deeper review.
+
+Then for each source where the resolver returned an abstract:
 1. Read the abstract text
 2. Compare the note's specific claims against what the abstract actually says
 3. Flag mischaracterizations: "note says X, abstract says Y"
