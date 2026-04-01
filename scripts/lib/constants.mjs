@@ -19,6 +19,3 @@ export const PLUGIN_DATA = getPluginData();
 export const DB_DIR = join(VAULT_PATH, '.vault-search');
 export const DB_PATH = join(DB_DIR, 'vault-index.db');
 export const BIN_DIR = join(PLUGIN_DATA, 'bin');
-
-/** @deprecated Use BIN_DIR instead. */
-export const CACHE_DIR = resolve(join(PLUGIN_ROOT, 'scripts', '.model-cache'));

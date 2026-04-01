@@ -73,16 +73,22 @@ function extractWikilinks(body) {
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
 
-function noteExistsInVault(name, vaultRoot) {
-  const target = `${name}.md`;
+function buildNoteIndex(vaultRoot) {
+  const index = new Set();
   for (const dir of VAULT_DIRS) {
-    const dirPath = join(vaultRoot, dir);
     try {
-      const files = readdirSync(dirPath, { recursive: true });
-      if (files.some(f => basename(f) === target)) return true;
+      const files = readdirSync(join(vaultRoot, dir), { recursive: true });
+      for (const f of files) {
+        const name = basename(f);
+        if (name.endsWith('.md')) index.add(name);
+      }
     } catch {}
   }
-  return false;
+  return index;
+}
+
+function noteExistsInIndex(name, noteIndex) {
+  return noteIndex.has(`${name}.md`);
 }
 
 function checkDuplicateNote(filePath, title, vaultRoot) {
@@ -164,7 +170,8 @@ process.stdin.on('end', () => {
     const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
     const body = fmEnd ? content.slice(fmEnd[0].length) : content;
     const links = extractWikilinks(body);
-    const broken = links.filter(l => !noteExistsInVault(l, vaultRoot));
+    const noteIndex = buildNoteIndex(vaultRoot);
+    const broken = links.filter(l => !noteExistsInIndex(l, noteIndex));
     if (broken.length > 0) {
       warnings.push(`Broken wikilinks: ${broken.map(l => '[[' + l + ']]').join(', ')} not found in vault.`);
     }

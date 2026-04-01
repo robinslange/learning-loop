@@ -44,18 +44,21 @@ function extractWikilinks(content) {
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
 
-function findNoteInVault(name, vaultRoot) {
-  const target = `${name}.md`;
+function buildNoteMap(vaultRoot) {
+  const map = new Map();
   for (const dir of VAULT_DIRS) {
     const dirPath = join(vaultRoot, dir);
     try {
       const files = readdirSync(dirPath, { recursive: true });
       for (const f of files) {
-        if (basename(f) === target) return join(dirPath, f);
+        const name = basename(f);
+        if (name.endsWith('.md') && !map.has(name)) {
+          map.set(name, join(dirPath, f));
+        }
       }
     } catch {}
   }
-  return null;
+  return map;
 }
 
 // appendFileSync is not atomic on Windows. The read-before-append dedup
@@ -80,11 +83,12 @@ process.stdin.on('end', () => {
 
     const sourceName = basename(filePath, '.md');
     const links = extractWikilinks(content);
+    const noteMap = buildNoteMap(vaultRoot);
 
     for (const linkName of links) {
       if (linkName === sourceName) continue;
 
-      const targetPath = findNoteInVault(linkName, vaultRoot);
+      const targetPath = noteMap.get(`${linkName}.md`);
       if (!targetPath) continue;
 
       const targetContent = readFileSync(targetPath, 'utf-8');

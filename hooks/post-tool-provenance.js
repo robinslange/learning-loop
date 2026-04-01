@@ -11,17 +11,23 @@ const PROVENANCE_DIR = join(
   process.env.CLAUDE_PLUGIN_DATA || join(homedir(), '.claude', 'plugins', 'data', 'learning-loop'),
   'provenance'
 );
-const CONFIG_PATH = join(import.meta.dirname, '..', 'config.json');
-
 function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
 
-let vaultPath;
-try {
-  const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-  vaultPath = resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-} catch {
-  vaultPath = resolve(join(home(), 'brain', 'brain'));
+function resolveVaultPath() {
+  if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
+  try {
+    const pluginData = process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+    const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
+    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
+  } catch {}
+  try {
+    const cfg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'config.json'), 'utf-8'));
+    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
+  } catch {}
+  return resolve(join(home(), 'brain', 'brain'));
 }
+
+const vaultPath = resolveVaultPath();
 const VAULT_PREFIX = vaultPath + sep;
 
 function getSessionId() {
