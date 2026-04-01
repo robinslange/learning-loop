@@ -13,6 +13,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, resolve, basename } from 'path';
+import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 
 const DATA_DIR = resolve(join(import.meta.dirname, '..', 'data'));
 const INDEX_PATH = join(DATA_DIR, 'citation-index.json');
@@ -456,11 +457,9 @@ function extractSourcesFromNote(content) {
     }
   }
 
-  // Match inline author+year citations that weren't already captured
-  const inlineRe = /\b([A-Z][a-z\u00C0-\u024F]+(?:-[A-Z][a-z\u00C0-\u024F]+)*(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z\u00C0-\u024F]+(?:-[A-Z][a-z\u00C0-\u024F]+)*))*)\s*[\(,]?\s*((?:19|20)\d{2})\b/g;
-  while ((m = inlineRe.exec(content)) !== null) {
-    const author = m[1];
-    const year = parseInt(m[2]);
+  // Match inline author+year citations via POS tagging (replaces naive regex)
+  const posMatches = extractAuthorYearCitations(content);
+  for (const { author, year } of posMatches) {
     if (!sources.some(s => s.claimedAuthor === author && s.claimedYear === year) &&
         !sources.some(s => s.claimedAuthor?.includes(author) && s.claimedYear === year)) {
       sources.push({
