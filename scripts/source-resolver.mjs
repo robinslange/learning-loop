@@ -622,6 +622,86 @@ async function structuredPubmedSearch(query, useMesh = false) {
   };
 }
 
+// --- Claim-Number Extraction ---
+
+const NUMBER_PATTERNS = [
+  /\b(?:OR|HR|RR|IRR|AOR|aOR)\s*(?:=\s*)?(\d+\.?\d*)/gi,
+  /\b(?:d|g|Cohen[\u2019']?s?\s*d)\s*=?\s*(\d+\.?\d*)/gi,
+  /\b(\d+\.?\d*)\s*%/g,
+  /\bn\s*=\s*(\d+)/gi,
+  /\b(\d+)\s+(?:patients?|participants?|subjects?|studies)/gi,
+  /\bp\s*[<>=]\s*(0?\.\d+)/gi,
+  /\b(\d+\.?\d*)\s*(?:mg|mcg|\u00b5g|ml|mL|mg\/L|ng\/mL)/gi,
+  /\b(\d+\.?\d*)-fold/gi,
+  /\b(\d+\.?\d*)\s*(?:ms|seconds?|minutes?|hours?|days?|weeks?|months?)\b/gi,
+];
+
+function extractNumbers(text) {
+  const numbers = new Set();
+  for (const re of NUMBER_PATTERNS) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      numbers.add(m[1] || m[0]);
+    }
+  }
+  return [...numbers];
+}
+
+function findNumberInAbstract(number, abstract) {
+  if (!abstract) return { found: false, excerpt: null };
+  const escaped = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp('.{0,60}' + escaped + '.{0,60}', 'i');
+  const match = abstract.match(re);
+  return match ? { found: true, excerpt: match[0].trim() } : { found: false, excerpt: null };
+}
+
+async function checkClaims(notePath) {
+  const content = readFileSync(notePath, 'utf-8');
+  const sources = extractSourcesFromNote(content);
+
+  // Strip frontmatter for number extraction
+  const bodyMatch = content.match(/^---[\s\S]*?---\s*\n([\s\S]*)$/);
+  const body = bodyMatch ? bodyMatch[1] : content;
+  const allNumbers = extractNumbers(body);
+  if (allNumbers.length === 0) return [];
+
+  const results = [];
+
+  for (const src of sources) {
+    let metadata = null;
+
+    if (src.pmid) {
+      metadata = await pubmedFetch(src.pmid);
+    } else if (src.doi) {
+      const url = 'https://api.crossref.org/works/' + encodeURIComponent(src.doi);
+      const crData = await fetchJSON(url);
+      if (crData?.message) {
+        const abstract = (crData.message.abstract || '').replace(/<[^>]+>/g, '');
+        metadata = { abstract, title: crData.message.title?.[0] };
+      }
+    }
+
+    if (!metadata?.abstract) continue;
+
+    const srcLabel = src.claimedAuthor ? (src.claimedAuthor + ' ' + (src.claimedYear || '')).trim() : (src.pmid || src.doi);
+
+    for (const num of allNumbers) {
+      const { found, excerpt } = findNumberInAbstract(num, metadata.abstract);
+      results.push({
+        source: srcLabel,
+        pmid: src.pmid || null,
+        doi: src.doi || null,
+        claim: num,
+        in_abstract: found,
+        abstract_excerpt: excerpt
+      });
+    }
+  }
+
+  return results;
+}
+
 // --- CLI ---
 
 async function main() {
@@ -629,11 +709,12 @@ async function main() {
 
   if (!command) {
     console.log(`Usage:
-  source-resolver.mjs resolve "Author Year Topic"
-  source-resolver.mjs verify-pmid <pmid> "Author" <year>
-  source-resolver.mjs verify-doi <doi> "Author" <year>
-  source-resolver.mjs verify-note <path>
-  source-resolver.mjs search-pubmed "query" [--mesh]`);
+  source-resolver.mjs resolve "Author Year Topic"        Resolve a citation to verified metadata
+  source-resolver.mjs verify-pmid <pmid> "Author" <year> Verify a specific PMID against claimed author/year
+  source-resolver.mjs verify-doi <doi> "Author" <year>   Verify a specific DOI against claimed author/year
+  source-resolver.mjs verify-note <path>                  Verify all sources in a vault note
+  source-resolver.mjs check-claims <path>                 Check quantitative claims against source abstracts
+  source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms`);
     process.exit(1);
   }
 
@@ -654,6 +735,9 @@ async function main() {
       break;
     case 'search-pubmed':
       result = await structuredPubmedSearch(args.filter(a => a !== '--mesh').join(' '), args.includes('--mesh'));
+      break;
+    case 'check-claims':
+      result = await checkClaims(resolve(args[0]));
       break;
     default:
       console.error(`Unknown command: ${command}`);
