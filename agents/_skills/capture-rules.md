@@ -24,8 +24,16 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ---
 tags: [tag1, tag2]
 date: YYYY-MM-DD
+claim_specificity: 0-2
+source_grounded: 0-2
 ---
 ```
+
+`claim_specificity` and `source_grounded` are set by the promote-gate scoring pass. Values: 0 (vague/none), 1 (bounded/vault-linked), 2 (falsifiable/externally-cited). Omit both fields if the note has not been scored yet.
+
+## Tag Hygiene
+
+When writing or rewriting frontmatter tags, de-duplicate the list before writing. If the counter-argument-linking skill adds topic tags from the target note, merge them with existing tags and remove duplicates. Final tag list must contain no repeated entries.
 
 ## What to Capture
 

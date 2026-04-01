@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.8.0
+
+Dream v2: seven consolidation operators, confidence-aware memory lifecycle, retrieval tracking, and architectural refactoring across the plugin.
+
+### Added
+
+- **Three new dream operators**: RESOLVE (four-strategy contradiction handling), ABSTRACT (higher-order pattern synthesis with per-cluster user gate), LINK (cross-type memory connections via `related:` frontmatter)
+- **Confidence tiering**: `/reflect` assigns `confidence: strong|medium|weak` to auto-memory captures based on signal strength (explicit > correction > implicit)
+- **Retrieval tracking**: session-start hook persists memory file snapshots to `PLUGIN_DATA/retrieval/access-*.jsonl` for decay-based pruning
+- **Size-limit flagging**: dream Phase 2 flags memories exceeding character thresholds (500 chars feedback/user, 1,000 chars project/reference)
+- **Shared skills**: `_skills/fleeting-sweep.md` extracted from inbox-organiser, reusable by `/health`
+
+### Changed
+
+- **Dream architecture**: monolithic 338-line SKILL.md split into 143-line orchestrator + 7 focused operator files in `operators/`. Each operator loads only when Phase 3 reaches it, reducing distractor density.
+- **MERGE simplified**: no longer does three-way classification. Merges what belongs together; contradictions flagged separately for RESOLVE.
+- **PRUNE upgraded**: confidence-aware thresholds (weak prunes first, strong never auto-prunes on retrieval alone)
+- **note-writer**: 70-line inline verification extracted to reference `_skills/source-verification.md`
+- **source-verification.md**: added mechanical `verify-note`/`check-claims` API procedure
+- **Promote-gate v2**: source routing fork (synthesis/factual/sourced), two-dimension scoring (claim_specificity + source_grounded)
+- **note-verifier**: 4-level ordinal output (strong/partial/no source/contradicted)
+- **inbox-organiser**: synthesis-tagged notes exempt from Sourcing + Source Integrity criteria
+
+### Fixed
+
+- Ghost provenance process in session-start.js replaced with synchronous `execFileSync`
+- Stale "5 criteria" references updated to 6 across note-writer, inbox-organiser, note-deepener, promote-gate
+- counter-argument-linking: grep before appending backlinks (prevents duplicates)
+- capture-rules: tag de-duplication rule
+- route-output: no parallel writes to same project memory
+
 ## v1.7.2
 
 Write-time source verification, POS-tagged citation extraction, and improved resolver accuracy.

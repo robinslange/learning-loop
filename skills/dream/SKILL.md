@@ -22,7 +22,7 @@ Emit events silently via Bash for each operator action.
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
-At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N}` + run `node {{PLUGIN}}/scripts/provenance-consolidate.mjs`.
+At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `node {{PLUGIN}}/scripts/provenance-consolidate.mjs`.
 
 ## Phase 1: Orient
 
@@ -40,7 +40,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 6. Check retrieval tracking data:
    ```bash
-   ls $PLUGIN_DATA/retrieval/access-*.jsonl 2>/dev/null | tail -3
+   ls ${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop}/retrieval/access-*.jsonl 2>/dev/null | tail -3
    ```
 
 7. Report:
@@ -71,7 +71,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 6. **Flag PRUNE candidates.**
    - Orphaned index entries
    - Outdated project memories (superseded versions, ended sprints, reversed decisions)
-   - Low-retrieval memories (if tracking data exists): `weak` + 0 retrievals in 10 sessions, `medium` + 0 in 15 sessions. `strong` memories never auto-prune on retrieval alone.
+   - Low-retrieval memories (if tracking data exists): scan JSONL entries for sessions where a memory file appears in the `memories` array. Note: this tracks file presence in the memory directory at session start, not whether Claude actually read the file. Thresholds account for this: `weak` + absent from 10 consecutive session snapshots, `medium` + absent from 15. `strong` memories never auto-prune on retrieval alone.
 
 7. **Flag LINK candidates.**
    Cross-type pairs sharing a keyword or concept. Descriptions only. Cap at 30 most recent files if 50+.

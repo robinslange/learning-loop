@@ -17,3 +17,5 @@ For each flagged file:
 ### COMPRESS
 - `project_kinso.md`: 24 lines / 1,840 chars -> 12 lines / 920 chars
 ```
+
+Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"compress","target":"FILENAME"}'`

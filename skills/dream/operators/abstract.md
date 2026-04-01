@@ -32,3 +32,5 @@ If approved:
   - Archived: feedback_a.md, feedback_b.md (fully subsumed)
   - Kept: feedback_c.md, feedback_d.md (unique detail)
 ```
+
+Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"abstract","target":"FILENAME"}'`

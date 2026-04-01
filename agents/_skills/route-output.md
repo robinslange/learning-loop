@@ -68,3 +68,4 @@ Ingest complete:
 - Never overwrite the entire auto-memory file. Read first, merge, write.
 - Don't create a project index note if one doesn't exist — that's a manual decision.
 - Vault notes go through the `note-writer` agent to ensure voice consistency.
+- Never run multiple route-output agents in parallel for the same project. Auto-memory uses read-merge-write without locking; parallel writes to the same `project_*.md` file will cause last-write-wins data loss.

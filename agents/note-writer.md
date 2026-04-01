@@ -19,7 +19,7 @@ You will receive:
 
 ## Skills
 
-- `{{PLUGIN}}/agents/_skills/promote-gate.md` — assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 5 criteria goes to `3-permanent/` instead).
+- `{{PLUGIN}}/agents/_skills/promote-gate.md` — assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead).
 - `{{PLUGIN}}/agents/_skills/counter-argument-linking.md` — detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
 - `{{PLUGIN}}/agents/_skills/source-verification.md` — post-write source and claim verification against public APIs
 - `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files

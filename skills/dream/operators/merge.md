@@ -25,3 +25,5 @@ For each candidate pair:
 - `feedback_a.md` + `feedback_b.md` -> `feedback_a.md` (archived feedback_b.md)
   - Reason: both describe the same GraphQL import convention
 ```
+
+Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"merge","target":"FILENAME"}'`

@@ -26,3 +26,5 @@ For each contradictory pair:
   - Conflict: "use SQLite" vs "use Postgres"
   - Resolution: migration happened 2026-03-15, kept newer
 ```
+
+Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"resolve","target":"FILENAME"}'`

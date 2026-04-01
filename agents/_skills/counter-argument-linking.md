@@ -57,7 +57,9 @@ Place this after the body, before Sources. Use "Challenges", "Qualifies", or "Co
 
 ### Step 4: Add backlink
 
-Edit the target note to add a link back to the new note. Append after existing links:
+Before appending, check if the target note already contains a link to the new note. Use `Grep` to search for `[[new-note-name]]` in the target file. If the link already exists, skip this step.
+
+If no existing link, edit the target note to add a link back to the new note. Append after existing links:
 
 ```markdown
 [[new-note-name]] — counter-evidence / qualification.

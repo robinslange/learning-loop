@@ -9,18 +9,34 @@ Quality gate that routes notes to the correct vault folder at write time. Any ag
 - **Reflect/deepen:** When capturing learnings that may already be deep enough to skip inbox.
 - **Batch scoring (via note-scorer agent):** When reporting quality across many notes — verify, health, or any command that needs numeric breakdowns.
 
+## Pre-Gate: Source Routing Fork
+
+Before running the criteria assessment, classify the note by source status:
+
+| Source status | Route |
+|---------------|-------|
+| Has external source citation (URL, DOI, PMID) | Standard gate below |
+| No source, but note is synthesis/author inference (cross-note connection, personal pattern recognition, design decision) | Tag `[synthesis]` in frontmatter, exempt from Sourcing criterion |
+| No source, but note makes a factual claim that should be verifiable | Block: do not score. Return `→ source-attach workflow` and stop |
+
+Detection heuristic for synthesis vs factual:
+- **Synthesis signals:** "connects to," "pattern across," "the reason we chose," wikilinks as primary evidence, no specific numbers or named studies
+- **Factual signals:** specific percentages, named mechanisms, study references without URLs, "research shows," effect sizes
+
+When in doubt, treat as factual (safer to require a source than to let an unsourced factual claim through).
+
 ## Assessment
 
-Evaluate the note against five criteria. Each is pass/fail — no scoring needed.
+Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 | Criterion | Pass | Fail |
 |-----------|------|------|
 | **Depth** | 5+ lines of substantive body (not padding) | < 5 lines or vague generalities |
-| **Sourcing** | Claims attributed with clickable URLs | Bare author+year or no sources |
+| **Sourcing** | Claims attributed with clickable URLs. Exempted for `[synthesis]`-tagged notes. | Bare author+year or no sources |
 | **Linking** | At least one genuine `[[wikilink]]` to a related note | No links or forced/irrelevant links |
 | **Voice** | Active voice, present tense, no filler, insight-as-title | Topic-as-title, passive voice, hedging |
 | **Atomicity** | One idea per note | Covers 2+ distinct ideas |
-| **Source Integrity** | All sources verified via source-resolver; no `[needs verification]` or `[citation needed]` tags remaining; no animal-only evidence presented as human | Contains unverified sources, `[needs verification]` tags, or unqualified species claims |
+| **Source Integrity** | All sources verified via source-resolver; no `[needs verification]` or `[citation needed]` tags remaining; no animal-only evidence presented as human. Exempted for `[synthesis]`-tagged notes. | Contains unverified sources, `[needs verification]` tags, or unqualified species claims |
 
 ## Routing
 
@@ -36,29 +52,52 @@ Evaluate the note against five criteria. Each is pass/fail — no scoring needed
 
 ## Scoring Mode
 
-When an agent needs numeric quality scores (for reporting, not routing), use this scale per criterion:
+When an agent needs numeric quality scores (for reporting, not routing), assess two orthogonal dimensions per claim in the note:
+
+### Dimension 1: Claim Specificity
+
+| Score | Meaning | Examples |
+|-------|---------|---------|
+| **0 — Vague** | No falsifiable assertion | "Sleep is important for cognition" |
+| **1 — Bounded** | Directional claim with some constraint | "Chronic sleep restriction below 6h degrades working memory" |
+| **2 — Falsifiable** | Precise enough to be wrong — named mechanism, number, or bounded condition | "Each hour below 6h adds ~0.5 SD to PVT lapses (Van Dongen 2003)" |
+
+### Dimension 2: Source Groundedness
 
 | Score | Meaning |
 |-------|---------|
-| **weak** (1/3) | Criterion fails clearly |
-| **solid** (2/3) | Partially met — some gaps remain |
-| **strong** (3/3) | Criterion fully met |
+| **0 — None** | No source, no vault link to a grounded note |
+| **1 — Vault-linked** | Supported by wikilink to another vault note that itself has sources |
+| **2 — Externally cited** | Attributed to a verified external source (URL, DOI, PMID) |
 
-Maturity tiers derived from scores:
+### Note-Level Score
 
-| Tier | Criteria |
-|------|----------|
-| **Shallow** | < 5 lines body. No sources. Weak or no links. Topic-as-title. |
-| **Medium** | 5-15 lines. Some links. Title captures an insight. Gaps remain. |
-| **Deep** | 10+ lines. Sources cited. Strong links. Persona voice. Atomic. |
+For each claim, compute `(specificity + groundedness) / 4`. Note-level score = mean across claims. Range: 0.0-1.0.
 
-Scoring mode is used by the note-scorer agent for batch assessment. The pass/fail routing table above remains the authority for folder decisions.
+### Maturity Tiers (derived from note-level score)
+
+| Tier | Score range |
+|------|------------|
+| **Shallow** | < 0.4 |
+| **Medium** | 0.4 - 0.7 |
+| **Deep** | > 0.7 |
+
+### Frontmatter Output
+
+When scoring, write the per-note dimension scores to frontmatter:
+
+```yaml
+claim_specificity: 2
+source_grounded: 2
+```
+
+Use the highest applicable score across claims for each dimension. These fields are advisory metadata for batch analysis — the pass/fail routing table above remains the authority for folder decisions.
 
 ## Override Rules
 
 - If the caller specifies `2-literature/`, do not override. Literature notes have different criteria.
 - If the caller specifies `3-permanent/` and the note only passes 2 criteria, demote to `0-inbox/` with a warning. Don't let bad notes into permanent.
-- If the caller specifies `0-inbox/` and the note passes all 5, promote to `3-permanent/`. Don't bury ready notes.
+- If the caller specifies `0-inbox/` and the note passes all 6, promote to `3-permanent/`. Don't bury ready notes.
 
 ## Skip-Rewrite Detection
 
