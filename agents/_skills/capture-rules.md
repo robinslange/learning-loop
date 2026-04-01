@@ -45,3 +45,13 @@ date: YYYY-MM-DD
 ## Splitting
 
 If a note covers two ideas, split it. Return two separate notes and flag the split.
+
+## Verification Markers
+
+These inline markers are set by the note-writer's API verification step. All agents should understand them:
+
+- `[unresolved]` -- source could not be found in PubMed, Semantic Scholar, or CrossRef. The citation may still be correct (non-academic source, preprint, or unusual identifier). `/deepen` should attempt to resolve it.
+- `[unverified]` -- source was found but author/year mismatch could not be auto-corrected after 2 attempts. Manual review needed.
+- `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. `/verify` should check the full text when possible.
+
+These markers are informational, not errors. They signal where human or deeper automated review should focus.
