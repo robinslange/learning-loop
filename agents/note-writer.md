@@ -98,6 +98,43 @@ After writing the note, before returning it, run this mechanical check. This ste
 
 This check exists because the rewrite step (brief → vault voice) is where most attribution errors are introduced. The research may be correct but the note garbles the authors during paraphrasing, inflates confidence during voice conversion, or rounds numbers incorrectly.
 
+## API Source Verification
+
+After the prompt-based self-check above, run deterministic verification against public APIs. This catches errors that self-review misses because it uses ground truth, not recall.
+
+### Step A: Verify sources
+
+1. Write the note content to a temp file: save to `/tmp/ll-note-verify-TIMESTAMP.md` (use current epoch ms for TIMESTAMP)
+2. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs verify-note /tmp/ll-note-verify-TIMESTAMP.md`
+3. Parse the JSON output. For each source:
+   - `verified: true` -- no action needed
+   - `wrong_author` -- replace the note's author with the resolver's `metadata.firstAuthor` surname + "et al." if multiple authors
+   - `wrong_year` -- replace the note's year with the resolver's `metadata.year`
+   - `author_not_first` -- replace with the correct first author
+   - `error: "No identifiable source information"` -- skip (non-academic source, handled by the prompt-based URL check)
+   - `error: "Source not found in any database"` -- add `[unresolved]` marker inline
+4. If any fixes were made, rewrite the temp file and re-run verify-note once more. Max 2 verify-note calls total (initial + one retry).
+5. If issues remain after the retry, mark them with `[unverified]` inline.
+
+### Step B: Check quantitative claims
+
+1. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs check-claims /tmp/ll-note-verify-TIMESTAMP.md`
+2. Parse the JSON output. For each claim:
+   - `in_abstract: true` -- confirmed, no action needed
+   - `in_abstract: false` -- read the abstract text from the verify-note metadata independently (without re-reading the note draft). Ask: does this abstract support the specific number? If the number appears nowhere in the abstract, add `[not in abstract]` after the claim in the note. Do NOT remove the claim -- it may be in the full text.
+3. This step runs once (no retry loop -- it is informational, not corrective).
+4. Clean up the temp file.
+
+### Step C: Emit provenance
+
+After verification completes, emit a provenance event:
+
+```bash
+node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"note-writer","action":"source-check","target":"NOTE_FILENAME","sources_checked":N,"sources_passed":N,"sources_failed":N,"failure_types":["type1"],"claims_checked":N,"claims_in_abstract":N,"claims_not_in_abstract":N,"iterations":N,"final_status":"pass|fail"}'
+```
+
+Replace N and type values with actual counts from Steps A and B.
+
 ## Evidence Context in Notes
 
 When the research brief includes evidence grades (from the source-resolver), include them naturally in the note:
