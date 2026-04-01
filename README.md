@@ -168,11 +168,16 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver script mechanically verifies citations against PubMed, Semantic Scholar, and CrossRef. LLM-generated PMIDs are wrong ~50% of the time, so this runs on every note before promotion to permanent.
+The source-resolver script mechanically verifies citations against PubMed, Semantic Scholar, and CrossRef. The note-writer runs `verify-note` and `check-claims` on every note at write time, catching author swaps, wrong years, and flagging quantitative claims not confirmable from abstracts. Provenance events track pass/fail rates for empirical measurement.
+
+Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words -- the naive regex approach had a ~60% false positive rate on author-year patterns.
 
 ```bash
 # Verify all sources in a note
 node scripts/source-resolver.mjs verify-note <path>
+
+# Check quantitative claims against source abstracts
+node scripts/source-resolver.mjs check-claims <path>
 
 # Resolve a citation
 node scripts/source-resolver.mjs resolve "Author Year Topic"
@@ -257,7 +262,8 @@ learning-loop/
   agents/               Specialized agent definitions
   agents/_skills/       Shared agent skills
   skills/               User-invocable skills (slash commands)
-  scripts/              Vault search dispatcher, provenance, binary download
+  scripts/              Vault search dispatcher, provenance, source-resolver, binary download
+  scripts/lib/vendor/   Vendored JS deps (winkNLP for POS-tagged citation extraction)
   vendor/               Vendored JS deps (sql.js WASM, ed25519, picomatch)
   hooks/                Lifecycle hooks (session start/stop, provenance)
   native/               Rust ll-search binary (indexing, embedding, search, sync)
