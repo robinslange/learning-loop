@@ -169,8 +169,9 @@ process.stdin.on('end', () => {
       warnings.push(`Broken wikilinks: ${broken.map(l => '[[' + l + ']]').join(', ')} not found in vault.`);
     }
 
-    const titleFromPath = filePath.split(sep).pop().replace(/\.md$/, '');
-    const dupeWarning = checkDuplicateNote(filePath, titleFromPath, vaultRoot);
+    const titleMatch = content.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    const dupeWarning = title ? checkDuplicateNote(filePath, title, vaultRoot) : null;
     if (dupeWarning) {
       warnings.push(dupeWarning);
     }
