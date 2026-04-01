@@ -16,3 +16,5 @@ For each flagged file:
 ### DATE NORMALIZE
 - `filename.md`: "last Thursday" -> "2026-03-20"
 ```
+
+Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"normalize","target":"FILENAME"}'`

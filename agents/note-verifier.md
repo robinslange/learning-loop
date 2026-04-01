@@ -1,5 +1,5 @@
 ---
-description: Verifies note claims against cited sources. Checks source URLs are reachable, claims are supported, and no references are fabricated. Returns pass/fail with specific issues.
+description: Verifies note claims against cited sources. Checks source URLs are reachable, claims are supported, and no references are fabricated. Returns 4-level ordinal confidence per claim (strong/partial/no source/contradicted) with specific issues.
 model: sonnet
 capabilities: ["source-verification", "claim-checking", "url-validation"]
 ---
@@ -118,12 +118,25 @@ General red flags:
 - Author names that don't appear in search results for the claimed work
 - URLs that 404 or lead to unrelated content
 
+## Claim Confidence Levels
+
+Score each claim on a 4-level ordinal scale:
+
+| Level | Label | Meaning | Routing effect |
+|-------|-------|---------|---------------|
+| **3** | **Strong** | Full evidence match — source directly supports claim with verbatim or near-verbatim anchor | Counts as pass |
+| **2** | **Partial** | Direction correct but source is incomplete, indirect, or covers a different population/context | Counts as pass; add inline `[partial]` tag |
+| **1** | **No source** | Claim is plausible but no evidence found in cited source or elsewhere | Forks to claim-type gate (synthesis vs factual) |
+| **0** | **Contradicted** | Evidence directly opposes the claim | Hard fail |
+
+Use these levels in the Claim Checks table below instead of binary supported/unsupported.
+
 ## Output Format
 
 ```
 ## Verification: [note title]
 
-### Status: PASS | ISSUES FOUND
+### Status: PASS | PARTIAL | ISSUES FOUND
 
 ### Source Checks
 | Source | URL | Status | Study Type | Species | n | Issue |
@@ -131,9 +144,9 @@ General red flags:
 | Author, Title | url | ok / dead / mismatched / not found | RCT/review/etc | human/animal | N | detail |
 
 ### Claim Checks
-| Claim | Source | Status | Issue |
-|-------|--------|--------|-------|
-| "claim text" | source | supported / unsupported / distorted | detail |
+| Claim | Source | Level | Issue |
+|-------|--------|-------|-------|
+| "claim text" | source | 3-strong / 2-partial / 1-no source / 0-contradicted | detail |
 
 ### Missing Citations
 - [claim that needs a source but doesn't have one]
@@ -141,6 +154,12 @@ General red flags:
 ### Corrections
 - [specific fix needed — correct URL, revised claim, added citation]
 ```
+
+### Status Derivation
+
+- **PASS**: All claims scored 3 (strong) and all sources verified
+- **PARTIAL**: No claims scored 0, but one or more scored 1-2
+- **ISSUES FOUND**: Any claim scored 0 (contradicted), or source verification failures
 
 ## Rules
 

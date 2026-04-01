@@ -66,6 +66,33 @@ Red flags:
 - Same PMID cited with different author names across different notes in the vault
 - Statistics attributed to a qualitative review or a study that excluded the relevant population
 
+## Mechanical API Verification
+
+When called from note-writer or other agents that need deterministic verification against public APIs:
+
+### Verify sources
+
+1. Write the note content to a temp file: `/tmp/ll-note-verify-TIMESTAMP.md` (epoch ms for TIMESTAMP)
+2. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs verify-note /tmp/ll-note-verify-TIMESTAMP.md`
+3. Parse the JSON output. For each source:
+   - `verified: true` -- no action needed
+   - `wrong_author` -- replace with the resolver's `metadata.firstAuthor` surname + "et al."
+   - `wrong_year` -- replace with the resolver's `metadata.year`
+   - `author_not_first` -- replace with the correct first author
+   - `error: "No identifiable source information"` -- skip (non-academic source)
+   - `error: "Source not found in any database"` -- add `[unresolved]` marker inline
+4. If fixes were made, rewrite the temp file and re-run verify-note once. Max 2 calls total.
+5. If issues remain after retry, mark with `[unverified]` inline.
+
+### Check quantitative claims
+
+1. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs check-claims /tmp/ll-note-verify-TIMESTAMP.md`
+2. For each claim:
+   - `in_abstract: true` -- confirmed
+   - `in_abstract: false` -- read the abstract independently; if the number appears nowhere, add `[not in abstract]` after the claim. Do NOT remove the claim.
+3. Runs once (informational, not corrective).
+4. Clean up the temp file.
+
 ## Output
 
 Report findings. Don't rewrite. Be specific — "source doesn't support claim" is useless. Say what the source actually says.

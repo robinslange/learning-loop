@@ -90,8 +90,8 @@ For each note, assign one action:
 
 | Promote-gate result | Action |
 |---|---|
-| All 5 pass + skip-rewrite | `mv` to `3-permanent/` (no rewrite needed) |
-| All 5 pass, voice fails | Rewrite via note-writer → `3-permanent/` |
+| All 6 pass + skip-rewrite | `mv` to `3-permanent/` (no rewrite needed) |
+| All 6 pass, voice fails | Rewrite via note-writer → `3-permanent/` |
 | 3-4 pass | `mv` to `1-fleeting/` |
 | ≤ 2 pass | Keep in `0-inbox/` |
 | Duplicate of another inbox note | Merge (gated) |
@@ -108,9 +108,9 @@ Output one table per cluster:
 
 | Note | Gate | Action | Destination |
 |------|------|--------|-------------|
-| insight-title | 5/5 | promote | 3-permanent/ |
-| related-title | 3/5 (missing: sourcing, voice) | keep | 0-inbox/ |
-| challenge-title | 5/5 | promote + link | 3-permanent/ → challenges [[target]] |
+| insight-title | 6/6 | promote | 3-permanent/ |
+| related-title | 3/6 (missing: sourcing, voice, source integrity) | keep | 0-inbox/ |
+| challenge-title | 6/6 | promote + link | 3-permanent/ → challenges [[target]] |
 | duplicate-title | — | merge into #1 | — |
 ```
 
