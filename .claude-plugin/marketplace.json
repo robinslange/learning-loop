@@ -1,0 +1,17 @@
+{
+  "name": "learning-loop-marketplace",
+  "description": "Learning loop plugin marketplace",
+  "owner": {
+    "name": "Robin"
+  },
+  "plugins": [
+    {
+      "name": "learning-loop",
+      "description": "Self-improving learning loop across Claude sessions",
+      "source": "./",
+      "author": {
+        "name": "Robin"
+      }
+    }
+  ]
+}

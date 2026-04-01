@@ -1,0 +1,22 @@
+.DS_Store
+**/.DS_Store
+
+# Model cache (downloaded on first run, ~40MB)
+scripts/.model-cache/
+
+# Provenance event logs and summaries (local-only)
+provenance/events-*.jsonl
+provenance/summaries/
+
+# Data files (local-only)
+data/
+
+.config-applied
+.config-state
+
+federation/.seed
+federation/data/
+federation/config.json
+scripts/node_modules/
+federation/node_modules/
+federation/relay/node_modules/

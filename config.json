@@ -1,0 +1,16 @@
+{
+  "vault_path": "~/brain/brain",
+  "dependencies": [
+    {
+      "name": "episodic-memory",
+      "marketplace": "superpowers-marketplace",
+      "required": true,
+      "version": ">=1.0.0",
+      "reason": "Cross-session conversation search for retrieval protocol, /discovery, /reflect, and /refresh",
+      "tools": [
+        "mcp__plugin_episodic-memory_episodic-memory__search",
+        "mcp__plugin_episodic-memory_episodic-memory__read"
+      ]
+    }
+  ]
+}

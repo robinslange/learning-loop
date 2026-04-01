@@ -1,0 +1,236 @@
+=== Reranker Benchmark ===
+Date: 2026-03-31T08:33:31Z
+Binary: native/target/release/ll-search
+Top: 10, Candidates: 20
+
+--- Query: kynurenine pathway neuroinflammation
+  Hybrid (114ms):
+    1. [0.2857] 3-permanent/skin-inflammation-feeds-brain-kynurenine-via-peripheral-export.md
+    2. [0.2667] 3-permanent/kynurenine-pathway-diverts-tryptophan-but-magnitude-is-often-overstated.md
+    3. [0.2361] 2-literature/inflammation-glutamate-glia-convergence.md
+    4. [0.1944] 3-permanent/inflammation-and-glutamate-excess-converge-at-glia.md
+    5. [0.1667] Excalidraw/tsw-skin-brain-cascade.excalidraw.md
+  Reranked (418ms):
+    1. [4.0694] 3-permanent/inflammation-and-glutamate-excess-converge-at-glia.md
+    2. [3.7204] 3-permanent/kynurenine-diversion-overstates-serotonin-impact.md
+    3. [3.5952] 2-literature/inflammation-glutamate-glia-convergence.md
+    4. [3.3470] 3-permanent/skin-inflammation-feeds-brain-kynurenine-via-peripheral-export.md
+    5. [3.1479] 2-literature/exercise-kynurenine-muscle-sink.md
+head: illegal line count -- -1
+
+--- Query: GABA glutamate excitation inhibition balance
+  Hybrid (112ms):
+    1. [0.3333] 3-permanent/anxiety-is-excess-excitation-not-deficient-inhibition.md
+    2. [0.2540] 3-permanent/ei-balance-may-be-unmeasurable-in-humans.md
+    3. [0.1429] 3-permanent/anxiety-glutamate-feedback-loop.md
+    4. [0.1250] 3-permanent/theanine-modulates-excitation-and-inhibition-with-uncertain-potency.md
+    5. [0.1000] 3-permanent/gaba-is-primary-in-anxiety-pharmacology.md
+  Reranked (462ms):
+    1. [3.9682] 3-permanent/ei-balance-may-be-unmeasurable-in-humans.md
+    2. [2.8093] 3-permanent/anxiety-is-excess-excitation-not-deficient-inhibition.md
+    3. [2.7519] 3-permanent/gaba-is-primary-in-anxiety-pharmacology.md
+    4. [2.3593] 3-permanent/theanine-modulates-excitation-and-inhibition-with-uncertain-potency.md
+    5. [1.8633] 2-literature/pfc-amygdala-glutamate-causes-anxiety.md
+head: illegal line count -- -1
+
+--- Query: FTS5 BM25 sqlite full text search
+  Hybrid (115ms):
+    1. [0.3095] 2-literature/garcia-sqlite-vec-hybrid-search-2024.md
+    2. [0.1667] Excalidraw/hybrid-search-pipeline.excalidraw.md
+    3. [0.1429] 5-maps/federated-second-brain-discovery.md
+    4. [0.1250] 1-fleeting/sqlite-vec-is-the-single-store-for-hybrid-vault-search.md
+    5. [0.1111] 0-inbox/sql-js-omits-fts5-from-default-wasm-build.md
+  Reranked (393ms):
+    1. [6.7794] 2-literature/garcia-sqlite-vec-hybrid-search-2024.md
+    2. [5.8996] 1-fleeting/sqlite-vec-is-the-single-store-for-hybrid-vault-search.md
+    3. [5.0268] Excalidraw/hybrid-search-pipeline.excalidraw.md
+    4. [4.8240] 2-literature/crosley-hybrid-retriever-obsidian-2026.md
+    5. [2.3554] 1-fleeting/hybrid-search-catches-failures-pure-vector-misses.md
+head: illegal line count -- -1
+
+--- Query: how to track cognitive performance over time
+  Hybrid (113ms):
+    1. [0.3333] 4-projects/thalenapp-landing-page-copy-draft.md
+    2. [0.1429] 5-maps/subjective-alertness-objective-cognition-discovery.md
+    3. [0.1429] 2-literature/buxton-sleep-quality-daily-cognition-2025.md
+    4. [0.1250] 6-writing/you-heard-ego.md
+    5. [0.1250] 5-maps/lifestyle-factors-cognitive-performance-discovery.md
+  Reranked (463ms):
+    1. [2.8265] 4-projects/thalenapp-landing-page-copy-draft.md
+    2. [2.3183] 3-permanent/daily-cognition-may-need-ar3-not-ar1.md
+    3. [1.3039] 2-literature/buxton-sleep-quality-daily-cognition-2025.md
+    4. [-0.3434] 3-permanent/hrv-cognition-link-is-too-weak-for-daily-prediction.md
+    5. [-0.4637] 1-fleeting/thalen-autism-informed-design-brief.md
+head: illegal line count -- -1
+
+--- Query: what makes a good experiment design for self tracking
+  Hybrid (113ms):
+    1. [0.1667] 1-fleeting/self-monitoring-changes-behavior-independent-of-analytics.md
+    2. [0.1667] 4-projects/thalen-coaching-system-design-spec.md
+    3. [0.1429] 1-fleeting/accuracy-does-not-moderate-self-monitoring-behavior-change.md
+    4. [0.1250] 3-permanent/robust-tasks-produce-poor-individual-differences-reliability.md
+    5. [0.1111] 1-fleeting/objective-tracking-is-more-valuable-when-self-report-fails.md
+  Reranked (419ms):
+    1. [0.2056] 1-fleeting/self-monitoring-changes-behavior-independent-of-analytics.md
+    2. [-0.3727] 1-fleeting/thalen-autism-informed-design-brief.md
+    3. [-0.5005] 3-permanent/glicko2-cognitive-self-tracking.md
+    4. [-0.7275] 1-fleeting/accuracy-does-not-moderate-self-monitoring-behavior-change.md
+    5. [-0.9273] 1-fleeting/quantified-self-is-identity-through-measurement.md
+head: illegal line count -- -1
+
+--- Query: building trust through consistent small actions
+  Hybrid (113ms):
+    1. [0.1667] 1-fleeting/email-drip-beats-pdf-for-coaching-lead-nurture.md
+    2. [0.1667] 4-projects/thalen-content-calendar-and-launch-sequence.md
+    3. [0.1429] 1-fleeting/showing-reasoning-builds-more-trust-than-showing-results.md
+    4. [0.1250] 1-fleeting/circular-reinforcement-creates-false-confidence.md
+    5. [0.1111] 3-permanent/trust-scoring-is-governance-overhead-at-two-peers.md
+  Reranked (414ms):
+    1. [-6.3610] 3-permanent/trust-applies-within-expertise-boundary-not-globally.md
+    2. [-6.5340] 1-fleeting/email-drip-beats-pdf-for-coaching-lead-nurture.md
+    3. [-6.6330] 3-permanent/trust-challenge-matrix-determines-mentoring-progress.md
+    4. [-7.1834] 3-permanent/defer-trust-scoring-until-past-direct-acquaintance.md
+    5. [-7.4061] 3-permanent/federation-trust-cold-start-is-unsolved.md
+head: illegal line count -- -1
+
+--- Query: bayesian
+  Hybrid (110ms):
+    1. [0.3095] Excalidraw/bayesian-ar1-update-cycle.excalidraw.md
+    2. [0.2778] Excalidraw/ar1-two-tier-bayesian-architecture.excalidraw.md
+    3. [0.2500] Excalidraw/bayesian-n-of-1-prior-pipeline.excalidraw.md
+    4. [0.2429] 3-permanent/bayesian-regression-with-covariates-is-the-correct-small-n-confound-method.md
+    5. [0.1818] 3-permanent/bayesian-optional-stopping-is-not-free.md
+  Reranked (400ms):
+    1. [2.1544] Excalidraw/bayesian-ar1-update-cycle.excalidraw.md
+    2. [1.7841] 2-literature/van-dongen-bayesian-individual-fatigue-prediction-2007.md
+    3. [1.6299] 3-permanent/bayesian-regression-with-covariates-is-the-correct-small-n-confound-method.md
+    4. [1.4816] Excalidraw/ar1-two-tier-bayesian-architecture.excalidraw.md
+    5. [1.2008] Excalidraw/bayesian-n-of-1-prior-pipeline.excalidraw.md
+head: illegal line count -- -1
+
+--- Query: pipeline
+  Hybrid (114ms):
+    1. [0.3333] Excalidraw/ai-targeting-pipeline.excalidraw.md
+    2. [0.2054] 1-fleeting/skill-pipelines-beat-standalone-tools.md
+    3. [0.2020] Excalidraw/vault-embedding-pipeline.excalidraw.md
+    4. [0.1776] Excalidraw/constrained-decoding-pipeline.excalidraw.md
+    5. [0.1667] 1-fleeting/health-command-completes-the-skill-pipeline.md
+  Reranked (330ms):
+    1. [2.1331] 1-fleeting/skill-pipelines-beat-standalone-tools.md
+    2. [0.9348] 3-permanent/streams-api-is-unix-pipes-for-the-browser.md
+    3. [0.7590] 5-maps/browser-rendering-pipeline-map.md
+    4. [0.5815] Excalidraw/ai-targeting-pipeline.excalidraw.md
+    5. [0.4346] Excalidraw/constrained-decoding-pipeline.excalidraw.md
+head: illegal line count -- -1
+
+--- Query: federation
+  Hybrid (116ms):
+    1. [0.2381] Excalidraw/p2p-federation-governance-lifecycle.excalidraw.md
+    2. [0.2111] 3-permanent/federation-trust-decay-is-an-open-design-space.md
+    3. [0.1863] 1-fleeting/single-player-value-stack-for-federation-protocol.md
+    4. [0.1667] 3-permanent/awareness-only-federation-is-an-untested-behavioral-assumption.md
+    5. [0.1650] 1-fleeting/embedding-as-federation-primitive-is-the-wrong-level.md
+  Reranked (426ms):
+    1. [1.0014] 3-permanent/federation-requires-creates-silent-breaking-changes-composition-cannot-catch.md
+    2. [0.8298] 3-permanent/federation-trust-decay-is-an-open-design-space.md
+    3. [0.5773] 1-fleeting/federation-requires-shared-embedding-model-across-peers.md
+    4. [0.4861] Excalidraw/bittorrent-bep46-federation-transport-stack.excalidraw.md
+    5. [0.3562] Excalidraw/p2p-federation-governance-lifecycle.excalidraw.md
+head: illegal line count -- -1
+
+--- Query: autism and sensory processing differences
+  Hybrid (110ms):
+    1. [0.3333] 3-permanent/sensory-sensitivity-may-be-alexithymia-not-autism.md
+    2. [0.2857] 3-permanent/autistic-perception-is-enhanced-not-just-different.md
+    3. [0.1573] 1-fleeting/autistic-avoidant-attachment-may-be-miscoded-monotropism.md
+    4. [0.1250] 3-permanent/predictive-coding-of-autism-risks-unfalsifiability.md
+    5. [0.1111] 5-maps/autism-and-relationships-the-full-landscape.md
+  Reranked (433ms):
+    1. [3.5272] 3-permanent/sensory-sensitivity-may-be-alexithymia-not-autism.md
+    2. [0.8564] 2-literature/monday-feldman-asd-sensory-circuit-clusters-2023.md
+    3. [-0.3615] 1-fleeting/cptsd-autism-overlap-is-near-total-but-mechanisms-diverge.md
+    4. [-0.7009] 5-maps/autism-discovery-synthesis.md
+    5. [-0.8675] 5-maps/autism-and-relationships-the-full-landscape.md
+head: illegal line count -- -1
+
+--- Query: supplement timing and absorption
+  Hybrid (114ms):
+    1. [0.3095] 3-permanent/most-supplement-timing-is-pk-based-not-circadian-tested.md
+    2. [0.2679] 1-fleeting/drug-chronotherapy-is-robust-supplement-chronotherapy-is-not.md
+    3. [0.2500] 1-fleeting/fat-soluble-vitamin-absorption-needs-less-fat-than-assumed.md
+    4. [0.2250] 1-fleeting/intestinal-clock-genes-regulate-nutrient-transporter-expression.md
+    5. [0.1528] 3-permanent/vitamin-c-overrides-polyphenol-and-phytate-iron-inhibition.md
+  Reranked (421ms):
+    1. [4.7465] 3-permanent/most-supplement-timing-is-pk-based-not-circadian-tested.md
+    2. [3.0031] 1-fleeting/drug-chronotherapy-is-robust-supplement-chronotherapy-is-not.md
+    3. [0.4770] 1-fleeting/cyp-inference-misses-chelation-interactions-entirely.md
+    4. [0.3287] 1-fleeting/intestinal-clock-genes-regulate-nutrient-transporter-expression.md
+    5. [-0.2520] 4-projects/thalen-content-calendar-and-launch-sequence.md
+head: illegal line count -- -1
+
+--- Query: dark patterns in product design
+  Hybrid (114ms):
+    1. [0.2017] 1-fleeting/visceral-behavioral-reflective-are-normans-three-design-levels.md
+    2. [0.1667] 3-permanent/dark-patterns-in-games-split-temporal-monetary-social.md
+    3. [0.1667] 1-fleeting/hassenzahl-splits-ux-into-pragmatic-and-hedonic-quality.md
+    4. [0.1534] 5-maps/game-design-fundamentals-discovery.md
+    5. [0.1429] 1-fleeting/dark-patterns-weaponize-the-same-emotional-mechanisms-as-good-design.md
+  Reranked (408ms):
+    1. [4.4594] 1-fleeting/97-percent-of-eu-sites-contain-dark-patterns.md
+    2. [4.1650] 3-permanent/dark-patterns-in-games-split-temporal-monetary-social.md
+    3. [4.0680] 1-fleeting/dark-patterns-weaponize-the-same-emotional-mechanisms-as-good-design.md
+    4. [3.2183] 1-fleeting/health-apps-use-nagging-more-than-countdown-dark-patterns.md
+    5. [2.2489] 6-writing/rest-xp-and-the-architecture-of-kindness.md
+head: illegal line count -- -1
+
+--- Query: how does the on-device bayesian inference pipeline work in thalen and what parameters does it estimate
+  Hybrid (111ms):
+    1. [0.1667] 1-fleeting/is-thalen-building-a-precision-instrument-to-measure-noise.md
+    2. [0.1429] Excalidraw/evidence-state-machine-thalen.excalidraw.md
+    3. [0.1250] Excalidraw/bayesian-n-of-1-prior-pipeline.excalidraw.md
+    4. [0.1111] 3-permanent/two-tier-bayesian-architecture-fast-display-full-background.md
+    5. [0.1000] 1-fleeting/population-intelligence-requires-published-literature-only.md
+  Reranked (447ms):
+    1. [2.2609] 3-permanent/universal-inference-is-the-practical-path-to-anytime-valid-testing.md
+    2. [0.8834] 3-permanent/n-of-1-inference-requires-ar1-errors-and-bayesian-shrinkage.md
+    3. [0.5655] 1-fleeting/population-intelligence-requires-published-literature-only.md
+    4. [0.0752] 3-permanent/two-tier-bayesian-architecture-fast-display-full-background.md
+    5. [-0.8457] 3-permanent/split-lrt-wastes-half-the-data-at-small-n.md
+head: illegal line count -- -1
+
+--- Query: what evidence exists that self-monitoring changes behavior independent of the accuracy of the measurements
+  Hybrid (113ms):
+    1. [0.1667] 1-fleeting/self-monitoring-changes-behavior-independent-of-analytics.md
+    2. [0.1429] 1-fleeting/accuracy-does-not-moderate-self-monitoring-behavior-change.md
+    3. [0.1250] 1-fleeting/objective-tracking-is-more-valuable-when-self-report-fails.md
+    4. [0.1111] 1-fleeting/tracking-honeymoon-decays-after-eight-weeks.md
+    5. [0.1000] 1-fleeting/self-experimentation-burden-drives-dropout-before-statistics-fail.md
+  Reranked (422ms):
+    1. [6.3448] 1-fleeting/accuracy-does-not-moderate-self-monitoring-behavior-change.md
+    2. [6.0671] 1-fleeting/self-monitoring-changes-behavior-independent-of-analytics.md
+    3. [1.5518] 1-fleeting/tracking-honeymoon-decays-after-eight-weeks.md
+    4. [-1.1204] 1-fleeting/obsessive-tracking-can-worsen-outcomes.md
+    5. [-2.2453] 1-fleeting/objective-tracking-is-more-valuable-when-self-report-fails.md
+head: illegal line count -- -1
+
+--- Query: why is concept creep problematic and how does it relate to diagnostic bracket creep in mental health
+  Hybrid (115ms):
+    1. [0.1667] 3-permanent/concept-creep-and-diagnostic-bracket-creep.md
+    2. [0.1429] 3-permanent/concept-creep-expands-harm-horizontally-and-vertically.md
+    3. [0.1250] 1-fleeting/safetyism-thesis-links-concept-creep-to-fragility-but-evidence-is-contested.md
+    4. [0.1111] 3-permanent/concept-creep-expands-harm-in-two-directions.md
+    5. [0.1000] 3-permanent/concept-creep-operates-through-a-self-reinforcing-sensitivity-loop.md
+  Reranked (362ms):
+    1. [5.2838] 3-permanent/concept-creep-and-diagnostic-bracket-creep.md
+    2. [2.6976] 1-fleeting/harm-concept-breadth-varies-by-person-and-predicts-political-orientation.md
+    3. [2.4913] 3-permanent/concept-creep-expands-harm-horizontally-and-vertically.md
+    4. [2.4097] 3-permanent/concept-creep-expands-harm-in-two-directions.md
+    5. [2.1335] 1-fleeting/safetyism-thesis-links-concept-creep-to-fragility-but-evidence-is-contested.md
+head: illegal line count -- -1
+
+=== Summary ===
+Queries: 15
+Avg hybrid latency: 113ms
+Avg rerank latency: 414ms
+Avg rerank overhead: 301ms
+Total top-5 promotions: 34 across 15 queries
