@@ -82,7 +82,7 @@ After web/PubMed search, run `node {{PLUGIN}}/scripts/source-resolver.mjs resolv
 - `species`: human, animal, in-vitro, unknown
 - `n`: sample size when available
 - `funding`: industry funding flagged explicitly
-- `abstract`: first 2-3 sentences for downstream claim checking
+- `abstract`: the literal API-returned abstract text, not paraphrased. Include the first 2-3 sentences minimum. Downstream note-writers use this as ground truth for claim verification -- paraphrasing defeats the purpose.
 
 ### Search Log (Deep mode only)
 
