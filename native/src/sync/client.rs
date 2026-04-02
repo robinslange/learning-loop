@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use anyhow::Context;
+use rusqlite::Connection;
 use serde::Serialize;
 use tungstenite::{connect, Message, WebSocket};
 use tungstenite::stream::MaybeTlsStream;
@@ -129,6 +130,9 @@ pub fn sync_all(
             Message::Binary(data) => {
                 std::fs::create_dir_all(&peer_dir)?;
                 std::fs::write(peer_dir.join("index.db"), &data)?;
+                if let Err(e) = ensure_peer_fts(&peer_dir.join("index.db")) {
+                    eprintln!("FTS rebuild for {} failed: {e}", peer.peer_id);
+                }
                 let meta = serde_json::json!({
                     "updated_at": peer.updated_at,
                     "note_count": peer.note_count,
@@ -182,4 +186,18 @@ fn recv_json<T: serde::de::DeserializeOwned>(
             _ => continue,
         }
     }
+}
+
+fn ensure_peer_fts(db_path: &Path) -> anyhow::Result<()> {
+    let conn = Connection::open(db_path)?;
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+            title, tags, body,
+            content='notes_content',
+            content_rowid='id',
+            tokenize='porter unicode61 remove_diacritics 1'
+        );
+        INSERT INTO notes_fts(notes_fts) VALUES('rebuild');"
+    )?;
+    Ok(())
 }
