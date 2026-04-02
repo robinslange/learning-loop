@@ -68,6 +68,10 @@ pub fn export_index(
          CREATE TABLE meta (
              key TEXT PRIMARY KEY,
              value TEXT
+         );
+         CREATE TABLE embeddings (
+             id INTEGER PRIMARY KEY,
+             data BLOB NOT NULL
          );"
     )?;
 
@@ -127,6 +131,29 @@ pub fn export_index(
         )?;
 
         exported += 1;
+    }
+
+    // Copy embeddings for exported notes
+    let mut emb_stmt = source.prepare(
+        "SELECT e.id, e.data FROM embeddings e JOIN notes n ON e.id = n.id"
+    )?;
+
+    let emb_rows = emb_stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+    })?;
+
+    for row in emb_rows {
+        let (id, data) = row?;
+        if export.query_row(
+            "SELECT 1 FROM notes WHERE id = ?1",
+            params![id],
+            |_| Ok(()),
+        ).is_ok() {
+            export.execute(
+                "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
+                params![id, data],
+            )?;
+        }
     }
 
     let peer_id = &config.identity.display_name;
