@@ -43,14 +43,13 @@ Then install learning-loop:
 
 Restart Claude Code, then run `/learning-loop:init` to configure your vault path and persona voice.
 
-## Token usage
+## Resource usage
 
-This plugin is token-heavy. Be aware of this if you're on a usage-capped plan.
+This plugin is not lightweight. It runs local model inference and injects vault context into every session. You should know this before installing.
 
-**Where the tokens go:**
-- **Every session** gets a context injection with your memory index, recent captures, and active intentions. This grows with your vault -- a new vault costs almost nothing, a mature vault with hundreds of memories and notes costs more.
-- **Skills** like `/discovery`, `/gaps`, and `/verify` spawn multiple parallel agents. Each agent gets its own context window with its definition and loaded skills. A `/discovery` session with two research rounds can easily spawn 4-6 agents.
-- **Heavy sweeps** (`/gaps --sweep`, `/verify inbox` on a large inbox) are the most expensive operations -- they fan out across many agents working in parallel.
+**Tokens:** Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault with hundreds of memories and notes adds thousands of tokens per session -- and it grows as your vault does. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window. Heavy sweeps can fan out across 6+ agents.
+
+**Local compute:** The `ll-search` binary (77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. Reranked searches and index rebuilds use multi-core inference. On an M4 Max, reranked search takes ~0.6s and indexing takes ~1.8s. On lower-spec machines these will be noticeably slower. An Apple Silicon Mac with 16GB+ RAM is the practical minimum for comfortable use.
 
 **What we do to keep costs down:**
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku, not Sonnet
@@ -58,6 +57,7 @@ This plugin is token-heavy. Be aware of this if you're on a usage-capped plan.
 - Intention summaries use compact format (context names and counts, not full content)
 - Provenance, backlinks, and session labels write to disk -- they don't inject tokens into your context
 - Pre-compact hook triggers note capture before Claude compresses context, so insights aren't lost to compression
+- Search batches multiple queries into a single process (reflect-scan), amortizing model init across queries
 
 ## Why this instead of rolling your own
 
