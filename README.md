@@ -43,6 +43,21 @@ Then install learning-loop:
 
 Restart Claude Code, then run `/learning-loop:init` to configure your vault path and persona voice.
 
+## Token usage
+
+This plugin is not lightweight. A session-start hook injects ~7,400 tokens of vault context into every session, whether you use the plugin or not. Running a skill adds 600-3,200 tokens for the skill definition, and each agent spawn adds another 1,500-4,200 tokens for the agent and its loaded skills.
+
+Rough scenario costs (definitions and injections only, before actual research content):
+
+| Usage | Tokens |
+|---|---|
+| Passive (no skills used) | ~7,400 |
+| `/quick` (single question) | ~14,000 |
+| `/discovery` (2 rounds, 2 notes) | ~32,000 |
+| `/gaps` + `/verify` sweep | ~40,000-50,000 |
+
+If you're on a usage-capped plan, be aware that heavy skills like `/discovery` and `/gaps` spawn multiple parallel agents that each consume their own context.
+
 ## Why this instead of rolling your own
 
 You could wire up hooks and note templates yourself. What takes time to build and test:
