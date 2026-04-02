@@ -536,7 +536,7 @@ fn walk_dir(root: &Path, dir: &Path, entries: &mut Vec<WalkEntry>) {
                 .strip_prefix(root)
                 .unwrap_or(&path)
                 .to_string_lossy()
-                .to_string();
+                .replace('\\', "/");
 
             entries.push(WalkEntry {
                 rel_path: rel,
