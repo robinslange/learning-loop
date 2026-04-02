@@ -45,18 +45,19 @@ Restart Claude Code, then run `/learning-loop:init` to configure your vault path
 
 ## Token usage
 
-This plugin is not lightweight. A session-start hook injects ~7,400 tokens of vault context into every session, whether you use the plugin or not. Running a skill adds 600-3,200 tokens for the skill definition, and each agent spawn adds another 1,500-4,200 tokens for the agent and its loaded skills.
+This plugin is token-heavy. Be aware of this if you're on a usage-capped plan.
 
-Rough scenario costs (definitions and injections only, before actual research content):
+**Where the tokens go:**
+- **Every session** gets a context injection with your memory index, recent captures, and active intentions. This grows with your vault -- a new vault costs almost nothing, a mature vault with hundreds of memories and notes costs more.
+- **Skills** like `/discovery`, `/gaps`, and `/verify` spawn multiple parallel agents. Each agent gets its own context window with its definition and loaded skills. A `/discovery` session with two research rounds can easily spawn 4-6 agents.
+- **Heavy sweeps** (`/gaps --sweep`, `/verify inbox` on a large inbox) are the most expensive operations -- they fan out across many agents working in parallel.
 
-| Usage | Tokens |
-|---|---|
-| Passive (no skills used) | ~7,400 |
-| `/quick` (single question) | ~14,000 |
-| `/discovery` (2 rounds, 2 notes) | ~32,000 |
-| `/gaps` + `/verify` sweep | ~40,000-50,000 |
-
-If you're on a usage-capped plan, be aware that heavy skills like `/discovery` and `/gaps` spawn multiple parallel agents that each consume their own context.
+**What we do to keep costs down:**
+- Lightweight agents (vault search, scoring, ingestion) run on Haiku, not Sonnet
+- Recent captures are capped at the last 5 notes, not the full inbox
+- Intention summaries use compact format (context names and counts, not full content)
+- Provenance, backlinks, and session labels write to disk -- they don't inject tokens into your context
+- Pre-compact hook triggers note capture before Claude compresses context, so insights aren't lost to compression
 
 ## Why this instead of rolling your own
 
