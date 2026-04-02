@@ -18,4 +18,4 @@ Agents are specialized subprocesses spawned by skills. They run in parallel wher
 | ingest-repo | Scan repo surface for architecture insights | Haiku |
 | diagram-rules | Shared Excalidraw generation spec | (reference) |
 
-Agents share 18 skills in `agents/_skills/` covering promote-gate assessment, cross-validation, source verification, coverage mapping, blindspot detection, and more.
+Agents share 19 skills in `agents/_skills/` covering promote-gate assessment, cross-validation, source verification, coverage mapping, blindspot detection, fleeting sweep, and more.
