@@ -19,7 +19,7 @@ function tryFederationExport() {
   if (!existsSync(FEDERATION_CONFIG) || !hasBinary()) return;
   try {
     const result = run(['export', DB_PATH, '/tmp/ll-search-export.db', VAULT_PATH]);
-    process.stderr.write(`Federation export: ${JSON.parse(result).exported} notes\n`);
+    process.stderr.write(`Federation export: ${result.exported} notes\n`);
   } catch (err) {
     process.stderr.write(`Federation export failed: ${err.message}\n`);
   }
