@@ -128,7 +128,7 @@ Repeat until the user says "done", "wrap up", or similar:
    - `existing_knowledge`: vault scout findings + prior round findings
    - Current depth setting
 3. **Present** — deliver findings in chosen style and tone
-4. **Capture** (if `full` mode) — after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
+4. **Capture** (if `full` mode) — after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body — don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
 
 **Steering keywords the skill should recognize:**
 - "go deeper" / "more on that" → same angle, increase detail

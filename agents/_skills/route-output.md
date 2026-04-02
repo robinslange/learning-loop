@@ -40,7 +40,7 @@ For each `durable-insight`:
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
 3. If novel, spawn a `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with:
    - **insight**: The title
-   - **research**: The body + source context
+   - **research**: The body + source context. Every source must include its URL. If no URL exists, include `[no URL found]` rather than omitting the source metadata.
    - **destination**: `0-inbox/`
    - **related_notes**: Top vault search results as wiki-links
 

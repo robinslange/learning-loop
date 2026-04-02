@@ -35,6 +35,16 @@ source_grounded: 0-2
 
 When writing or rewriting frontmatter tags, de-duplicate the list before writing. If the counter-argument-linking skill adds topic tags from the target note, merge them with existing tags and remove duplicates. Final tag list must contain no repeated entries.
 
+## Sources
+
+Include source URLs at write-time, not as a deferred step. Every non-synthesis note that cites a source should include it as a clickable markdown link:
+
+```
+[Author, "Title" (Year)](URL)
+```
+
+If no URL exists, write `[no URL found]` rather than omitting the reference. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone.
+
 ## What to Capture
 
 - Decisions made — what was chosen, what was rejected
