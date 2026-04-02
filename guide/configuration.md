@@ -16,14 +16,16 @@ The `VAULT_PATH` environment variable overrides `config.json` if set.
 
 ## Hooks
 
-Five lifecycle hooks fire automatically:
+Eight lifecycle hooks fire automatically:
 
 | Event | Hook | What it does |
 |---|---|---|
-| SessionStart | session-start.js | Injects auto-memory index, recent captures, intention summary (context names + counts), retrieval protocol |
+| SessionStart | session-start.js | Injects auto-memory index, recent captures, intention summary, dream gate check |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory |
-| PostToolUse | post-tool-provenance.js | Tracks vault reads/writes for provenance |
+| PreToolUse (Write) | pre-write-check.js | Catches near-duplicate notes before they land in the vault |
+| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks vault reads/writes for provenance |
+| PostToolUse (Write) | post-write-backlink.js | Adds backlinks to related notes after vault writes |
 | PreCompact | pre-compact.js | Preserves context before compression |
 
 ## Provenance
