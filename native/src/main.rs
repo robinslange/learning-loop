@@ -107,6 +107,13 @@ enum Commands {
         model_b: String,
         queries: Vec<String>,
     },
+    Migrate {
+        db_path: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        drop_old: bool,
+    },
 }
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
@@ -277,6 +284,19 @@ fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
             };
             ll_search::sync::watch::run_watch(cfg).expect("watch failed");
+        }
+        Commands::Migrate { db_path, model, drop_old } => {
+            let target = parse_model(&model);
+            let provider = ll_search::model::loader::load_provider(&target)
+                .expect("failed to load model");
+            let conn = ll_search::db::open_db(&db_path);
+            if drop_old {
+                ll_search::db::drop_old_embeddings(&conn);
+                eprintln!("Dropped old embeddings table.");
+            } else {
+                let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
+                println!("{}", serde_json::to_string(&result).unwrap());
+            }
         }
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a);
