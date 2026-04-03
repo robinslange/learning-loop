@@ -27,8 +27,4 @@ $BINARY sync "$DB" "$VAULT" 2>&1 | head -20
 echo "3. Index --sync"
 $BINARY index "$VAULT" "$DB" --sync 2>&1 | head -20
 
-echo "4. Download binary"
-$BINARY download-binary --version v1.5.0 --dest /tmp/ll-search-download-test.tar.gz 2>&1
-ls -lh /tmp/ll-search-download-test.tar.gz
-
 echo "=== PASS ==="

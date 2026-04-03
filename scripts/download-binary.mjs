@@ -4,7 +4,6 @@ import { mkdirSync, chmodSync, existsSync, readFileSync, writeFileSync, createWr
 import { join } from 'path';
 import { homedir, platform, arch } from 'os';
 import { execFileSync } from 'child_process';
-import { createInterface } from 'readline';
 
 function getPluginData() {
   return process.env.CLAUDE_PLUGIN_DATA
@@ -107,61 +106,14 @@ async function main() {
   mkdirSync(binDir, { recursive: true });
   const tmpPath = join(binDir, artifact);
 
-  // Try direct GitHub download first (repo is public)
-  let downloaded = false;
   const tag = version;
   const ghUrl = `https://github.com/${repo}/releases/download/${tag}/${artifact}`;
 
   try {
-    console.error('  Downloading from GitHub...');
     await download(ghUrl, tmpPath);
-    downloaded = true;
   } catch (dlErr) {
-    console.error(`  GitHub download failed: ${dlErr.message}`);
-  }
-
-  // Fallback: federation hub (authenticated via Ed25519 seed)
-  if (!downloaded) {
-    const pluginData = getPluginData();
-    const configPath = join(pluginData, 'federation', 'config.json');
-    const seedPath = join(pluginData, 'federation', '.seed');
-
-    if (existsSync(configPath) && existsSync(seedPath)) {
-      try {
-        const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-        const hubUrl = config.hub?.endpoint;
-        const peerId = config.identity?.displayName;
-        if (hubUrl && peerId) {
-          const httpBase = hubUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace(/\/ws$/, '');
-          const url = `${httpBase}/releases/${version}/${artifact}`;
-          const timestamp = Math.floor(Date.now() / 1000);
-
-          const seed = readFileSync(seedPath);
-          const { createHash: createSha512 } = await import('crypto');
-          const ed = await import(join(import.meta.dirname, '..', 'vendor', 'noble-ed25519', 'index.js'));
-          ed.etc.sha512Sync = (...m) => createSha512('sha512').update(ed.etc.concatBytes(...m)).digest();
-
-          const message = new TextEncoder().encode(`download:${peerId}:${timestamp}`);
-          const sig = ed.sign(message, seed);
-          const sigB64 = Buffer.from(sig).toString('base64');
-          const authHeader = `Ed25519 ${peerId}:${timestamp}:${sigB64}`;
-
-          console.error('  Trying hub download...');
-          execFileSync('curl', ['-fSL', '-H', `Authorization: ${authHeader}`, '-o', tmpPath, url], {
-            stdio: 'inherit',
-            timeout: 120000,
-          });
-          downloaded = true;
-          console.error('  Downloaded from hub');
-        }
-      } catch (hubErr) {
-        console.error(`  Hub download failed: ${hubErr.message}`);
-      }
-    }
-  }
-
-  if (!downloaded) {
-    console.error('Download failed. Check your network connection and try again.');
+    console.error(`Download failed: ${dlErr.message}`);
+    console.error('Check your network connection and try again.');
     process.exit(1);
   }
 

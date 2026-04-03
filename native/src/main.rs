@@ -89,14 +89,6 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
-    DownloadBinary {
-        #[arg(long)]
-        version: Option<String>,
-        #[arg(long)]
-        config_dir: Option<String>,
-        #[arg(long)]
-        dest: Option<String>,
-    },
     Watch {
         vault_path: String,
         db_path: String,
@@ -238,52 +230,17 @@ fn main() {
                 out(&Vec::<ll_search::rerank::RerankResult>::new());
                 return;
             }
+            let paths: Vec<String> = candidate_results.iter().map(|r| r.path.clone()).collect();
+            let bodies = ll_search::search::batch_load_bodies_federated(&conn, &peers, &paths);
             let docs: Vec<(String, String)> = candidate_results
                 .iter()
                 .filter_map(|r| {
-                    if let Some(rest) = r.path.strip_prefix("peer:") {
-                        let (peer_id, peer_path) = rest.split_once('/')?;
-                        let (_, pc) = peers.iter().find(|(pid, _)| pid == peer_id)?;
-                        let body: String = pc.query_row(
-                            "SELECT body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path = ?1",
-                            rusqlite::params![peer_path],
-                            |row| row.get(0),
-                        ).ok()?;
-                        Some((r.path.clone(), body))
-                    } else {
-                        let body: String = conn.query_row(
-                            "SELECT body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path = ?1",
-                            rusqlite::params![r.path],
-                            |row| row.get(0),
-                        ).ok()?;
-                        Some((r.path.clone(), body))
-                    }
+                    let body = bodies.get(&r.path)?;
+                    Some((r.path.clone(), body.clone()))
                 })
                 .collect();
             let reranked = ll_search::rerank::rerank(&query, &docs, top);
             out(&reranked);
-        }
-        Commands::DownloadBinary { version, config_dir, dest } => {
-            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let config = ll_search::sync::config::load_config(&config_dir)
-                .expect("failed to load federation config");
-            let seed = ll_search::sync::auth::load_seed(
-                &ll_search::sync::config::seed_path(&config_dir),
-            )
-            .expect("failed to load seed");
-            let peer_id = &config.identity.display_name;
-            let hub_url = &config.hub.endpoint;
-
-            let version = version.unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")));
-            let artifact = ll_search::sync::download::detect_artifact();
-            let dest = dest.map(std::path::PathBuf::from).unwrap_or_else(|| {
-                config_dir.join("bin").join(if cfg!(windows) { "ll-search.exe" } else { "ll-search" })
-            });
-
-            ll_search::sync::download::download_release(
-                hub_url, &version, &artifact, &seed, peer_id, &dest,
-            )
-            .expect("download failed");
         }
         Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
