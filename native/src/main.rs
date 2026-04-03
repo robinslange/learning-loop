@@ -26,6 +26,8 @@ enum Commands {
         text: String,
         #[arg(long, default_value_t = 10)]
         top: usize,
+        #[arg(long)]
+        config_dir: Option<String>,
     },
     Similar {
         db_path: String,
@@ -53,6 +55,8 @@ enum Commands {
         candidates: usize,
         #[arg(long, default_value_t = 0.85)]
         threshold: f32,
+        #[arg(long)]
+        config_dir: Option<String>,
     },
     Embed {
         text: String,
@@ -64,6 +68,8 @@ enum Commands {
         top: usize,
         #[arg(long, default_value_t = 20)]
         candidates: usize,
+        #[arg(long)]
+        config_dir: Option<String>,
     },
     Version,
     Status {
@@ -107,6 +113,23 @@ fn out<T: serde::Serialize>(data: &T) {
     println!("{}", serde_json::to_string_pretty(data).unwrap());
 }
 
+fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec<(String, rusqlite::Connection)> {
+    let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+    let fed_config_path = config_dir.join("federation").join("config.json");
+    if !fed_config_path.exists() {
+        return Vec::new();
+    }
+    let model_id: String = match conn.query_row(
+        "SELECT value FROM meta WHERE key = 'model_id'",
+        [],
+        |r| r.get(0),
+    ) {
+        Ok(id) => id,
+        Err(_) => return Vec::new(),
+    };
+    ll_search::search::discover_peer_dbs(&config_dir, &model_id)
+}
+
 fn main() {
     let cli = Cli::parse();
     match cli.command {
@@ -133,9 +156,14 @@ fn main() {
                 }
             }
         }
-        Commands::Query { db_path, text, top } => {
+        Commands::Query { db_path, text, top, config_dir } => {
             let conn = ll_search::db::open_db(&db_path);
-            let results = ll_search::search::hybrid_query(&conn, &text, top);
+            let peers = resolve_peers(&conn, config_dir);
+            let results = if peers.is_empty() {
+                ll_search::search::hybrid_query(&conn, &text, top)
+            } else {
+                ll_search::search::hybrid_query_federated(&conn, &text, top, &peers)
+            };
             out(&results);
         }
         Commands::Similar { db_path, note_path, top } => {
@@ -153,9 +181,14 @@ fn main() {
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold);
             out(&results);
         }
-        Commands::ReflectScan { db_path, queries, top, candidates, threshold } => {
+        Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
             let conn = ll_search::db::open_db(&db_path);
-            let result = ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold);
+            let peers = resolve_peers(&conn, config_dir);
+            let result = if peers.is_empty() {
+                ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold)
+            } else {
+                ll_search::search::reflect_scan_federated(&conn, &queries, top, candidates, threshold, &peers)
+            };
             out(&result);
         }
         Commands::Embed { text } => {
@@ -193,9 +226,14 @@ fn main() {
             .expect("sync failed");
             out(&result);
         }
-        Commands::Rerank { db_path, query, top, candidates } => {
+        Commands::Rerank { db_path, query, top, candidates, config_dir } => {
             let conn = ll_search::db::open_db(&db_path);
-            let candidate_results = ll_search::search::hybrid_query(&conn, &query, candidates);
+            let peers = resolve_peers(&conn, config_dir);
+            let candidate_results = if peers.is_empty() {
+                ll_search::search::hybrid_query(&conn, &query, candidates)
+            } else {
+                ll_search::search::hybrid_query_federated(&conn, &query, candidates, &peers)
+            };
             if candidate_results.is_empty() {
                 out(&Vec::<ll_search::rerank::RerankResult>::new());
                 return;
@@ -203,14 +241,23 @@ fn main() {
             let docs: Vec<(String, String)> = candidate_results
                 .iter()
                 .filter_map(|r| {
-                    let body: String = conn
-                        .query_row(
+                    if let Some(rest) = r.path.strip_prefix("peer:") {
+                        let (peer_id, peer_path) = rest.split_once('/')?;
+                        let (_, pc) = peers.iter().find(|(pid, _)| pid == peer_id)?;
+                        let body: String = pc.query_row(
+                            "SELECT body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path = ?1",
+                            rusqlite::params![peer_path],
+                            |row| row.get(0),
+                        ).ok()?;
+                        Some((r.path.clone(), body))
+                    } else {
+                        let body: String = conn.query_row(
                             "SELECT body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path = ?1",
                             rusqlite::params![r.path],
                             |row| row.get(0),
-                        )
-                        .ok()?;
-                    Some((r.path.clone(), body))
+                        ).ok()?;
+                        Some((r.path.clone(), body))
+                    }
                 })
                 .collect();
             let reranked = ll_search::rerank::rerank(&query, &docs, top);
