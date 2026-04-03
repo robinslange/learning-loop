@@ -38,16 +38,19 @@ fn download(url: &str, dest: &Path) -> Result<()> {
     if dest.exists() {
         return Ok(());
     }
+    let tmp = dest.with_extension("tmp");
     eprintln!("Downloading {} ...", url);
     let status = Command::new("curl")
         .args(["-fSL", "--progress-bar", "-o"])
-        .arg(dest)
+        .arg(&tmp)
         .arg(url)
         .status()
         .context("failed to run curl")?;
     if !status.success() {
+        fs::remove_file(&tmp).ok();
         anyhow::bail!("curl failed with status {}", status);
     }
+    fs::rename(&tmp, dest).context("failed to move downloaded file into place")?;
     Ok(())
 }
 
