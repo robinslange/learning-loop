@@ -557,6 +557,229 @@ pub fn reflect_scan(
     }
 }
 
+pub fn reflect_scan_federated(
+    conn: &Connection,
+    queries: &[String],
+    top_n: usize,
+    candidates_n: usize,
+    discriminate_threshold: f32,
+    peers: &[(String, Connection)],
+) -> ReflectScanResult {
+    let all_embeddings = load_all_embeddings(conn);
+    let titles = load_titles_map(conn);
+
+    let peer_data: Vec<(&str, Vec<(i64, String, Vec<f32>)>, HashMap<String, Option<String>>)> =
+        peers
+            .iter()
+            .map(|(id, pc)| {
+                (
+                    id.as_str(),
+                    load_all_embeddings(pc),
+                    load_titles_map(pc),
+                )
+            })
+            .collect();
+
+    let mut all_candidate_paths: Vec<String> = Vec::new();
+    let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
+
+    // Phase 1: hybrid search per query with federated RRF
+    for query_text in queries {
+        let query_vec = embed_query(query_text);
+
+        let mut vec_scored: Vec<(String, f64)> = all_embeddings
+            .iter()
+            .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
+            .collect();
+        vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        vec_scored.truncate(30);
+
+        let fts_results = fts_bm25_query(conn, query_text, 30);
+
+        let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+        for (rank, (path, _)) in vec_scored.iter().enumerate() {
+            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+        for (rank, (_, path, _)) in fts_results.iter().enumerate() {
+            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+
+        for (peer_id, peer_conn) in peers {
+            let peer_embs = peer_data
+                .iter()
+                .find(|(id, _, _)| *id == peer_id.as_str())
+                .map(|(_, e, _)| e);
+
+            if let Some(embs) = peer_embs {
+                let mut pvec: Vec<(String, f64)> = embs
+                    .iter()
+                    .map(|(_, path, emb)| {
+                        (
+                            format!("peer:{peer_id}/{path}"),
+                            cosine(&query_vec, emb) as f64,
+                        )
+                    })
+                    .collect();
+                pvec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                pvec.truncate(30);
+
+                for (rank, (path, _)) in pvec.iter().enumerate() {
+                    *rrf_scores.entry(path.clone()).or_default() +=
+                        1.0 / (RRF_K + rank as f64 + 1.0);
+                }
+            }
+
+            let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+            for (rank, (_, path, _)) in peer_fts.iter().enumerate() {
+                let prefixed = format!("peer:{peer_id}/{path}");
+                *rrf_scores.entry(prefixed).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+            }
+        }
+
+        let mut candidates: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.truncate(candidates_n);
+
+        let mut merged_titles = titles.clone();
+        for (pid, _, pt) in &peer_data {
+            for (path, title) in pt {
+                merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
+            }
+        }
+
+        let candidate_results: Vec<SearchResult> = candidates
+            .into_iter()
+            .map(|(path, score)| SearchResult {
+                title: merged_titles.get(&path).cloned().flatten(),
+                path,
+                score,
+            })
+            .collect();
+
+        for r in &candidate_results {
+            all_candidate_paths.push(r.path.clone());
+        }
+
+        per_query.push((query_text.clone(), query_vec, candidate_results));
+    }
+
+    // Phase 2: batch-fetch bodies, splitting local vs peer
+    all_candidate_paths.sort();
+    all_candidate_paths.dedup();
+
+    let local_paths: Vec<String> = all_candidate_paths
+        .iter()
+        .filter(|p| !p.starts_with("peer:"))
+        .cloned()
+        .collect();
+    let mut bodies = batch_load_bodies(conn, &local_paths);
+
+    let mut peer_path_groups: HashMap<String, Vec<String>> = HashMap::new();
+    for path in &all_candidate_paths {
+        if let Some(rest) = path.strip_prefix("peer:") {
+            if let Some(slash) = rest.find('/') {
+                let pid = &rest[..slash];
+                let actual = &rest[slash + 1..];
+                peer_path_groups
+                    .entry(pid.to_string())
+                    .or_default()
+                    .push(actual.to_string());
+            }
+        }
+    }
+
+    for (peer_id, peer_conn) in peers {
+        if let Some(stripped_paths) = peer_path_groups.get(peer_id.as_str()) {
+            let peer_bodies = batch_load_bodies(peer_conn, stripped_paths);
+            for (path, body) in peer_bodies {
+                bodies.insert(format!("peer:{peer_id}/{path}"), body);
+            }
+        }
+    }
+
+    // Phase 3: rerank each query's candidates
+    let mut all_result_paths: Vec<String> = Vec::new();
+    let mut query_results: Vec<ReflectQueryResult> = Vec::new();
+
+    let mut merged_titles = titles.clone();
+    for (pid, _, pt) in &peer_data {
+        for (path, title) in pt {
+            merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
+        }
+    }
+
+    for (query_text, query_vec, candidate_results) in &per_query {
+        let docs: Vec<(String, String)> = candidate_results
+            .iter()
+            .filter_map(|r| {
+                let body = bodies.get(&r.path)?;
+                Some((r.path.clone(), body.clone()))
+            })
+            .collect();
+
+        let reranked = crate::rerank::rerank(query_text, &docs, top_n);
+
+        let results: Vec<SearchResult> = reranked
+            .iter()
+            .map(|r| SearchResult {
+                path: r.path.clone(),
+                score: r.score,
+                title: merged_titles.get(&r.path).cloned().flatten(),
+            })
+            .collect();
+
+        let top_sim = results
+            .first()
+            .and_then(|best| {
+                if let Some(rest) = best.path.strip_prefix("peer:") {
+                    let slash = rest.find('/')?;
+                    let pid = &rest[..slash];
+                    let actual = &rest[slash + 1..];
+                    peer_data
+                        .iter()
+                        .find(|(id, _, _)| *id == pid)
+                        .and_then(|(_, embs, _)| {
+                            embs.iter()
+                                .find(|(_, p, _)| p == actual)
+                                .map(|(_, _, emb)| cosine(query_vec, emb) as f64)
+                        })
+                } else {
+                    all_embeddings
+                        .iter()
+                        .find(|(_, path, _)| *path == best.path)
+                        .map(|(_, _, emb)| cosine(query_vec, emb) as f64)
+                }
+            })
+            .unwrap_or(0.0);
+
+        for r in &results {
+            all_result_paths.push(r.path.clone());
+        }
+
+        query_results.push(ReflectQueryResult {
+            query: query_text.clone(),
+            top_match_similarity: top_sim,
+            results,
+        });
+    }
+
+    // Phase 4: discriminate on LOCAL result paths only
+    let local_result_paths: Vec<String> = all_result_paths
+        .iter()
+        .filter(|p| !p.starts_with("peer:"))
+        .cloned()
+        .collect();
+    let mut local_deduped = local_result_paths;
+    local_deduped.sort();
+    local_deduped.dedup();
+    let confusable_pairs = discriminate_pairs(conn, &local_deduped, discriminate_threshold);
+
+    ReflectScanResult {
+        queries: query_results,
+        confusable_pairs,
+    }
+}
+
 fn find_note_id(conn: &Connection, path: &str) -> Option<i64> {
     conn.query_row(
         "SELECT id FROM notes WHERE path = ?1",
