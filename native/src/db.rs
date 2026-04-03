@@ -463,24 +463,26 @@ pub fn load_embedding(conn: &Connection, note_id: i64) -> Option<Vec<f32>> {
 }
 
 pub fn load_all_embeddings(conn: &Connection) -> Vec<(i64, String, Vec<f32>)> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT e.id, n.path, e.data FROM embeddings e JOIN notes n ON e.id = n.id",
-        )
-        .unwrap();
+    let mut stmt = match conn.prepare(
+        "SELECT e.id, n.path, e.data FROM embeddings e JOIN notes n ON e.id = n.id",
+    ) {
+        Ok(s) => s,
+        Err(_) => return Vec::new(),
+    };
 
-    let rows = stmt
-        .query_map([], |row| {
-            let id: i64 = row.get(0)?;
-            let path: String = row.get(1)?;
-            let blob: Vec<u8> = row.get(2)?;
-            let vec: Vec<f32> = blob
-                .chunks_exact(4)
-                .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-                .collect();
-            Ok((id, path, vec))
-        })
-        .unwrap();
+    let rows = match stmt.query_map([], |row| {
+        let id: i64 = row.get(0)?;
+        let path: String = row.get(1)?;
+        let blob: Vec<u8> = row.get(2)?;
+        let vec: Vec<f32> = blob
+            .chunks_exact(4)
+            .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
+            .collect();
+        Ok((id, path, vec))
+    }) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
 
     rows.filter_map(|r| r.ok()).collect()
 }
