@@ -159,7 +159,7 @@ Run the download script:
 node {{PLUGIN}}/scripts/download-binary.mjs
 ```
 
-This detects the platform and downloads the correct artifact. If federation is configured (seed + config exist), it downloads from the hub using Ed25519 auth. Otherwise, falls back to `gh` CLI (handles private repo auth). Extracts to `{{PLUGIN_DATA}}/bin/`, sets executable permission, and writes `.version`.
+This detects the platform and downloads the correct binary from GitHub releases. Extracts to `{{PLUGIN_DATA}}/bin/`, sets executable permission, and writes `.version`. Skips download if the installed version already matches.
 
 ### 3b: Verify Vendor Dependencies
 
