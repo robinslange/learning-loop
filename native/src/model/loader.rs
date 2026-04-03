@@ -4,16 +4,12 @@ use std::process::Command;
 
 use anyhow::{Context, Result};
 
-use super::{bge_small, embeddinggemma, EmbeddingProvider, KnownModel};
+use super::{bge_small, EmbeddingProvider, KnownModel};
 
 const BGE_SMALL_MODEL_URL: &str =
     "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx";
 const BGE_SMALL_TOKENIZER_URL: &str =
     "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json";
-const GEMMA_MODEL_URL: &str = "https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/resolve/main/onnx/model_quantized.onnx";
-const GEMMA_MODEL_DATA_URL: &str = "https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/resolve/main/onnx/model_quantized.onnx_data";
-const GEMMA_TOKENIZER_URL: &str =
-    "https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX/resolve/main/tokenizer.json";
 
 fn models_dir() -> PathBuf {
     let dir = dirs_next::home_dir()
@@ -27,7 +23,6 @@ fn models_dir() -> PathBuf {
 fn model_dir(model: &KnownModel) -> PathBuf {
     let name = match model {
         KnownModel::BgeSmallEnV15 => "bge-small-en-v1.5",
-        KnownModel::EmbeddingGemma300m => "embeddinggemma-300m",
     };
     let dir = models_dir().join(name);
     fs::create_dir_all(&dir).expect("failed to create model directory");
@@ -64,15 +59,6 @@ pub fn ensure_model(model: &KnownModel) -> Result<(PathBuf, PathBuf)> {
             download(BGE_SMALL_TOKENIZER_URL, &tokenizer_path)?;
             Ok((model_path, tokenizer_path))
         }
-        KnownModel::EmbeddingGemma300m => {
-            let model_path = dir.join("model_quantized.onnx");
-            let model_data_path = dir.join("model_quantized.onnx_data");
-            let tokenizer_path = dir.join("tokenizer.json");
-            download(GEMMA_MODEL_URL, &model_path)?;
-            download(GEMMA_MODEL_DATA_URL, &model_data_path)?;
-            download(GEMMA_TOKENIZER_URL, &tokenizer_path)?;
-            Ok((model_path, tokenizer_path))
-        }
     }
 }
 
@@ -81,11 +67,6 @@ pub fn load_provider(model: &KnownModel) -> Result<Box<dyn EmbeddingProvider>> {
     match model {
         KnownModel::BgeSmallEnV15 => {
             let provider = bge_small::BgeSmallProvider::from_files(&model_path, &tokenizer_path)?;
-            Ok(Box::new(provider))
-        }
-        KnownModel::EmbeddingGemma300m => {
-            let provider =
-                embeddinggemma::EmbeddingGemmaProvider::from_files(&model_path, &tokenizer_path)?;
             Ok(Box::new(provider))
         }
     }
