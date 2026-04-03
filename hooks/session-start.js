@@ -236,6 +236,46 @@ if (existsSync(patternsFile)) {
   } catch {}
 }
 
+// 7.6. Federation status
+try {
+  const fedConfigPath = join(pluginData, 'federation', 'config.json');
+  if (existsSync(fedConfigPath)) {
+    const fedConfig = JSON.parse(readFileSync(fedConfigPath, 'utf-8'));
+    const peersDir = join(pluginData, 'federation', 'data', 'peers');
+    let peerInfo = [];
+
+    if (existsSync(peersDir)) {
+      for (const entry of readdirSync(peersDir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const metaPath = join(peersDir, entry.name, 'index.db.meta');
+        if (existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
+            peerInfo.push({ id: entry.name, notes: meta.note_count || '?', updated: meta.updated_at || 'unknown' });
+          } catch {}
+        }
+      }
+    }
+
+    if (peerInfo.length > 0) {
+      context += '\n## Federation\n';
+      context += `Connected peers: ${peerInfo.length}. Search results automatically include peer knowledge.\n`;
+      for (const p of peerInfo) {
+        context += `- ${p.id}: ${p.notes} notes (last sync: ${p.updated})\n`;
+      }
+
+      const oneHourAgo = Date.now() - 3600000;
+      const allStale = peerInfo.every(p => {
+        const ts = new Date(p.updated).getTime();
+        return isNaN(ts) || ts < oneHourAgo;
+      });
+      if (allStale) {
+        context += '\nFederation indexes may be stale. Run `node vault-search.mjs sync` to refresh.\n';
+      }
+    }
+  }
+} catch {}
+
 // 8. Record session start time and snapshot memory file list
 const sessionId = randomBytes(4).toString('hex');
 writeFileSync(join(tmp, 'learning-loop-session-start'), String(Math.floor(Date.now() / 1000)));
