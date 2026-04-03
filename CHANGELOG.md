@@ -1,5 +1,94 @@
 # Changelog
 
+## v1.10.2
+
+Federated search hardening: test coverage, deduplication, and performance.
+
+### Added
+
+- 17 unit tests for search and federated search functions (discover_peer_dbs, hybrid_query, federated merge/prefix/degradation, body routing, FTS edge cases)
+- `batch_load_bodies_federated` shared helper for peer-aware body loading
+- `load_title_federated` for lazy per-result title lookup in federated queries
+- `tempfile` dev-dependency for filesystem-based tests
+
+### Changed
+
+- Extracted `hybrid_query_inner` and `hybrid_query_federated_inner` to separate ONNX embedding from search logic, enabling tests without model overhead
+- Federated hybrid query uses lazy title loading (per-result lookup instead of bulk load from all peers)
+- `reflect_scan_federated` hoists merged title map above query loop (was rebuilding N times)
+- `reflect_scan_federated` uses `batch_load_bodies_federated` instead of inline peer routing
+- Rerank CLI command uses `batch_load_bodies_federated` instead of inline per-result SQL
+
+### Removed
+
+- Dead `keyword_search` function (zero callers)
+- `DownloadBinary` CLI command (hub download fallback removed, GitHub-only)
+- `native/src/sync/download.rs` module
+
+### Fixed
+
+- Defensive path normalization in export (backslash to forward slash for Windows peers)
+
+## v1.10.1
+
+Cleanup after federated search launch.
+
+- Remove dead `keyword_search_federated` function
+- Consistent `--config-dir` flag on export and sync commands
+
+## v1.10.0
+
+Federated search: peer vaults are now searchable alongside local notes.
+
+### Added
+
+- `discover_peer_dbs` finds and opens peer index databases with model ID validation
+- `hybrid_query_federated` merges local and peer results via flat RRF fusion
+- `reflect_scan_federated` with peer BM25 + vector search + cross-vault reranking
+- `--config-dir` on Query, Rerank, ReflectScan CLI commands for automatic federation
+- JS dispatcher auto-passes `--config-dir` when federation config exists
+- Session-start hook injects federation status and staleness warning
+- Federation section in help skill
+- Embeddings included in federation export for cross-vault vector search
+- FTS5 rebuild on peer indexes after download
+- Graceful fallback when peer index lacks embeddings table
+
+### Fixed
+
+- Path normalization to forward slashes in `walk_dir` for Windows compatibility
+
+## v1.9.4
+
+- Fix double `JSON.parse` in federation export
+
+## v1.9.3
+
+- Download binary from GitHub first, hub as fallback
+
+## v1.9.2
+
+- Require source URLs at write-time to prevent source-missing findings
+
+## v1.9.1
+
+- Align vault path resolution, optimize note scanning, clean dead code
+- Add tests for dream-gate and session-label hooks
+
+## v1.9.0
+
+Vault write hooks and discriminate threshold tuning.
+
+### Added
+
+- PreToolUse validation hook for vault writes (dupe detection, structure enforcement)
+- PostToolUse backlink hook for vault writes
+- Tests for pre-write and post-write hooks
+
+### Changed
+
+- Discriminate threshold default raised to 0.85
+- H1 title extraction for dupe detection instead of filename
+
 ## v1.8.0
 
 Dream v2: seven consolidation operators, confidence-aware memory lifecycle, retrieval tracking, and architectural refactoring across the plugin.
