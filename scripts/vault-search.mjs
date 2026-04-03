@@ -8,6 +8,11 @@ import { hasBinary, run } from './lib/binary.mjs';
 
 const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
 
+function federationArgs() {
+  if (!existsSync(FEDERATION_CONFIG)) return [];
+  return ['--config-dir', PLUGIN_DATA];
+}
+
 function ensureBinary() {
   if (!hasBinary()) {
     process.stderr.write('ll-search binary not found. Run /learning-loop:init to install.\n');
@@ -126,9 +131,9 @@ try {
       const topN = parseFlag('--top', '10');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '20');
-        out(run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates]));
+        out(run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates, ...federationArgs()]));
       } else {
-        out(run(['query', DB_PATH, text, '--top', topN]));
+        out(run(['query', DB_PATH, text, '--top', topN, ...federationArgs()]));
       }
       break;
     }
@@ -139,9 +144,9 @@ try {
       const topN = parseFlag('--top', '20');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '40');
-        out(run(['rerank', DB_PATH, keywords, '--top', topN, '--candidates', candidates]));
+        out(run(['rerank', DB_PATH, keywords, '--top', topN, '--candidates', candidates, ...federationArgs()]));
       } else {
-        out(run(['query', DB_PATH, keywords, '--top', topN]));
+        out(run(['query', DB_PATH, keywords, '--top', topN, ...federationArgs()]));
       }
       break;
     }
@@ -256,7 +261,7 @@ try {
         console.error('Usage: vault-search.mjs reflect-scan "query1" "query2" ... [--top N] [--candidates N]');
         process.exit(1);
       }
-      out(run(['reflect-scan', DB_PATH, ...queries, '--top', topN, '--candidates', candidates, '--threshold', threshold]));
+      out(run(['reflect-scan', DB_PATH, ...queries, '--top', topN, '--candidates', candidates, '--threshold', threshold, ...federationArgs()]));
       break;
     }
 
