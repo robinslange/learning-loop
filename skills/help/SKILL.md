@@ -149,11 +149,21 @@ challenge  → /learning-loop:gaps       → counterpoints + rewrites + /deepen 
 hygiene    → /learning-loop:health     → diagnose → route to /inbox, /verify, /deepen
 ```
 
+### Federation
+
+If you've configured federation via `/learning-loop:init`, search results automatically include notes from connected peers. Peer results appear with a `peer:<name>/` prefix in their path.
+
+- **Manual sync:** `node vault-search.mjs sync` refreshes peer indexes from the hub
+- **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
+- **Visibility:** you control what peers see of your vault (public/listed/private tiers, configured during init)
+- **Details:** see `guide/federation.md`
+
 ### Quick reference
 
 | Command | What it does |
 |---------|-------------|
 | `/learning-loop:init` | First-time setup: vault path, persona, folder structure |
+| `/learning-loop:init` (Phase 4) | Configure federation: identity, peers, visibility |
 | `/learning-loop:discovery "topic"` | Interactive research journey — explore something new or go deeper |
 | `/learning-loop:quick "question"` | Fast verified answer — vault + web, auto-captures if novel |
 | `/learning-loop:literature <URL>` | Capture an external source as a literature note |
