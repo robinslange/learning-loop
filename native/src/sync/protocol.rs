@@ -6,6 +6,7 @@ pub enum ClientMessage {
     SyncHello {
         peer_id: String,
         model_id: String,
+        supported_models: Vec<String>,
         schema_version: u32,
     },
     AuthResponse {
