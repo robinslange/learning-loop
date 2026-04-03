@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, readdirSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
 import { relativeToVault } from './lib/paths.mjs';
@@ -54,6 +54,33 @@ function stripFlags(from, ...flags) {
 
 function out(data) {
   console.log(JSON.stringify(data, null, 2));
+}
+
+function logRetrieval(command, query, results) {
+  try {
+    const dir = join(PLUGIN_DATA, 'retrieval');
+    mkdirSync(dir, { recursive: true });
+    const now = new Date();
+    const file = join(dir, `queries-${now.toISOString().slice(0, 7)}.jsonl`);
+    let sessionId = '';
+    try { sessionId = readFileSync('/tmp/learning-loop-session-id', 'utf-8').trim(); } catch {}
+    const federated = existsSync(FEDERATION_CONFIG);
+    const topPaths = Array.isArray(results)
+      ? results.slice(0, 10).map(r => r.path || r.note_a || '')
+      : [];
+    const peerCount = topPaths.filter(p => p.startsWith('peer:')).length;
+    const entry = {
+      ts: now.toISOString(),
+      session_id: sessionId,
+      command,
+      query,
+      federated,
+      result_count: Array.isArray(results) ? results.length : 0,
+      peer_results: peerCount,
+      top_paths: topPaths,
+    };
+    appendFileSync(file, JSON.stringify(entry) + '\n');
+  } catch {}
 }
 
 function intentions(projectFilter) {
@@ -131,9 +158,13 @@ try {
       const topN = parseFlag('--top', '10');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '20');
-        out(run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates, ...federationArgs()]));
+        const results = run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates, ...federationArgs()]);
+        logRetrieval('rerank', text, results);
+        out(results);
       } else {
-        out(run(['query', DB_PATH, text, '--top', topN, ...federationArgs()]));
+        const results = run(['query', DB_PATH, text, '--top', topN, ...federationArgs()]);
+        logRetrieval('query', text, results);
+        out(results);
       }
       break;
     }
@@ -144,9 +175,13 @@ try {
       const topN = parseFlag('--top', '20');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '40');
-        out(run(['rerank', DB_PATH, keywords, '--top', topN, '--candidates', candidates, ...federationArgs()]));
+        const results = run(['rerank', DB_PATH, keywords, '--top', topN, '--candidates', candidates, ...federationArgs()]);
+        logRetrieval('rerank', keywords, results);
+        out(results);
       } else {
-        out(run(['query', DB_PATH, keywords, '--top', topN, ...federationArgs()]));
+        const results = run(['query', DB_PATH, keywords, '--top', topN, ...federationArgs()]);
+        logRetrieval('query', keywords, results);
+        out(results);
       }
       break;
     }
@@ -154,7 +189,9 @@ try {
     case 'similar': {
       ensureBinary();
       const topN = parseFlag('--top', '10');
-      out(run(['similar', DB_PATH, args[1], '--top', topN]));
+      const results = run(['similar', DB_PATH, args[1], '--top', topN]);
+      logRetrieval('similar', args[1], results);
+      out(results);
       break;
     }
 
@@ -261,7 +298,11 @@ try {
         console.error('Usage: vault-search.mjs reflect-scan "query1" "query2" ... [--top N] [--candidates N]');
         process.exit(1);
       }
-      out(run(['reflect-scan', DB_PATH, ...queries, '--top', topN, '--candidates', candidates, '--threshold', threshold, ...federationArgs()]));
+      const results = run(['reflect-scan', DB_PATH, ...queries, '--top', topN, '--candidates', candidates, '--threshold', threshold, ...federationArgs()]);
+      for (const q of (results.queries || [])) {
+        logRetrieval('reflect-scan', q.query, q.results);
+      }
+      out(results);
       break;
     }
 
