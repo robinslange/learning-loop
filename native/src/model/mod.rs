@@ -29,21 +29,37 @@ pub trait EmbeddingProvider: Send + Sync {
             None => text.to_string(),
         };
         let mut results = self.embed_batch(&[prefixed])?;
-        Ok(results.remove(0))
+        let vec = results.remove(0);
+        let expected = self.config().dim;
+        anyhow::ensure!(
+            vec.len() == expected,
+            "embedding dim mismatch: model {} produced {} dims, expected {}",
+            self.config().model_id, vec.len(), expected
+        );
+        Ok(vec)
     }
 
     fn embed_documents(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        match &self.config().passage_prefix {
+        let results = match &self.config().passage_prefix {
             Some(prefix) => {
                 let prefixed: Vec<String> =
                     texts.iter().map(|t| format!("{}{}", prefix, t)).collect();
-                self.embed_batch(&prefixed)
+                self.embed_batch(&prefixed)?
             }
-            None => self.embed_batch(texts),
+            None => self.embed_batch(texts)?,
+        };
+        let expected = self.config().dim;
+        if let Some(vec) = results.first() {
+            anyhow::ensure!(
+                vec.len() == expected,
+                "embedding dim mismatch: model {} produced {} dims, expected {}",
+                self.config().model_id, vec.len(), expected
+            );
         }
+        Ok(results)
     }
 
     fn dim(&self) -> usize {
