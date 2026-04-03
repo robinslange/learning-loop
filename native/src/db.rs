@@ -5,11 +5,10 @@ use std::path::Path;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-use crate::embed::embed_documents;
+use crate::embed::{embed_documents, model_id};
 use crate::preprocess::{content_hash, preprocess_file};
 
-const SCHEMA_VERSION: u32 = 2;
-const MODEL_ID: &str = "Xenova/bge-small-en-v1.5";
+const SCHEMA_VERSION: u32 = 3;
 const DTYPE: &str = "q8";
 const BATCH_SIZE: usize = 32;
 
@@ -133,7 +132,7 @@ fn create_schema(conn: &Connection) {
     let upsert = "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)";
     conn.execute(upsert, params!["schema_version", SCHEMA_VERSION.to_string()])
         .unwrap();
-    conn.execute(upsert, params!["model_id", MODEL_ID]).unwrap();
+    conn.execute(upsert, params!["model_id", model_id()]).unwrap();
     conn.execute(upsert, params!["dtype", DTYPE]).unwrap();
     conn.execute(upsert, params!["indexed_at", ""]).unwrap();
     conn.execute(upsert, params!["note_count", "0"]).unwrap();
@@ -604,6 +603,92 @@ pub fn chrono_iso_now() -> String {
         "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
         year, month, day, hours, minutes, seconds
     )
+}
+
+pub fn check_model_mismatch(conn: &Connection, active_model_id: &str) -> bool {
+    let stored: String = conn
+        .query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))
+        .unwrap_or_else(|_| "unknown".to_string());
+    stored != active_model_id
+}
+
+pub fn migrate_embeddings(
+    conn: &Connection,
+    provider: &dyn crate::model::EmbeddingProvider,
+) -> IndexResult {
+    let model_id = provider.model_id();
+    eprintln!("Model mismatch detected. Migrating to {} ...", model_id);
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
+    )
+    .expect("create embeddings_new");
+
+    let notes: Vec<(i64, String)> = {
+        let mut stmt = conn
+            .prepare("SELECT n.id, nc.body FROM notes n JOIN notes_content nc ON n.id = nc.id")
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    let batch_size = 32;
+    let total = notes.len();
+    let mut embedded = 0;
+
+    for chunk in notes.chunks(batch_size) {
+        let texts: Vec<String> = chunk.iter().map(|(_, body)| body.clone()).collect();
+        let vecs = provider.embed_documents(&texts).expect("embed failed");
+
+        conn.execute_batch("BEGIN TRANSACTION;").unwrap();
+        for ((id, _), vec) in chunk.iter().zip(vecs.iter()) {
+            let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+            conn.execute(
+                "INSERT OR REPLACE INTO embeddings_new (id, data) VALUES (?1, ?2)",
+                params![id, blob],
+            )
+            .unwrap();
+        }
+        conn.execute_batch("COMMIT;").unwrap();
+
+        embedded += chunk.len();
+        eprintln!("  Migrated {}/{}", embedded, total);
+    }
+
+    conn.execute_batch("BEGIN IMMEDIATE;").unwrap();
+    conn.execute_batch("ALTER TABLE embeddings RENAME TO embeddings_old;")
+        .unwrap();
+    conn.execute_batch("ALTER TABLE embeddings_new RENAME TO embeddings;")
+        .unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+        params!["model_id", model_id],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+        params!["schema_version", SCHEMA_VERSION.to_string()],
+    )
+    .unwrap();
+    conn.execute_batch("COMMIT;").unwrap();
+
+    eprintln!("Migration complete. Old embeddings retained in 'embeddings_old'.");
+
+    IndexResult {
+        embedded,
+        deleted: 0,
+        total,
+    }
+}
+
+pub fn drop_old_embeddings(conn: &Connection) {
+    conn.execute_batch("DROP TABLE IF EXISTS embeddings_old;")
+        .ok();
+    conn.execute_batch("VACUUM;").ok();
 }
 
 pub fn days_to_ymd(days_since_epoch: u64) -> (u64, u64, u64) {
