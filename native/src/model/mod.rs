@@ -67,10 +67,4 @@ impl KnownModel {
         }
     }
 
-    pub fn model_id(&self) -> &str {
-        match self {
-            KnownModel::BgeSmallEnV15 => "bge-small-en-v1.5",
-            KnownModel::EmbeddingGemma300m => todo!("Task 2"),
-        }
-    }
 }
