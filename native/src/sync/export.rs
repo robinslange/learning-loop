@@ -103,6 +103,7 @@ pub fn export_index(
 
     for row in rows {
         let (id, path, title, tags, body) = row?;
+        let path = path.replace('\\', "/");
         let title = title.unwrap_or_default();
         let tags = tags.unwrap_or_default();
         let body = body.unwrap_or_default();

@@ -48,7 +48,6 @@ ll-search index ~/brain/brain ~/brain/brain/.vault-search/vault-index.db --sync
 ll-search sync <db> <vault>
 ll-search export <db> <output> <vault>
 ll-search watch <vault> <db> --sync-interval 300
-ll-search download-binary --version v1.6.0
 ```
 
-Sync runs automatically: reindex on session start, export+sync on session end (unless watch mode is running). Binary updates download from the federation hub (Ed25519 authenticated) with `gh` CLI fallback.
+Sync runs automatically: reindex on session start, export+sync on session end (unless watch mode is running).

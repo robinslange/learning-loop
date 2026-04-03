@@ -136,11 +136,20 @@ fn fts_bm25_query(conn: &Connection, query: &str, limit: usize) -> Vec<(i64, Str
 
 pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
+    hybrid_query_inner(conn, &query_vec, query_text, top_n)
+}
+
+fn hybrid_query_inner(
+    conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    top_n: usize,
+) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
 
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
+        .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
         .collect();
     vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     vec_scored.truncate(30);
@@ -161,19 +170,7 @@ pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize) -> Vec<Se
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(top_n);
 
-    let titles: HashMap<String, Option<String>> = {
-        let mut map = HashMap::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT path, title FROM notes") {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-            }) {
-                for row in rows.flatten() {
-                    map.insert(row.0, row.1);
-                }
-            }
-        }
-        map
-    };
+    let titles = load_titles_map(conn);
 
     results
         .into_iter()
@@ -185,33 +182,6 @@ pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize) -> Vec<Se
         .collect()
 }
 
-pub fn keyword_search(conn: &Connection, keywords: &str, top_n: usize) -> Vec<SearchResult> {
-    let fts_results = fts_bm25_query(conn, keywords, top_n);
-
-    let titles: HashMap<String, Option<String>> = {
-        let mut map = HashMap::new();
-        if let Ok(mut stmt) = conn.prepare("SELECT path, title FROM notes") {
-            if let Ok(rows) = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-            }) {
-                for row in rows.flatten() {
-                    map.insert(row.0, row.1);
-                }
-            }
-        }
-        map
-    };
-
-    fts_results
-        .into_iter()
-        .map(|(_, path, score)| SearchResult {
-            title: titles.get(&path).cloned().flatten(),
-            path,
-            score: -score,
-        })
-        .collect()
-}
-
 pub fn hybrid_query_federated(
     conn: &Connection,
     query_text: &str,
@@ -219,7 +189,16 @@ pub fn hybrid_query_federated(
     peers: &[(String, Connection)],
 ) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
+    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers)
+}
 
+fn hybrid_query_federated_inner(
+    conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    top_n: usize,
+    peers: &[(String, Connection)],
+) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .iter()
@@ -265,19 +244,10 @@ pub fn hybrid_query_federated(
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(top_n);
 
-    let local_titles = load_titles_map(conn);
-    let mut all_titles: HashMap<String, Option<String>> = local_titles;
-    for (peer_id, peer_conn) in peers {
-        let titles = load_titles_map(peer_conn);
-        for (path, title) in titles {
-            all_titles.insert(format!("peer:{peer_id}/{path}"), title);
-        }
-    }
-
     results
         .into_iter()
         .map(|(path, score)| SearchResult {
-            title: all_titles.get(&path).cloned().flatten(),
+            title: load_title_federated(&path, conn, peers),
             path,
             score,
         })
@@ -536,6 +506,13 @@ pub fn reflect_scan_federated(
             })
             .collect();
 
+    let mut merged_titles = titles.clone();
+    for (pid, _, pt) in &peer_data {
+        for (path, title) in pt {
+            merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
+        }
+    }
+
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
@@ -596,13 +573,6 @@ pub fn reflect_scan_federated(
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         candidates.truncate(candidates_n);
 
-        let mut merged_titles = titles.clone();
-        for (pid, _, pt) in &peer_data {
-            for (path, title) in pt {
-                merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
-            }
-        }
-
         let candidate_results: Vec<SearchResult> = candidates
             .into_iter()
             .map(|(path, score)| SearchResult {
@@ -622,47 +592,11 @@ pub fn reflect_scan_federated(
     // Phase 2: batch-fetch bodies, splitting local vs peer
     all_candidate_paths.sort();
     all_candidate_paths.dedup();
-
-    let local_paths: Vec<String> = all_candidate_paths
-        .iter()
-        .filter(|p| !p.starts_with("peer:"))
-        .cloned()
-        .collect();
-    let mut bodies = batch_load_bodies(conn, &local_paths);
-
-    let mut peer_path_groups: HashMap<String, Vec<String>> = HashMap::new();
-    for path in &all_candidate_paths {
-        if let Some(rest) = path.strip_prefix("peer:") {
-            if let Some(slash) = rest.find('/') {
-                let pid = &rest[..slash];
-                let actual = &rest[slash + 1..];
-                peer_path_groups
-                    .entry(pid.to_string())
-                    .or_default()
-                    .push(actual.to_string());
-            }
-        }
-    }
-
-    for (peer_id, peer_conn) in peers {
-        if let Some(stripped_paths) = peer_path_groups.get(peer_id.as_str()) {
-            let peer_bodies = batch_load_bodies(peer_conn, stripped_paths);
-            for (path, body) in peer_bodies {
-                bodies.insert(format!("peer:{peer_id}/{path}"), body);
-            }
-        }
-    }
+    let bodies = batch_load_bodies_federated(conn, peers, &all_candidate_paths);
 
     // Phase 3: rerank each query's candidates
     let mut all_result_paths: Vec<String> = Vec::new();
     let mut query_results: Vec<ReflectQueryResult> = Vec::new();
-
-    let mut merged_titles = titles.clone();
-    for (pid, _, pt) in &peer_data {
-        for (path, title) in pt {
-            merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
-        }
-    }
 
     for (query_text, query_vec, candidate_results) in &per_query {
         let docs: Vec<(String, String)> = candidate_results
@@ -770,6 +704,32 @@ fn load_titles_map(conn: &Connection) -> HashMap<String, Option<String>> {
     map
 }
 
+fn load_title(conn: &Connection, path: &str) -> Option<String> {
+    conn.query_row(
+        "SELECT title FROM notes WHERE path = ?1",
+        params![path],
+        |r| r.get(0),
+    )
+    .ok()
+    .flatten()
+}
+
+fn load_title_federated(
+    path: &str,
+    conn: &Connection,
+    peers: &[(String, Connection)],
+) -> Option<String> {
+    if let Some(rest) = path.strip_prefix("peer:") {
+        let slash = rest.find('/')?;
+        let pid = &rest[..slash];
+        let actual = &rest[slash + 1..];
+        let (_, pc) = peers.iter().find(|(id, _)| id == pid)?;
+        load_title(pc, actual)
+    } else {
+        load_title(conn, path)
+    }
+}
+
 fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for path in paths {
@@ -782,6 +742,37 @@ fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<String, Str
         }
     }
     map
+}
+
+pub fn batch_load_bodies_federated(
+    conn: &Connection,
+    peers: &[(String, Connection)],
+    paths: &[String],
+) -> HashMap<String, String> {
+    let mut local_paths = Vec::new();
+    let mut peer_groups: HashMap<&str, Vec<String>> = HashMap::new();
+
+    for path in paths {
+        if let Some(rest) = path.strip_prefix("peer:") {
+            if let Some(slash) = rest.find('/') {
+                let pid = &rest[..slash];
+                let actual = &rest[slash + 1..];
+                peer_groups.entry(pid).or_default().push(actual.to_string());
+            }
+        } else {
+            local_paths.push(path.clone());
+        }
+    }
+
+    let mut bodies = batch_load_bodies(conn, &local_paths);
+    for (peer_id, peer_conn) in peers {
+        if let Some(stripped) = peer_groups.get(peer_id.as_str()) {
+            for (path, body) in batch_load_bodies(peer_conn, stripped) {
+                bodies.insert(format!("peer:{peer_id}/{path}"), body);
+            }
+        }
+    }
+    bodies
 }
 
 fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
@@ -802,4 +793,463 @@ fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn create_test_db(notes: &[(&str, &str, &str, &[f32])]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT UNIQUE NOT NULL,
+                 content_hash TEXT NOT NULL,
+                 mtime REAL NOT NULL,
+                 title TEXT,
+                 tags TEXT,
+                 visibility TEXT DEFAULT 'private'
+             );
+             CREATE TABLE notes_content (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT,
+                 tags TEXT,
+                 body TEXT
+             );
+             CREATE VIRTUAL TABLE notes_fts USING fts5(
+                 title, tags, body,
+                 content='notes_content',
+                 content_rowid='id',
+                 tokenize='porter unicode61 remove_diacritics 1'
+             );
+             CREATE TABLE embeddings (
+                 id INTEGER PRIMARY KEY,
+                 data BLOB NOT NULL
+             );
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        )
+        .unwrap();
+
+        for (i, (path, title, body, emb)) in notes.iter().enumerate() {
+            let id = (i + 1) as i64;
+            conn.execute(
+                "INSERT INTO notes (id, path, content_hash, mtime, title, tags) VALUES (?1, ?2, 'hash', 0.0, ?3, '')",
+                params![id, path, title],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
+                params![id, title, body],
+            ).unwrap();
+            let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+            conn.execute(
+                "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
+                params![id, blob],
+            ).unwrap();
+        }
+
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn
+    }
+
+    fn create_peer_db(notes: &[(&str, &str, &str, &[f32])]) -> Connection {
+        create_test_db(notes)
+    }
+
+    fn create_peer_db_no_embeddings(notes: &[(&str, &str, &str)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT UNIQUE NOT NULL,
+                 title TEXT,
+                 tags TEXT,
+                 tier TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE notes_content (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT,
+                 tags TEXT,
+                 body TEXT
+             );
+             CREATE VIRTUAL TABLE notes_fts USING fts5(
+                 title, tags, body,
+                 content='notes_content',
+                 content_rowid='id',
+                 tokenize='porter unicode61 remove_diacritics 1'
+             );
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        )
+        .unwrap();
+
+        for (i, (path, title, body)) in notes.iter().enumerate() {
+            let id = (i + 1) as i64;
+            conn.execute(
+                "INSERT INTO notes (id, path, title, tags, tier, updated_at) VALUES (?1, ?2, ?3, '', 'public', 0)",
+                params![id, path, title],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
+                params![id, title, body],
+            ).unwrap();
+        }
+
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn
+    }
+
+    fn create_peer_db_no_fts(notes: &[(&str, &str, &[f32])]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT UNIQUE NOT NULL,
+                 title TEXT,
+                 tags TEXT,
+                 tier TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE notes_content (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT,
+                 tags TEXT,
+                 body TEXT
+             );
+             CREATE TABLE embeddings (
+                 id INTEGER PRIMARY KEY,
+                 data BLOB NOT NULL
+             );
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        )
+        .unwrap();
+
+        for (i, (path, title, emb)) in notes.iter().enumerate() {
+            let id = (i + 1) as i64;
+            conn.execute(
+                "INSERT INTO notes (id, path, title, tags, tier, updated_at) VALUES (?1, ?2, ?3, '', 'public', 0)",
+                params![id, path, title],
+            ).unwrap();
+            conn.execute(
+                "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
+                params![id, title, title],
+            ).unwrap();
+            let blob: Vec<u8> = emb.iter().flat_map(|f| f.to_le_bytes()).collect();
+            conn.execute(
+                "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
+                params![id, blob],
+            ).unwrap();
+        }
+
+        conn
+    }
+
+    fn norm(v: &[f32]) -> Vec<f32> {
+        let mag = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        if mag == 0.0 { return v.to_vec(); }
+        v.iter().map(|x| x / mag).collect()
+    }
+
+    // --- discover_peer_dbs ---
+
+    #[test]
+    fn test_discover_peer_dbs_empty_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        assert!(peers.is_empty());
+    }
+
+    #[test]
+    fn test_discover_peer_dbs_model_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let peers_dir = tmp.path().join("federation").join("data").join("peers").join("alice");
+        std::fs::create_dir_all(&peers_dir).unwrap();
+        let db_path = peers_dir.join("index.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', 'wrong-model');",
+        ).unwrap();
+        drop(conn);
+
+        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        assert!(peers.is_empty());
+    }
+
+    #[test]
+    fn test_discover_peer_dbs_valid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let peers_dir = tmp.path().join("federation").join("data").join("peers").join("alice");
+        std::fs::create_dir_all(&peers_dir).unwrap();
+        let db_path = peers_dir.join("index.db");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        ).unwrap();
+        drop(conn);
+
+        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].0, "alice");
+    }
+
+    // --- hybrid_query_inner ---
+
+    #[test]
+    fn test_hybrid_query_inner_returns_results() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.0, 1.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important for memory consolidation", &emb_a),
+            ("3-permanent/diet.md", "diet and nutrition", "Protein intake affects muscle recovery", &emb_b),
+        ]);
+
+        let query_vec = norm(&[1.0, 0.1, 0.0]);
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+
+        assert!(!results.is_empty());
+        assert_eq!(results[0].path, "3-permanent/sleep.md");
+        assert_eq!(results[0].title, Some("sleep architecture".to_string()));
+    }
+
+    #[test]
+    fn test_hybrid_query_inner_empty_db() {
+        let conn = create_test_db(&[]);
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+        assert!(results.is_empty());
+    }
+
+    // --- hybrid_query_federated_inner ---
+
+    #[test]
+    fn test_federated_merges_local_and_peer() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.9, 0.1, 0.0]);
+        let emb_c = norm(&[0.8, 0.2, 0.0]);
+
+        let local = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep stages and cycles", &emb_a),
+        ]);
+        let peer = create_peer_db(&[
+            ("3-permanent/circadian.md", "circadian rhythm", "Light exposure controls the circadian clock", &emb_b),
+            ("3-permanent/melatonin.md", "melatonin synthesis", "Melatonin is produced in the pineal gland", &emb_c),
+        ]);
+
+        let peers = vec![("alice".to_string(), peer)];
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+
+        let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"3-permanent/sleep.md"));
+        assert!(paths.iter().any(|p| p.starts_with("peer:alice/")));
+    }
+
+    #[test]
+    fn test_federated_peer_path_prefixing() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let local = create_test_db(&[
+            ("local.md", "local note", "local content", &emb),
+        ]);
+        let peer = create_peer_db(&[
+            ("3-permanent/note.md", "peer note", "peer content about sleep", &emb),
+        ]);
+
+        let peers = vec![("bob".to_string(), peer)];
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+
+        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:")).collect();
+        for r in &peer_results {
+            assert!(r.path.starts_with("peer:bob/"));
+            let after_prefix = r.path.strip_prefix("peer:bob/").unwrap();
+            assert!(!after_prefix.starts_with("peer:"));
+        }
+    }
+
+    #[test]
+    fn test_federated_no_peers_matches_local() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
+        ]);
+
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+
+        let conn2 = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
+        ]);
+        let peers: Vec<(String, Connection)> = vec![];
+        let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers);
+
+        assert_eq!(local_results.len(), fed_results.len());
+        for (l, f) in local_results.iter().zip(fed_results.iter()) {
+            assert_eq!(l.path, f.path);
+        }
+    }
+
+    // --- graceful degradation ---
+
+    #[test]
+    fn test_federated_peer_no_embeddings_table() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let local = create_test_db(&[
+            ("local.md", "local note", "sleep cycles and stages", &emb),
+        ]);
+        let peer = create_peer_db_no_embeddings(&[
+            ("peer-note.md", "peer note", "circadian rhythm and sleep"),
+        ]);
+
+        let peers = vec![("charlie".to_string(), peer)];
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|r| r.path == "local.md"));
+        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:charlie/")).collect();
+        for r in &peer_results {
+            assert!(r.score > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_federated_peer_no_fts_table() {
+        let emb_local = norm(&[1.0, 0.0, 0.0]);
+        let emb_peer = norm(&[0.9, 0.1, 0.0]);
+        let local = create_test_db(&[
+            ("local.md", "local note", "sleep content", &emb_local),
+        ]);
+        let peer = create_peer_db_no_fts(&[
+            ("peer.md", "peer note", &emb_peer),
+        ]);
+
+        let peers = vec![("delta".to_string(), peer)];
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+
+        assert!(!results.is_empty());
+        let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:delta/")).collect();
+        assert!(!peer_results.is_empty());
+    }
+
+    // --- batch_load_bodies_federated ---
+
+    #[test]
+    fn test_batch_load_bodies_federated_routes_correctly() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let local = create_test_db(&[
+            ("local.md", "local", "local body text", &emb),
+        ]);
+        let peer = create_peer_db(&[
+            ("peer-note.md", "peer", "peer body text", &emb),
+        ]);
+
+        let peers = vec![("eve".to_string(), peer)];
+        let paths = vec![
+            "local.md".to_string(),
+            "peer:eve/peer-note.md".to_string(),
+        ];
+
+        let bodies = batch_load_bodies_federated(&local, &peers, &paths);
+        assert_eq!(bodies.get("local.md").unwrap(), "local body text");
+        assert_eq!(bodies.get("peer:eve/peer-note.md").unwrap(), "peer body text");
+    }
+
+    #[test]
+    fn test_batch_load_bodies_federated_missing_peer() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let local = create_test_db(&[
+            ("local.md", "local", "local body", &emb),
+        ]);
+
+        let peers: Vec<(String, Connection)> = vec![];
+        let paths = vec![
+            "local.md".to_string(),
+            "peer:unknown/note.md".to_string(),
+        ];
+
+        let bodies = batch_load_bodies_federated(&local, &peers, &paths);
+        assert_eq!(bodies.len(), 1);
+        assert!(bodies.contains_key("local.md"));
+    }
+
+    // --- ensure_peer_fts (via client.rs, tested indirectly) ---
+
+    #[test]
+    fn test_fts_rebuild_on_export_schema() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT NOT NULL,
+                 title TEXT NOT NULL,
+                 tags TEXT,
+                 tier TEXT NOT NULL,
+                 updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE notes_content (
+                 id INTEGER PRIMARY KEY,
+                 title TEXT,
+                 tags TEXT,
+                 body TEXT
+             );
+             INSERT INTO notes (id, path, title, tags, tier, updated_at) VALUES (1, 'test.md', 'test title', 'tag1', 'public', 0);
+             INSERT INTO notes_content (id, title, tags, body) VALUES (1, 'test title', 'tag1', 'body text about sleep');",
+        ).unwrap();
+
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+                 title, tags, body,
+                 content='notes_content',
+                 content_rowid='id',
+                 tokenize='porter unicode61 remove_diacritics 1'
+             );
+             INSERT INTO notes_fts(notes_fts) VALUES('rebuild');",
+        ).unwrap();
+
+        let results = fts_bm25_query(&conn, "sleep", 10);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].1, "test.md");
+    }
+
+    // --- fts_bm25_query edge cases ---
+
+    #[test]
+    fn test_fts_empty_query() {
+        let conn = create_test_db(&[
+            ("note.md", "note", "content", &norm(&[1.0, 0.0, 0.0])),
+        ]);
+        let results = fts_bm25_query(&conn, "", 10);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_fts_no_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        let results = fts_bm25_query(&conn, "test", 10);
+        assert!(results.is_empty());
+    }
+
+    // --- cosine ---
+
+    #[test]
+    fn test_cosine_identical() {
+        let v = norm(&[1.0, 0.0, 0.0]);
+        let sim = cosine(&v, &v);
+        assert!((sim - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_cosine_orthogonal() {
+        let a = norm(&[1.0, 0.0, 0.0]);
+        let b = norm(&[0.0, 1.0, 0.0]);
+        let sim = cosine(&a, &b);
+        assert!(sim.abs() < 1e-5);
+    }
 }
