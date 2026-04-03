@@ -64,7 +64,7 @@ This plugin is not lightweight. It runs local model inference and injects vault 
 You could wire up hooks and note templates yourself. What takes time to build and test:
 
 - **Source verification at write time.** Every note gets checked against PubMed, Semantic Scholar, and CrossRef before it lands. Author swaps, wrong years, and unconfirmable numbers get caught, not shipped. The naive regex approach for citation extraction had a ~60% false positive rate -- POS tagging with vendored winkNLP solved it.
-- **Hybrid search with reranking.** BM25 + vector similarity + optional cross-encoder reranking, all in a single Rust binary. No native Node.js dependencies.
+- **Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over the wikilink graph + IDF-weighted tag expansion, fused via RRF, with optional cross-encoder reranking. Graph signals surface bridge notes across domains. All in a single Rust binary.
 - **Write-time guardrails.** A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks automatically. A dream gate nudges you to consolidate auto-memory when it's been long enough.
 - **13 specialized agents** that run in parallel -- research, verification, gap analysis, note writing, batch triage. They share 19 skills covering promote-gate assessment, cross-validation, blindspot detection, and more.
 - **A quality gate that blocks promotion.** Notes flow inbox to fleeting to permanent. Six criteria determine routing. Source integrity failures block promotion regardless of other scores.

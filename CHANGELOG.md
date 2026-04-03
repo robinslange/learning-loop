@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.11.0
+
+Graph-augmented retrieval and composable search architecture.
+
+### Added
+
+- **Personalized PageRank** as a third RRF signal: walks the wikilink graph from seed results to surface bridge notes that connect domains. Damping=0.5, 20 iterations, sub-millisecond at vault scale.
+- **IDF-weighted tag expansion** as a fourth RRF signal: finds notes sharing rare tags (freq 2-20) with seed results. Patches vocabulary gap failures where vector similarity misses categorical neighbors.
+- `links` table populated during indexing from extracted wikilinks. 6,521 links stored from 2,261 notes.
+- `extract_wikilinks` in preprocess.rs: parses `[[target]]`, `[[target|alias]]`, `[[target#heading]]` before wikilink stripping
+- `load_link_graph`: builds undirected adjacency from links table with HashSet deduplication for mutual links
+- `retrieval-report.mjs`: summary of query patterns, repeated queries, most-surfaced notes, federation hit rates
+- Retrieval instrumentation: every search logs to `retrieval/queries-YYYY-MM.jsonl` with session, command, query, results, peer hits
+- 15 new tests (7 preprocess, 8 search) covering wikilink extraction, PPR, tag expansion, graph loading
+
+### Changed
+
+- **Search architecture refactored** into composable building blocks: `local_rrf_scores`, `add_peer_rrf_scores`, `add_ranked_rrf`, `finalize_rrf`. All four search functions (hybrid_query, hybrid_query_federated, reflect_scan, reflect_scan_federated) compose from these instead of duplicating logic. Future signal additions (e.g., new embedding model) touch one function, not four.
+- Cross-domain query baseline improved: queries that scored B-C now surface graph-connected bridge notes
+- `drop_all` includes `links` table cleanup
+
+### Fixed
+
+- Stale init skill text still referenced hub download fallback (removed in v1.10.2)
+
+## v1.10.3
+
+- Fix stale hub download reference in init skill
+
 ## v1.10.2
 
 Federated search hardening: test coverage, deduplication, and performance.
