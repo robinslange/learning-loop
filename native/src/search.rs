@@ -212,6 +212,122 @@ pub fn keyword_search(conn: &Connection, keywords: &str, top_n: usize) -> Vec<Se
         .collect()
 }
 
+pub fn hybrid_query_federated(
+    conn: &Connection,
+    query_text: &str,
+    top_n: usize,
+    peers: &[(String, Connection)],
+) -> Vec<SearchResult> {
+    let query_vec = embed_query(query_text);
+
+    let all_embeddings = load_all_embeddings(conn);
+    let mut vec_scored: Vec<(String, f64)> = all_embeddings
+        .iter()
+        .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
+        .collect();
+    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    vec_scored.truncate(30);
+
+    let fts_results = fts_bm25_query(conn, query_text, 30);
+
+    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+
+    for (rank, (path, _)) in vec_scored.iter().enumerate() {
+        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+    }
+    for (rank, (_, path, _)) in fts_results.iter().enumerate() {
+        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+    }
+
+    for (peer_id, peer_conn) in peers {
+        let peer_embeddings = load_all_embeddings(peer_conn);
+        let mut peer_vec: Vec<(String, f64)> = peer_embeddings
+            .iter()
+            .map(|(_, path, emb)| {
+                (format!("peer:{peer_id}/{path}"), cosine(&query_vec, emb) as f64)
+            })
+            .collect();
+        peer_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        peer_vec.truncate(30);
+
+        for (rank, (path, _)) in peer_vec.iter().enumerate() {
+            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+
+        let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+        for (rank, (_, path, _)) in peer_fts.iter().enumerate() {
+            let prefixed = format!("peer:{peer_id}/{path}");
+            *rrf_scores.entry(prefixed).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+    }
+
+    let mut results: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(top_n);
+
+    let local_titles = load_titles_map(conn);
+    let mut all_titles: HashMap<String, Option<String>> = local_titles;
+    for (peer_id, peer_conn) in peers {
+        let titles = load_titles_map(peer_conn);
+        for (path, title) in titles {
+            all_titles.insert(format!("peer:{peer_id}/{path}"), title);
+        }
+    }
+
+    results
+        .into_iter()
+        .map(|(path, score)| SearchResult {
+            title: all_titles.get(&path).cloned().flatten(),
+            path,
+            score,
+        })
+        .collect()
+}
+
+pub fn keyword_search_federated(
+    conn: &Connection,
+    keywords: &str,
+    top_n: usize,
+    peers: &[(String, Connection)],
+) -> Vec<SearchResult> {
+    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+
+    let local_fts = fts_bm25_query(conn, keywords, 30);
+    for (rank, (_, path, _)) in local_fts.iter().enumerate() {
+        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+    }
+
+    for (peer_id, peer_conn) in peers {
+        let peer_fts = fts_bm25_query(peer_conn, keywords, 30);
+        for (rank, (_, path, _)) in peer_fts.iter().enumerate() {
+            let prefixed = format!("peer:{peer_id}/{path}");
+            *rrf_scores.entry(prefixed).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+    }
+
+    let mut results: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(top_n);
+
+    let local_titles = load_titles_map(conn);
+    let mut all_titles: HashMap<String, Option<String>> = local_titles;
+    for (peer_id, peer_conn) in peers {
+        let titles = load_titles_map(peer_conn);
+        for (path, title) in titles {
+            all_titles.insert(format!("peer:{peer_id}/{path}"), title);
+        }
+    }
+
+    results
+        .into_iter()
+        .map(|(path, score)| SearchResult {
+            title: all_titles.get(&path).cloned().flatten(),
+            path,
+            score,
+        })
+        .collect()
+}
+
 pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize) -> Vec<SimilarResult> {
     let note_id = find_note_id(conn, note_path);
     let note_id = match note_id {
