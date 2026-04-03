@@ -12,6 +12,7 @@ rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 anyhow = "1"
+dirs-next = "2"
 tungstenite = { version = "0.29", default-features = false, features = ["handshake"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 globset = "0.4"

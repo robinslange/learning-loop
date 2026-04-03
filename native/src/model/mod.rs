@@ -1,5 +1,6 @@
 pub mod bge_small;
 pub mod embeddinggemma;
+pub mod loader;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
