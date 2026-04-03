@@ -20,8 +20,6 @@ enum Commands {
         sync: bool,
         #[arg(long)]
         config_dir: Option<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Query {
         db_path: String,
@@ -30,31 +28,23 @@ enum Commands {
         top: usize,
         #[arg(long)]
         config_dir: Option<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Similar {
         db_path: String,
         note_path: String,
         #[arg(long, default_value_t = 10)]
         top: usize,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Cluster {
         db_path: String,
         #[arg(long, default_value_t = 0.85)]
         threshold: f32,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Discriminate {
         db_path: String,
         #[arg(long, default_value_t = 0.85)]
         threshold: f32,
         paths: Vec<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     ReflectScan {
         db_path: String,
@@ -67,13 +57,9 @@ enum Commands {
         threshold: f32,
         #[arg(long)]
         config_dir: Option<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Embed {
         text: String,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Rerank {
         db_path: String,
@@ -84,8 +70,6 @@ enum Commands {
         candidates: usize,
         #[arg(long)]
         config_dir: Option<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
     },
     Version,
     Status {
@@ -114,35 +98,11 @@ enum Commands {
         config_dir: Option<String>,
         #[arg(long)]
         pid_file: Option<String>,
-        #[arg(long, default_value = "bge-small")]
-        model: String,
-    },
-    Benchmark {
-        db_path: String,
-        #[arg(long, default_value = "bge-small")]
-        model_a: String,
-        #[arg(long, default_value = "embeddinggemma")]
-        model_b: String,
-        queries: Vec<String>,
-    },
-    Migrate {
-        db_path: String,
-        #[arg(long)]
-        model: String,
-        #[arg(long)]
-        drop_old: bool,
     },
 }
 
-fn parse_model(s: &str) -> ll_search::model::KnownModel {
-    match s {
-        "bge-small" | "bge" | "bge-small-en-v1.5" => ll_search::model::KnownModel::BgeSmallEnV15,
-        "embeddinggemma" | "gemma" | "embeddinggemma-300m" => ll_search::model::KnownModel::EmbeddingGemma300m,
-        other => {
-            eprintln!("Unknown model: '{}'. Available: bge-small, embeddinggemma", other);
-            std::process::exit(1);
-        }
-    }
+fn init_embedding() {
+    ll_search::embed::init_provider(&ll_search::model::KnownModel::BgeSmallEnV15);
 }
 
 fn out<T: serde::Serialize>(data: &T) {
@@ -172,15 +132,9 @@ fn main() {
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
         }
-        Commands::Index { vault_path, db_path, force, sync, config_dir, model, .. } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Index { vault_path, db_path, force, sync, config_dir, .. } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
-            if ll_search::db::check_model_mismatch(&conn, ll_search::embed::model_id()) {
-                eprintln!("Error: database was indexed with a different model. Run 'll-search migrate --model {}' first.",
-                    ll_search::embed::model_id());
-                std::process::exit(1);
-            }
             let result = ll_search::db::reindex(&conn, &vault_path, force);
             out(&result);
             if sync {
@@ -199,9 +153,8 @@ fn main() {
                 }
             }
         }
-        Commands::Query { db_path, text, top, config_dir, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Query { db_path, text, top, config_dir } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let peers = resolve_peers(&conn, config_dir);
             let results = if peers.is_empty() {
@@ -211,30 +164,26 @@ fn main() {
             };
             out(&results);
         }
-        Commands::Similar { db_path, note_path, top, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Similar { db_path, note_path, top } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let results = ll_search::search::similar_notes(&conn, &note_path, top);
             out(&results);
         }
-        Commands::Cluster { db_path, threshold, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Cluster { db_path, threshold } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let results = ll_search::search::cluster_notes(&conn, threshold);
             out(&results);
         }
-        Commands::Discriminate { db_path, threshold, paths, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Discriminate { db_path, threshold, paths } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold);
             out(&results);
         }
-        Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let peers = resolve_peers(&conn, config_dir);
             let result = if peers.is_empty() {
@@ -244,9 +193,8 @@ fn main() {
             };
             out(&result);
         }
-        Commands::Embed { text, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Embed { text } => {
+            init_embedding();
             let vec = ll_search::embed::embed_query(&text);
             out(&vec);
         }
@@ -281,9 +229,8 @@ fn main() {
             .expect("sync failed");
             out(&result);
         }
-        Commands::Rerank { db_path, query, top, candidates, config_dir, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Rerank { db_path, query, top, candidates, config_dir } => {
+            init_embedding();
             let conn = ll_search::db::open_db(&db_path);
             let peers = resolve_peers(&conn, config_dir);
             let candidate_results = if peers.is_empty() {
@@ -307,9 +254,8 @@ fn main() {
             let reranked = ll_search::rerank::rerank(&query, &docs, top);
             out(&reranked);
         }
-        Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, model } => {
-            let model = parse_model(&model);
-            ll_search::embed::init_provider(&model);
+        Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file } => {
+            init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let pid_file = pid_file
                 .map(std::path::PathBuf::from)
@@ -328,31 +274,6 @@ fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
             };
             ll_search::sync::watch::run_watch(cfg).expect("watch failed");
-        }
-        Commands::Migrate { db_path, model, drop_old } => {
-            let target = parse_model(&model);
-            let provider = ll_search::model::loader::load_provider(&target)
-                .expect("failed to load model");
-            let conn = ll_search::db::open_db(&db_path);
-            if drop_old {
-                ll_search::db::drop_old_embeddings(&conn);
-                eprintln!("Dropped old embeddings table.");
-            } else {
-                let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
-                println!("{}", serde_json::to_string(&result).unwrap());
-            }
-        }
-        Commands::Benchmark { db_path, model_a, model_b, queries } => {
-            let ma = parse_model(&model_a);
-            let mb = parse_model(&model_b);
-            let result = ll_search::model::benchmark::run_benchmark(
-                std::path::Path::new(&db_path),
-                &ma,
-                &mb,
-                &queries,
-            )
-            .expect("benchmark failed");
-            out(&result);
         }
     }
 }

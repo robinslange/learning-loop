@@ -22,3 +22,6 @@ federation/config.json
 scripts/node_modules/
 federation/node_modules/
 federation/relay/node_modules/
+
+# Training data (adapter weights, pair datasets)
+native/training_data/

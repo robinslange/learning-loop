@@ -1,6 +1,5 @@
 pub mod benchmark;
 pub mod bge_small;
-pub mod embeddinggemma;
 pub mod loader;
 
 use anyhow::Result;
@@ -75,15 +74,12 @@ pub trait EmbeddingProvider: Send + Sync {
 #[serde(tag = "model")]
 pub enum KnownModel {
     BgeSmallEnV15,
-    EmbeddingGemma300m,
 }
 
 impl KnownModel {
     pub fn config(&self) -> ModelConfig {
         match self {
             KnownModel::BgeSmallEnV15 => bge_small::config(),
-            KnownModel::EmbeddingGemma300m => embeddinggemma::config(),
         }
     }
-
 }
