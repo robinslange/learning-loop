@@ -1,4 +1,5 @@
 pub mod bge_small;
+pub mod embeddinggemma;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -63,7 +64,7 @@ impl KnownModel {
     pub fn config(&self) -> ModelConfig {
         match self {
             KnownModel::BgeSmallEnV15 => bge_small::config(),
-            KnownModel::EmbeddingGemma300m => todo!("Task 2"),
+            KnownModel::EmbeddingGemma300m => embeddinggemma::config(),
         }
     }
 
