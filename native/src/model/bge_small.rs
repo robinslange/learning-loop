@@ -7,7 +7,7 @@ use tokenizers::Tokenizer;
 
 use super::{EmbeddingProvider, ModelConfig};
 
-const MODEL_ID: &str = "bge-small-en-v1.5";
+const MODEL_ID: &str = "Xenova/bge-small-en-v1.5";
 const DIM: usize = 384;
 const MAX_TOKENS: usize = 512;
 const QUERY_PREFIX: &str = "Represent this sentence for searching relevant passages: ";
@@ -61,6 +61,9 @@ impl BgeSmallProvider {
 
 impl EmbeddingProvider for BgeSmallProvider {
     fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
         let batch_size = texts.len();
 
         let encodings = self
