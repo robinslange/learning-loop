@@ -99,6 +99,31 @@ enum Commands {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    Migrate {
+        db_path: String,
+        #[arg(long)]
+        model: String,
+        #[arg(long)]
+        drop_old: bool,
+    },
+    Benchmark {
+        db_path: String,
+        #[arg(long)]
+        model_a: String,
+        #[arg(long)]
+        model_b: String,
+        queries: Vec<String>,
+    },
+}
+
+fn parse_model(s: &str) -> ll_search::model::KnownModel {
+    match s {
+        "bge-small" | "bge" | "bge-small-en-v1.5" => ll_search::model::KnownModel::BgeSmallEnV15,
+        other => {
+            eprintln!("Unknown model: '{}'. Available: bge-small", other);
+            std::process::exit(1);
+        }
+    }
 }
 
 fn init_embedding() {
@@ -274,6 +299,31 @@ fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
             };
             ll_search::sync::watch::run_watch(cfg).expect("watch failed");
+        }
+        Commands::Migrate { db_path, model, drop_old } => {
+            let target = parse_model(&model);
+            let provider = ll_search::model::loader::load_provider(&target)
+                .expect("failed to load model");
+            let conn = ll_search::db::open_db(&db_path);
+            if drop_old {
+                ll_search::db::drop_old_embeddings(&conn);
+                eprintln!("Dropped old embeddings table.");
+            } else {
+                let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
+                out(&result);
+            }
+        }
+        Commands::Benchmark { db_path, model_a, model_b, queries } => {
+            let ma = parse_model(&model_a);
+            let mb = parse_model(&model_b);
+            let result = ll_search::model::benchmark::run_benchmark(
+                std::path::Path::new(&db_path),
+                &ma,
+                &mb,
+                &queries,
+            )
+            .expect("benchmark failed");
+            out(&result);
         }
     }
 }
