@@ -99,6 +99,22 @@ enum Commands {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    Benchmark {
+        db_path: String,
+        #[arg(long, default_value = "bge-small")]
+        model_a: String,
+        #[arg(long, default_value = "embeddinggemma")]
+        model_b: String,
+        queries: Vec<String>,
+    },
+}
+
+fn parse_model(s: &str) -> ll_search::model::KnownModel {
+    match s {
+        "bge-small" | "bge" => ll_search::model::KnownModel::BgeSmallEnV15,
+        "embeddinggemma" | "gemma" => ll_search::model::KnownModel::EmbeddingGemma300m,
+        other => panic!("Unknown model: {}. Use 'bge-small' or 'embeddinggemma'", other),
+    }
 }
 
 fn out<T: serde::Serialize>(data: &T) {
@@ -261,6 +277,18 @@ fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
             };
             ll_search::sync::watch::run_watch(cfg).expect("watch failed");
+        }
+        Commands::Benchmark { db_path, model_a, model_b, queries } => {
+            let ma = parse_model(&model_a);
+            let mb = parse_model(&model_b);
+            let result = ll_search::model::benchmark::run_benchmark(
+                std::path::Path::new(&db_path),
+                &ma,
+                &mb,
+                &queries,
+            )
+            .expect("benchmark failed");
+            out(&result);
         }
     }
 }

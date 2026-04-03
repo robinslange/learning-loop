@@ -1,3 +1,4 @@
+pub mod benchmark;
 pub mod bge_small;
 pub mod embeddinggemma;
 pub mod loader;
