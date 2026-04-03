@@ -67,6 +67,7 @@ pub fn open_db(db_path: &str) -> Connection {
     }
 
     ensure_embeddings_table(&conn);
+    ensure_links_table(&conn);
     conn
 }
 
@@ -102,6 +103,13 @@ fn create_schema(conn: &Connection) {
             id INTEGER PRIMARY KEY,
             data BLOB NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS links (
+            source_id INTEGER NOT NULL,
+            target_path TEXT NOT NULL,
+            UNIQUE(source_id, target_path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);
 
         CREATE TRIGGER IF NOT EXISTS notes_content_ai AFTER INSERT ON notes_content BEGIN
             INSERT INTO notes_fts(rowid, title, tags, body)
@@ -140,6 +148,20 @@ fn ensure_embeddings_table(conn: &Connection) {
     }
 }
 
+fn ensure_links_table(conn: &Connection) {
+    if !table_exists(conn, "links") {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS links (
+                source_id INTEGER NOT NULL,
+                target_path TEXT NOT NULL,
+                UNIQUE(source_id, target_path)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);",
+        )
+        .expect("failed to create links table");
+    }
+}
+
 fn drop_vec0_remnants(conn: &Connection) {
     // vec0 virtual tables can't be dropped without the vec0 module loaded.
     // Drop the underlying storage tables directly, ignore errors.
@@ -167,7 +189,8 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
 
 fn drop_all(conn: &Connection) {
     conn.execute_batch(
-        "DROP TABLE IF EXISTS embeddings;
+        "DROP TABLE IF EXISTS links;
+        DROP TABLE IF EXISTS embeddings;
         DROP TABLE IF EXISTS notes_fts;
         DROP TRIGGER IF EXISTS notes_content_ai;
         DROP TRIGGER IF EXISTS notes_content_ad;
@@ -220,6 +243,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         text: String,
         hash: String,
         mtime: f64,
+        links: Vec<String>,
     }
 
     let mut to_embed: Vec<EmbedItem> = Vec::new();
@@ -273,6 +297,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
                 text: result.text,
                 hash,
                 mtime: file.mtime,
+                links: result.links,
             });
         } else {
             to_embed.push(EmbedItem {
@@ -283,6 +308,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
                 text: result.text,
                 hash,
                 mtime: file.mtime,
+                links: result.links,
             });
         }
     }
@@ -356,6 +382,16 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
             params![note_id, blob],
         )
         .unwrap();
+
+        conn.execute("DELETE FROM links WHERE source_id = ?1", params![note_id])
+            .unwrap();
+        for target in &item.links {
+            conn.execute(
+                "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
+                params![note_id, target],
+            )
+            .unwrap();
+        }
     }
 
     for &(id, mtime) in &to_update_mtime {
@@ -368,6 +404,8 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
 
     for &id in &to_delete {
         conn.execute("DELETE FROM embeddings WHERE id = ?1", params![id])
+            .unwrap();
+        conn.execute("DELETE FROM links WHERE source_id = ?1", params![id])
             .unwrap();
         conn.execute("DELETE FROM notes_content WHERE id = ?1", params![id])
             .unwrap();
