@@ -1,4 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 
 const MAX_TEXT_LENGTH: usize = 1500;
@@ -9,6 +10,7 @@ pub struct PreprocessedNote {
     pub tags: String,
     pub body: String,
     pub text: String,
+    pub links: Vec<String>,
 }
 
 pub fn preprocess_note(raw: &str, filename: &str) -> Option<PreprocessedNote> {
@@ -26,6 +28,7 @@ pub fn preprocess_note(raw: &str, filename: &str) -> Option<PreprocessedNote> {
         return None;
     }
 
+    let links = extract_wikilinks(&body);
     let cleaned = clean_wikilinks(&body);
 
     let mut text = format!("Title: {}\n\n{}", title, cleaned);
@@ -50,6 +53,7 @@ pub fn preprocess_note(raw: &str, filename: &str) -> Option<PreprocessedNote> {
         tags,
         body: cleaned,
         text,
+        links,
     })
 }
 
@@ -96,6 +100,7 @@ pub fn preprocess_excalidraw(raw: &str, filename: &str) -> Option<PreprocessedNo
         tags: "excalidraw".to_string(),
         body,
         text,
+        links: Vec::new(),
     })
 }
 
@@ -165,6 +170,30 @@ fn strip_frontmatter(raw: &str) -> String {
     } else {
         raw.trim().to_string()
     }
+}
+
+pub fn extract_wikilinks(text: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut links = Vec::new();
+    let mut remaining = text;
+
+    while let Some(pos) = remaining.find("[[") {
+        let after_open = &remaining[pos + 2..];
+        if let Some(end) = after_open.find("]]") {
+            let inner = &after_open[..end];
+            let target = inner.split('|').next().unwrap_or("");
+            let target = target.split('#').next().unwrap_or("");
+            let target = target.trim().to_lowercase();
+            if !target.is_empty() && seen.insert(target.clone()) {
+                links.push(target);
+            }
+            remaining = &after_open[end + 2..];
+        } else {
+            break;
+        }
+    }
+
+    links
 }
 
 fn clean_wikilinks(text: &str) -> String {
@@ -303,5 +332,48 @@ excalidraw-plugin: parsed
         let result = preprocess_file(excalidraw_raw, "draw.excalidraw.md").unwrap();
         assert_eq!(result.title, "draw");
         assert_eq!(result.tags, "excalidraw");
+    }
+
+    #[test]
+    fn test_extract_wikilinks_basic() {
+        let links = extract_wikilinks("See [[note-a]] and [[note-b]] for details.");
+        assert_eq!(links, vec!["note-a", "note-b"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_aliased() {
+        let links = extract_wikilinks("Read [[target-note|display text]] here.");
+        assert_eq!(links, vec!["target-note"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_anchored() {
+        let links = extract_wikilinks("See [[target#heading]] for details.");
+        assert_eq!(links, vec!["target"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_combined() {
+        let links = extract_wikilinks("See [[target#section|alias]].");
+        assert_eq!(links, vec!["target"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_dedup() {
+        let links = extract_wikilinks("[[a]] and [[a]] again.");
+        assert_eq!(links, vec!["a"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_unclosed() {
+        let links = extract_wikilinks("broken [[link without close");
+        assert!(links.is_empty());
+    }
+
+    #[test]
+    fn test_preprocess_note_has_links() {
+        let raw = "---\ntags: []\n---\n\nSee [[some-note]] and [[other|display]].\n";
+        let result = preprocess_note(raw, "test.md").unwrap();
+        assert_eq!(result.links, vec!["some-note", "other"]);
     }
 }

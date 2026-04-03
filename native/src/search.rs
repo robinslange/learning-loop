@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use rusqlite::{params, Connection, OpenFlags};
@@ -134,6 +134,77 @@ fn fts_bm25_query(conn: &Connection, query: &str, limit: usize) -> Vec<(i64, Str
     rows.filter_map(|r| r.ok()).collect()
 }
 
+// --- Composable search building blocks ---
+
+fn local_rrf_scores(
+    conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    all_embeddings: &[(i64, String, Vec<f32>)],
+    graph: &HashMap<String, Vec<String>>,
+) -> HashMap<String, f64> {
+    let mut vec_scored: Vec<(String, f64)> = all_embeddings
+        .iter()
+        .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
+        .collect();
+    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    vec_scored.truncate(30);
+
+    let fts_results = fts_bm25_query(conn, query_text, 30);
+
+    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
+    add_ranked_rrf(&mut rrf_scores, vec_scored.iter().map(|(p, _)| p.as_str()));
+    add_ranked_rrf(&mut rrf_scores, fts_results.iter().map(|(_, p, _)| p.as_str()));
+
+    let seeds = collect_seeds(&vec_scored, &fts_results);
+    let ppr_results = personalized_pagerank(graph, &seeds, 0.5, 20);
+    let tag_results = tag_expand(conn, &seeds);
+    add_ranked_rrf(&mut rrf_scores, ppr_results.iter().map(|(p, _)| p.as_str()));
+    add_ranked_rrf(&mut rrf_scores, tag_results.iter().map(|(p, _)| p.as_str()));
+
+    rrf_scores
+}
+
+fn add_peer_rrf_scores(
+    rrf_scores: &mut HashMap<String, f64>,
+    peer_id: &str,
+    peer_conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    peer_embeddings: &[(i64, String, Vec<f32>)],
+) {
+    let mut peer_vec: Vec<(String, f64)> = peer_embeddings
+        .iter()
+        .map(|(_, path, emb)| {
+            (format!("peer:{peer_id}/{path}"), cosine(query_vec, emb) as f64)
+        })
+        .collect();
+    peer_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    peer_vec.truncate(30);
+    add_ranked_rrf(rrf_scores, peer_vec.iter().map(|(p, _)| p.as_str()));
+
+    let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+    add_ranked_rrf(
+        rrf_scores,
+        peer_fts.iter().map(|(_, path, _)| format!("peer:{peer_id}/{path}")).collect::<Vec<_>>().iter().map(|s| s.as_str()),
+    );
+}
+
+fn add_ranked_rrf<'a>(rrf_scores: &mut HashMap<String, f64>, items: impl Iterator<Item = &'a str>) {
+    for (rank, path) in items.enumerate() {
+        *rrf_scores.entry(path.to_string()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+    }
+}
+
+fn finalize_rrf(rrf_scores: HashMap<String, f64>, top_n: usize) -> Vec<(String, f64)> {
+    let mut results: Vec<(String, f64)> = rrf_scores.into_iter().collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(top_n);
+    results
+}
+
+// --- Public search API ---
+
 pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
     hybrid_query_inner(conn, &query_vec, query_text, top_n)
@@ -146,33 +217,11 @@ fn hybrid_query_inner(
     top_n: usize,
 ) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
-
-    let mut vec_scored: Vec<(String, f64)> = all_embeddings
-        .iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
-        .collect();
-    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(30);
-
-    let fts_results = fts_bm25_query(conn, query_text, 30);
-
-    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-
-    for (rank, (path, _)) in vec_scored.iter().enumerate() {
-        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-    }
-
-    for (rank, (_, path, _)) in fts_results.iter().enumerate() {
-        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-    }
-
-    let mut results: Vec<(String, f64)> = rrf_scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(top_n);
-
+    let graph = load_link_graph(conn);
+    let rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
     let titles = load_titles_map(conn);
 
-    results
+    finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: titles.get(&path).cloned().flatten(),
@@ -200,51 +249,15 @@ fn hybrid_query_federated_inner(
     peers: &[(String, Connection)],
 ) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
-    let mut vec_scored: Vec<(String, f64)> = all_embeddings
-        .iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
-        .collect();
-    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(30);
-
-    let fts_results = fts_bm25_query(conn, query_text, 30);
-
-    let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-
-    for (rank, (path, _)) in vec_scored.iter().enumerate() {
-        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-    }
-    for (rank, (_, path, _)) in fts_results.iter().enumerate() {
-        *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-    }
+    let graph = load_link_graph(conn);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
 
     for (peer_id, peer_conn) in peers {
         let peer_embeddings = load_all_embeddings(peer_conn);
-        let mut peer_vec: Vec<(String, f64)> = peer_embeddings
-            .iter()
-            .map(|(_, path, emb)| {
-                (format!("peer:{peer_id}/{path}"), cosine(&query_vec, emb) as f64)
-            })
-            .collect();
-        peer_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        peer_vec.truncate(30);
-
-        for (rank, (path, _)) in peer_vec.iter().enumerate() {
-            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
-
-        let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
-        for (rank, (_, path, _)) in peer_fts.iter().enumerate() {
-            let prefixed = format!("peer:{peer_id}/{path}");
-            *rrf_scores.entry(prefixed).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
+        add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
     }
 
-    let mut results: Vec<(String, f64)> = rrf_scores.into_iter().collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(top_n);
-
-    results
+    finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: load_title_federated(&path, conn, peers),
@@ -380,36 +393,16 @@ pub fn reflect_scan(
 ) -> ReflectScanResult {
     let all_embeddings = load_all_embeddings(conn);
     let titles = load_titles_map(conn);
+    let graph = load_link_graph(conn);
 
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
-    // Phase 1: hybrid search per query, collect candidates
     for query_text in queries {
         let query_vec = embed_query(query_text);
+        let rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
 
-        let mut vec_scored: Vec<(String, f64)> = all_embeddings
-            .iter()
-            .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
-            .collect();
-        vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        vec_scored.truncate(30);
-
-        let fts_results = fts_bm25_query(conn, query_text, 30);
-
-        let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-        for (rank, (path, _)) in vec_scored.iter().enumerate() {
-            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
-        for (rank, (_, path, _)) in fts_results.iter().enumerate() {
-            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
-
-        let mut candidates: Vec<(String, f64)> = rrf_scores.into_iter().collect();
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        candidates.truncate(candidates_n);
-
-        let candidate_results: Vec<SearchResult> = candidates
+        let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
             .map(|(path, score)| SearchResult {
                 title: titles.get(&path).cloned().flatten(),
@@ -425,7 +418,6 @@ pub fn reflect_scan(
         per_query.push((query_text.clone(), query_vec, candidate_results));
     }
 
-    // Phase 2: batch-fetch bodies for all candidates
     all_candidate_paths.sort();
     all_candidate_paths.dedup();
     let bodies = batch_load_bodies(conn, &all_candidate_paths);
@@ -513,29 +505,14 @@ pub fn reflect_scan_federated(
         }
     }
 
+    let graph = load_link_graph(conn);
+
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
-    // Phase 1: hybrid search per query with federated RRF
     for query_text in queries {
         let query_vec = embed_query(query_text);
-
-        let mut vec_scored: Vec<(String, f64)> = all_embeddings
-            .iter()
-            .map(|(_, path, emb)| (path.clone(), cosine(&query_vec, emb) as f64))
-            .collect();
-        vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        vec_scored.truncate(30);
-
-        let fts_results = fts_bm25_query(conn, query_text, 30);
-
-        let mut rrf_scores: HashMap<String, f64> = HashMap::new();
-        for (rank, (path, _)) in vec_scored.iter().enumerate() {
-            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
-        for (rank, (_, path, _)) in fts_results.iter().enumerate() {
-            *rrf_scores.entry(path.clone()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-        }
+        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
 
         for (peer_id, peer_conn) in peers {
             let peer_embs = peer_data
@@ -544,36 +521,13 @@ pub fn reflect_scan_federated(
                 .map(|(_, e, _)| e);
 
             if let Some(embs) = peer_embs {
-                let mut pvec: Vec<(String, f64)> = embs
-                    .iter()
-                    .map(|(_, path, emb)| {
-                        (
-                            format!("peer:{peer_id}/{path}"),
-                            cosine(&query_vec, emb) as f64,
-                        )
-                    })
-                    .collect();
-                pvec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-                pvec.truncate(30);
-
-                for (rank, (path, _)) in pvec.iter().enumerate() {
-                    *rrf_scores.entry(path.clone()).or_default() +=
-                        1.0 / (RRF_K + rank as f64 + 1.0);
-                }
-            }
-
-            let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
-            for (rank, (_, path, _)) in peer_fts.iter().enumerate() {
-                let prefixed = format!("peer:{peer_id}/{path}");
-                *rrf_scores.entry(prefixed).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+                add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, &query_vec, query_text, embs);
+            } else {
+                add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, &query_vec, query_text, &[]);
             }
         }
 
-        let mut candidates: Vec<(String, f64)> = rrf_scores.into_iter().collect();
-        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        candidates.truncate(candidates_n);
-
-        let candidate_results: Vec<SearchResult> = candidates
+        let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
             .map(|(path, score)| SearchResult {
                 title: merged_titles.get(&path).cloned().flatten(),
@@ -589,7 +543,6 @@ pub fn reflect_scan_federated(
         per_query.push((query_text.clone(), query_vec, candidate_results));
     }
 
-    // Phase 2: batch-fetch bodies, splitting local vs peer
     all_candidate_paths.sort();
     all_candidate_paths.dedup();
     let bodies = batch_load_bodies_federated(conn, peers, &all_candidate_paths);
@@ -728,6 +681,188 @@ fn load_title_federated(
     } else {
         load_title(conn, path)
     }
+}
+
+fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
+    let mut basename_to_path: HashMap<String, String> = HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT path FROM notes") {
+        if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
+            for path in rows.flatten() {
+                let basename = path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&path)
+                    .strip_suffix(".md")
+                    .unwrap_or(&path)
+                    .to_lowercase();
+                basename_to_path.entry(basename).or_insert(path);
+            }
+        }
+    }
+
+    let mut edges: HashMap<String, HashSet<String>> = HashMap::new();
+    let mut stmt = match conn.prepare(
+        "SELECT n.path, l.target_path FROM links l JOIN notes n ON l.source_id = n.id",
+    ) {
+        Ok(s) => s,
+        Err(_) => return HashMap::new(),
+    };
+
+    let rows = match stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        Ok(r) => r,
+        Err(_) => return HashMap::new(),
+    };
+
+    for row in rows.flatten() {
+        let (source_path, target_basename) = row;
+        if let Some(target_path) = basename_to_path.get(&target_basename) {
+            if source_path != *target_path {
+                edges.entry(source_path.clone()).or_default().insert(target_path.clone());
+                edges.entry(target_path.clone()).or_default().insert(source_path.clone());
+            }
+        }
+    }
+
+    edges.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
+}
+
+fn personalized_pagerank(
+    graph: &HashMap<String, Vec<String>>,
+    seeds: &[String],
+    damping: f32,
+    iterations: usize,
+) -> Vec<(String, f64)> {
+    if seeds.is_empty() || graph.is_empty() {
+        return Vec::new();
+    }
+
+    let seed_score = 1.0 / seeds.len() as f64;
+    let d = damping as f64;
+    let mut scores: HashMap<String, f64> = HashMap::new();
+    let seed_set: HashSet<&str> = seeds.iter().map(|s| s.as_str()).collect();
+
+    for s in seeds {
+        if graph.contains_key(s) {
+            scores.insert(s.clone(), seed_score);
+        }
+    }
+
+    for _ in 0..iterations {
+        let mut new_scores: HashMap<String, f64> = HashMap::new();
+
+        for s in seeds {
+            if graph.contains_key(s) {
+                *new_scores.entry(s.clone()).or_default() += (1.0 - d) * seed_score;
+            }
+        }
+
+        for (node, score) in &scores {
+            if let Some(neighbors) = graph.get(node) {
+                let share = d * score / neighbors.len() as f64;
+                for neighbor in neighbors {
+                    *new_scores.entry(neighbor.clone()).or_default() += share;
+                }
+            }
+        }
+
+        scores = new_scores;
+    }
+
+    let mut results: Vec<(String, f64)> = scores
+        .into_iter()
+        .filter(|(path, score)| *score > 1e-6 && !seed_set.contains(path.as_str()))
+        .collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(30);
+    results
+}
+
+fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(String, f64)> {
+    let tags_map = load_tags_map(conn);
+    let total_notes = tags_map.len() as f64;
+    if total_notes == 0.0 {
+        return Vec::new();
+    }
+    let seed_set: HashSet<&str> = seed_paths.iter().map(|s| s.as_str()).collect();
+
+    let mut seed_tags: HashSet<String> = HashSet::new();
+    for path in seed_paths {
+        if let Some(tags) = tags_map.get(path) {
+            for tag in tags {
+                seed_tags.insert(tag.clone());
+            }
+        }
+    }
+
+    let mut tag_freq: HashMap<&str, usize> = HashMap::new();
+    for tags in tags_map.values() {
+        for tag in tags {
+            *tag_freq.entry(tag.as_str()).or_default() += 1;
+        }
+    }
+
+    let qualifying: HashSet<&str> = seed_tags
+        .iter()
+        .filter_map(|t| {
+            let freq = *tag_freq.get(t.as_str()).unwrap_or(&0);
+            if (2..=20).contains(&freq) {
+                Some(t.as_str())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if qualifying.is_empty() {
+        return Vec::new();
+    }
+
+    let mut candidate_scores: HashMap<&str, f64> = HashMap::new();
+    for (path, tags) in &tags_map {
+        if seed_set.contains(path.as_str()) {
+            continue;
+        }
+        let score: f64 = tags
+            .iter()
+            .filter(|t| qualifying.contains(t.as_str()))
+            .map(|t| {
+                let freq = *tag_freq.get(t.as_str()).unwrap_or(&1) as f64;
+                (total_notes / freq).ln()
+            })
+            .sum();
+        if score > 0.0 {
+            candidate_scores.insert(path.as_str(), score);
+        }
+    }
+
+    let mut results: Vec<(String, f64)> = candidate_scores
+        .into_iter()
+        .map(|(path, score)| (path.to_string(), score))
+        .collect();
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results.truncate(30);
+    results
+}
+
+fn collect_seeds(
+    vec_scored: &[(String, f64)],
+    fts_results: &[(i64, String, f64)],
+) -> Vec<String> {
+    let mut seeds: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+    for (path, _) in vec_scored.iter().take(10) {
+        if seen.insert(path.clone()) {
+            seeds.push(path.clone());
+        }
+    }
+    for (_, path, _) in fts_results.iter().take(10) {
+        if seen.insert(path.clone()) {
+            seeds.push(path.clone());
+        }
+    }
+    seeds
 }
 
 fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<String, String> {
@@ -1251,5 +1386,162 @@ mod tests {
         let b = norm(&[0.0, 1.0, 0.0]);
         let sim = cosine(&a, &b);
         assert!(sim.abs() < 1e-5);
+    }
+
+    // --- PPR ---
+
+    fn create_graph_db(notes: &[(&str, &str, &str, &[f32])], links: &[(&str, &str)]) -> Connection {
+        let conn = create_test_db(notes);
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS links (
+                source_id INTEGER NOT NULL,
+                target_path TEXT NOT NULL,
+                UNIQUE(source_id, target_path)
+            );
+            CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);",
+        ).unwrap();
+
+        for (source_path, target_basename) in links {
+            let source_id: i64 = conn.query_row(
+                "SELECT id FROM notes WHERE path = ?1",
+                params![source_path],
+                |r| r.get(0),
+            ).unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
+                params![source_id, target_basename],
+            ).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn test_ppr_single_seed_chain() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_graph_db(
+            &[
+                ("a.md", "a", "content a", &emb),
+                ("b.md", "b", "content b", &emb),
+                ("c.md", "c", "content c", &emb),
+                ("d.md", "d", "content d", &emb),
+            ],
+            &[("a.md", "b"), ("b.md", "c"), ("c.md", "d")],
+        );
+
+        let graph = load_link_graph(&conn);
+        assert!(!graph.is_empty());
+
+        let results = personalized_pagerank(&graph, &["a.md".to_string()], 0.5, 20);
+        assert!(!results.is_empty());
+        let paths: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
+        assert!(paths.contains(&"b.md"));
+        if results.len() >= 2 {
+            assert!(results[0].1 >= results[1].1);
+        }
+    }
+
+    #[test]
+    fn test_ppr_bridge_node() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        // Two clusters connected by bridge
+        // Cluster 1: a-b-bridge, Cluster 2: bridge-c-d
+        let conn = create_graph_db(
+            &[
+                ("a.md", "a", "content", &emb),
+                ("b.md", "b", "content", &emb),
+                ("bridge.md", "bridge", "content", &emb),
+                ("c.md", "c", "content", &emb),
+                ("d.md", "d", "content", &emb),
+            ],
+            &[
+                ("a.md", "b"), ("b.md", "bridge"),
+                ("bridge.md", "c"), ("c.md", "d"),
+            ],
+        );
+
+        let graph = load_link_graph(&conn);
+        let results = personalized_pagerank(
+            &graph,
+            &["a.md".to_string(), "d.md".to_string()],
+            0.5,
+            20,
+        );
+
+        let bridge_score = results.iter().find(|(p, _)| p == "bridge.md").map(|(_, s)| *s);
+        assert!(bridge_score.is_some(), "bridge node should appear in results");
+        // Bridge is reachable from both seeds -- it should appear in results
+        // The exact ranking depends on graph topology and damping
+    }
+
+    #[test]
+    fn test_ppr_empty_graph() {
+        let graph: HashMap<String, Vec<String>> = HashMap::new();
+        let results = personalized_pagerank(&graph, &["a.md".to_string()], 0.5, 20);
+        assert!(results.is_empty());
+    }
+
+    // --- tag expansion ---
+
+    #[test]
+    fn test_tag_expand_idf_filtering() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_test_db(&[
+            ("a.md", "a", "content", &emb),
+            ("b.md", "b", "content", &emb),
+            ("c.md", "c", "content", &emb),
+        ]);
+        // Tag "rare" on a and b (freq=2, qualifies)
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'a.md'", []).unwrap();
+        conn.execute("UPDATE notes SET tags = 'rare' WHERE path = 'b.md'", []).unwrap();
+        conn.execute("UPDATE notes SET tags = 'common' WHERE path = 'c.md'", []).unwrap();
+
+        let results = tag_expand(&conn, &["a.md".to_string()]);
+        let paths: Vec<&str> = results.iter().map(|r| r.0.as_str()).collect();
+        assert!(paths.contains(&"b.md"));
+        assert!(!paths.contains(&"c.md"));
+        assert!(!paths.contains(&"a.md"));
+    }
+
+    #[test]
+    fn test_tag_expand_excludes_high_freq() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let mut notes: Vec<(&str, &str, &str, &[f32])> = Vec::new();
+        // Create 25 notes all tagged "popular" (freq > 20, excluded)
+        let paths: Vec<String> = (0..25).map(|i| format!("note{i}.md")).collect();
+        let titles: Vec<String> = (0..25).map(|i| format!("note{i}")).collect();
+        for i in 0..25 {
+            notes.push((&paths[i], &titles[i], "content", &emb));
+        }
+        let conn = create_test_db(&notes);
+        for i in 0..25 {
+            conn.execute(
+                "UPDATE notes SET tags = 'popular' WHERE path = ?1",
+                params![paths[i]],
+            ).unwrap();
+        }
+
+        let results = tag_expand(&conn, &["note0.md".to_string()]);
+        assert!(results.is_empty());
+    }
+
+    // --- load_link_graph ---
+
+    #[test]
+    fn test_load_link_graph_undirected() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_graph_db(
+            &[("a.md", "a", "content", &emb), ("b.md", "b", "content", &emb)],
+            &[("a.md", "b")],
+        );
+        let graph = load_link_graph(&conn);
+        assert!(graph.get("a.md").unwrap().contains(&"b.md".to_string()));
+        assert!(graph.get("b.md").unwrap().contains(&"a.md".to_string()));
+    }
+
+    #[test]
+    fn test_load_link_graph_no_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        let graph = load_link_graph(&conn);
+        assert!(graph.is_empty());
     }
 }
