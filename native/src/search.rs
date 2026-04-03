@@ -1,6 +1,7 @@
 use std::collections::HashMap;
+use std::path::Path;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 use serde::Serialize;
 
 use crate::db::{load_all_embeddings, load_embedding};
@@ -43,6 +44,49 @@ pub struct ReflectQueryResult {
 pub struct ReflectScanResult {
     pub queries: Vec<ReflectQueryResult>,
     pub confusable_pairs: Vec<DiscriminatePair>,
+}
+
+pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
+    let peers_dir = config_dir.join("federation").join("data").join("peers");
+    let entries = match std::fs::read_dir(&peers_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut peers = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let peer_id = entry.file_name().to_string_lossy().to_string();
+        let db_path = entry.path().join("index.db");
+        if !db_path.exists() {
+            continue;
+        }
+
+        let conn = match Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let model_id: String = match conn.query_row(
+            "SELECT value FROM meta WHERE key = 'model_id'",
+            [],
+            |r| r.get(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+
+        if model_id != local_model_id {
+            eprintln!("Skipping peer {peer_id}: model mismatch ({model_id} vs {local_model_id})");
+            continue;
+        }
+
+        peers.push((peer_id, conn));
+    }
+
+    peers
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
