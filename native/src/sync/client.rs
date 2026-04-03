@@ -57,6 +57,7 @@ pub fn sync_all(
 
     send_json(&mut ws, &ClientMessage::SyncHello {
         peer_id: peer_id.clone(),
+        supported_models: vec![model_id.clone()],
         model_id,
         schema_version: SCHEMA_VERSION,
     })?;

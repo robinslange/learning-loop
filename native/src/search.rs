@@ -79,8 +79,7 @@ pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String
         };
 
         if model_id != local_model_id {
-            eprintln!("Skipping peer {peer_id}: model mismatch ({model_id} vs {local_model_id})");
-            continue;
+            eprintln!("Peer {peer_id}: model mismatch ({model_id} vs {local_model_id}), BM25 fallback");
         }
 
         peers.push((peer_id, conn));
@@ -252,9 +251,25 @@ fn hybrid_query_federated_inner(
     let graph = load_link_graph(conn);
     let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
 
+    let local_dim = query_vec.len();
+
     for (peer_id, peer_conn) in peers {
         let peer_embeddings = load_all_embeddings(peer_conn);
-        add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
+        let peer_dim = peer_embeddings.first().map(|(_, _, e)| e.len()).unwrap_or(0);
+
+        if peer_dim == local_dim && peer_dim > 0 {
+            add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
+        } else {
+            let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+            add_ranked_rrf(
+                &mut rrf,
+                peer_fts.iter()
+                    .map(|(_, path, _)| format!("peer:{peer_id}/{path}"))
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|s| s.as_str()),
+            );
+        }
     }
 
     finalize_rrf(rrf, top_n)
@@ -1112,7 +1127,8 @@ mod tests {
         drop(conn);
 
         let peers = discover_peer_dbs(tmp.path(), "test-model");
-        assert!(peers.is_empty());
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].0, "alice");
     }
 
     #[test]
