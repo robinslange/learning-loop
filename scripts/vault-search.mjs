@@ -23,7 +23,7 @@ function ensureBinary() {
 function tryFederationExport() {
   if (!existsSync(FEDERATION_CONFIG) || !hasBinary()) return;
   try {
-    const result = run(['export', DB_PATH, '/tmp/ll-search-export.db', VAULT_PATH]);
+    const result = run(['export', DB_PATH, '/tmp/ll-search-export.db', VAULT_PATH, ...federationArgs()]);
     process.stderr.write(`Federation export: ${result.exported} notes\n`);
   } catch (err) {
     process.stderr.write(`Federation export failed: ${err.message}\n`);
@@ -186,7 +186,7 @@ try {
 
       if (syncing) {
         try {
-          run(['sync', DB_PATH, VAULT_PATH]);
+          run(['sync', DB_PATH, VAULT_PATH, ...federationArgs()]);
         } catch (err) {
           process.stderr.write(`Sync error: ${err.message}\n`);
         }
@@ -247,7 +247,7 @@ try {
 
     case 'sync': {
       ensureBinary();
-      out(run(['sync', DB_PATH, VAULT_PATH]));
+      out(run(['sync', DB_PATH, VAULT_PATH, ...federationArgs()]));
       break;
     }
 
