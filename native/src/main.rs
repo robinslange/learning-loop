@@ -136,9 +136,12 @@ enum Commands {
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
     match s {
-        "bge-small" | "bge" => ll_search::model::KnownModel::BgeSmallEnV15,
-        "embeddinggemma" | "gemma" => ll_search::model::KnownModel::EmbeddingGemma300m,
-        other => panic!("Unknown model: {}. Use 'bge-small' or 'embeddinggemma'", other),
+        "bge-small" | "bge" | "bge-small-en-v1.5" => ll_search::model::KnownModel::BgeSmallEnV15,
+        "embeddinggemma" | "gemma" | "embeddinggemma-300m" => ll_search::model::KnownModel::EmbeddingGemma300m,
+        other => {
+            eprintln!("Unknown model: '{}'. Available: bge-small, embeddinggemma", other);
+            std::process::exit(1);
+        }
     }
 }
 
@@ -173,6 +176,11 @@ fn main() {
             let model = parse_model(&model);
             ll_search::embed::init_provider(&model);
             let conn = ll_search::db::open_db(&db_path);
+            if ll_search::db::check_model_mismatch(&conn, ll_search::embed::model_id()) {
+                eprintln!("Error: database was indexed with a different model. Run 'll-search migrate --model {}' first.",
+                    ll_search::embed::model_id());
+                std::process::exit(1);
+            }
             let result = ll_search::db::reindex(&conn, &vault_path, force);
             out(&result);
             if sync {

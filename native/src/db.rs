@@ -619,8 +619,9 @@ pub fn migrate_embeddings(
     let model_id = provider.model_id();
     eprintln!("Model mismatch detected. Migrating to {} ...", model_id);
 
+    conn.execute_batch("DROP TABLE IF EXISTS embeddings_new;").ok();
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
+        "CREATE TABLE embeddings_new (id INTEGER PRIMARY KEY, data BLOB NOT NULL);",
     )
     .expect("create embeddings_new");
 

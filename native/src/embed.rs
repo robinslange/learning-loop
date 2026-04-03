@@ -6,6 +6,17 @@ use crate::model::loader;
 static PROVIDER: OnceLock<Box<dyn EmbeddingProvider>> = OnceLock::new();
 
 pub fn init_provider(model: &KnownModel) {
+    if let Some(existing) = PROVIDER.get() {
+        let requested = model.config().model_id;
+        let active = existing.model_id();
+        if active != requested {
+            panic!(
+                "embedding provider already initialized with '{}', cannot switch to '{}'",
+                active, requested
+            );
+        }
+        return;
+    }
     PROVIDER.get_or_init(|| {
         loader::load_provider(model)
             .expect("failed to load embedding model")
