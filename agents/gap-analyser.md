@@ -23,11 +23,11 @@ You will receive:
 
 Read and follow these skills during analysis:
 
-- `{{PLUGIN}}/agents/_skills/claim-extraction.md` — how to pull testable claims
-- `{{PLUGIN}}/agents/_skills/evidence-comparison.md` — how to compare claims against research
-- `{{PLUGIN}}/agents/_skills/coverage-mapping.md` — how to map vault coverage
-- `{{PLUGIN}}/agents/_skills/blindspot-detection.md` — how to find domain blindspots
-- `{{PLUGIN}}/agents/_skills/source-quality.md` — how to assess source quality
+- `PLUGIN/agents/_skills/claim-extraction.md` — how to pull testable claims
+- `PLUGIN/agents/_skills/evidence-comparison.md` — how to compare claims against research
+- `PLUGIN/agents/_skills/coverage-mapping.md` — how to map vault coverage
+- `PLUGIN/agents/_skills/blindspot-detection.md` — how to find domain blindspots
+- `PLUGIN/agents/_skills/source-quality.md` — how to assess source quality
 
 Read each skill file before beginning analysis.
 

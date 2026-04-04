@@ -21,12 +21,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-start"}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-start"}'
 ```
 
 **At session end:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"limbo":N}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"limbo":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -39,7 +39,7 @@ Launch the `inbox-organiser` agent with:
 - **vault_path**: `{{VAULT}}/`
 - **scope**: `all` (or `topic:<name>` if the user specified a topic filter)
 
-The agent definition is at `{{PLUGIN}}/agents/inbox-organiser.md`.
+The agent definition is at `PLUGIN/agents/inbox-organiser.md`.
 
 Use `subagent_type: "learning-loop:note-scorer"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 

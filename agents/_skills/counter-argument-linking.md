@@ -35,7 +35,7 @@ If no signal, stop. Most notes are not counter-arguments.
 Use vault-search to find the note being challenged:
 
 ```bash
-node {{PLUGIN}}/scripts/vault-search.mjs search "<challenged concept>" --rerank
+node PLUGIN/scripts/vault-search.mjs search "<challenged concept>" --rerank
 ```
 
 Also try `Glob` for filename matches. The target is usually in `3-permanent/` or `1-fleeting/`.

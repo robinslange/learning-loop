@@ -53,7 +53,7 @@ This teaches the modes through use rather than upfront prompting.
 If `--provenance` flag is present, skip all vault health checks and run:
 
 ```bash
-node {{PLUGIN}}/scripts/provenance-report.mjs
+node PLUGIN/scripts/provenance-report.mjs
 ```
 
 Display the output directly.
@@ -92,10 +92,10 @@ Collect the raw data needed for all checks. Run these in parallel:
 3. **Permanent files:** `Glob` pattern `*.md` in `{{VAULT}}/3-permanent/`
 4. **Literature files:** `Glob` pattern `*.md` in `{{VAULT}}/2-literature/`
 5. **System files:** `Glob` pattern `*.md` in `{{VAULT}}/_system/`
-6. **Near-duplicate clusters:** `node {{PLUGIN}}/scripts/vault-search.mjs cluster --threshold 0.85`
-7. **Indexed notes:** `node {{PLUGIN}}/scripts/vault-search.mjs list`
-8. **Plugin dependencies:** `node {{PLUGIN}}/scripts/check-deps.mjs`
-9. **Binary version:** Check `ll-search` binary via `node -e "import { binaryVersion } from '{{PLUGIN}}/scripts/lib/binary.mjs'; console.log(binaryVersion());"` -- returns version string or null
+6. **Near-duplicate clusters:** `node PLUGIN/scripts/vault-search.mjs cluster --threshold 0.85`
+7. **Indexed notes:** `node PLUGIN/scripts/vault-search.mjs list`
+8. **Plugin dependencies:** `node PLUGIN/scripts/check-deps.mjs`
+9. **Binary version:** Check `ll-search` binary via `node -e "import { binaryVersion } from 'PLUGIN/scripts/lib/binary.mjs'; console.log(binaryVersion());"` -- returns version string or null
 
 ### Step 1.5: Check — Plugin Dependencies
 
@@ -127,7 +127,7 @@ Parse the cluster output from Step 1. Filter to pairs with similarity > 0.85 tha
 For each note across all content folders (0-inbox, 1-fleeting, 3-permanent), grep for `\[\[` outgoing wikilinks. Notes with zero outgoing links are orphans. Exclude `_system/` and `2-literature/` from orphan checks (system docs and literature notes don't need outlinks).
 
 **Light:** List orphan filenames with their folder.
-**Deep:** For each orphan, run `node {{PLUGIN}}/scripts/vault-search.mjs similar "<note-path>" --top 3` to suggest link targets.
+**Deep:** For each orphan, run `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 3` to suggest link targets.
 
 ### Step 5: Check — Stale Inbox
 

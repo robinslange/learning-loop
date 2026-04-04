@@ -116,7 +116,7 @@ When skip-rewrite is true, the triage/promotion step can simply `mv` the file in
 Before any note reaches `3-permanent/`, run:
 
 ```bash
-node {{PLUGIN}}/scripts/source-resolver.mjs verify-note <note-path>
+node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
 This mechanically checks:

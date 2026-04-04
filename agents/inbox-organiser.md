@@ -18,11 +18,11 @@ You will receive:
 
 Read and follow these skills during triage:
 
-- `{{PLUGIN}}/agents/_skills/promote-gate.md` — quality gate for folder routing and skip-rewrite detection
-- `{{PLUGIN}}/agents/_skills/counter-argument-linking.md` — detect and link challenge notes
-- `{{PLUGIN}}/agents/_skills/capture-rules.md` — what belongs in the vault and note format rules
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
-- `{{PLUGIN}}/agents/_skills/fleeting-sweep.md` — sweep 1-fleeting/ for archival candidates (Step 8)
+- `PLUGIN/agents/_skills/promote-gate.md` — quality gate for folder routing and skip-rewrite detection
+- `PLUGIN/agents/_skills/counter-argument-linking.md` — detect and link challenge notes
+- `PLUGIN/agents/_skills/capture-rules.md` — what belongs in the vault and note format rules
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/fleeting-sweep.md` — sweep 1-fleeting/ for archival candidates (Step 8)
 
 ## Process
 
@@ -63,7 +63,7 @@ Add `status: intentioned | resolved | limbo` to each note's frontmatter via `Edi
 Run semantic clustering:
 
 ```bash
-node {{PLUGIN}}/scripts/vault-search.mjs cluster --threshold 0.72
+node PLUGIN/scripts/vault-search.mjs cluster --threshold 0.72
 ```
 
 Filter to clusters containing at least one inbox note. Supplement with tag overlap — notes sharing 2+ tags that weren't caught by embeddings belong in the same cluster.
@@ -175,7 +175,7 @@ Remaining: [R] in inbox
 
 ### 8. Fleeting Sweep
 
-After inbox processing, run the fleeting sweep per `{{PLUGIN}}/agents/_skills/fleeting-sweep.md`.
+After inbox processing, run the fleeting sweep per `PLUGIN/agents/_skills/fleeting-sweep.md`.
 
 ### 9. Final Report
 

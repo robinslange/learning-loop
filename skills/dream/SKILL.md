@@ -18,11 +18,11 @@ Seven operators, each defined in `operators/`. This file orchestrates the four-p
 Emit events silently via Bash for each operator action.
 
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
-At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `node {{PLUGIN}}/scripts/provenance-consolidate.mjs`.
+At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `node PLUGIN/scripts/provenance-consolidate.mjs`.
 
 ## Phase 1: Orient
 

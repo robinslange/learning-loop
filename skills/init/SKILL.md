@@ -9,7 +9,9 @@ Four-phase detect-confirm-apply flow. One question at a time. Safe to re-run -- 
 
 All operations use Node.js (fs, path, child_process for binaries). No bash `find`, no shell commands for detection.
 
-Use `{{PLUGIN}}` for PLUGIN_ROOT and `{{PLUGIN_DATA}}` for the data directory (from `scripts/lib/config.mjs`).
+## Paths
+
+`PLUGIN`, `PLUGIN_DATA`, and `VAULT` are injected by the session-start hook (see "Learning Loop Paths" in your context). Use those resolved values for ALL path references below. If not present, resolve them by running: `node <skill-base-dir>/scripts/resolve-paths.mjs`
 
 ---
 
@@ -18,15 +20,15 @@ Use `{{PLUGIN}}` for PLUGIN_ROOT and `{{PLUGIN_DATA}}` for the data directory (f
 Run all checks silently before asking anything. Use Node.js APIs:
 
 1. **Platform:** `process.platform`, `process.arch`
-2. **Config:** Read `{{PLUGIN_DATA}}/config.json` (fallback `{{PLUGIN}}/config.json`)
+2. **Config:** Read `PLUGIN_DATA/config.json` (fallback `PLUGIN/config.json`)
 3. **Vault:** Read `vault_path` from config, verify directory exists via `fs.existsSync`, count `.md` files with `fs.readdirSync` (recursive)
 4. **Folders:** Check for `0-inbox`, `1-fleeting`, `2-literature`, `3-permanent`, `4-projects`, `5-maps`, `_system`
 5. **System files:** Check `_system/persona.md` and `_system/capture-rules.md` exist
-6. **Binary:** Check `{{PLUGIN_DATA}}/bin/ll-search` exists; if so, run `ll-search version`
-7. **Dependencies:** Run `node {{PLUGIN}}/scripts/check-deps.mjs`
+6. **Binary:** Check `PLUGIN_DATA/bin/ll-search` exists; if so, run `ll-search version`
+7. **Dependencies:** Run `node PLUGIN/scripts/check-deps.mjs`
 8. **Search index:** If binary present, run `ll-search status`
-9. **Federation config:** Check `{{PLUGIN_DATA}}/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
-10. **Seed location:** Check if `.seed` exists in `{{PLUGIN}}/federation/` (legacy, needs migration) vs `{{PLUGIN_DATA}}/federation/` (correct). Flag if legacy seed found.
+9. **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
+10. **Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
 11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 
 Present a dashboard:
@@ -156,14 +158,14 @@ Only list items that are actually needed. After confirmation, run sequentially:
 Run the download script:
 
 ```bash
-node {{PLUGIN}}/scripts/download-binary.mjs
+node PLUGIN/scripts/download-binary.mjs
 ```
 
-This detects the platform and downloads the correct binary from GitHub releases. Extracts to `{{PLUGIN_DATA}}/bin/`, sets executable permission, and writes `.version`. Skips download if the installed version already matches.
+This detects the platform and downloads the correct binary from GitHub releases. Extracts to `PLUGIN_DATA/bin/`, sets executable permission, and writes `.version`. Skips download if the installed version already matches.
 
 ### 3b: Verify Vendor Dependencies
 
-Confirm `{{PLUGIN}}/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored in `{{PLUGIN}}/vendor/` and require no npm install.
+Confirm `PLUGIN/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored in `PLUGIN/vendor/` and require no npm install.
 
 ### 3c: Initial Vault Index
 
@@ -171,7 +173,7 @@ Run `ll-search index` to build the search index. Report progress.
 
 ### 3d: Plugin Dependencies
 
-Run `node {{PLUGIN}}/scripts/check-deps.mjs`. For each missing dependency, present it and ask to install:
+Run `node PLUGIN/scripts/check-deps.mjs`. For each missing dependency, present it and ask to install:
 
 ```
 Missing dependency: episodic-memory
@@ -191,10 +193,10 @@ Ask: "Connect to other learning-loop users?"
 
 ### 4a: Identity
 
-The seed file MUST live in `{{PLUGIN_DATA}}/federation/.seed` (persists across plugin updates), NOT in `{{PLUGIN}}/federation/.seed` (gets wiped on reinstall).
+The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `PLUGIN/federation/.seed` (gets wiped on reinstall).
 
-**Migration check:** If `{{PLUGIN}}/federation/.seed` exists but `{{PLUGIN_DATA}}/federation/.seed` does not, migrate it:
-1. Copy the seed to `{{PLUGIN_DATA}}/federation/.seed` (mode 0o600)
+**Migration check:** If `PLUGIN/federation/.seed` exists but `PLUGIN_DATA/federation/.seed` does not, migrate it:
+1. Copy the seed to `PLUGIN_DATA/federation/.seed` (mode 0o600)
 2. Delete the old one from the marketplace directory
 3. Verify the pubkey matches `config.identity.pubkey` -- if not, warn and offer to update the hub
 
@@ -236,7 +238,7 @@ Ask: "Share anonymized pipeline stats? (Tier 1: action counts only)"
 
 ### 4e: Write Config
 
-Write `{{PLUGIN_DATA}}/federation/config.json` with identity, visibility, peers, and `share_provenance` field.
+Write `PLUGIN_DATA/federation/config.json` with identity, visibility, peers, and `share_provenance` field.
 
 ### 4f: First Export and Test
 

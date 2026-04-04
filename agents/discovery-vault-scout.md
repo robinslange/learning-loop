@@ -24,8 +24,8 @@ If the episodic memory MCP tools are unavailable (`mcp__plugin_episodic-memory_e
 1. **Search the vault** for related notes:
    - Use `mgrep "<topic keywords>" {{VAULT}}/` for content matches
    - Use `Glob` for filename matches: `**/*<keyword>*.md` in vault path
-   - Use `node {{PLUGIN}}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches beyond keyword search
-   - Once a strong match is found, use `node {{PLUGIN}}/scripts/vault-search.mjs similar "<best-match-note>"` to find semantically related notes
+   - Use `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches beyond keyword search
+   - Once a strong match is found, use `node PLUGIN/scripts/vault-search.mjs similar "<best-match-note>"` to find semantically related notes
    - Read the top matches (up to 5-8 notes)
 
 2. **Search episodic memory** for past conversations:
@@ -41,9 +41,9 @@ If the episodic memory MCP tools are unavailable (`mcp__plugin_episodic-memory_e
 
 After completing the search and before compiling the output:
 
-1. Read the discrimination skill: `{{PLUGIN}}/agents/_skills/discrimination.md`
+1. Read the discrimination skill: `PLUGIN/agents/_skills/discrimination.md`
 2. Collect all note paths found during search
-3. Run: `node {{PLUGIN}}/scripts/vault-search.mjs discriminate <paths>`
+3. Run: `node PLUGIN/scripts/vault-search.mjs discriminate <paths>`
    - Pass the note paths as space-separated arguments
    - If more than 20 notes, pass only the top 20 most relevant
 4. For each returned pair, read both notes and apply the discrimination skill's three-outcome assessment
@@ -78,8 +78,8 @@ Return a knowledge map:
 
 ## Skills
 
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
-- `{{PLUGIN}}/agents/_skills/discrimination.md` — confusable pair detection and assessment rules
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/discrimination.md` — confusable pair detection and assessment rules
 
 ## Rules
 

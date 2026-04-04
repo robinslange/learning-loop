@@ -73,7 +73,7 @@ When called from note-writer or other agents that need deterministic verificatio
 ### Verify sources
 
 1. Write the note content to a temp file: `/tmp/ll-note-verify-TIMESTAMP.md` (epoch ms for TIMESTAMP)
-2. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs verify-note /tmp/ll-note-verify-TIMESTAMP.md`
+2. Run: `node PLUGIN/scripts/source-resolver.mjs verify-note /tmp/ll-note-verify-TIMESTAMP.md`
 3. Parse the JSON output. For each source:
    - `verified: true` -- no action needed
    - `wrong_author` -- replace with the resolver's `metadata.firstAuthor` surname + "et al."
@@ -86,7 +86,7 @@ When called from note-writer or other agents that need deterministic verificatio
 
 ### Check quantitative claims
 
-1. Run: `node {{PLUGIN}}/scripts/source-resolver.mjs check-claims /tmp/ll-note-verify-TIMESTAMP.md`
+1. Run: `node PLUGIN/scripts/source-resolver.mjs check-claims /tmp/ll-note-verify-TIMESTAMP.md`
 2. For each claim:
    - `in_abstract: true` -- confirmed
    - `in_abstract: false` -- read the abstract independently; if the number appears nowhere, add `[not in abstract]` after the claim. Do NOT remove the claim.

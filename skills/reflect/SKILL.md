@@ -22,12 +22,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-start"}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-start"}'
 ```
 
 **At session end:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -68,7 +68,7 @@ List each learning as a single line.
 Run a single retrieval call for all learnings identified in Step 2. Pass each learning summary as a query:
 
 ```bash
-node {{PLUGIN}}/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
+node PLUGIN/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
 ```
 
 Parse the JSON result. For each query:

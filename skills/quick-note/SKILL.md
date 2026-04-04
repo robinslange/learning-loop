@@ -39,7 +39,7 @@ Date: <today YYYY-MM-DD>
 Destination: 0-inbox/
 
 Before writing, run this command to find related vault notes:
-node {{PLUGIN}}/scripts/vault-search.mjs search "<key terms from insight>" --rerank
+node PLUGIN/scripts/vault-search.mjs search "<key terms from insight>" --rerank
 
 Use the top 1-3 relevant results as wiki-links in the note.
 

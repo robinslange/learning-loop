@@ -34,7 +34,7 @@ If the answer to all three is no, tell the user: "This works better as text/tabl
 Read the diagram-rules agent file to get the full Excalidraw construction spec:
 
 ```
-{{PLUGIN}}/agents/diagram-rules.md
+PLUGIN/agents/diagram-rules.md
 ```
 
 Follow every rule in that file. Key points:

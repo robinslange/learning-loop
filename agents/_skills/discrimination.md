@@ -11,7 +11,7 @@ Shared rules for detecting and handling confusable note pairs. Used by vault-sco
 
 **Confusable pair:** Two notes with cosine similarity > 0.85 that make different claims. High similarity + same conclusion = duplicate (handled by overlap-check skill). High similarity + different conclusion = confusable (handled here).
 
-**Similarity source:** `node {{PLUGIN}}/scripts/vault-search.mjs discriminate` provides pairs with scores.
+**Similarity source:** `node PLUGIN/scripts/vault-search.mjs discriminate` provides pairs with scores.
 
 ## Three Outcomes
 

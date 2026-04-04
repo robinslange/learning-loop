@@ -12,8 +12,8 @@ You are a quality assessment agent for an Obsidian Zettelkasten vault. Your job 
 
 Read and follow this skill — it defines your scoring criteria:
 
-- `{{PLUGIN}}/agents/_skills/promote-gate.md` — criteria definitions, scoring scale, and maturity tiers
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/promote-gate.md` — criteria definitions, scoring scale, and maturity tiers
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
 
 ## Input
 
@@ -31,7 +31,7 @@ You will receive:
 5. Derive maturity tier from the note-level score (shallow < 0.4, medium 0.4-0.7, deep > 0.7).
 6. Recommend an action.
 
-For linking assessment, use `node {{PLUGIN}}/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps — notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
+For linking assessment, use `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps — notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
 
 ## Output Format
 

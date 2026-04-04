@@ -21,11 +21,11 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `{{PLUGIN}}/agents/_skills/research-scaling.md` — determine search effort from depth and existing knowledge
-- `{{PLUGIN}}/agents/_skills/overlap-check.md` — check if existing knowledge already covers this topic
-- `{{PLUGIN}}/agents/_skills/cross-validation.md` — compare findings against existing vault knowledge
-- `{{PLUGIN}}/agents/_skills/decision-gates.md` — checkpoints between research phases
-- `{{PLUGIN}}/agents/_skills/source-verification.md` — how to verify sources
+- `PLUGIN/agents/_skills/research-scaling.md` — determine search effort from depth and existing knowledge
+- `PLUGIN/agents/_skills/overlap-check.md` — check if existing knowledge already covers this topic
+- `PLUGIN/agents/_skills/cross-validation.md` — compare findings against existing vault knowledge
+- `PLUGIN/agents/_skills/decision-gates.md` — checkpoints between research phases
+- `PLUGIN/agents/_skills/source-verification.md` — how to verify sources
 
 ## Process
 
@@ -51,7 +51,7 @@ Run research-scaling using the depth parameter and overlap results. This determi
 
 **Medium:**
 - 4-6 web searches, following leads from initial results
-- For academic topics: run `node {{PLUGIN}}/scripts/source-resolver.mjs search-pubmed "topic" --mesh` to get structured results alongside web search
+- For academic topics: run `node PLUGIN/scripts/source-resolver.mjs search-pubmed "topic" --mesh` to get structured results alongside web search
 - Return findings organized by sub-topic
 - Include at least 2 named sources with URLs worth capturing
 - 10-15 bullet points with source attribution and links
@@ -66,7 +66,7 @@ Run research-scaling using the depth parameter and overlap results. This determi
 
 ### 2b. Resolve Sources (Layer 1 Verification)
 
-After web/PubMed search, run `node {{PLUGIN}}/scripts/source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
+After web/PubMed search, run `node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
 - Correct author list (ground truth, not LLM inference)
 - Correct year, journal, DOI
 - Abstract text (for claim verification in later steps)
@@ -132,7 +132,7 @@ After completing research, verify your own findings before returning them. Unver
 
 After drafting findings and before verification, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
 
-Read `{{PLUGIN}}/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `PLUGIN/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 **In the research brief**, include a `### Diagram` section with:
 - The diagram filename (e.g., `glutamate-inflammation-loop.excalidraw.md`)

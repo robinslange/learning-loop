@@ -19,10 +19,10 @@ You will receive:
 
 ## Skills
 
-- `{{PLUGIN}}/agents/_skills/promote-gate.md` — assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead).
-- `{{PLUGIN}}/agents/_skills/counter-argument-linking.md` — detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
-- `{{PLUGIN}}/agents/_skills/source-verification.md` — post-write source and claim verification against public APIs
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/promote-gate.md` — assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead).
+- `PLUGIN/agents/_skills/counter-argument-linking.md` — detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
+- `PLUGIN/agents/_skills/source-verification.md` — post-write source and claim verification against public APIs
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
 
 ## Voice
 
@@ -78,7 +78,7 @@ If `existing_note` is provided:
 
 When the note describes a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves, generate an accompanying Excalidraw diagram.
 
-Read `{{PLUGIN}}/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `PLUGIN/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 Write the diagram to `{{VAULT}}/Excalidraw/{insight-slug}.excalidraw.md` and embed it in the note with `![[{insight-slug}]]`.
 
@@ -97,12 +97,12 @@ Compare every source in the note against the research brief provided as input:
 
 ### Pass 2: API verification
 
-Run the full verification procedure per `{{PLUGIN}}/agents/_skills/source-verification.md`, using `source-resolver.mjs verify-note` and `check-claims`. Fix what the resolver catches (wrong author, wrong year). Mark unresolvable issues with inline markers (`[unresolved]`, `[unverified]`, `[not in abstract]`). Max 2 verify-note calls (initial + one retry).
+Run the full verification procedure per `PLUGIN/agents/_skills/source-verification.md`, using `source-resolver.mjs verify-note` and `check-claims`. Fix what the resolver catches (wrong author, wrong year). Mark unresolvable issues with inline markers (`[unresolved]`, `[unverified]`, `[not in abstract]`). Max 2 verify-note calls (initial + one retry).
 
 ### Emit provenance
 
 ```bash
-node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"note-writer","action":"source-check","target":"NOTE_FILENAME","sources_checked":N,"sources_passed":N,"sources_failed":N,"failure_types":["type1"],"claims_checked":N,"claims_in_abstract":N,"claims_not_in_abstract":N,"iterations":N,"final_status":"pass|fail"}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-writer","action":"source-check","target":"NOTE_FILENAME","sources_checked":N,"sources_passed":N,"sources_failed":N,"failure_types":["type1"],"claims_checked":N,"claims_in_abstract":N,"claims_not_in_abstract":N,"iterations":N,"final_status":"pass|fail"}'
 ```
 
 ## Evidence Context in Notes

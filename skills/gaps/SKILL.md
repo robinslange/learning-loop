@@ -38,12 +38,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start (after scope identified):**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH"}}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH"}}'
 ```
 
 **At session end:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -75,7 +75,7 @@ Proceed immediately.
 ### Step 0: Select (auto-pick and sweep modes only)
 
 **Auto-pick (`/gaps` with no topic):**
-1. Run `node {{PLUGIN}}/scripts/vault-search.mjs cluster --threshold 0.7`
+1. Run `node PLUGIN/scripts/vault-search.mjs cluster --threshold 0.7`
 2. Find the densest cluster without recent `#gaps-reviewed` tag
 3. Tell the user: "Analysing [cluster topic] — [N] notes, last reviewed [date/never]"
 4. Proceed to Step 1 with inferred topic
@@ -117,7 +117,7 @@ Determine depth from vault scout results:
 
 Launch the **Gap Analyser** (`gap-analyser`):
 - Pass: notes (full content from vault scout), research (from adversarial researcher), domain_survey (from domain survey researcher), scope, depth
-- The analyser reads its skills from `{{PLUGIN}}/agents/_skills/`
+- The analyser reads its skills from `PLUGIN/agents/_skills/`
 - Returns: structured report with thin ice, tensions, absences, and blindspots
 
 ### Step 3: Present

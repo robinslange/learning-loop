@@ -12,7 +12,7 @@ Scans `1-fleeting/` for notes that have been absorbed into permanent knowledge o
 Run the sweep script:
 
 ```bash
-bash {{PLUGIN}}/scripts/fleeting-sweep.sh {{VAULT}}/
+bash PLUGIN/scripts/fleeting-sweep.sh {{VAULT}}/
 ```
 
 Output is TSV: `TYPE\tNAME\tDETAIL`. The script finds:

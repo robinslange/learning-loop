@@ -18,13 +18,13 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `{{PLUGIN}}/agents/_skills/capture-rules.md` — note format and what belongs in the vault
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
-- `{{PLUGIN}}/agents/_skills/source-verification.md` — how to verify sources
-- `{{PLUGIN}}/agents/_skills/counter-argument-linking.md` — detect if the source's claims challenge existing vault notes
-- `{{PLUGIN}}/agents/_skills/overlap-check.md` — check if source's ideas are already covered in the vault
-- `{{PLUGIN}}/agents/_skills/cross-validation.md` — compare source claims against existing vault knowledge
-- `{{PLUGIN}}/agents/_skills/decision-gates.md` — checkpoints between capture phases
+- `PLUGIN/agents/_skills/capture-rules.md` — note format and what belongs in the vault
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/source-verification.md` — how to verify sources
+- `PLUGIN/agents/_skills/counter-argument-linking.md` — detect if the source's claims challenge existing vault notes
+- `PLUGIN/agents/_skills/overlap-check.md` — check if source's ideas are already covered in the vault
+- `PLUGIN/agents/_skills/cross-validation.md` — compare source claims against existing vault knowledge
+- `PLUGIN/agents/_skills/decision-gates.md` — checkpoints between capture phases
 
 ## Process
 
