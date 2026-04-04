@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::fs;
 use std::path::Path;
@@ -9,14 +10,15 @@ use super::index::IndexResult;
 const SCHEMA_VERSION: u32 = 3;
 pub(crate) const DTYPE: &str = "q8";
 
-pub fn open_db(db_path: &str) -> Connection {
+pub fn open_db(db_path: &str) -> Result<Connection> {
     if let Some(parent) = Path::new(db_path).parent() {
         fs::create_dir_all(parent).ok();
     }
 
-    let conn = Connection::open(db_path).expect("failed to open database");
+    let conn = Connection::open(db_path)
+        .context("failed to open database")?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
-        .expect("failed to set pragmas");
+        .context("failed to set pragmas")?;
 
     let has_meta: bool = conn
         .query_row(
@@ -33,7 +35,7 @@ pub fn open_db(db_path: &str) -> Connection {
 
     ensure_embeddings_table(&conn);
     ensure_links_table(&conn);
-    conn
+    Ok(conn)
 }
 
 pub(crate) fn create_schema(conn: &Connection) {
