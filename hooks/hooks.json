@@ -58,11 +58,11 @@
         ]
       },
       {
-        "matcher": "Write",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-write-backlink.js\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-write-autolink.js\"",
             "timeout": 3
           }
         ]
