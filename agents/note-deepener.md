@@ -26,7 +26,6 @@ Read and follow these skills during work:
 - `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
 - `PLUGIN/agents/_skills/source-verification.md` — how to verify sources
 - `PLUGIN/agents/_skills/overlap-check.md` — check if note's topic is already covered elsewhere
-- `PLUGIN/agents/_skills/research-scaling.md` — determine research effort from note maturity
 - `PLUGIN/agents/_skills/cross-validation.md` — compare findings against existing vault knowledge
 - `PLUGIN/agents/_skills/decision-gates.md` — checkpoints between research phases
 
@@ -47,21 +46,21 @@ Run novelty gate (decision-gates):
 - If **partial**: note what's already covered — research only the gap.
 - If **novel** or **upstream/downstream**: proceed.
 
-### 3. Scale and Research
+### 3. Research
 
-Run research-scaling using the promote-gate assessment and overlap results. This determines effort level.
+Use the promote-gate assessment and overlap results to determine approach.
 
-**Heavy / Medium (shallow or fleeting notes) — parallel research:**
+**Shallow or fleeting notes (gaps in sourcing, depth, or linking) -- parallel research:**
 
 Launch two searches in parallel:
 1. **Vault context:** Use `node PLUGIN/scripts/vault-search.mjs search "<note topic>" --rerank` and `Glob` to find related vault notes. Search episodic memory for past conversations on this topic. If the episodic memory tools are unavailable, skip the episodic memory search and note "episodic memory unavailable" in your research output. Do not attempt to call the tool.
 2. **Web research:** Use web search to fill knowledge gaps — find sources, evidence, counterpoints for the note's claims. Focus on the specific gaps identified in Step 1.
 
-**Light (deep/permanent notes) — vault context only:**
+**Well-sourced permanent notes -- vault context only:**
 
-Search the vault for cross-links and tensions. No web research needed — the note is already substantive. Focus on connections, not content.
+Search the vault for cross-links and tensions. No web research needed -- the note is already substantive. Focus on connections, not content.
 
-**Targeted (partial overlap) — focused research:**
+**Partial overlap -- focused research:**
 
 Research only the uncovered angle identified by overlap-check. Skip what's already in the vault.
 
