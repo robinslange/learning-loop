@@ -115,12 +115,19 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
 fn do_reindex(db_path: &Path, vault_path: &Path) {
     let db_str = db_path.to_string_lossy();
     let vault_str = vault_path.to_string_lossy();
-    let conn = crate::db::open_db(&db_str);
+    let conn = match crate::db::open_db(&db_str) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to open database: {e}");
+            return;
+        }
+    };
     let result = crate::db::reindex(&conn, &vault_str, false);
     eprintln!(
         "Reindex: {} embedded, {} deleted, {} total",
         result.embedded, result.deleted, result.total
     );
+    conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
 }
 
 fn do_sync(
@@ -137,6 +144,16 @@ fn do_sync(
                 result.downloaded.len(),
                 result.skipped.len()
             );
+            if !result.downloaded.is_empty() {
+                let db_str = db_path.to_string_lossy();
+                match crate::db::open_db(&db_str) {
+                    Ok(conn) => {
+                        crate::db::compute_sessions(&conn);
+                        crate::db::compute_project_phases(&conn);
+                    }
+                    Err(e) => eprintln!("Failed to open database for session compute: {e}"),
+                }
+            }
         }
         Err(e) => eprintln!("Sync failed: {e}"),
     }

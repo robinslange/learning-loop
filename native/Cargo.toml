@@ -17,6 +17,7 @@ tungstenite = { version = "0.29", default-features = false, features = ["handsha
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 globset = "0.4"
 rand = "0.8"
+rayon = "1.10"
 base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
