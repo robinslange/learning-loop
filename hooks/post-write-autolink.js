@@ -153,12 +153,14 @@ process.stdin.on('end', () => {
       similar = JSON.parse(out);
     } catch { return; }
 
-    // 3. Filter and select
+    // 3. Filter and select (re-read from disk to catch links already on file)
+    const currentContent = readFileSync(filePath, 'utf-8');
+    const diskLinks = extractWikilinks(currentContent);
     const candidates = similar
       .filter(r => r.score >= SIMILARITY_THRESHOLD)
       .filter(r => {
         const name = basename(r.path, '.md');
-        return name !== sourceName && !existingLinks.has(name);
+        return name !== sourceName && !diskLinks.has(name);
       })
       .slice(0, MAX_AUTO_LINKS);
 
@@ -166,7 +168,6 @@ process.stdin.on('end', () => {
 
     // 4. Append auto-links to the written note
     const autoLinks = candidates.map(r => `[[${basename(r.path, '.md')}]]`).join('\n');
-    const currentContent = readFileSync(filePath, 'utf-8');
     const needsNewline = currentContent.length > 0 && !currentContent.endsWith('\n');
     appendFileSync(filePath, (needsNewline ? '\n' : '') + autoLinks + '\n');
 
