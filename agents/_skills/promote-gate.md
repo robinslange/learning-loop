@@ -144,14 +144,33 @@ If `verify-note` returns any `high` severity issues, Source Integrity **fails**.
 
 If `verify-note` returns only `low` or `medium` issues (e.g., year off by one, author is co-author not first author), Source Integrity **passes with warnings** — the note can promote but the warnings should be included in the promotion report.
 
+## Auto-Link Safety Net (before promotion)
+
+Before promoting a note from `0-inbox/` to `3-permanent/`, check its wikilink count. This catches notes that bypassed the post-write-autolink hook (subagent writes, manual operations).
+
+### Process
+
+1. Parse the note body for `[[wikilinks]]` (exclude frontmatter)
+2. If the note has **1 or more wikilinks**, proceed with promotion (no action needed)
+3. If the note has **0 wikilinks**:
+   a. Run `ll-search similar <db> <relative-path> --top 5`
+   b. Filter: similarity >= 0.65, not self
+   c. If matches found: take top 3, append as `[[note-name]]` links after the note body
+   d. If no matches above threshold: proceed anyway (the note is legitimately isolated in a new domain)
+   e. Emit provenance: `node PLUGIN/scripts/provenance-emit.js '{"action":"auto-link","target":"<note.md>","links_added":N,"trigger":"promote-gate"}'`
+4. Proceed with normal promotion
+
+This check is not a blocking gate. A note with zero links and zero similar notes still promotes if all other criteria pass. The auto-link is a quality improvement, not a requirement.
+
 ## Integration
 
 Agents using this skill should:
 1. Generate or read the note content
 2. Run the 6-criterion assessment
-3. If all other criteria pass and destination would be `3-permanent/`, run `source-resolver.mjs verify-note`
-4. Determine final destination from the routing table
-5. Check skip-rewrite conditions
-6. Write to the determined destination (or `mv` if skip-rewrite)
+3. If note has 0 wikilinks, run the Auto-Link Safety Net (above)
+4. If all other criteria pass and destination would be `3-permanent/`, run `source-resolver.mjs verify-note`
+5. Determine final destination from the routing table
+6. Check skip-rewrite conditions
+7. Write to the determined destination (or `mv` if skip-rewrite)
 
 Report the routing decision in output: `→ 3-permanent/ (all criteria met, no rewrite needed)` or `→ 0-inbox/ (missing: sourcing, depth)`
