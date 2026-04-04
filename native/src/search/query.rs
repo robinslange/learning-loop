@@ -10,6 +10,7 @@ use crate::embed::embed_query;
 use super::scoring::{add_ranked_rrf, cosine, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf};
 use super::graph::{load_link_graph, personalized_pagerank, tag_expand};
 use super::federation::{add_peer_rrf_scores, load_title_federated};
+use super::store::EmbeddingStore;
 
 #[derive(Serialize)]
 pub struct SearchResult {
@@ -44,9 +45,10 @@ pub(crate) fn local_rrf_scores(
     conn: &Connection,
     query_vec: &[f32],
     query_text: &str,
-    all_embeddings: &[(i64, String, Vec<f32>)],
+    store: &EmbeddingStore,
     graph: &HashMap<String, Vec<String>>,
 ) -> HashMap<String, f64> {
+    let all_embeddings = store.all();
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .par_iter()
         .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
@@ -66,15 +68,15 @@ pub(crate) fn local_rrf_scores(
     add_ranked_rrf(&mut rrf_scores, ppr_results.iter().map(|(p, _)| p.as_str()));
     add_ranked_rrf(&mut rrf_scores, tag_results.iter().map(|(p, _)| p.as_str()));
 
-    let prf_results = rocchio_prf(query_vec, &vec_scored, all_embeddings);
+    let prf_results = rocchio_prf(query_vec, &vec_scored, &all_embeddings);
     add_ranked_rrf(&mut rrf_scores, prf_results.iter().map(|(p, _)| p.as_str()));
 
     rrf_scores
 }
 
-pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize, temporal: &TemporalParams) -> Vec<SearchResult> {
+pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize, temporal: &TemporalParams, store: &EmbeddingStore) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
-    hybrid_query_inner(conn, &query_vec, query_text, top_n, temporal)
+    hybrid_query_inner(conn, &query_vec, query_text, top_n, temporal, store)
 }
 
 pub(crate) fn hybrid_query_inner(
@@ -83,10 +85,10 @@ pub(crate) fn hybrid_query_inner(
     query_text: &str,
     top_n: usize,
     temporal: &TemporalParams,
+    store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
-    let all_embeddings = load_all_embeddings(conn);
     let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, store, &graph);
     let titles = load_titles_map(conn);
     let mtimes = load_mtime_map(conn);
 
@@ -111,9 +113,10 @@ pub fn hybrid_query_federated(
     top_n: usize,
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
+    store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
-    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal)
+    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal, store)
 }
 
 pub(crate) fn hybrid_query_federated_inner(
@@ -123,10 +126,10 @@ pub(crate) fn hybrid_query_federated_inner(
     top_n: usize,
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
+    store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
-    let all_embeddings = load_all_embeddings(conn);
     let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, store, &graph);
     let mtimes = load_mtime_map(conn);
 
     let local_dim = query_vec.len();
@@ -316,9 +319,10 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important for memory consolidation", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake affects muscle recovery", &emb_b),
         ]);
+        let store = EmbeddingStore::load(&conn);
 
         let query_vec = norm(&[1.0, 0.1, 0.0]);
-        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
 
         assert!(!results.is_empty());
         assert_eq!(results[0].path, "3-permanent/sleep.md");
@@ -328,8 +332,9 @@ mod tests {
     #[test]
     fn test_hybrid_query_inner_empty_db() {
         let conn = create_test_db(&[]);
+        let store = EmbeddingStore::load(&conn);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
         assert!(results.is_empty());
     }
 
@@ -342,6 +347,7 @@ mod tests {
         let local = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep stages and cycles", &emb_a),
         ]);
+        let store = EmbeddingStore::load(&local);
         let peer = create_peer_db(&[
             ("3-permanent/circadian.md", "circadian rhythm", "Light exposure controls the circadian clock", &emb_b),
             ("3-permanent/melatonin.md", "melatonin synthesis", "Melatonin is produced in the pineal gland", &emb_c),
@@ -349,7 +355,7 @@ mod tests {
 
         let peers = vec![("alice".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default(), &store);
 
         let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
         assert!(paths.contains(&"3-permanent/sleep.md"));
@@ -362,13 +368,14 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "local content", &emb),
         ]);
+        let store = EmbeddingStore::load(&local);
         let peer = create_peer_db(&[
             ("3-permanent/note.md", "peer note", "peer content about sleep", &emb),
         ]);
 
         let peers = vec![("bob".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default(), &store);
 
         let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:")).collect();
         for r in &peer_results {
@@ -384,15 +391,17 @@ mod tests {
         let conn = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
         ]);
+        let store = EmbeddingStore::load(&conn);
 
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
+        let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
 
         let conn2 = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
         ]);
+        let store2 = EmbeddingStore::load(&conn2);
         let peers: Vec<(String, Connection)> = vec![];
-        let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers, &TemporalParams::default());
+        let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers, &TemporalParams::default(), &store2);
 
         assert_eq!(local_results.len(), fed_results.len());
         for (l, f) in local_results.iter().zip(fed_results.iter()) {
@@ -406,13 +415,14 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "sleep cycles and stages", &emb),
         ]);
+        let store = EmbeddingStore::load(&local);
         let peer = create_peer_db_no_embeddings(&[
             ("peer-note.md", "peer note", "circadian rhythm and sleep"),
         ]);
 
         let peers = vec![("charlie".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default(), &store);
 
         assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.path == "local.md"));
@@ -429,13 +439,14 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "sleep content", &emb_local),
         ]);
+        let store = EmbeddingStore::load(&local);
         let peer = create_peer_db_no_fts(&[
             ("peer.md", "peer note", &emb_peer),
         ]);
 
         let peers = vec![("delta".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default(), &store);
 
         assert!(!results.is_empty());
         let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:delta/")).collect();

@@ -11,6 +11,7 @@ use super::query::{local_rrf_scores, load_titles_map, SearchResult};
 use super::graph::load_link_graph;
 use super::federation::{add_peer_rrf_scores, batch_load_bodies, batch_load_bodies_federated};
 use super::cluster::discriminate_pairs;
+use super::store::EmbeddingStore;
 
 #[derive(Serialize)]
 pub struct ReflectQueryResult {
@@ -31,8 +32,9 @@ pub fn reflect_scan(
     top_n: usize,
     candidates_n: usize,
     discriminate_threshold: f32,
+    store: &EmbeddingStore,
 ) -> ReflectScanResult {
-    let all_embeddings = load_all_embeddings(conn);
+    let all_embeddings = store.all();
     let titles = load_titles_map(conn);
     let graph = load_link_graph(conn);
 
@@ -41,7 +43,7 @@ pub fn reflect_scan(
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
+        let rrf = local_rrf_scores(conn, &query_vec, query_text, store, &graph);
 
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
@@ -108,7 +110,7 @@ pub fn reflect_scan(
 
     all_result_paths.sort();
     all_result_paths.dedup();
-    let confusable_pairs = discriminate_pairs(conn, &all_result_paths, discriminate_threshold);
+    let confusable_pairs = discriminate_pairs(conn, &all_result_paths, discriminate_threshold, store);
 
     ReflectScanResult {
         queries: query_results,
@@ -123,8 +125,9 @@ pub fn reflect_scan_federated(
     candidates_n: usize,
     discriminate_threshold: f32,
     peers: &[(String, Connection)],
+    store: &EmbeddingStore,
 ) -> ReflectScanResult {
-    let all_embeddings = load_all_embeddings(conn);
+    let all_embeddings = store.all();
     let titles = load_titles_map(conn);
 
     let peer_data: Vec<(&str, Vec<(i64, String, Vec<f32>)>, HashMap<String, Option<String>>)> =
@@ -153,7 +156,7 @@ pub fn reflect_scan_federated(
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
+        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, store, &graph);
 
         for (peer_id, peer_conn) in peers {
             let peer_embs = peer_data
@@ -256,7 +259,7 @@ pub fn reflect_scan_federated(
     let mut local_deduped = local_result_paths;
     local_deduped.sort();
     local_deduped.dedup();
-    let confusable_pairs = discriminate_pairs(conn, &local_deduped, discriminate_threshold);
+    let confusable_pairs = discriminate_pairs(conn, &local_deduped, discriminate_threshold, store);
 
     ReflectScanResult {
         queries: query_results,

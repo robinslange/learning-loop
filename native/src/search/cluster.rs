@@ -2,11 +2,12 @@ use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
-use crate::db::{load_all_embeddings, load_embedding};
+use crate::db::load_embedding;
 
 use super::scoring::cosine;
 use super::graph::load_tags_map;
 use super::query::{find_note_id, resolve_note_id_like};
+use super::store::EmbeddingStore;
 
 #[derive(Serialize)]
 pub struct SimilarResult {
@@ -24,7 +25,7 @@ pub struct DiscriminatePair {
     pub similarity: f64,
 }
 
-pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize) -> Vec<SimilarResult> {
+pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize, store: &EmbeddingStore) -> Vec<SimilarResult> {
     let note_id = find_note_id(conn, note_path);
     let note_id = match note_id {
         Some(id) => id,
@@ -36,7 +37,7 @@ pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize) -> Vec<Si
         None => return Vec::new(),
     };
 
-    let all = load_all_embeddings(conn);
+    let all = store.all();
 
     let mut scored: Vec<(i64, String, f32)> = all
         .iter()
@@ -63,8 +64,8 @@ pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize) -> Vec<Si
         .collect()
 }
 
-pub fn cluster_notes(conn: &Connection, threshold: f32) -> Vec<Vec<String>> {
-    let all = load_all_embeddings(conn);
+pub fn cluster_notes(_conn: &Connection, threshold: f32, store: &EmbeddingStore) -> Vec<Vec<String>> {
+    let all = store.all();
     let n = all.len();
     let mut assigned = vec![false; n];
     let mut clusters: Vec<Vec<String>> = Vec::new();
@@ -99,11 +100,12 @@ pub fn discriminate_pairs(
     conn: &Connection,
     paths: &[String],
     threshold: f32,
+    store: &EmbeddingStore,
 ) -> Vec<DiscriminatePair> {
     let embeddings: Vec<(String, Vec<f32>)> = if paths.is_empty() {
-        load_all_embeddings(conn)
-            .into_iter()
-            .map(|(_, path, emb)| (path, emb))
+        store.all()
+            .iter()
+            .map(|(_, path, emb)| (path.clone(), emb.clone()))
             .collect()
     } else {
         paths
@@ -164,7 +166,8 @@ mod tests {
             ("d.md", "d", "d", &emb_d),
         ]);
 
-        let clusters = cluster_notes(&conn, 0.9);
+        let store = EmbeddingStore::load(&conn);
+        let clusters = cluster_notes(&conn, 0.9, &store);
         assert_eq!(clusters.len(), 2);
         assert!(clusters[0].contains(&"a.md".to_string()));
         assert!(clusters[0].contains(&"b.md".to_string()));
