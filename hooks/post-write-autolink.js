@@ -94,7 +94,8 @@ process.stdin.on('end', () => {
     const data = JSON.parse(input);
     const toolName = data.tool_name;
     if (toolName !== 'Write' && toolName !== 'Edit') return;
-    if (!data.tool_response?.success) return;
+    const resp = data.tool_response;
+    if (!resp || (typeof resp === 'object' && resp.success === false)) return;
 
     const filePath = data.tool_input?.file_path;
     if (!filePath) return;
