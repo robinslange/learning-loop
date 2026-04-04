@@ -160,6 +160,21 @@ Return a structured brief:
 ### Sources Found
 - "Source Title" by Author (Year) — URL — [study_type, species, n=X, funding] — [one-line relevance note]
 
+### Verified Sources
+<!-- NOTE-WRITER: use these URLs verbatim in note frontmatter. NEVER reconstruct a URL from memory. -->
+| ID | URL | Title | Status |
+|----|-----|-------|--------|
+| S1 | [exact URL fetched] | [page title from fetch] | fetched |
+| S2 | [exact URL fetched] | [page title from fetch] | fetched |
+
+Reference findings by ID: "Microglia prune synapses via complement [S1]"
+
+**Rules for this table:**
+- Only include URLs you actually fetched in this session (WebFetch or WebSearch result URLs)
+- The URL must be copied from your tool call result, not reconstructed from memory
+- If you cited a source but never fetched its URL, list it with status: `unfetched` — the note-writer will use `source: unverified` for these
+- This table is the contract between researcher and writer. What is verified here stays verified downstream.
+
 ### Gaps & Uncertainties
 - [what couldn't be confirmed or remains debated]
 
