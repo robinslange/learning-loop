@@ -177,9 +177,11 @@ function checkResult(sessionId, query, resultFile) {
   }
   state.noveltyRates.push(noveltyRate);
   if (queryNumber >= 2) {
-    state.runningAvgRate = runningAvgRate === null
-      ? noveltyRate
-      : EMA_ALPHA * noveltyRate + (1 - EMA_ALPHA) * runningAvgRate;
+    if (runningAvgRate === null) {
+      state.runningAvgRate = state.noveltyRates.reduce((a, b) => a + b, 0) / state.noveltyRates.length;
+    } else {
+      state.runningAvgRate = EMA_ALPHA * noveltyRate + (1 - EMA_ALPHA) * runningAvgRate;
+    }
   }
   state.queryCount = queryNumber;
   saveState(sessionId, state);
@@ -189,7 +191,16 @@ function checkResult(sessionId, query, resultFile) {
 
 function showStatus(sessionId) {
   const state = loadState(sessionId);
-  console.log(JSON.stringify(state, null, 2));
+  console.log(JSON.stringify({
+    sessionId,
+    queryCount: state.queryCount,
+    queries: state.queries,
+    totalSentences: state.sentenceEmbeddings.length,
+    totalEntities: state.entities.length,
+    totalCitations: state.citations.length,
+    noveltyRates: state.noveltyRates,
+    runningAvgRate: state.runningAvgRate,
+  }, null, 2));
 }
 
 function resetSession(sessionId) {
