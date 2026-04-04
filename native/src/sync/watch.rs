@@ -137,6 +137,12 @@ fn do_sync(
                 result.downloaded.len(),
                 result.skipped.len()
             );
+            if !result.downloaded.is_empty() {
+                let db_str = db_path.to_string_lossy();
+                let conn = crate::db::open_db(&db_str);
+                crate::db::compute_sessions(&conn);
+                crate::db::compute_project_phases(&conn);
+            }
         }
         Err(e) => eprintln!("Sync failed: {e}"),
     }

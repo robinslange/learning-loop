@@ -15,6 +15,8 @@ pub struct SearchResult {
     pub score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtime: Option<f64>,
 }
 
 #[derive(Serialize)]
@@ -44,6 +46,25 @@ pub struct ReflectQueryResult {
 pub struct ReflectScanResult {
     pub queries: Vec<ReflectQueryResult>,
     pub confusable_pairs: Vec<DiscriminatePair>,
+}
+
+#[derive(Default)]
+pub struct TemporalParams {
+    pub recency_days: Option<f64>,
+    pub after: Option<f64>,
+    pub before: Option<f64>,
+    pub session_id: Option<i64>,
+    pub project_tag: Option<String>,
+}
+
+impl TemporalParams {
+    pub fn has_any(&self) -> bool {
+        self.recency_days.is_some()
+            || self.after.is_some()
+            || self.before.is_some()
+            || self.session_id.is_some()
+            || self.project_tag.is_some()
+    }
 }
 
 pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
@@ -135,6 +156,54 @@ fn fts_bm25_query(conn: &Connection, query: &str, limit: usize) -> Vec<(i64, Str
 
 // --- Composable search building blocks ---
 
+const PRF_ALPHA: f32 = 0.7;
+const PRF_BETA: f32 = 0.3;
+const PRF_K: usize = 3;
+
+fn rocchio_prf(
+    query_vec: &[f32],
+    top_results: &[(String, f64)],
+    all_embeddings: &[(i64, String, Vec<f32>)],
+) -> Vec<(String, f64)> {
+    let dim = query_vec.len();
+    let emb_map: HashMap<&str, &Vec<f32>> = all_embeddings
+        .iter()
+        .map(|(_, path, emb)| (path.as_str(), emb))
+        .collect();
+
+    let feedback_vecs: Vec<&Vec<f32>> = top_results
+        .iter()
+        .take(PRF_K)
+        .filter_map(|(path, _)| emb_map.get(path.as_str()).copied())
+        .collect();
+
+    if feedback_vecs.is_empty() {
+        return Vec::new();
+    }
+
+    let mut expanded = vec![0.0f32; dim];
+    for d in 0..dim {
+        let fb_mean: f32 = feedback_vecs.iter().map(|v| v[d]).sum::<f32>() / feedback_vecs.len() as f32;
+        expanded[d] = PRF_ALPHA * query_vec[d] + PRF_BETA * fb_mean;
+    }
+
+    // L2 normalize
+    let norm: f32 = expanded.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if norm > 0.0 {
+        for d in 0..dim {
+            expanded[d] /= norm;
+        }
+    }
+
+    let mut prf_scored: Vec<(String, f64)> = all_embeddings
+        .iter()
+        .map(|(_, path, emb)| (path.clone(), cosine(&expanded, emb) as f64))
+        .collect();
+    prf_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    prf_scored.truncate(30);
+    prf_scored
+}
+
 fn local_rrf_scores(
     conn: &Connection,
     query_vec: &[f32],
@@ -160,6 +229,10 @@ fn local_rrf_scores(
     let tag_results = tag_expand(conn, &seeds);
     add_ranked_rrf(&mut rrf_scores, ppr_results.iter().map(|(p, _)| p.as_str()));
     add_ranked_rrf(&mut rrf_scores, tag_results.iter().map(|(p, _)| p.as_str()));
+
+    // Rocchio PRF: expand query using top-3 vector results, re-rank as 5th signal
+    let prf_results = rocchio_prf(query_vec, &vec_scored, all_embeddings);
+    add_ranked_rrf(&mut rrf_scores, prf_results.iter().map(|(p, _)| p.as_str()));
 
     rrf_scores
 }
@@ -204,9 +277,9 @@ fn finalize_rrf(rrf_scores: HashMap<String, f64>, top_n: usize) -> Vec<(String, 
 
 // --- Public search API ---
 
-pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize) -> Vec<SearchResult> {
+pub fn hybrid_query(conn: &Connection, query_text: &str, top_n: usize, temporal: &TemporalParams) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
-    hybrid_query_inner(conn, &query_vec, query_text, top_n)
+    hybrid_query_inner(conn, &query_vec, query_text, top_n, temporal)
 }
 
 fn hybrid_query_inner(
@@ -214,16 +287,23 @@ fn hybrid_query_inner(
     query_vec: &[f32],
     query_text: &str,
     top_n: usize,
+    temporal: &TemporalParams,
 ) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
     let graph = load_link_graph(conn);
-    let rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
     let titles = load_titles_map(conn);
+    let mtimes = load_mtime_map(conn);
+
+    if temporal.has_any() {
+        apply_temporal_boost(&mut rrf, &mtimes, temporal, conn);
+    }
 
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: titles.get(&path).cloned().flatten(),
+            mtime: mtimes.get(&path).copied(),
             path,
             score,
         })
@@ -235,9 +315,10 @@ pub fn hybrid_query_federated(
     query_text: &str,
     top_n: usize,
     peers: &[(String, Connection)],
+    temporal: &TemporalParams,
 ) -> Vec<SearchResult> {
     let query_vec = embed_query(query_text);
-    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers)
+    hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal)
 }
 
 fn hybrid_query_federated_inner(
@@ -246,10 +327,12 @@ fn hybrid_query_federated_inner(
     query_text: &str,
     top_n: usize,
     peers: &[(String, Connection)],
+    temporal: &TemporalParams,
 ) -> Vec<SearchResult> {
     let all_embeddings = load_all_embeddings(conn);
     let graph = load_link_graph(conn);
     let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
+    let mtimes = load_mtime_map(conn);
 
     let local_dim = query_vec.len();
 
@@ -272,10 +355,15 @@ fn hybrid_query_federated_inner(
         }
     }
 
+    if temporal.has_any() {
+        apply_temporal_boost(&mut rrf, &mtimes, temporal, conn);
+    }
+
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: load_title_federated(&path, conn, peers),
+            mtime: mtimes.get(&path).copied(),
             path,
             score,
         })
@@ -421,6 +509,7 @@ pub fn reflect_scan(
             .into_iter()
             .map(|(path, score)| SearchResult {
                 title: titles.get(&path).cloned().flatten(),
+                mtime: None,
                 path,
                 score,
             })
@@ -458,6 +547,7 @@ pub fn reflect_scan(
                 path: r.path.clone(),
                 score: r.score,
                 title: titles.get(&r.path).cloned().flatten(),
+                mtime: None,
             })
             .collect();
 
@@ -546,6 +636,7 @@ pub fn reflect_scan_federated(
             .into_iter()
             .map(|(path, score)| SearchResult {
                 title: merged_titles.get(&path).cloned().flatten(),
+                mtime: None,
                 path,
                 score,
             })
@@ -583,6 +674,7 @@ pub fn reflect_scan_federated(
                 path: r.path.clone(),
                 score: r.score,
                 title: merged_titles.get(&r.path).cloned().flatten(),
+                mtime: None,
             })
             .collect();
 
@@ -698,6 +790,109 @@ fn load_title_federated(
     }
 }
 
+fn load_mtime_map(conn: &Connection) -> HashMap<String, f64> {
+    let mut map = HashMap::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT path, mtime FROM notes") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        }) {
+            for row in rows.flatten() {
+                map.insert(row.0, row.1 / 1000.0);
+            }
+        }
+    }
+    map
+}
+
+fn load_project_phase(conn: &Connection, tag: &str) -> Option<(f64, f64)> {
+    conn.query_row(
+        "SELECT first_mtime, last_mtime FROM project_phases WHERE tag = ?1",
+        params![tag.to_lowercase()],
+        |row| Ok((row.get::<_, f64>(0)?, row.get::<_, f64>(1)?)),
+    )
+    .ok()
+}
+
+fn apply_temporal_boost(
+    rrf_scores: &mut HashMap<String, f64>,
+    mtime_map: &HashMap<String, f64>,
+    params: &TemporalParams,
+    conn: &Connection,
+) {
+    if params.after.is_some() || params.before.is_some() {
+        rrf_scores.retain(|path, _| {
+            let Some(&mtime) = mtime_map.get(path) else {
+                return true;
+            };
+            if let Some(after) = params.after {
+                if mtime < after {
+                    return false;
+                }
+            }
+            if let Some(before) = params.before {
+                if mtime > before {
+                    return false;
+                }
+            }
+            true
+        });
+    }
+
+    if let Some(session_id) = params.session_id {
+        let session_paths: Option<HashSet<String>> = (|| {
+            let mut stmt = conn
+                .prepare("SELECT path FROM notes WHERE session_id = ?1")
+                .ok()?;
+            let rows = stmt
+                .query_map(params![session_id], |row| row.get::<_, String>(0))
+                .ok()?;
+            let set: HashSet<String> = rows.filter_map(|r| r.ok()).collect();
+            Some(set)
+        })();
+
+        if let Some(paths) = session_paths {
+            rrf_scores.retain(|path, _| paths.contains(path));
+        }
+    }
+
+    if let Some(half_life_days) = params.recency_days {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        let half_life_secs = half_life_days * 86400.0;
+
+        if half_life_secs > 0.0 {
+            let ln2 = std::f64::consts::LN_2;
+            for (path, score) in rrf_scores.iter_mut() {
+                if let Some(&mtime) = mtime_map.get(path) {
+                    let age_secs = (now_secs - mtime).max(0.0);
+                    let decay = (-ln2 * age_secs / half_life_secs).exp();
+                    *score *= decay;
+                }
+            }
+        }
+    }
+
+    if let Some(ref tag) = params.project_tag {
+        if let Some((phase_start, phase_end)) = load_project_phase(conn, tag) {
+            let sigma = (phase_end - phase_start) / 4.0;
+            if sigma > 0.0 {
+                let center = (phase_start + phase_end) / 2.0;
+                let two_sigma_sq = 2.0 * sigma * sigma;
+
+                for (path, score) in rrf_scores.iter_mut() {
+                    if let Some(&mtime) = mtime_map.get(path) {
+                        let diff = mtime - center;
+                        let boost = (-(diff * diff) / two_sigma_sq).exp();
+                        *score *= 1.0 + 0.15 * (boost - 0.5);
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
     let mut basename_to_path: HashMap<String, String> = HashMap::new();
     if let Ok(mut stmt) = conn.prepare("SELECT path FROM notes") {
@@ -753,24 +948,44 @@ fn personalized_pagerank(
         return Vec::new();
     }
 
-    let seed_score = 1.0 / seeds.len() as f64;
+    // Node specificity: rare (low-inlink) seeds get higher weight
+    let mut inlink_counts: HashMap<&str, usize> = HashMap::new();
+    for targets in graph.values() {
+        for t in targets {
+            *inlink_counts.entry(t.as_str()).or_default() += 1;
+        }
+    }
+
+    let mut seed_weights: Vec<(&str, f64)> = seeds
+        .iter()
+        .filter(|s| graph.contains_key(s.as_str()))
+        .map(|s| {
+            let inlinks = inlink_counts.get(s.as_str()).copied().unwrap_or(0);
+            (s.as_str(), 1.0 / (inlinks as f64 + 1.0))
+        })
+        .collect();
+
+    let total_weight: f64 = seed_weights.iter().map(|(_, w)| w).sum();
+    if total_weight == 0.0 {
+        return Vec::new();
+    }
+    for (_, w) in &mut seed_weights {
+        *w /= total_weight;
+    }
+
     let d = damping as f64;
     let mut scores: HashMap<String, f64> = HashMap::new();
     let seed_set: HashSet<&str> = seeds.iter().map(|s| s.as_str()).collect();
 
-    for s in seeds {
-        if graph.contains_key(s) {
-            scores.insert(s.clone(), seed_score);
-        }
+    for &(s, w) in &seed_weights {
+        scores.insert(s.to_string(), w);
     }
 
     for _ in 0..iterations {
         let mut new_scores: HashMap<String, f64> = HashMap::new();
 
-        for s in seeds {
-            if graph.contains_key(s) {
-                *new_scores.entry(s.clone()).or_default() += (1.0 - d) * seed_score;
-            }
+        for &(s, w) in &seed_weights {
+            *new_scores.entry(s.to_string()).or_default() += (1.0 - d) * w;
         }
 
         for (node, score) in &scores {
@@ -1161,7 +1376,7 @@ mod tests {
         ]);
 
         let query_vec = norm(&[1.0, 0.1, 0.0]);
-        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
 
         assert!(!results.is_empty());
         assert_eq!(results[0].path, "3-permanent/sleep.md");
@@ -1172,7 +1387,7 @@ mod tests {
     fn test_hybrid_query_inner_empty_db() {
         let conn = create_test_db(&[]);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+        let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
         assert!(results.is_empty());
     }
 
@@ -1194,7 +1409,7 @@ mod tests {
 
         let peers = vec![("alice".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
 
         let paths: Vec<&str> = results.iter().map(|r| r.path.as_str()).collect();
         assert!(paths.contains(&"3-permanent/sleep.md"));
@@ -1213,7 +1428,7 @@ mod tests {
 
         let peers = vec![("bob".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
 
         let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:")).collect();
         for r in &peer_results {
@@ -1231,13 +1446,13 @@ mod tests {
         ]);
 
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5);
+        let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default());
 
         let conn2 = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
         ]);
         let peers: Vec<(String, Connection)> = vec![];
-        let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers);
+        let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers, &TemporalParams::default());
 
         assert_eq!(local_results.len(), fed_results.len());
         for (l, f) in local_results.iter().zip(fed_results.iter()) {
@@ -1259,7 +1474,7 @@ mod tests {
 
         let peers = vec![("charlie".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
 
         assert!(!results.is_empty());
         assert!(results.iter().any(|r| r.path == "local.md"));
@@ -1282,7 +1497,7 @@ mod tests {
 
         let peers = vec![("delta".to_string(), peer)];
         let query_vec = norm(&[1.0, 0.0, 0.0]);
-        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers);
+        let results = hybrid_query_federated_inner(&local, &query_vec, "sleep", 10, &peers, &TemporalParams::default());
 
         assert!(!results.is_empty());
         let peer_results: Vec<&SearchResult> = results.iter().filter(|r| r.path.starts_with("peer:delta/")).collect();
