@@ -1,13 +1,13 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use rusqlite::Connection;
 
 use crate::db::load_all_embeddings;
 
 pub struct EmbeddingStore {
-    data: RwLock<Vec<(i64, String, Vec<f32>)>>,
-    path_index: RwLock<HashMap<String, usize>>,
+    data: Vec<(i64, String, Vec<f32>)>,
+    path_index: HashMap<String, usize>,
 }
 
 impl EmbeddingStore {
@@ -18,37 +18,31 @@ impl EmbeddingStore {
             .enumerate()
             .map(|(i, (_, path, _))| (path.clone(), i))
             .collect();
-        Arc::new(Self {
-            data: RwLock::new(data),
-            path_index: RwLock::new(path_index),
-        })
+        Arc::new(Self { data, path_index })
     }
 
-    pub fn all(&self) -> std::sync::RwLockReadGuard<'_, Vec<(i64, String, Vec<f32>)>> {
-        self.data.read().expect("embedding store lock")
+    pub fn all(&self) -> &[(i64, String, Vec<f32>)] {
+        &self.data
     }
 
     pub fn get_by_path(&self, path: &str) -> Option<Vec<f32>> {
-        let index = self.path_index.read().expect("path index lock");
-        let data = self.data.read().expect("embedding data lock");
-        let &i = index.get(path)?;
-        Some(data[i].2.clone())
+        let &i = self.path_index.get(path)?;
+        Some(self.data[i].2.clone())
     }
 
     pub fn get_by_id(&self, id: i64) -> Option<Vec<f32>> {
-        let data = self.data.read().expect("embedding data lock");
-        data.iter()
+        self.data
+            .iter()
             .find(|(eid, _, _)| *eid == id)
             .map(|(_, _, emb)| emb.clone())
     }
 
     pub fn len(&self) -> usize {
-        self.data.read().expect("embedding data lock").len()
+        self.data.len()
     }
 
     pub fn dim(&self) -> usize {
-        let data = self.data.read().expect("embedding data lock");
-        data.first().map(|(_, _, emb)| emb.len()).unwrap_or(0)
+        self.data.first().map(|(_, _, emb)| emb.len()).unwrap_or(0)
     }
 }
 
