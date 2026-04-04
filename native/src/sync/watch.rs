@@ -121,6 +121,7 @@ fn do_reindex(db_path: &Path, vault_path: &Path) {
         "Reindex: {} embedded, {} deleted, {} total",
         result.embedded, result.deleted, result.total
     );
+    conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
 }
 
 fn do_sync(
