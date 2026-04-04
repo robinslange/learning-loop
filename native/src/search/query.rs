@@ -45,10 +45,9 @@ pub(crate) fn local_rrf_scores(
     conn: &Connection,
     query_vec: &[f32],
     query_text: &str,
-    store: &EmbeddingStore,
+    all_embeddings: &[(i64, String, Vec<f32>)],
     graph: &HashMap<String, Vec<String>>,
 ) -> HashMap<String, f64> {
-    let all_embeddings = store.all();
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .par_iter()
         .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
@@ -87,8 +86,9 @@ pub(crate) fn hybrid_query_inner(
     temporal: &TemporalParams,
     store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
+    let all_embeddings = store.all();
     let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, store, &graph);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
     let titles = load_titles_map(conn);
     let mtimes = load_mtime_map(conn);
 
@@ -128,8 +128,9 @@ pub(crate) fn hybrid_query_federated_inner(
     temporal: &TemporalParams,
     store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
+    let all_embeddings = store.all();
     let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, store, &graph);
+    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
     let mtimes = load_mtime_map(conn);
 
     let local_dim = query_vec.len();

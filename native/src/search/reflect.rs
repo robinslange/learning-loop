@@ -43,7 +43,7 @@ pub fn reflect_scan(
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let rrf = local_rrf_scores(conn, &query_vec, query_text, store, &graph);
+        let rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
 
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
@@ -156,7 +156,7 @@ pub fn reflect_scan_federated(
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, store, &graph);
+        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
 
         for (peer_id, peer_conn) in peers {
             let peer_embs = peer_data
