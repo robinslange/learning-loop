@@ -27,14 +27,14 @@ This skill emits provenance events for pipeline observability.
 
 **At session start (after scope identified):**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
 ```
 
 **After scoring and verification, emit each finding via provenance-emit.js:**
 
 For each note with issues, run:
 ```bash
-node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}'
 ```
 
 Where:
@@ -45,14 +45,14 @@ Where:
 
 For quality scores, emit one event per note:
 ```bash
-node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}'
 ```
 
 A note with no finding events is a pass.
 
 **Then emit session-end:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
 ```
 
 A note with zero score records is a pass.
@@ -88,7 +88,7 @@ Proceed immediately.
 
 - For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`, Read it
 - For folder-based: `Glob` for `*.md` in the target folder
-- For topic-based: `mgrep "<topic>" {{VAULT}}/` + `Glob` for filenames + `node {{PLUGIN}}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
+- For topic-based: `mgrep "<topic>" {{VAULT}}/` + `Glob` for filenames + `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
 Read each note.
 
@@ -109,8 +109,8 @@ Wait for all scoring agents to complete before proceeding.
 After all scorer agents return, parse their results and emit one provenance event per note via `provenance-emit.js`. Run all emit calls in a single Bash command (chained with `&&`) to avoid excessive tool calls:
 
 ```bash
-node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}' && \
-node "{{PLUGIN}}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","depth":1,"sourcing":1,"linking":1,"voice":2,"atomicity":3,"total":8}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}' && \
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","depth":1,"sourcing":1,"linking":1,"voice":2,"atomicity":3,"total":8}'
 ```
 
 This closes the subagent provenance gap -- scorer agents return text results, the main thread emits them to the provenance system.
@@ -119,7 +119,7 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 Check for cross-note issues using Smart Connections embeddings:
 
-1. For each assessed note, run: `node {{PLUGIN}}/scripts/vault-search.mjs similar "<note-path>" --top 5`
+1. For each assessed note, run: `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5`
 2. Read the top similar notes (score > 0.7)
 3. Flag two types of issues:
 
@@ -224,7 +224,7 @@ Group scored notes by filename prefix to find coherent knowledge clusters ready 
 
 On approval, `mv` all qualifying files from the main thread (not subagents) so the PostToolUse hook captures the promotions. Log a batch provenance event:
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
 ```
 
 Clusters below the 80% threshold are reported but not offered for batch promotion. Individual deep notes within those clusters can still be promoted in the normal batch actions step.

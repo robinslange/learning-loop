@@ -21,4 +21,4 @@ Always archive, never delete. The `_archived/` directory is the safety net.
 - Archived: `feedback_weak_pattern.md` -> `_archived/` (low retrieval, 0/10 sessions, confidence: weak)
 ```
 
-Emit provenance after each operation: `{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"dream","action":"prune","target":"FILENAME"}'`
+Emit provenance after each operation: `PLUGIN/scripts/provenance-emit.js '{"agent":"dream","action":"prune","target":"FILENAME"}'`

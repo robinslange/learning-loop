@@ -63,7 +63,7 @@ Spawn the appropriate agent in the foreground:
 **Linear:** Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent definition at {{PLUGIN}}/agents/ingest-linear.md and follow it exactly.
+Read the agent definition at PLUGIN/agents/ingest-linear.md and follow it exactly.
 
 Scope: {scope}
 State filter: {state_filter or "none"}
@@ -72,7 +72,7 @@ State filter: {state_filter or "none"}
 **Repo:** Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent definition at {{PLUGIN}}/agents/ingest-repo.md and follow it exactly.
+Read the agent definition at PLUGIN/agents/ingest-repo.md and follow it exactly.
 
 Repo path: {repo_path}
 ```
@@ -80,7 +80,7 @@ Repo path: {repo_path}
 **Context:** Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent definition at {{PLUGIN}}/agents/ingest-context.md and follow it exactly.
+Read the agent definition at PLUGIN/agents/ingest-context.md and follow it exactly.
 
 Source label: {source_label or "pasted text"}
 Text:
@@ -91,7 +91,7 @@ Text:
 
 Take the insights JSON returned by the agent.
 
-Read `{{PLUGIN}}/agents/_skills/preview-format.md` and format the preview accordingly.
+Read `PLUGIN/agents/_skills/preview-format.md` and format the preview accordingly.
 
 Display the preview to the user. Wait for confirmation via `AskUserQuestion`:
 
@@ -116,7 +116,7 @@ Determine the project name:
 Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent skill at {{PLUGIN}}/agents/_skills/route-output.md and follow it exactly.
+Read the agent skill at PLUGIN/agents/_skills/route-output.md and follow it exactly.
 
 Project name: {project_name}
 Vault path: {{VAULT}}/

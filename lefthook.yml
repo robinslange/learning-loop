@@ -8,7 +8,7 @@ pre-commit:
              grep -qF "~/brain/learning-loop" "$file" 2>/dev/null || \
              grep -qF "$HOME/brain/brain" "$file" 2>/dev/null || \
              grep -qF "~/brain/brain" "$file" 2>/dev/null; then
-            echo "ERROR: $file contains resolved paths — use {{PLUGIN}} or {{VAULT}} tokens"
+            echo "ERROR: $file contains resolved paths — use PLUGIN or {{VAULT}} tokens"
             exit 1
           fi
         done

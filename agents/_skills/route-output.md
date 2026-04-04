@@ -35,7 +35,7 @@ For each `durable-insight`:
 
 1. Search for existing vault notes on the same topic using:
    ```bash
-   node {{PLUGIN}}/scripts/vault-search.mjs search "<key terms>" --rerank
+   node PLUGIN/scripts/vault-search.mjs search "<key terms>" --rerank
    ```
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
 3. If novel, spawn a `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with:

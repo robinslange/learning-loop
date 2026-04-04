@@ -22,12 +22,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-start","target":"NOTE_FILENAME"}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-start","target":"NOTE_FILENAME"}'
 ```
 
 **At session end:**
 ```bash
-{{PLUGIN}}/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-end","target":"NOTE_FILENAME","promoted":true|false}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-end","target":"NOTE_FILENAME","promoted":true|false}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -53,7 +53,7 @@ Launch the `note-deepener` agent with:
 - **note_path**: Path to the target note (resolve via `Glob` if only a name was given)
 - **vault_path**: `{{VAULT}}/`
 
-The agent definition is at `{{PLUGIN}}/agents/note-deepener.md`.
+The agent definition is at `PLUGIN/agents/note-deepener.md`.
 
 If no note name was provided, pass no note_path — the agent will pick the shallowest inbox note.
 
@@ -68,7 +68,7 @@ If the agent flagged uncaptured sources, suggest `/literature` for each.
 If the note contains write-time verification markers, prioritize resolving them:
 
 - `[unresolved]` -- search for the source via web search. If found, add the URL/DOI and remove the marker. If genuinely unfindable, either find an alternative source for the claim or remove the claim.
-- `[unverified]` -- run `node {{PLUGIN}}/scripts/source-resolver.mjs verify-note <path>` to see the specific issue. Fix the author/year, then remove the marker.
+- `[unverified]` -- run `node PLUGIN/scripts/source-resolver.mjs verify-note <path>` to see the specific issue. Fix the author/year, then remove the marker.
 - `[not in abstract]` -- fetch the full source (web fetch the URL or DOI page). If the number appears in the full text, remove the marker. If it doesn't, either correct the number or add scope qualification.
 
 ## Key Principles

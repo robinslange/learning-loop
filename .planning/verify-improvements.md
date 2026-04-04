@@ -35,7 +35,7 @@ Three issues surfaced:
 
 **Implementation**:
 - In Step 3, after all scorers return, add: "Parse each agent's TSV/table output into JSON score objects"
-- In Step 6 (report), add: "Write all scores to `{{PLUGIN}}/provenance/scores.jsonl` using the Write tool"
+- In Step 6 (report), add: "Write all scores to `PLUGIN/provenance/scores.jsonl` using the Write tool"
 - Each score line: `{"action":"score","target":"note.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3}`
 
 **The hook handler already exists** (lines 71-84 of post-tool-provenance.js). We just need the verify skill to actually write to it.

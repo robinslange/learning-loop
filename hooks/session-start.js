@@ -112,6 +112,12 @@ if (binary && existsSync(DB_PATH) && !isWatchRunning()) {
 
 let context = '';
 
+// 0.5. Inject resolved paths for skill consumption
+context += `## Learning Loop Paths\n`;
+context += `PLUGIN=${PLUGIN_DIR}\n`;
+context += `PLUGIN_DATA=${pluginData}\n`;
+context += `VAULT=${vaultRoot}\n`;
+
 // 1. Detect project from working directory
 const projectDir = process.env.CLAUDE_PROJECT_DIR || '';
 if (projectDir) {

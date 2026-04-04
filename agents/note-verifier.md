@@ -16,13 +16,13 @@ You will receive:
 
 ## Skills
 
-- `{{PLUGIN}}/agents/_skills/vault-io.md` — how to read/write vault files
+- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
 
 ## Process
 
 ### 1. Extract Claims and Sources
 
-When given a topic-based scope rather than a specific note, use `node {{PLUGIN}}/scripts/vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
+When given a topic-based scope rather than a specific note, use `node PLUGIN/scripts/vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
 
 Read the note. Identify:
 - Every factual claim (not opinions or framing)
@@ -37,13 +37,13 @@ For each source with a PMID, PMC ID, or DOI, run the appropriate command:
 
 ```bash
 # For PubMed URLs
-node {{PLUGIN}}/scripts/source-resolver.mjs verify-pmid <pmid> "ClaimedAuthor" <year>
+node PLUGIN/scripts/source-resolver.mjs verify-pmid <pmid> "ClaimedAuthor" <year>
 
 # For DOI URLs
-node {{PLUGIN}}/scripts/source-resolver.mjs verify-doi <doi> "ClaimedAuthor" <year>
+node PLUGIN/scripts/source-resolver.mjs verify-doi <doi> "ClaimedAuthor" <year>
 
 # Or verify all sources in a note at once
-node {{PLUGIN}}/scripts/source-resolver.mjs verify-note <note-path>
+node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
 The resolver returns:
@@ -58,7 +58,7 @@ The resolver returns:
 
 **For sources cited by name without a URL:**
 ```bash
-node {{PLUGIN}}/scripts/source-resolver.mjs resolve "Author Year Topic"
+node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"
 ```
 This searches PubMed → Semantic Scholar → CrossRef. If found, report the correct URL and verify authors match.
 
@@ -67,7 +67,7 @@ This searches PubMed → Semantic Scholar → CrossRef. If found, report the cor
 For quantitative claims, run the mechanical checker first:
 
 ```bash
-node {{PLUGIN}}/scripts/source-resolver.mjs check-claims <note-path>
+node PLUGIN/scripts/source-resolver.mjs check-claims <note-path>
 ```
 
 This extracts specific numbers from the note body and checks whether each appears in the source's abstract. Use results to prioritize which claims need deeper review.
@@ -80,7 +80,7 @@ Then for each source where the resolver returned an abstract:
 
 ### 2c. Cross-Vault Consistency
 
-Check `{{PLUGIN}}/data/citation-index.json` for any PMID that appears in multiple notes. If the same PMID has different authors in different notes, flag it — at least one note is wrong.
+Check `PLUGIN/data/citation-index.json` for any PMID that appears in multiple notes. If the same PMID has different authors in different notes, flag it — at least one note is wrong.
 
 ### 3. Check Claims Against Sources
 
