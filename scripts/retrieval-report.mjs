@@ -2,9 +2,9 @@
 
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
+import { getPluginData } from './lib/config.mjs';
 
-const PD = process.env.CLAUDE_PLUGIN_DATA
-  || join(process.env.HOME || process.env.USERPROFILE, '.claude', 'plugins', 'data', 'learning-loop');
+const PD = getPluginData();
 const dir = join(PD, 'retrieval');
 
 let entries = [];

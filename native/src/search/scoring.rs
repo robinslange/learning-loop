@@ -2,9 +2,22 @@ use std::collections::HashMap;
 
 pub(crate) const RRF_K: f64 = 5.0;
 
-const PRF_ALPHA: f32 = 0.7;
-const PRF_BETA: f32 = 0.3;
-const PRF_K: usize = 3;
+pub(crate) const PRF_ALPHA: f32 = 0.7;
+const _PRF_BETA: f32 = 0.3;
+pub(crate) const PRF_K: usize = 3;
+
+#[derive(Debug, Clone, Copy)]
+pub struct PrfParams {
+    pub alpha: f32,
+    pub beta: f32,
+    pub k: usize,
+}
+
+impl Default for PrfParams {
+    fn default() -> Self {
+        Self { alpha: PRF_ALPHA, beta: 1.0 - PRF_ALPHA, k: PRF_K }
+    }
+}
 
 pub(crate) fn cosine(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
@@ -89,6 +102,15 @@ pub(crate) fn rocchio_prf(
     top_results: &[(String, f64)],
     all_embeddings: &[(i64, String, Vec<f32>)],
 ) -> Vec<(String, f64)> {
+    rocchio_prf_with(query_vec, top_results, all_embeddings, &PrfParams::default())
+}
+
+pub(crate) fn rocchio_prf_with(
+    query_vec: &[f32],
+    top_results: &[(String, f64)],
+    all_embeddings: &[(i64, String, Vec<f32>)],
+    params: &PrfParams,
+) -> Vec<(String, f64)> {
     let dim = query_vec.len();
     let emb_map: HashMap<&str, &Vec<f32>> = all_embeddings
         .iter()
@@ -97,7 +119,7 @@ pub(crate) fn rocchio_prf(
 
     let feedback_vecs: Vec<&Vec<f32>> = top_results
         .iter()
-        .take(PRF_K)
+        .take(params.k)
         .filter_map(|(path, _)| emb_map.get(path.as_str()).copied())
         .collect();
 
@@ -108,7 +130,7 @@ pub(crate) fn rocchio_prf(
     let mut expanded = vec![0.0f32; dim];
     for d in 0..dim {
         let fb_mean: f32 = feedback_vecs.iter().map(|v| v[d]).sum::<f32>() / feedback_vecs.len() as f32;
-        expanded[d] = PRF_ALPHA * query_vec[d] + PRF_BETA * fb_mean;
+        expanded[d] = params.alpha * query_vec[d] + params.beta * fb_mean;
     }
 
     let norm: f32 = expanded.iter().map(|x| x * x).sum::<f32>().sqrt();

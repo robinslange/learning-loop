@@ -44,7 +44,22 @@ if (hookData.stop_hook_active) process.exit(0);
 
 // Reindex + federation sync via binary (fire and forget)
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-const pluginData = process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+function resolvePluginData() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+}
+
+const pluginData = resolvePluginData();
 const watchPid = join(pluginData, 'watch.pid');
 
 function isWatchRunning() {

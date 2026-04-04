@@ -1,15 +1,29 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
 function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
 
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+function resolvePluginData() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+}
+
 function resolveVaultPath() {
   if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
   try {
-    const pluginData = process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+    const pluginData = resolvePluginData();
     const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
     return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
   } catch {}
@@ -93,7 +107,7 @@ function noteExistsInIndex(name, noteIndex) {
 
 function checkDuplicateNote(filePath, title, vaultRoot) {
   try {
-    const pluginData = process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+    const pluginData = resolvePluginData();
     const binPath = join(pluginData, 'bin', 'll-search');
     if (!existsSync(binPath)) return null;
     const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');

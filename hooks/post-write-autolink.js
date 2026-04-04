@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -10,9 +10,18 @@ const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-p
 
 function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
 
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
 function getPluginData() {
-  return process.env.CLAUDE_PLUGIN_DATA
-    || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
 }
 
 function resolveVaultPath() {

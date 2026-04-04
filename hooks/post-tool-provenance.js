@@ -3,20 +3,32 @@
 // Logs vault writes, agent spawns, skill invocations, and vault searches.
 // Receives hook JSON on stdin, emits provenance event, exits.
 
-import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
-const PROVENANCE_DIR = join(
-  process.env.CLAUDE_PLUGIN_DATA || join(homedir(), '.claude', 'plugins', 'data', 'learning-loop'),
-  'provenance'
-);
 function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
+
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+function resolvePluginData() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+}
+
+const pluginData = resolvePluginData();
+const PROVENANCE_DIR = join(pluginData, 'provenance');
 
 function resolveVaultPath() {
   if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
   try {
-    const pluginData = process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
     const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
     return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
   } catch {}

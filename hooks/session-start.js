@@ -11,6 +11,20 @@ import { execFileSync } from 'node:child_process';
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
 
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+function resolvePluginData() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+}
+
 // Clean stale plugin cache versions (only keep current)
 try {
   const cacheParent = resolve(PLUGIN_DIR, '..');
@@ -80,8 +94,7 @@ try {
 // 0. Incremental reindex (fast: 39ms no-op, <500ms with changes)
 const DB_DIR = join(vaultRoot, '.vault-search');
 const DB_PATH = join(DB_DIR, 'vault-index.db');
-const pluginData = process.env.CLAUDE_PLUGIN_DATA
-  || join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+const pluginData = resolvePluginData();
 
 function findBinary() {
   const installed = join(pluginData, 'bin', 'll-search');
@@ -228,7 +241,7 @@ try {
 
 // 7.5. Inject learned patterns if they exist
 const PROVENANCE_DIR = join(
-  process.env.CLAUDE_PLUGIN_DATA || join(home(), '.claude', 'plugins', 'data', 'learning-loop'),
+  pluginData,
   'provenance'
 );
 const patternsFile = join(PROVENANCE_DIR, 'learned-patterns.md');
