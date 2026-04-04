@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 
 pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
     let mut basename_to_path: HashMap<String, String> = HashMap::new();
@@ -208,6 +208,7 @@ pub(crate) fn load_tags_map(conn: &Connection) -> HashMap<String, Vec<String>> {
 mod tests {
     use super::*;
     use super::super::test_helpers::helpers::*;
+    use rusqlite::params;
 
     #[test]
     fn test_ppr_single_seed_chain() {
