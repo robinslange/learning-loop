@@ -131,8 +131,12 @@ pub fn sync_all(
             Message::Binary(data) => {
                 std::fs::create_dir_all(&peer_dir)?;
                 std::fs::write(peer_dir.join("index.db"), &data)?;
-                if let Err(e) = ensure_peer_fts(&peer_dir.join("index.db")) {
+                let peer_db_path = peer_dir.join("index.db");
+                if let Err(e) = ensure_peer_fts(&peer_db_path) {
                     eprintln!("FTS rebuild for {} failed: {e}", peer.peer_id);
+                }
+                if let Err(e) = ensure_peer_embeddings(&peer_db_path, &peer.peer_id) {
+                    eprintln!("Embedding generation for {} failed: {e}", peer.peer_id);
                 }
                 let meta = serde_json::json!({
                     "updated_at": peer.updated_at,
@@ -200,5 +204,69 @@ fn ensure_peer_fts(db_path: &Path) -> anyhow::Result<()> {
         );
         INSERT INTO notes_fts(notes_fts) VALUES('rebuild');"
     )?;
+    Ok(())
+}
+
+fn ensure_peer_embeddings(db_path: &Path, peer_id: &str) -> anyhow::Result<()> {
+    let conn = Connection::open(db_path)?;
+
+    let has_table: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embeddings'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0) > 0;
+
+    let has_data = has_table && conn
+        .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get::<_, i64>(0))
+        .unwrap_or(0) > 0;
+
+    if has_data {
+        return Ok(());
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT nc.id, nc.body FROM notes_content nc WHERE nc.body IS NOT NULL AND nc.body != ''"
+    )?;
+    let notes: Vec<(i64, String)> = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?
+    .filter_map(|r| r.ok())
+    .collect();
+    drop(stmt);
+
+    if notes.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!("Generating embeddings for peer {} ({} notes)...", peer_id, notes.len());
+
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);"
+    )?;
+
+    let batch_size = 32;
+    let mut embedded = 0;
+
+    for chunk in notes.chunks(batch_size) {
+        let texts: Vec<String> = chunk.iter().map(|(_, body)| body.clone()).collect();
+        let vecs = crate::embed::embed_documents(&texts);
+
+        conn.execute_batch("BEGIN TRANSACTION;")?;
+        for ((id, _), vec) in chunk.iter().zip(vecs.iter()) {
+            let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
+            conn.execute(
+                "INSERT OR REPLACE INTO embeddings (id, data) VALUES (?1, ?2)",
+                rusqlite::params![id, blob],
+            )?;
+        }
+        conn.execute_batch("COMMIT;")?;
+
+        embedded += chunk.len();
+        eprintln!("  Embedded {}/{}", embedded, notes.len());
+    }
+
+    eprintln!("Peer {} embeddings complete", peer_id);
     Ok(())
 }
