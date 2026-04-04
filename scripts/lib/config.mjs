@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, copyFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -6,9 +6,21 @@ import { expandHome } from './paths.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+
 export function getPluginData() {
-  return process.env.CLAUDE_PLUGIN_DATA
-    || join(homedir(), '.claude', 'plugins', 'data', 'learning-loop');
+  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  if (fromEnv) {
+    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
+    return fromEnv;
+  }
+
+  try {
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+    if (saved && existsSync(saved)) return saved;
+  } catch {}
+
+  return join(homedir(), '.claude', 'plugins', 'data', 'learning-loop');
 }
 
 export function getPluginRoot() {

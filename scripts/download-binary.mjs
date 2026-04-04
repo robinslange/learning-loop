@@ -2,13 +2,9 @@
 
 import { mkdirSync, chmodSync, existsSync, readFileSync, writeFileSync, createWriteStream, unlinkSync } from 'fs';
 import { join } from 'path';
-import { homedir, platform, arch } from 'os';
+import { platform, arch } from 'os';
 import { execFileSync } from 'child_process';
-
-function getPluginData() {
-  return process.env.CLAUDE_PLUGIN_DATA
-    || join(homedir(), '.claude', 'plugins', 'data', 'learning-loop');
-}
+import { getPluginData } from './lib/config.mjs';
 
 function detectArtifact() {
   const p = platform();

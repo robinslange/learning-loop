@@ -1,12 +1,7 @@
 import { execFileSync } from 'child_process';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';
-import { homedir } from 'os';
-
-function getPluginData() {
-  return process.env.CLAUDE_PLUGIN_DATA
-    || join(homedir(), '.claude', 'plugins', 'data', 'learning-loop');
-}
+import { getPluginData } from './config.mjs';
 
 function findBinary() {
   const pluginData = getPluginData();
