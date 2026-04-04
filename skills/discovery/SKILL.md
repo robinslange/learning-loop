@@ -1,6 +1,6 @@
 ---
 name: discovery
-description: 'Explore a topic interactively with web research and vault context. Usage: /learning-loop:discovery "topic" [--depth shallow|medium|deep] [--style guided|branch|checkpoint] [--tone academic|conversational|persona] [--surf]. --surf skips note creation.'
+description: 'Explore a topic interactively with web research and vault context. Usage: /learning-loop:discovery "topic" [--style guided|branch|checkpoint] [--tone academic|conversational|persona] [--surf]. --surf skips note creation.'
 ---
 
 # Discovery — Interactive Research Journeys
@@ -24,15 +24,14 @@ Parse from the invocation or ask the user. All have defaults.
 | Parameter | Options | Default |
 |-----------|---------|---------|
 | **style** | `guided` / `branch` / `checkpoint` | `guided` |
-| **depth** | `shallow` / `medium` / `deep` | `medium` |
 | **tone** | `academic` / `conversational` / `persona` | `conversational` |
 | **capture** | `full` / `surf` | `full` |
 
 **Examples:**
 - `/discovery "spaced repetition"` — all defaults
-- `/discovery "spaced repetition" --style branch --depth deep`
+- `/discovery "spaced repetition" --style branch`
 - `/discovery "spaced repetition" --surf` — lightweight, no artifacts until asked
-- `/discovery --shallow --academic "CRISPR gene drives"`
+- `/discovery --academic "CRISPR gene drives"`
 
 ## Styles
 
@@ -51,7 +50,7 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start (after scope identified):**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH","style":"STYLE","capture":"MODE"}}'
+PLUGIN/scripts/provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-start","intent":"TOPIC","config":{"style":"STYLE","capture":"MODE"}}'
 ```
 
 **At session end (after all rounds complete):**
@@ -74,7 +73,6 @@ Ask what the user is curious about. Include a brief mention of available options
 >
 > Optional settings (all have sensible defaults):
 > - **Style:** `guided` (Socratic, default) · `branch` (choose-your-own-adventure) · `checkpoint` (research burst then react)
-> - **Depth:** `shallow` · `medium` (default) · `deep`
 > - **Tone:** `conversational` (default) · `academic` · `persona` (vault voice)
 > - **Mode:** `full` (captures notes, default) · `surf` (explore only, no artifacts)
 
@@ -95,7 +93,7 @@ Launch both subagents in parallel:
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)
 
 2. **Researcher** (`discovery-researcher`): Search the web for landscape overview.
-   - Pass: topic, depth, existing_knowledge (empty on first pass — vault scout results feed into subsequent rounds)
+   - Pass: topic, existing_knowledge (empty on first pass — vault scout results feed into subsequent rounds)
 
 While agents work, confirm parameters with the user if any were ambiguous.
 
@@ -126,7 +124,6 @@ Repeat until the user says "done", "wrap up", or similar:
    - The new angle/question
    - `prior_rounds`: summary of what's been covered (prevent repetition)
    - `existing_knowledge`: vault scout findings + prior round findings
-   - Current depth setting
 3. **Present** — deliver findings in chosen style and tone
 4. **Capture** (if `full` mode) — after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body — don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
 
@@ -165,7 +162,7 @@ Sources worth capturing (run /literature):
 
 ```
 Discovery: "[topic]"
-Style: guided | Depth: medium | Rounds: N
+Style: guided | Rounds: N
 Captured: N notes → 0-inbox/
 Synthesis: "Synthesis Note Title" → 0-inbox/
 Sources found: N (run /literature to capture)
@@ -180,8 +177,8 @@ Sources found: N (run /literature to capture)
 
 ### discovery-researcher
 - Launch at Step 1 and each loop iteration
-- Pass topic, angle, depth, existing_knowledge, prior_rounds
-- Scale search intensity to depth parameter
+- Pass topic, angle, existing_knowledge, prior_rounds
+- Search intensity is self-regulating via mechanical convergence detection
 - Use results as the raw material for presentation
 - **Internally spawns `note-verifier`** on its own findings before returning. Revises and re-verifies up to 3 times. All findings presented to the user are pre-verified.
 
@@ -204,7 +201,7 @@ Hemingway/Musashi/Lao Tzu vault voice. Short sentences. No filler. Active voice.
 
 - **Follow curiosity, not curriculum.** The user steers. Don't impose a syllabus.
 - **Never fabricate.** If agents can't find evidence, say so. Gaps are findings too.
-- **Scale effort to depth.** Shallow = quick orientation. Deep = systematic multi-source investigation. Don't over-research a shallow session.
+- **Effort scales to the gap.** The researcher searches until mechanical convergence signals say it's found enough. Dense topics get more queries; sparse topics stop early. No manual depth tuning needed.
 - **Vault-first.** Always check what's already known before going external. The most valuable discoveries connect new knowledge to existing understanding.
 - **Atomic captures.** Each trail note is one idea. The synthesis note links them. Don't write monoliths.
 - **Sources stay separate.** Flag sources for `/literature`. Don't create literature notes during discovery.
