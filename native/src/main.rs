@@ -282,6 +282,7 @@ fn main() {
             out(&result);
         }
         Commands::Sync { db_path, vault_path, config_dir } => {
+            init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let config = ll_search::sync::config::load_config(&config_dir)
                 .expect("failed to load federation config");
