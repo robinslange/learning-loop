@@ -13,8 +13,6 @@ enum Commands {
         vault_path: String,
         db_path: String,
         #[arg(long)]
-        incremental: bool,
-        #[arg(long)]
         force: bool,
         #[arg(long)]
         sync: bool,
