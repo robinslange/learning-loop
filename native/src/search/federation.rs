@@ -99,14 +99,32 @@ pub(crate) fn load_title_federated(
 }
 
 pub(crate) fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<String, String> {
+    if paths.is_empty() {
+        return HashMap::new();
+    }
+
+    let placeholders: String = (0..paths.len())
+        .map(|i| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT n.path, nc.body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path IN ({})",
+        placeholders
+    );
+
+    let mut stmt = match conn.prepare(&sql) {
+        Ok(s) => s,
+        Err(_) => return HashMap::new(),
+    };
+
+    let sql_params: Vec<&dyn rusqlite::types::ToSql> =
+        paths.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
     let mut map = HashMap::new();
-    for path in paths {
-        if let Ok(body) = conn.query_row(
-            "SELECT nc.body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path = ?1",
-            params![path],
-            |row| row.get::<_, String>(0),
-        ) {
-            map.insert(path.clone(), body);
+    if let Ok(rows) = stmt.query_map(sql_params.as_slice(), |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    }) {
+        for row in rows.flatten() {
+            map.insert(row.0, row.1);
         }
     }
     map
@@ -190,6 +208,22 @@ mod tests {
         let peers = discover_peer_dbs(tmp.path(), "test-model");
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].0, "alice");
+    }
+
+    #[test]
+    fn test_batch_load_bodies_multiple_paths() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_test_db(&[
+            ("a.md", "a", "body a", &emb),
+            ("b.md", "b", "body b", &emb),
+            ("c.md", "c", "body c", &emb),
+        ]);
+
+        let paths = vec!["a.md".to_string(), "c.md".to_string()];
+        let bodies = batch_load_bodies(&conn, &paths);
+        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies.get("a.md").unwrap(), "body a");
+        assert_eq!(bodies.get("c.md").unwrap(), "body c");
     }
 
     #[test]
