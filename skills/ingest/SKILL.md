@@ -1,13 +1,13 @@
 ---
 name: ingest
-description: 'Pull external context into the second brain. Usage: /learning-loop:ingest linear ["project"], /learning-loop:ingest repo [path], /learning-loop:ingest context, /learning-loop:ingest (prompts for source).'
+description: 'Pull external context into the second brain. Handles any format Claude can read: PDFs, images, code, conversations, docs, or raw text. Usage: /learning-loop:ingest linear ["project"], /learning-loop:ingest repo [path], /learning-loop:ingest context, /learning-loop:ingest (prompts for source).'
 ---
 
 # Ingest — External Context Import
 
 ## Overview
 
-Pulls data from external sources (Linear, repositories, pasted text), extracts atomic insights, previews them for confirmation, then routes to auto-memory and/or vault notes.
+Pulls data from external sources (Linear, repositories, or any content Claude can read), extracts atomic insights, previews them for confirmation, then routes to auto-memory and/or vault notes. The context mode accepts anything: PDFs, images, code files, conversation dumps, documents, or plain text.
 
 ## When to Use
 
@@ -16,7 +16,7 @@ Pulls data from external sources (Linear, repositories, pasted text), extracts a
 - `/ingest linear --state "In Progress"` — filter by ticket state
 - `/ingest repo ~/path/to/repo` — scan a repository
 - `/ingest repo` — prompt for repo path
-- `/ingest context` — prompt user to paste text
+- `/ingest context` — provide any content (paste text, give a file path, drop an image)
 - `/ingest` — ask which source type
 
 ## Process
@@ -32,7 +32,7 @@ Use `AskUserQuestion`:
 >
 > - **linear** — Pull Linear tickets (my assigned, or a specific project)
 > - **repo** — Scan a repository for architecture and patterns
-> - **context** — Paste text to extract insights from
+> - **context** — Provide any content (text, PDF, image, code, doc) to extract insights from
 
 **Source type provided:**
 Parse remaining args as source-specific parameters.
@@ -52,8 +52,9 @@ Parse remaining args as source-specific parameters.
 - Announce: "Scanning {path}..."
 
 **Context:**
-- `AskUserQuestion`: "Paste the text you'd like to ingest. I'll extract insights when you're done."
-- Announce: "Extracting insights from pasted text..."
+- `AskUserQuestion`: "What would you like to ingest? You can paste text, provide a file path (PDF, image, code, doc), or describe what you'd like to import."
+- If a file path is given, read it with the Read tool before passing to the agent.
+- Announce: "Extracting insights..."
 
 ### Step 2: Launch Source Agent
 

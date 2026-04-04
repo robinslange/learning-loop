@@ -433,11 +433,154 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
     let total = total as usize;
     eprintln!("Index complete: {} notes indexed", total);
 
+    compute_sessions(conn);
+    compute_project_phases(conn);
+
     IndexResult {
         embedded: embedded_items.len(),
         deleted: to_delete.len(),
         total,
     }
+}
+
+pub fn compute_sessions(conn: &Connection) {
+    let has_session_col = conn.prepare("SELECT session_id FROM notes LIMIT 0").is_ok();
+    if !has_session_col {
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN session_id INTEGER;").unwrap();
+    }
+
+    let mut notes: Vec<(i64, f64)> = Vec::new();
+    if let Ok(mut stmt) = conn.prepare("SELECT id, mtime FROM notes ORDER BY mtime") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, f64>(1)?))
+        }) {
+            for row in rows.flatten() {
+                notes.push(row);
+            }
+        }
+    }
+
+    if notes.is_empty() {
+        return;
+    }
+
+    let gaps_min: Vec<f64> = notes.windows(2)
+        .map(|w| ((w[1].1 - w[0].1) / 60_000.0).max(0.0))
+        .collect();
+
+    let threshold_min = find_session_threshold(&gaps_min);
+    eprintln!("Session threshold: {:.0} minutes ({} notes)", threshold_min, notes.len());
+
+    let mut session_id: i64 = 0;
+    let mut assignments: Vec<(i64, i64)> = Vec::with_capacity(notes.len());
+    assignments.push((notes[0].0, session_id));
+
+    for i in 1..notes.len() {
+        let gap_min = (notes[i].1 - notes[i - 1].1) / 60_000.0;
+        if gap_min > threshold_min {
+            session_id += 1;
+        }
+        assignments.push((notes[i].0, session_id));
+    }
+
+    conn.execute_batch("BEGIN TRANSACTION;").unwrap();
+    for (note_id, sid) in &assignments {
+        conn.execute(
+            "UPDATE notes SET session_id = ?1 WHERE id = ?2",
+            params![sid, note_id],
+        ).ok();
+    }
+    conn.execute_batch("COMMIT;").unwrap();
+
+    eprintln!("Assigned {} sessions across {} notes", session_id + 1, notes.len());
+}
+
+fn find_session_threshold(gaps_min: &[f64]) -> f64 {
+    if gaps_min.is_empty() {
+        return 30.0;
+    }
+
+    let max_bucket = 480;
+    let mut counts = vec![0u32; max_bucket + 1];
+    for &g in gaps_min {
+        let bucket = (g as usize).min(max_bucket);
+        counts[bucket] += 1;
+    }
+
+    let window = 10i32;
+    let mut smoothed = vec![0.0f64; max_bucket + 1];
+    for m in 0..=max_bucket {
+        let mut sum = 0.0;
+        let mut n = 0;
+        for d in -window..=window {
+            let idx = m as i32 + d;
+            if idx >= 0 && idx <= max_bucket as i32 {
+                sum += counts[idx as usize] as f64;
+                n += 1;
+            }
+        }
+        smoothed[m] = sum / n as f64;
+    }
+
+    let search_start = 15;
+    let search_end = 120.min(max_bucket);
+    let mut min_val = f64::MAX;
+    let mut min_idx = 30;
+
+    for m in search_start..=search_end {
+        if smoothed[m] < min_val {
+            min_val = smoothed[m];
+            min_idx = m;
+        }
+    }
+
+    min_idx as f64
+}
+
+pub fn compute_project_phases(conn: &Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_phases (
+            tag TEXT PRIMARY KEY,
+            first_mtime REAL,
+            last_mtime REAL,
+            note_count INTEGER
+        );"
+    ).ok();
+
+    let mut tag_data: HashMap<String, (f64, f64, usize)> = HashMap::new();
+
+    if let Ok(mut stmt) = conn.prepare("SELECT tags, mtime FROM notes WHERE tags IS NOT NULL AND tags != ''") {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+        }) {
+            for row in rows.flatten() {
+                let (tags_str, mtime) = row;
+                let mtime_sec = mtime / 1000.0;
+                for tag in tags_str.split_whitespace() {
+                    let tag = tag.to_lowercase();
+                    if tag.is_empty() {
+                        continue;
+                    }
+                    let entry = tag_data.entry(tag).or_insert((f64::MAX, f64::MIN, 0));
+                    entry.0 = entry.0.min(mtime_sec);
+                    entry.1 = entry.1.max(mtime_sec);
+                    entry.2 += 1;
+                }
+            }
+        }
+    }
+
+    conn.execute_batch("DELETE FROM project_phases;").ok();
+    for (tag, (first, last, count)) in &tag_data {
+        if *count >= 3 {
+            conn.execute(
+                "INSERT OR REPLACE INTO project_phases (tag, first_mtime, last_mtime, note_count) VALUES (?1, ?2, ?3, ?4)",
+                params![tag, first, last, count],
+            ).ok();
+        }
+    }
+
+    eprintln!("Computed {} project phase tags", tag_data.len());
 }
 
 pub fn get_status(conn: &Connection, vault_path: &str) -> Status {
@@ -690,6 +833,94 @@ pub fn drop_old_embeddings(conn: &Connection) {
     conn.execute_batch("DROP TABLE IF EXISTS embeddings_old;")
         .ok();
     conn.execute_batch("VACUUM;").ok();
+}
+
+#[derive(Serialize)]
+pub struct TagInfo {
+    pub tag: String,
+    pub count: usize,
+    pub first_mtime: f64,
+    pub last_mtime: f64,
+}
+
+pub fn list_tags(conn: &Connection, min_count: usize) -> Vec<TagInfo> {
+    let mut result: Vec<TagInfo> = Vec::new();
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT tag, note_count, first_mtime, last_mtime FROM project_phases WHERE note_count >= ?1 ORDER BY note_count DESC"
+    ) {
+        if let Ok(rows) = stmt.query_map(params![min_count as i64], |row| {
+            Ok(TagInfo {
+                tag: row.get(0)?,
+                count: row.get::<_, i64>(1)? as usize,
+                first_mtime: row.get(2)?,
+                last_mtime: row.get(3)?,
+            })
+        }) {
+            result = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+
+    result
+}
+
+#[derive(Serialize)]
+pub struct SessionInfo {
+    pub session_id: i64,
+    pub note_count: usize,
+    pub first_mtime: f64,
+    pub last_mtime: f64,
+    pub sample_titles: Vec<String>,
+}
+
+pub fn list_sessions(conn: &Connection, min_notes: usize) -> Vec<SessionInfo> {
+    let has_session_col = conn.prepare("SELECT session_id FROM notes LIMIT 0").is_ok();
+    if !has_session_col {
+        return Vec::new();
+    }
+
+    let mut sessions: HashMap<i64, (usize, f64, f64, Vec<String>)> = HashMap::new();
+
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT n.session_id, n.mtime, nc.title FROM notes n LEFT JOIN notes_content nc ON n.id = nc.id WHERE n.session_id IS NOT NULL ORDER BY n.mtime"
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, f64>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        }) {
+            for row in rows.flatten() {
+                let (sid, mtime, title) = row;
+                let mtime_sec = mtime / 1000.0;
+                let entry = sessions.entry(sid).or_insert((0, f64::MAX, f64::MIN, Vec::new()));
+                entry.0 += 1;
+                entry.1 = entry.1.min(mtime_sec);
+                entry.2 = entry.2.max(mtime_sec);
+                if entry.3.len() < 3 {
+                    if let Some(t) = title {
+                        entry.3.push(t);
+                    }
+                }
+            }
+        }
+    }
+
+    let mut result: Vec<SessionInfo> = sessions
+        .into_iter()
+        .filter(|(_, (count, _, _, _))| *count >= min_notes)
+        .map(|(sid, (count, first, last, titles))| SessionInfo {
+            session_id: sid,
+            note_count: count,
+            first_mtime: first,
+            last_mtime: last,
+            sample_titles: titles,
+        })
+        .collect();
+
+    result.sort_by(|a, b| b.first_mtime.partial_cmp(&a.first_mtime).unwrap_or(std::cmp::Ordering::Equal));
+    result
 }
 
 pub fn days_to_ymd(days_since_epoch: u64) -> (u64, u64, u64) {
