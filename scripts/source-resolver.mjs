@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 // Source resolver for the learning-loop pipeline.
-// Resolves citations to verified metadata via PubMed, Semantic Scholar, and CrossRef APIs.
+// Resolves citations to verified metadata via PubMed, Europe PMC, arXiv, Semantic Scholar,
+// CrossRef, OpenAlex, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL APIs.
 // Maintains a citation index for cross-vault consistency checks.
 //
 // Usage:
@@ -9,6 +10,10 @@
 //   source-resolver.mjs verify-pmid <pmid> "Author" <year> Verify a specific PMID against claimed author/year
 //   source-resolver.mjs verify-doi <doi> "Author" <year>   Verify a specific DOI against claimed author/year
 //   source-resolver.mjs verify-note <path>                  Verify all sources in a vault note
+//   source-resolver.mjs verify-arxiv <arxiv-id>             Verify an arXiv paper by ID
+//   source-resolver.mjs verify-rfc <rfc-number>             Verify an RFC by number
+//   source-resolver.mjs verify-isbn <isbn>                  Verify a book by ISBN
+//   source-resolver.mjs lookup-compound <name>              Look up a compound in ChEMBL
 //   source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
@@ -17,7 +22,15 @@ import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 
 const DATA_DIR = resolve(join(import.meta.dirname, '..', 'data'));
 const INDEX_PATH = join(DATA_DIR, 'citation-index.json');
+const CONFIG_PATH = resolve(join(import.meta.dirname, '..', 'data', 'resolver-config.json'));
 const RATE_LIMIT_MS = 500; // PubMed: 3 req/sec without API key, padded for safety
+
+function loadConfig() {
+  if (!existsSync(CONFIG_PATH)) return {};
+  try { return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')); } catch { return {}; }
+}
+
+const CONFIG = loadConfig();
 
 // --- API Clients ---
 
@@ -206,6 +219,308 @@ async function crossrefSearch(query, rows = 5) {
   });
 }
 
+// --- Europe PMC ---
+
+async function europmcSearch(query, pageSize = 5) {
+  const url = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&format=json&pageSize=${pageSize}&resultType=core`;
+  const data = await fetchJSON(url);
+  if (!data?.resultList?.result) return [];
+  return data.resultList.result.map(r => ({
+    source: 'europepmc',
+    pmid: r.pmid || null,
+    pmc: r.pmcid || null,
+    doi: r.doi || null,
+    title: r.title,
+    authors: r.authorString ? r.authorString.split(', ').map(a => a.replace(/\.$/, '')) : [],
+    firstAuthor: r.authorList?.author?.[0]?.lastName || (r.authorString || '').split(',')[0]?.trim() || null,
+    year: r.pubYear ? parseInt(r.pubYear) : null,
+    journal: r.journalTitle || null,
+    abstract: r.abstractText || null,
+    studyType: r.pubType || null,
+    species: null,
+    sampleSize: null,
+    funding: [],
+    coiStatement: null,
+    url: r.doi ? `https://doi.org/${r.doi}` : (r.pmid ? `https://pubmed.ncbi.nlm.nih.gov/${r.pmid}/` : null)
+  }));
+}
+
+// --- arXiv ---
+
+function parseArxivEntry(entryXml) {
+  const title = parseXMLTag(entryXml, 'title')?.replace(/\s+/g, ' ');
+  const abstract = parseXMLTag(entryXml, 'summary')?.replace(/\s+/g, ' ');
+  const published = parseXMLTag(entryXml, 'published');
+  const year = published ? parseInt(published.substring(0, 4)) : null;
+
+  const authorRe = /<author>\s*<name>([^<]+)<\/name>/g;
+  const authors = [];
+  let am;
+  while ((am = authorRe.exec(entryXml)) !== null) authors.push(am[1].trim());
+
+  const idTag = parseXMLTag(entryXml, 'id');
+  const arxivId = idTag?.match(/abs\/(.+)/)?.[1]?.replace(/v\d+$/, '') || null;
+
+  const categoryRe = /category\s+term="([^"]+)"/g;
+  const categories = [];
+  let cm;
+  while ((cm = categoryRe.exec(entryXml)) !== null) categories.push(cm[1]);
+
+  const doiTag = entryXml.match(/<arxiv:doi[^>]*>([^<]+)<\/arxiv:doi>/)?.[1] || null;
+
+  return {
+    source: 'arxiv',
+    pmid: null,
+    pmc: null,
+    doi: doiTag,
+    arxivId,
+    title,
+    authors,
+    firstAuthor: authors[0] || null,
+    year,
+    journal: null,
+    abstract,
+    studyType: 'preprint',
+    species: null,
+    sampleSize: null,
+    funding: [],
+    coiStatement: null,
+    categories,
+    url: arxivId ? `https://arxiv.org/abs/${arxivId}` : null
+  };
+}
+
+async function arxivFetchById(arxivId) {
+  const cleanId = arxivId.replace(/^arxiv:/i, '').replace(/v\d+$/, '');
+  const url = `https://export.arxiv.org/api/query?id_list=${encodeURIComponent(cleanId)}&max_results=1`;
+  const xml = await fetchXML(url);
+  if (!xml) return null;
+  const entry = parseXMLTag(xml, 'entry');
+  if (!entry || entry.includes('<title>Error</title>')) return null;
+  return parseArxivEntry(entry);
+}
+
+async function arxivSearch(query, maxResults = 5) {
+  await sleep(RATE_LIMIT_MS);
+  const url = `https://export.arxiv.org/api/query?search_query=all:${encodeURIComponent(query)}&start=0&max_results=${maxResults}`;
+  const xml = await fetchXML(url);
+  if (!xml) return [];
+  const entries = parseXMLTags(xml, 'entry');
+  return entries.map(e => parseArxivEntry(e)).filter(e => e.title);
+}
+
+// --- OpenAlex ---
+
+async function openalexSearch(query, perPage = 5) {
+  const url = `https://api.openalex.org/works?search=${encodeURIComponent(query)}&per_page=${perPage}`;
+  const data = await fetchJSON(url);
+  if (!data?.results) return [];
+  return data.results.map(w => {
+    const authors = (w.authorships || []).map(a => a.author?.display_name).filter(Boolean);
+    return {
+      source: 'openalex',
+      pmid: w.ids?.pmid?.replace('https://pubmed.ncbi.nlm.nih.gov/', '') || null,
+      pmc: null,
+      doi: w.doi?.replace('https://doi.org/', '') || null,
+      title: w.display_name || w.title,
+      authors,
+      firstAuthor: authors[0] || null,
+      year: w.publication_year,
+      journal: w.primary_location?.source?.display_name || null,
+      abstract: w.abstract_inverted_index ? reconstructAbstract(w.abstract_inverted_index) : null,
+      studyType: w.type || null,
+      species: null,
+      sampleSize: null,
+      funding: [],
+      coiStatement: null,
+      url: w.doi || w.id
+    };
+  });
+}
+
+function reconstructAbstract(invertedIndex) {
+  if (!invertedIndex) return null;
+  const words = [];
+  for (const [word, positions] of Object.entries(invertedIndex)) {
+    for (const pos of positions) words[pos] = word;
+  }
+  return words.join(' ');
+}
+
+// --- bioRxiv / medRxiv ---
+
+async function biorxivFetchByDoi(doi) {
+  const cleanDoi = doi.replace(/^10\.1101\//, '');
+  const url = `https://api.biorxiv.org/details/biorxiv/${cleanDoi}`;
+  let data = await fetchJSON(url);
+  if (!data?.collection?.length) {
+    const murl = `https://api.biorxiv.org/details/medrxiv/${cleanDoi}`;
+    data = await fetchJSON(murl);
+  }
+  if (!data?.collection?.length) return null;
+  const p = data.collection[0];
+  const authors = p.authors ? p.authors.split('; ').map(a => a.trim()) : [];
+  return {
+    source: 'biorxiv',
+    pmid: null,
+    pmc: null,
+    doi: p.doi || doi,
+    title: p.title,
+    authors,
+    firstAuthor: authors[0] || null,
+    year: p.date ? parseInt(p.date.substring(0, 4)) : null,
+    journal: p.published && p.published !== 'NA' ? p.published : (p.server || 'bioRxiv'),
+    abstract: p.abstract || null,
+    studyType: 'preprint',
+    species: null,
+    sampleSize: null,
+    funding: [],
+    coiStatement: null,
+    url: `https://doi.org/${p.doi || doi}`
+  };
+}
+
+// --- DBLP ---
+
+async function dblpSearch(query, maxResults = 5) {
+  const url = `https://dblp.org/search/publ/api?q=${encodeURIComponent(query)}&format=json&h=${maxResults}`;
+  const data = await fetchJSON(url);
+  const hits = data?.result?.hits?.hit;
+  if (!hits || !Array.isArray(hits)) return [];
+  return hits.map(h => {
+    const info = h.info || {};
+    let authors = [];
+    if (info.authors?.author) {
+      const raw = info.authors.author;
+      authors = (Array.isArray(raw) ? raw : [raw]).map(a => typeof a === 'string' ? a : a.text || '');
+    }
+    return {
+      source: 'dblp',
+      pmid: null, pmc: null,
+      doi: info.doi || null,
+      title: info.title,
+      authors,
+      firstAuthor: authors[0] || null,
+      year: info.year ? parseInt(info.year) : null,
+      journal: info.venue || null,
+      abstract: null,
+      studyType: info.type || null,
+      species: null,
+      sampleSize: null,
+      funding: [],
+      coiStatement: null,
+      url: info.ee || (info.doi ? `https://doi.org/${info.doi}` : null)
+    };
+  });
+}
+
+// --- Unpaywall ---
+
+async function unpaywallVerifyDoi(doi) {
+  const email = CONFIG.unpaywall_email;
+  if (!email) return null;
+  const url = `https://api.unpaywall.org/v2/${encodeURIComponent(doi)}?email=${encodeURIComponent(email)}`;
+  const data = await fetchJSON(url);
+  if (!data || data.error) return null;
+  return {
+    doi: data.doi,
+    title: data.title,
+    year: data.year,
+    journal: data.journal_name,
+    is_oa: data.is_oa,
+    oa_url: data.best_oa_location?.url || null,
+    publisher: data.publisher
+  };
+}
+
+// --- RFC Editor ---
+
+async function rfcFetch(rfcNumber) {
+  const num = String(rfcNumber).replace(/^rfc/i, '');
+  const url = `https://www.rfc-editor.org/rfc/rfc${num}.json`;
+  const data = await fetchJSON(url);
+  if (!data) return null;
+  const authors = (data.authors || []).map(a =>
+    typeof a === 'string' ? a : a.name || `${a.given || ''} ${a.family || ''}`.trim()
+  );
+  return {
+    source: 'rfc',
+    pmid: null, pmc: null, doi: null,
+    rfcNumber: parseInt(num),
+    title: data.title,
+    authors,
+    firstAuthor: authors[0] || null,
+    year: data.pub_date ? parseInt(data.pub_date.match(/\d{4}/)?.[0]) : null,
+    journal: 'IETF RFC',
+    abstract: data.abstract || null,
+    studyType: 'standard',
+    species: null,
+    sampleSize: null,
+    funding: [],
+    coiStatement: null,
+    status: data.pub_status || data.status,
+    url: `https://www.rfc-editor.org/rfc/rfc${num}`
+  };
+}
+
+// --- Open Library (ISBN) ---
+
+async function openLibraryFetchISBN(isbn) {
+  const cleanIsbn = isbn.replace(/[-\s]/g, '');
+  const url = `https://openlibrary.org/api/books?bibkeys=ISBN:${cleanIsbn}&format=json&jscmd=data`;
+  const data = await fetchJSON(url);
+  if (!data) return null;
+  const entry = data[`ISBN:${cleanIsbn}`];
+  if (!entry) return null;
+  const authors = (entry.authors || []).map(a => a.name);
+  return {
+    source: 'openlibrary',
+    pmid: null, pmc: null, doi: null,
+    isbn: cleanIsbn,
+    title: entry.title,
+    subtitle: entry.subtitle || null,
+    authors,
+    firstAuthor: authors[0] || null,
+    year: entry.publish_date ? parseInt(entry.publish_date.match(/\d{4}/)?.[0]) : null,
+    journal: null,
+    publisher: (entry.publishers || [])[0]?.name || null,
+    pages: entry.number_of_pages || null,
+    abstract: null,
+    studyType: 'book',
+    species: null,
+    sampleSize: null,
+    funding: [],
+    coiStatement: null,
+    url: entry.url
+  };
+}
+
+// --- ChEMBL ---
+
+async function chemblLookup(compoundName) {
+  const url = `https://www.ebi.ac.uk/chembl/api/data/molecule?pref_name__iexact=${encodeURIComponent(compoundName)}&format=json`;
+  let data = await fetchJSON(url);
+  if (!data?.molecules?.length) {
+    const searchUrl = `https://www.ebi.ac.uk/chembl/api/data/molecule/search?q=${encodeURIComponent(compoundName)}&format=json`;
+    data = await fetchJSON(searchUrl);
+  }
+  if (!data?.molecules?.length) return null;
+  const mol = data.molecules[0];
+  return {
+    source: 'chembl',
+    chemblId: mol.molecule_chembl_id,
+    name: mol.pref_name,
+    formula: mol.molecule_properties?.full_molformula || null,
+    molecularWeight: mol.molecule_properties?.full_mwt || null,
+    maxPhase: mol.max_phase,
+    firstApproval: mol.first_approval,
+    naturalProduct: !!mol.natural_product,
+    atcClassifications: mol.atc_classifications || [],
+    synonyms: (mol.molecule_synonyms || []).map(s => s.molecule_synonym || s.synonyms),
+    url: `https://www.ebi.ac.uk/chembl/compound_report_card/${mol.molecule_chembl_id}/`
+  };
+}
+
 // --- Heuristic Extractors ---
 
 function inferStudyType(pubTypes, abstractLower) {
@@ -298,6 +613,22 @@ async function resolveSource(query) {
     if (match) return { resolved: true, ...match };
   }
 
+  // Europe PMC (broader than PubMed - preprints, clinical guidelines)
+  await sleep(200);
+  const epmcResults = await europmcSearch(query, 5);
+  if (epmcResults.length > 0) {
+    const match = bestAuthorMatch(epmcResults, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
+
+  // arXiv (CS, ML, physics, math preprints)
+  await sleep(200);
+  const arxivResults = await arxivSearch(query, 5);
+  if (arxivResults.length > 0) {
+    const match = bestAuthorMatch(arxivResults, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
+
   await sleep(200);
   const s2Results = await semanticScholarSearch(query, 5);
   if (s2Results.length > 0) {
@@ -309,6 +640,22 @@ async function resolveSource(query) {
   const crResults = await crossrefSearch(query, 5);
   if (crResults.length > 0) {
     const match = bestAuthorMatch(crResults, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
+
+  // OpenAlex (catch-all, 250M+ works across all disciplines)
+  await sleep(200);
+  const oaResults = await openalexSearch(query, 5);
+  if (oaResults.length > 0) {
+    const match = bestAuthorMatch(oaResults, claimedAuthor);
+    if (match) return { resolved: true, ...match };
+  }
+
+  // DBLP (CS bibliography fallback)
+  await sleep(200);
+  const dblpResults = await dblpSearch(query, 5);
+  if (dblpResults.length > 0) {
+    const match = bestAuthorMatch(dblpResults, claimedAuthor);
     if (match) return { resolved: true, ...match };
   }
 
@@ -452,6 +799,8 @@ function extractSourcesFromNote(content) {
     const pmidMatch = url.match(/pubmed\.ncbi\.nlm\.nih\.gov\/(\d+)/);
     const pmcMatch = url.match(/(?:pmc\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov\/pmc)\/articles\/(PMC\d+)/);
     const doiMatch = url.match(/doi\.org\/(.+)/);
+    const arxivUrlMatch = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5}(?:v\d+)?)/);
+    const rfcUrlMatch = url.match(/rfc-editor\.org\/rfc\/rfc(\d{3,5})/);
 
     const authorYearMatch = text.match(/^([A-Z][a-z\u00C0-\u024F]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-z\u00C0-\u024F]+|[A-Z][a-z\u00C0-\u024F]+))*)\s*[\(,]?\s*(\d{4})/);
 
@@ -461,6 +810,8 @@ function extractSourcesFromNote(content) {
       pmid: pmidMatch?.[1] || null,
       pmc: pmcMatch?.[1] || null,
       doi: doiMatch?.[1] || null,
+      arxivId: arxivUrlMatch?.[1]?.replace(/v\d+$/, '') || null,
+      rfcNumber: rfcUrlMatch?.[1] || null,
       claimedAuthor: authorYearMatch?.[1] || null,
       claimedYear: authorYearMatch?.[2] ? parseInt(authorYearMatch[2]) : null
     });
@@ -519,6 +870,54 @@ function extractSourcesFromNote(content) {
     }
   }
 
+  // Match arXiv IDs: "arXiv:1706.03762" or "arxiv.org/abs/1706.03762"
+  const arxivInlineRe = /(?:arXiv:\s*|arxiv\.org\/abs\/)(\d{4}\.\d{4,5}(?:v\d+)?)/gi;
+  while ((m = arxivInlineRe.exec(content)) !== null) {
+    const arxivId = m[1].replace(/v\d+$/, '');
+    if (!sources.some(s => s.arxivId === arxivId)) {
+      sources.push({
+        text: `arXiv:${arxivId}`,
+        url: `https://arxiv.org/abs/${arxivId}`,
+        pmid: null, pmc: null, doi: null,
+        arxivId,
+        claimedAuthor: null,
+        claimedYear: null
+      });
+    }
+  }
+
+  // Match RFC references: "RFC 9110", "RFC9110", "rfc-editor.org/rfc/rfc9110"
+  const rfcInlineRe = /(?:RFC\s*(\d{3,5})|rfc-editor\.org\/rfc\/rfc(\d{3,5}))/gi;
+  while ((m = rfcInlineRe.exec(content)) !== null) {
+    const rfcNum = m[1] || m[2];
+    if (!sources.some(s => s.rfcNumber === rfcNum)) {
+      sources.push({
+        text: `RFC ${rfcNum}`,
+        url: `https://www.rfc-editor.org/rfc/rfc${rfcNum}`,
+        pmid: null, pmc: null, doi: null,
+        rfcNumber: rfcNum,
+        claimedAuthor: null,
+        claimedYear: null
+      });
+    }
+  }
+
+  // Match ISBNs: "ISBN 978-0-14-312779-6", "ISBN: 9780143127796", "ISBN 90-5699-501-4"
+  const isbnInlineRe = /ISBN[:\s]*([\d][\d\s-]{8,16}[\dX])/gi;
+  while ((m = isbnInlineRe.exec(content)) !== null) {
+    const isbn = m[1].replace(/[-\s]/g, '');
+    if (!sources.some(s => s.isbn === isbn)) {
+      sources.push({
+        text: `ISBN ${isbn}`,
+        url: null,
+        pmid: null, pmc: null, doi: null,
+        isbn,
+        claimedAuthor: null,
+        claimedYear: null
+      });
+    }
+  }
+
   return sources;
 }
 
@@ -548,6 +947,19 @@ async function verifyNote(notePath) {
       result = await verifyPmid(src.pmid, src.claimedAuthor, src.claimedYear);
     } else if (src.doi) {
       result = await verifyDoi(src.doi, src.claimedAuthor, src.claimedYear);
+      if (!result.verified && result.error === 'DOI not found' && src.doi.startsWith('10.1101/')) {
+        const biorxiv = await biorxivFetchByDoi(src.doi);
+        if (biorxiv) {
+          const issues = [];
+          if (src.claimedAuthor && biorxiv.authors.length > 0 && !authorMatches(src.claimedAuthor, biorxiv.authors)) {
+            issues.push({ type: 'wrong_author', severity: 'high', claimed: src.claimedAuthor, actual_first: biorxiv.firstAuthor });
+          }
+          if (src.claimedYear && biorxiv.year && Math.abs(src.claimedYear - biorxiv.year) > 1) {
+            issues.push({ type: 'wrong_year', severity: 'high', claimed: src.claimedYear, actual: biorxiv.year });
+          }
+          result = { verified: issues.length === 0, issues, metadata: biorxiv };
+        }
+      }
     } else if (src.pmc) {
       const pmcId = src.pmc.replace(/^PMC/i, '');
       const convertUrl = `https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pmc&id=${pmcId}&retmode=json`;
@@ -581,6 +993,38 @@ async function verifyNote(notePath) {
       } else {
         result = { verified: false, error: `Could not resolve ${src.pmc}`, metadata: null };
       }
+    } else if (src.arxivId) {
+      const data = await arxivFetchById(src.arxivId);
+      if (data) {
+        const issues = [];
+        if (src.claimedAuthor && data.authors.length > 0 && !authorMatches(src.claimedAuthor, data.authors)) {
+          issues.push({ type: 'wrong_author', severity: 'high', claimed: src.claimedAuthor, actual_first: data.firstAuthor, actual_all: data.authors });
+        }
+        if (src.claimedYear && data.year && Math.abs(src.claimedYear - data.year) > 1) {
+          issues.push({ type: 'wrong_year', severity: 'high', claimed: src.claimedYear, actual: data.year });
+        }
+        result = { verified: issues.length === 0, issues, metadata: data };
+      } else {
+        result = { verified: false, error: `arXiv ID ${src.arxivId} not found`, metadata: null };
+      }
+    } else if (src.rfcNumber) {
+      const data = await rfcFetch(src.rfcNumber);
+      if (data) {
+        result = { verified: true, issues: [], metadata: data };
+      } else {
+        result = { verified: false, error: `RFC ${src.rfcNumber} not found`, metadata: null };
+      }
+    } else if (src.isbn) {
+      const data = await openLibraryFetchISBN(src.isbn);
+      if (data) {
+        const issues = [];
+        if (src.claimedAuthor && data.authors.length > 0 && !authorMatches(src.claimedAuthor, data.authors)) {
+          issues.push({ type: 'wrong_author', severity: 'high', claimed: src.claimedAuthor, actual_first: data.firstAuthor });
+        }
+        result = { verified: issues.length === 0, issues, metadata: data };
+      } else {
+        result = { verified: false, error: `ISBN ${src.isbn} not found in Open Library`, metadata: null };
+      }
     } else if (src.claimedAuthor && src.claimedYear) {
       const query = topicKeywords
         ? `${src.claimedAuthor} ${src.claimedYear} ${topicKeywords}`
@@ -602,6 +1046,15 @@ async function verifyNote(notePath) {
       }
     } else {
       result = { verified: false, error: 'No identifiable source information', metadata: null };
+    }
+
+    // Unpaywall enrichment for any source with a DOI
+    if (result.metadata?.doi) {
+      const unpaywall = await unpaywallVerifyDoi(result.metadata.doi);
+      if (unpaywall) {
+        result.metadata.is_oa = unpaywall.is_oa;
+        result.metadata.oa_url = unpaywall.oa_url;
+      }
     }
 
     if (result.metadata?.pmid) {
@@ -737,6 +1190,8 @@ async function checkClaims(notePath) {
 
     if (src.pmid) {
       metadata = await pubmedFetch(src.pmid);
+    } else if (src.arxivId) {
+      metadata = await arxivFetchById(src.arxivId);
     } else if (src.doi) {
       const url = 'https://api.crossref.org/works/' + encodeURIComponent(src.doi);
       const crData = await fetchJSON(url);
@@ -776,7 +1231,11 @@ async function main() {
   source-resolver.mjs resolve "Author Year Topic"        Resolve a citation to verified metadata
   source-resolver.mjs verify-pmid <pmid> "Author" <year> Verify a specific PMID against claimed author/year
   source-resolver.mjs verify-doi <doi> "Author" <year>   Verify a specific DOI against claimed author/year
+  source-resolver.mjs verify-arxiv <arxiv-id>             Verify an arXiv paper by ID (e.g. 1706.03762)
+  source-resolver.mjs verify-rfc <rfc-number>             Verify an RFC by number (e.g. 9110)
+  source-resolver.mjs verify-isbn <isbn>                  Verify a book by ISBN
   source-resolver.mjs verify-note <path>                  Verify all sources in a vault note
+  source-resolver.mjs lookup-compound <name>              Look up a compound in ChEMBL
   source-resolver.mjs check-claims <path>                 Check quantitative claims against source abstracts
   source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms`);
     process.exit(1);
@@ -793,6 +1252,22 @@ async function main() {
       break;
     case 'verify-doi':
       result = await verifyDoi(args[0], args[1], args[2] ? parseInt(args[2]) : null);
+      break;
+    case 'verify-arxiv':
+      result = await arxivFetchById(args[0]);
+      if (!result) result = { error: `arXiv ID ${args[0]} not found` };
+      break;
+    case 'verify-rfc':
+      result = await rfcFetch(args[0]);
+      if (!result) result = { error: `RFC ${args[0]} not found` };
+      break;
+    case 'verify-isbn':
+      result = await openLibraryFetchISBN(args[0]);
+      if (!result) result = { error: `ISBN ${args[0]} not found in Open Library` };
+      break;
+    case 'lookup-compound':
+      result = await chemblLookup(args.join(' '));
+      if (!result) result = { error: `Compound "${args.join(' ')}" not found in ChEMBL` };
       break;
     case 'verify-note':
       result = await verifyNote(resolve(args[0]));

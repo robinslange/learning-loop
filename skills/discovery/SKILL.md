@@ -79,7 +79,7 @@ Ask what the user is curious about. Include a brief mention of available options
 **Topic provided, no other params (`/discovery "topic"`):**
 Proceed with defaults. Do NOT prompt — the user chose speed. Defaults are good.
 
-**Topic + partial params (`/discovery "topic" --deep`):**
+**Topic + partial params (`/discovery "topic" --surf`):**
 Proceed with provided params + defaults for the rest. Do NOT prompt for missing params — if they wanted to set them, they would have.
 
 **Full params provided:**

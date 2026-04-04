@@ -41,7 +41,7 @@ Want to just browse without saving anything? Add `--surf`:
 /learning-loop:discovery "spaced repetition" --surf
 ```
 
-Other options: `--depth shallow|medium|deep`, `--style guided|branch|checkpoint`, `--tone academic|conversational|persona`.
+Other options: `--style guided|branch|checkpoint`, `--tone academic|conversational|persona`.
 
 **Reading something good?** Run `/learning-loop:literature`.
 
