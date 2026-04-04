@@ -1,5 +1,15 @@
 # Source Verification
 
+## Source Provenance Principle
+
+A source URL is a verified artifact or it is a hallucination risk. There is no middle ground.
+
+**Verified:** The URL was fetched during this session (by the researcher, writer, or verifier) and the page content matched the note's topic. These flow through the pipeline as artifacts, never reconstructed.
+
+**Unverified:** The URL was generated from parametric memory without a fetch. Measured fabrication rates: PubMed IDs ~43%, DOIs ~26%, Wikipedia/RFC ~0%. The opacity of the identifier predicts the fabrication rate.
+
+**The contract between agents:** When a researcher passes sources to a writer, verified URLs arrive in a `Verified Sources` table. The writer copies them verbatim. If a source wasn't fetched, it's marked `unfetched` and the writer uses `source: unverified` in frontmatter. No agent should reconstruct what a prior agent already resolved.
+
 ## Verify Source URLs
 
 For each URL in a note or research brief:
