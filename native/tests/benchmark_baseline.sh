@@ -85,8 +85,8 @@ bench "status" $BINARY status "$DB" "$VAULT"
 # 9. Tags
 bench "tags" $BINARY tags "$DB" --min-count 3
 
-# 10. Index (incremental, no changes)
-bench "index (no-op)" $BINARY index "$VAULT" "$DB" --incremental
+# 10. Index (no changes)
+bench "index (no-op)" $BINARY index "$VAULT" "$DB"
 
 echo "" >> "$RESULTS_FILE"
 echo "## System" >> "$RESULTS_FILE"
