@@ -1,3 +1,4 @@
+use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -120,22 +121,54 @@ pub fn discriminate_pairs(
             .collect()
     };
 
-    let mut pairs: Vec<DiscriminatePair> = Vec::new();
     let n = embeddings.len();
 
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let sim = cosine(&embeddings[i].1, &embeddings[j].1);
-            if sim >= threshold {
-                pairs.push(DiscriminatePair {
-                    note_a: embeddings[i].0.clone(),
-                    note_b: embeddings[j].0.clone(),
-                    similarity: sim as f64,
-                });
+    let mut pairs: Vec<DiscriminatePair> = (0..n)
+        .into_par_iter()
+        .flat_map(|i| {
+            let mut local_pairs = Vec::new();
+            for j in (i + 1)..n {
+                let sim = cosine(&embeddings[i].1, &embeddings[j].1);
+                if sim >= threshold {
+                    local_pairs.push(DiscriminatePair {
+                        note_a: embeddings[i].0.clone(),
+                        note_b: embeddings[j].0.clone(),
+                        similarity: sim as f64,
+                    });
+                }
             }
-        }
-    }
+            local_pairs
+        })
+        .collect();
 
     pairs.sort_by(|a, b| b.similarity.partial_cmp(&a.similarity).unwrap_or(std::cmp::Ordering::Equal));
     pairs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::test_helpers::helpers::*;
+
+    #[test]
+    fn test_cluster_deterministic_ordering() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.99, 0.1, 0.0]);
+        let emb_c = norm(&[0.0, 1.0, 0.0]);
+        let emb_d = norm(&[0.0, 0.99, 0.1]);
+
+        let conn = create_test_db(&[
+            ("a.md", "a", "a", &emb_a),
+            ("b.md", "b", "b", &emb_b),
+            ("c.md", "c", "c", &emb_c),
+            ("d.md", "d", "d", &emb_d),
+        ]);
+
+        let clusters = cluster_notes(&conn, 0.9);
+        assert_eq!(clusters.len(), 2);
+        assert!(clusters[0].contains(&"a.md".to_string()));
+        assert!(clusters[0].contains(&"b.md".to_string()));
+        assert!(clusters[1].contains(&"c.md".to_string()));
+        assert!(clusters[1].contains(&"d.md".to_string()));
+    }
 }

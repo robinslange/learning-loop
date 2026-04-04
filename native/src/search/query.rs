@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -47,7 +48,7 @@ pub(crate) fn local_rrf_scores(
     graph: &HashMap<String, Vec<String>>,
 ) -> HashMap<String, f64> {
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
-        .iter()
+        .par_iter()
         .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
         .collect();
     vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
