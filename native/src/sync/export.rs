@@ -72,6 +72,11 @@ pub fn export_index(
          CREATE TABLE embeddings (
              id INTEGER PRIMARY KEY,
              data BLOB NOT NULL
+         );
+         CREATE TABLE links (
+             source_id INTEGER NOT NULL,
+             target_path TEXT NOT NULL,
+             UNIQUE(source_id, target_path)
          );"
     )?;
 
@@ -154,6 +159,37 @@ pub fn export_index(
                 "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
                 params![id, data],
             )?;
+        }
+    }
+
+    // Copy links for exported notes
+    let has_links = source
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='links'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+
+    if has_links {
+        let mut link_stmt = source.prepare(
+            "SELECT source_id, target_path FROM links"
+        )?;
+        let link_rows = link_stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for row in link_rows {
+            let (source_id, target_path) = row?;
+            if export.query_row(
+                "SELECT 1 FROM notes WHERE id = ?1",
+                params![source_id],
+                |_| Ok(()),
+            ).is_ok() {
+                export.execute(
+                    "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
+                    params![source_id, target_path],
+                )?;
+            }
         }
     }
 
