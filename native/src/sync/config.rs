@@ -56,14 +56,8 @@ pub fn resolve_config_dir() -> PathBuf {
     if let Ok(pd) = std::env::var("CLAUDE_PLUGIN_DATA") {
         return PathBuf::from(pd);
     }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".into());
-    PathBuf::from(home)
-        .join(".claude")
-        .join("plugins")
-        .join("data")
-        .join("learning-loop")
+    eprintln!("warning: CLAUDE_PLUGIN_DATA not set and --config-dir not provided; pass --config-dir <plugin-data-root>");
+    PathBuf::from(".")
 }
 
 pub fn seed_path(config_dir: &Path) -> PathBuf {
