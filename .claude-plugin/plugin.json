@@ -1,6 +1,6 @@
 {
   "name": "learning-loop",
-  "version": "1.13.3",
+  "version": "1.13.4",
   "description": "Self-improving learning loop across Claude sessions — retrieval, capture, consolidation, and cross-project transfer",
   "author": {
     "name": "Robin"
