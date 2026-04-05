@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, cosine, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf};
+use super::scoring::{add_ranked_rrf, cosine, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf_with, PrfParams};
 use super::graph::{load_link_graph, personalized_pagerank, tag_expand};
 use super::federation::{add_peer_rrf_scores, load_title_federated};
 use super::store::EmbeddingStore;
@@ -67,7 +67,13 @@ pub(crate) fn local_rrf_scores(
     add_ranked_rrf(&mut rrf_scores, ppr_results.iter().map(|(p, _)| p.as_str()));
     add_ranked_rrf(&mut rrf_scores, tag_results.iter().map(|(p, _)| p.as_str()));
 
-    let prf_results = rocchio_prf(query_vec, &vec_scored, &all_embeddings);
+    // Hybrid-feedback PRF: expand query using the fused RRF top-k (not just vector top-k)
+    // so BM25/PPR/tag-surfaced documents teach the vector where to look
+    let mut initial: Vec<(String, f64)> = rrf_scores.iter().map(|(p, s)| (p.clone(), *s)).collect();
+    initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    initial.truncate(30);
+    let prf_params = PrfParams { alpha: 0.9, beta: 0.1, k: 3 };
+    let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
     add_ranked_rrf(&mut rrf_scores, prf_results.iter().map(|(p, _)| p.as_str()));
 
     rrf_scores

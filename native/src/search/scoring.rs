@@ -97,14 +97,6 @@ pub(crate) fn collect_seeds(
     seeds
 }
 
-pub(crate) fn rocchio_prf(
-    query_vec: &[f32],
-    top_results: &[(String, f64)],
-    all_embeddings: &[(i64, String, Vec<f32>)],
-) -> Vec<(String, f64)> {
-    rocchio_prf_with(query_vec, top_results, all_embeddings, &PrfParams::default())
-}
-
 pub(crate) fn rocchio_prf_with(
     query_vec: &[f32],
     top_results: &[(String, f64)],
