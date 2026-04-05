@@ -234,15 +234,21 @@ Present defaults:
 
 Ask: "Does that work for you?" Allow pattern customization if not.
 
-### 4d: Provenance Consent
+### 4d: Knowledge Graph Opt-in
+
+Ask: "Would you like your public note titles to appear on the interchange.live knowledge graph? (This only shares titles of notes marked public or listed, no content.)"
+
+If yes, set `"graph": true` in the generated config. If no, set `"graph": false`.
+
+### 4e: Provenance Consent
 
 Ask: "Share anonymized pipeline stats? (Tier 1: action counts only)"
 
-### 4e: Write Config
+### 4f: Write Config
 
-Write `PLUGIN_DATA/federation/config.json` with identity, visibility, peers, and `share_provenance` field.
+Write `PLUGIN_DATA/federation/config.json` with identity, visibility, peers, `graph`, and `share_provenance` fields.
 
-### 4f: First Export and Test
+### 4g: First Export and Test
 
 Run `ll-search export-index`. Report counts. If network is connected, attempt a sync test. If sync fails with an auth error, this likely means the hub admin hasn't registered the peer yet -- say so clearly and suggest re-running init after registration.
 
