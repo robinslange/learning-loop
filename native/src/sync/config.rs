@@ -8,6 +8,8 @@ pub struct FederationConfig {
     pub hub: HubEndpoint,
     #[serde(default)]
     pub peers: Vec<PeerConfig>,
+    #[serde(default)]
+    pub graph: bool,
 }
 
 #[derive(Deserialize)]
