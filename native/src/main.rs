@@ -136,6 +136,11 @@ enum Commands {
         db_path: String,
         queries: Vec<String>,
     },
+    EvalPrf {
+        db_path: String,
+        #[arg(long, default_value_t = 2)]
+        min_links: usize,
+    },
 }
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
@@ -358,6 +363,13 @@ fn main() {
                 let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
                 out(&result);
             }
+        }
+        Commands::EvalPrf { db_path, min_links } => {
+            init_embedding();
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let result = ll_search::search::eval_prf(&conn, &store, min_links);
+            out(&result);
         }
         Commands::TunePrf { db_path, queries } => {
             init_embedding();

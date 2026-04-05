@@ -6,6 +6,7 @@ pub mod cluster;
 pub mod reflect;
 pub mod store;
 pub mod tune;
+pub mod eval;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
@@ -15,3 +16,4 @@ pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes,
 pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_scan_federated};
 pub use store::EmbeddingStore;
 pub use tune::tune_prf;
+pub use eval::eval_prf;

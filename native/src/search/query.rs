@@ -72,7 +72,7 @@ pub(crate) fn local_rrf_scores(
     let mut initial: Vec<(String, f64)> = rrf_scores.iter().map(|(p, s)| (p.clone(), *s)).collect();
     initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     initial.truncate(30);
-    let prf_params = PrfParams { alpha: 0.9, beta: 0.1, k: 3 };
+    let prf_params = PrfParams { alpha: 0.5, beta: 0.5, k: 1 };
     let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
     add_ranked_rrf(&mut rrf_scores, prf_results.iter().map(|(p, _)| p.as_str()));
 
