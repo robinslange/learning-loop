@@ -161,6 +161,14 @@ Use these levels in the Claim Checks table below instead of binary supported/uns
 - **PARTIAL**: No claims scored 0, but one or more scored 1-2
 - **ISSUES FOUND**: Any claim scored 0 (contradicted), or source verification failures
 
+## Emit Provenance
+
+After verification, emit a result event:
+
+```bash
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-verifier","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
+```
+
 ## Rules
 
 - **Verify, don't rewrite.** Your job is to flag issues, not fix them. Return findings so other agents can act.

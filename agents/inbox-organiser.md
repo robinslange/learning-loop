@@ -184,6 +184,14 @@ Inbox: [N] notes processed, [X] promoted, [R] remaining.
 Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
 ```
 
+## Emit Provenance
+
+After completing inbox processing, emit a triage summary:
+
+```bash
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"counter_arguments":N,"merges":N,"deletes":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N}'
+```
+
 ## Rules
 
 - **Process by cluster, not by note.** This is the key throughput improvement. A cluster of 5 related notes gets one assessment pass, not five independent ones.

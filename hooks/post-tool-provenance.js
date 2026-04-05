@@ -1,148 +1,51 @@
 #!/usr/bin/env node
 // post-tool-provenance.js — Automatic provenance capture from PostToolUse hook
-// Logs vault writes, agent spawns, skill invocations, and vault searches.
-// Receives hook JSON on stdin, emits provenance event, exits.
+// Logs vault writes, agent spawns, and skill invocations.
 
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
-
-function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
-
-const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
-function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) {
-    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
-    return fromEnv;
-  }
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch {}
-  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
-}
-
-const pluginData = resolvePluginData();
-const PROVENANCE_DIR = join(pluginData, 'provenance');
-
-function resolveVaultPath() {
-  if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
-  try {
-    const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  try {
-    const cfg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  return resolve(join(home(), 'brain', 'brain'));
-}
+import { runHook, resolveVaultPath, vaultRelPath, classifyVaultPath, emitProvenance } from './lib/common.mjs';
 
 const vaultPath = resolveVaultPath();
-const VAULT_PREFIX = vaultPath + sep;
 
-function getSessionId() {
-  try {
-    return readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf8').trim();
-  } catch {
-    return 'unknown';
-  }
-}
-
-function emit(event) {
-  mkdirSync(PROVENANCE_DIR, { recursive: true });
-  const now = new Date();
-  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const record = {
-    ts: now.toISOString(),
-    session_id: getSessionId(),
-    source: 'hook',
-    ...event,
-  };
-  appendFileSync(join(PROVENANCE_DIR, `events-${month}.jsonl`), JSON.stringify(record) + '\n');
-}
-
-function vaultRelPath(filePath) {
-  if (filePath && filePath.startsWith(VAULT_PREFIX)) {
-    return filePath.slice(VAULT_PREFIX.length);
-  }
-  return null;
-}
-
-function classifyVaultPath(relPath) {
-  const p = relPath.replace(/\\/g, '/');
-  if (p.startsWith('0-inbox/')) return 'inbox';
-  if (p.startsWith('1-fleeting/')) return 'fleeting';
-  if (p.startsWith('2-literature/')) return 'literature';
-  if (p.startsWith('3-permanent/')) return 'permanent';
-  if (p.startsWith('4-projects/')) return 'project';
-  if (p.startsWith('5-maps/')) return 'map';
-  if (p.startsWith('_system/')) return 'system';
-  return 'other';
-}
-
-// Read stdin
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', () => {
-  try {
-    const data = JSON.parse(input);
-    const tool = data.tool_name;
-    const toolInput = data.tool_input || {};
-
-    // Vault writes
-    if (tool === 'Write' || tool === 'Edit') {
-      const rel = vaultRelPath(toolInput.file_path);
-      if (rel) {
-        const event = {
-          action: tool === 'Write' ? 'vault-write' : 'vault-edit',
-          target: rel,
-          folder: classifyVaultPath(rel),
-        };
-        const content = toolInput.content || toolInput.new_string || '';
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (fmMatch) {
-          const tagMatch = fmMatch[1].match(/tags:\s*\[([^\]]*)\]/);
-          if (tagMatch) {
-            event.tags = tagMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
-          }
+runHook(({ tool, input }) => {
+  // Vault writes
+  if (tool === 'Write' || tool === 'Edit') {
+    const rel = vaultRelPath(input.file_path, vaultPath);
+    if (rel) {
+      const event = {
+        action: tool === 'Write' ? 'vault-write' : 'vault-edit',
+        target: rel,
+        folder: classifyVaultPath(rel),
+      };
+      const content = input.content || input.new_string || '';
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+      if (fmMatch) {
+        const tagMatch = fmMatch[1].match(/tags:\s*\[([^\]]*)\]/);
+        if (tagMatch) {
+          event.tags = tagMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
         }
-        emit(event);
-        return;
       }
+      emitProvenance(event);
     }
+    return;
+  }
 
-    // Agent spawns
-    if (tool === 'Agent') {
-      const agentType = toolInput.subagent_type || 'general-purpose';
-      emit({
-        action: 'agent-spawn',
-        agent: agentType,
-        description: toolInput.description || '',
-        background: !!toolInput.run_in_background,
-      });
-      return;
-    }
+  // Agent spawns
+  if (tool === 'Agent') {
+    emitProvenance({
+      action: 'agent-spawn',
+      agent: input.subagent_type || 'general-purpose',
+      description: input.description || '',
+      background: !!input.run_in_background,
+    });
+    return;
+  }
 
-    // Skill invocations
-    if (tool === 'Skill') {
-      emit({
-        action: 'skill-invoke',
-        skill: toolInput.skill || '',
-        args: toolInput.args || '',
-      });
-      return;
-    }
-
-    // Bash commands that touch provenance-emit (skill-initiated provenance)
-    if (tool === 'Bash' && toolInput.command && toolInput.command.includes('provenance-emit')) {
-      // Already captured by the emit itself, skip to avoid doubles
-      return;
-    }
-
-  } catch {
-    // Silent failure - don't block Claude
+  // Skill invocations
+  if (tool === 'Skill') {
+    emitProvenance({
+      action: 'skill-invoke',
+      skill: input.skill || '',
+      args: input.args || '',
+    });
   }
 });

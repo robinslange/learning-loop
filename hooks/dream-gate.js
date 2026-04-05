@@ -5,15 +5,12 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
+import { home } from './lib/common.mjs';
 
 const tmp = tmpdir();
 const DREAM_MARKER = join(tmp, 'learning-loop-last-dream');
 const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');
-
-function home() {
-  return process.env.HOME || process.env.USERPROFILE || homedir();
-}
 
 function now() {
   return Math.floor(Date.now() / 1000);

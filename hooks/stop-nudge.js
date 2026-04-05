@@ -4,31 +4,18 @@
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
+import { home, resolvePluginData, readStdin } from './lib/common.mjs';
 
 const tmp = tmpdir();
-
-function home() {
-  return process.env.HOME || process.env.USERPROFILE || homedir();
-}
 
 function now() {
   return Math.floor(Date.now() / 1000);
 }
 
-// Read stdin
-const input = await new Promise((resolve) => {
-  let data = '';
-  process.stdin.setEncoding('utf8');
-  const timeout = setTimeout(() => resolve(''), 3000);
-  process.stdin.on('data', (chunk) => (data += chunk));
-  process.stdin.on('end', () => {
-    clearTimeout(timeout);
-    resolve(data);
-  });
-});
+const input = await readStdin();
 
 if (!input.trim()) process.exit(0);
 
@@ -44,20 +31,6 @@ if (hookData.stop_hook_active) process.exit(0);
 
 // Reindex + federation sync via binary (fire and forget)
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-
-const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
-function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) {
-    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
-    return fromEnv;
-  }
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch {}
-  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
-}
 
 const pluginData = resolvePluginData();
 const watchPid = join(pluginData, 'watch.pid');

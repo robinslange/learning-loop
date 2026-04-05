@@ -4,26 +4,13 @@
 
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync, statSync, rmSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { home, resolvePluginData } from './lib/common.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
-
-const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
-function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) {
-    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
-    return fromEnv;
-  }
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch {}
-  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
-}
 
 // Clean stale plugin cache versions (only keep current)
 try {
@@ -36,10 +23,6 @@ try {
   }
 } catch {}
 const tmp = tmpdir();
-
-function home() {
-  return process.env.HOME || process.env.USERPROFILE || homedir();
-}
 
 const MEMORY_DIR = join(home(), '.claude', 'projects');
 

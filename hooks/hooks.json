@@ -66,6 +66,26 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-read-retrieval.js\"",
+            "timeout": 2
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_episodic-memory",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-search-tracking.js\"",
+            "timeout": 2
+          }
+        ]
       }
     ],
     "PreCompact": [

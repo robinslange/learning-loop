@@ -1,38 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
-import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-
-function home() { return process.env.HOME || process.env.USERPROFILE || homedir(); }
-
-const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
-function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) {
-    try { writeFileSync(DATA_PATH_MARKER, fromEnv, 'utf-8'); } catch {}
-    return fromEnv;
-  }
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch {}
-  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
-}
-
-function resolveVaultPath() {
-  if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
-  try {
-    const pluginData = resolvePluginData();
-    const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  try {
-    const cfg = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  return resolve(join(home(), 'brain', 'brain'));
-}
+import { runHook, resolvePluginData, resolveVaultPath } from './lib/common.mjs';
 
 function isVaultNote(filePath, vaultRoot) {
   const prefix = vaultRoot + sep;
@@ -154,53 +124,45 @@ function warn(context) {
   process.stdout.write(JSON.stringify(out));
 }
 
-let input = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => { input += chunk; });
-process.stdin.on('end', () => {
-  try {
-    const data = JSON.parse(input);
-    if (data.tool_name !== 'Write') return;
+runHook(({ tool, input }) => {
+  if (tool !== 'Write') return;
 
-    const filePath = data.tool_input?.file_path;
-    const content = data.tool_input?.content || '';
-    if (!filePath) return;
+  const filePath = input.file_path;
+  const content = input.content || '';
+  if (!filePath) return;
 
-    const vaultRoot = resolveVaultPath();
-    if (!isVaultNote(filePath, vaultRoot)) return;
+  const vaultRoot = resolveVaultPath();
+  if (!isVaultNote(filePath, vaultRoot)) return;
 
-    const fm = parseFrontmatter(content);
-    if (fm) {
-      const tags = parseTags(fm);
-      const dupes = findDuplicateTags(tags);
-      if (dupes.length > 0) {
-        deny(`Duplicate tags found: [${dupes.join(', ')}]. Remove duplicates before writing.`);
-        return;
-      }
+  const fm = parseFrontmatter(content);
+  if (fm) {
+    const tags = parseTags(fm);
+    const dupes = findDuplicateTags(tags);
+    if (dupes.length > 0) {
+      deny(`Duplicate tags found: [${dupes.join(', ')}]. Remove duplicates before writing.`);
+      return;
     }
+  }
 
-    const warnings = [];
+  const warnings = [];
 
-    const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-    const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-    const links = extractWikilinks(body);
-    const noteIndex = buildNoteIndex(vaultRoot);
-    const broken = links.filter(l => !noteExistsInIndex(l, noteIndex));
-    if (broken.length > 0) {
-      warnings.push(`Broken wikilinks: ${broken.map(l => '[[' + l + ']]').join(', ')} not found in vault.`);
-    }
+  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
+  const body = fmEnd ? content.slice(fmEnd[0].length) : content;
+  const links = extractWikilinks(body);
+  const noteIndex = buildNoteIndex(vaultRoot);
+  const broken = links.filter(l => !noteExistsInIndex(l, noteIndex));
+  if (broken.length > 0) {
+    warnings.push(`Broken wikilinks: ${broken.map(l => '[[' + l + ']]').join(', ')} not found in vault.`);
+  }
 
-    const titleMatch = content.match(/^#\s+(.+)$/m);
-    const title = titleMatch ? titleMatch[1].trim() : null;
-    const dupeWarning = title ? checkDuplicateNote(filePath, title, vaultRoot) : null;
-    if (dupeWarning) {
-      warnings.push(dupeWarning);
-    }
+  const titleMatch = content.match(/^#\s+(.+)$/m);
+  const title = titleMatch ? titleMatch[1].trim() : null;
+  const dupeWarning = title ? checkDuplicateNote(filePath, title, vaultRoot) : null;
+  if (dupeWarning) {
+    warnings.push(dupeWarning);
+  }
 
-    if (warnings.length > 0) {
-      warn(warnings.join('\n'));
-    }
-  } catch {
-    // Silent failure
+  if (warnings.length > 0) {
+    warn(warnings.join('\n'));
   }
 });

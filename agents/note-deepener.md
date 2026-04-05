@@ -139,6 +139,14 @@ Sources found: N uncaptured — run /literature to capture
 
 Flag any sources found during research that aren't already in `2-literature/` as candidates for `/literature`.
 
+## Emit Provenance
+
+After completing the deepen cycle, emit a result event:
+
+```bash
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
+```
+
 ## Rules
 
 - **Never fabricate sources.** If you can't find evidence, say so. A gap acknowledged beats a gap papered over.

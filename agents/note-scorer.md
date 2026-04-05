@@ -137,6 +137,14 @@ Why this is deep: Falsifiable claim (specificity 2) — "negative definition is 
 
 **Use these as your reference points.** When in doubt, compare the note you are scoring to these three examples.
 
+## Emit Provenance
+
+After scoring all notes, emit a summary event:
+
+```bash
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-scorer","action":"batch-score","notes_scored":N,"tiers":{"shallow":N,"medium":N,"deep":N},"actions":{"deepen":N,"promote":N,"split":N,"merge":N,"source-attach":N}}'
+```
+
 ## Rules
 
 - **Read every note before scoring.** Never score from titles alone.

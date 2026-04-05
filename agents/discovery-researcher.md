@@ -199,6 +199,14 @@ Reference findings by ID: "Microglia prune synapses via complement [S1]"
 - [issue that couldn't be fixed after 3 iterations]
 ```
 
+## Emit Provenance
+
+After compiling the research brief, emit a summary event:
+
+```bash
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"sources_verified":N,"verification_status":"PASS|PARTIAL","has_diagram":false}'
+```
+
 ## Rules
 
 - Never fabricate sources or claims. If you can't find evidence, say so.
