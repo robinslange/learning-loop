@@ -80,7 +80,7 @@ pub fn sync_all(
         other => anyhow::bail!("unexpected: {other:?}"),
     }
 
-    let envelope = auth::create_envelope(&seed, &export_bytes, peer_id);
+    let envelope = auth::create_envelope(&seed, &export_bytes, peer_id, config.graph);
     let export_size_kb = export_bytes.len() / 1024;
     ws.send(Message::binary(export_bytes))?;
     eprintln!("Sent local index ({export_size_kb} KB)");

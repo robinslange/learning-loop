@@ -41,6 +41,7 @@ pub fn create_envelope(
     signing_key: &SigningKey,
     index_bytes: &[u8],
     peer_id: &str,
+    graph: bool,
 ) -> serde_json::Value {
     let hash = Sha256::digest(index_bytes);
     let sig = signing_key.sign(&hash);
@@ -52,5 +53,6 @@ pub fn create_envelope(
         "signature": B64.encode(sig.to_bytes()),
         "pub_key": B64.encode(pubkey.as_bytes()),
         "signed_at": crate::db::chrono_iso_now(),
+        "graph": graph,
     })
 }
