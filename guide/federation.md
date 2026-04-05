@@ -41,6 +41,28 @@ Default configuration in `PLUGIN_DATA/federation/config.json`:
 
 Frontmatter `visibility: private` on any note overrides glob rules.
 
+## Knowledge graph
+
+A shared visualization of cross-vault connections at [interchange.live/graph](https://interchange.live/graph). The graph shows note titles only -- no content, summaries, or body text leaves your machine. Connections are drawn from shared tags and embedding similarity between notes across vaults.
+
+### Opting in
+
+Add `"graph": true` to your federation config:
+
+```json
+{
+  "visibility": { ... },
+  "graph": true
+}
+```
+
+Graph visibility is two-gated: a note appears in the graph only if **both** conditions are met:
+
+1. The note's visibility tier is `public` or `listed` (private notes are never included)
+2. The peer has `"graph": true` in their config
+
+Disabling graph participation is instant -- set `"graph": false` or remove the key. Your titles are removed from the graph on next sync.
+
 ## Sync commands
 
 ```bash
