@@ -30,6 +30,7 @@ Run all checks silently before asking anything. Use Node.js APIs:
 9. **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
 10. **Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
 11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
+12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the current plugin version from `PLUGIN/package.json`. Note: present/missing/outdated (version mismatch).
 
 Present a dashboard:
 
@@ -45,6 +46,7 @@ Learning Loop Setup
   Search index:  2,031 notes indexed
   Federation:    configured (peer registered, hub connected)
   Hub sync:      working (1,200 notes exported, 1 peer downloaded)
+  CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
 
 Everything looks good. Nothing to set up.
 ```
