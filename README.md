@@ -85,7 +85,7 @@ You could wire up hooks and note templates yourself. What takes time to build an
 | `/dream` | Auto-memory consolidation between sessions |
 | `/refresh "topic"` | See what you already know (no web research) |
 | `/health` | Vault health dashboard |
-| `/ingest` | Pull from Linear, repos, or pasted text |
+| `/ingest` | Pull from Linear, repos, or any content Claude can read |
 | `/diagram "concept"` | Generate Excalidraw diagram |
 | `/init` | First-time setup: vault path, persona, binary, federation |
 | `/help` | Show all commands with usage details |
