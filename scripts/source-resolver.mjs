@@ -16,13 +16,29 @@
 //   source-resolver.mjs lookup-compound <name>              Look up a compound in ChEMBL
 //   source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve, basename } from 'path';
 import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
+import { getPluginData } from './lib/config.mjs';
 
-const DATA_DIR = resolve(join(import.meta.dirname, '..', 'data'));
-const INDEX_PATH = join(DATA_DIR, 'citation-index.json');
-const CONFIG_PATH = resolve(join(import.meta.dirname, '..', 'data', 'resolver-config.json'));
+const PLUGIN_DATA = getPluginData();
+const PLUGIN_DIR = resolve(import.meta.dirname, '..');
+const DATA_DIR = PLUGIN_DATA ? join(PLUGIN_DATA, 'data') : join(PLUGIN_DIR, 'data');
+mkdirSync(DATA_DIR, { recursive: true });
+
+function resolveDataFile(name) {
+  const primary = join(DATA_DIR, name);
+  if (existsSync(primary)) return primary;
+  const template = join(PLUGIN_DIR, 'data', name);
+  if (existsSync(template)) {
+    copyFileSync(template, primary);
+    return primary;
+  }
+  return primary;
+}
+
+const INDEX_PATH = resolveDataFile('citation-index.json');
+const CONFIG_PATH = resolveDataFile('resolver-config.json');
 const RATE_LIMIT_MS = 500; // PubMed: 3 req/sec without API key, padded for safety
 
 function loadConfig() {

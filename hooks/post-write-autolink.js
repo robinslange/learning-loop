@@ -2,20 +2,12 @@
 import { readFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath } from './lib/common.mjs';
+import { runHook, resolvePluginData, resolveVaultPath, findBinary } from './lib/common.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_AUTO_LINKS = 3;
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
-
-function findBinary() {
-  const pluginData = resolvePluginData();
-  const installed = join(pluginData, 'bin', 'll-search');
-  if (existsSync(installed)) return { bin: installed, binDir: join(pluginData, 'bin') };
-  const devBuild = resolve(join(import.meta.dirname, '..', 'native', 'target', 'release', 'll-search'));
-  if (existsSync(devBuild)) return { bin: devBuild, binDir: resolve(join(import.meta.dirname, '..', 'native', 'target', 'release')) };
-  return null;
-}
+const TITLE_INDEX_EXTRA_DIRS = ['Excalidraw'];
 
 function isWatchRunning() {
   try {
@@ -50,7 +42,7 @@ function extractWikilinks(content) {
 
 function buildNoteMap(vaultRoot) {
   const map = new Map();
-  for (const dir of VAULT_DIRS) {
+  for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS]) {
     const dirPath = join(vaultRoot, dir);
     try {
       const files = readdirSync(dirPath, { recursive: true });
@@ -109,7 +101,7 @@ runHook(({ tool, input, response }) => {
     try {
       execFileSync(binary.bin, ['index', vaultRoot, dbPath, '--incremental'], {
         timeout: 2000, stdio: 'ignore',
-        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir },
+        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
       });
     } catch {}
   }
@@ -118,7 +110,7 @@ runHook(({ tool, input, response }) => {
   try {
     const out = execFileSync(binary.bin, ['similar', dbPath, relativePath, '--top', '5'], {
       encoding: 'utf-8', timeout: 1000,
-      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir },
+      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
     });
     similar = JSON.parse(out);
   } catch { return; }

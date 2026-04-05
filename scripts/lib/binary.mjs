@@ -1,14 +1,18 @@
 import { execFileSync } from 'child_process';
-import { join, resolve } from 'path';
+import { join, resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { getPluginData } from './config.mjs';
 
+const BINARY_NAME = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
+
 function findBinary() {
   const pluginData = getPluginData();
-  const installed = join(pluginData, 'bin', 'll-search');
-  if (existsSync(installed)) return installed;
+  if (pluginData) {
+    const installed = join(pluginData, 'bin', BINARY_NAME);
+    if (existsSync(installed)) return installed;
+  }
 
-  const devBuild = resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release', 'll-search'));
+  const devBuild = resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release', BINARY_NAME));
   if (existsSync(devBuild)) return devBuild;
 
   return null;
@@ -44,7 +48,7 @@ export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const stdout = execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: { ...process.env, ORT_DYLIB_PATH: join(getPluginData(), 'bin') },
+    env: { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) },
   });
   return JSON.parse(stdout);
 }
@@ -58,6 +62,6 @@ export function runRaw(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   return execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: { ...process.env, ORT_DYLIB_PATH: join(getPluginData(), 'bin') },
+    env: { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) },
   });
 }

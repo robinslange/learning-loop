@@ -16,7 +16,7 @@ The `VAULT_PATH` environment variable overrides `config.json` if set.
 
 ## Hooks
 
-Eight lifecycle hooks fire automatically:
+Ten hook entries fire automatically (dream-gate.js is invoked by session-start, not registered independently):
 
 | Event | Hook | What it does |
 |---|---|---|
@@ -25,7 +25,9 @@ Eight lifecycle hooks fire automatically:
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory |
 | PreToolUse (Write) | pre-write-check.js | Catches near-duplicate notes before they land in the vault |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks vault reads/writes for provenance |
-| PostToolUse (Write) | post-write-backlink.js | Adds backlinks to related notes after vault writes |
+| PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links to related notes after vault writes |
+| PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
+| PostToolUse (episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
 | PreCompact | pre-compact.js | Preserves context before compression |
 
 ## Provenance
@@ -82,5 +84,5 @@ learning-loop/
   vendor/               Vendored JS deps (sql.js WASM, ed25519, picomatch)
   hooks/                Lifecycle hooks (session start/stop, provenance)
   native/               Rust ll-search binary (indexing, embedding, search, sync)
-  native/src/sync/      Federation sync client, export, watch, auth, download
+  native/src/sync/      Federation sync client (auth, client, config, export, mod, protocol, visibility, watch)
 ```

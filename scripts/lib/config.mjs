@@ -20,7 +20,8 @@ export function getPluginData() {
     if (saved && existsSync(saved)) return saved;
   } catch {}
 
-  return join(homedir(), '.claude', 'plugins', 'data', 'learning-loop');
+  process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
+  return null;
 }
 
 export function getPluginRoot() {
@@ -28,7 +29,8 @@ export function getPluginRoot() {
 }
 
 function configPath() {
-  return join(getPluginData(), 'config.json');
+  const pd = getPluginData();
+  return pd ? join(pd, 'config.json') : null;
 }
 
 function legacyConfigPath() {
@@ -43,7 +45,7 @@ export function getConfig() {
   const primary = configPath();
   const legacy = legacyConfigPath();
 
-  if (existsSync(primary)) {
+  if (primary && existsSync(primary)) {
     try {
       _config = JSON.parse(readFileSync(primary, 'utf-8'));
       return _config;
@@ -53,7 +55,7 @@ export function getConfig() {
   if (existsSync(legacy)) {
     try {
       _config = JSON.parse(readFileSync(legacy, 'utf-8'));
-      migrateConfig(legacy, primary);
+      if (primary) migrateConfig(legacy, primary);
       return _config;
     } catch { /* fall through */ }
   }
@@ -70,6 +72,7 @@ function migrateConfig(from, to) {
 
 export function getVaultPath() {
   const cfg = getConfig();
-  const raw = process.env.VAULT_PATH || cfg.vault_path || '~/brain/brain';
+  const raw = process.env.VAULT_PATH || cfg.vault_path;
+  if (!raw) return null;
   return expandHome(raw);
 }

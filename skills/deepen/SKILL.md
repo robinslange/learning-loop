@@ -22,12 +22,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-start","target":"NOTE_FILENAME"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"deepen","skill":"deepen","action":"session-start","target":"NOTE_FILENAME"}'
 ```
 
 **At session end:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-end","target":"NOTE_FILENAME","promoted":true|false}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"deepen","skill":"deepen","action":"session-end","target":"NOTE_FILENAME","promoted":true|false}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

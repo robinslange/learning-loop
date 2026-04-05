@@ -131,7 +131,7 @@ For each note across all content folders (0-inbox, 1-fleeting, 3-permanent), gre
 
 ### Step 5: Check — Stale Inbox
 
-For each inbox note, check file modification time using `stat -f %m` (macOS). Flag notes older than 14 days.
+For each inbox note, check file modification time using Bash: `node -e "console.log(require('fs').statSync('FILE').mtimeMs)"`. Flag notes older than 14 days.
 
 **Light:** List stale notes with age in days.
 **Deep:** Launch `note-scorer` agent(s) with stale note paths. Report maturity tier and recommend action: promote (if deep/medium), `/deepen` (if shallow but promising), or delete candidate (if shallow and empty).
@@ -222,13 +222,15 @@ SendMessage to note-scorer:
 - file: <path>
   tier: shallow | medium | deep
   issues: [<string>, ...]
-  scores:
-    depth: weak | solid | strong
-    sourcing: weak | solid | strong
-    linking: weak | solid | strong
-    voice: weak | solid | strong
-    atomicity: weak | solid | strong
+  gate: N/6
+  claim_specificity: 0-2
+  source_grounded: 0-2
 ```
+
+**Mapping gate pass count to summary labels** (for dashboard display):
+- 0-2 pass = weak
+- 3-4 pass = solid
+- 5-6 pass = strong
 
 ## Key Principles
 

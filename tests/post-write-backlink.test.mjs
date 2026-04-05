@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-write-backlink.js');
+const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-write-autolink.js');
 const VAULT = '/tmp/ll-test-vault-backlink';
 
 function run(toolName, filePath, content, success = true) {

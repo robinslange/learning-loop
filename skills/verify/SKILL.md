@@ -27,7 +27,7 @@ This skill emits provenance events for pipeline observability.
 
 **At session start (after scope identified):**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
 ```
 
 **After scoring and verification, emit each finding via provenance-emit.js:**
@@ -45,14 +45,14 @@ Where:
 
 For quality scores, emit one event per note:
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}'
 ```
 
 A note with no finding events is a pass.
 
 **Then emit session-end:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
 ```
 
 A note with zero score records is a pass.
@@ -100,7 +100,7 @@ Launch `note-scorer` agent(s) to assess the gathered notes:
 - **10-99 notes:** Split into batches of ~10. Launch one `note-scorer` agent per batch in parallel.
 - **>= 100 notes (sweep):** Split into batches of ~50. Launch one `note-scorer` agent per batch in parallel. Haiku handles 50 notes per batch; the bottleneck is Read calls, not reasoning.
 
-Each agent reads its own notes, applies promote-gate scoring mode, and returns per-note scores (depth, sourcing, linking, voice, atomicity) with a maturity tier (shallow/medium/deep).
+Each agent reads its own notes, applies promote-gate assessment (6-criterion pass/fail + scoring mode dimensions), and returns per-note gate results (N/6 pass count, claim_specificity 0-2, source_grounded 0-2) with a maturity tier (shallow/medium/deep).
 
 Wait for all scoring agents to complete before proceeding.
 
@@ -109,8 +109,8 @@ Wait for all scoring agents to complete before proceeding.
 After all scorer agents return, parse their results and emit one provenance event per note via `provenance-emit.js`. Run all emit calls in a single Bash command (chained with `&&`) to avoid excessive tool calls:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","depth":3,"sourcing":3,"linking":2,"voice":3,"atomicity":3,"total":14}' && \
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","depth":1,"sourcing":1,"linking":1,"voice":2,"atomicity":3,"total":8}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}' && \
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","gate":"2/6","claim_specificity":0,"source_grounded":0}'
 ```
 
 This closes the subagent provenance gap -- scorer agents return text results, the main thread emits them to the provenance system.
@@ -155,9 +155,9 @@ Merge outputs from all agents into a single report:
 - Sources: Pass N | Issues N | Skipped (no sources) N
 
 ### Quality Scores
-| Note | Tier | Depth | Sourcing | Linking | Voice | Atomicity | Issues |
-|------|------|-------|----------|---------|-------|-----------|--------|
-| [[note]] | shallow | 1/3 | 0/3 | 1/3 | 2/3 | 3/3 | no sources, topic-as-title |
+| Note | Tier | Gate | Specificity | Grounded | Issues |
+|------|------|------|-------------|----------|--------|
+| [[note]] | shallow | 2/6 (missing: sourcing, voice, source integrity, depth) | 0 | 0 | no sources, topic-as-title |
 
 ### Consistency
 - [[note-A]] ↔ [[note-B]] (0.91 similarity) — near-duplicate, merge candidate
@@ -224,7 +224,7 @@ Group scored notes by filename prefix to find coherent knowledge clusters ready 
 
 On approval, `mv` all qualifying files from the main thread (not subagents) so the PostToolUse hook captures the promotions. Log a batch provenance event:
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
 ```
 
 Clusters below the 80% threshold are reported but not offered for batch promotion. Individual deep notes within those clusters can still be promoted in the normal batch actions step.

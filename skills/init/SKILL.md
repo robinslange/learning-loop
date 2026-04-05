@@ -88,7 +88,7 @@ Never rename or restructure existing folders.
 
 For each missing system file, write defaults after confirmation:
 
-**`_system/persona.md`** -- Write the default voice (Hemingway + Musashi + Lao Tzu). Persona customization is handled by `/learning-loop:persona`, not here.
+**`_system/persona.md`** -- Write the default voice (Hemingway + Musashi + Lao Tzu). Persona can be customized by editing `_system/persona.md` directly.
 
 **`_system/capture-rules.md`** -- Write the standard rules:
 
@@ -144,7 +144,7 @@ Present a single confirmation covering all needed work:
 
 ```
 Dependencies need installing. This will:
-  - Download ll-search binary (~50MB)
+  - Download ll-search binary (~77MB)
   - Install packages (sql.js, no native deps)
   - Index your vault (~30s for 2,000 notes)
 
@@ -178,7 +178,7 @@ Run `node PLUGIN/scripts/check-deps.mjs`. For each missing dependency, present i
 ```
 Missing dependency: episodic-memory
 Required for: Cross-session conversation search
-Install: claude plugin install superpowers@claude-plugins-official
+Install: claude plugin install episodic-memory@superpowers-marketplace
 ```
 
 ---

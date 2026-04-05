@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { home, resolvePluginData, readStdin } from './lib/common.mjs';
+import { home, resolvePluginData, resolveVaultPath, readStdin, findBinary as findBinaryShared } from './lib/common.mjs';
 
 const tmp = tmpdir();
 
@@ -33,32 +33,31 @@ if (hookData.stop_hook_active) process.exit(0);
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
 const pluginData = resolvePluginData();
-const watchPid = join(pluginData, 'watch.pid');
 
 function isWatchRunning() {
+  if (!pluginData) return false;
   try {
-    const pid = parseInt(readFileSync(watchPid, 'utf8').trim(), 10);
+    const pid = parseInt(readFileSync(join(pluginData, 'watch.pid'), 'utf8').trim(), 10);
     process.kill(pid, 0);
     return true;
   } catch { return false; }
 }
 
 if (!isWatchRunning()) {
-  const fedConfig = join(pluginData, 'federation', 'config.json');
+  const fedConfig = pluginData ? join(pluginData, 'federation', 'config.json') : null;
   try {
-    const cfg = JSON.parse(readFileSync(join(PLUGIN_DIR, 'config.json'), 'utf-8'));
-    const vaultRoot = (cfg.vault_path || '~/brain/brain').replace(/^~/, home());
+    const vaultRoot = resolveVaultPath();
+    if (!vaultRoot) throw new Error('no vault');
     const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
-    const binPath = join(pluginData, 'bin', 'll-search');
-    const binDir = join(pluginData, 'bin');
-    if (existsSync(binPath)) {
-      const args = existsSync(fedConfig)
+    const binary = findBinaryShared();
+    if (binary) {
+      const args = (fedConfig && existsSync(fedConfig))
         ? ['index', vaultRoot, dbPath, '--sync']
         : ['index', vaultRoot, dbPath];
-      const child = spawn(binPath, args, {
+      const child = spawn(binary.bin, args, {
         detached: true,
         stdio: 'ignore',
-        env: { ...process.env, ORT_DYLIB_PATH: binDir },
+        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
       });
       child.unref();
     }

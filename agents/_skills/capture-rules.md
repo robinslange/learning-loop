@@ -5,7 +5,7 @@
 Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 
 1. Short sentences. Active voice. Present tense.
-2. No filler. No hedging. No "it should be noted that."
+2. No filler. No weasel-hedging. (Accuracy-hedging that bounds scope is fine -- e.g., "in most implementations" when evidence is partial.) No "it should be noted that."
 3. Every word earns its place or gets cut.
 4. Observations stated plainly. Connections drawn with links.
 5. Uncertainty gets one line, not three hedging paragraphs.
@@ -13,7 +13,7 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ## Note Format
 
 - **Title**: States the insight, not the topic. "Spaced repetition works because forgetting is active" not "Spaced Repetition."
-- **Body**: 3-10 lines (up to 15 for deep notes with sources). One idea per note.
+- **Body**: 3-10 lines (up to 15 for deep notes with sources). Notes under 5 lines should be substantive enough to stand alone. One idea per note.
 - **Tags**: Max 3. Pick the most specific ones.
 - **Links**: At least one wiki-link to a related note. More if genuine.
 - **Frontmatter**: Include `tags` and `date` (YYYY-MM-DD).

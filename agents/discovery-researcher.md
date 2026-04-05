@@ -52,16 +52,12 @@ Repeat:
 
 2. **Search** via `mgrep --web --answer "query"`. For academic topics, also run `node PLUGIN/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
 
-3. **Save the result** to a temp file:
-   ```bash
-   cat > /tmp/ll-result-N.txt << 'RESULT_EOF'
-   [paste the search result text here]
-   RESULT_EOF
-   ```
+3. **Save the result** to a temp file using the Write tool:
+   Write the search result text to a file at `<tmpdir>/ll-result-N.txt` (where tmpdir is the OS temp directory and N increments per query).
 
 4. **Check convergence**:
    ```bash
-   node PLUGIN/scripts/convergence-check.mjs check "SESSION_ID" "your query" /tmp/ll-result-N.txt
+   node PLUGIN/scripts/convergence-check.mjs check "SESSION_ID" "your query" "<tmpdir>/ll-result-N.txt"
    ```
 
 5. **Read the verdict**:
@@ -69,7 +65,7 @@ Repeat:
    - `stop: true, reason: "hard_stop:*"` — stop immediately, compile findings
    - `stop: true, reason: "soft_stop:*"` — stop searching, compile findings
 
-6. **Clean up**: `rm /tmp/ll-result-N.txt`
+6. **Clean up**: Delete the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-result-N.txt') } catch(e) {}"`
 
 Do NOT override the convergence checker's verdict. It uses mechanical signals (embedding similarity, entity overlap, cycle detection) that are more reliable than self-assessment.
 

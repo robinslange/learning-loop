@@ -2,7 +2,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve, sep, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath } from './lib/common.mjs';
+import { runHook, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared } from './lib/common.mjs';
 
 function isVaultNote(filePath, vaultRoot) {
   const prefix = vaultRoot + sep;
@@ -56,10 +56,11 @@ function extractWikilinks(body) {
 }
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
+const TITLE_INDEX_EXTRA_DIRS = ['Excalidraw'];
 
 function buildNoteIndex(vaultRoot) {
   const index = new Set();
-  for (const dir of VAULT_DIRS) {
+  for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS]) {
     try {
       const files = readdirSync(join(vaultRoot, dir), { recursive: true });
       for (const f of files) {
@@ -77,15 +78,15 @@ function noteExistsInIndex(name, noteIndex) {
 
 function checkDuplicateNote(filePath, title, vaultRoot) {
   try {
-    const pluginData = resolvePluginData();
-    const binPath = join(pluginData, 'bin', 'll-search');
-    if (!existsSync(binPath)) return null;
+    const binary = findBinaryShared();
+    if (!binary) return null;
     const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
     if (!existsSync(dbPath)) return null;
 
-    const out = execFileSync(binPath, ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'], {
+    const out = execFileSync(binary.bin, ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'], {
       encoding: 'utf-8',
       timeout: 3000,
+      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
     });
     const result = JSON.parse(out);
     const q = result.queries && result.queries[0];

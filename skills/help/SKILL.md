@@ -176,6 +176,8 @@ If you've configured federation via `/learning-loop:init`, search results automa
 | `/learning-loop:gaps "topic"` | Challenge vault knowledge — find tensions, thin ice, and missing perspectives |
 | `/learning-loop:ingest [linear\|repo\|context]` | Pull external context into vault + auto-memory |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard — ghost dupes, orphans, stale notes, broken links |
+| `/learning-loop:dream` | Consolidate auto-memory between sessions |
+| `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
 | `/learning-loop:help` | This guide |
 
 ---

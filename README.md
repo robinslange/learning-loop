@@ -31,7 +31,7 @@ Other things you can do mid-session:
 Requires the [episodic-memory](https://github.com/anthropics/claude-code) plugin for cross-session conversation search:
 
 ```bash
-claude plugin install superpowers@claude-plugins-official
+claude plugin install episodic-memory@superpowers-marketplace
 ```
 
 Then install learning-loop:
@@ -49,7 +49,7 @@ This plugin is not lightweight. It runs local model inference and injects vault 
 
 **Tokens:** Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault with hundreds of memories and notes adds thousands of tokens per session -- and it grows as your vault does. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window. Heavy sweeps can fan out across 6+ agents.
 
-**Local compute:** The `ll-search` binary (77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. Reranked searches and index rebuilds use multi-core inference. On an M4 Max, reranked search takes ~0.6s and indexing takes ~1.8s. On lower-spec machines these will be noticeably slower. An Apple Silicon Mac with 16GB+ RAM is the practical minimum for comfortable use.
+**Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. Reranked searches and index rebuilds use multi-core inference. On an M4 Max, reranked search takes ~0.6s and indexing takes ~1.8s. On lower-spec machines these will be noticeably slower. An Apple Silicon Mac with 16GB+ RAM is the practical minimum for comfortable use.
 
 **What we do to keep costs down:**
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku, not Sonnet
@@ -66,7 +66,7 @@ You could wire up hooks and note templates yourself. What takes time to build an
 - **Source verification at write time.** Every note gets checked against PubMed, Semantic Scholar, and CrossRef before it lands. Author swaps, wrong years, and unconfirmable numbers get caught, not shipped. The naive regex approach for citation extraction had a ~60% false positive rate -- POS tagging with vendored winkNLP solved it.
 - **Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over the wikilink graph + IDF-weighted tag expansion, fused via RRF, with optional cross-encoder reranking. Graph signals surface bridge notes across domains. All in a single Rust binary.
 - **Write-time guardrails.** A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks automatically. A dream gate nudges you to consolidate auto-memory when it's been long enough.
-- **13 specialized agents** that run in parallel -- research, verification, gap analysis, note writing, batch triage. They share 19 skills covering promote-gate assessment, cross-validation, blindspot detection, and more.
+- **13 specialized agents** that run in parallel -- research, verification, gap analysis, note writing, batch triage. They share 18 skills covering promote-gate assessment, cross-validation, blindspot detection, and more.
 - **A quality gate that blocks promotion.** Notes flow inbox to fleeting to permanent. Six criteria determine routing. Source integrity failures block promotion regardless of other scores.
 
 ## Skills
@@ -87,6 +87,8 @@ You could wire up hooks and note templates yourself. What takes time to build an
 | `/health` | Vault health dashboard |
 | `/ingest` | Pull from Linear, repos, or pasted text |
 | `/diagram "concept"` | Generate Excalidraw diagram |
+| `/init` | First-time setup: vault path, persona, binary, federation |
+| `/help` | Show all commands with usage details |
 
 All commands are prefixed with `/learning-loop:` (e.g., `/learning-loop:discovery "caffeine"`). Run `/learning-loop:help` for full usage details.
 
@@ -114,7 +116,7 @@ your-vault/
 ## Troubleshooting
 
 **`/learning-loop:init` hangs on binary download**
-The `ll-search` binary is ~75MB (includes embedding and reranker models). On slow connections, the download can take a few minutes. If it fails, re-run init -- it resumes from where it left off.
+The `ll-search` binary is ~77MB (includes embedding and reranker models). On slow connections, the download can take a few minutes. If it fails, re-run init -- it resumes from where it left off.
 
 **Search returns no results**
 Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls.
@@ -123,7 +125,7 @@ Run `node scripts/vault-search.mjs index --force` to rebuild the index. The inde
 Check that `config.json` in `~/.claude/plugins/data/learning-loop/` has the correct `vault_path`. The `VAULT_PATH` environment variable overrides it if set.
 
 **Episodic memory not available**
-Install the superpowers bundle first: `claude plugin install superpowers@claude-plugins-official`. Restart Claude Code.
+Install episodic-memory first: `claude plugin install episodic-memory@superpowers-marketplace`. Restart Claude Code.
 
 ## License
 

@@ -2,6 +2,7 @@
 
 import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
 import { relativeToVault } from './lib/paths.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
@@ -23,7 +24,7 @@ function ensureBinary() {
 function tryFederationExport() {
   if (!existsSync(FEDERATION_CONFIG) || !hasBinary()) return;
   try {
-    const result = run(['export', DB_PATH, '/tmp/ll-search-export.db', VAULT_PATH, ...federationArgs()]);
+    const result = run(['export', DB_PATH, join(tmpdir(), 'll-search-export.db'), VAULT_PATH, ...federationArgs()]);
     process.stderr.write(`Federation export: ${result.exported} notes\n`);
   } catch (err) {
     process.stderr.write(`Federation export failed: ${err.message}\n`);
@@ -63,7 +64,7 @@ function logRetrieval(command, query, results) {
     const now = new Date();
     const file = join(dir, `queries-${now.toISOString().slice(0, 7)}.jsonl`);
     let sessionId = '';
-    try { sessionId = readFileSync('/tmp/learning-loop-session-id', 'utf-8').trim(); } catch {}
+    try { sessionId = readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf-8').trim(); } catch {}
     const federated = existsSync(FEDERATION_CONFIG);
     const topPaths = Array.isArray(results)
       ? results.slice(0, 10).map(r => r.path || r.note_a || '')
@@ -278,7 +279,7 @@ try {
 
     case 'export-index': {
       ensureBinary();
-      out(run(['export', DB_PATH, '/tmp/ll-search-export.db', VAULT_PATH]));
+      out(run(['export', DB_PATH, join(tmpdir(), 'll-search-export.db'), VAULT_PATH]));
       break;
     }
 

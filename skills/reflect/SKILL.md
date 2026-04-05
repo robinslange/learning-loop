@@ -22,12 +22,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-start"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-start"}'
 ```
 
 **At session end:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -142,7 +142,7 @@ Keep it to 2-4 lines. The user can see the diffs if they want details.
 Write a timestamp so the Stop hook knows reflection already happened:
 
 ```bash
-date +%s > /tmp/learning-loop-last-reflect
+node -e "require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'learning-loop-last-reflect'), Math.floor(Date.now()/1000).toString())"
 ```
 
 Run this via the Bash tool at the end of every /reflect invocation.

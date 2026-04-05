@@ -19,6 +19,7 @@ Before running the criteria assessment, classify the note by source status:
 | Has external source citation (URL, DOI, PMID) but provenance unknown | Standard gate below, but Source Integrity requires mechanical verification before promotion |
 | Source field is `unverified` | Block for permanent. Route to `1-fleeting/` max. The note openly declares its source gap. |
 | No source, but note is synthesis/author inference (cross-note connection, personal pattern recognition, design decision) | Tag `[synthesis]` in frontmatter, exempt from Sourcing and Source Integrity criteria |
+| `source: discovery` (generated during `/discovery` sessions) | Treat like synthesis but require at least one verifiable claim with a URL. Exempt from Source Integrity mechanical verification; Sourcing still applies. |
 | No source, but note makes a factual claim that should be verifiable | Block: do not score. Return `→ source-attach workflow` and stop |
 
 ### Source provenance
@@ -46,10 +47,10 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 | Criterion | Pass | Fail |
 |-----------|------|------|
-| **Depth** | 5+ lines of substantive body (not padding) | < 5 lines or vague generalities |
+| **Depth** | 3+ lines of substantive body (5+ for notes with external sources) | < 3 lines or vague generalities |
 | **Sourcing** | Claims attributed with clickable URLs. Exempted for `[synthesis]`-tagged notes. | Bare author+year or no sources |
 | **Linking** | At least one genuine `[[wikilink]]` to a related note | No links or forced/irrelevant links |
-| **Voice** | Active voice, present tense, no filler, insight-as-title | Topic-as-title, passive voice, hedging |
+| **Voice** | Active voice, present tense, no filler, insight-as-title | Topic-as-title, passive voice, weasel-hedging |
 | **Atomicity** | One idea per note | Covers 2+ distinct ideas |
 | **Source Integrity** | All sources verified via source-resolver; no `[needs verification]` or `[citation needed]` tags remaining; no animal-only evidence presented as human. Exempted for `[synthesis]`-tagged notes. | Contains unverified sources, `[needs verification]` tags, or unqualified species claims |
 
@@ -61,7 +62,7 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 | All but voice pass | `3-permanent/` | Yes — rewrite in persona voice |
 | Source integrity fails (non-synthesis notes only) | `1-fleeting/` | No — **cannot promote with unverified sources** |
 | 3-4 of applicable pass | `1-fleeting/` | No |
-| ≤ half of applicable pass | `0-inbox/` | No |
+| ≤ 2 of applicable pass | `0-inbox/` | No |
 
 For `[synthesis]`-tagged notes, "all applicable" = 4 criteria (Sourcing and Source Integrity exempt). For all other notes, "all applicable" = 6.
 

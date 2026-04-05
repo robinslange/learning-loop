@@ -21,12 +21,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-start"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-start"}'
 ```
 
 **At session end:**
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"limbo":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"limbo":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

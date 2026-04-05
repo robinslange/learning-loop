@@ -7,10 +7,9 @@ import { join, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { home, resolvePluginData } from './lib/common.mjs';
+import { home, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared } from './lib/common.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
 
 // Clean stale plugin cache versions (only keep current)
 try {
@@ -26,13 +25,10 @@ const tmp = tmpdir();
 
 const MEMORY_DIR = join(home(), '.claude', 'projects');
 
-// Resolve vault root from config
-let vaultRoot;
-try {
-  const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-  vaultRoot = resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-} catch {
-  vaultRoot = resolve(join(home(), 'brain', 'brain'));
+let vaultRoot = resolveVaultPath();
+if (!vaultRoot) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: '' } }));
+  process.exit(0);
 }
 const VAULT_INBOX = join(vaultRoot, '0-inbox');
 
@@ -63,11 +59,15 @@ try {
 
 // Apply config tokens if needed (runs once after install/update)
 const configMarker = join(PLUGIN_DIR, '.config-applied');
+const pluginData = resolvePluginData();
 try {
-  const configExists = existsSync(CONFIG_PATH);
+  const pluginDataConfig = pluginData ? join(pluginData, 'config.json') : null;
+  const legacyConfig = join(PLUGIN_DIR, 'config.json');
+  const activeConfig = (pluginDataConfig && existsSync(pluginDataConfig)) ? pluginDataConfig : legacyConfig;
+  const configExists = existsSync(activeConfig);
   const markerExists = existsSync(configMarker);
   const configNewer =
-    configExists && markerExists && statSync(CONFIG_PATH).mtimeMs > statSync(configMarker).mtimeMs;
+    configExists && markerExists && statSync(activeConfig).mtimeMs > statSync(configMarker).mtimeMs;
   if (!markerExists || configNewer) {
     execFileSync('node', [join(PLUGIN_DIR, 'scripts', 'apply-config.mjs')], { stdio: 'ignore' });
     writeFileSync(configMarker, '');
@@ -77,17 +77,9 @@ try {
 // 0. Incremental reindex (fast: 39ms no-op, <500ms with changes)
 const DB_DIR = join(vaultRoot, '.vault-search');
 const DB_PATH = join(DB_DIR, 'vault-index.db');
-const pluginData = resolvePluginData();
-
-function findBinary() {
-  const installed = join(pluginData, 'bin', 'll-search');
-  if (existsSync(installed)) return { bin: installed, binDir: join(pluginData, 'bin') };
-  const devBuild = resolve(join(PLUGIN_DIR, 'native', 'target', 'release', 'll-search'));
-  if (existsSync(devBuild)) return { bin: devBuild, binDir: resolve(join(PLUGIN_DIR, 'native', 'target', 'release')) };
-  return null;
-}
 
 function isWatchRunning() {
+  if (!pluginData) return false;
   try {
     const pid = parseInt(readFileSync(join(pluginData, 'watch.pid'), 'utf8').trim(), 10);
     process.kill(pid, 0);
@@ -95,13 +87,13 @@ function isWatchRunning() {
   } catch { return false; }
 }
 
-const binary = findBinary();
+const binary = findBinaryShared();
 if (binary && existsSync(DB_PATH) && !isWatchRunning()) {
   try {
     execFileSync(binary.bin, ['index', vaultRoot, DB_PATH], {
       timeout: 5000,
       stdio: 'ignore',
-      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir },
+      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
     });
   } catch {}
 }

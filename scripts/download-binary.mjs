@@ -118,7 +118,7 @@ async function main() {
   if (artifact.endsWith('.tar.gz')) {
     execFileSync('tar', ['-xzf', tmpPath, '-C', binDir]);
   } else if (artifact.endsWith('.zip')) {
-    execFileSync('unzip', ['-o', tmpPath, '-d', binDir]);
+    execFileSync('tar', ['-xf', tmpPath, '-C', binDir]);
   }
 
   // Clean up archive

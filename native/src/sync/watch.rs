@@ -41,8 +41,11 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
     let _pid = PidGuard::new(&cfg.pid_file)?;
 
     let stopped = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&stopped))?;
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&stopped))?;
+    #[cfg(unix)]
+    {
+        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&stopped))?;
+        signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&stopped))?;
+    }
 
     eprintln!("Initial reindex...");
     do_reindex(&cfg.db_path, &cfg.vault_path);
@@ -159,6 +162,24 @@ fn do_sync(
     }
 }
 
+#[cfg(unix)]
+fn is_process_running(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_process_running(pid: u32) -> bool {
+    std::process::Command::new("tasklist")
+        .args(["/FI", &format!("PID eq {}", pid), "/NH"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+        .unwrap_or(false)
+}
+
 pub fn is_watch_running(pid_file: &Path) -> bool {
     let pid_str = match std::fs::read_to_string(pid_file) {
         Ok(s) => s,
@@ -168,9 +189,5 @@ pub fn is_watch_running(pid_file: &Path) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    is_process_running(pid)
 }

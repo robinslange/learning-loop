@@ -7,11 +7,20 @@
 
 if [ -z "$1" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-  CONFIG="$SCRIPT_DIR/../config.json"
-  if [ -f "$CONFIG" ]; then
-    VAULT=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CONFIG','utf-8')); console.log(c.vault_path?.replace(/^~/, process.env.HOME) || process.env.HOME+'/brain/brain')")
+  if [ -n "$CLAUDE_PLUGIN_DATA" ] && [ -f "$CLAUDE_PLUGIN_DATA/config.json" ]; then
+    CONFIG="$CLAUDE_PLUGIN_DATA/config.json"
   else
-    VAULT="$HOME/brain/brain"
+    CONFIG="$SCRIPT_DIR/../config.json"
+  fi
+  if [ -f "$CONFIG" ]; then
+    VAULT=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CONFIG','utf-8')); const v=c.vault_path; if(!v){process.exit(1)} console.log(v.replace(/^~/, process.env.HOME))")
+    if [ $? -ne 0 ] || [ -z "$VAULT" ]; then
+      echo "No vault_path configured" >&2
+      exit 1
+    fi
+  else
+    echo "No config found" >&2
+    exit 1
   fi
 else
   VAULT="$1"

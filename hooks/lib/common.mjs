@@ -22,21 +22,44 @@ export function resolvePluginData() {
     const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
     if (saved && existsSync(saved)) return saved;
   } catch {}
-  return join(home(), '.claude', 'plugins', 'data', 'learning-loop');
+  process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
+  return null;
+}
+
+export function resolveConfig() {
+  const pluginData = resolvePluginData();
+  if (pluginData) {
+    try {
+      return JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
+    } catch {}
+  }
+  try {
+    return JSON.parse(readFileSync(join(resolve(import.meta.dirname, '..', '..'), 'config.json'), 'utf-8'));
+  } catch {}
+  return {};
 }
 
 export function resolveVaultPath() {
   if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
+  const cfg = resolveConfig();
+  if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, home()));
+  return null;
+}
+
+export function binaryName() {
+  return process.platform === 'win32' ? 'll-search.exe' : 'll-search';
+}
+
+export function findBinary() {
+  const name = binaryName();
   const pluginData = resolvePluginData();
-  try {
-    const cfg = JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  try {
-    const cfg = JSON.parse(readFileSync(join(resolve(import.meta.dirname, '..', '..'), 'config.json'), 'utf-8'));
-    return resolve((cfg.vault_path || '~/brain/brain').replace(/^~/, home()));
-  } catch {}
-  return resolve(join(home(), 'brain', 'brain'));
+  if (pluginData) {
+    const installed = join(pluginData, 'bin', name);
+    if (existsSync(installed)) return { bin: installed, binDir: join(pluginData, 'bin') };
+  }
+  const devBuild = resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release', name));
+  if (existsSync(devBuild)) return { bin: devBuild, binDir: resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release')) };
+  return null;
 }
 
 export function getSessionId() {
@@ -102,7 +125,9 @@ function monthStr() {
 }
 
 export function emitProvenance(event) {
-  const dir = join(resolvePluginData(), 'provenance');
+  const pd = resolvePluginData();
+  if (!pd) return;
+  const dir = join(pd, 'provenance');
   mkdirSync(dir, { recursive: true });
   const record = {
     ts: new Date().toISOString(),
@@ -114,7 +139,9 @@ export function emitProvenance(event) {
 }
 
 export function emitRetrieval(prefix, event) {
-  const dir = join(resolvePluginData(), 'retrieval');
+  const pd = resolvePluginData();
+  if (!pd) return;
+  const dir = join(pd, 'retrieval');
   mkdirSync(dir, { recursive: true });
   const record = {
     ts: new Date().toISOString(),

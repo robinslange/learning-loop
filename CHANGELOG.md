@@ -1,5 +1,89 @@
 # Changelog
 
+## v1.13.1
+
+- fix: remove hardcoded fallback path in federation config resolution
+
+## v1.13.0
+
+Subagent provenance, memory-read tracking, and PRF tuning.
+
+### Added
+
+- Subagent provenance tracking via shared hook module
+- `post-read-retrieval.js` hook for vault read instrumentation
+- `post-search-tracking.js` hook for episodic memory search tracking
+
+### Changed
+
+- PRF switched from add-as-signal to hybrid-feedback strategy
+
+## v1.12.3
+
+Discovery skill rewrite: mechanical convergence, self-regulating effort.
+
+### Added
+
+- Mechanical convergence checker for research stopping decisions
+- Sentence-split utility for convergence checking
+- Auto-link safety net in promote-gate for unlinked notes
+
+### Changed
+
+- Discovery researcher rewritten to use mechanical convergence checking
+- Depth parameter removed from discovery skill -- effort is now self-regulating
+- Decision gates simplified, depth gate removed (now mechanical)
+- Backlink hook replaced with autolink hook (`post-write-autolink.js`), extended matcher to Write|Edit
+
+### Removed
+
+- `research-scaling` skill (replaced by mechanical convergence)
+
+### Fixed
+
+- Accept Edit tool_response shape (may not have success field)
+- Read links from disk not tool_input to prevent dedup failure
+- Status shows summary not raw embeddings, EMA uses mean of first two rates
+- Stale depth references in help and discovery skills
+
+## v1.12.2
+
+- fix: source provenance contract across researcher-writer-gate pipeline
+
+## v1.12.1
+
+- fix: inject resolved PLUGIN/PLUGIN_DATA paths from session-start hook
+
+## v1.12.0
+
+ll-search v2: module split, rayon parallelism, EmbeddingStore cache, Rocchio PRF.
+
+### Added
+
+- Rocchio vector PRF as 5th RRF signal
+- `EmbeddingStore` cache to eliminate redundant embedding deserialization
+- `Migrate` and `Benchmark` CLI commands restored for future model experiments
+- `EmbeddingProvider` trait, `ModelConfig`, and `BgeSmallProvider` for model abstraction
+- Shadow-table migration for model switching
+- Federation: advertise supported models, BM25 fallback for mismatched peers
+- `--model` flag on all embedding CLI commands
+- Generate embeddings for peers that lack them on sync
+
+### Changed
+
+- `search.rs` split into `search/` module with 8 focused files
+- `db.rs` split into `db/` module (schema, index, query)
+- Pairwise cosine ops parallelized with rayon
+- Batch body loading into single SQL query
+- `open_db` returns `anyhow::Result` for proper error propagation
+- WAL checkpoint after reindex in watch mode
+- Removed unnecessary `RwLock` from `EmbeddingStore` (data is immutable after construction)
+
+### Removed
+
+- Dead `--incremental` CLI flag
+- EmbeddingGemma experiment (provider abstraction kept)
+
 ## v1.11.0
 
 Graph-augmented retrieval and composable search architecture.

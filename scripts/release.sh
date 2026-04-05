@@ -59,12 +59,12 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
 fi
 
 # Update all versioned manifests
-sed -i '' "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
+perl -i -pe "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
   package.json \
   .claude-plugin/plugin.json
 
 if [ -f native/Cargo.toml ]; then
-  sed -i '' "s/^version = \"[0-9]*\.[0-9]*\.[0-9]*\"/version = \"$NEW\"/" native/Cargo.toml
+  perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" native/Cargo.toml
 fi
 
 # Verify

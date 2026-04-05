@@ -92,7 +92,7 @@ Body: 3-10 lines (up to 15 for deep notes with sources). Max 3 tags. At least on
 
 ### 6. Verify Sources (Mechanical)
 
-**Run source-resolver on the rewritten note before finishing.** Do not rely on your own recognition of whether citations are correct — LLM-generated PMIDs are wrong ~50% of the time.
+**Run source-resolver on the rewritten note before finishing.** Do not rely on your own recognition of whether citations are correct — LLM-generated PMIDs are wrong ~43% of the time.
 
 ```bash
 node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>

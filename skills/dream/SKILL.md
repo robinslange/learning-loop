@@ -18,7 +18,7 @@ Seven operators, each defined in `operators/`. This file orchestrates the four-p
 Emit events silently via Bash for each operator action.
 
 ```bash
-PLUGIN/scripts/provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
@@ -27,7 +27,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 ## Phase 1: Orient
 
 1. Detect the project memory directory:
-   - Use `$CLAUDE_PROJECT_DIR` if available, else derive from cwd: `$HOME/.claude/projects/$(echo "$PWD" | sed 's|/|-|g')/memory`
+   - Use `$CLAUDE_PROJECT_DIR` if available, else use the auto-memory directory for the current project
    - Verify the directory exists and contains MEMORY.md
 
 2. Read all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/).
@@ -99,7 +99,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 Process in strict order: **DATE NORMALIZE, MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK.**
 
-Create lock file first: `echo $$ > /tmp/learning-loop-dream-lock`. Abort if lock exists.
+Create lock file first using Bash: `node -e "require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'learning-loop-dream-lock'), process.pid.toString())"`. Abort if lock exists.
 
 For each operator, read its instruction file from `operators/` and execute:
 
@@ -115,13 +115,13 @@ For each operator, read its instruction file from `operators/` and execute:
 
 Log every operation to `_dream_log.md` (append, create if needed).
 
-Remove lock file when done: `rm -f /tmp/learning-loop-dream-lock`
+Remove lock file when done using Bash: `node -e "try { require('fs').unlinkSync(require('path').join(require('os').tmpdir(), 'learning-loop-dream-lock')) } catch(e) {}"`
 
 ## Phase 4: Rebuild Index and Report
 
 1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md) — description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
 
-2. Write MEMORY.md (full overwrite). Write timestamp: `date +%s > /tmp/learning-loop-last-dream`.
+2. Write MEMORY.md (full overwrite). Write timestamp using Bash: `node -e "require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'learning-loop-last-dream'), Math.floor(Date.now()/1000).toString())"`.
 
 3. Report:
    ```
