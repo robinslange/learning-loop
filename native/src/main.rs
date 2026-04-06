@@ -141,6 +141,14 @@ enum Commands {
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    NliCheck {
+        text_a: String,
+        text_b: String,
+    },
+    NliBatch {
+        text_a: String,
+        texts_b_file: String,
+    },
 }
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
@@ -377,6 +385,17 @@ fn main() {
             let store = ll_search::search::EmbeddingStore::load(&conn);
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
             out(&result);
+        }
+        Commands::NliCheck { text_a, text_b } => {
+            let result = ll_search::nli::nli_check(&text_a, &text_b);
+            out(&result);
+        }
+        Commands::NliBatch { text_a, texts_b_file } => {
+            let content = std::fs::read_to_string(&texts_b_file)
+                .expect("failed to read texts_b file");
+            let texts_b: Vec<String> = content.lines().map(String::from).collect();
+            let results = ll_search::nli::nli_batch(&text_a, &texts_b);
+            out(&results);
         }
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a);
