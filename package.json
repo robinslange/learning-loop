@@ -1,6 +1,6 @@
 {
   "name": "learning-loop",
-  "version": "1.13.5",
+  "version": "1.13.6",
   "private": true,
   "type": "module",
   "description": "Self-improving learning loop across Claude sessions"
