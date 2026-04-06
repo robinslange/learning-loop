@@ -203,6 +203,25 @@ After compiling the research brief, emit a summary event:
 node "PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"sources_verified":N,"verification_status":"PASS|PARTIAL","has_diagram":false}'
 ```
 
+## WebFetch Discipline
+
+WebFetch has no timeout parameter. A single hanging fetch can stall the entire agent for hours.
+
+**Prefer WebSearch over WebFetch.** WebSearch returns fast. Only use WebFetch when you need to verify a specific claim against the page content.
+
+**Never WebFetch these domains** (paywalled, bot-blocking, or redirect chains that hang):
+- `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org` (redirect chain)
+- `springer.com`, `link.springer.com`
+- `tandfonline.com`, `ieeexplore.ieee.org`
+- `eprints.*.ac.uk`, `*.edu` thesis PDFs
+- Any URL ending in `.pdf` (binary, WebFetch can't read it anyway)
+
+For academic sources, use `node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"` instead. It hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably.
+
+**Never re-fetch a URL you already fetched.** The verification loop should check claims against findings already in memory, not re-fetch every source. If you fetched a URL during research, its content is already in your context.
+
+**Cap WebFetch at 15 calls per session.** If you've hit 15, stop fetching and mark remaining URLs as `unfetched` in the verified sources table.
+
 ## Rules
 
 - Never fabricate sources or claims. If you can't find evidence, say so.

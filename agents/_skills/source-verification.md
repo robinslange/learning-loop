@@ -10,13 +10,22 @@ A source URL is a verified artifact or it is a hallucination risk. There is no m
 
 **The contract between agents:** When a researcher passes sources to a writer, verified URLs arrive in a `Verified Sources` table. The writer copies them verbatim. If a source wasn't fetched, it's marked `unfetched` and the writer uses `source: unverified` in frontmatter. No agent should reconstruct what a prior agent already resolved.
 
+## WebFetch Discipline
+
+WebFetch has no timeout parameter. Hanging fetches stall the entire agent.
+
+**Never WebFetch paywalled or bot-blocking domains:** `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org`, `springer.com`, `link.springer.com`, `tandfonline.com`, `ieeexplore.ieee.org`, `eprints.*.ac.uk`, any `.pdf` URL. For academic sources on these domains, use `source-resolver.mjs` instead -- it hits APIs that respond reliably. Mark paywalled URLs as `unfetched (paywalled)` -- this is not a failure.
+
+**Never re-fetch a URL already in your context.** If the research brief or prior agent already fetched it, use that content.
+
 ## Verify Source URLs
 
 For each URL in a note or research brief:
 
-1. Fetch the URL using web fetch tools.
-2. Check: does the page exist? Does the title/author match what's cited?
-3. If dead or mismatched, flag it.
+1. For academic sources (PMID, DOI, arXiv): use `source-resolver.mjs verify-pmid/verify-doi/resolve` first. Only WebFetch if the resolver cannot handle the source type.
+2. For non-academic URLs (blogs, docs, specs): fetch the URL using WebFetch, but skip domains in the blocklist above.
+3. Check: does the page exist? Does the title/author match what's cited?
+4. If dead or mismatched, flag it.
 
 For sources cited by name without a URL:
 

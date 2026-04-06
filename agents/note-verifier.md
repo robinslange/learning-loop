@@ -169,10 +169,27 @@ After verification, emit a result event:
 node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-verifier","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
 ```
 
+## WebFetch Discipline
+
+WebFetch has no timeout parameter. A single hanging fetch can stall verification for hours.
+
+**Never WebFetch paywalled or bot-blocking domains:**
+- `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org` (redirect chain)
+- `springer.com`, `link.springer.com`
+- `tandfonline.com`, `ieeexplore.ieee.org`
+- `eprints.*.ac.uk`, `*.edu` thesis PDFs
+- Any URL ending in `.pdf`
+
+For these, use `source-resolver.mjs verify-pmid/verify-doi` instead. Mark the URL as `unfetched (paywalled)` in the source checks table -- this is not a failure, it is a known constraint.
+
+**If you already have the page content in your context** (e.g., from a research brief passed as input, or from an earlier fetch in this session), do not re-fetch. Check claims against what you already have.
+
+**Cap WebFetch at 10 calls per verification session.** After 10, mark remaining URLs as `unfetched (budget)` and move on.
+
 ## Rules
 
 - **Verify, don't rewrite.** Your job is to flag issues, not fix them. Return findings so other agents can act.
 - **Be specific.** "Source doesn't support claim" is useless. Say what the source actually says.
 - **Don't over-flag.** Common knowledge doesn't need a citation. Only flag claims that are specific enough to require sourcing.
-- **URL checks are mandatory.** Every URL in the note gets fetched. No exceptions.
+- **URL checks use source-resolver first, WebFetch second.** For academic sources with PMID/DOI, the resolver is authoritative. Only WebFetch non-academic URLs (blogs, docs, specs) and only if not already in context.
 - **Missing URLs are issues.** If a source is cited by name but has no URL, that's a finding — include the correct URL if you can find it.
