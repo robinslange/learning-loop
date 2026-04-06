@@ -1,48 +1,38 @@
 # learning-loop
 
-Claude Code forgets everything between sessions. This plugin makes it remember.
+A context engineering plugin for Claude Code. It teaches Claude how to work with what you know.
 
-It connects Claude Code to an Obsidian vault and builds a knowledge system that compounds over time. Every session starts with what you already know. During work, insights get captured in your voice. At session end, learnings get routed to the right place. The vault grows sharper, not just larger.
+Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It enforces source verification before anything lands in your vault. It gates promotion on quality scores. It writes in your voice, not its own. It surfaces what you already know before searching the web. The result is a knowledge system that compounds through discipline, not volume.
+
+## What it solves
+
+Claude fabricates sources. Measured rates: ~43% of PubMed IDs, ~26% of DOIs. Without mechanical verification, these contaminate your notes and propagate through every future session that retrieves them.
+
+Claude writes like Claude. Without persona enforcement and capture rules, your vault fills with homogeneous LLM prose that sounds the same regardless of topic or domain.
+
+Claude forgets process. It will skip verification, promote half-sourced notes, and synthesize before the evidence supports it. Hooks and quality gates make these failures structurally impossible, not a matter of prompt discipline.
+
+## How it works
+
+**Process enforcement through hooks.** Ten lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
+
+**Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary.
+
+**13 specialized agents.** Research, verification, gap analysis, note writing, and batch triage run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research agents run on Sonnet.
+
+**A vault that earns its structure.** Notes flow from inbox through fleeting to permanent. Six criteria gate each transition. Source integrity failures block promotion. The vault grows sharper because every note that reaches permanent status survived mechanical scrutiny.
 
 ## What a session looks like
 
-You're reading about caffeine tolerance. You run:
+You run `/learning-loop:discovery "caffeine tolerance"`. The plugin searches your vault first. You already have three notes on caffeine mechanisms and a literature note on CYP1A2. It searches the web, checks sources against 11 academic APIs, catches a misattributed author on a real PMID, and writes atomic notes in your voice. It tells you what you already know and where the gaps are.
 
-```
-> /learning-loop:discovery "caffeine tolerance"
-```
+You find a paper. `/learning-loop:literature "https://arxiv.org/abs/2307.03172"` captures it without breaking flow.
 
-The plugin searches your vault first. You already have three notes on caffeine mechanisms and a literature note on CYP1A2. It searches the web, evaluates a dozen sources against 11 academic APIs (PubMed, Semantic Scholar, CrossRef, OpenAlex, arXiv, Europe PMC, DBLP, Unpaywall, RFC Editor, Open Library, ChEMBL), catches an author misattribution on a real PMID, and writes atomic notes in your voice. It tells you what you already know and where the gaps are.
-
-Later you find an interesting paper. You capture it without breaking flow:
-
-```
-> /learning-loop:literature "https://arxiv.org/abs/2307.03172"
-```
-
-Before closing the session, you consolidate:
-
-```
-> /learning-loop:reflect
-```
-
-Learnings route to the right stores. Notes that pass the quality gate get promoted. Notes that don't stay where they are until they're ready.
-
-## What it actually does
-
-**Source verification at write time.** Every note gets checked before it lands. The resolver hits 11 APIs, cross-references author names against fetched metadata, catches year mismatches, flags impossible journal combinations, and verifies that cited studies actually support the claims made. Measured fabrication rates without this: PubMed IDs ~43%, DOIs ~26%. The naive regex approach for citation extraction had a ~60% false positive rate, so we vendored winkNLP for POS tagging.
-
-**Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over the wikilink graph + IDF-weighted tag expansion, fused via RRF, with optional cross-encoder reranking. Graph signals surface bridge notes across domains. All in a single Rust binary.
-
-**Write-time guardrails.** A pre-write hook catches near-duplicates. A post-write hook adds backlinks automatically. A convergence checker decides when research has enough coverage to stop.
-
-**13 specialized agents** that run in parallel for research, verification, gap analysis, note writing, and batch triage. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and more.
-
-**A quality gate that blocks promotion.** Notes flow inbox to fleeting to permanent. Six criteria determine routing. Source integrity failures block promotion regardless of other scores.
+Before closing: `/learning-loop:reflect`. Learnings route to the right stores. Notes that pass the quality gate get promoted. Notes that don't stay where they are until they're ready.
 
 ## Install
 
-Requires the [episodic-memory](https://github.com/anthropics/claude-code) plugin for cross-session conversation search:
+Requires [episodic-memory](https://github.com/anthropics/claude-code) for cross-session conversation search:
 
 ```bash
 claude plugin install episodic-memory@superpowers-marketplace
@@ -59,25 +49,25 @@ Restart Claude Code, then run `/learning-loop:init` to configure your vault path
 
 ## Resource usage
 
-This plugin is not lightweight. It runs local model inference and injects vault context into every session.
+This plugin is heavy. It runs local model inference and injects vault context into every session.
 
-**Tokens:** Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault with hundreds of memories and notes adds thousands of tokens per session, and it grows as your vault does. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
+**Tokens:** Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault adds thousands of tokens per session, and grows. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
 
-**Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing takes ~1.8s. On lower-spec machines these will be noticeably slower. An Apple Silicon Mac with 16GB+ RAM is the practical minimum.
+**Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum.
 
 **What we do to keep costs down:**
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku
-- Recent captures capped at the last 5 notes, not the full inbox
-- Intention summaries use compact format (names and counts, not full content)
-- Provenance, backlinks, and session labels write to disk, not into your context
+- Recent captures capped at the last 5 notes
+- Intention summaries use compact format
+- Provenance, backlinks, and session labels write to disk, not into context
 - Pre-compact hook captures insights before Claude compresses context
-- Search batches multiple queries into a single process, amortizing model init
+- Search batches multiple queries into a single process
 
 ## Skills
 
 | Command | What it does |
 |---|---|
-| `/discovery "topic"` | Interactive research with web search and vault context |
+| `/discovery "topic"` | Research with web search and vault context |
 | `/quick "question"` | Fast verified answer with auto-capture |
 | `/quick-note "insight"` | Capture to inbox without breaking flow |
 | `/deepen "note"` | Strengthen a note with research, sources, links |
@@ -112,10 +102,10 @@ your-vault/
 
 ## Go deeper
 
-- [Search](guide/search.md) -- hybrid search commands, reranking, clustering
-- [Agents](guide/agents.md) -- all 13 specialized agents and shared skills
-- [Federation](guide/federation.md) -- experimental cross-vault knowledge sharing
-- [Configuration](guide/configuration.md) -- hooks, provenance, source verification, project structure
+- [Search](guide/search.md) -- hybrid search, reranking, retrieval instrumentation
+- [Agents](guide/agents.md) -- 13 specialized agents and 18 shared skills
+- [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
+- [Configuration](guide/configuration.md) -- hooks, provenance, source verification
 
 ## Troubleshooting
 
@@ -126,7 +116,7 @@ The `ll-search` binary is ~77MB (includes embedding and reranker models). On slo
 Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls.
 
 **Notes not showing up in vault**
-Check that `config.json` in `~/.claude/plugins/data/learning-loop/` has the correct `vault_path`. The `VAULT_PATH` environment variable overrides it if set.
+Check that `config.json` in `~/.claude/plugins/data/learning-loop/` has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.
 
 **Episodic memory not available**
 Install episodic-memory first: `claude plugin install episodic-memory@superpowers-marketplace`. Restart Claude Code.

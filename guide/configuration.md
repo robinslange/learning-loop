@@ -8,31 +8,33 @@
 }
 ```
 
-Config persists across plugin updates. On first run after upgrade from <1.4, config is auto-migrated from the old plugin root location.
+Config persists across plugin updates. On first run after upgrading from <1.4, the plugin migrates config from the old root location.
 
 Persona voice and capture rules live in the vault itself (`_system/persona.md` and `_system/capture-rules.md`), not in config. Agents read them directly.
 
-The `VAULT_PATH` environment variable overrides `config.json` if set.
+If set, the `VAULT_PATH` environment variable overrides `config.json`.
 
 ## Hooks
 
-Ten hook entries fire automatically (dream-gate.js is invoked by session-start, not registered independently):
+Ten hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
-| Event | Hook | What it does |
+| Event | Hook | What it enforces |
 |---|---|---|
-| SessionStart | session-start.js | Injects auto-memory index, recent captures, intention summary, dream gate check |
+| SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
-| UserPromptSubmit | session-label.js | Labels sessions for episodic memory |
-| PreToolUse (Write) | pre-write-check.js | Catches near-duplicate notes before they land in the vault |
-| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks vault reads/writes for provenance |
-| PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links to related notes after vault writes |
+| UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval |
+| PreToolUse (Write) | pre-write-check.js | Blocks near-duplicate notes before they land |
+| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
+| PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links after vault writes |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
 | PostToolUse (episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
-| PreCompact | pre-compact.js | Preserves context before compression |
+| PreCompact | pre-compact.js | Captures context insights before compression |
+
+These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
 ## Provenance
 
-Every vault operation (read, write, agent spawn, skill invocation) gets logged to `provenance/events-YYYY-MM.jsonl`. The `/health` command reads these logs to show session activity patterns.
+Every vault operation (read, write, agent spawn, skill invocation) logs to `provenance/events-YYYY-MM.jsonl`. The `/health` command reads these logs to show session activity patterns.
 
 ```bash
 # Generate provenance report
@@ -44,9 +46,9 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver script mechanically verifies citations against PubMed, Semantic Scholar, and CrossRef. The note-writer runs `verify-note` and `check-claims` on every note at write time, catching author swaps, wrong years, and flagging quantitative claims not confirmable from abstracts. Provenance events track pass/fail rates for empirical measurement.
+The source-resolver verifies citations mechanically against PubMed, Semantic Scholar, and CrossRef. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
 
-Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words -- the naive regex approach had a ~60% false positive rate on author-year patterns.
+Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words. The naive regex approach had a ~60% false positive rate on author-year patterns.
 
 ```bash
 # Verify all sources in a note
@@ -79,10 +81,10 @@ learning-loop/
   agents/               Specialized agent definitions
   agents/_skills/       Shared agent skills
   skills/               User-invocable skills (slash commands)
-  scripts/              Vault search dispatcher, provenance, source-resolver, binary download
+  scripts/              Vault search, provenance, source-resolver, binary download
   scripts/lib/vendor/   Vendored JS deps (winkNLP for POS-tagged citation extraction)
   vendor/               Vendored JS deps (sql.js WASM, ed25519, picomatch)
-  hooks/                Lifecycle hooks (session start/stop, provenance)
+  hooks/                Lifecycle hooks (enforcement layer)
   native/               Rust ll-search binary (indexing, embedding, search, sync)
-  native/src/sync/      Federation sync client (auth, client, config, export, mod, protocol, visibility, watch)
+  native/src/sync/      Federation sync client
 ```

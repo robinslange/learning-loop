@@ -1,6 +1,6 @@
 # Federation (experimental)
 
-A curated knowledge network for sharing insights across vaults. Federation is invite-only -- a hub admin provisions your network access and registers your identity on the hub. See [interchange.live](https://interchange.live) for more.
+A curated knowledge network for sharing verified insights across vaults. Federation is invite-only -- a hub admin provisions your network access and registers your identity on the hub. Notes that reach your peers have already passed source verification and quality gating. See [interchange.live](https://interchange.live) for more.
 
 ## What you get
 
