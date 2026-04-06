@@ -21,25 +21,40 @@ The `--rerank` flag runs a cross-encoder (ms-marco-MiniLM-L-6-v2, quantized int8
 
 ```bash
 # Hybrid semantic + keyword search
-node scripts/vault-search.mjs query "caffeine tolerance"
+node scripts/vault-search.mjs query "caffeine tolerance" [--top N] [--rerank] [--candidates N]
 
-# Hybrid search with cross-encoder reranking
-node scripts/vault-search.mjs search "caffeine tolerance" --rerank
+# Hybrid search (broader default: top 20)
+node scripts/vault-search.mjs search "caffeine tolerance" [--top N] [--rerank] [--candidates N]
 
 # Find similar notes
-node scripts/vault-search.mjs similar "path/to/note.md"
+node scripts/vault-search.mjs similar "path/to/note.md" [--top N]
 
 # Cluster by similarity
-node scripts/vault-search.mjs cluster --threshold 0.72
+node scripts/vault-search.mjs cluster [--threshold 0.7]
 
 # Rebuild index
 node scripts/vault-search.mjs index [--force] [--watch] [--sync]
 
+# Index health check
+node scripts/vault-search.mjs status
+
+# List indexed notes
+node scripts/vault-search.mjs list [--top N]
+
 # Find confusable note pairs
-node scripts/vault-search.mjs discriminate <paths>
+node scripts/vault-search.mjs discriminate [--threshold T] [paths...]
 
 # Batch search+rerank+discriminate (used by /reflect)
-node scripts/vault-search.mjs reflect-scan "query1" "query2" --top 5
+node scripts/vault-search.mjs reflect-scan "query1" "query2" [--top N] [--candidates N]
+
+# List intention contexts
+node scripts/vault-search.mjs intentions ["filter"]
+
+# Export federation index
+node scripts/vault-search.mjs export-index
+
+# Sync with federation hub
+node scripts/vault-search.mjs sync
 ```
 
 The `reflect-scan` command batches multiple queries into a single process, sharing model init, embedding loads, and graph traversal across queries for ~30% faster throughput.

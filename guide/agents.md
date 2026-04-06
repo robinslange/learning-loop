@@ -48,6 +48,5 @@ Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
 - **decision-gates** -- structured go/no-go checkpoints
 - **extract-insights** -- pulls atomic insights from raw content
 - **source-quality** -- rates source reliability
-- **research-scaling** -- calibrates research depth to note maturity
 - **preview-format** -- standardized output formatting
 - **fleeting-sweep** -- identifies stale fleeting notes for archival

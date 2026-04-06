@@ -14,17 +14,17 @@ Claude forgets process. It will skip verification, promote half-sourced notes, a
 
 ## How it works
 
-**Process enforcement through hooks.** Ten lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
+**Process enforcement through hooks.** Nine lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
 
 **Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary.
 
-**13 specialized agents.** Research, verification, gap analysis, note writing, and batch triage run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research agents run on Sonnet.
+**12 specialized agents.** Research, verification, gap analysis, note writing, and batch triage run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research agents run on Sonnet.
 
 **A vault that earns its structure.** Notes flow from inbox through fleeting to permanent. Six criteria gate each transition. Source integrity failures block promotion. The vault grows sharper because every note that reaches permanent status survived mechanical scrutiny.
 
 ## What a session looks like
 
-You run `/learning-loop:discovery "caffeine tolerance"`. The plugin searches your vault first. You already have three notes on caffeine mechanisms and a literature note on CYP1A2. It searches the web, checks sources against 11 academic APIs, catches a misattributed author on a real PMID, and writes atomic notes in your voice. It tells you what you already know and where the gaps are.
+You run `/learning-loop:discovery "caffeine tolerance"`. The plugin searches your vault first. You already have three notes on caffeine mechanisms and a literature note on CYP1A2. It searches the web, checks sources against 12 academic APIs, catches a misattributed author on a real PMID, and writes atomic notes in your voice. It tells you what you already know and where the gaps are.
 
 You find a paper. `/learning-loop:literature "https://arxiv.org/abs/2307.03172"` captures it without breaking flow.
 
@@ -103,7 +103,7 @@ your-vault/
 ## Go deeper
 
 - [Search](guide/search.md) -- hybrid search, reranking, retrieval instrumentation
-- [Agents](guide/agents.md) -- 13 specialized agents and 18 shared skills
+- [Agents](guide/agents.md) -- 12 specialized agents and 18 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
 - [Configuration](guide/configuration.md) -- hooks, provenance, source verification
 
@@ -116,7 +116,7 @@ The `ll-search` binary is ~77MB (includes embedding and reranker models). On slo
 Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls.
 
 **Notes not showing up in vault**
-Check that `config.json` in `~/.claude/plugins/data/learning-loop/` has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.
+Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.
 
 **Episodic memory not available**
 Install episodic-memory first: `claude plugin install episodic-memory@superpowers-marketplace`. Restart Claude Code.

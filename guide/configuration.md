@@ -1,6 +1,6 @@
 # Configuration
 
-`config.json` in `PLUGIN_DATA` (`~/.claude/plugins/data/learning-loop/`):
+`config.json` in `PLUGIN_DATA` (set by Claude Code via `CLAUDE_PLUGIN_DATA` env var):
 
 ```json
 {
@@ -8,7 +8,7 @@
 }
 ```
 
-Config persists across plugin updates. On first run after upgrading from <1.4, the plugin migrates config from the old root location.
+Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
 Persona voice and capture rules live in the vault itself (`_system/persona.md` and `_system/capture-rules.md`), not in config. Agents read them directly.
 
@@ -16,7 +16,7 @@ If set, the `VAULT_PATH` environment variable overrides `config.json`.
 
 ## Hooks
 
-Ten hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
+Nine hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
 | Event | Hook | What it enforces |
 |---|---|---|
@@ -46,7 +46,7 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver verifies citations mechanically against PubMed, Semantic Scholar, and CrossRef. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
+The source-resolver verifies citations mechanically against 12 APIs: PubMed, Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
 
 Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words. The naive regex approach had a ~60% false positive rate on author-year patterns.
 
@@ -59,6 +59,16 @@ node scripts/source-resolver.mjs check-claims <path>
 
 # Resolve a citation
 node scripts/source-resolver.mjs resolve "Author Year Topic"
+
+# Verify specific identifiers
+node scripts/source-resolver.mjs verify-pmid <pmid> "Author" <year>
+node scripts/source-resolver.mjs verify-doi <doi> "Author" <year>
+node scripts/source-resolver.mjs verify-arxiv <arxiv-id>
+node scripts/source-resolver.mjs verify-rfc <rfc-number>
+node scripts/source-resolver.mjs verify-isbn <isbn>
+
+# Look up a compound in ChEMBL
+node scripts/source-resolver.mjs lookup-compound <name>
 
 # Search PubMed with MeSH terms
 node scripts/source-resolver.mjs search-pubmed "topic" --mesh

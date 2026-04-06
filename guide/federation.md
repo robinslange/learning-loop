@@ -66,10 +66,17 @@ Disabling graph participation is instant -- set `"graph": false` or remove the k
 ## Sync commands
 
 ```bash
-ll-search index ~/brain/brain ~/brain/brain/.vault-search/vault-index.db --sync
-ll-search sync <db> <vault>
-ll-search export <db> <output> <vault>
-ll-search watch <vault> <db> --sync-interval 300
+# Reindex and sync in one step
+node scripts/vault-search.mjs index --sync
+
+# Export federation index
+node scripts/vault-search.mjs export-index
+
+# Sync with federation hub
+node scripts/vault-search.mjs sync
+
+# Watch mode with periodic sync (calls ll-search watch internally)
+node scripts/vault-search.mjs index --watch --sync
 ```
 
 Sync runs automatically: reindex on session start, export+sync on session end (unless watch mode is running).
