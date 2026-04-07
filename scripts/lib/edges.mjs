@@ -24,6 +24,16 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_path);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_path);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_confidence ON edges(confidence);
+
+CREATE TABLE IF NOT EXISTS supersessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  old_pattern_query TEXT NOT NULL,
+  superseded_date TEXT NOT NULL DEFAULT (date('now')),
+  replacement_note_path TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_super_pattern ON supersessions(old_pattern_query);
 `;
 
 export async function openEdgeDb(dbPath) {
@@ -61,6 +71,10 @@ export function removeEdge(db, id) {
 
 export function removeEdgesByNote(db, notePath) {
   db.run('DELETE FROM edges WHERE from_path = ? OR to_path = ?', [notePath, notePath]);
+}
+
+export function removeOutgoingEdges(db, notePath) {
+  db.run('DELETE FROM edges WHERE from_path = ?', [notePath]);
 }
 
 function rowsToObjects(result) {
@@ -130,6 +144,77 @@ export function confirmEdge(db, id, newType) {
 
 export function rejectEdge(db, id) {
   db.run("DELETE FROM edges WHERE id = ? AND confidence = 'medium'", [id]);
+}
+
+export function addSupersession(db, { oldPatternQuery, replacementNotePath = null, reason = null, supersededDate = null }) {
+  if (!oldPatternQuery || !oldPatternQuery.trim()) {
+    throw new Error('oldPatternQuery is required');
+  }
+  if (tokenize(oldPatternQuery).length === 0) {
+    throw new Error(`oldPatternQuery has no content words after stopword removal: "${oldPatternQuery}". Add at least one distinctive word.`);
+  }
+  if (supersededDate) {
+    db.run(
+      'INSERT INTO supersessions (old_pattern_query, superseded_date, replacement_note_path, reason) VALUES (?, ?, ?, ?)',
+      [oldPatternQuery, supersededDate, replacementNotePath, reason],
+    );
+  } else {
+    db.run(
+      'INSERT INTO supersessions (old_pattern_query, replacement_note_path, reason) VALUES (?, ?, ?)',
+      [oldPatternQuery, replacementNotePath, reason],
+    );
+  }
+  const [row] = db.exec('SELECT last_insert_rowid() as id');
+  return row.values[0][0];
+}
+
+export function removeSupersession(db, id) {
+  db.run('DELETE FROM supersessions WHERE id = ?', [id]);
+}
+
+export function listSupersessions(db) {
+  return rowsToObjects(db.exec('SELECT * FROM supersessions ORDER BY superseded_date DESC'));
+}
+
+const STOPWORDS = new Set([
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+  'do', 'does', 'did', 'have', 'has', 'had', 'i', 'you', 'we', 'they',
+  'should', 'would', 'could', 'will', 'shall', 'may', 'might', 'can',
+  'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as',
+  'and', 'or', 'but', 'not', 'no', 'so', 'if', 'than', 'then', 'when',
+  'how', 'what', 'why', 'which', 'where', 'who', 'whose', 'whom',
+  'me', 'my', 'mine', 'your', 'yours', 'our', 'ours', 'their', 'theirs',
+  'this', 'that', 'these', 'those', 'it', 'its',
+]);
+
+function tokenize(text) {
+  return text.toLowerCase()
+    .replace(/[^\w\s-]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t && !STOPWORDS.has(t));
+}
+
+export function findMatchingSupersessions(db, query) {
+  if (!query || !query.trim()) return [];
+  const queryTokens = new Set(tokenize(query));
+  if (queryTokens.size === 0) return [];
+
+  const all = rowsToObjects(db.exec('SELECT * FROM supersessions'));
+  const matches = [];
+  for (const s of all) {
+    const patternTokens = new Set(tokenize(s.old_pattern_query || ''));
+    if (patternTokens.size === 0) continue;
+    let shared = 0;
+    for (const t of patternTokens) {
+      if (queryTokens.has(t)) shared++;
+    }
+    const ratio = shared / patternTokens.size;
+    const minShared = patternTokens.size === 1 ? 1 : 2;
+    if (shared >= minShared && ratio >= 0.5) {
+      matches.push({ ...s, match_ratio: ratio });
+    }
+  }
+  return matches.sort((a, b) => b.match_ratio - a.match_ratio);
 }
 
 export function saveDb(db, dbPath) {

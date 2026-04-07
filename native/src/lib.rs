@@ -4,5 +4,6 @@ pub mod model;
 pub mod db;
 pub mod search;
 pub mod rerank;
+#[cfg(feature = "nli")]
 pub mod nli;
 pub mod sync;

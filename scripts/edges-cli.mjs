@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
-import { join } from 'path';
-import { PLUGIN_DATA } from './lib/constants.mjs';
+import { join, basename } from 'path';
+import { readFileSync } from 'fs';
+import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import {
   openEdgeDb, addEdge, removeEdge, removeEdgesByNote,
   getEdgesFrom, getEdgesTo, getDownstream,
   getSoleJustificationDependents, getPendingReview,
   confirmEdge, rejectEdge, saveDb,
+  addSupersession, removeSupersession, listSupersessions, findMatchingSupersessions,
 } from './lib/edges.mjs';
 
 const DB_FILE = join(PLUGIN_DATA, 'edges.db');
@@ -23,6 +25,23 @@ function out(data) {
   console.log(JSON.stringify(data, null, 2));
 }
 
+function extractEdgeContext(fromPath, toTarget) {
+  try {
+    const fullPath = join(VAULT_PATH, fromPath);
+    const content = readFileSync(fullPath, 'utf-8');
+    const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
+    const body = fmEnd ? content.slice(fmEnd[0].length) : content;
+    const linkRe = new RegExp(`\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`);
+    const m = linkRe.exec(body);
+    if (!m) return null;
+    const start = Math.max(0, m.index - 100);
+    const end = Math.min(body.length, m.index + m[0].length + 100);
+    return body.slice(start, end).replace(/\n/g, ' ').trim();
+  } catch {
+    return null;
+  }
+}
+
 function usage() {
   out({
     error: 'Unknown command',
@@ -32,7 +51,12 @@ function usage() {
       'list <note-path>',
       'downstream <note-path> [--max-depth 10]',
       'sole-dependents <note-path>',
-      'review',
+      'review (shows context from source notes)',
+      'review-count',
+      'super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]',
+      'super-list',
+      'super-check <query>',
+      'super-remove <id>',
       'confirm <id> [--type new-type]',
       'reject <id>',
       'stats',
@@ -113,7 +137,18 @@ async function main() {
 
       case 'review': {
         const pending = getPendingReview(db);
-        out({ pending_count: pending.length, edges: pending });
+        const enriched = pending.map(edge => {
+          const ctx = extractEdgeContext(edge.from_path, edge.to_path);
+          return ctx ? { ...edge, context: ctx } : edge;
+        });
+        out({ pending_count: pending.length, edges: enriched });
+        break;
+      }
+
+      case 'review-count': {
+        const countResult = db.exec("SELECT COUNT(*) FROM edges WHERE confidence = 'medium'");
+        const count = countResult.length ? countResult[0].values[0][0] : 0;
+        out({ pending_count: count });
         break;
       }
 
@@ -139,6 +174,50 @@ async function main() {
         rejectEdge(db, id);
         saveDb(db, DB_FILE);
         out({ ok: true, rejected: id });
+        break;
+      }
+
+      case 'super-add': {
+        const pattern = args[1];
+        if (!pattern) {
+          out({ error: 'Usage: super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]' });
+          process.exit(1);
+        }
+        const replacementNotePath = parseFlag('--replacement', null);
+        const reason = parseFlag('--reason', null);
+        const supersededDate = parseFlag('--date', null);
+        const id = addSupersession(db, { oldPatternQuery: pattern, replacementNotePath, reason, supersededDate });
+        saveDb(db, DB_FILE);
+        out({ ok: true, id });
+        break;
+      }
+
+      case 'super-list': {
+        const items = listSupersessions(db);
+        out({ count: items.length, supersessions: items });
+        break;
+      }
+
+      case 'super-check': {
+        const query = args.slice(1).join(' ');
+        if (!query) {
+          out({ error: 'Usage: super-check <query>' });
+          process.exit(1);
+        }
+        const matches = findMatchingSupersessions(db, query);
+        out({ query, matches });
+        break;
+      }
+
+      case 'super-remove': {
+        const id = parseInt(args[1], 10);
+        if (isNaN(id)) {
+          out({ error: 'Usage: super-remove <id>' });
+          process.exit(1);
+        }
+        removeSupersession(db, id);
+        saveDb(db, DB_FILE);
+        out({ ok: true, removed: id });
         break;
       }
 

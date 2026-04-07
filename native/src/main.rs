@@ -141,10 +141,12 @@ enum Commands {
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    #[cfg(feature = "nli")]
     NliCheck {
         text_a: String,
         text_b: String,
     },
+    #[cfg(feature = "nli")]
     NliBatch {
         text_a: String,
         texts_b_file: String,
@@ -386,10 +388,12 @@ fn main() {
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
             out(&result);
         }
+        #[cfg(feature = "nli")]
         Commands::NliCheck { text_a, text_b } => {
             let result = ll_search::nli::nli_check(&text_a, &text_b);
             out(&result);
         }
+        #[cfg(feature = "nli")]
         Commands::NliBatch { text_a, texts_b_file } => {
             let content = std::fs::read_to_string(&texts_b_file)
                 .expect("failed to read texts_b file");

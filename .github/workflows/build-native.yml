@@ -45,8 +45,14 @@ jobs:
             native/target
           key: ${{ matrix.target }}-cargo-${{ hashFiles('native/Cargo.lock') }}
 
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: native/model
+          key: native-model-v2-${{ hashFiles('native/build.rs') }}
+
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --features nli --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

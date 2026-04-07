@@ -26,6 +26,15 @@ notify = "7"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
+[features]
+# `nli` bundles the DeBERTa NLI model for the contradiction-check hook.
+# OFF by default because the model file (~172MB) is local-only on the dev machine
+# and not yet wired into build.rs. Compile with `cargo build --features nli`
+# locally to enable. When OFF, the `nli-check` and `nli-batch` subcommands are
+# omitted from the binary; the JS hook layer fails soft when they are missing.
+default = []
+nli = []
+
 [dev-dependencies]
 tempfile = "3"
 
