@@ -16,16 +16,17 @@ If set, the `VAULT_PATH` environment variable overrides `config.json`.
 
 ## Hooks
 
-Nine hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
+Ten hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
 | Event | Hook | What it enforces |
 |---|---|---|
-| SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate |
+| SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate nudge (via `lib/dream-gate.js`) |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval |
 | PreToolUse (Write) | pre-write-check.js | Blocks near-duplicate notes before they land |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
 | PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links after vault writes |
+| PostToolUse (Write\|Edit) | post-write-edge-infer.js | Classifies and stores semantic edges between notes on write |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
 | PostToolUse (episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
 | PreCompact | pre-compact.js | Captures context insights before compression |

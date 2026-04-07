@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync 
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'dream-gate.js');
+const HOOK = join(import.meta.dirname, '..', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
 const DREAM_MARKER = join(tmp, 'learning-loop-last-dream');
 const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');

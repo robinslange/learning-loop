@@ -14,7 +14,7 @@ Claude forgets process. It will skip verification, promote half-sourced notes, a
 
 ## How it works
 
-**Process enforcement through hooks.** Nine lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
+**Process enforcement through hooks.** Ten lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
 
 **Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary.
 

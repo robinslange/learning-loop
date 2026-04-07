@@ -206,7 +206,7 @@ context += 'Keep retrieval lightweight — one line per insight, not a wall of t
 try {
   const dreamNudge = execFileSync(
     'node',
-    [join(import.meta.dirname, 'dream-gate.js')],
+    [join(import.meta.dirname, 'lib', 'dream-gate.js')],
     { encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'ignore'] }
   ).trim();
   if (dreamNudge) {

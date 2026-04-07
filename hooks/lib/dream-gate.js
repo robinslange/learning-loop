@@ -6,7 +6,7 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { home } from './lib/common.mjs';
+import { home } from './common.mjs';
 
 const tmp = tmpdir();
 const DREAM_MARKER = join(tmp, 'learning-loop-last-dream');
