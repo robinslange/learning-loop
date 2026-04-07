@@ -99,8 +99,8 @@ runHook(({ tool, input, response }) => {
 
   if (!isWatchRunning()) {
     try {
-      execFileSync(binary.bin, ['index', vaultRoot, dbPath, '--incremental'], {
-        timeout: 2000, stdio: 'ignore',
+      execFileSync(binary.bin, ['index', vaultRoot, dbPath], {
+        timeout: 5000, stdio: 'ignore',
         env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
       });
     } catch {}

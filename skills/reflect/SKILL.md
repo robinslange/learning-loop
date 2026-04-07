@@ -107,6 +107,56 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
+- **After each vault note Write, append its absolute path to `/tmp/ll-reflect-new-notes.txt`** (one per line). Step 4.6 (Upstream Refinement) reads this file. If you write zero vault notes in this step, leave the file empty or absent.
+
+```bash
+# Initialize at the start of Step 4 (truncates any stale file from a prior reflect):
+: > /tmp/ll-reflect-new-notes.txt
+# After each vault Write:
+echo "<absolute-path-to-just-written-note>" >> /tmp/ll-reflect-new-notes.txt
+```
+
+### Step 4.4: Post-Batch Sweep
+
+Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed `post-write-autolink.js` and `post-write-edge-infer.js` entirely — ending up without suggested backlinks or typed edges.
+
+Replay the hook chain on any vault notes missing structural backlinks. Idempotent — safe to run on already-hooked notes.
+
+```bash
+# Resolve plugin data dir, vault path, and ll-search binary at runtime.
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
+LL_BIN="$PLUGIN_DATA/bin/ll-search"
+[ -x "$LL_BIN" ] || LL_BIN="${CLAUDE_PLUGIN_ROOT}/native/target/release/ll-search"
+
+# Ensure new notes are indexed before the sweep + any downstream similarity queries.
+# Incremental by default; only embeds notes that are new or mtime-changed.
+ORT_DYLIB_PATH="$(dirname "$LL_BIN")" ORT_LIB_LOCATION="$(dirname "$LL_BIN")" \
+  "$LL_BIN" index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
+
+# Detect unlinked candidates (exclude 4-projects — free-form indexes)
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+import os, re
+root = os.environ["LL_VAULT"]
+for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
+    for dirpath, _, files in os.walk(os.path.join(root, d)):
+        for f in files:
+            if not f.endswith(".md"): continue
+            p = os.path.join(dirpath, f)
+            try:
+                body = open(p).read()
+                body = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.DOTALL)
+                if not re.search(r"\[\[[^\]]+\]\]", body):
+                    print(p)
+            except: pass
+PY
+
+if [ -s /tmp/ll-sweep-candidates.txt ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+fi
+```
+
+Expected output is a JSON summary `{processed, ok, failed, failures}`. Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
 
 ### Step 4.5: Intention Extraction
 
@@ -123,6 +173,103 @@ status: intentioned
 ```
 
 This ensures new notes with intentions appear in the next session's intention summary. Claude can drill into specific contexts on-demand.
+
+### Step 4.6: Upstream Refinement
+
+When a new vault note touches a claim already in the vault, the existing claim should be refined to incorporate the new evidence. This step finds those pairs, asks the `refinement-proposer` agent to draft edits, validates them, presents the batch for confirmation, and applies via `Write`. Contradictions route to inline counter-argument linking instead of editing the upstream body.
+
+Skip this entire step if `/tmp/ll-reflect-new-notes.txt` does not exist or is empty (the session wrote no vault notes).
+
+#### 4.6.a — Build candidate pairs
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out /tmp/ll-refinement-pairs.json < /tmp/ll-reflect-new-notes.txt > /dev/null
+```
+
+If the resulting `/tmp/ll-refinement-pairs.json` is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
+
+#### 4.6.b — Dispatch refinement-proposer agent
+
+Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt:
+
+```
+Read the agent definition at PLUGIN/agents/refinement-proposer.md and follow it exactly.
+
+pairs_file: /tmp/ll-refinement-pairs.json
+vault_path: {{VAULT}}/
+
+Return the JSON response only, no commentary, no markdown fences.
+```
+
+Capture the agent's stdout response. Write it to `/tmp/ll-refinement-agent-output.json`.
+
+#### 4.6.c — Validate
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" /tmp/ll-refinement-agent-output.json /tmp/ll-refinement-pairs.json > /tmp/ll-refinement-validated.json
+```
+
+The validator strips em-dashes, computes sentence delta, and tags each decision with status `ok`, `oversized_warning`, or `auto_rejected`. The cleaned proposed bodies replace the agent's originals.
+
+#### 4.6.d — Present batch for confirmation
+
+Read `/tmp/ll-refinement-validated.json`. Build a preview-format table from the `decisions` array:
+
+```markdown
+## Refinement Proposals (N total)
+
+### Edits ({edit_ok} ok, {edit_oversized} oversized warnings, {edit_auto_rejected} auto-rejected)
+
+| # | upstream | type | Δ% | summary |
+|---|----------|------|----|---------|
+| 1 | websocket-has-no-built-in-reconnection | extends | 12% | Added Vercel/CF/AWS proxy timeout numbers |
+| 2 | (warn) digital-signatures-prove-authorship | qualifies | 28% | Added challenge-response gap discussion |
+
+### Counterpoints ({counterpoint_ok})
+
+| # | upstream | reason |
+|---|----------|--------|
+| 3 | concept-creep-and-diagnostic-bracket-creep | new note disputes the bracket-vs-vertical distinction |
+
+### Auto-rejected ({edit_auto_rejected})
+
+| # | upstream | Δ% | reason |
+|---|----------|----|--------|
+| 4 | ... | 73% | exceeded 50% body change ceiling |
+
+**Actions**: type `apply all` to apply every ok + oversized item, `apply ok` to apply only `ok` items, `apply N M` for specific IDs, `diff N` to print the unified diff for one item, or `none` to cancel.
+```
+
+Use `AskUserQuestion` for the action selection.
+
+If the user types `diff N`, print the unified diff between the upstream's current body and the validated `proposed_body` for decision N, then re-prompt.
+
+#### 4.6.e — Apply approved edits
+
+For each decision in the approved set:
+
+- **edit**: write the validated `proposed_body` to `upstream_path` using the `Write` tool. The post-write hook chain re-fires (autolink, edge-infer, provenance).
+- **counterpoint**: append `new_note_link_text` to the new note's body via `Edit`, and append `upstream_link_text` to the upstream's body via `Edit`. Do NOT modify the upstream's claim. Both edits should append to the body, not modify existing lines. Skip if a link with the same target already exists in either file.
+- **auto_rejected**: never apply. Log only.
+- **pass**: never apply. Log only.
+
+#### 4.6.f — Emit provenance
+
+For each applied refinement:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"refinement-proposer","skill":"reflect","action":"refinement-applied","target":"<upstream-path>","new_note":"<new-note-path>","subtype":"<edit_subtype>","cosine":<cosine>}'
+```
+
+For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"`.
+
+#### 4.6.g — Cleanup
+
+```bash
+rm -f /tmp/ll-reflect-new-notes.txt /tmp/ll-refinement-pairs.json /tmp/ll-refinement-agent-output.json /tmp/ll-refinement-validated.json
+```
+
+Report counts in Step 5: `Refinement: N edits applied, M counterpoints linked, K passed, J auto-rejected`.
 
 ### Step 5: Report
 
