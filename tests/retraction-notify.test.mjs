@@ -128,4 +128,21 @@ describe('retraction-notify', () => {
     const result = runScript(['3-permanent/note.md']);
     assert.deepEqual(result.event.targets, ['charlie']);
   });
+
+  it('matches peer paths with backslash separators', async () => {
+    const peerDir = join(PEERS_DIR, 'windows_peer');
+    mkdirSync(peerDir, { recursive: true });
+    const peerDb = join(peerDir, 'index.db');
+    const SQL = await initSQL();
+    const db = new SQL.Database();
+    db.run('CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT NOT NULL)');
+    db.run('INSERT INTO notes (path) VALUES (?)', ['3-permanent\\sample-note.md']);
+    writeFileSync(peerDb, Buffer.from(db.export()));
+    db.close();
+
+    const result = await runScript(['3-permanent/sample-note.md', '--reason', 'test']);
+    assert.equal(result.ok, true);
+    assert.equal(result.targeted_peers, 1);
+    assert.deepEqual(result.event.targets, ['windows_peer']);
+  });
 });

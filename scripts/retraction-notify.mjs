@@ -44,14 +44,18 @@ const reason = parseFlag('--reason', null);
 const replacement = parseFlag('--replacement', null);
 const sourceGraph = parseFlag('--source-graph', 'local');
 
-async function peerHasNote(peerId, path) {
+async function peerHasNote(peerId, notePath) {
   const dbPath = join(PEERS_DIR, peerId, 'index.db');
   if (!existsSync(dbPath)) return false;
   try {
     const SQL = await initSQL();
     const buffer = readFileSync(dbPath);
     const db = new SQL.Database(buffer);
-    const result = db.exec('SELECT 1 FROM notes WHERE path = ? LIMIT 1', [path]);
+    const normalized = notePath.replace(/\\/g, '/');
+    const result = db.exec(
+      "SELECT 1 FROM notes WHERE path = ? OR REPLACE(path, '\\', '/') = ? LIMIT 1",
+      [normalized, normalized],
+    );
     db.close();
     return result.length > 0 && result[0].values.length > 0;
   } catch {
