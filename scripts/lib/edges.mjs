@@ -25,6 +25,7 @@ CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_path);
 CREATE INDEX IF NOT EXISTS idx_edges_to ON edges(to_path);
 CREATE INDEX IF NOT EXISTS idx_edges_type ON edges(edge_type);
 CREATE INDEX IF NOT EXISTS idx_edges_confidence ON edges(confidence);
+CREATE INDEX IF NOT EXISTS idx_edges_source_graph ON edges(source_graph);
 
 CREATE TABLE IF NOT EXISTS supersessions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,6 +57,10 @@ export async function openEdgeDb(dbPath) {
   return db;
 }
 
+// source_graph value space:
+//   'local'    — edge inferred from a write/edit on this machine (default)
+//   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
+//   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 }) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);
@@ -80,7 +85,7 @@ export function removeEdgesByNote(db, notePath) {
 }
 
 export function removeOutgoingEdges(db, notePath) {
-  db.run('DELETE FROM edges WHERE from_path = ?', [notePath]);
+  db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
 }
 
 function rowsToObjects(result) {
