@@ -56,7 +56,6 @@ export async function openEdgeDb(dbPath) {
   return db;
 }
 
-
 export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 }) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);

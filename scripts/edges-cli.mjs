@@ -46,7 +46,7 @@ function usage() {
   out({
     error: 'Unknown command',
     commands: [
-      'add <from> <to> <type> [--confidence high|medium|low] [--source-graph local]',
+      'add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]',
       'remove <id>',
       'list <note-path>',
       'downstream <note-path> [--max-depth 10]',
@@ -82,7 +82,8 @@ async function main() {
         }
         const confidence = parseFlag('--confidence', 'high');
         const sourceGraph = parseFlag('--source-graph', 'local');
-        const id = addEdge(db, { fromPath, toPath, edgeType, confidence, sourceGraph });
+        const directionFlipped = parseFlag('--direction-flipped', '0') === '1' ? 1 : 0;
+        const id = addEdge(db, { fromPath, toPath, edgeType, confidence, sourceGraph, directionFlipped });
         saveDb(db, DB_FILE);
         out({ ok: true, id });
         break;
