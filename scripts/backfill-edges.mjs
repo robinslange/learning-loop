@@ -104,12 +104,13 @@ async function main() {
     const classified = classifyNoteEdges(content, sourceName, resolver);
 
     stats.notes_scanned++;
-    if (classified.length === 0) continue;
-    stats.notes_with_edges++;
 
     if (db) {
       removeOutgoingEdges(db, sourceRel);
     }
+
+    if (classified.length === 0) continue;
+    stats.notes_with_edges++;
 
     for (const edge of classified) {
       stats.edges_total++;
