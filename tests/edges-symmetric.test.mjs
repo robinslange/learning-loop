@@ -54,4 +54,36 @@ describe('symmetric edge queries', () => {
     assert.equal(dependents.length, 1);
     assert.equal(dependents[0].to_path, 'b.md');
   });
+
+  it('getSoleJustificationDependentsSymmetric finds sole-dependents when source has multiple unrelated targets', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for' });
+    addEdge(db, { fromPath: 'c.md', toPath: 'b.md', edgeType: 'evidence_for' });
+    addEdge(db, { fromPath: 'a.md', toPath: 'd.md', edgeType: 'evidence_for' });
+    saveDb(db, DB_PATH);
+
+    const dependents = getSoleJustificationDependentsSymmetric(db, 'a.md');
+    db.close();
+
+    // a->d is sole (d has only one evidence source)
+    // a->b is NOT sole (b has two evidence sources: a and c)
+    const soleToPaths = dependents.map(d => d.to_path).sort();
+    assert.deepEqual(soleToPaths, ['d.md']);
+  });
+
+  it('getSoleJustificationDependentsSymmetric finds sole-dependents where notePath is the target', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for' });
+    addEdge(db, { fromPath: 'a.md', toPath: 'x.md', edgeType: 'evidence_for' });
+    saveDb(db, DB_PATH);
+
+    // b has only one source (a), but a also points to x.
+    // b's sole-justification is a->b (from b's perspective, a is the only supporter)
+    const dependents = getSoleJustificationDependentsSymmetric(db, 'b.md');
+    db.close();
+
+    assert.equal(dependents.length, 1);
+    assert.equal(dependents[0].from_path, 'a.md');
+    assert.equal(dependents[0].to_path, 'b.md');
+  });
 });

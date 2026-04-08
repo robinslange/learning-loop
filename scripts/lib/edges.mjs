@@ -150,7 +150,7 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
       JOIN reachable r ON (e.from_path = r.node OR e.to_path = r.node)
       WHERE r.depth < ? AND e.source_graph != 'archived'
     )
-    SELECT DISTINCT node, MIN(depth) AS depth
+    SELECT node, MIN(depth) AS depth
     FROM reachable
     WHERE node != ?
     GROUP BY node
@@ -159,19 +159,32 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
   return rowsToObjects(db.exec(sql, [notePath, maxDepth, notePath]));
 }
 
+// Unlike getDownstreamSymmetric, this function INCLUDES archived edges.
+// Sole-dependent analysis for rewrite/correction impact maps must consider
+// historical justifications — an archived note may still have sole-dependent
+// relationships worth preserving in the impact map.
 export function getSoleJustificationDependentsSymmetric(db, notePath) {
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
-    WHERE (e.from_path = ? OR e.to_path = ?)
+    WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
       AND NOT EXISTS (
         SELECT 1 FROM edges other
-        WHERE (
-          (other.to_path = e.to_path AND other.from_path != e.from_path)
-          OR (other.from_path = e.from_path AND other.to_path != e.to_path)
-        )
-        AND other.edge_type IN ('evidence_for', 'supports')
+        WHERE other.to_path = e.to_path
+          AND other.from_path != e.from_path
+          AND other.edge_type IN ('evidence_for', 'supports')
+      )
+    UNION
+    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
+    FROM edges e
+    WHERE e.to_path = ?
+      AND e.edge_type IN ('evidence_for', 'supports')
+      AND NOT EXISTS (
+        SELECT 1 FROM edges other
+        WHERE other.to_path = e.to_path
+          AND other.from_path != e.from_path
+          AND other.edge_type IN ('evidence_for', 'supports')
       )
   `;
   return rowsToObjects(db.exec(sql, [notePath, notePath]));
