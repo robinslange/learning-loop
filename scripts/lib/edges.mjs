@@ -110,12 +110,12 @@ export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
       SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
-      FROM edges WHERE from_path = ?
+      FROM edges WHERE from_path = ? AND source_graph != 'archived'
       UNION
       SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
       FROM edges e
       JOIN downstream d ON e.from_path = d.to_path
-      WHERE d.depth < ?
+      WHERE d.depth < ? AND e.source_graph != 'archived'
     )
     SELECT DISTINCT * FROM downstream ORDER BY depth, to_path
   `;

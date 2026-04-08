@@ -2,7 +2,7 @@ import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, removeOutgoingEdges, getEdgesFrom, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, removeOutgoingEdges, getEdgesFrom, getDownstream, saveDb } from '../scripts/lib/edges.mjs';
 
 const PLUGIN_DATA = '/tmp/ll-test-plugin-data-archive';
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
@@ -39,5 +39,19 @@ describe('archive edge preservation', () => {
     saveDb(db, DB_PATH);
     db.close();
     assert.ok(id > 0);
+  });
+
+  it('getDownstream excludes archived edges from traversal', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for', sourceGraph: 'local' });
+    addEdge(db, { fromPath: 'a.md', toPath: 'c.md', edgeType: 'derived_from', sourceGraph: 'archived' });
+    addEdge(db, { fromPath: 'b.md', toPath: 'd.md', edgeType: 'evidence_for', sourceGraph: 'local' });
+    saveDb(db, DB_PATH);
+
+    const downstream = getDownstream(db, 'a.md', 5);
+    db.close();
+
+    const toPaths = downstream.map(e => e.to_path).sort();
+    assert.deepEqual(toPaths, ['b.md', 'd.md'], 'archived edge to c.md must be excluded; b→d chain still reached');
   });
 });
