@@ -270,4 +270,38 @@ describe('post-write-edge-infer', () => {
     const fmMatches = fmBody.match(/\[\[the-claim\]\]/g);
     assert.equal(fmMatches.length, 1, 'frontmatter array must not duplicate the claim');
   });
+
+  it('creates frontmatter when note has none', () => {
+    stub('claim-x');
+    const path = join(VAULT, '3-permanent', 'no-fm.md');
+    const content = '# Note\n\nThis proves [[claim-x]].\n';
+    writeFileSync(path, content);
+    run('Write', path, content);
+    const after = readFileSync(path, 'utf-8');
+    assert.match(after, /^---\n/);
+    assert.match(after, /evidence-for:\s*\["?\[\[claim-x\]\]"?\]/);
+    assert.match(after, /# Note/);
+  });
+
+  it('upgrades block-format frontmatter arrays to inline', () => {
+    stub('old-claim');
+    stub('new-claim');
+    const path = join(VAULT, '3-permanent', 'block-fm.md');
+    const content = '---\ntags: [test]\nevidence-for:\n  - "[[old-claim]]"\n---\n# Note\n\nThis proves [[new-claim]].\n';
+    writeFileSync(path, content);
+    run('Write', path, content);
+    const after = readFileSync(path, 'utf-8');
+    assert.match(after, /evidence-for:\s*\[.*\[\[old-claim\]\].*\[\[new-claim\]\].*\]/);
+    assert.doesNotMatch(after, /evidence-for:\s*\n\s*-/);
+  });
+
+  it('appends evidence-for key when frontmatter exists but key is absent', () => {
+    stub('target-y');
+    const path = join(VAULT, '3-permanent', 'fm-no-key.md');
+    const content = '---\ntags: [test]\n---\n# Note\n\nThis proves [[target-y]].\n';
+    writeFileSync(path, content);
+    run('Write', path, content);
+    const after = readFileSync(path, 'utf-8');
+    assert.match(after, /evidence-for:\s*\["?\[\[target-y\]\]"?\]/);
+  });
 });

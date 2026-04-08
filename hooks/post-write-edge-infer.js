@@ -43,18 +43,22 @@ function formatInlineArray(items) {
   return '[' + items.map(s => `"${s}"`).join(', ') + ']';
 }
 
+function parseBlockArray(lines, startIdx) {
+  const items = [];
+  let i = startIdx + 1;
+  while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
+    const item = lines[i].replace(/^\s*-\s+/, '').replace(/^["']|["']$/g, '').trim();
+    if (item) items.push(item);
+    i++;
+  }
+  return { items, endIdx: i - 1 };
+}
+
 function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   if (highConfidenceEdges.length === 0) return false;
 
   let content;
   try { content = readFileSync(filePath, 'utf-8'); } catch { return false; }
-
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---(\n?)/);
-  if (!fmMatch) return false;
-
-  const fmBody = fmMatch[1];
-  const trailingNewline = fmMatch[2];
-  const afterFm = content.slice(fmMatch[0].length);
 
   const grouped = {};
   for (const edge of highConfidenceEdges) {
@@ -65,29 +69,57 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
     grouped[key].add(`[[${bare}]]`);
   }
 
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---(\n?)/);
+
+  if (!fmMatch) {
+    const newKeys = Object.entries(grouped)
+      .map(([k, links]) => `${k}: ${formatInlineArray([...links])}`)
+      .join('\n');
+    const newContent = `---\n${newKeys}\n---\n${content}`;
+    writeFileSync(filePath, newContent);
+    return true;
+  }
+
+  const fmBody = fmMatch[1];
+  const trailingNewline = fmMatch[2];
+  const afterFm = content.slice(fmMatch[0].length);
+
   let lines = fmBody.split('\n');
   let changed = false;
 
   for (const [key, links] of Object.entries(grouped)) {
     const lineIdx = lines.findIndex(l => new RegExp(`^${key}:\\s*`).test(l));
-    if (lineIdx !== -1) {
-      const existingValue = lines[lineIdx].slice(key.length + 1).trim();
-      const existingArray = parseInlineArray(existingValue);
-      if (existingArray === null) continue;
-      const merged = new Set(existingArray);
+    if (lineIdx === -1) {
+      lines.push(`${key}: ${formatInlineArray([...links])}`);
+      changed = true;
+      continue;
+    }
+
+    const valueAfterColon = lines[lineIdx].slice(key.length + 1).trim();
+
+    if (valueAfterColon === '') {
+      const block = parseBlockArray(lines, lineIdx);
+      const merged = new Set(block.items);
       let added = false;
       for (const link of links) {
-        if (!merged.has(link)) {
-          merged.add(link);
-          added = true;
-        }
+        if (!merged.has(link)) { merged.add(link); added = true; }
       }
-      if (added) {
-        lines[lineIdx] = `${key}: ${formatInlineArray([...merged])}`;
+      if (added || block.items.length > 0) {
+        lines.splice(lineIdx, block.endIdx - lineIdx + 1, `${key}: ${formatInlineArray([...merged])}`);
         changed = true;
       }
-    } else {
-      lines.push(`${key}: ${formatInlineArray([...links])}`);
+      continue;
+    }
+
+    const existingArray = parseInlineArray(valueAfterColon);
+    if (existingArray === null) continue;
+    const merged = new Set(existingArray);
+    let added = false;
+    for (const link of links) {
+      if (!merged.has(link)) { merged.add(link); added = true; }
+    }
+    if (added) {
+      lines[lineIdx] = `${key}: ${formatInlineArray([...merged])}`;
       changed = true;
     }
   }
