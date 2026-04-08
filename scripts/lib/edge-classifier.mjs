@@ -143,7 +143,9 @@ export function extractLinksWithContext(content) {
 }
 
 export function classifyLink(context, targetName) {
-  const targetRe = new RegExp(`\\[\\[${targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`);
+  const targetRe = new RegExp(
+    `\\[\\[${targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
+  );
   const targetMatch = targetRe.exec(context);
   if (!targetMatch) return null;
 
@@ -164,12 +166,15 @@ export function classifyLink(context, targetName) {
     .filter(i => i !== -1);
   if (afterBoundaries.length) after = after.slice(0, Math.min(...afterBoundaries));
 
-  const window = before.slice(-100) + ' ' + after.slice(0, 100);
+  const beforeTail = before.slice(-100);
+  const afterHead = after.slice(0, 100);
+  const window = beforeTail + ' ' + afterHead;
 
   for (const pattern of PATTERNS) {
     for (const re of pattern.high) {
       if (re.test(window)) {
-        return { type: pattern.type, confidence: 'high' };
+        const flip = detectFlip(beforeTail, afterHead, pattern.high);
+        return { type: pattern.type, confidence: 'high', flip };
       }
     }
   }
@@ -177,12 +182,21 @@ export function classifyLink(context, targetName) {
   for (const pattern of PATTERNS) {
     for (const re of pattern.medium) {
       if (re.test(window)) {
-        return { type: pattern.type, confidence: 'medium' };
+        const flip = detectFlip(beforeTail, afterHead, pattern.medium);
+        return { type: pattern.type, confidence: 'medium', flip };
       }
     }
   }
 
   return null;
+}
+
+function detectFlip(beforeTail, afterHead, patterns) {
+  const verbInBefore = patterns.some(re => re.test(beforeTail));
+  const verbInAfter = patterns.some(re => re.test(afterHead));
+  if (verbInBefore && !verbInAfter) return false;
+  if (verbInAfter && !verbInBefore) return true;
+  return false;
 }
 
 // classifyNoteEdges takes the note content, the source note's bare name, and an
@@ -209,6 +223,7 @@ export function classifyNoteEdges(content, sourceName, resolveLink = null) {
       toPath,
       edgeType: classification.type,
       confidence: classification.confidence,
+      flip: classification.flip,
     });
   }
   return edges;

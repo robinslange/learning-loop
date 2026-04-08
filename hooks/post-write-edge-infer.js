@@ -161,19 +161,26 @@ runHook(async ({ tool, input, response }) => {
   const classified = classifyNoteEdges(content, sourceName, resolver);
   if (classified.length === 0) return;
 
-  const edges = classified.map(e => ({ fromPath: sourceRel, ...e }));
+  const edges = classified.map(e => ({
+    fromPath: e.flip ? e.toPath : sourceRel,
+    toPath: e.flip ? sourceRel : e.toPath,
+    edgeType: e.edgeType,
+    confidence: e.confidence,
+    flip: e.flip,
+  }));
 
   const db = await openEdgeDb(dbPath);
   try {
     removeOutgoingEdges(db, sourceRel);
     for (const edge of edges) {
-      addEdge(db, edge);
+      const { fromPath, toPath, edgeType, confidence } = edge;
+      addEdge(db, { fromPath, toPath, edgeType, confidence });
     }
     saveDb(db, dbPath);
   } finally {
     db.close();
   }
 
-  const highConfidenceEdges = edges.filter(e => e.confidence === 'high');
+  const highConfidenceEdges = edges.filter(e => e.confidence === 'high' && !e.flip);
   syncFrontmatterEdges(filePath, highConfidenceEdges);
 });
