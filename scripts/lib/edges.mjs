@@ -138,6 +138,45 @@ export function getSoleJustificationDependents(db, notePath) {
   return rowsToObjects(db.exec(sql, [notePath, notePath]));
 }
 
+export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
+  const sql = `
+    WITH RECURSIVE reachable(node, depth) AS (
+      SELECT ?, 0
+      UNION
+      SELECT
+        CASE WHEN e.from_path = r.node THEN e.to_path ELSE e.from_path END,
+        r.depth + 1
+      FROM edges e
+      JOIN reachable r ON (e.from_path = r.node OR e.to_path = r.node)
+      WHERE r.depth < ? AND e.source_graph != 'archived'
+    )
+    SELECT DISTINCT node, MIN(depth) AS depth
+    FROM reachable
+    WHERE node != ?
+    GROUP BY node
+    ORDER BY depth, node
+  `;
+  return rowsToObjects(db.exec(sql, [notePath, maxDepth, notePath]));
+}
+
+export function getSoleJustificationDependentsSymmetric(db, notePath) {
+  const sql = `
+    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
+    FROM edges e
+    WHERE (e.from_path = ? OR e.to_path = ?)
+      AND e.edge_type IN ('evidence_for', 'supports')
+      AND NOT EXISTS (
+        SELECT 1 FROM edges other
+        WHERE (
+          (other.to_path = e.to_path AND other.from_path != e.from_path)
+          OR (other.from_path = e.from_path AND other.to_path != e.to_path)
+        )
+        AND other.edge_type IN ('evidence_for', 'supports')
+      )
+  `;
+  return rowsToObjects(db.exec(sql, [notePath, notePath]));
+}
+
 export function getPendingReview(db) {
   return rowsToObjects(db.exec("SELECT * FROM edges WHERE confidence = 'medium'"));
 }

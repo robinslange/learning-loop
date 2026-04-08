@@ -5,8 +5,9 @@ import { readFileSync } from 'fs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import {
   openEdgeDb, addEdge, removeEdge, removeEdgesByNote,
-  getEdgesFrom, getEdgesTo, getDownstream,
-  getSoleJustificationDependents, getPendingReview,
+  getEdgesFrom, getEdgesTo, getDownstream, getDownstreamSymmetric,
+  getSoleJustificationDependents, getSoleJustificationDependentsSymmetric,
+  getPendingReview,
   confirmEdge, rejectEdge, saveDb,
   addSupersession, removeSupersession, listSupersessions, findMatchingSupersessions,
 } from './lib/edges.mjs';
@@ -49,8 +50,8 @@ function usage() {
       'add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]',
       'remove <id>',
       'list <note-path>',
-      'downstream <note-path> [--max-depth 10]',
-      'sole-dependents <note-path>',
+      'downstream <note-path> [--max-depth 10] [--symmetric]',
+      'sole-dependents <note-path> [--symmetric]',
       'review (shows context from source notes)',
       'review-count',
       'super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]',
@@ -116,23 +117,29 @@ async function main() {
       case 'downstream': {
         const notePath = args[1];
         if (!notePath) {
-          out({ error: 'Usage: downstream <note-path>' });
+          out({ error: 'Usage: downstream <note-path> [--max-depth 10] [--symmetric]' });
           process.exit(1);
         }
         const maxDepth = parseInt(parseFlag('--max-depth', '10'), 10);
-        const tree = getDownstream(db, notePath, maxDepth);
-        out({ root: notePath, downstream: tree });
+        const symmetric = args.includes('--symmetric');
+        const tree = symmetric
+          ? getDownstreamSymmetric(db, notePath, maxDepth)
+          : getDownstream(db, notePath, maxDepth);
+        out({ root: notePath, symmetric, downstream: tree });
         break;
       }
 
       case 'sole-dependents': {
         const notePath = args[1];
         if (!notePath) {
-          out({ error: 'Usage: sole-dependents <note-path>' });
+          out({ error: 'Usage: sole-dependents <note-path> [--symmetric]' });
           process.exit(1);
         }
-        const dependents = getSoleJustificationDependents(db, notePath);
-        out({ root: notePath, sole_dependents: dependents });
+        const symmetric = args.includes('--symmetric');
+        const dependents = symmetric
+          ? getSoleJustificationDependentsSymmetric(db, notePath)
+          : getSoleJustificationDependents(db, notePath);
+        out({ root: notePath, symmetric, sole_dependents: dependents });
         break;
       }
 
