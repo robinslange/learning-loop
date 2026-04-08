@@ -305,4 +305,37 @@ describe('post-write-edge-infer', () => {
     const after = readFileSync(path, 'utf-8');
     assert.match(after, /evidence-for:\s*\["?\[\[target-y\]\]"?\]/);
   });
+
+  it('stores flipped edges as source→target with direction_flipped=1', async () => {
+    stub('target-z');
+    const path = join(VAULT, '3-permanent', 'flipped-source.md');
+    const content = '---\ntags: [test]\n---\n# Source\n\n[[target-z]] proves this claim beyond doubt.\n';
+    run('Write', path, content);
+
+    const db = await openEdgeDb(DB_PATH);
+    const outgoing = getEdgesFrom(db, '3-permanent/flipped-source.md');
+    db.close();
+
+    assert.equal(outgoing.length, 1);
+    assert.equal(outgoing[0].from_path, '3-permanent/flipped-source.md');
+    assert.equal(outgoing[0].to_path, '3-permanent/target-z.md');
+    assert.equal(outgoing[0].edge_type, 'evidence_for');
+    assert.equal(outgoing[0].direction_flipped, 1);
+  });
+
+  it('re-saving a note with flipped edges is idempotent (no duplicates)', async () => {
+    stub('target-w');
+    const path = join(VAULT, '3-permanent', 'idempotent-source.md');
+    const content = '---\ntags: [test]\n---\n# Source\n\n[[target-w]] demonstrates the mechanism.\n';
+    run('Write', path, content);
+    run('Write', path, content);
+    run('Write', path, content);
+
+    const db = await openEdgeDb(DB_PATH);
+    const outgoing = getEdgesFrom(db, '3-permanent/idempotent-source.md');
+    db.close();
+
+    assert.equal(outgoing.length, 1, 'flipped edge must not duplicate on re-save');
+    assert.equal(outgoing[0].direction_flipped, 1);
+  });
 });

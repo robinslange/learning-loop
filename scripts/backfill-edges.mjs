@@ -105,9 +105,13 @@ async function main() {
       stats.by_type[edge.edgeType] = (stats.by_type[edge.edgeType] || 0) + 1;
       stats.by_confidence[edge.confidence]++;
       if (db) {
-        const fromPath = edge.flip ? edge.toPath : sourceRel;
-        const toPath = edge.flip ? sourceRel : edge.toPath;
-        addEdge(db, { fromPath, toPath, edgeType: edge.edgeType, confidence: edge.confidence });
+        addEdge(db, {
+          fromPath: sourceRel,
+          toPath: edge.toPath,
+          edgeType: edge.edgeType,
+          confidence: edge.confidence,
+          directionFlipped: edge.flip ? 1 : 0,
+        });
       }
     }
   }

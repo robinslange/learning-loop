@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS edges (
   edge_type TEXT NOT NULL,
   confidence TEXT NOT NULL DEFAULT 'high',
   source_graph TEXT DEFAULT 'local',
+  direction_flipped INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_edges_from ON edges(from_path);
@@ -47,10 +48,16 @@ export async function openEdgeDb(dbPath) {
     db = new SQL.Database();
   }
   db.run(SCHEMA);
+  const colsResult = db.exec('PRAGMA table_info(edges)');
+  const cols = colsResult[0] ? colsResult[0].values.map(r => r[1]) : [];
+  if (!cols.includes('direction_flipped')) {
+    db.run('ALTER TABLE edges ADD COLUMN direction_flipped INTEGER NOT NULL DEFAULT 0');
+  }
   return db;
 }
 
-export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local' }) {
+
+export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 }) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);
   }
@@ -58,8 +65,8 @@ export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', s
     throw new Error(`Invalid confidence: ${confidence}. Must be one of: ${VALID_CONFIDENCE.join(', ')}`);
   }
   db.run(
-    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph) VALUES (?, ?, ?, ?, ?)',
-    [fromPath, toPath, edgeType, confidence, sourceGraph],
+    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped) VALUES (?, ?, ?, ?, ?, ?)',
+    [fromPath, toPath, edgeType, confidence, sourceGraph, directionFlipped ? 1 : 0],
   );
   const [row] = db.exec('SELECT last_insert_rowid() as id');
   return row.values[0][0];
@@ -97,11 +104,11 @@ export function getEdgesTo(db, notePath) {
 
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
-    WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, created_at, depth) AS (
-      SELECT id, from_path, to_path, edge_type, confidence, source_graph, created_at, 1
+    WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
+      SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
       FROM edges WHERE from_path = ?
       UNION
-      SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.created_at, d.depth + 1
+      SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
       FROM edges e
       JOIN downstream d ON e.from_path = d.to_path
       WHERE d.depth < ?
@@ -113,7 +120,7 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 
 export function getSoleJustificationDependents(db, notePath) {
   const sql = `
-    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.created_at
+    SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')

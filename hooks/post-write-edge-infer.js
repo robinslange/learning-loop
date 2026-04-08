@@ -162,8 +162,8 @@ runHook(async ({ tool, input, response }) => {
   if (classified.length === 0) return;
 
   const edges = classified.map(e => ({
-    fromPath: e.flip ? e.toPath : sourceRel,
-    toPath: e.flip ? sourceRel : e.toPath,
+    fromPath: sourceRel,
+    toPath: e.toPath,
     edgeType: e.edgeType,
     confidence: e.confidence,
     flip: e.flip,
@@ -173,8 +173,13 @@ runHook(async ({ tool, input, response }) => {
   try {
     removeOutgoingEdges(db, sourceRel);
     for (const edge of edges) {
-      const { fromPath, toPath, edgeType, confidence } = edge;
-      addEdge(db, { fromPath, toPath, edgeType, confidence });
+      addEdge(db, {
+        fromPath: edge.fromPath,
+        toPath: edge.toPath,
+        edgeType: edge.edgeType,
+        confidence: edge.confidence,
+        directionFlipped: edge.flip ? 1 : 0,
+      });
     }
     saveDb(db, dbPath);
   } finally {
