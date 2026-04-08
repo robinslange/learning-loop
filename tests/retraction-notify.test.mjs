@@ -140,7 +140,7 @@ describe('retraction-notify', () => {
     writeFileSync(peerDb, Buffer.from(db.export()));
     db.close();
 
-    const result = await runScript(['3-permanent/sample-note.md', '--reason', 'test']);
+    const result = runScript(['3-permanent/sample-note.md', '--reason', 'test']);
     assert.equal(result.ok, true);
     assert.equal(result.targeted_peers, 1);
     assert.deepEqual(result.event.targets, ['windows_peer']);
