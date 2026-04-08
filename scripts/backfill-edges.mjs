@@ -57,6 +57,15 @@ function walkVault(root, dirs, max) {
   return out;
 }
 
+function countOrphanEdges(db, orphanFromPaths) {
+  let total = 0;
+  for (const orphan of orphanFromPaths) {
+    const res = db.exec("SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+    total += res[0] ? res[0].values[0][0] : 0;
+  }
+  return total;
+}
+
 async function main() {
   if (!VAULT_PATH) {
     console.error('VAULT_PATH not configured');
@@ -78,6 +87,8 @@ async function main() {
     by_type: {},
     by_confidence: { high: 0, medium: 0 },
   };
+
+  const walkedSourceRels = new Set(files.map(fp => fp.slice(VAULT_PATH.length + 1).split(sep).join('/')));
 
   let progress = 0;
   for (const filePath of files) {
@@ -117,8 +128,33 @@ async function main() {
   }
 
   if (db) {
+    const allFromPathsRes = db.exec('SELECT DISTINCT from_path FROM edges');
+    const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map(r => r[0]) : [];
+    const orphanFromPaths = allFromPaths.filter(fp => !walkedSourceRels.has(fp));
+    let orphansRemoved = 0;
+    for (const orphan of orphanFromPaths) {
+      const countRes = db.exec("SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+      const count = countRes[0] ? countRes[0].values[0][0] : 0;
+      if (count > 0) {
+        db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+        orphansRemoved += count;
+      }
+    }
+    stats.orphans_removed = orphansRemoved;
+    stats.orphan_from_paths = orphanFromPaths.length;
     saveDb(db, DB_FILE);
     db.close();
+  } else {
+    const dryDb = await openEdgeDb(DB_FILE);
+    try {
+      const allFromPathsRes = dryDb.exec('SELECT DISTINCT from_path FROM edges');
+      const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map(r => r[0]) : [];
+      const orphanFromPaths = allFromPaths.filter(fp => !walkedSourceRels.has(fp));
+      stats.orphans_would_remove = countOrphanEdges(dryDb, orphanFromPaths);
+      stats.orphan_from_paths = orphanFromPaths.length;
+    } finally {
+      dryDb.close();
+    }
   }
 
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
