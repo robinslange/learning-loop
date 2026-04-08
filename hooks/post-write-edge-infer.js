@@ -104,7 +104,7 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
       for (const link of links) {
         if (!merged.has(link)) { merged.add(link); added = true; }
       }
-      if (added || block.items.length > 0) {
+      if (added) {
         lines.splice(lineIdx, block.endIdx - lineIdx + 1, `${key}: ${formatInlineArray([...merged])}`);
         changed = true;
       }

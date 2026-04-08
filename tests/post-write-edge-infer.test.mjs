@@ -281,6 +281,7 @@ describe('post-write-edge-infer', () => {
     assert.match(after, /^---\n/);
     assert.match(after, /evidence-for:\s*\["?\[\[claim-x\]\]"?\]/);
     assert.match(after, /# Note/);
+    assert.match(after, /\n---\n/);
   });
 
   it('upgrades block-format frontmatter arrays to inline', () => {
