@@ -1,6 +1,6 @@
 [package]
 name = "ll-search"
-version = "1.14.2"
+version = "1.14.3"
 edition = "2021"
 description = "Learning loop search binary -- SQLite + ONNX embeddings"
 
