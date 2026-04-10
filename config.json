@@ -1,5 +1,6 @@
 {
   "vault_path": "~/brain/brain",
+  "injection_mode": "shadow",
   "dependencies": [
     {
       "name": "episodic-memory",

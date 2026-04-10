@@ -1,7 +1,7 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, readFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -171,5 +171,50 @@ describe('session-label', () => {
     const label = run(sid, 'switch to Thalen', transcript);
     // Kinso: weight 3, Thalen: weight 10 -- Thalen should be primary topic
     assert.ok(label.startsWith('Thalen'), `current prompt topic should rank first, got: ${label}`);
+  });
+});
+
+describe('session-label stdout contract', () => {
+  function runCapturingStdout(env, prompt = 'test question about hooks and injection') {
+    const input = JSON.stringify({
+      session_id: randomUUID(),
+      prompt,
+      transcript_path: '',
+      cwd: '/tmp',
+    });
+    return execFileSync('node', [HOOK], {
+      input,
+      encoding: 'utf-8',
+      timeout: 5000,
+      env: { ...process.env, ...env },
+    });
+  }
+
+  it('produces empty stdout in shadow mode', () => {
+    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'shadow' });
+    assert.equal(out, '');
+  });
+
+  it('produces empty stdout when mode is off', () => {
+    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'off' });
+    assert.equal(out, '');
+  });
+
+  it('produces empty stdout on gate-fail path', () => {
+    const emptyVault = mkdtempSync(join(tmpdir(), 'll-empty-vault-'));
+    try {
+      const out = runCapturingStdout({
+        LEARNING_LOOP_INJECTION_MODE: 'live',
+        VAULT_PATH: emptyVault,
+      }, 'obscure nonsense that will not match anything in any vault anywhere xyzzy');
+      assert.equal(out, '');
+    } finally {
+      rmSync(emptyVault, { recursive: true, force: true });
+    }
+  });
+
+  it('produces empty stdout when pipeline throws', () => {
+    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_FORCE_ERROR: '1' });
+    assert.equal(out, '');
   });
 });

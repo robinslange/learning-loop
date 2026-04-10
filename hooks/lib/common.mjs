@@ -124,7 +124,12 @@ function monthStr() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
+const provenanceDedupeKeys = new Set();
+
 export function emitProvenance(event) {
+  const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
+  if (key !== '||' && provenanceDedupeKeys.has(key)) return;
+  provenanceDedupeKeys.add(key);
   const pd = resolvePluginData();
   if (!pd) return;
   const dir = join(pd, 'provenance');

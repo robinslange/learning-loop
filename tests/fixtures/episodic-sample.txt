@@ -1,0 +1,15 @@
+Loading embedding model (first run may take time)...
+Embedding model loaded
+Found 3 relevant conversations:
+
+1. [-Users-robin-dev-kinso-monorepo, 2026-01-05] - 2% match
+   "let's do it as part of that performance improvement PR in the existing stack"
+   Lines 449-464 in /Users/robin/.config/superpowers/conversation-archive/-Users-robin-dev-kinso-monorepo/095636a1-995f-4faf-89e8-5e2ea1ca92f8.jsonl (2208.6KB, 638 lines)
+
+2. [-Users-robin-dev-kinso-monorepo, 2025-12-22] - -3% match
+   "review the work carefully please"
+   Lines 553-565 in /Users/robin/.config/superpowers/conversation-archive/-Users-robin-dev-kinso-monorepo/76fd7f03-e231-4ea2-9d84-c98998850082.jsonl (2539KB, 791 lines)
+
+3. [-Users-robin-dev-kinso-monorepo, 2025-12-15] - -4% match
+   "yes"
+   Lines 2891-2961 in /Users/robin/.config/superpowers/conversation-archive/-Users-robin-dev-kinso-monorepo/eb2c6b9f-c6bc-446b-8ea2-4931a433e80f.jsonl (18767.7KB, 4195 lines)
