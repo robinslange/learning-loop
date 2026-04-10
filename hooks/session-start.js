@@ -144,26 +144,10 @@ if (existsSync(globalMemory)) {
   } catch {}
 }
 
-// 4. Recent Obsidian inbox captures (last 5 by modification time)
-if (existsSync(VAULT_INBOX)) {
-  try {
-    const notes = readdirSync(VAULT_INBOX)
-      .filter((f) => f.endsWith('.md'))
-      .map((f) => ({
-        name: f,
-        mtime: statSync(join(VAULT_INBOX, f)).mtimeMs,
-      }))
-      .sort((a, b) => b.mtime - a.mtime)
-      .slice(0, 5);
-
-    if (notes.length > 0) {
-      context += '\n## Recent vault captures (0-inbox, newest first):\n';
-      for (const note of notes) {
-        context += `- ${basename(note.name, '.md')}\n`;
-      }
-    }
-  } catch {}
-}
+// 4. On-demand vault captures (stable pointer, no mtime-sorted list)
+const searchCmd = `node ${join(PLUGIN_DIR, 'scripts', 'vault-search.mjs')}`;
+context += '\n## Recent vault captures\n';
+context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
 // 5. Build intention summary
 try {
@@ -186,7 +170,6 @@ try {
 } catch {}
 
 // 6. Output retrieval cue
-const searchCmd = `node ${join(PLUGIN_DIR, 'scripts', 'vault-search.mjs')}`;
 context += '\n## Learning Loop — Retrieval Protocol\n';
 context += 'You have a learning loop active. Before responding to the user\'s first message:\n';
 context += '1. Check if any auto-memories (listed above) are relevant to the task at hand. If so, read them.\n';
@@ -230,41 +213,18 @@ if (existsSync(patternsFile)) {
   } catch {}
 }
 
-// 7.6. Federation status
+// 7.6. Federation status (stable, no sync timestamps)
 try {
   const fedConfigPath = join(pluginData, 'federation', 'config.json');
   if (existsSync(fedConfigPath)) {
-    const fedConfig = JSON.parse(readFileSync(fedConfigPath, 'utf-8'));
     const peersDir = join(pluginData, 'federation', 'data', 'peers');
-    let peerInfo = [];
-
     if (existsSync(peersDir)) {
-      for (const entry of readdirSync(peersDir, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const metaPath = join(peersDir, entry.name, 'index.db.meta');
-        if (existsSync(metaPath)) {
-          try {
-            const meta = JSON.parse(readFileSync(metaPath, 'utf-8'));
-            peerInfo.push({ id: entry.name, notes: meta.note_count || '?', updated: meta.updated_at || 'unknown' });
-          } catch {}
-        }
-      }
-    }
-
-    if (peerInfo.length > 0) {
-      context += '\n## Federation\n';
-      context += `Connected peers: ${peerInfo.length}. Search results automatically include peer knowledge.\n`;
-      for (const p of peerInfo) {
-        context += `- ${p.id}: ${p.notes} notes (last sync: ${p.updated})\n`;
-      }
-
-      const oneHourAgo = Date.now() - 3600000;
-      const allStale = peerInfo.every(p => {
-        const ts = new Date(p.updated).getTime();
-        return isNaN(ts) || ts < oneHourAgo;
-      });
-      if (allStale) {
-        context += '\nFederation indexes may be stale. Run `node vault-search.mjs sync` to refresh.\n';
+      const peerNames = readdirSync(peersDir, { withFileTypes: true })
+        .filter(e => e.isDirectory())
+        .map(e => e.name);
+      if (peerNames.length > 0) {
+        context += '\n## Federation\n';
+        context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
       }
     }
   }
