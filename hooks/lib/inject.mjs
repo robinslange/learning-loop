@@ -1,3 +1,5 @@
+import { spawn as defaultSpawn } from 'node:child_process';
+
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/g,
   /gh[po]_[A-Za-z0-9]{36,}/g,
@@ -71,4 +73,67 @@ export function emitHookOutput({ event, additionalContext }) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: event, additionalContext },
   }));
+}
+
+function spawnSearch(spawnFn, cmd, args, abortSignal) {
+  return new Promise((resolve) => {
+    const child = spawnFn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    const t0 = Date.now();
+
+    if (child.stdout) child.stdout.on('data', (c) => { stdout += c; });
+    if (child.stderr) child.stderr.on('data', (c) => { stderr += c; });
+
+    child.on('close', (code) => {
+      resolve({ ok: code === 0, latency_ms: Date.now() - t0, stdout, stderr, code, killed: child.killed });
+    });
+    child.on('error', (err) => {
+      resolve({ ok: false, latency_ms: Date.now() - t0, error: err.message, killed: child.killed });
+    });
+
+    const onAbort = () => { if (!child.killed) child.kill('SIGTERM'); };
+    if (abortSignal.aborted) onAbort();
+    else abortSignal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function parseVault(result) {
+  if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
+  try {
+    return { hits: JSON.parse(result.stdout), latency_ms: result.latency_ms };
+  } catch {
+    return { hits: [], error: 'parse_error', latency_ms: result.latency_ms };
+  }
+}
+
+function parseEpisodic(result) {
+  if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
+  const hits = [];
+  for (const line of result.stdout.split('\n')) {
+    const m = line.match(/^\d+\.\s*\[([^,]+),\s*([^\]]+)\]\s*-\s*(-?\d+)%/);
+    if (m) {
+      const project = m[1].trim();
+      const date = m[2].trim();
+      const score = parseInt(m[3], 10) / 100;
+      hits.push({ date, project, snippet: '', score });
+    }
+  }
+  return { hits, latency_ms: result.latency_ms };
+}
+
+export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _spawnFn }) {
+  const spawnFn = _spawnFn || defaultSpawn;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), raceCapMs);
+
+  const results = await Promise.allSettled([
+    spawnSearch(spawnFn, 'll-search', ['query', '--top', '5', vaultDbPath, query], controller.signal),
+    spawnSearch(spawnFn, 'episodic-memory', ['search', '--vector', '--limit', '5', query], controller.signal),
+  ]);
+  clearTimeout(timer);
+
+  const vault = results[0].status === 'fulfilled' ? parseVault(results[0].value) : { hits: [], error: 'rejected' };
+  const episodic = results[1].status === 'fulfilled' ? parseEpisodic(results[1].value) : { hits: [], error: 'rejected' };
+  return { vault, episodic };
 }

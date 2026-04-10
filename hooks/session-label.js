@@ -3,9 +3,11 @@
 // Runs on every UserPromptSubmit. Updates as the session evolves.
 // Scores topics by recency (current prompt >> old messages).
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resolveVaultPath, resolveConfig, resolvePluginData, emitRetrieval } from './lib/common.mjs';
+import { buildInjection, emitHookOutput, runBackendsWithRaceCap, scrubSecrets } from './lib/inject.mjs';
 
 const input = await new Promise(resolve => {
   let data = '';
@@ -175,4 +177,116 @@ if (label.length > 35) {
   label = label.slice(0, 34) + '\u2026';
 }
 
+function dedupeStatePath(sid) {
+  const pd = resolvePluginData();
+  if (!pd) return null;
+  const dir = join(pd, 'retrieval', 'session-dedupe');
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${sid}.json`);
+}
+
+function loadDedupeState(sid) {
+  const p = dedupeStatePath(sid);
+  if (!p || !existsSync(p)) return new Set();
+  try {
+    const raw = JSON.parse(readFileSync(p, 'utf8'));
+    const cutoff = Date.now() - 180_000;
+    return new Set(raw.filter(e => new Date(e.ts).getTime() >= cutoff).map(e => e.path));
+  } catch {
+    return new Set();
+  }
+}
+
+function persistDedupeState(sid, newPaths) {
+  const p = dedupeStatePath(sid);
+  if (!p) return;
+  let existing = [];
+  try { if (existsSync(p)) existing = JSON.parse(readFileSync(p, 'utf8')); } catch {}
+  const cutoff = Date.now() - 180_000;
+  const kept = existing.filter(e => new Date(e.ts).getTime() >= cutoff);
+  const ts = new Date().toISOString();
+  for (const path of newPaths) kept.push({ path, ts });
+  writeFileSync(p, JSON.stringify(kept));
+}
+
+function logShadow(record) {
+  try {
+    emitRetrieval('shadow-injection', {
+      prompt: scrubSecrets((prompt || '').slice(0, 200)),
+      prompt_length: (prompt || '').length,
+      ...record,
+    });
+  } catch {}
+}
+
+function summarizeBackends(results) {
+  return {
+    vault: { latency_ms: results.vault?.latency_ms, hits: results.vault?.hits?.length || 0, top_path: results.vault?.hits?.[0]?.path, error: results.vault?.error, raced_out: results.vault?.raced_out },
+    episodic: { latency_ms: results.episodic?.latency_ms, hits: results.episodic?.hits?.length || 0, error: results.episodic?.error, raced_out: results.episodic?.raced_out },
+  };
+}
+
 writeFileSync(labelFile, label);
+
+try {
+  if (process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR === '1') throw new Error('forced error for test');
+
+  const mode = process.env.LEARNING_LOOP_INJECTION_MODE || resolveConfig().injection_mode || 'shadow';
+  if (mode === 'off') process.exit(0);
+
+  const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
+  if (trimmed.length < 20 || /^(ok|yes|no|thanks|try\s+again|continue|go|sure|done)$/i.test(trimmed)) {
+    logShadow({ gate: { passed: false, fast_path_skip: true } });
+    process.exit(0);
+  }
+
+  const priorMsgs = messages.slice(-3, -1).map(m => (m || '').slice(0, 200));
+  const query = [(prompt || '').slice(0, 400), ...priorMsgs].join(' ');
+
+  const vaultRoot = resolveVaultPath();
+  if (!vaultRoot) {
+    logShadow({ gate: { passed: false, error: 'no_vault_path' } });
+    process.exit(0);
+  }
+  const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
+
+  const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs: 2500 });
+
+  const vaultTop = results.vault?.hits?.[0]?.score || 0;
+  const episodicTop = results.episodic?.hits?.[0]?.score || 0;
+
+  if (vaultTop < 0.65 && episodicTop < 0.65) {
+    logShadow({ gate: { passed: false, vault_top_score: vaultTop, episodic_top_score: episodicTop }, backends: summarizeBackends(results) });
+    process.exit(0);
+  }
+
+  const alreadyInjectedPaths = loadDedupeState(session_id);
+  const rawVaultHitCount = (results.vault?.hits || []).length;
+  const injection = buildInjection({
+    vaultHits: results.vault?.hits || [],
+    episodicHits: results.episodic?.hits || [],
+    query,
+    alreadyInjectedPaths,
+  });
+  const dedupeFilteredCount = rawVaultHitCount - (injection?.injectedVaultPaths?.length || 0);
+
+  if (!injection) {
+    logShadow({ gate: { passed: true }, backends: summarizeBackends(results), payload: null, dedupe_filtered_count: dedupeFilteredCount });
+    process.exit(0);
+  }
+
+  if (mode === 'shadow') {
+    logShadow({
+      gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
+      backends: summarizeBackends(results),
+      payload: { tokens_estimated: Math.ceil(injection.additionalContext.length / 4), vault_notes: injection.injectedVaultPaths.length },
+      dedupe_filtered_count: dedupeFilteredCount,
+      would_inject: scrubSecrets(injection.additionalContext),
+    });
+  } else if (mode === 'live') {
+    emitHookOutput({ event: 'UserPromptSubmit', additionalContext: injection.additionalContext });
+    persistDedupeState(session_id, injection.injectedVaultPaths);
+  }
+} catch (err) {
+  process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);
+}
