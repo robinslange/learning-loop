@@ -531,6 +531,68 @@ mod tests {
     }
 
     #[test]
+    fn test_query_response_partial_filtering() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.0, 1.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
+            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+        ]);
+        let store = EmbeddingStore::load(&conn);
+        // Query close to sleep, far from diet
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_inner(
+            &conn, &query_vec, "sleep", 10, &TemporalParams::default(), &store,
+        );
+        assert!(results.len() >= 2, "need both notes returned to test filtering");
+        let max_score = results.iter().map(|r| r.score).fold(0.0_f64, f64::max);
+        let min_score = results.iter().map(|r| r.score).fold(f64::MAX, f64::min);
+        // Pick a threshold between the two scores so one passes and one doesn't
+        let mid = (max_score + min_score) / 2.0;
+        let response = build_query_response("sleep".to_string(), results, &conn, mid);
+        assert!(response.meta.above_threshold < 2, "threshold should filter at least one result");
+        assert!(response.meta.above_threshold >= 1, "threshold should keep at least one result");
+        assert_eq!(response.results.len(), response.meta.above_threshold);
+        assert!(response.meta.hint.is_none());
+        assert_eq!(response.meta.total_indexed, 2);
+    }
+
+    #[test]
+    fn test_query_response_threshold_zero_passes_all() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.0, 1.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep", &emb_a),
+            ("3-permanent/diet.md", "diet and nutrition", "Protein intake", &emb_b),
+        ]);
+        let store = EmbeddingStore::load(&conn);
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_inner(
+            &conn, &query_vec, "sleep", 10, &TemporalParams::default(), &store,
+        );
+        let count = results.len();
+        let response = build_query_response("sleep".to_string(), results, &conn, 0.0);
+        assert_eq!(response.results.len(), count);
+        assert_eq!(response.meta.above_threshold, count);
+        assert!(response.meta.hint.is_none());
+    }
+
+    #[test]
+    fn test_query_response_empty_db() {
+        let conn = create_test_db(&[]);
+        let store = EmbeddingStore::load(&conn);
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let results = hybrid_query_inner(
+            &conn, &query_vec, "anything", 5, &TemporalParams::default(), &store,
+        );
+        let response = build_query_response("anything".to_string(), results, &conn, 0.15);
+        assert_eq!(response.meta.total_indexed, 0);
+        assert_eq!(response.meta.above_threshold, 0);
+        assert!(response.results.is_empty());
+        assert!(response.meta.hint.is_some());
+    }
+
+    #[test]
     fn test_federated_peer_no_fts_table() {
         let emb_local = norm(&[1.0, 0.0, 0.0]);
         let emb_peer = norm(&[0.9, 0.1, 0.0]);
