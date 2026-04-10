@@ -155,17 +155,18 @@ try {
   switch (cmd) {
     case 'query': {
       ensureBinary();
-      const text = stripFlags(1, '--top', '--rerank', '--candidates').join(' ');
+      const text = stripFlags(1, '--top', '--rerank', '--candidates', '--threshold').join(' ');
       const topN = parseFlag('--top', '10');
+      const threshold = parseFlag('--threshold', '0.15');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '20');
         const results = run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates, ...federationArgs()]);
         logRetrieval('rerank', text, results);
         out(results);
       } else {
-        const results = run(['query', DB_PATH, text, '--top', topN, ...federationArgs()]);
-        logRetrieval('query', text, results);
-        out(results);
+        const response = run(['query', DB_PATH, text, '--top', topN, '--threshold', threshold, ...federationArgs()]);
+        logRetrieval('query', text, response.results || response);
+        out(response);
       }
       break;
     }
