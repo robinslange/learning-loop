@@ -22,6 +22,22 @@ pub struct SearchResult {
     pub mtime: Option<f64>,
 }
 
+#[derive(Serialize)]
+pub struct QueryResponse {
+    pub meta: QueryMeta,
+    pub results: Vec<SearchResult>,
+}
+
+#[derive(Serialize)]
+pub struct QueryMeta {
+    pub query: String,
+    pub total_indexed: usize,
+    pub above_threshold: usize,
+    pub threshold: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
 #[derive(Default)]
 pub struct TemporalParams {
     pub recency_days: Option<f64>,
@@ -173,6 +189,43 @@ pub(crate) fn hybrid_query_federated_inner(
             score,
         })
         .collect()
+}
+
+pub fn total_note_count(conn: &Connection) -> usize {
+    conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get::<_, usize>(0))
+        .unwrap_or(0)
+}
+
+pub fn build_query_response(
+    query: String,
+    results: Vec<SearchResult>,
+    conn: &Connection,
+    threshold: f64,
+) -> QueryResponse {
+    let total_indexed = total_note_count(conn);
+    let above: Vec<SearchResult> = results
+        .into_iter()
+        .filter(|r| r.score >= threshold)
+        .collect();
+    let above_count = above.len();
+    let hint = if above_count == 0 {
+        Some(format!(
+            "0 results above {:.1} threshold in {} indexed notes. Try broader terms or --threshold 0.1",
+            threshold, total_indexed
+        ))
+    } else {
+        None
+    };
+    QueryResponse {
+        meta: QueryMeta {
+            query,
+            total_indexed,
+            above_threshold: above_count,
+            threshold,
+            hint,
+        },
+        results: above,
+    }
 }
 
 pub(crate) fn find_note_id(conn: &Connection, path: &str) -> Option<i64> {
@@ -437,6 +490,44 @@ mod tests {
         for r in &peer_results {
             assert!(r.score > 0.0);
         }
+    }
+
+    #[test]
+    fn test_query_response_empty_when_below_threshold() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.0, 1.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
+            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+        ]);
+        let store = EmbeddingStore::load(&conn);
+        let query_vec = norm(&[0.0, 0.0, 1.0]);
+        let results = hybrid_query_inner(
+            &conn, &query_vec, "xyznonexistent", 5, &TemporalParams::default(), &store,
+        );
+        let response = build_query_response("xyznonexistent".to_string(), results, &conn, 0.9);
+        assert_eq!(response.meta.above_threshold, 0);
+        assert!(response.results.is_empty());
+        assert!(response.meta.hint.is_some());
+    }
+
+    #[test]
+    fn test_query_response_includes_results_above_threshold() {
+        let emb_a = norm(&[1.0, 0.0, 0.0]);
+        let emb_b = norm(&[0.0, 1.0, 0.0]);
+        let conn = create_test_db(&[
+            ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
+            ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
+        ]);
+        let store = EmbeddingStore::load(&conn);
+        let query_vec = norm(&[1.0, 0.1, 0.0]);
+        let results = hybrid_query_inner(
+            &conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store,
+        );
+        let response = build_query_response("sleep".to_string(), results, &conn, 0.1);
+        assert!(response.meta.above_threshold > 0);
+        assert!(!response.results.is_empty());
+        assert!(response.meta.hint.is_none());
     }
 
     #[test]
