@@ -212,6 +212,7 @@ function persistDedupeState(sid, newPaths) {
 function logShadow(record) {
   try {
     emitRetrieval('shadow-injection', {
+      session_label: label,
       prompt: scrubSecrets((prompt || '').slice(0, 200)),
       prompt_length: (prompt || '').length,
       ...record,
