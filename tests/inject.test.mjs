@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../hooks/lib/inject.mjs';
 
@@ -123,6 +125,111 @@ describe('buildInjection', () => {
     assert.ok(result.additionalContext.includes('Stripe integration'));
     assert.ok(!result.additionalContext.includes('This should be excluded'));
     assert.deepEqual(result.injectedVaultPaths, []);
+  });
+});
+
+describe('buildInjection vault Related notes header', () => {
+  it('includes Related notes: header before pointer list', () => {
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Main note', path: 'main.md', body: 'The main body.', score: 0.95 },
+        { title: 'Related A', path: 'a.md', body: 'A body.', score: 0.85 },
+        { title: 'Related B', path: 'b.md', body: 'B body.', score: 0.80 },
+      ],
+      episodicHits: [],
+      query: 'test',
+      alreadyInjectedPaths: new Set(),
+    });
+    assert.ok(result.additionalContext.includes('Related notes:'));
+  });
+});
+
+describe('parseEpisodic via runBackendsWithRaceCap', () => {
+  it('extracts snippets from real episodic CLI output format', async () => {
+    const fixture = readFileSync(join(import.meta.dirname, 'fixtures', 'episodic-sample.txt'), 'utf8');
+
+    const mockSpawn = (cmd, _args, _opts) => {
+      const closeCallbacks = [];
+      const dataCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => { child.killed = true; },
+        stdout: {
+          on: (evt, cb) => { if (evt === 'data') dataCallbacks.push(cb); },
+        },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      if (cmd === 'episodic-memory') {
+        setTimeout(() => {
+          for (const cb of dataCallbacks) cb(fixture);
+          for (const cb of closeCallbacks) cb(0);
+        }, 5);
+      } else {
+        setTimeout(() => {
+          for (const cb of dataCallbacks) cb('[]');
+          for (const cb of closeCallbacks) cb(0);
+        }, 5);
+      }
+      return child;
+    };
+
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(results.episodic.hits.length, 3);
+    assert.equal(results.episodic.hits[0].project, '-Users-robin-dev-kinso-monorepo');
+    assert.equal(results.episodic.hits[0].date, '2026-01-05');
+    assert.equal(results.episodic.hits[0].score, 0.02);
+    assert.equal(results.episodic.hits[0].snippet, "let's do it as part of that performance improvement PR in the existing stack");
+    assert.equal(results.episodic.hits[1].snippet, 'review the work carefully please');
+    assert.equal(results.episodic.hits[2].snippet, 'yes');
+    assert.equal(results.episodic.raced_out, false);
+  });
+});
+
+describe('parseVault raced_out field', () => {
+  it('returns raced_out: false on successful parse', async () => {
+    const vaultJson = JSON.stringify([
+      { title: 'Test', path: 'test.md', body: 'Body.', score: 0.9 },
+    ]);
+
+    const mockSpawn = (cmd, _args, _opts) => {
+      const closeCallbacks = [];
+      const dataCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => { child.killed = true; },
+        stdout: {
+          on: (evt, cb) => { if (evt === 'data') dataCallbacks.push(cb); },
+        },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      setTimeout(() => {
+        for (const cb of dataCallbacks) cb(cmd === 'll-search' ? vaultJson : '');
+        for (const cb of closeCallbacks) cb(0);
+      }, 5);
+      return child;
+    };
+
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(results.vault.raced_out, false);
+    assert.equal(results.vault.hits.length, 1);
   });
 });
 

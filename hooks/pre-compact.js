@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// Content reviewed per Task 10 of 2026-04-07-hook-injection-channels-phase-1 — kept as-is
 // Learning Loop — PreCompact hook
 // Nudges capture before context compression.
 

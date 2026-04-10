@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.15.0
+
+### Added
+
+- **Just-in-time vault + episodic context injection on UserPromptSubmit** -- searches vault and past conversations when you ask a substantive question and injects the top matches into Claude's context. Ships in shadow mode by default; flip `injection_mode: "live"` in config.json after reviewing shadow log via `scripts/review-shadow.mjs`.
+- **Episodic pre-warm on SessionStart** -- warms the OS page cache for the episodic-memory model and index.
+- **Provenance dedupe** within hook invocations, keyed on (session_id, agent_id, path).
+- **`scripts/review-shadow.mjs`** -- shadow injection log analyzer with stats, latency percentiles, and go/no-go gate.
+
+### Changed
+
+- `hooks/session-label.js` -- runs injection pipeline after label-writing. Stdout empty unless `injection_mode: "live"` AND gate passed.
+- `hooks/session-start.js` -- sweeps session-dedupe dir (7d TTL) and fires detached episodic pre-warm.
+- `hooks/pre-compact.js` -- content review (no behavior change).
+
 ## v1.13.1
 
 - fix: remove hardcoded fallback path in federation config resolution

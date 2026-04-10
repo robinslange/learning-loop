@@ -283,6 +283,7 @@ try {
       dedupe_filtered_count: dedupeFilteredCount,
       would_inject: scrubSecrets(injection.additionalContext),
     });
+    persistDedupeState(session_id, injection.injectedVaultPaths);
   } else if (mode === 'live') {
     emitHookOutput({ event: 'UserPromptSubmit', additionalContext: injection.additionalContext });
     persistDedupeState(session_id, injection.injectedVaultPaths);

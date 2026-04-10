@@ -45,7 +45,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
 
     const pointers = filtered.slice(1, 5);
     if (pointers.length > 0) {
-      lines.push('');
+      lines.push('', 'Related notes:');
       for (const p of pointers) {
         lines.push(`- ${p.title} — ${p.path}`);
         injectedVaultPaths.push(p.path);
@@ -101,25 +101,33 @@ function spawnSearch(spawnFn, cmd, args, abortSignal) {
 function parseVault(result) {
   if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
   try {
-    return { hits: JSON.parse(result.stdout), latency_ms: result.latency_ms };
+    return { hits: JSON.parse(result.stdout), raced_out: false, latency_ms: result.latency_ms };
   } catch {
-    return { hits: [], error: 'parse_error', latency_ms: result.latency_ms };
+    return { hits: [], error: 'parse_error', raced_out: false, latency_ms: result.latency_ms };
   }
 }
 
 function parseEpisodic(result) {
   if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
   const hits = [];
-  for (const line of result.stdout.split('\n')) {
-    const m = line.match(/^\d+\.\s*\[([^,]+),\s*([^\]]+)\]\s*-\s*(-?\d+)%/);
+  const lines = result.stdout.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^\d+\.\s*\[([^,]+),\s*([^\]]+)\]\s*-\s*(-?\d+)%/);
     if (m) {
       const project = m[1].trim();
       const date = m[2].trim();
       const score = parseInt(m[3], 10) / 100;
-      hits.push({ date, project, snippet: '', score });
+      let snippet = '';
+      const next = (lines[i + 1] || '').trim();
+      if (next.startsWith('"') && next.endsWith('"')) {
+        snippet = next.slice(1, -1);
+      } else if (next && !next.startsWith('Lines ') && !/^\d+\./.test(next)) {
+        snippet = next;
+      }
+      hits.push({ date, project, snippet, score });
     }
   }
-  return { hits, latency_ms: result.latency_ms };
+  return { hits, raced_out: false, latency_ms: result.latency_ms };
 }
 
 export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _spawnFn }) {
