@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, rea
 import { join, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { home, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared } from './lib/common.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
@@ -263,6 +263,32 @@ try {
     [join(PLUGIN_DIR, 'scripts', 'provenance.mjs'), JSON.stringify({ agent: 'session', action: 'session-start', source: 'hook' })],
     { timeout: 3000, stdio: 'ignore' }
   );
+} catch {}
+
+// 11. TTL sweep for session-dedupe files older than 7 days
+try {
+  const pd = resolvePluginData();
+  if (pd) {
+    const dedupeDir = join(pd, 'retrieval', 'session-dedupe');
+    if (existsSync(dedupeDir)) {
+      const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      for (const f of readdirSync(dedupeDir)) {
+        const full = join(dedupeDir, f);
+        try {
+          if (statSync(full).mtimeMs < cutoff) rmSync(full, { force: true });
+        } catch {}
+      }
+    }
+  }
+} catch {}
+
+// 12. Episodic memory pre-warm
+try {
+  const child = spawn('episodic-memory', ['search', '--vector', '--limit', '1', 'warmup'], {
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.unref();
 } catch {}
 
 // Output as JSON for additionalContext injection
