@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { scrubSecrets, buildInjection, emitHookOutput } from '../hooks/lib/inject.mjs';
+import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../hooks/lib/inject.mjs';
 
 describe('scrubSecrets', () => {
   it('masks AWS access key', () => {
@@ -140,5 +140,41 @@ describe('emitHookOutput', () => {
     assert.ok(parsed.hookSpecificOutput);
     assert.equal(parsed.hookSpecificOutput.hookEventName, 'NotificationSubagentStart');
     assert.equal(parsed.hookSpecificOutput.additionalContext, 'test context');
+  });
+});
+
+describe('runBackendsWithRaceCap zombie kill', () => {
+  it('sends SIGTERM to both slow backends on race timeout', async () => {
+    const signals = { 'll-search': null, 'episodic-memory': null };
+
+    const mockSpawn = (cmd, _args, _opts) => {
+      const closeCallbacks = [];
+      const child = {
+        killed: false,
+        kill: (sig) => {
+          child.killed = true;
+          signals[cmd] = sig;
+          setTimeout(() => {
+            for (const cb of closeCallbacks) cb(143);
+          }, 5);
+        },
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      return child;
+    };
+
+    await runBackendsWithRaceCap({
+      query: 'q',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 30,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(signals['ll-search'], 'SIGTERM', 'll-search should be killed with SIGTERM');
+    assert.equal(signals['episodic-memory'], 'SIGTERM', 'episodic-memory should be killed with SIGTERM');
   });
 });
