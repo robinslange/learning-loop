@@ -36,6 +36,8 @@ enum Commands {
         session: Option<i64>,
         #[arg(long, help = "Boost notes from this project tag's active period")]
         project: Option<String>,
+        #[arg(long, default_value_t = 0.15, help = "Minimum score threshold (results below are filtered)")]
+        threshold: f64,
     },
     Similar {
         db_path: String,
@@ -215,7 +217,7 @@ fn main() {
                 }
             }
         }
-        Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project } => {
+        Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project, threshold } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let store = ll_search::search::EmbeddingStore::load(&conn);
@@ -232,7 +234,8 @@ fn main() {
             } else {
                 ll_search::search::hybrid_query_federated(&conn, &text, top, &peers, &temporal, &store)
             };
-            out(&results);
+            let response = ll_search::search::build_query_response(text, results, &conn, threshold);
+            out(&response);
         }
         Commands::Similar { db_path, note_path, top } => {
             init_embedding();
