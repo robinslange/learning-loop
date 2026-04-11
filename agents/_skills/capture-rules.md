@@ -16,7 +16,7 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 - **Body**: 3-10 lines (up to 15 for deep notes with sources). Notes under 5 lines should be substantive enough to stand alone. One idea per note.
 - **Tags**: Max 3. Pick the most specific ones.
 - **Links**: At least one wiki-link to a related note. More if genuine.
-- **Frontmatter**: Include `tags` and `date` (YYYY-MM-DD).
+- **Frontmatter**: Include `tags`, `date` (YYYY-MM-DD), and `source` (the URL or citation).
 
 ## Frontmatter Template
 
@@ -24,12 +24,30 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ---
 tags: [tag1, tag2]
 date: YYYY-MM-DD
+source: "[Author, \"Title\" (Year)](URL)"
 claim_specificity: 0-2
 source_grounded: 0-2
 ---
 ```
 
+For multiple sources, use a YAML list:
+
+```yaml
+source:
+  - "[Author1, \"Title1\"](URL1)"
+  - "[Author2, \"Title2\"](URL2)"
+```
+
+For synthesis notes, use `source: synthesis`. For unverifiable citations, use `source: unverified`.
+
 `claim_specificity` and `source_grounded` are set by the promote-gate scoring pass. Values: 0 (vague/none), 1 (bounded/vault-linked), 2 (falsifiable/externally-cited). Omit both fields if the note has not been scored yet.
+
+## Reserved Fields
+
+Two fields have strict semantics — do not overload them:
+
+- **`source:`** — URL or citation only. The single source of truth for provenance. Readers, retrieval, and federation all index this field. Never duplicate it as a `**Source:**` line in the body.
+- **`status:`** — intention tracking only. Legal values: `intentioned | resolved | limbo`. Managed by inbox-organiser. Never write `status: inbox`, `status: permanent`, or `status: fleeting` — the folder location IS the maturity status. A note in `3-permanent/` is permanent by virtue of being there.
 
 ## Tag Hygiene
 
@@ -37,13 +55,15 @@ When writing or rewriting frontmatter tags, de-duplicate the list before writing
 
 ## Sources
 
-Include source URLs at write-time, not as a deferred step. Every non-synthesis note that cites a source should include it as a clickable markdown link:
+Include source URLs at write-time, not as a deferred step. Every non-synthesis note that cites a source should set the `source:` frontmatter field with a clickable markdown link:
 
-```
-[Author, "Title" (Year)](URL)
+```yaml
+source: "[Author, \"Title\" (Year)](URL)"
 ```
 
-If no URL exists, write `[no URL found]` rather than omitting the reference. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone.
+The `source:` field lives in frontmatter only. Do NOT write a `**Source:**` or `Source:` line in the body — the frontmatter field is what retrieval, verification, and federation read. A body-level Source line is invisible to tooling.
+
+If no URL exists, write `source: "[no URL found]"` rather than omitting the field. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone.
 
 ## What to Capture
 

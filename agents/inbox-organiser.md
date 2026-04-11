@@ -154,6 +154,7 @@ Do NOT display:
 **Autonomous (no approval needed):**
 - Promote via `mv` when skip-rewrite is true
 - Promote via note-writer agent when rewrite is needed
+- After every promotion (mv or rewrite), run frontmatter hygiene on the promoted file (see 6a)
 - Add counter-argument links (both directions) via `Edit`
 
 **Gated (wait for approval):**
@@ -161,6 +162,18 @@ Do NOT display:
 - Deletes: `rm` the inbox copy
 
 **Parallelism:** Launch note-writer agents in parallel for multiple rewrites. Process clusters sequentially (to present results progressively) but parallelize within clusters.
+
+### 6a. Post-Promotion Frontmatter Hygiene
+
+After a note is promoted (either via `mv` or note-writer rewrite), run this cleanup on the destination file via `Edit`:
+
+1. **Strip invented folder-status fields.** Remove any frontmatter line that reads `status: inbox`, `status: permanent`, or `status: fleeting`. These are LLM pollution — the folder IS the status. Preserve `status: intentioned | resolved | limbo` (these track intention, not folder).
+
+2. **Move body Sources to frontmatter.** If the body contains a `**Source:**` or `Sources:` line and the frontmatter has no `source:` field, extract the citation and add it as `source: "<citation>"` in frontmatter. Leave the body line intact (non-destructive).
+
+3. **Strip `[unverified]` markers that are no longer true.** If the note has been through source-verification and passed, remove any lingering `[unverified]` inline markers.
+
+This cleanup is mandatory for every promotion. It closes the gap that lets body-level sources and folder-status pollution accumulate in permanent notes.
 
 ### 7. Report (Inbox)
 

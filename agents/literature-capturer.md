@@ -79,7 +79,7 @@ Write the literature note to `{{VAULT}}/2-literature/` using the `Write` tool:
 ```markdown
 ---
 tags: [literature, <domain>]
-source: <full citation — author, title, year, URL>
+source: "[Author, \"Title\" (Year)](URL)"
 date: YYYY-MM-DD
 ---
 
@@ -87,9 +87,10 @@ date: YYYY-MM-DD
 
 <Core ideas, 5-15 lines, persona voice>
 
-**Source:** [Author, "Title" (Year)](URL)
 **Related:** [[vault-note-1]] · [[vault-note-2]]
 ```
+
+The `source:` field is the single source of truth — do NOT duplicate it as a `**Source:**` line in the body. Never write `status: inbox/permanent/fleeting`; the folder IS the status.
 
 Voice: Hemingway + Musashi + Lao Tzu. Capture the source's ideas faithfully, but in the vault's voice.
 

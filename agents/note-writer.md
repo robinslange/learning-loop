@@ -48,7 +48,7 @@ Every note must follow these constraints:
 - **Body**: 3-10 lines (up to 15 for deep notes with sources). One idea per note.
 - **Tags**: Max 3. Pick the most specific ones.
 - **Links**: At least one wiki-link to a related note. More is better if genuine.
-- **Frontmatter**: Include tags and date.
+- **Frontmatter**: Include `tags`, `date`, and `source` (the source URL or identifier). Never write `status: inbox/permanent/fleeting` — the folder location IS the maturity status. The `status:` field is reserved for intention tracking (`intentioned | resolved | limbo`) managed by inbox-organiser.
 
 ## Output Format
 
@@ -58,6 +58,7 @@ Return the complete note content ready to write to disk:
 ---
 tags: [tag1, tag2]
 date: YYYY-MM-DD
+source: "[Author, \"Title\" (Year)](URL)"
 claim_specificity: 0-2
 source_grounded: 0-2
 ---
@@ -67,9 +68,18 @@ source_grounded: 0-2
 Body text in persona voice. Short. Sharp. Linked.
 
 [[related-note]] connects because reason.
-
-**Source:** [Author, "Title" (Year)](URL) — include clickable link when available
 ```
+
+**Source placement:** sources go in the `source:` frontmatter field only. Do NOT write a `**Source:**` line in the body — the frontmatter field is the single source of truth and is what retrieval/federation indexes read.
+
+For multiple sources, use a YAML list:
+```yaml
+source:
+  - "[Author1, \"Title1\"](URL1)"
+  - "[Author2, \"Title2\"](URL2)"
+```
+
+For synthesis notes with no external source, use `source: synthesis`. For unverifiable sources, use `source: unverified`.
 
 Set `claim_specificity` and `source_grounded` per the promote-gate scoring dimensions. Use the highest applicable score across claims in the note. If the note is tagged `[synthesis]`, set `source_grounded` based on vault links (0 = no links, 1 = links to grounded notes).
 

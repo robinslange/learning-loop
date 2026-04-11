@@ -99,6 +99,9 @@ Why this is shallow: Claims are bounded (specificity 1) — describes a real mec
 ---
 tags: [graphql, apollo]
 date: 2026-03-19
+source:
+  - "[Apollo cache configuration docs](https://www.apollographql.com/docs/react/caching/cache-configuration)"
+  - "[Demystifying Cache Normalization](https://www.apollographql.com/blog/demystifying-cache-normalization)"
 ---
 # Apollo cache normalizes via __typename plus id into flat refs
 
@@ -109,8 +112,6 @@ When a second query returns the same User:42, fields merge into the existing ent
 Custom keys via `keyFields: ["sku"]` in typePolicies. `keyFields: false` disables normalization and embeds the object in its parent.
 
 [[apollo-cache-modify-vs-evict-decision-framework]] covers what to do when automatic cache updates fall short.
-
-**Source:** [Apollo cache configuration docs](https://www.apollographql.com/docs/react/caching/cache-configuration), [Demystifying Cache Normalization](https://www.apollographql.com/blog/demystifying-cache-normalization)
 ```
 Why this is medium: Strong voice (claim-as-title, compressed). Specific clickable sources (grounded 2). Atomic. But claims are bounded not falsifiable (specificity 1) — describes how the cache works, not a testable prediction. Only one wiki-link (linking weak).
 
