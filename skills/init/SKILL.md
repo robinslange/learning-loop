@@ -5,7 +5,7 @@ description: 'First-time setup or upgrade for the learning-loop plugin. Configur
 
 # Init -- Learning Loop Setup
 
-Five-phase detect-confirm-apply flow. One question at a time. Safe to re-run -- detects existing state and skips completed steps.
+Six-phase detect-confirm-apply flow. One question at a time. Safe to re-run -- detects existing state and skips completed steps.
 
 All operations use Node.js (fs, path, child_process for binaries). No bash `find`, no shell commands for detection.
 
@@ -31,6 +31,7 @@ Run all checks silently before asking anything. Use Node.js APIs:
 10. **Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
 11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the template version from `PLUGIN/templates/claudemd-section.version` (a single-line file containing the template version, e.g. `1`). Compare against the version in the user's comment tag. Note: present/missing/outdated (version mismatch).
+13. **Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 
 Present a dashboard:
 
@@ -216,7 +217,13 @@ The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugi
 2. Delete the old one from the marketplace directory
 3. Verify the pubkey matches `config.identity.pubkey` -- if not, warn and offer to update the hub
 
-Generate Ed25519 keypair via `ll-search` (handles key generation and migration). Extract the raw 32-byte public key bytes for redemption (base64-encoded). If `.seed` already exists, reuse the existing key.
+Run `ll-search identity --config-dir $PLUGIN_DATA` to load or create the Ed25519 keypair. Output is JSON:
+
+```json
+{ "pubkey_b64": "0JuQ...r5o=", "seed_path": "...", "created": false }
+```
+
+The `pubkey_b64` value is the raw 32-byte public key as base64 -- ready to send to `/api/redeem` as-is. The command is idempotent: if `.seed` already exists it reuses it (`created: false`), otherwise it creates one with mode `0o600` (`created: true`). Existing seeds created by prior init runs continue to work.
 
 ### 4c: Redeem
 
@@ -402,6 +409,44 @@ If the version comment is older than the current template version:
 
 ---
 
+## Phase 6: Cache Health Statusline (optional)
+
+Logs per-turn cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`) from the Claude Code statusline payload to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl` and displays `cache NN%` in the statusline. Useful for detecting silent cache regressions and measuring the cost of context injection experiments. See `scripts/cache-health-report.mjs` for the summary tool.
+
+### Dependencies
+
+This feature currently targets oh-my-claude (https://github.com/npow/oh-my-claude) as the statusline runner. If oh-my-claude is not installed, skip this phase silently.
+
+### 6a: Detect
+
+If Phase 1's cache-health check reported `omc_installed: false`, skip Phase 6. Report once in the summary: "Cache health: oh-my-claude not installed, skipped."
+
+If `omc_installed: true` and `configured: true`, the plugin is already set up. Skip with "Cache health: already installed."
+
+If `omc_installed: true` and `configured: false`, proceed to 6b.
+
+### 6b: Confirm
+
+Ask:
+
+> Install the cache-health statusline plugin? It logs per-turn cache metrics to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl` and shows cache hit rate in your statusline. Useful for spotting cache regressions.
+
+On confirmation, run:
+
+```bash
+node PLUGIN/scripts/install-cache-health.mjs
+```
+
+The script is idempotent. It copies `PLUGIN/plugins/omc-cache-health/plugin.js` to `~/.claude/oh-my-claude/plugins/cache-health/`, then inserts `cache-health` into `~/.claude/oh-my-claude/config.json` under the first line's `left` column (after `context-percent` if present) and adds a default plugin config.
+
+If the target directory is a symlink (development mode), the script leaves the file alone and only updates config.
+
+### 6c: Verify
+
+After install, re-run the detection step and confirm `configured: true`. Report: "Cache health: installed."
+
+---
+
 ## Summary
 
 After all phases complete, show final state:
@@ -415,6 +460,7 @@ Learning loop configured.
   Search:      2,031 notes indexed
   Federation:  configured, 1 peer
   CLAUDE.md:   learning-loop section present
+  Cache health: installed (or skipped — oh-my-claude not found)
 
 Run /learning-loop:help to see available commands.
 ```

@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.15.2
+
+### Added
+
+- **Cache-health oh-my-claude plugin** (`plugins/omc-cache-health/plugin.js`) -- logs per-turn cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`, `input_tokens`) from the Claude Code statusline payload to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl` and displays `cache NN%` in the statusline. Dedupes by session_id + token counts to avoid duplicate rows when the statusline fires multiple times per turn.
+- **`scripts/cache-health-report.mjs`** -- summarises the JSONL with weighted hit rate, percentile distribution (p50/p25/p10), per-session breakdown, and zero-hit event listing. Supports `--session <id>` and `--month YYYY-MM` filters.
+- **`scripts/install-cache-health.mjs`** -- idempotent installer. Copies the plugin file to `~/.claude/oh-my-claude/plugins/cache-health/`, inserts `cache-health` into `~/.claude/oh-my-claude/config.json` under the first line's `left` column (after `context-percent`), and adds a default plugin config. `--check` for dry-run state, `--uninstall` to remove. Skips file copy when the target directory is a symlink (dev mode).
+- **Init Phase 6: Cache Health Statusline** -- detects oh-my-claude and offers to install the cache-health plugin. Skips silently if oh-my-claude is not installed.
+
+### Context
+
+The statusline is the only channel Claude Code exposes per-turn token usage on -- hook events do not carry `current_usage`. This plugin captures the data as it arrives and persists it for later analysis. Useful for measuring the impact of context injection experiments on cache hit rate before and after flipping `injection_mode` to `live`.
+
 ## v1.15.1
 
 ### Changed
