@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.15.3
+
+### Added
+
+- **`ll-search identity`** subcommand -- loads or creates `PLUGIN_DATA/federation/.seed` and returns the raw 32-byte Ed25519 public key as base64 JSON. Used by init Phase 4 to extract the pubkey for the `interchange.live` redeem POST. Backwards compatible with existing seed files.
+
+### Changed
+
+- init Phase 4b now calls `ll-search identity` directly instead of relying on improvised shell commands for key generation and extraction.
+
 ## v1.15.2
 
 ### Added
