@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.15.1
+
+### Changed
+
+- `init` skill Phase 4 rewritten for self-service federation onboarding via `interchange.live` invitation tokens. Paste a redeem token -> automatic headscale provisioning -> `tailscale up` -> sync test, no manual hub admin step.
+- Existing peers re-running `init` are unaffected (token prompt only appears on fresh setup).
+
+### Removed
+
+- Manual hub registration step (4b.1) -- superseded by the automatic redeem flow at `interchange.live/api/redeem`.
+
 ## v1.15.0
 
 ### Added

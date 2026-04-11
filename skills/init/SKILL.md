@@ -187,13 +187,27 @@ Install: claude plugin install episodic-memory@superpowers-marketplace
 
 ## Phase 4: Federation (Optional)
 
-Ask: "Connect to other learning-loop users?"
+Ask: "Connect to other learning-loop users via interchange.live?"
 
 **If no:** Skip to summary.
 
-**If yes:** Walk through each sub-step with one confirmation each:
+**If yes:** Ask: "Do you have an invite token?"
 
-### 4a: Identity
+### 4a: No token path
+
+If the user has no token, show:
+
+```
+You'll need an invitation to join the federation. Apply at:
+  https://interchange.live/apply
+
+Once your application is approved, you'll receive a redeem URL.
+Re-run /learning-loop:init after you have it.
+```
+
+Skip to summary.
+
+### 4b: Identity
 
 The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `PLUGIN/federation/.seed` (gets wiped on reinstall).
 
@@ -202,30 +216,37 @@ The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugi
 2. Delete the old one from the marketplace directory
 3. Verify the pubkey matches `config.identity.pubkey` -- if not, warn and offer to update the hub
 
-Generate Ed25519 keypair via `ll-search` (the Rust binary handles key generation and migration). Display public key. If `.seed` already exists, show existing key and ask keep/regenerate.
+Generate Ed25519 keypair via `ll-search` (handles key generation and migration). Extract the raw 32-byte public key bytes for redemption (base64-encoded). If `.seed` already exists, reuse the existing key.
 
-### 4b: Network Connection
+### 4c: Redeem
 
-Check for Tailscale. If not installed, guide installation (brew for macOS, curl for Linux). Ask for Headscale auth key (provided by the hub admin). Connect to the coordination server. Verify with `tailscale status`.
+Ask for the token. POST to `https://interchange.live/api/redeem` with:
 
-If no auth key available, skip -- they can re-run init later.
-
-### 4b.1: Hub Registration
-
-The hub requires manual peer registration by the hub admin. There is no self-registration endpoint.
-
-After generating the identity in 4a, display the pubkey and instruct the user:
-
-```
-Your public key: ed25519:SvMMcogkaIkiuhxU7BeBkW77KvXBizV8mSYhVGzUrGo=
-
-Send this key to the hub admin. They will register you on the hub.
-You can re-run /learning-loop:init to test connectivity once registered.
+```json
+{ "token": "<token>", "peer_id": "<peer_id>", "pubkey": "<base64-32-bytes>" }
 ```
 
-Do not attempt to register the peer on the hub. Do not claim registration succeeded unless a sync test (step 11 in Phase 1) actually succeeds.
+The `peer_id` is bound to the token server-side — the user does not choose it. The redeem response returns the `peer_id` along with the headscale auth key and hub endpoint. Store these in memory for the rest of Phase 4. Do NOT write config yet — wait for the sync test to succeed.
 
-### 4c: Visibility Rules
+Handle server errors:
+- `404` -> "invalid token, check the URL you were sent"
+- `409` -> "this token was already redeemed"
+- `410` -> "this token has expired, contact robin for a new one"
+- `502` -> "provisioning service is unreachable, try again later"
+
+On any failure, exit Phase 4 without writing config.
+
+### 4d: Network Connection
+
+Check for Tailscale. If not installed, guide installation (brew for macOS, curl for Linux). Run:
+
+```bash
+tailscale up --auth-key <headscale_auth_key> --login-server https://hs.interchange.live
+```
+
+Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window) — surface the error and exit Phase 4 without writing config. The pubkey is already registered so re-running init should work.
+
+### 4e: Visibility Rules
 
 Present defaults:
 - `3-permanent/` -> public (full content shared)
@@ -234,23 +255,25 @@ Present defaults:
 
 Ask: "Does that work for you?" Allow pattern customization if not.
 
-### 4d: Knowledge Graph Opt-in
+### 4f: Knowledge Graph Opt-in
 
 Ask: "Would you like your public note titles to appear on the interchange.live knowledge graph? (This only shares titles of notes marked public or listed, no content.)"
 
 If yes, set `"graph": true` in the generated config. If no, set `"graph": false`.
 
-### 4e: Provenance Consent
+### 4g: Provenance Consent
 
 Ask: "Share anonymized pipeline stats? (Tier 1: action counts only)"
 
-### 4f: Write Config
+### 4h: Write Config
 
-Write `PLUGIN_DATA/federation/config.json` with identity, visibility, peers, `graph`, and `share_provenance` fields.
+Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from 4c), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
 
-### 4g: First Export and Test
+### 4i: First Sync Test
 
-Run `ll-search export-index`. Report counts. If network is connected, attempt a sync test. If sync fails with an auth error, this likely means the hub admin hasn't registered the peer yet -- say so clearly and suggest re-running init after registration.
+Run `ll-search sync`. On success: report counts. On failure: the pubkey is registered but something else is wrong — surface the error and suggest re-running init.
+
+**Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped. The token prompt only fires on fresh federation setup, so existing peers re-running init are unaffected.
 
 ---
 
