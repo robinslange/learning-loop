@@ -7,7 +7,7 @@ import { join, resolve, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import { home, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared } from './lib/common.mjs';
+import { home, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared, findEpisodicBinary } from './lib/common.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
@@ -284,7 +284,8 @@ try {
 
 // 12. Episodic memory pre-warm
 try {
-  const child = spawn('episodic-memory', ['search', '--vector', '--limit', '1', 'warmup'], {
+  const epBin = findEpisodicBinary() || 'episodic-memory';
+  const child = spawn(epBin, ['search', '--vector', '--limit', '1', 'warmup'], {
     detached: true,
     stdio: 'ignore',
   });

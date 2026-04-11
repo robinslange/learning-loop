@@ -1,4 +1,5 @@
 import { spawn as defaultSpawn } from 'node:child_process';
+import { findBinary, findEpisodicBinary } from './common.mjs';
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/g,
@@ -75,9 +76,11 @@ export function emitHookOutput({ event, additionalContext }) {
   }));
 }
 
-function spawnSearch(spawnFn, cmd, args, abortSignal) {
+function spawnSearch(spawnFn, cmd, args, abortSignal, env) {
   return new Promise((resolve) => {
-    const child = spawnFn(cmd, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const opts = { stdio: ['ignore', 'pipe', 'pipe'] };
+    if (env) opts.env = env;
+    const child = spawnFn(cmd, args, opts);
     let stdout = '';
     let stderr = '';
     const t0 = Date.now();
@@ -135,9 +138,16 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), raceCapMs);
 
+  const useRealBinaries = !_spawnFn;
+  const llBinary = useRealBinaries ? findBinary() : null;
+  const llCmd = llBinary ? llBinary.bin : 'll-search';
+  const llEnv = llBinary ? { ...process.env, ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir } : undefined;
+
+  const epCmd = useRealBinaries ? (findEpisodicBinary() || 'episodic-memory') : 'episodic-memory';
+
   const results = await Promise.allSettled([
-    spawnSearch(spawnFn, 'll-search', ['query', '--top', '5', vaultDbPath, query], controller.signal),
-    spawnSearch(spawnFn, 'episodic-memory', ['search', '--vector', '--limit', '5', query], controller.signal),
+    spawnSearch(spawnFn, llCmd, ['query', '--top', '5', vaultDbPath, query], controller.signal, llEnv),
+    spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal),
   ]);
   clearTimeout(timer);
 

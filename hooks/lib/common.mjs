@@ -62,6 +62,22 @@ export function findBinary() {
   return null;
 }
 
+export function findEpisodicBinary() {
+  const claudeDir = join(home(), '.claude', 'plugins');
+  try {
+    const raw = JSON.parse(readFileSync(join(claudeDir, 'installed_plugins.json'), 'utf-8'));
+    const plugins = raw.plugins || raw;
+    for (const [key, entries] of Object.entries(plugins)) {
+      if (!key.startsWith('episodic-memory@')) continue;
+      const entry = entries[0];
+      if (!entry?.installPath) continue;
+      const bin = join(entry.installPath, 'cli', 'episodic-memory');
+      if (existsSync(bin)) return bin;
+    }
+  } catch {}
+  return null;
+}
+
 export function getSessionId() {
   try {
     return readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf8').trim();
