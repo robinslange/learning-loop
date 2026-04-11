@@ -109,6 +109,10 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
+    Identity {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
     Watch {
         vault_path: String,
         db_path: String,
@@ -316,6 +320,17 @@ fn main() {
             )
             .expect("sync failed");
             out(&result);
+        }
+        Commands::Identity { config_dir } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let seed_path = ll_search::sync::config::seed_path(&config_dir);
+            let result = ll_search::sync::auth::load_or_create_seed(&seed_path)
+                .expect("failed to load or create seed");
+            out(&serde_json::json!({
+                "pubkey_b64": ll_search::sync::auth::pubkey_b64(&result.signing_key),
+                "seed_path": seed_path.display().to_string(),
+                "created": result.created,
+            }));
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
             init_embedding();
