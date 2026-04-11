@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
+pub(crate) use ll_core::graph::personalized_pagerank;
+
 pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
     let mut basename_to_path: HashMap<String, String> = HashMap::new();
     if let Ok(mut stmt) = conn.prepare("SELECT path FROM notes") {
@@ -45,76 +47,6 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
     }
 
     edges.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
-}
-
-pub(crate) fn personalized_pagerank(
-    graph: &HashMap<String, Vec<String>>,
-    seeds: &[String],
-    damping: f32,
-    iterations: usize,
-) -> Vec<(String, f64)> {
-    if seeds.is_empty() || graph.is_empty() {
-        return Vec::new();
-    }
-
-    let mut inlink_counts: HashMap<&str, usize> = HashMap::new();
-    for targets in graph.values() {
-        for t in targets {
-            *inlink_counts.entry(t.as_str()).or_default() += 1;
-        }
-    }
-
-    let mut seed_weights: Vec<(&str, f64)> = seeds
-        .iter()
-        .filter(|s| graph.contains_key(s.as_str()))
-        .map(|s| {
-            let inlinks = inlink_counts.get(s.as_str()).copied().unwrap_or(0);
-            (s.as_str(), 1.0 / (inlinks as f64 + 1.0))
-        })
-        .collect();
-
-    let total_weight: f64 = seed_weights.iter().map(|(_, w)| w).sum();
-    if total_weight == 0.0 {
-        return Vec::new();
-    }
-    for (_, w) in &mut seed_weights {
-        *w /= total_weight;
-    }
-
-    let d = damping as f64;
-    let mut scores: HashMap<String, f64> = HashMap::new();
-    let seed_set: HashSet<&str> = seeds.iter().map(|s| s.as_str()).collect();
-
-    for &(s, w) in &seed_weights {
-        scores.insert(s.to_string(), w);
-    }
-
-    for _ in 0..iterations {
-        let mut new_scores: HashMap<String, f64> = HashMap::new();
-
-        for &(s, w) in &seed_weights {
-            *new_scores.entry(s.to_string()).or_default() += (1.0 - d) * w;
-        }
-
-        for (node, score) in &scores {
-            if let Some(neighbors) = graph.get(node) {
-                let share = d * score / neighbors.len() as f64;
-                for neighbor in neighbors {
-                    *new_scores.entry(neighbor.clone()).or_default() += share;
-                }
-            }
-        }
-
-        scores = new_scores;
-    }
-
-    let mut results: Vec<(String, f64)> = scores
-        .into_iter()
-        .filter(|(path, score)| *score > 1e-6 && !seed_set.contains(path.as_str()))
-        .collect();
-    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(30);
-    results
 }
 
 pub(crate) fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(String, f64)> {

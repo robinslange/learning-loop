@@ -166,7 +166,7 @@ mod tests {
             ("d.md", "d", "d", &emb_d),
         ]);
 
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let clusters = cluster_notes(&conn, 0.9, &store);
         assert_eq!(clusters.len(), 2);
         assert!(clusters[0].contains(&"a.md".to_string()));

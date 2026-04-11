@@ -14,6 +14,6 @@ pub use query::{SearchResult, QueryResponse, QueryMeta, TemporalParams, hybrid_q
 pub use federation::{discover_peer_dbs, batch_load_bodies_federated};
 pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes, discriminate_pairs};
 pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_scan_federated};
-pub use store::EmbeddingStore;
+pub use store::{EmbeddingStore, load_store};
 pub use tune::tune_prf;
 pub use eval::eval_prf;

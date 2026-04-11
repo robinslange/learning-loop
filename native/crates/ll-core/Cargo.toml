@@ -1,0 +1,13 @@
+[package]
+name = "ll-core"
+version = "0.1.0"
+edition.workspace = true
+description = "Hybrid semantic search engine -- embedding, BM25, RRF, PageRank, reranking"
+
+[dependencies]
+rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

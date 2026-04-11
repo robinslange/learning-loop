@@ -1,3 +1,5 @@
 /target/
-/model/*.onnx
-/model/*.json
+/crates/ll-core/model/*.onnx
+/crates/ll-core/model/*.json
+/crates/ll-search/model/*.onnx
+/crates/ll-search/model/*.json

@@ -1,18 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use rusqlite::Connection;
-
-use crate::db::load_all_embeddings;
-
 pub struct EmbeddingStore {
     data: Vec<(i64, String, Vec<f32>)>,
     path_index: HashMap<String, usize>,
 }
 
 impl EmbeddingStore {
-    pub fn load(conn: &Connection) -> Arc<Self> {
-        let data = load_all_embeddings(conn);
+    pub fn from_data(data: Vec<(i64, String, Vec<f32>)>) -> Arc<Self> {
         let path_index: HashMap<String, usize> = data
             .iter()
             .enumerate()
@@ -41,6 +36,10 @@ impl EmbeddingStore {
         self.data.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+
     pub fn dim(&self) -> usize {
         self.data.first().map(|(_, _, emb)| emb.len()).unwrap_or(0)
     }
@@ -49,27 +48,19 @@ impl EmbeddingStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::search::test_helpers::helpers::*;
 
     #[test]
-    fn test_store_load_and_lookup() {
-        let emb = norm(&[1.0, 0.0, 0.0]);
-        let conn = create_test_db(&[
-            ("a.md", "a", "content a", &emb),
-            ("b.md", "b", "content b", &emb),
-        ]);
-        let store = EmbeddingStore::load(&conn);
+    fn test_store_from_data() {
+        let data = vec![
+            (1, "a.md".to_string(), vec![1.0, 0.0, 0.0]),
+            (2, "b.md".to_string(), vec![0.0, 1.0, 0.0]),
+        ];
+        let store = EmbeddingStore::from_data(data);
         assert_eq!(store.len(), 2);
+        assert!(!store.is_empty());
+        assert_eq!(store.dim(), 3);
         assert!(store.get_by_path("a.md").is_some());
         assert!(store.get_by_path("nonexistent.md").is_none());
-        assert_eq!(store.dim(), 3);
-    }
-
-    #[test]
-    fn test_store_get_by_id() {
-        let emb = norm(&[1.0, 0.0, 0.0]);
-        let conn = create_test_db(&[("a.md", "a", "content", &emb)]);
-        let store = EmbeddingStore::load(&conn);
         assert!(store.get_by_id(1).is_some());
         assert!(store.get_by_id(999).is_none());
     }

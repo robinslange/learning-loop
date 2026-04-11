@@ -1,7 +1,3 @@
-pub mod benchmark;
-pub mod bge_small;
-pub mod loader;
-
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -67,19 +63,5 @@ pub trait EmbeddingProvider: Send + Sync {
 
     fn model_id(&self) -> &str {
         &self.config().model_id
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "model")]
-pub enum KnownModel {
-    BgeSmallEnV15,
-}
-
-impl KnownModel {
-    pub fn config(&self) -> ModelConfig {
-        match self {
-            KnownModel::BgeSmallEnV15 => bge_small::config(),
-        }
     }
 }

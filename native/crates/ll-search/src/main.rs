@@ -220,7 +220,7 @@ fn main() {
         Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project, threshold } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let temporal = ll_search::search::TemporalParams {
                 recency_days: recency,
                 after,
@@ -240,28 +240,28 @@ fn main() {
         Commands::Similar { db_path, note_path, top } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::similar_notes(&conn, &note_path, top, &store);
             out(&results);
         }
         Commands::Cluster { db_path, threshold } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::cluster_notes(&conn, threshold, &store);
             out(&results);
         }
         Commands::Discriminate { db_path, threshold, paths } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold, &store);
             out(&results);
         }
         Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir);
             let result = if peers.is_empty() {
                 ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold, &store)
@@ -320,7 +320,7 @@ fn main() {
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir);
             let candidate_results = if peers.is_empty() {
                 ll_search::search::hybrid_query(&conn, &query, candidates, &ll_search::search::TemporalParams::default(), &store)
@@ -380,14 +380,14 @@ fn main() {
         Commands::EvalPrf { db_path, min_links } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_prf(&conn, &store, min_links);
             out(&result);
         }
         Commands::TunePrf { db_path, queries } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::EmbeddingStore::load(&conn);
+            let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
             out(&result);
         }

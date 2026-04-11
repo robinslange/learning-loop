@@ -379,7 +379,7 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important for memory consolidation", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake affects muscle recovery", &emb_b),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
 
         let query_vec = norm(&[1.0, 0.1, 0.0]);
         let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn test_hybrid_query_inner_empty_db() {
         let conn = create_test_db(&[]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
         assert!(results.is_empty());
@@ -407,7 +407,7 @@ mod tests {
         let local = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep stages and cycles", &emb_a),
         ]);
-        let store = EmbeddingStore::load(&local);
+        let store = crate::search::store::load_store(&local);
         let peer = create_peer_db(&[
             ("3-permanent/circadian.md", "circadian rhythm", "Light exposure controls the circadian clock", &emb_b),
             ("3-permanent/melatonin.md", "melatonin synthesis", "Melatonin is produced in the pineal gland", &emb_c),
@@ -428,7 +428,7 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "local content", &emb),
         ]);
-        let store = EmbeddingStore::load(&local);
+        let store = crate::search::store::load_store(&local);
         let peer = create_peer_db(&[
             ("3-permanent/note.md", "peer note", "peer content about sleep", &emb),
         ]);
@@ -451,7 +451,7 @@ mod tests {
         let conn = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
 
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let local_results = hybrid_query_inner(&conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store);
@@ -459,7 +459,7 @@ mod tests {
         let conn2 = create_test_db(&[
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is critical", &emb),
         ]);
-        let store2 = EmbeddingStore::load(&conn2);
+        let store2 = crate::search::store::load_store(&conn2);
         let peers: Vec<(String, Connection)> = vec![];
         let fed_results = hybrid_query_federated_inner(&conn2, &query_vec, "sleep", 5, &peers, &TemporalParams::default(), &store2);
 
@@ -475,7 +475,7 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "sleep cycles and stages", &emb),
         ]);
-        let store = EmbeddingStore::load(&local);
+        let store = crate::search::store::load_store(&local);
         let peer = create_peer_db_no_embeddings(&[
             ("peer-note.md", "peer note", "circadian rhythm and sleep"),
         ]);
@@ -500,7 +500,7 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let query_vec = norm(&[0.0, 0.0, 1.0]);
         let results = hybrid_query_inner(
             &conn, &query_vec, "xyznonexistent", 5, &TemporalParams::default(), &store,
@@ -519,7 +519,7 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let query_vec = norm(&[1.0, 0.1, 0.0]);
         let results = hybrid_query_inner(
             &conn, &query_vec, "sleep", 5, &TemporalParams::default(), &store,
@@ -538,7 +538,7 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep is important", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake matters", &emb_b),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         // Query close to sleep, far from diet
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = hybrid_query_inner(
@@ -565,7 +565,7 @@ mod tests {
             ("3-permanent/sleep.md", "sleep architecture", "Deep sleep", &emb_a),
             ("3-permanent/diet.md", "diet and nutrition", "Protein intake", &emb_b),
         ]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = hybrid_query_inner(
             &conn, &query_vec, "sleep", 10, &TemporalParams::default(), &store,
@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn test_query_response_empty_db() {
         let conn = create_test_db(&[]);
-        let store = EmbeddingStore::load(&conn);
+        let store = crate::search::store::load_store(&conn);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let results = hybrid_query_inner(
             &conn, &query_vec, "anything", 5, &TemporalParams::default(), &store,
@@ -599,7 +599,7 @@ mod tests {
         let local = create_test_db(&[
             ("local.md", "local note", "sleep content", &emb_local),
         ]);
-        let store = EmbeddingStore::load(&local);
+        let store = crate::search::store::load_store(&local);
         let peer = create_peer_db_no_fts(&[
             ("peer.md", "peer note", &emb_peer),
         ]);

@@ -877,8 +877,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
+name = "ll-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ort",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tokenizers",
+]
+
+[[package]]
 name = "ll-search"
-version = "1.14.3"
+version = "1.15.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -887,6 +899,7 @@ dependencies = [
  "ed25519-dalek",
  "globset",
  "hex",
+ "ll-core",
  "notify",
  "ort",
  "rand 0.8.5",
