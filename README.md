@@ -16,9 +16,11 @@ Claude forgets process. It will skip verification, promote half-sourced notes, a
 
 **Process enforcement through hooks.** Ten lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
 
-**Four-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary.
+**Just-in-time context injection.** When you ask a substantive question, a UserPromptSubmit hook searches your vault and past conversations and injects the top matches into Claude's context before it responds. Ships in shadow mode by default — logs what it *would* have injected without touching your prompts. Flip `injection_mode: "live"` in `config.json` after reviewing the shadow log with `scripts/review-shadow.mjs`.
 
-**12 specialized agents.** Research, verification, gap analysis, note writing, and batch triage run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research agents run on Sonnet.
+**Five-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion + Rocchio pseudo-relevance feedback, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary backed by the `ll-core` library crate.
+
+**15 specialized agents.** Research, verification, gap analysis, note writing, batch triage, and cross-store correction run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research and judgment agents run on Sonnet.
 
 **A vault that earns its structure.** Notes flow from inbox through fleeting to permanent. Six criteria gate each transition. Source integrity failures block promotion. The vault grows sharper because every note that reaches permanent status survived mechanical scrutiny.
 
@@ -63,6 +65,8 @@ This plugin is heavy. It runs local model inference and injects vault context in
 - Pre-compact hook captures insights before Claude compresses context
 - Search batches multiple queries into a single process
 
+**Measuring cache impact.** `/learning-loop:init` Phase 6 offers to install a bundled `cache-health` oh-my-claude statusline plugin (if oh-my-claude is present). It logs per-turn cache hit rates from the statusline payload to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl`. Run `node scripts/cache-health-report.mjs` for weighted hit rate, percentile distribution, and zero-hit events — useful for measuring the cost impact of flipping `injection_mode` from shadow to live.
+
 ## Skills
 
 | Command | What it does |
@@ -78,6 +82,7 @@ This plugin is heavy. It runs local model inference and injects vault context in
 | `/reflect` | End-of-session consolidation |
 | `/dream` | Auto-memory consolidation between sessions |
 | `/refresh "topic"` | See what you already know (no web research) |
+| `/rewrite "old" "new"` | Retract a belief across vault, auto-memory, and episodic history |
 | `/health` | Vault health dashboard |
 | `/ingest` | Pull from Linear, repos, or any content Claude can read |
 | `/diagram "concept"` | Generate Excalidraw diagram |
@@ -102,10 +107,10 @@ your-vault/
 
 ## Go deeper
 
-- [Search](guide/search.md) -- hybrid search, reranking, retrieval instrumentation
-- [Agents](guide/agents.md) -- 12 specialized agents and 18 shared skills
+- [Search](guide/search.md) -- five-signal hybrid search, reranking, retrieval instrumentation
+- [Agents](guide/agents.md) -- 15 specialized agents and 18 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
-- [Configuration](guide/configuration.md) -- hooks, provenance, source verification
+- [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
 
 ## Troubleshooting
 

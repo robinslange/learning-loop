@@ -4,9 +4,12 @@
 
 ```json
 {
-  "vault_path": "~/path/to/vault"
+  "vault_path": "~/path/to/vault",
+  "injection_mode": "shadow"
 }
 ```
+
+`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it *would* have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below).
 
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
@@ -22,7 +25,7 @@ Ten hooks enforce process discipline at the lifecycle level. They run regardless
 |---|---|---|
 | SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate nudge (via `lib/dream-gate.js`) |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
-| UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval |
+| UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
 | PreToolUse (Write) | pre-write-check.js | Blocks near-duplicate notes before they land |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
 | PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links after vault writes |
@@ -32,6 +35,27 @@ Ten hooks enforce process discipline at the lifecycle level. They run regardless
 | PreCompact | pre-compact.js | Captures context insights before compression |
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
+
+## Context injection
+
+The `session-label.js` hook runs a dual-backend search (vault + episodic) on every `UserPromptSubmit` and either emits a real context injection (live mode) or writes a shadow log (shadow mode, the default). A race cap bounds total hook latency; backends that exceed the cap are killed and skipped for the turn.
+
+- shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
+- review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
+- flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes
+- dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
+
+## Cache health statusline
+
+If you run [oh-my-claude](https://github.com/eric-gaudet/oh-my-claude), `/learning-loop:init` Phase 6 offers to install a `cache-health` plugin from `plugins/omc-cache-health/`. It reads per-turn cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`, `input_tokens`) from the statusline payload and persists them to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl`, deduping by `session_id` + token counts so repeated statusline fires inside one turn don't double-count.
+
+```bash
+# Weighted hit rate, p50/p25/p10, per-session breakdown, zero-hit events
+node scripts/cache-health-report.mjs [--session <id>] [--month YYYY-MM]
+
+# Idempotent installer — also supports --check (dry-run) and --uninstall
+node scripts/install-cache-health.mjs
+```
 
 ## Provenance
 
@@ -88,14 +112,19 @@ Restart Claude Code. The session-start hook auto-applies config changes on first
 
 ```
 learning-loop/
-  .claude-plugin/       Plugin manifest
-  agents/               Specialized agent definitions
-  agents/_skills/       Shared agent skills
-  skills/               User-invocable skills (slash commands)
-  scripts/              Vault search, provenance, source-resolver, binary download
-  scripts/lib/vendor/   Vendored JS deps (winkNLP for POS-tagged citation extraction)
-  vendor/               Vendored JS deps (sql.js WASM, ed25519, picomatch)
-  hooks/                Lifecycle hooks (enforcement layer)
-  native/               Rust ll-search binary (indexing, embedding, search, sync)
-  native/src/sync/      Federation sync client
+  .claude-plugin/            Plugin manifest
+  agents/                    Specialized agent definitions
+  agents/_skills/            Shared agent skills
+  skills/                    User-invocable skills (slash commands)
+  scripts/                   Vault search, provenance, source-resolver,
+                             injection review, cache-health, binary download
+  scripts/lib/vendor/        Vendored JS deps (winkNLP for POS-tagged
+                             citation extraction)
+  vendor/                    Vendored JS deps (sql.js WASM, ed25519, picomatch)
+  hooks/                     Lifecycle hooks (enforcement layer)
+  hooks/lib/inject.mjs       Shared helpers for the injection pipeline
+  native/                    Cargo workspace
+  native/crates/ll-core/     Search library: embed, graph, score, rerank, store
+  native/crates/ll-search/   CLI binary, sync client, preprocess, model loader
+  plugins/omc-cache-health/  oh-my-claude cache statusline plugin
 ```

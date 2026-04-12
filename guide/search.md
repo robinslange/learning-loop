@@ -1,17 +1,18 @@
 # Search
 
-Four-signal hybrid search fused via Reciprocal Rank Fusion. All search, embedding, graph traversal, and reranking runs in the `ll-search` Rust binary with zero native Node.js dependencies.
+Five-signal hybrid search fused via Reciprocal Rank Fusion. All search, embedding, graph traversal, and reranking runs in the `ll-search` Rust binary (backed by the `ll-core` library crate) with zero native Node.js dependencies.
 
 ## Signals
 
-Every query runs four retrieval signals in parallel:
+Every query runs five retrieval signals in parallel:
 
 1. **BM25** -- full-text keyword matching via FTS5 (title 10x, tags 5x, body 1x weighting)
 2. **Vector similarity** -- cosine similarity against BGE-small-en-v1.5 embeddings (384-dim, int8 quantized)
 3. **Personalized PageRank** -- walks the wikilink graph from the top BM25+vector results, surfacing bridge notes that connect domains (damping=0.5, 20 iterations)
 4. **Tag expansion** -- finds notes sharing rare tags (frequency 2-20) with the top results, IDF-weighted to favor specific tags over broad ones
+5. **Rocchio PRF** -- pseudo-relevance feedback: nudges the query vector toward the centroid of the top BM25+vector candidates and re-searches. Patches queries where the initial phrasing misses vocabulary the vault actually uses
 
-The top 30 candidates from each signal enter the RRF merge. Graph signals (PPR + tags) improve cross-domain recall: they surface notes that no single keyword or embedding would find, but that your wikilinks connect.
+The top 30 candidates from each signal enter the RRF merge. Graph signals (PPR + tags) improve cross-domain recall: they surface notes that no single keyword or embedding would find, but that your wikilinks connect. PRF improves recall for paraphrased queries without needing query rewriting.
 
 ## Reranking
 

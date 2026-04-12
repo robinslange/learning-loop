@@ -19,10 +19,14 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 | note-scorer | Batch quality assessment | Haiku |
 | note-verifier | Source verification and claim checking | Sonnet |
 | note-writer | Write atomic notes in persona voice | Sonnet |
+| correction-analyser | Trace sole-justification dependents of a retracted belief for `/rewrite` impact maps | Sonnet |
+| refinement-proposer | Propose upstream refinements when a new note touches an existing claim | Sonnet |
 | ingest-context | Extract insights from pasted text | Haiku |
 | ingest-linear | Pull and extract from Linear tickets | Haiku |
 | ingest-repo | Scan repo surface for architecture insights | Haiku |
 | diagram-rules | Shared Excalidraw generation spec | (reference) |
+
+Fourteen working agents plus the `diagram-rules` shared reference file.
 
 ## Model selection
 

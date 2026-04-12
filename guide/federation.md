@@ -1,6 +1,26 @@
 # Federation (experimental)
 
-A curated knowledge network for sharing verified insights across vaults. Federation is invite-only -- a hub admin provisions your network access and registers your identity on the hub. Notes that reach your peers have already passed source verification and quality gating. See [interchange.live](https://interchange.live) for more.
+A curated knowledge network for sharing verified insights across vaults. Federation is invite-only -- onboarding runs through [interchange.live](https://interchange.live), which issues one-time redeem tokens that self-register your peer without any manual hub-admin step. Notes that reach your peers have already passed source verification and quality gating.
+
+## interchange.live
+
+`interchange.live` is the coordination service the federation runs on. It's the reason onboarding is self-service, and it's the reason your vault's contents never leave your machine: it handles *identity and routing*, not content.
+
+Three responsibilities:
+
+1. **Invitation issuance.** An existing peer (or the admin) generates a redeem token bound to a display name and an expiry. You paste the token into `/learning-loop:init` Phase 4. Tokens are one-shot -- once redeemed, they're burned.
+2. **Pubkey registration and network provisioning.** The redeem endpoint (`interchange.live/api/redeem`) accepts your raw Ed25519 public key (extracted locally via `ll-search identity`) and returns a [headscale](https://headscale.net) pre-auth key. Headscale is a self-hosted coordination server for [tailscale](https://tailscale.com) -- your peer connects over a WireGuard mesh, not over the public internet. Each peer's identity is cryptographic, not credential-based.
+3. **Index exchange rendezvous.** Peers sync their filtered index databases (titles, embeddings, tags, graph edges -- never body text unless a note is `public`) over the tailnet. The interchange service only facilitates the handshake; the actual index transfer is peer-to-peer.
+
+The optional [interchange.live/graph](https://interchange.live/graph) surface is a separate, read-only visualization. Peers opt in by setting `"graph": true` in their config. Only note *titles* and the edges between them leave the machine -- no content, no summaries. Toggling off removes your contribution on the next sync.
+
+What the interchange service deliberately does *not* do:
+
+- Store your vault content. Public-tier notes live in your own index DB; peers pull them on demand.
+- Decrypt anything. WireGuard terminates on the peers, not on the coordinator.
+- Operate without your key. You can revoke participation by rotating the seed at `PLUGIN_DATA/federation/.seed` and re-running `/learning-loop:init`.
+
+The architecture mirrors Signal's sealed-sender or Matrix's federated-room model: a neutral rendezvous, not a content host. The trust boundary is the tailnet; the content boundary is your disk.
 
 ## What you get
 
@@ -15,13 +35,15 @@ Each peer exports a filtered index of their vault (respecting visibility rules) 
 
 ## Setup
 
-Federation is configured during `/learning-loop:init` (Phase 4):
+Federation is configured during `/learning-loop:init` (Phase 4). Onboarding is self-service via `interchange.live` invitation tokens:
 
-1. Connect to the network with a pre-auth key (provided by the hub admin)
-2. Generate an Ed25519 identity
-3. Send your public key to the hub admin for registration (manual step -- there is no self-registration)
-4. Configure visibility rules
-5. Test sync (re-run `/learning-loop:init` after the admin confirms registration)
+1. Paste an invitation redeem token from `interchange.live`
+2. Init extracts your Ed25519 pubkey via `ll-search identity` (creating the seed on first run) and posts it to `interchange.live/api/redeem`, which returns a headscale pre-auth key
+3. `tailscale up` connects you to the network
+4. Init configures default visibility rules
+5. Sync test confirms peer reachability
+
+Re-running `/learning-loop:init` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
 
 ## Visibility rules
 
@@ -39,7 +61,23 @@ Default configuration in `PLUGIN_DATA/federation/config.json`:
 }
 ```
 
-Frontmatter `visibility: private` on any note overrides glob rules.
+**Resolution order:** rules are evaluated top-to-bottom, **last match wins**, and frontmatter `visibility:` on a note overrides all globs. In practice this means you can layer broad allows with narrow denies — e.g. share `3-permanent/**` publicly but carve out project-prefix notes:
+
+```json
+{
+  "visibility": {
+    "default": "private",
+    "rules": [
+      { "pattern": "3-permanent/**", "tier": "public" },
+      { "pattern": "1-fleeting/**", "tier": "listed" },
+      { "pattern": "**/projectname-*", "tier": "private" },
+      { "pattern": "**/client-name-*", "tier": "private" }
+    ]
+  }
+}
+```
+
+Globs match against the note's vault-relative path. For fuzzier privacy decisions (one-off notes where a glob would false-positive), add `visibility: private` to the note's frontmatter -- it's more precise and survives file renames.
 
 ## Knowledge graph
 
