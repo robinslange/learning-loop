@@ -15,8 +15,6 @@ Built for local-first tools that need search over SQLite data without shipping a
 
 **[learning-loop](https://github.com/robinslange/learning-loop)** — A Claude Code plugin that turns your Obsidian vault into a queryable knowledge graph. ll-core powers semantic search, link-graph traversal, and note clustering across thousands of atomic notes. Runs entirely on your machine.
 
-**[postbox-search](https://github.com/robinslange/mcp-messaging)** — Local-first semantic search across Gmail, iMessage, and WhatsApp for [Postbox](https://postbox.run). Embeddings and indexing happen on-device; the sidecar exposes search to Claude via MCP.
-
 ## Usage
 
 ```rust
@@ -47,7 +45,7 @@ let results = ll_core::scoring::finalize_rrf(rrf_scores, 10);
 
 Existing Rust search crates either ship a full vector database (heavyweight) or are pure algorithms with no SQLite integration (too low-level). ll-core sits in between: enough infrastructure to build a real search experience, thin enough to embed in a sidecar or CLI.
 
-The design came from [learning-loop](https://github.com/robinslange/learning-loop)'s need to search an Obsidian vault with BM25 + embeddings + wikilink graph + reranking, all running on a laptop. The same pipeline turned out to work for messaging search, so the shared bits moved here.
+The design came from [learning-loop](https://github.com/robinslange/learning-loop)'s need to search an Obsidian vault with BM25 + embeddings + wikilink graph + reranking, all running on a laptop.
 
 ## License
 
