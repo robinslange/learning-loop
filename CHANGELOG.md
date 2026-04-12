@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.15.5
+
+### Fixed
+
+- **SessionStart incremental indexing no longer silently drops large deltas.** The hook ran `ll-search index` as a blocking `execFileSync` with a 5 s timeout and `stdio: 'ignore'`. With ~50 ms per note to embed (bge-small q8 CPU), any session-to-session delta above ~30 notes exceeded the budget, got SIGKILL'd mid-embedding loop, and since the indexer only opens its SQLite transaction after the full embed batch completes (`native/src/db/index.rs:153-218`), zero progress persisted. The next session rediscovered the same (now larger) delta and failed again — backlog compounded silently until a manual `ll-search index` was run. Swapped to detached `spawn(..., { detached: true }).unref()`, matching the pattern Stop already uses. Session start no longer blocks on indexing, and the indexer runs to completion in the background regardless of delta size.
+
 ## v1.15.4
 
 ### Changed

@@ -90,11 +90,12 @@ function isWatchRunning() {
 const binary = findBinaryShared();
 if (binary && existsSync(DB_PATH) && !isWatchRunning()) {
   try {
-    execFileSync(binary.bin, ['index', vaultRoot, DB_PATH], {
-      timeout: 5000,
+    const child = spawn(binary.bin, ['index', vaultRoot, DB_PATH], {
+      detached: true,
       stdio: 'ignore',
       env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
     });
+    child.unref();
   } catch {}
 }
 
