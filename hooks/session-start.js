@@ -11,12 +11,21 @@ import { home, resolvePluginData, resolveVaultPath, findBinary as findBinaryShar
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
-// Clean stale plugin cache versions (only keep current)
+// Clean stale plugin cache versions — only prune versions strictly older than
+// the running hook. An older hook firing under a stale Claude Code process
+// (e.g. after /reload-plugins) must never delete newer cache entries that the
+// marketplace just installed, or the next session has nothing to load.
 try {
   const cacheParent = resolve(PLUGIN_DIR, '..');
   const currentVersion = JSON.parse(readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf-8')).version;
+  const semverCmp = (a, b) => {
+    const pa = a.split('.').map(Number);
+    const pb = b.split('.').map(Number);
+    return (pa[0] - pb[0]) || (pa[1] - pb[1]) || (pa[2] - pb[2]);
+  };
   for (const entry of readdirSync(cacheParent)) {
-    if (entry !== currentVersion && /^\d+\.\d+\.\d+$/.test(entry)) {
+    if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
+    if (semverCmp(entry, currentVersion) < 0) {
       rmSync(join(cacheParent, entry), { recursive: true, force: true });
     }
   }

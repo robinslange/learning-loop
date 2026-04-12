@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.15.6
+
+### Fixed
+
+- **SessionStart cache pruner no longer deletes newer plugin versions.** The hook prunes stale `plugins/cache/.../<version>/` directories so they don't accumulate forever. The previous logic kept exactly one version (its own) and deleted everything else, which is wrong when a stale Claude Code process re-fires an old hook (e.g. after `/reload-plugins` post-marketplace-update): the old hook would delete the just-installed newer version, and the next session had no cache to load. Switched to numeric semver comparison so only versions strictly older than the running hook are pruned. Also fixes the latent string-compare bug where `'1.9.0'` would be considered newer than `'1.10.0'`.
+
 ## v1.15.5
 
 ### Fixed
