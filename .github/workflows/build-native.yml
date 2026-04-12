@@ -48,10 +48,8 @@ jobs:
       - name: Cache models
         uses: actions/cache@v4
         with:
-          path: |
-            native/crates/ll-core/model
-            native/crates/ll-search/model
-          key: native-model-v3-${{ hashFiles('native/crates/ll-core/build.rs', 'native/crates/ll-search/build.rs') }}
+          path: native/crates/ll-search/model
+          key: native-model-v4-${{ hashFiles('native/crates/ll-search/build.rs') }}
 
       - name: Build
         run: cargo build --release -p ll-search --features nli --target ${{ matrix.target }}

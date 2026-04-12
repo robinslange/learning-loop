@@ -2,10 +2,13 @@
 name = "ll-core"
 version = "0.1.0"
 edition.workspace = true
-description = "Hybrid semantic search engine -- embedding, BM25, RRF, PageRank, reranking"
+description = "Hybrid semantic search engine: BM25 + vector + PageRank + cross-encoder reranking over SQLite, with on-device ONNX inference"
 license = "MIT"
 repository = "https://github.com/robinslange/learning-loop"
+homepage = "https://github.com/robinslange/learning-loop"
 readme = "README.md"
+keywords = ["search", "embeddings", "rag", "onnx", "sqlite"]
+categories = ["database", "science"]
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }

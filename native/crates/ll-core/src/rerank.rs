@@ -4,8 +4,8 @@ use ort::{ep, session::Session, value::Tensor};
 use serde::Serialize;
 use tokenizers::Tokenizer;
 
-const RERANKER_MODEL: &[u8] = include_bytes!("../model/reranker.onnx");
-const RERANKER_TOKENIZER: &[u8] = include_bytes!("../model/reranker_tokenizer.json");
+const RERANKER_MODEL: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/reranker.onnx"));
+const RERANKER_TOKENIZER: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/reranker_tokenizer.json"));
 
 #[derive(Serialize)]
 pub struct RerankResult {
