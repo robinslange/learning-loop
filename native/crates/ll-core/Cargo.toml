@@ -1,7 +1,8 @@
 [package]
 name = "ll-core"
-version = "0.1.1"
+version = "0.1.2"
 edition.workspace = true
+rust-version = "1.88"
 description = "Hybrid semantic search engine: BM25 + vector + PageRank + cross-encoder reranking over SQLite, with on-device ONNX inference"
 license = "MIT"
 repository = "https://github.com/robinslange/learning-loop"
