@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.15.4
+
+### Changed
+
+- **cache-health statusline plugin: quiet by default.** The first cut rendered `cache NN%` every turn, which was decorative noise -- individual turns are 99%+ in practice and the rounding meant the display never dropped below 100%. Reworked to render only when something is wrong.
+- **Rolling window.** Hit rate is now computed over the last 10 post-warmup turns, not lifetime. Sustained degradation shows up quickly; transient busts self-heal out of the window.
+- **Warmup suppression.** The first 5 turns of a session are excluded from the window and from display. Initial turns always have a low lifetime hit rate as the cache is being built -- showing that as "bad" was noise.
+- **Instant bust alerts.** Any turn where `cache_read == 0` shows `cache bust (N)` in red on the turn it happens, regardless of warmup state. Bust counter persists across subsequent degradation displays (e.g. `cache 89% 2b`).
+- **JSONL schema extended.** Records now carry `turn`, `turn_hit_rate`, `window_hit_rate`, `lifetime_hit_rate`, and `session_busts` so the report tool can analyse windowed vs lifetime behaviour. Previous `hit_rate` field still read as fallback for backwards compatibility.
+- **Default thresholds** tuned against real session data: `warnAt: 95`, `criticalAt: 85`, `windowSize: 10`, `warmupTurns: 5`. Healthy sessions in the wild sit at 99%+; observed degraded sessions hit 89-97% aggregate.
+
 ## v1.15.3
 
 ### Added
