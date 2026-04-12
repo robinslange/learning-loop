@@ -56,13 +56,13 @@ function percentile(arr, p) {
   return sorted[Math.floor((p / 100) * (sorted.length - 1))];
 }
 
-const hitRates = rows.map(r => r.hit_rate);
+const hitRates = rows.map(r => r.turn_hit_rate ?? r.hit_rate ?? 0);
 const totalRead = rows.reduce((s, r) => s + r.cache_read, 0);
 const totalCreate = rows.reduce((s, r) => s + r.cache_creation, 0);
 const totalUncached = rows.reduce((s, r) => s + r.uncached_input, 0);
 const totalInput = totalRead + totalCreate + totalUncached;
 const overallHitRate = totalInput > 0 ? totalRead / totalInput : 0;
-const zeroHits = rows.filter(r => r.hit_rate === 0).length;
+const zeroHits = rows.filter(r => (r.turn_hit_rate ?? r.hit_rate) === 0).length;
 
 const sessionIds = new Set(rows.map(r => r.session_id));
 const sessions = [...sessionIds].map(sid => {
@@ -111,7 +111,7 @@ for (const s of sessions.slice(0, 10)) {
 
 if (zeroHits > 0) {
   console.log('\n## Zero-hit events (cache busts)');
-  const busts = rows.filter(r => r.hit_rate === 0).slice(0, 10);
+  const busts = rows.filter(r => (r.turn_hit_rate ?? r.hit_rate) === 0).slice(0, 10);
   for (const r of busts) {
     console.log(`${r.ts}  session=${r.session_id.slice(0, 8)}  create=${r.cache_creation.toLocaleString()}`);
   }

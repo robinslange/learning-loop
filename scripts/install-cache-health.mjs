@@ -90,11 +90,12 @@ function updateConfig() {
   cfg.plugins = cfg.plugins || {};
   if (!cfg.plugins['cache-health']) {
     cfg.plugins['cache-health'] = {
-      style: 'dim',
-      warnAt: 70,
-      criticalAt: 40,
-      styleWarn: 'yellow',
-      styleCritical: 'red',
+      warnAt: 95,
+      criticalAt: 85,
+      windowSize: 10,
+      warmupTurns: 5,
+      style: 'yellow',
+      styleCritical: 'bold red',
     };
     changed = true;
   }
