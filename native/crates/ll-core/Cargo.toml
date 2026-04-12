@@ -3,6 +3,9 @@ name = "ll-core"
 version = "0.1.0"
 edition.workspace = true
 description = "Hybrid semantic search engine -- embedding, BM25, RRF, PageRank, reranking"
+license = "MIT"
+repository = "https://github.com/robinslange/learning-loop"
+readme = "README.md"
 
 [dependencies]
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
