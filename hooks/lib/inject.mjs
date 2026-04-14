@@ -104,7 +104,9 @@ function spawnSearch(spawnFn, cmd, args, abortSignal, env) {
 function parseVault(result) {
   if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
   try {
-    return { hits: JSON.parse(result.stdout), raced_out: false, latency_ms: result.latency_ms };
+    const parsed = JSON.parse(result.stdout);
+    const hits = Array.isArray(parsed) ? parsed : (parsed?.results || []);
+    return { hits, raced_out: false, latency_ms: result.latency_ms };
   } catch {
     return { hits: [], error: 'parse_error', raced_out: false, latency_ms: result.latency_ms };
   }

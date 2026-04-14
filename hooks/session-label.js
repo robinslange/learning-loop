@@ -256,8 +256,9 @@ try {
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
   const episodicTop = results.episodic?.hits?.[0]?.score || 0;
 
-  if (vaultTop < 0.65 && episodicTop < 0.65) {
-    logShadow({ gate: { passed: false, vault_top_score: vaultTop, episodic_top_score: episodicTop }, backends: summarizeBackends(results) });
+  const gateThreshold = Number(process.env.LEARNING_LOOP_INJECTION_THRESHOLD || resolveConfig().injection_threshold || 0.35);
+  if (vaultTop < gateThreshold && episodicTop < gateThreshold) {
+    logShadow({ gate: { passed: false, vault_top_score: vaultTop, episodic_top_score: episodicTop, threshold: gateThreshold }, backends: summarizeBackends(results) });
     process.exit(0);
   }
 
