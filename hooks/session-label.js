@@ -264,8 +264,18 @@ try {
 
   const alreadyInjectedPaths = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
+  const enrichedVaultHits = (results.vault?.hits || []).map(h => {
+    if (h.body) return h;
+    try {
+      const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
+      const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+      return { ...h, body };
+    } catch {
+      return { ...h, body: '' };
+    }
+  }).filter(h => h.body);
   const injection = buildInjection({
-    vaultHits: results.vault?.hits || [],
+    vaultHits: enrichedVaultHits,
     episodicHits: results.episodic?.hits || [],
     query,
     alreadyInjectedPaths,
