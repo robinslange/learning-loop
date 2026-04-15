@@ -1,5 +1,36 @@
 # Changelog
 
+## v1.15.9
+
+### Added
+
+- **Background reindex on Stop** (`hooks/post-stop-reindex.js`). After each turn the Stop hook spawns a detached `ll-search index` so the vector index is fresh for the next `UserPromptSubmit` retrieval. Returns immediately. A lockfile in `os.tmpdir()` (with PID + timestamp + 10 min staleness window) prevents overlapping runs across turns or sessions. `stdio: 'ignore'` keeps the spawn cross-platform-safe — file-descriptor inheritance with `detached: true` does not let the child outlive the parent on Windows.
+- **`guide/cross-platform.md`** — supported platforms, known caveats per OS, and the verified-vs-untested matrix.
+
+### Fixed
+
+- **`findEpisodicBinary()` now appends `.exe` on Windows.** Previously returned a Unix-style path on every platform; episodic backend resolution silently failed on Windows.
+- **`resolveConfig` strips UTF-8 BOM** before parsing `config.json`. Notepad and some VS Code configurations write BOM-prefixed UTF-8; without stripping, `JSON.parse` threw `SyntaxError: Unexpected token` at position 0.
+- **`scripts/download-binary.mjs` zip extraction.** The `.zip` (Windows) artifact was being extracted with `tar -xf`, which only works on Windows 10 1803+. Added fallback chain: tar → PowerShell `Expand-Archive` (Windows) → `unzip` (POSIX).
+
+### Changed
+
+- **`injection_threshold` is now configurable** via `config.json` or `LEARNING_LOOP_INJECTION_THRESHOLD` env var (default `0.35`). The hardcoded `0.65` shipped in v1.15.0 was unreachable in practice — bge-small-en-v1.5 cosine similarities on real prompts sit in the 0.15-0.45 band.
+- **`guide/configuration.md`** documents the new env vars (`LEARNING_LOOP_INJECTION_THRESHOLD`, `LEARNING_LOOP_INJECTION_MODE`, `LL_REINDEX_DEBUG`) and the eleventh hook.
+
+## v1.15.8
+
+### Fixed
+
+- **Injection pipeline crash on every gate-pass** (`hooks/session-label.js`). `buildInjection` reads `top.body` to truncate the vault snippet, but `ll-search query` returns `{path, score, title, mtime}` with no body field. Every gate-pass since v1.15.7 (when parseVault started returning real hits) crashed with `Cannot read properties of undefined (reading 'length')`. Hook now reads each hit's body from disk after the search returns, strips frontmatter, and skips hits where the file is unreadable.
+
+## v1.15.7
+
+### Fixed
+
+- **`parseVault` envelope discard** (`hooks/lib/inject.mjs`). The function called `JSON.parse(stdout)` and stored the whole result as `hits`, but `ll-search query` returns a `{meta, results}` envelope. `hits.length` returned `undefined`, every vault hit was silently dropped, and `review-shadow` reported "0/941 passed gate — delete the branch" because the instrument was broken, not the feature. Now coerces to `parsed.results || []`.
+- **Injection gate threshold lowered to 0.35** (`hooks/session-label.js`). The 0.65 default was never validated against real score distributions and was unreachable. Configurable via `LEARNING_LOOP_INJECTION_THRESHOLD` env var or `config.json:injection_threshold`. Threshold is also now logged in shadow records for post-hoc tuning.
+
 ## v1.15.6
 
 ### Fixed

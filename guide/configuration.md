@@ -5,11 +5,14 @@
 ```json
 {
   "vault_path": "~/path/to/vault",
-  "injection_mode": "shadow"
+  "injection_mode": "shadow",
+  "injection_threshold": 0.35
 }
 ```
 
 `injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it *would* have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below).
+
+`injection_threshold` is the minimum cosine similarity score the top vault or episodic hit must clear before context is injected. Defaults to `0.35`. Tune by inspecting `scripts/review-shadow.mjs` output — real top-score distributions on bge-small-en-v1.5 sit in the 0.15-0.45 band, so 0.65+ is unreachable. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
 
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
@@ -17,14 +20,17 @@ Persona voice and capture rules live in the vault itself (`_system/persona.md` a
 
 If set, the `VAULT_PATH` environment variable overrides `config.json`.
 
+Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows parses correctly.
+
 ## Hooks
 
-Ten hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
+Eleven hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
 | Event | Hook | What it enforces |
 |---|---|---|
 | SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate nudge (via `lib/dream-gate.js`) |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
+| Stop | post-stop-reindex.js | Spawns a detached `ll-search index` so the vector index is fresh for the next turn. Returns immediately. Cross-platform lockfile (`os.tmpdir()/learning-loop-reindex.lock`) prevents overlapping runs. |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
 | PreToolUse (Write) | pre-write-check.js | Blocks near-duplicate notes before they land |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
@@ -43,7 +49,20 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 - shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
 - review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
 - flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes
+- gate threshold: `injection_threshold` in `config.json` (default `0.35`) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
+- background reindex: the Stop hook spawns a detached `ll-search index` after each turn so the vector index stays fresh for the next prompt's retrieval, without blocking the current turn
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `CLAUDE_PLUGIN_DATA` | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
+| `VAULT_PATH` | Overrides `vault_path` from `config.json` |
+| `LEARNING_LOOP_INJECTION_MODE` | Per-session override of `injection_mode` (`shadow`, `live`, `off`) |
+| `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (decimal cosine, e.g. `0.4`) |
+| `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
+| `LL_REINDEX_DEBUG` | Set to `1` to emit `[reindex]` traces from `post-stop-reindex.js` to stderr |
 
 ## Cache health statusline
 

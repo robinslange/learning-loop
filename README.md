@@ -14,9 +14,9 @@ Claude forgets process. It will skip verification, promote half-sourced notes, a
 
 ## How it works
 
-**Process enforcement through hooks.** Ten lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds.
+**Process enforcement through hooks.** Eleven lifecycle hooks fire automatically. A pre-write hook catches near-duplicates before they land. A post-write hook adds backlinks. Source verification runs at write time, not as an afterthought. The quality gate blocks promotion regardless of how good the prose sounds. A Stop hook spawns a detached background reindex after each turn so retrieval stays fresh without blocking work.
 
-**Just-in-time context injection.** When you ask a substantive question, a UserPromptSubmit hook searches your vault and past conversations and injects the top matches into Claude's context before it responds. Ships in shadow mode by default — logs what it *would* have injected without touching your prompts. Flip `injection_mode: "live"` in `config.json` after reviewing the shadow log with `scripts/review-shadow.mjs`.
+**Just-in-time context injection.** When you ask a substantive question, a UserPromptSubmit hook searches your vault and past conversations and injects the top matches into Claude's context before it responds. Ships in shadow mode by default — logs what it *would* have injected without touching your prompts. Tune `injection_threshold` (default `0.35`) and flip `injection_mode: "live"` in `config.json` after reviewing the shadow log with `scripts/review-shadow.mjs`.
 
 **Five-signal hybrid search.** BM25 + vector similarity + Personalized PageRank over your wikilink graph + IDF-weighted tag expansion + Rocchio pseudo-relevance feedback, fused via RRF. Optional cross-encoder reranking. Graph signals surface bridge notes across domains that no single keyword or embedding would find. All runs in a single Rust binary backed by the `ll-core` library crate.
 
@@ -55,7 +55,7 @@ This plugin is heavy. It runs local model inference and injects vault context in
 
 **Tokens:** Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault adds thousands of tokens per session, and grows. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
 
-**Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum.
+**Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum. Linux x64 and Windows x64 binaries are CI-built; see [guide/cross-platform.md](guide/cross-platform.md) for per-platform status.
 
 **What we do to keep costs down:**
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku
@@ -111,6 +111,7 @@ your-vault/
 - [Agents](guide/agents.md) -- 15 specialized agents and 18 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
 - [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
+- [Cross-platform support](guide/cross-platform.md) -- macOS / Linux / Windows status and known caveats
 
 ## Troubleshooting
 
@@ -118,7 +119,10 @@ your-vault/
 The `ll-search` binary is ~77MB (includes embedding and reranker models). On slow connections, the download can take a few minutes. If it fails, re-run init.
 
 **Search returns no results**
-Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls.
+Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. The Stop hook also spawns a detached incremental reindex after each turn, so the index normally stays current without manual intervention.
+
+**Shadow injection log shows 0 passes**
+First check that the backends are alive — open a recent shadow record and look at `backends.vault.error` and `backends.episodic.error`. If you see `spawn ... ENOENT`, run `/learning-loop:init` to install the binary. If `episodic-memory` exits with a NODE_MODULE_VERSION mismatch, rebuild with `npm rebuild --prefix ~/.claude/plugins/cache/superpowers-marketplace/episodic-memory/<version>`. If both backends are healthy but the gate never passes, the threshold is too high — lower `injection_threshold` in `config.json` (or set `LEARNING_LOOP_INJECTION_THRESHOLD`).
 
 **Notes not showing up in vault**
 Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.

@@ -3,7 +3,7 @@
 import { mkdirSync, chmodSync, existsSync, readFileSync, writeFileSync, createWriteStream, unlinkSync } from 'fs';
 import { join } from 'path';
 import { platform, arch } from 'os';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import { getPluginData } from './lib/config.mjs';
 
 function detectArtifact() {
@@ -73,6 +73,23 @@ async function download(url, dest) {
   });
 }
 
+function extractZip(zipPath, destDir) {
+  // Windows 10 1803+ ships tar.exe with zip support; older Windows + non-Windows
+  // need a fallback. Try tar first, then PowerShell Expand-Archive on Windows,
+  // then unzip on POSIX.
+  const tarRes = spawnSync('tar', ['-xf', zipPath, '-C', destDir], { stdio: 'ignore' });
+  if (tarRes.status === 0) return;
+
+  if (platform() === 'win32') {
+    const psRes = spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${destDir}' -Force`], { stdio: 'ignore' });
+    if (psRes.status === 0) return;
+  } else {
+    const unzipRes = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
+    if (unzipRes.status === 0) return;
+  }
+  throw new Error(`Failed to extract ${zipPath}: install tar, powershell, or unzip`);
+}
+
 async function main() {
   const artifact = detectArtifact();
   if (!artifact) {
@@ -118,7 +135,7 @@ async function main() {
   if (artifact.endsWith('.tar.gz')) {
     execFileSync('tar', ['-xzf', tmpPath, '-C', binDir]);
   } else if (artifact.endsWith('.zip')) {
-    execFileSync('tar', ['-xf', tmpPath, '-C', binDir]);
+    extractZip(tmpPath, binDir);
   }
 
   // Clean up archive

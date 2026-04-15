@@ -26,15 +26,21 @@ export function resolvePluginData() {
   return null;
 }
 
+function readJsonStripBom(path) {
+  let raw = readFileSync(path, 'utf-8');
+  if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+  return JSON.parse(raw);
+}
+
 export function resolveConfig() {
   const pluginData = resolvePluginData();
   if (pluginData) {
     try {
-      return JSON.parse(readFileSync(join(pluginData, 'config.json'), 'utf-8'));
+      return readJsonStripBom(join(pluginData, 'config.json'));
     } catch {}
   }
   try {
-    return JSON.parse(readFileSync(join(resolve(import.meta.dirname, '..', '..'), 'config.json'), 'utf-8'));
+    return readJsonStripBom(join(resolve(import.meta.dirname, '..', '..'), 'config.json'));
   } catch {}
   return {};
 }
@@ -64,6 +70,7 @@ export function findBinary() {
 
 export function findEpisodicBinary() {
   const claudeDir = join(home(), '.claude', 'plugins');
+  const exe = process.platform === 'win32' ? '.exe' : '';
   try {
     const raw = JSON.parse(readFileSync(join(claudeDir, 'installed_plugins.json'), 'utf-8'));
     const plugins = raw.plugins || raw;
@@ -71,7 +78,7 @@ export function findEpisodicBinary() {
       if (!key.startsWith('episodic-memory@')) continue;
       const entry = entries[0];
       if (!entry?.installPath) continue;
-      const bin = join(entry.installPath, 'cli', 'episodic-memory');
+      const bin = join(entry.installPath, 'cli', `episodic-memory${exe}`);
       if (existsSync(bin)) return bin;
     }
   } catch {}
