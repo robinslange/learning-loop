@@ -94,11 +94,11 @@ Read each note.
 
 ### Step 3: Quality Scoring (Parallel Subagents)
 
-Launch `note-scorer` agent(s) to assess the gathered notes:
+Spawn `note-scorer` agent(s) to assess the gathered notes. When spawning multiple agents, dispatch them all in the same turn (a single message with multiple Agent tool calls):
 
 - **< 10 notes:** Single `note-scorer` agent with all file paths.
-- **10-99 notes:** Split into batches of ~10. Launch one `note-scorer` agent per batch in parallel.
-- **>= 100 notes (sweep):** Split into batches of ~50. Launch one `note-scorer` agent per batch in parallel. Haiku handles 50 notes per batch; the bottleneck is Read calls, not reasoning.
+- **10-99 notes:** Split into batches of ~10. Spawn one `note-scorer` agent per batch in the same turn.
+- **>= 100 notes (sweep):** Split into batches of ~50. Spawn one `note-scorer` agent per batch in the same turn. Haiku handles 50 notes per batch; the bottleneck is Read calls, not reasoning.
 
 Each agent reads its own notes, applies promote-gate assessment (6-criterion pass/fail + scoring mode dimensions), and returns per-note gate results (N/6 pass count, claim_specificity 0-2, source_grounded 0-2) with a maturity tier (shallow/medium/deep).
 
@@ -135,10 +135,10 @@ Check for cross-note issues using Smart Connections embeddings:
 
 Filter notes to those with sources/citations. Skip sourceless notes (report as "no sources — skipped").
 
-Launch `note-verifier` agent(s):
+Spawn `note-verifier` agent(s). When spawning multiple, dispatch them all in the same turn:
 
 - **< 5 notes with sources:** Single agent with all note contents
-- **>= 5 notes with sources:** Split into batches of ~5. Launch one agent per batch in parallel. (Verification involves URL fetching which is slow.)
+- **>= 5 notes with sources:** Split into batches of ~5. Spawn one agent per batch in the same turn. (Verification involves URL fetching which is slow.)
 
 Each agent receives the note content and returns the structured verification report (source checks, claim checks, missing citations, corrections).
 

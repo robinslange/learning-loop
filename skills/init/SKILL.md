@@ -62,6 +62,18 @@ Everything looks good. Nothing to set up.
 
 If everything is configured, stop here. If issues exist, proceed to the relevant phases only.
 
+**Model advisory (Opus 4.7+):**
+If the orchestrator model is Opus 4.7 or later, append to the dashboard:
+
+```
+  Model notes:   Opus 4.7 detected. Research agents use effort: xhigh.
+                 Dispatch instructions are explicit for literal instruction-following.
+                 Cost tip: set CLAUDE_CODE_SUBAGENT_MODEL=claude-sonnet-4-6
+                 to route subagents to Sonnet while keeping Opus as orchestrator.
+```
+
+This is informational only. No configuration is needed -- the agent frontmatter and skill content are forward-compatible with both 4.6 and 4.7.
+
 ---
 
 ## Phase 2: Vault Setup

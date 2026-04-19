@@ -93,7 +93,7 @@ Proceed immediately.
 
 ### Step 1: Orient
 
-Launch all three subagents in parallel:
+Spawn all three subagents in the same turn (a single message with three Agent tool calls, not sequential):
 
 1. **Vault Scout** (`discovery-vault-scout`):
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)
@@ -115,10 +115,11 @@ Determine depth from vault scout results:
 
 ### Step 2: Analyse
 
-Launch the **Gap Analyser** (`gap-analyser`):
+Spawn the **Gap Analyser** (`gap-analyser`):
 - Pass: notes (full content from vault scout), research (from adversarial researcher), domain_survey (from domain survey researcher), scope, depth
 - The analyser reads its skills from `PLUGIN/agents/_skills/`
 - Returns: structured report with thin ice, tensions, absences, and blindspots
+- **Context budget**: for clusters of 20+ notes, pass note titles + first 5 lines of body instead of full content. Full content on 20+ notes risks degraded retrieval in long contexts. For clusters under 20 notes, pass full content as normal.
 
 ### Step 3: Present
 

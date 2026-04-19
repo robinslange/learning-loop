@@ -1,6 +1,7 @@
 ---
 description: Verifies note claims against cited sources. Checks source URLs are reachable, claims are supported, and no references are fabricated. Returns 4-level ordinal confidence per claim (strong/partial/no source/contradicted) with specific issues.
 model: sonnet
+effort: xhigh
 capabilities: ["source-verification", "claim-checking", "url-validation"]
 ---
 

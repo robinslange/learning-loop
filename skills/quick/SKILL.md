@@ -24,7 +24,7 @@ Answer a question quickly with web research, vault awareness, and source verific
 
 ### Step 2: Parallel Research
 
-Launch both subagents simultaneously:
+Spawn both subagents in the same turn (a single message with two Agent tool calls):
 
 **Vault Scout** (`discovery-vault-scout`):
 ```

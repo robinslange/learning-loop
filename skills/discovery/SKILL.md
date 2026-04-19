@@ -87,7 +87,7 @@ Just run.
 
 ### Step 1: Orient
 
-Launch both subagents in parallel:
+Spawn both subagents in the same turn (a single message with two Agent tool calls, not sequential):
 
 1. **Vault Scout** (`discovery-vault-scout`): Search existing vault notes and episodic memory for what the user already knows about this topic.
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)
@@ -182,7 +182,7 @@ Sources found: N (run /literature to capture)
 - Use results as the raw material for presentation
 - **Internally spawns `note-verifier`** on its own findings before returning. Revises and re-verifies up to 3 times. All findings presented to the user are pre-verified.
 
-**Always launch agents in parallel when possible.** Vault scout and researcher have no dependencies on each other at orientation time.
+**Always spawn agents in the same turn when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. Use a single message with multiple Agent tool calls.
 
 ## Tone Guide
 

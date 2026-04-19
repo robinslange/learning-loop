@@ -1,6 +1,7 @@
 ---
 description: Strengthens a single vault note. Assesses maturity, researches gaps scaled to need, rewrites in persona voice, verifies sources, promotes when ready. Splits multi-idea notes.
 model: sonnet
+effort: xhigh
 capabilities: ["maturity-assessment", "gap-research", "note-enrichment", "promotion"]
 ---
 
