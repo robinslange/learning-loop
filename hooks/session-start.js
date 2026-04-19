@@ -32,6 +32,62 @@ try {
 } catch {}
 const tmp = tmpdir();
 
+// Check for plugin updates in background (throttled to once per hour)
+const pluginVersion = (() => {
+  try { return JSON.parse(readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf-8')).version; }
+  catch { return '0.0.0'; }
+})();
+const updateCacheFile = (() => {
+  const pd = resolvePluginData();
+  return pd ? join(pd, 'update-check.json') : null;
+})();
+
+if (updateCacheFile) {
+  let shouldCheck = true;
+  try {
+    const cached = JSON.parse(readFileSync(updateCacheFile, 'utf8'));
+    if (cached.checked && (Date.now() / 1000 - cached.checked) < 3600) shouldCheck = false;
+  } catch {}
+
+  if (shouldCheck) {
+    const child = spawn(process.execPath, ['-e', `
+      const fs = require('fs');
+      const https = require('https');
+      const cacheFile = ${JSON.stringify(updateCacheFile)};
+      const installed = ${JSON.stringify(pluginVersion)};
+
+      const req = https.get('https://api.github.com/repos/robinslange/learning-loop/releases/latest', {
+        headers: { 'User-Agent': 'learning-loop-update-check', 'Accept': 'application/vnd.github.v3+json' },
+        timeout: 10000,
+      }, (res) => {
+        let data = '';
+        res.on('data', (c) => data += c);
+        res.on('end', () => {
+          try {
+            const tag = JSON.parse(data).tag_name || '';
+            const latest = tag.replace(/^v/, '');
+            if (!latest) return;
+            const cmp = (a, b) => {
+              const pa = a.split('.').map(Number);
+              const pb = b.split('.').map(Number);
+              return (pa[0] - pb[0]) || (pa[1] - pb[1]) || (pa[2] - pb[2]);
+            };
+            fs.writeFileSync(cacheFile, JSON.stringify({
+              update_available: cmp(latest, installed) > 0,
+              installed,
+              latest,
+              checked: Math.floor(Date.now() / 1000),
+            }));
+          } catch {}
+        });
+      });
+      req.on('error', () => {});
+      req.end();
+    `], { stdio: 'ignore', detached: true });
+    child.unref();
+  }
+}
+
 const MEMORY_DIR = join(home(), '.claude', 'projects');
 
 let vaultRoot = resolveVaultPath();
@@ -115,6 +171,17 @@ context += `## Learning Loop Paths\n`;
 context += `PLUGIN=${PLUGIN_DIR}\n`;
 context += `PLUGIN_DATA=${pluginData}\n`;
 context += `VAULT=${vaultRoot}\n`;
+
+// 0.6. Update notification from cached check
+if (updateCacheFile) {
+  try {
+    const cached = JSON.parse(readFileSync(updateCacheFile, 'utf8'));
+    if (cached.update_available) {
+      context += `\n## Plugin Update Available\n`;
+      context += `learning-loop ${cached.installed} → ${cached.latest}. Run \`/learning-loop:init\` to update.\n`;
+    }
+  } catch {}
+}
 
 // 1. Detect project from working directory
 const projectDir = process.env.CLAUDE_PROJECT_DIR || '';
