@@ -236,7 +236,11 @@ try {
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
-  if (trimmed.length < 20 || /^(ok|yes|no|thanks|try\s+again|continue|go|sure|done)$/i.test(trimmed)) {
+  if (
+    trimmed.length < 20 ||
+    /^(ok|yes|no|thanks|try\s+again|continue|go|sure|done)$/i.test(trimmed) ||
+    trimmed.startsWith('<')
+  ) {
     logShadow({ gate: { passed: false, fast_path_skip: true } });
     process.exit(0);
   }
@@ -251,7 +255,8 @@ try {
   }
   const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
 
-  const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs: 2500 });
+  const raceCapMs = Number(process.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS || 1500);
+  const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs });
 
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
   const episodicTop = results.episodic?.hits?.[0]?.score || 0;

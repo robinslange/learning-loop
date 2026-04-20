@@ -26,6 +26,13 @@ describe('review-shadow', () => {
         would_inject: `injection ${i}`,
       }));
     }
+    for (let i = 0; i < 90; i++) {
+      entries.push(JSON.stringify({
+        ts: now.toISOString(), session_id: 's1', prompt: `non-matching question number ${i}`,
+        gate: { passed: false, vault_top_score: 0.1, episodic_top_score: 0.05, threshold: 0.35 },
+        backends: { vault: { latency_ms: 120, hits: 0 }, episodic: { latency_ms: 800, hits: 0, raced_out: false } },
+      }));
+    }
     for (let i = 0; i < 10; i++) {
       entries.push(JSON.stringify({
         ts: now.toISOString(), session_id: 's1', prompt: 'ok',
@@ -36,14 +43,40 @@ describe('review-shadow', () => {
   });
   after(() => rmSync(dataDir, { recursive: true, force: true }));
 
-  it('prints stats and reports not-ready when n < 50', () => {
+  it('reports READY verdict when enough healthy passes and good pass rate', () => {
     const out = execFileSync('node', [SCRIPT], {
       encoding: 'utf-8',
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
     });
-    assert.match(out, /gate pass rate/i);
-    assert.match(out, /30 passed-gate entries/);
-    assert.match(out, /20 more entries needed/);
-    assert.match(out, /fast-path/i);
+    assert.match(out, /Backend health/);
+    assert.match(out, /Healthy pass rate:\s+30 \/ 120/);
+    assert.match(out, /READY FOR REVIEW/);
+    assert.match(out, /Fast-path skips: 10/);
+  });
+
+  it('fires INFRASTRUCTURE verdict when backends are unhealthy', () => {
+    const dir2 = mkdtempSync(join(tmpdir(), 'review-shadow-test-infra-'));
+    const subdir = join(dir2, 'retrieval');
+    mkdirSync(subdir, { recursive: true });
+    const logPath = join(subdir, `shadow-injection-${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}.jsonl`);
+    const entries = [];
+    for (let i = 0; i < 100; i++) {
+      entries.push(JSON.stringify({
+        ts: new Date().toISOString(), session_id: 's1', prompt: `question ${i}`,
+        gate: { passed: false, vault_top_score: 0, episodic_top_score: 0 },
+        backends: {
+          vault: { latency_ms: 2, hits: 0, error: 'spawn ll-search ENOENT', raced_out: false },
+          episodic: { latency_ms: 0, hits: 0, error: 'spawn episodic-memory ENOENT', raced_out: false },
+        },
+      }));
+    }
+    writeFileSync(logPath, entries.join('\n') + '\n');
+    const out = execFileSync('node', [SCRIPT], {
+      encoding: 'utf-8',
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir2 },
+    });
+    assert.match(out, /INFRASTRUCTURE/);
+    assert.match(out, /spawn ll-search ENOENT/);
+    rmSync(dir2, { recursive: true, force: true });
   });
 });
