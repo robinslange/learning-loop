@@ -16,6 +16,9 @@ data/
 
 docs/
 
+# Planning artifacts (local-only)
+.planning/
+
 federation/.seed
 federation/data/
 federation/config.json
