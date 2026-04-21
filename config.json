@@ -13,5 +13,12 @@
         "mcp__plugin_episodic-memory_episodic-memory__read"
       ]
     }
-  ]
+  ],
+  "librarian": {
+    "enabled": false,
+    "model": "gemma4:e2b",
+    "pace_seconds": 2,
+    "queue_cap": 200,
+    "ollama_url": "http://localhost:11434"
+  }
 }
