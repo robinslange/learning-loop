@@ -22,6 +22,8 @@ Claude forgets process. It will skip verification, promote half-sourced notes, a
 
 **15 specialized agents.** Research, verification, gap analysis, note writing, batch triage, and cross-store correction run in parallel. They share 18 skills covering promotion gating, cross-validation, blindspot detection, and source integrity. Lightweight agents run on Haiku. Research and judgment agents run on Sonnet.
 
+**A background librarian that never sleeps.** An optional local agent (Gemma 4 E2B via ollama) continuously wanders your vault, finding orphan notes that should be linked to their neighbors, flagging topic-style inbox titles, and marking potentially stale claims. It queues observations for Claude to review when you run `/health --librarian`. E2B does what it's good at (classification with evidence); Claude handles the deep investigation. No API calls, completely local.
+
 **A vault that earns its structure.** Notes flow from inbox through fleeting to permanent. Six criteria gate each transition. Source integrity failures block promotion. The vault grows sharper because every note that reaches permanent status survived mechanical scrutiny.
 
 ## What a session looks like
@@ -57,6 +59,8 @@ This plugin is heavy. It runs local model inference and injects vault context in
 
 **Local compute:** The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum. Linux x64 and Windows x64 binaries are CI-built; see [guide/cross-platform.md](guide/cross-platform.md) for per-platform status.
 
+**Librarian (optional):** If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama alongside `ll-search watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
+
 **What we do to keep costs down:**
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku
 - Recent captures capped at the last 5 notes
@@ -84,6 +88,7 @@ This plugin is heavy. It runs local model inference and injects vault context in
 | `/refresh "topic"` | See what you already know (no web research) |
 | `/rewrite "old" "new"` | Retract a belief across vault, auto-memory, and episodic history |
 | `/health` | Vault health dashboard |
+| `/health --librarian` | Review librarian observations: approve links, acknowledge voice flags, investigate staleness |
 | `/ingest` | Pull from Linear, repos, or any content Claude can read |
 | `/diagram "concept"` | Generate Excalidraw diagram |
 | `/init` | First-time setup: vault path, persona, binary, federation |
@@ -126,6 +131,9 @@ First check that the backends are alive — open a recent shadow record and look
 
 **Notes not showing up in vault**
 Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.
+
+**Librarian not starting**
+Check that `librarian.enabled` is `true` in your config, ollama is running (`ollama serve`), and Gemma 4 E2B is pulled (`ollama pull gemma4:e2b`). The librarian starts as a child of `ll-search watch`; it won't run standalone without the watcher. Check stderr output for "Waiting for ollama..." or "Librarian disabled in config".
 
 **Episodic memory not available**
 Install episodic-memory first: `claude plugin install episodic-memory@superpowers-marketplace`. Restart Claude Code.

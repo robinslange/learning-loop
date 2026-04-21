@@ -28,6 +28,17 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 
 Fourteen working agents plus the `diagram-rules` shared reference file.
 
+## Vault librarian (local, optional)
+
+A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It has 10 tools backed by `ll-search` and SQL queries, and writes observations to a JSONL queue. Claude reviews the queue on demand via `/health --librarian`.
+
+| Agent | Engine | Tasks | Speed |
+|---|---|---|---|
+| librarian | Gemma 4 E2B (ollama, local) | Link validation, voice gate, staleness flagging | ~15s/note |
+| Claude (on-demand) | Opus/Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
+
+E2B is excellent at classification with evidence (90% link accuracy, 93% voice gate) but poor at open-ended investigation. The architecture splits accordingly.
+
 ## Model selection
 
 Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs down. Anything that requires judgment about source quality, claim validity, or writing in the persona voice runs on Sonnet.

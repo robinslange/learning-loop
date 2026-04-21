@@ -64,6 +64,36 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
 | `LL_REINDEX_DEBUG` | Set to `1` to emit `[reindex]` traces from `post-stop-reindex.js` to stderr |
 
+## Vault librarian
+
+An optional background agent that uses Gemma 4 E2B via ollama to continuously maintain vault hygiene. Disabled by default; enable via `/init` Phase 7 or by setting `librarian.enabled: true` in config.
+
+```json
+{
+  "librarian": {
+    "enabled": false,
+    "model": "gemma4:e2b",
+    "pace_seconds": 2,
+    "queue_cap": 200,
+    "ollama_url": "http://localhost:11434"
+  }
+}
+```
+
+| Key | Default | Purpose |
+|---|---|---|
+| `enabled` | `false` | Opt-in. Set `true` to start the librarian with `ll-search watch`. |
+| `model` | `gemma4:e2b` | Ollama model for classification. E2B is validated; E4B is a future upgrade path. |
+| `pace_seconds` | `2` | Delay between note investigations. Higher values reduce resource pressure. |
+| `queue_cap` | `200` | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
+| `ollama_url` | `http://localhost:11434` | Ollama API endpoint. |
+
+The librarian spawns as a child process of `ll-search watch` (via `--librarian-script`). It runs continuously, picking random unvisited notes, checking them mechanically (staleness regex) and via ollama tool calling (link investigation, voice gate), and writing observations to `PLUGIN_DATA/librarian/queue.jsonl`. A separate `state.json` tracks visited notes and resets after a full pass.
+
+Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act.
+
+**Requirements:** ollama installed, 16GB+ system RAM, Gemma 4 E2B pulled (`ollama pull gemma4:e2b`). E2B Q4 uses ~5GB active memory. `keep_alive: 5m` in ollama auto-unloads the model after idle.
+
 ## Cache health statusline
 
 If you run [oh-my-claude](https://github.com/eric-gaudet/oh-my-claude), `/learning-loop:init` Phase 6 offers to install a `cache-health` plugin from `plugins/omc-cache-health/`. It reads per-turn cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`, `input_tokens`) from the statusline payload and persists them to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl`, deduping by `session_id` + token counts so repeated statusline fires inside one turn don't double-count.
@@ -136,7 +166,9 @@ learning-loop/
   agents/_skills/            Shared agent skills
   skills/                    User-invocable skills (slash commands)
   scripts/                   Vault search, provenance, source-resolver,
-                             injection review, cache-health, binary download
+                             injection review, cache-health, binary download,
+                             librarian agent loop
+  scripts/lib/               Queue, tools, config, binary helpers
   scripts/lib/vendor/        Vendored JS deps (winkNLP for POS-tagged
                              citation extraction)
   vendor/                    Vendored JS deps (sql.js WASM, ed25519, picomatch)

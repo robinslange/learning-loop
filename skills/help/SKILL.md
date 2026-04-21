@@ -113,6 +113,16 @@ Focused mode analyses a topic. No-argument mode auto-picks your densest unchalle
 /learning-loop:health --deep --auto
 ```
 
+If you've enabled the librarian (see below), `/health` also shows pending librarian observations in the dashboard. Run `/health --librarian` to review and act on them.
+
+**The vault librarian** runs in the background when `ll-search watch` is active, using Gemma 4 E2B locally via ollama. It wanders the vault autonomously, finding orphan notes that should be linked, flagging topic-style titles, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
+
+```
+/learning-loop:health --librarian
+```
+
+Phase 1 presents link suggestions and voice flags for approval. Phase 2 hands staleness suspects to Claude for deep investigation. Enable via `/init` Phase 7 (requires ollama + 16GB+ RAM). No API calls, completely local and free.
+
 **`/learning-loop:refresh`** is pure recall — what does your vault already hold on a topic? No research, no new notes. Just surfaces what's there, organized by knowledge depth, and suggests what to do next.
 
 ```
@@ -147,6 +157,7 @@ recall     → /learning-loop:refresh    → see what you know
 quality    → /learning-loop:verify     → score quality + check sources → /learning-loop:deepen
 challenge  → /learning-loop:gaps       → counterpoints + rewrites + /deepen queue
 hygiene    → /learning-loop:health     → diagnose → route to /inbox, /verify, /deepen
+librarian  → /learning-loop:health --librarian → approve links, review staleness
 ```
 
 ### Federation
@@ -176,6 +187,7 @@ If you've configured federation via `/learning-loop:init`, search results automa
 | `/learning-loop:gaps "topic"` | Challenge vault knowledge — find tensions, thin ice, and missing perspectives |
 | `/learning-loop:ingest [linear\|repo\|context]` | Pull external context into vault + auto-memory |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard — ghost dupes, orphans, stale notes, broken links |
+| `/learning-loop:health --librarian` | Review librarian queue — approve links, acknowledge voice flags, investigate staleness |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
 | `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
 | `/learning-loop:help` | This guide |

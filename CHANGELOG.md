@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.16.0
+
+### Added
+
+- **Vault librarian** -- a continuously running background agent that uses Gemma 4 E2B via ollama to maintain vault hygiene autonomously. Wanders the vault picking random notes, investigating orphans for missing links, flagging topic-style titles in inbox notes, and marking potentially stale claims. Queues observations for Claude to review via `/health --librarian`. Disabled by default; opt in via `/init` Phase 7 (requires ollama + 16GB+ RAM).
+- **`ll-search link-stats`** subcommand -- queries the link graph for per-folder note counts, zero-inlink tallies, permanent-to-maps ratio, and optional orphan path listing. Used by the librarian and exposed via `vault-search.mjs link-stats`.
+- **`/health --librarian`** mode -- two-phase review of librarian observations. Phase 1: approve/reject link suggestions and acknowledge voice flags. Phase 2: Claude investigates staleness suspects using source-resolver, web search, and vault graph walks.
+- **`/health` Step 7.5** -- librarian queue summary in the dashboard when pending observations exist.
+- **`/inbox` Step 1.5** -- surfaces librarian voice flags targeting inbox notes during triage.
+- **`/init` Phase 7** -- librarian hardware detection and opt-in setup. Checks ollama, system RAM, model pull status.
+- **`scripts/librarian.mjs`** -- continuous agent loop with ollama `/api/chat` tool calling (10 tools), mechanical staleness regex, visited state tracking, queue cap management.
+- **`scripts/lib/librarian-queue.mjs`** -- append-only JSONL queue + `state.json` for librarian observations. 30-day and mtime-based expiry.
+- **`scripts/lib/librarian-tools.mjs`** -- tool definitions and executor for the ollama agent (find_similar, search_vault, get_inlinks, get_outlinks, read_note, submit_link, submit_voice_flag, submit_suspect, and more).
+- **Watch integration** -- `ll-search watch --librarian-script <path>` spawns and manages the librarian as a child process. Explicit kill on watcher shutdown prevents orphaned processes.
+- **Librarian config** in `config.json` -- `enabled`, `model`, `pace_seconds`, `queue_cap`, `ollama_url` (all with sensible defaults, disabled by default).
+
 ## v1.15.9
 
 ### Added
