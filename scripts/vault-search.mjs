@@ -257,6 +257,16 @@ try {
       break;
     }
 
+    case 'link-stats': {
+      ensureBinary();
+      const folder = parseFlag('--folder', null);
+      const cliArgs = ['link-stats', DB_PATH];
+      if (folder) cliArgs.push('--folder', folder);
+      if (hasFlag('--orphans')) cliArgs.push('--orphans');
+      out(run(cliArgs));
+      break;
+    }
+
     case 'list': {
       const { openReadonly } = await import('./lib/sqljs.mjs');
       const db = await openReadonly(DB_PATH);
