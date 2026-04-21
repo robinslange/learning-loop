@@ -63,9 +63,9 @@ perl -i -pe "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
   package.json \
   .claude-plugin/plugin.json
 
-if [ -f native/Cargo.toml ]; then
-  perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" native/Cargo.toml
-fi
+for cargo_toml in native/crates/*/Cargo.toml; do
+  [ -f "$cargo_toml" ] && perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" "$cargo_toml"
+done
 
 # Verify
 for f in package.json .claude-plugin/plugin.json; do
@@ -78,7 +78,7 @@ for f in package.json .claude-plugin/plugin.json; do
 done
 
 git add package.json .claude-plugin/plugin.json
-[ -f native/Cargo.toml ] && git add native/Cargo.toml
+git add native/crates/*/Cargo.toml 2>/dev/null
 git commit -m "release: v$NEW"
 git tag "v$NEW"
 
