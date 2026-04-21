@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.16.3
+
+### Changed
+
+- **README overhaul** -- slimmed from 144 to 88 lines. Replaced dense prose sections (What it solves, How it works, Resource usage, Troubleshooting) with a short "Why" and four concrete usage examples.
+- Moved resource usage, troubleshooting, and detailed workflow patterns to dedicated guide files.
+
+### Added
+
+- **`guide/workflows.md`** -- session lifecycle, research/capture/maintenance/consolidation patterns, skill chaining reference.
+- **`guide/resource-usage.md`** -- token costs, local compute requirements, cost mitigation strategies, cache health measurement.
+- **`guide/troubleshooting.md`** -- all common issues and fixes previously embedded in the README.
+
 ## v1.16.0
 
 ### Added
