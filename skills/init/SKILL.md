@@ -11,7 +11,7 @@ All operations use Node.js (fs, path, child_process for binaries). No bash `find
 
 ## Paths
 
-`PLUGIN`, `PLUGIN_DATA`, and `VAULT` are injected by the session-start hook (see "Learning Loop Paths" in your context). Use those resolved values for ALL path references below. If not present, resolve them by running: `node <skill-base-dir>/scripts/resolve-paths.mjs`
+`PLUGIN`, `PLUGIN_DATA`, and `VAULT` are injected by the session-start hook (see "Learning Loop Paths" in your context). Use those resolved values for ALL path references below. If not present, resolve them by running: `node PLUGIN/scripts/resolve-paths.mjs`
 
 ---
 
