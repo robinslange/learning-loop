@@ -8,4 +8,5 @@ pub use query::{
     load_embedding, load_all_embeddings, get_status, list_tags,
     compute_sessions, compute_project_phases, Status, TagInfo,
     chrono_iso_now, days_to_ymd, list_sessions, SessionInfo,
+    link_stats, LinkStats, FolderStats,
 };

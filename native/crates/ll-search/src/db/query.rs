@@ -39,6 +39,22 @@ pub struct SessionInfo {
     pub sample_titles: Vec<String>,
 }
 
+#[derive(Serialize)]
+pub struct FolderStats {
+    pub count: i64,
+    pub zero_inlinks: i64,
+}
+
+#[derive(Serialize)]
+pub struct LinkStats {
+    pub total_notes: i64,
+    pub total_links: i64,
+    pub by_folder: HashMap<String, FolderStats>,
+    pub permanent_to_maps_ratio: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orphans: Option<Vec<String>>,
+}
+
 pub fn load_embedding(conn: &Connection, note_id: i64) -> Option<Vec<f32>> {
     conn.query_row(
         "SELECT data FROM embeddings WHERE id = ?1",
@@ -332,6 +348,95 @@ pub fn list_sessions(conn: &Connection, min_notes: usize) -> Vec<SessionInfo> {
 
     result.sort_by(|a, b| b.first_mtime.partial_cmp(&a.first_mtime).unwrap_or(std::cmp::Ordering::Equal));
     result
+}
+
+pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphans: bool) -> LinkStats {
+    let total_notes: i64 = conn
+        .query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    let total_links: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM links WHERE target_path NOT LIKE '%[%'",
+            [], |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let mut folder_counts: HashMap<String, (i64, i64)> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT path FROM notes").unwrap();
+        let paths: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        for path in &paths {
+            let folder = path.split('/').next().unwrap_or("").to_string();
+            folder_counts.entry(folder).or_insert((0, 0)).0 += 1;
+        }
+    }
+
+    {
+        let mut stmt = conn.prepare(
+            "SELECT n.path FROM notes n \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM links l \
+               WHERE l.target_path = REPLACE( \
+                 REPLACE(n.path, '.md', ''), \
+                 SUBSTR(n.path, 1, INSTR(n.path, '/')), '') \
+               AND l.target_path NOT LIKE '%[%' \
+             )"
+        ).unwrap();
+        let orphan_paths: Vec<String> = stmt
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+        for path in &orphan_paths {
+            let folder = path.split('/').next().unwrap_or("").to_string();
+            if let Some(entry) = folder_counts.get_mut(&folder) {
+                entry.1 += 1;
+            }
+        }
+    }
+
+    let by_folder: HashMap<String, FolderStats> = folder_counts
+        .into_iter()
+        .map(|(k, (count, zero))| (k, FolderStats { count, zero_inlinks: zero }))
+        .collect();
+
+    let perm_count = by_folder.get("3-permanent").map(|f| f.count).unwrap_or(0) as f64;
+    let maps_count = by_folder.get("5-maps").map(|f| f.count).unwrap_or(1).max(1) as f64;
+
+    let orphans = if include_orphans {
+        let filter = folder_filter.unwrap_or("3-permanent/");
+        let mut stmt = conn.prepare(
+            "SELECT n.path FROM notes n \
+             WHERE n.path LIKE ?1 \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM links l \
+               WHERE l.target_path = REPLACE( \
+                 REPLACE(n.path, '.md', ''), \
+                 SUBSTR(n.path, 1, INSTR(n.path, '/')), '') \
+               AND l.target_path NOT LIKE '%[%' \
+             ) ORDER BY n.path"
+        ).unwrap();
+        Some(stmt
+            .query_map(params![format!("{}%", filter)], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect())
+    } else {
+        None
+    };
+
+    LinkStats {
+        total_notes,
+        total_links,
+        by_folder,
+        permanent_to_maps_ratio: (perm_count / maps_count * 100.0).round() / 100.0,
+        orphans,
+    }
 }
 
 pub fn chrono_iso_now() -> String {
