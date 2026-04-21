@@ -5,7 +5,7 @@ description: 'First-time setup or upgrade for the learning-loop plugin. Configur
 
 # Init -- Learning Loop Setup
 
-Six-phase detect-confirm-apply flow. One question at a time. Safe to re-run -- detects existing state and skips completed steps.
+Seven-phase detect-confirm-apply flow. One question at a time. Safe to re-run -- detects existing state and skips completed steps.
 
 All operations use Node.js (fs, path, child_process for binaries). No bash `find`, no shell commands for detection.
 
@@ -32,6 +32,7 @@ Run all checks silently before asking anything. Use Node.js APIs:
 11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the template version from `PLUGIN/templates/claudemd-section.version` (a single-line file containing the template version, e.g. `1`). Compare against the version in the user's comment tag. Note: present/missing/outdated (version mismatch).
 13. **Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
+14. **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
 
 Present a dashboard:
 
@@ -48,9 +49,16 @@ Learning Loop Setup
   Federation:    configured (peer registered, hub connected)
   Hub sync:      working (1,200 notes exported, 1 peer downloaded)
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
+  Librarian:     [status]
 
 Everything looks good. Nothing to set up.
 ```
+
+**Librarian status values:**
+- `enabled (ollama running, gemma4:e2b loaded)` — librarian is enabled and working
+- `available (ollama installed, XGB RAM)` — hardware capable but not enabled
+- `skipped (requires ollama + 16GB+ RAM)` — hardware insufficient
+- `skipped (ollama not installed)` — ollama missing
 
 **Federation status rules:**
 - Only report what the connectivity test actually returned. Never infer or guess peer registration status.
@@ -459,6 +467,53 @@ After install, re-run the detection step and confirm `configured: true`. Report:
 
 ---
 
+## Phase 7: Librarian (Optional)
+
+Background agent that continuously maintains your vault using Gemma 4 E2B via ollama. Finds orphan notes that should be linked, flags topic-style titles, and marks potentially stale claims. Runs locally (free, private, no API calls). Requires ~5GB RAM while active.
+
+### 7a: Detect
+
+Use Phase 1's librarian detection results:
+
+- If `librarian.enabled` is already `true` in config: skip with "Librarian: already enabled."
+- If ollama not installed or RAM < 16GB: skip with "Librarian: skipped (requires ollama + 16GB+ RAM)."
+- If ollama installed and RAM sufficient: proceed to 7b.
+
+### 7b: Confirm
+
+Present:
+
+> The librarian is a background agent that continuously maintains your vault:
+> - Finds orphan notes that should be linked to their neighbors
+> - Flags topic-style titles in inbox notes
+> - Marks potentially stale claims for investigation
+>
+> It runs Gemma 4 E2B locally via ollama (free, private, ~5GB RAM while active).
+> It starts automatically when `ll-search watch` runs and stops when the watcher stops.
+>
+> Enable the librarian?
+
+### 7c: Setup
+
+On confirmation:
+
+1. **Pull model** (if not already pulled):
+   ```bash
+   ollama pull gemma4:e2b
+   ```
+   Show progress. This is an ~8GB download.
+
+2. **Update config:** Set `librarian.enabled: true` in config.json (merge, don't overwrite).
+
+3. **Verify:** Run a test classification to confirm the model works:
+   ```bash
+   curl -s http://localhost:11434/api/generate -d '{"model":"gemma4:e2b","prompt":"Classify: is this a topic or an insight? Title: cadences-are-harmonic-punctuation","stream":false}' | python3 -c "import sys,json; print(json.load(sys.stdin).get('response','')[:200])"
+   ```
+   If this returns a sensible response, report: "Librarian enabled. It will start when `ll-search watch` runs."
+   If it fails, report the error and suggest: "Model may still be loading. Try re-running /init in a minute."
+
+---
+
 ## Summary
 
 After all phases complete, show final state:
@@ -473,6 +528,7 @@ Learning loop configured.
   Federation:  configured, 1 peer
   CLAUDE.md:   learning-loop section present
   Cache health: installed (or skipped — oh-my-claude not found)
+  Librarian:   enabled (or skipped — ollama/hardware not available)
 
 Run /learning-loop:help to see available commands.
 ```
