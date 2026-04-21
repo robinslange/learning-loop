@@ -129,6 +129,8 @@ enum Commands {
         config_dir: Option<String>,
         #[arg(long)]
         pid_file: Option<String>,
+        #[arg(long)]
+        librarian_script: Option<String>,
     },
     Migrate {
         db_path: String,
@@ -370,7 +372,7 @@ fn main() {
             let reranked = ll_search::rerank::rerank(&query, &docs, top);
             out(&reranked);
         }
-        Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file } => {
+        Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, librarian_script } => {
             init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let pid_file = pid_file
@@ -388,6 +390,7 @@ fn main() {
                 config_dir,
                 pid_file,
                 sync_interval: std::time::Duration::from_secs(sync_interval),
+                librarian_script: librarian_script.map(std::path::PathBuf::from),
             };
             ll_search::sync::watch::run_watch(cfg).expect("watch failed");
         }

@@ -15,6 +15,7 @@ pub struct WatchConfig {
     pub config_dir: PathBuf,
     pub pid_file: PathBuf,
     pub sync_interval: Duration,
+    pub librarian_script: Option<PathBuf>,
 }
 
 struct PidGuard {
@@ -54,6 +55,24 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
     if let Some(ref fc) = fed_config {
         eprintln!("Initial sync...");
         do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc);
+    }
+
+    let mut librarian_child: Option<std::process::Child> = None;
+    if let Some(ref script) = cfg.librarian_script {
+        if script.exists() {
+            match std::process::Command::new("node")
+                .arg(script)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::inherit())
+                .spawn()
+            {
+                Ok(child) => {
+                    eprintln!("Librarian started (PID {})", child.id());
+                    librarian_child = Some(child);
+                }
+                Err(e) => eprintln!("Failed to start librarian: {e}"),
+            }
+        }
     }
 
     let (fs_tx, fs_rx) = mpsc::channel();
@@ -109,6 +128,12 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
                 fed_config.as_ref().unwrap(),
             );
         }
+    }
+
+    if let Some(mut child) = librarian_child {
+        eprintln!("Stopping librarian (PID {})...", child.id());
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     eprintln!("Watch stopped");
