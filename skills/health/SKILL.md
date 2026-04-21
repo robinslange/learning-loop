@@ -28,6 +28,7 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 | `/health --auto` | light | yes |
 | `/health --deep --auto` | deep | yes |
 | `/health --provenance` | provenance | no |
+| `/health --librarian` | librarian | no |
 
 ## Process
 
@@ -80,6 +81,81 @@ Network (last 7 days):
 ```
 
 3. If no peer data exists, show: "No peer provenance data. Run `vault-search.mjs sync` to fetch."
+
+Then stop (do not proceed to Step 1).
+
+### Step 0.6: Librarian Review Mode (`--librarian`)
+
+If `--librarian` flag is present, skip all vault health checks and enter librarian review mode.
+
+**Step L1: Load Queue**
+
+Read `PLUGIN_DATA/librarian/queue.jsonl`. Parse all lines. Filter to `status === 'pending'`. If no pending items, report "No pending librarian observations." and stop.
+
+**Step L2: Phase 1 — Link Suggestions + Voice Flags**
+
+Group pending items into link suggestions and voice flags.
+
+**Link suggestions:**
+Present in a table grouped by confidence:
+
+```
+High confidence (N):
+  Orphan                                    → Suggested link                           Reason
+  3-permanent/cadences-are-harmonic...      → 3-permanent/chord-progressions-are...    Both discuss harmonic function
+  ...
+
+Review (N):
+  Orphan                                    → Suggested link                           Reason
+  ...
+```
+
+Ask user: "Apply approved links? Enter numbers to approve (e.g., '1,3,5'), 'all-high' for all high-confidence, or 'skip'."
+
+For each approved link suggestion:
+1. Read the target (orphan) note
+2. Append `\n\n[[suggested-note-slug]]` to the note body using Edit tool
+3. Update queue item status to `approved`
+
+For rejected items, update status to `rejected`.
+
+**Voice flags:**
+Present as a list:
+
+```
+Voice flags (N):
+  0-inbox/gmail-multi-daemon-pull-dedup...  "gmail multi daemon pull deduplication" — Names a topic without stating a claim
+  ...
+```
+
+These are advisory — present them for awareness. Ask: "Acknowledge voice flags? (y/n)" — on yes, update all to `acknowledged`.
+
+**Step L3: Phase 2 — Staleness Suspects**
+
+Present staleness suspects:
+
+```
+Staleness suspects (N):
+  3-permanent/react-compiler-memoizes...    90 days old, matched: v1.0, October 2025
+  ...
+```
+
+Ask: "Investigate staleness suspects? Enter numbers (e.g., '1,2'), 'all', or 'skip'."
+
+For each selected suspect, Claude (the active model) investigates using available tools:
+- Read the note content
+- Check if version references are still current (web search if needed)
+- Check if specific claims are still accurate
+- Report findings inline
+
+After investigation, ask user what to do with each: "update", "dismiss", or "flag for /deepen".
+
+**Step L4: Cleanup**
+
+After both phases:
+1. Expire processed/old items: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))"`
+2. Reset librarian state to allow re-investigation: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.resetState())"`
+3. Report summary: "Processed N items: X links applied, Y voice flags acknowledged, Z suspects investigated."
 
 Then stop (do not proceed to Step 1).
 
@@ -150,6 +226,33 @@ Grep all `\[\[...\]\]` wikilink references across all vault notes. For each uniq
 
 **Light:** List each broken link with the source note that contains it.
 **Deep:** For each broken link, find the closest matching vault filename using fuzzy/substring match and suggest it as a correction.
+
+### Step 7.5: Check — Librarian Queue
+
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
+
+If the queue file doesn't exist or is empty, skip this step silently.
+
+Group pending items by `task` field:
+- `link_suggestion` — link suggestions
+- `voice_flag` — voice flags
+- `staleness_suspect` — staleness suspects
+
+Add to the dashboard output:
+
+```
+  Librarian:       N pending observations (visited M/T notes)
+    Link suggestions:     N (X high, Y review)
+    Voice flags:           N
+    Staleness suspects:   N (for Claude to investigate)
+    Queue:                P% full (N/CAP cap)
+```
+
+Where CAP is read from config.json's `librarian.queue_cap` (default 200).
+
+If the queue has pending items, add recommendation:
+
+> Run `/health --librarian` to review and act on librarian suggestions.
 
 ### Step 8: Present Dashboard
 
