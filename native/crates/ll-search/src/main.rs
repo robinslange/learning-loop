@@ -96,6 +96,13 @@ enum Commands {
         #[arg(long, default_value_t = 2, help = "Minimum notes per session")]
         min_notes: usize,
     },
+    LinkStats {
+        db_path: String,
+        #[arg(long)]
+        folder: Option<String>,
+        #[arg(long)]
+        orphans: bool,
+    },
     Export {
         db_path: String,
         output: String,
@@ -293,6 +300,11 @@ fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let sessions = ll_search::db::list_sessions(&conn, min_notes);
             out(&sessions);
+        }
+        Commands::LinkStats { db_path, folder, orphans } => {
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let result = ll_search::db::link_stats(&conn, folder.as_deref(), orphans);
+            out(&result);
         }
         Commands::Export { db_path, output, vault_path, config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
