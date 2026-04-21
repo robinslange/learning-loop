@@ -1,6 +1,6 @@
-import { statSync, readFileSync } from 'fs';
+import { statSync, readFileSync, appendFileSync, existsSync, renameSync, mkdirSync } from 'fs';
 import { join } from 'path';
-import { getConfig } from './lib/config.mjs';
+import { getConfig, getPluginData } from './lib/config.mjs';
 import { DB_PATH, VAULT_PATH } from './lib/constants.mjs';
 import { openReadonly } from './lib/sqljs.mjs';
 import { TOOL_DEFS, executeTool } from './lib/librarian-tools.mjs';
@@ -16,6 +16,35 @@ import {
 
 const cfg = getConfig();
 const libCfg = cfg.librarian || {};
+
+function resolveLogPath() {
+  const pd = getPluginData();
+  if (!pd) return null;
+  return join(pd, 'librarian', 'librarian.log');
+}
+
+const LOG_PATH = resolveLogPath();
+const LOG_MAX_BYTES = 10 * 1024 * 1024;
+
+function rotateLogIfNeeded() {
+  if (!LOG_PATH) return;
+  try {
+    if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > LOG_MAX_BYTES) {
+      renameSync(LOG_PATH, LOG_PATH + '.1');
+    }
+  } catch {}
+}
+
+function log(msg) {
+  process.stderr.write(msg);
+  if (!LOG_PATH) return;
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  try {
+    mkdirSync(join(LOG_PATH, '..'), { recursive: true });
+    appendFileSync(LOG_PATH, line, 'utf-8');
+  } catch {}
+}
+
 const MODEL = libCfg.model || 'gemma4:e2b';
 const PACE = (libCfg.pace_seconds || 2) * 1000;
 const QUEUE_CAP = libCfg.queue_cap || 200;
@@ -31,7 +60,7 @@ async function waitForOllama() {
       const res = await fetch(`${OLLAMA_URL}/api/tags`);
       if (res.ok) return;
     } catch {}
-    process.stderr.write('Waiting for ollama...\n');
+    log('Waiting for ollama...\n');
     await sleep(60000);
   }
 }
@@ -164,7 +193,7 @@ async function investigateNote(notePath, task) {
       }
     } catch (err) {
       clearTimeout(timer);
-      process.stderr.write(`Turn ${turn} error: ${err.message}\n`);
+      log(`Turn ${turn} error: ${err.message}\n`);
       break;
     }
   }
@@ -172,12 +201,13 @@ async function investigateNote(notePath, task) {
 
 async function main() {
   if (!libCfg.enabled) {
-    process.stderr.write('Librarian disabled in config\n');
+    log('Librarian disabled in config\n');
     process.exit(0);
   }
 
+  rotateLogIfNeeded();
   await waitForOllama();
-  process.stderr.write(`Librarian started (model: ${MODEL}, pace: ${PACE / 1000}s)\n`);
+  log(`Librarian started (model: ${MODEL}, pace: ${PACE / 1000}s)\n`);
 
   let state = loadState();
   if (!state.started_at) {
@@ -185,14 +215,14 @@ async function main() {
   }
 
   const allPaths = await getAllNotePaths();
-  process.stderr.write(`Loaded ${allPaths.length} notes\n`);
+  log(`Loaded ${allPaths.length} notes\n`);
 
   while (true) {
     if (pendingCount() >= QUEUE_CAP) {
-      process.stderr.write('Queue full, expiring stale items...\n');
+      log('Queue full, expiring stale items...\n');
       expireStaleItems(VAULT_PATH);
       if (pendingCount() >= QUEUE_CAP) {
-        process.stderr.write('Queue still full, sleeping 5m...\n');
+        log('Queue still full, sleeping 5m...\n');
         await sleep(300000);
         continue;
       }
@@ -200,7 +230,7 @@ async function main() {
 
     const note = pickNote(allPaths, state.visited || []);
     if (!note) {
-      process.stderr.write('Full pass complete. Resetting visited set.\n');
+      log('Full pass complete. Resetting visited set.\n');
       state.visited = [];
       saveState(state);
       continue;
@@ -212,11 +242,11 @@ async function main() {
 
     const task = await noteNeedsInvestigation(note);
     if (task) {
-      process.stderr.write(`Investigating ${note} (${task})\n`);
+      log(`Investigating ${note} (${task})\n`);
       try {
         await investigateNote(note, task);
       } catch (err) {
-        process.stderr.write(`Investigation error for ${note}: ${err.message}\n`);
+        log(`Investigation error for ${note}: ${err.message}\n`);
       }
     }
 
@@ -227,6 +257,6 @@ async function main() {
 }
 
 main().catch(err => {
-  process.stderr.write(`Librarian fatal: ${err.message}\n`);
+  log(`Librarian fatal: ${err.message}\n`);
   process.exit(1);
 });

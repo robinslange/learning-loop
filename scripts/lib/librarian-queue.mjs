@@ -82,6 +82,7 @@ const DEFAULT_STATE = {
   link_suggestions: 0,
   voice_flags: 0,
   staleness_suspects: 0,
+  counters: {},
   last_note: null,
   started_at: null,
 };
@@ -90,10 +91,17 @@ export function loadState() {
   const p = statePath();
   if (!existsSync(p)) return { ...DEFAULT_STATE };
   try {
-    return JSON.parse(readFileSync(p, 'utf-8'));
+    const s = JSON.parse(readFileSync(p, 'utf-8'));
+    if (!s.counters) s.counters = {};
+    return s;
   } catch {
     return { ...DEFAULT_STATE };
   }
+}
+
+export function incrementCounter(state, key) {
+  const counters = state.counters || {};
+  return { ...state, counters: { ...counters, [key]: (counters[key] || 0) + 1 } };
 }
 
 export function saveState(state) {

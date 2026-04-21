@@ -1,8 +1,8 @@
 import { run } from './binary.mjs';
 import { openReadonly } from './sqljs.mjs';
 import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { appendItem, newItemId } from './librarian-queue.mjs';
+import { join, basename } from 'path';
+import { appendItem, newItemId, loadState, saveState, incrementCounter } from './librarian-queue.mjs';
 import { VAULT_PATH, DB_PATH } from './constants.mjs';
 
 const MAX_RESULT = 1500;
@@ -83,6 +83,38 @@ async function readNote({ note_path }) {
 }
 
 async function submitLink({ target, suggested_link, confidence, reason }) {
+  // Fix 2: reject self-links
+  if (target === suggested_link) {
+    let state = loadState();
+    state = incrementCounter(state, 'rejected_self_link');
+    saveState(state);
+    return 'Rejected: self-link';
+  }
+
+  // Fix 2: reject missing files
+  const fullSuggestedPath = join(VAULT_PATH, suggested_link);
+  if (!existsSync(fullSuggestedPath)) {
+    let state = loadState();
+    state = incrementCounter(state, 'rejected_missing_file');
+    saveState(state);
+    return 'Rejected: suggested_link file does not exist';
+  }
+
+  // Fix 1: reject already-linked
+  const suggestedSlug = basename(suggested_link, '.md');
+  const targetFullPath = join(VAULT_PATH, target);
+  if (existsSync(targetFullPath)) {
+    const targetContent = readFileSync(targetFullPath, 'utf-8');
+    const escapedSlug = suggestedSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const linkPattern = new RegExp(`\\[\\[${escapedSlug}(\\|[^\\]]*)?\\]\\]`);
+    if (linkPattern.test(targetContent)) {
+      let state = loadState();
+      state = incrementCounter(state, 'rejected_already_linked');
+      saveState(state);
+      return 'Rejected: link already present in target note';
+    }
+  }
+
   const item = {
     id: newItemId(),
     task: 'link_suggestion',
@@ -94,6 +126,11 @@ async function submitLink({ target, suggested_link, confidence, reason }) {
     created_at: new Date().toISOString(),
   };
   appendItem(item);
+
+  let state = loadState();
+  state = { ...state, link_suggestions: (state.link_suggestions || 0) + 1 };
+  saveState(state);
+
   return `Queued link suggestion: ${item.id}`;
 }
 
@@ -108,6 +145,11 @@ async function submitVoiceFlag({ target, current_title, reason }) {
     created_at: new Date().toISOString(),
   };
   appendItem(item);
+
+  let state = loadState();
+  state = { ...state, voice_flags: (state.voice_flags || 0) + 1 };
+  saveState(state);
+
   return `Queued voice flag: ${item.id}`;
 }
 
@@ -121,6 +163,11 @@ async function submitSuspect({ target, reason }) {
     created_at: new Date().toISOString(),
   };
   appendItem(item);
+
+  let state = loadState();
+  state = { ...state, staleness_suspects: (state.staleness_suspects || 0) + 1 };
+  saveState(state);
+
   return `Queued suspect: ${item.id}`;
 }
 
