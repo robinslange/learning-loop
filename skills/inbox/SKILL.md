@@ -43,6 +43,22 @@ The agent definition is at `PLUGIN/agents/inbox-organiser.md`.
 
 Use `subagent_type: "learning-loop:note-scorer"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 
+### Step 1.5: Surface Librarian Voice Flags
+
+Before the agent returns, check the librarian queue for voice flags targeting inbox notes.
+
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'` and `task === 'voice_flag'` and `target` starts with `0-inbox/`.
+
+If matches exist, include them as advisory context when presenting the agent's results:
+
+```
+Librarian observations:
+  "gmail multi daemon pull deduplication" — Names a topic, not an insight. Consider retitling.
+  ...
+```
+
+These are informational — the user decides whether to act on them during triage.
+
 ### Step 2: Handle Gated Actions
 
 When the agent returns, it will list any actions needing approval (merges, deletes). Present these to the user and wait for confirmation. Execute approved actions.
