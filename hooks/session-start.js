@@ -275,37 +275,36 @@ try {
 } catch {}
 
 // 7.5. Inject learned patterns if they exist
-const PROVENANCE_DIR = join(
-  pluginData,
-  'provenance'
-);
-const patternsFile = join(PROVENANCE_DIR, 'learned-patterns.md');
-if (existsSync(patternsFile)) {
+if (pluginData) {
+  const PROVENANCE_DIR = join(pluginData, 'provenance');
+  const patternsFile = join(PROVENANCE_DIR, 'learned-patterns.md');
+  if (existsSync(patternsFile)) {
+    try {
+      const patternsContent = readFileSync(patternsFile, 'utf8');
+      const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
+      if (patternCount > 0) {
+        context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
+      }
+    } catch {}
+  }
+
+  // 7.6. Federation status (stable, no sync timestamps)
   try {
-    const patternsContent = readFileSync(patternsFile, 'utf8');
-    const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
-    if (patternCount > 0) {
-      context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
+    const fedConfigPath = join(pluginData, 'federation', 'config.json');
+    if (existsSync(fedConfigPath)) {
+      const peersDir = join(pluginData, 'federation', 'data', 'peers');
+      if (existsSync(peersDir)) {
+        const peerNames = readdirSync(peersDir, { withFileTypes: true })
+          .filter(e => e.isDirectory())
+          .map(e => e.name);
+        if (peerNames.length > 0) {
+          context += '\n## Federation\n';
+          context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
+        }
+      }
     }
   } catch {}
 }
-
-// 7.6. Federation status (stable, no sync timestamps)
-try {
-  const fedConfigPath = join(pluginData, 'federation', 'config.json');
-  if (existsSync(fedConfigPath)) {
-    const peersDir = join(pluginData, 'federation', 'data', 'peers');
-    if (existsSync(peersDir)) {
-      const peerNames = readdirSync(peersDir, { withFileTypes: true })
-        .filter(e => e.isDirectory())
-        .map(e => e.name);
-      if (peerNames.length > 0) {
-        context += '\n## Federation\n';
-        context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
-      }
-    }
-  }
-} catch {}
 
 // 8. Record session start time and snapshot memory file list
 const sessionId = randomBytes(4).toString('hex');
