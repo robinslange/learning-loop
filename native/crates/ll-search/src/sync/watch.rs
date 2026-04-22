@@ -47,6 +47,12 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
         signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&stopped))?;
         signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&stopped))?;
     }
+    #[cfg(not(unix))]
+    {
+        let stopped_clone = Arc::clone(&stopped);
+        ctrlc::set_handler(move || stopped_clone.store(true, Ordering::Relaxed))
+            .expect("failed to set Ctrl+C handler");
+    }
 
     eprintln!("Initial reindex...");
     do_reindex(&cfg.db_path, &cfg.vault_path);

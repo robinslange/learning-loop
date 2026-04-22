@@ -23,6 +23,7 @@ base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
 notify = "7"
+ctrlc = "3"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
