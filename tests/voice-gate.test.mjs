@@ -145,4 +145,21 @@ describe("voice-gate structured-output classification", () => {
       "expected no queue items on malformed response",
     );
   });
+
+  it("skips gracefully on HTTP error from ollama", async () => {
+    resetState();
+
+    globalThis.fetch = mock.fn(async () => ({
+      ok: false,
+      status: 500,
+    }));
+
+    const mod = await import(
+      `../scripts/librarian.mjs?bust=http-error-${runId}`
+    );
+    await mod.__test__.voiceCheck("0-inbox/some-topic-title.md");
+
+    const items = readQueue();
+    assert.equal(items.length, 0, "expected no queue items on HTTP error");
+  });
 });

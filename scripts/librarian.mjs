@@ -7,6 +7,7 @@ import {
   mkdirSync,
 } from "fs";
 import { join, basename } from "path";
+import { fileURLToPath } from "url";
 import { getConfig, getPluginData } from "./lib/config.mjs";
 import { DB_PATH, VAULT_PATH } from "./lib/constants.mjs";
 import { openReadonly } from "./lib/sqljs.mjs";
@@ -180,6 +181,10 @@ async function voiceCheck(notePath) {
       stream: false,
     }),
   });
+  if (!resp.ok) {
+    log(`voiceCheck HTTP ${resp.status} for ${notePath}\n`);
+    return;
+  }
   try {
     const { message } = await resp.json();
     const { label } = JSON.parse(message.content);
@@ -308,7 +313,7 @@ async function main() {
 }
 
 const isDirectRun =
-  process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isDirectRun) {
   main().catch((err) => {
