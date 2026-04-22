@@ -132,7 +132,7 @@ async function noteNeedsInvestigation(notePath) {
   return null;
 }
 
-const SYSTEM_PROMPT = `You are a vault librarian. You wander through a knowledge vault, noticing things that need attention.
+const LINK_PROMPT = `You are a vault librarian. You wander through a knowledge vault, noticing things that need attention.
 
 Right now you're looking at one note. Your tools let you check its neighborhood in the link graph.
 
@@ -144,11 +144,9 @@ For LINK INVESTIGATION (notes with 0 inlinks):
 
 Be liberal -- same domain = related. Different mechanisms within one field ARE connected.
 
-For VOICE GATE (inbox/fleeting notes only):
-- Does the title state a claim or just name a topic?
-- submit_voice_flag if it's a topic title
-
 You do NOT investigate staleness yourself. If something seems off, submit_suspect and move on. Claude will handle the deep investigation.`;
+
+const VOICE_PROMPT = `Classify this Obsidian note title as "claim" (states an assertion that could be true or false) or "topic" (names a domain, concept, or entity without stating a relationship). A claim contains a verb or claim connective; a topic is a noun phrase without one. When in doubt, answer "claim".`;
 
 async function investigateNote(notePath, task) {
   const userMessage = task === 'link_check'
@@ -156,7 +154,7 @@ async function investigateNote(notePath, task) {
     : `Voice gate check on inbox note: ${notePath}`;
 
   const messages = [
-    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'system', content: LINK_PROMPT },
     { role: 'user', content: userMessage },
   ];
 
