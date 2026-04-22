@@ -105,7 +105,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
             }
         };
 
-        let hash = content_hash(&result.text).to_string();
+        let hash = content_hash(&result.text);
 
         if let Some(&(id, ref ex_hash, _)) = ex {
             if *ex_hash == hash {

@@ -1,6 +1,6 @@
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
-use std::hash::{Hash, Hasher};
+
+use sha2::{Digest, Sha256};
 
 const MAX_TEXT_LENGTH: usize = 1500;
 
@@ -112,10 +112,9 @@ pub fn preprocess_file(raw: &str, filename: &str) -> Option<PreprocessedNote> {
     }
 }
 
-pub fn content_hash(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    text.hash(&mut hasher);
-    hasher.finish()
+pub fn content_hash(text: &str) -> String {
+    let digest = Sha256::digest(text.as_bytes());
+    hex::encode(&digest[..16])
 }
 
 fn title_from_filename(filename: &str) -> String {
