@@ -12,7 +12,7 @@ The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 f
 
 ## Librarian (optional)
 
-If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama alongside `ll-search watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
+If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama alongside `ll-watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
 
 ## What we do to keep costs down
 

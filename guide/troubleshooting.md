@@ -22,7 +22,7 @@ Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) 
 
 ## Librarian not starting
 
-Check that `librarian.enabled` is `true` in your config, ollama is running (`ollama serve`), and Gemma 4 E2B is pulled (`ollama pull gemma4:e2b`). The librarian starts as a child of `ll-search watch`; it won't run standalone without the watcher. Check stderr output for "Waiting for ollama..." or "Librarian disabled in config".
+Check that `librarian.enabled` is `true` in your config, ollama is running (`ollama serve`), and Gemma 4 E2B is pulled (`ollama pull gemma4:e2b`). The librarian starts as a child of `ll-watch`; it won't run standalone without the watcher. Run `ll-watch status` to check if the watcher is running. Check stderr output with `ll-watch --foreground` for "Waiting for ollama..." or "Librarian disabled in config".
 
 ## Episodic memory not available
 

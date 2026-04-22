@@ -113,8 +113,8 @@ node scripts/vault-search.mjs export-index
 # Sync with federation hub
 node scripts/vault-search.mjs sync
 
-# Watch mode with periodic sync (calls ll-search watch internally)
-node scripts/vault-search.mjs index --watch --sync
+# Watch mode with periodic sync
+ll-watch
 ```
 
 Sync runs automatically: reindex on session start, export+sync on session end (unless watch mode is running).

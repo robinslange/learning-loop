@@ -82,13 +82,13 @@ An optional background agent that uses Gemma 4 E2B via ollama to continuously ma
 
 | Key | Default | Purpose |
 |---|---|---|
-| `enabled` | `false` | Opt-in. Set `true` to start the librarian with `ll-search watch`. |
+| `enabled` | `false` | Opt-in. Set `true` to start the librarian with `ll-watch`. |
 | `model` | `gemma4:e2b` | Ollama model for classification. E2B is validated; E4B is a future upgrade path. |
 | `pace_seconds` | `2` | Delay between note investigations. Higher values reduce resource pressure. |
 | `queue_cap` | `200` | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
 | `ollama_url` | `http://localhost:11434` | Ollama API endpoint. |
 
-The librarian spawns as a child process of `ll-search watch` (via `--librarian-script`). It runs continuously, picking random unvisited notes, checking them mechanically (staleness regex) and via ollama tool calling (link investigation, voice gate), and writing observations to `PLUGIN_DATA/librarian/queue.jsonl`. A separate `state.json` tracks visited notes and resets after a full pass.
+The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes, checking them mechanically (staleness regex) and via ollama tool calling (link investigation, voice gate), and writing observations to `PLUGIN_DATA/librarian/queue.jsonl`. A separate `state.json` tracks visited notes and resets after a full pass.
 
 Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act.
 

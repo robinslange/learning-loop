@@ -33,6 +33,7 @@ Run all checks silently before asking anything. Use Node.js APIs:
 12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the template version from `PLUGIN/templates/claudemd-section.version` (a single-line file containing the template version, e.g. `1`). Compare against the version in the user's comment tag. Note: present/missing/outdated (version mismatch).
 13. **Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 14. **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
+15. **ll-watch CLI:** Check if `~/.local/bin/ll-watch` exists. If it does, run `ll-watch status` to check if the watcher is running.
 
 Present a dashboard:
 
@@ -50,6 +51,7 @@ Learning Loop Setup
   Hub sync:      working (1,200 notes exported, 1 peer downloaded)
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   Librarian:     [status]
+  ll-watch:      installed (not running)
 
 Everything looks good. Nothing to set up.
 ```
@@ -194,7 +196,11 @@ Confirm `PLUGIN/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored i
 
 Run `ll-search index` to build the search index. Report progress.
 
-### 3d: Plugin Dependencies
+### 3d: Install ll-watch CLI
+
+Run `node PLUGIN/scripts/watch.mjs --install` to write a stable shim to `~/.local/bin/ll-watch`. The shim resolves the latest plugin cache version at runtime, so it survives plugin updates. If `~/.local/bin` is not in the user's PATH, inform them to add it.
+
+### 3e: Plugin Dependencies
 
 Run `node PLUGIN/scripts/check-deps.mjs`. For each missing dependency, present it and ask to install:
 
@@ -489,7 +495,7 @@ Present:
 > - Marks potentially stale claims for investigation
 >
 > It runs Gemma 4 E2B locally via ollama (free, private, ~5GB RAM while active).
-> It starts automatically when `ll-search watch` runs and stops when the watcher stops.
+> It starts automatically when `ll-watch` runs and stops when the watcher stops.
 >
 > Enable the librarian?
 
@@ -509,7 +515,7 @@ On confirmation:
    ```bash
    curl -s http://localhost:11434/api/generate -d '{"model":"gemma4:e2b","prompt":"Classify: is this a topic or an insight? Title: cadences-are-harmonic-punctuation","stream":false}' | python3 -c "import sys,json; print(json.load(sys.stdin).get('response','')[:200])"
    ```
-   If this returns a sensible response, report: "Librarian enabled. It will start when `ll-search watch` runs."
+   If this returns a sensible response, report: "Librarian enabled. It will start when `ll-watch` runs."
    If it fails, report the error and suggest: "Model may still be loading. Try re-running /init in a minute."
 
 ---
@@ -529,7 +535,9 @@ Learning loop configured.
   CLAUDE.md:   learning-loop section present
   Cache health: installed (or skipped — oh-my-claude not found)
   Librarian:   enabled (or skipped — ollama/hardware not available)
+  ll-watch:    installed
 
+Start the watcher with: ll-watch
 Run /learning-loop:help to see available commands.
 ```
 

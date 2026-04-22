@@ -115,7 +115,7 @@ Focused mode analyses a topic. No-argument mode auto-picks your densest unchalle
 
 If you've enabled the librarian (see below), `/health` also shows pending librarian observations in the dashboard. Run `/health --librarian` to review and act on them.
 
-**The vault librarian** runs in the background when `ll-search watch` is active, using Gemma 4 E2B locally via ollama. It wanders the vault autonomously, finding orphan notes that should be linked, flagging topic-style titles, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
+**The vault librarian** runs in the background when `ll-watch` is active, using Gemma 4 E2B locally via ollama. It wanders the vault autonomously, finding orphan notes that should be linked, flagging topic-style titles, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
 
 ```
 /learning-loop:health --librarian

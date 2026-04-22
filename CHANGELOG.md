@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.16.7
+
+### Added
+
+- **`ll-watch` CLI** -- a single command to start, stop, and check the vault watcher. Replaces the multi-argument `ll-search watch` invocation. Installed automatically on first session start or via `node scripts/watch.mjs --install`. The shim resolves the latest plugin cache version at runtime, so it survives plugin updates.
+
+### Fixed
+
+- **Stop-nudge false positives from concurrent sessions.** Memory snapshot files were written to a single global tmp path, so concurrent Claude Code sessions overwrote each other's baselines. The stop hook then compared against the wrong snapshot and reported phantom memory file creation. Snapshot and session ID files are now keyed per session.
+
 ## v1.16.4
 
 ### Fixed

@@ -23,7 +23,7 @@ Then install learning-loop:
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
-Restart Claude Code, then run `/learning-loop:init` to configure your vault path and persona voice.
+Restart Claude Code, then run `/learning-loop:init` to configure your vault path and persona voice. Init installs the `ll-watch` CLI for running the vault watcher.
 
 ## What it looks like
 
