@@ -335,3 +335,5 @@ export async function executeTool(name, args) {
   const result = await handler(args);
   return typeof result === 'string' ? result : cap(JSON.stringify(result));
 }
+
+export { submitVoiceFlag };
