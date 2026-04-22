@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.16.4
+
+### Fixed
+
+- **Null-path crash in unconfigured environments.** `constants.mjs` called `join(null, ...)` when `VAULT_PATH` or `PLUGIN_DATA` was unset, crashing every consumer at import time. `DB_DIR`, `DB_PATH`, and `BIN_DIR` now resolve to `null` when their parent is missing.
+- **Session-start hook crash when `pluginData` is null.** Sections 7.5 (learned patterns) and 7.6 (federation status) called `join(pluginData, ...)` without a null guard, crashing the entire session-start hook and leaving sessions with no learning-loop context.
+- **Edge inference silent no-op on Windows.** `isVaultNote` in `post-write-edge-infer.js` checked `rel.startsWith(d + '/')` with a hardcoded forward slash, but `rel` uses the platform separator. Changed to `sep`.
+- **Watch mode cannot exit on Windows.** The `stopped` AtomicBool was only set by Unix signal hooks. Added `ctrlc` crate for cross-platform Ctrl+C handling so the PID guard runs cleanup and the librarian subprocess is not orphaned.
+- **Content hash non-deterministic across Rust versions.** `DefaultHasher` is explicitly not stable across compilations, causing a full vault re-embed on every binary update. Replaced with truncated SHA-256 (deterministic, uses existing `sha2` dependency). First run after this update will re-embed once.
+- **`/init` Phase 5 version detection broken.** `templates/claudemd-section.version` was referenced by the init skill but never created.
+
 ## v1.16.3
 
 ### Fixed
