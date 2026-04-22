@@ -322,13 +322,14 @@ if (pluginData) {
 
 // 8. Record session start time and snapshot memory file list
 const sessionId = randomBytes(4).toString('hex');
-writeFileSync(join(tmp, 'learning-loop-session-start'), String(Math.floor(Date.now() / 1000)));
+const ppid = process.ppid;
+writeFileSync(join(tmp, `learning-loop-session-start-${sessionId}`), String(Math.floor(Date.now() / 1000)));
 if (projectDir) {
   const encodedPath = projectDir.replace(/[/\\]/g, '-');
   const memDir = join(MEMORY_DIR, encodedPath, 'memory');
   try {
     const files = readdirSync(memDir).filter((f) => f.endsWith('.md'));
-    writeFileSync(join(tmp, 'learning-loop-memory-snapshot'), JSON.stringify(files));
+    writeFileSync(join(tmp, `learning-loop-memory-snapshot-${sessionId}`), JSON.stringify(files));
     // Persist retrieval snapshot for /dream decay tracking
     try {
       const retrievalDir = join(pluginData, 'retrieval');
@@ -343,8 +344,9 @@ if (projectDir) {
   } catch {}
 }
 
-// 9. Write session ID
-writeFileSync(join(tmp, 'learning-loop-session-id'), sessionId);
+// 9. Write session ID (keyed by ppid so concurrent sessions don't collide)
+writeFileSync(join(tmp, `learning-loop-session-id-${ppid}`), sessionId);
+writeFileSync(join(tmp, 'learning-loop-session-id'), sessionId); // legacy fallback
 
 // 10. Emit session-start provenance event
 try {

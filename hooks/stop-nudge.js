@@ -75,10 +75,20 @@ if (existsSync(reflectMarker)) {
 
 // Check if many new memory files were created this session (dream nudge)
 const dreamMarker = join(tmp, 'learning-loop-last-dream');
-const sessionStartFile = join(tmp, 'learning-loop-session-start');
 const projectDir = process.env.CLAUDE_PROJECT_DIR;
 
-const snapshotFile = join(tmp, 'learning-loop-memory-snapshot');
+// Resolve session ID: hook input > ppid-keyed file > global file (legacy)
+let sessionId = hookData.session_id || '';
+if (!sessionId) {
+  try { sessionId = readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim(); } catch {}
+}
+if (!sessionId) {
+  try { sessionId = readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim(); } catch {}
+}
+
+const snapshotFile = sessionId
+  ? join(tmp, `learning-loop-memory-snapshot-${sessionId}`)
+  : join(tmp, 'learning-loop-memory-snapshot');
 if (projectDir && existsSync(snapshotFile)) {
   const encodedPath = projectDir.replace(/[/\\]/g, '-');
   const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
