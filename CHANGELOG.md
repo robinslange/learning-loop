@@ -13,6 +13,27 @@
 - **`guide/resource-usage.md`** -- token costs, local compute requirements, cost mitigation strategies, cache health measurement.
 - **`guide/troubleshooting.md`** -- all common issues and fixes previously embedded in the README.
 
+## v1.16.2
+
+### Fixed
+
+- **`ll-search` Cargo.toml version out of sync** with the release tag. `release.sh` now updates crate versions alongside `package.json`.
+
+## v1.16.1
+
+### Fixed
+
+- **Librarian link suggestions: 36% noise rate eliminated.** `submit_link` now guards against self-links, missing target files, and links already present in the target note (wikilink slug matching with regex-escaped dots for Excalidraw-style filenames). Each rejection increments a counter under `state.json:counters`.
+- **State counters stuck at 0** despite 959 queued items. `submit_link`, `submit_voice_flag`, and `submit_suspect` now increment their respective top-level counters on queue writes.
+- **`/init` Phase 7 path reference** pointed at wrong `resolve-paths.mjs` location.
+
+### Added
+
+- **`librarian.log`** -- the librarian now writes timestamped log output to `<PLUGIN_DATA>/librarian/librarian.log` (rotated at 10 MB), restoring `tail -f` visibility when running under `ll-search watch`.
+- **`scripts/verify-librarian-fixes.mjs`** -- standalone verification script exercising all submit_link guard rules (10 assertions).
+- **`.gitignore` entry for `.planning/`** -- planning artifacts stay local.
+- Documentation for vault librarian in README, changelog, help skill, agents guide, and configuration guide.
+
 ## v1.16.0
 
 ### Added
