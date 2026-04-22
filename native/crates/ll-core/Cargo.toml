@@ -1,6 +1,6 @@
 [package]
 name = "ll-core"
-version = "1.16.4"
+version = "1.16.5"
 edition.workspace = true
 rust-version = "1.88"
 description = "Hybrid semantic search engine: BM25 + vector + PageRank + cross-encoder reranking over SQLite, with on-device ONNX inference"
