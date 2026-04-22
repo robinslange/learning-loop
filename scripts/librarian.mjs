@@ -1,9 +1,9 @@
 import { statSync, readFileSync, appendFileSync, existsSync, renameSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
 import { getConfig, getPluginData } from './lib/config.mjs';
 import { DB_PATH, VAULT_PATH } from './lib/constants.mjs';
 import { openReadonly } from './lib/sqljs.mjs';
-import { TOOL_DEFS, executeTool } from './lib/librarian-tools.mjs';
+import { TOOL_DEFS, executeTool, submitVoiceFlag } from './lib/librarian-tools.mjs';
 import {
   loadState,
   saveState,
@@ -148,10 +148,47 @@ You do NOT investigate staleness yourself. If something seems off, submit_suspec
 
 const VOICE_PROMPT = `Classify this Obsidian note title as "claim" (states an assertion that could be true or false) or "topic" (names a domain, concept, or entity without stating a relationship). A claim contains a verb or claim connective; a topic is a noun phrase without one. When in doubt, answer "claim".`;
 
+async function voiceCheck(notePath) {
+  const title = basename(notePath, '.md');
+  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: VOICE_PROMPT },
+        { role: 'user', content: `Title: ${title}\nClassify:` },
+      ],
+      format: {
+        type: 'object',
+        properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
+        required: ['label'],
+      },
+      stream: false,
+    }),
+  });
+  try {
+    const { message } = await resp.json();
+    const { label } = JSON.parse(message.content);
+    if (label === 'topic') {
+      await submitVoiceFlag({
+        target: notePath,
+        current_title: title,
+        reason: 'topic-style title (structured-output classifier)',
+      });
+    }
+  } catch (err) {
+    log(`voiceCheck parse error for ${notePath}: ${err.message}\n`);
+  }
+}
+
 async function investigateNote(notePath, task) {
-  const userMessage = task === 'link_check'
-    ? `Investigate this orphan note (0 inlinks): ${notePath}`
-    : `Voice gate check on inbox note: ${notePath}`;
+  if (task === 'voice_gate') {
+    await voiceCheck(notePath);
+    return;
+  }
+
+  const userMessage = `Investigate this orphan note (0 inlinks): ${notePath}`;
 
   const messages = [
     { role: 'system', content: LINK_PROMPT },
