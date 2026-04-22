@@ -23,7 +23,7 @@ function isVaultNote(filePath, vaultRoot) {
   const rel = filePath.slice(prefix.length);
   const firstSegment = rel.split(sep)[0];
   if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
-  return VAULT_DIRS.some(d => rel.startsWith(d + '/'));
+  return VAULT_DIRS.some(d => rel.startsWith(d + sep));
 }
 
 function vaultRelPath(filePath, vaultRoot) {
