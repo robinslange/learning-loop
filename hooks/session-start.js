@@ -30,6 +30,20 @@ try {
     }
   }
 } catch {}
+
+// Ensure ll-watch shim exists — stable shell script that resolves the latest
+// plugin version at runtime, so it survives cache path changes on updates.
+try {
+  const shimPath = join(home(), '.local', 'bin', 'll-watch');
+  if (!existsSync(shimPath)) {
+    const watchScript = join(PLUGIN_DIR, 'scripts', 'watch.mjs');
+    if (existsSync(watchScript)) {
+      mkdirSync(join(home(), '.local', 'bin'), { recursive: true });
+      execFileSync('node', [watchScript, '--install'], { stdio: 'ignore', timeout: 5000 });
+    }
+  }
+} catch {}
+
 const tmp = tmpdir();
 
 // Check for plugin updates in background (throttled to once per hour)
