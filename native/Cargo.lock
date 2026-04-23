@@ -916,7 +916,7 @@ checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
 name = "ll-core"
-version = "1.16.3"
+version = "1.16.7"
 dependencies = [
  "anyhow",
  "ort",
@@ -928,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "ll-search"
-version = "1.16.3"
+version = "1.16.7"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
