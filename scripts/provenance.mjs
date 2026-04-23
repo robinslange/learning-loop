@@ -12,8 +12,12 @@ const PROVENANCE_DIR = join(getPluginData(), 'provenance');
 const TEMPLATE_DIR = join(import.meta.dirname, '..', 'provenance');
 
 function getSessionId() {
+  const tmp = tmpdir();
   try {
-    return readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf8').trim();
+    return readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
+  } catch {}
+  try {
+    return readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
   } catch {
     return 'unknown';
   }
