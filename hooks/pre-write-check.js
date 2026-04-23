@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, existsSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { runHook, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared, isVaultNote } from './lib/common.mjs';
@@ -95,104 +94,6 @@ function checkDuplicateNote(filePath, title, vaultRoot) {
   }
 }
 
-const NLI_CONTRADICTION_THRESHOLD = 0.75;
-const NLI_TOPIC_RELEVANCE_THRESHOLD = 0.65;
-const CONTRADICTION_CHECK_FOLDERS = ['3-permanent/', '2-literature/'];
-
-function shouldCheckContradictions(filePath, vaultRoot) {
-  const rel = filePath.slice(vaultRoot.length + 1);
-  return CONTRADICTION_CHECK_FOLDERS.some(f => rel.startsWith(f));
-}
-
-function extractClaimSentence(content) {
-  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-  const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-  const titleMatch = body.match(/^#\s+(.+)$/m);
-  const title = titleMatch ? titleMatch[1].trim() : null;
-  const noHeading = body.replace(/^#+\s+.*$/gm, '').trim();
-  if (!noHeading) return title;
-  const firstPara = noHeading.split(/\n\s*\n/)[0].replace(/\n/g, ' ').trim();
-  if (!firstPara) return title;
-  const claim = title ? `${title}. ${firstPara}` : firstPara;
-  return claim.slice(0, 500);
-}
-
-function readCandidateClaim(vaultRoot, relPath) {
-  try {
-    const content = readFileSync(join(vaultRoot, relPath), 'utf-8');
-    return extractClaimSentence(content);
-  } catch {
-    return null;
-  }
-}
-
-function checkContradictions(filePath, title, content, vaultRoot) {
-  let tmpDir;
-  try {
-    const binary = findBinaryShared();
-    if (!binary) return null;
-    const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
-    if (!existsSync(dbPath)) return null;
-
-    const newClaim = extractClaimSentence(content);
-    if (!newClaim) return null;
-
-    const scanOut = execFileSync(
-      binary.bin,
-      ['reflect-scan', dbPath, newClaim, '--top', '8', '--candidates', '15', '--threshold', '0.5'],
-      {
-        encoding: 'utf-8',
-        timeout: 3000,
-        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
-      },
-    );
-    const scan = JSON.parse(scanOut);
-    const q = scan.queries && scan.queries[0];
-    if (!q || !q.results || q.results.length === 0) return null;
-    if (!q.top_match_similarity || q.top_match_similarity < NLI_TOPIC_RELEVANCE_THRESHOLD) return null;
-
-    const candidates = q.results
-      .filter(r => {
-        const candAbs = resolve(join(vaultRoot, r.path));
-        return candAbs !== resolve(filePath);
-      })
-      .map(r => ({ ...r, claim: readCandidateClaim(vaultRoot, r.path) }))
-      .filter(r => r.claim && r.claim.length >= 20)
-      .slice(0, 8);
-    if (candidates.length === 0) return null;
-
-    tmpDir = mkdtempSync(join(tmpdir(), 'll-nli-'));
-    const candFile = join(tmpDir, 'candidates.txt');
-    writeFileSync(candFile, candidates.map(c => c.claim.replace(/\n/g, ' ')).join('\n'));
-
-    const nliOut = execFileSync(binary.bin, ['nli-batch', newClaim, candFile], {
-      encoding: 'utf-8',
-      timeout: 8000,
-      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
-    });
-    const nliResults = JSON.parse(nliOut);
-    if (!Array.isArray(nliResults)) return null;
-
-    const contradictions = nliResults
-      .map((r, i) => ({ ...r, candidate: candidates[i] }))
-      .filter(r => r.contradiction >= NLI_CONTRADICTION_THRESHOLD);
-
-    if (contradictions.length === 0) return null;
-
-    const lines = contradictions.map(c => {
-      const pct = Math.round(c.contradiction * 100);
-      return `  - [[${basename(c.candidate.path, '.md')}]] (${pct}% contradiction)`;
-    });
-    return `Possible contradictions with existing notes:\n${lines.join('\n')}`;
-  } catch {
-    return null;
-  } finally {
-    if (tmpDir) {
-      try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
-    }
-  }
-}
-
 function deny(reason) {
   const out = {
     hookSpecificOutput: {
@@ -250,13 +151,6 @@ runHook(({ tool, input }) => {
   const dupeWarning = title ? checkDuplicateNote(filePath, title, vaultRoot) : null;
   if (dupeWarning) {
     warnings.push(dupeWarning);
-  }
-
-  if (title && shouldCheckContradictions(filePath, vaultRoot)) {
-    const contradictionWarning = checkContradictions(filePath, title, content, vaultRoot);
-    if (contradictionWarning) {
-      warnings.push(contradictionWarning);
-    }
   }
 
   if (warnings.length > 0) {
