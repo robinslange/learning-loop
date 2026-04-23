@@ -22,6 +22,7 @@ pub enum ClientMessage {
     UploadEnvelope {
         envelope: serde_json::Value,
     },
+    SyncSkipUpload,
 }
 
 #[derive(Debug, Deserialize)]
@@ -46,6 +47,7 @@ pub enum HubMessage {
     PeerEnvelope {
         envelope: Option<serde_json::Value>,
     },
+    SyncSkipAck,
 }
 
 #[derive(Debug, Deserialize)]

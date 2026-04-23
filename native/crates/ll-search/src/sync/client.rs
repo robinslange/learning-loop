@@ -4,6 +4,7 @@ use std::path::Path;
 use anyhow::Context;
 use rusqlite::Connection;
 use serde::Serialize;
+use sha2::{Sha256, Digest};
 use tungstenite::{connect, Message, WebSocket};
 use tungstenite::stream::MaybeTlsStream;
 
@@ -16,8 +17,9 @@ const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Serialize)]
 pub struct SyncResult {
-    pub export: ExportResult,
+    pub export: Option<ExportResult>,
     pub uploaded_notes: i64,
+    pub skipped_upload: bool,
     pub downloaded: Vec<DownloadedPeer>,
     pub skipped: Vec<String>,
 }
@@ -37,12 +39,53 @@ pub fn sync_all(
     let export_path = export_db_path(config_dir);
     let peer_id = &config.identity.display_name;
 
-    eprintln!("Exporting local index...");
-    let export_result = export_index(source_db, vault_path, &export_path, config)?;
-    eprintln!("Export complete: {} exported, {} skipped", export_result.exported, export_result.skipped);
+    let fed_dir = config_dir.join("federation");
+    std::fs::create_dir_all(&fed_dir)?;
+    let mtime_path = fed_dir.join("last-export-mtime");
+    let hash_path = fed_dir.join("last-export-hash");
 
-    let model_id = export_result.model_id.clone();
-    let export_bytes = std::fs::read(&export_path)?;
+    let last_mtime: u64 = std::fs::read_to_string(&mtime_path)
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0);
+    let current_max_mtime = max_md_mtime(vault_path);
+    let vault_changed = current_max_mtime > last_mtime;
+
+    let (export_bytes, export_result, export_hash) = if vault_changed {
+        eprintln!("Exporting local index...");
+        let result = export_index(source_db, vault_path, &export_path, config)?;
+        eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
+        let bytes = std::fs::read(&export_path)?;
+        let hash = hex::encode(Sha256::digest(&bytes));
+        (bytes, Some(result), hash)
+    } else if export_path.exists() {
+        eprintln!("No vault changes since last export");
+        let bytes = std::fs::read(&export_path)?;
+        let hash = hex::encode(Sha256::digest(&bytes));
+        (bytes, None, hash)
+    } else {
+        eprintln!("Exporting local index...");
+        let result = export_index(source_db, vault_path, &export_path, config)?;
+        eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
+        let bytes = std::fs::read(&export_path)?;
+        let hash = hex::encode(Sha256::digest(&bytes));
+        (bytes, Some(result), hash)
+    };
+
+    let upload_unchanged = std::fs::read_to_string(&hash_path)
+        .map(|stored| stored.trim() == export_hash)
+        .unwrap_or(false);
+
+    let model_id = if let Some(ref r) = export_result {
+        r.model_id.clone()
+    } else {
+        let source = Connection::open_with_flags(
+            source_db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
+        source.query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))?
+    };
+
     let seed = auth::load_seed(&seed_path(config_dir))?;
 
     let hub_url = &config.hub.endpoint;
@@ -80,20 +123,37 @@ pub fn sync_all(
         other => anyhow::bail!("unexpected: {other:?}"),
     }
 
-    let envelope = auth::create_envelope(&seed, &export_bytes, peer_id, config.graph);
-    let export_size_kb = export_bytes.len() / 1024;
-    ws.send(Message::binary(export_bytes))?;
-    eprintln!("Sent local index ({export_size_kb} KB)");
-
-    let ack = recv_json::<HubMessage>(&mut ws)?;
-    let uploaded_notes = match ack {
-        HubMessage::SyncAck { note_count } => {
-            eprintln!("Hub acknowledged: {note_count} notes");
-            note_count
+    let (uploaded_notes, skipped_upload) = if upload_unchanged {
+        eprintln!("Index unchanged since last sync, skipping upload");
+        send_json(&mut ws, &ClientMessage::SyncSkipUpload)?;
+        let skip_ack = recv_json::<HubMessage>(&mut ws)?;
+        match skip_ack {
+            HubMessage::SyncSkipAck => eprintln!("Hub acknowledged skip"),
+            other => anyhow::bail!("expected sync-skip-ack, got: {other:?}"),
         }
-        other => anyhow::bail!("expected sync-ack, got: {other:?}"),
+        (0, true)
+    } else {
+        let envelope = auth::create_envelope(&seed, &export_bytes, peer_id, config.graph);
+        send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope })?;
+
+        let export_size_kb = export_bytes.len() / 1024;
+        ws.send(Message::binary(export_bytes))?;
+        eprintln!("Sent local index ({export_size_kb} KB)");
+
+        let ack = recv_json::<HubMessage>(&mut ws)?;
+        let notes = match ack {
+            HubMessage::SyncAck { note_count } => {
+                eprintln!("Hub acknowledged: {note_count} notes");
+                note_count
+            }
+            other => anyhow::bail!("expected sync-ack, got: {other:?}"),
+        };
+
+        std::fs::write(&hash_path, &export_hash)?;
+        std::fs::write(&mtime_path, current_max_mtime.to_string())?;
+
+        (notes, false)
     };
-    send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope })?;
 
     send_json(&mut ws, &ClientMessage::ListPeers)?;
     let peer_list = recv_json::<HubMessage>(&mut ws)?;
@@ -166,9 +226,34 @@ pub fn sync_all(
     Ok(SyncResult {
         export: export_result,
         uploaded_notes,
+        skipped_upload,
         downloaded,
         skipped,
     })
+}
+
+fn max_md_mtime(dir: &Path) -> u64 {
+    let mut max = 0u64;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().map_or(false, |n| n.to_str().map_or(false, |s| s.starts_with('.'))) {
+                continue;
+            }
+            if path.is_dir() {
+                max = max.max(max_md_mtime(&path));
+            } else if path.extension().map_or(false, |e| e == "md") {
+                if let Ok(meta) = path.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {
+                            max = max.max(d.as_secs());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    max
 }
 
 fn send_json<S: Read + Write, T: serde::Serialize>(
