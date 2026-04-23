@@ -6,10 +6,13 @@
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
-import { home } from './common.mjs';
+import { home, resolvePluginData } from './common.mjs';
 
 const tmp = tmpdir();
-const DREAM_MARKER = join(tmp, 'learning-loop-last-dream');
+const pluginData = resolvePluginData();
+const DREAM_MARKER = pluginData
+  ? join(pluginData, 'retrieval', 'last-dream')
+  : join(tmp, 'learning-loop-last-dream');
 const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');
 
 function now() {
