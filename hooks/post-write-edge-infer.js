@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, basename, sep } from 'node:path';
 import { runHook, resolvePluginData, resolveVaultPath } from './lib/common.mjs';
-import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb, acquireLock, releaseLock } from '../scripts/lib/edges.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from '../scripts/lib/edge-classifier.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
@@ -169,6 +169,7 @@ runHook(async ({ tool, input, response }) => {
     flip: e.flip,
   }));
 
+  if (!acquireLock(dbPath)) return;
   const db = await openEdgeDb(dbPath);
   try {
     removeOutgoingEdges(db, sourceRel);
@@ -184,6 +185,7 @@ runHook(async ({ tool, input, response }) => {
     saveDb(db, dbPath);
   } finally {
     db.close();
+    releaseLock(dbPath);
   }
 
   const highConfidenceEdges = edges.filter(e => e.confidence === 'high' && !e.flip);

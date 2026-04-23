@@ -1,6 +1,33 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, unlinkSync, constants as fsConstants } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
+
+let lockFd = null;
+
+export function acquireLock(dbPath, retries = 3, delayMs = 50) {
+  const lockPath = dbPath + '.lock';
+  for (let i = 0; i < retries; i++) {
+    try {
+      lockFd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY);
+      return true;
+    } catch {
+      if (i < retries - 1) {
+        const start = Date.now();
+        while (Date.now() - start < delayMs) {}
+      }
+    }
+  }
+  return false;
+}
+
+export function releaseLock(dbPath) {
+  const lockPath = dbPath + '.lock';
+  if (lockFd !== null) {
+    try { closeSync(lockFd); } catch {}
+    lockFd = null;
+  }
+  try { unlinkSync(lockPath); } catch {}
+}
 
 const VALID_TYPES = [
   'evidence_for', 'supports',
