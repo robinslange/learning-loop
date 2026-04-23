@@ -3,7 +3,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OpenFlags};
 
-use super::scoring::{add_ranked_rrf, cosine, fts_bm25_query};
+use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
 
 pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
     let peers_dir = config_dir.join("federation").join("data").join("peers");
@@ -58,7 +58,7 @@ pub(crate) fn add_peer_rrf_scores(
     let mut peer_vec: Vec<(String, f64)> = peer_embeddings
         .iter()
         .map(|(_, path, emb)| {
-            (format!("peer:{peer_id}/{path}"), cosine(query_vec, emb) as f64)
+            (format!("peer:{peer_id}/{path}"), dot_product(query_vec, emb) as f64)
         })
         .collect();
     peer_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
@@ -99,35 +99,41 @@ pub(crate) fn load_title_federated(
 }
 
 pub(crate) fn batch_load_bodies(conn: &Connection, paths: &[String]) -> HashMap<String, String> {
+    let mut result = HashMap::new();
     if paths.is_empty() {
-        return HashMap::new();
+        return result;
     }
 
-    let placeholders: String = (0..paths.len())
-        .map(|i| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!(
-        "SELECT n.path, nc.body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path IN ({})",
-        placeholders
-    );
+    for chunk in paths.chunks(500) {
+        let placeholders: String = (0..chunk.len())
+            .map(|i| format!("?{}", i + 1))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT n.path, nc.body FROM notes_content nc JOIN notes n ON nc.id = n.id WHERE n.path IN ({})",
+            placeholders
+        );
 
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return HashMap::new(),
-    };
+        let mut stmt = match conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
 
-    let sql_params: Vec<&dyn rusqlite::types::ToSql> =
-        paths.iter().map(|p| p as &dyn rusqlite::types::ToSql).collect();
-    let mut map = HashMap::new();
-    if let Ok(rows) = stmt.query_map(sql_params.as_slice(), |row| {
-        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-    }) {
+        let params: Vec<&dyn rusqlite::types::ToSql> =
+            chunk.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let rows = match stmt.query_map(params.as_slice(), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
         for row in rows.flatten() {
-            map.insert(row.0, row.1);
+            result.insert(row.0, row.1);
         }
     }
-    map
+
+    result
 }
 
 pub fn batch_load_bodies_federated(
