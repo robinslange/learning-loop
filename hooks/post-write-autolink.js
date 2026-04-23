@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve, sep, basename } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath, findBinary } from './lib/common.mjs';
+import { runHook, resolvePluginData, resolveVaultPath, findBinary, isVaultNote } from './lib/common.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_AUTO_LINKS = 3;
@@ -15,16 +15,6 @@ function isWatchRunning() {
     process.kill(pid, 0);
     return true;
   } catch { return false; }
-}
-
-function isVaultNote(filePath, vaultRoot) {
-  const prefix = vaultRoot + sep;
-  if (!filePath.startsWith(prefix)) return false;
-  if (!filePath.endsWith('.md')) return false;
-  const rel = filePath.slice(prefix.length);
-  const firstSegment = rel.split(sep)[0];
-  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
-  return true;
 }
 
 function extractWikilinks(content) {

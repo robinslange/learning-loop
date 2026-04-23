@@ -105,6 +105,16 @@ export function vaultRelPath(filePath, vaultPath) {
   return null;
 }
 
+export function isVaultNote(filePath, vaultRoot) {
+  const prefix = vaultRoot + sep;
+  if (!filePath.startsWith(prefix)) return false;
+  if (!filePath.endsWith('.md')) return false;
+  const rel = filePath.slice(prefix.length);
+  const firstSegment = rel.split(sep)[0];
+  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
+  return true;
+}
+
 export function classifyVaultPath(relPath) {
   const p = relPath.replace(/\\/g, '/');
   if (p.startsWith('0-inbox/')) return 'inbox';

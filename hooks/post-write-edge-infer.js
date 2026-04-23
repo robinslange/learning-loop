@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join, basename, sep } from 'node:path';
-import { runHook, resolvePluginData, resolveVaultPath } from './lib/common.mjs';
+import { join, basename } from 'node:path';
+import { runHook, resolvePluginData, resolveVaultPath, isVaultNote } from './lib/common.mjs';
 import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb, acquireLock, releaseLock } from '../scripts/lib/edges.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from '../scripts/lib/edge-classifier.mjs';
 
@@ -13,18 +13,6 @@ const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   challenges_undercutting: 'undercuts',
   challenges_rebuttal: 'rebuts',
 };
-
-const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
-
-function isVaultNote(filePath, vaultRoot) {
-  const prefix = vaultRoot + sep;
-  if (!filePath.startsWith(prefix)) return false;
-  if (!filePath.endsWith('.md')) return false;
-  const rel = filePath.slice(prefix.length);
-  const firstSegment = rel.split(sep)[0];
-  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
-  return VAULT_DIRS.some(d => rel.startsWith(d + sep));
-}
 
 function vaultRelPath(filePath, vaultRoot) {
   return filePath.slice(vaultRoot.length + 1);

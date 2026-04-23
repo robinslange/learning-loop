@@ -1,19 +1,9 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep, basename } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared } from './lib/common.mjs';
-
-function isVaultNote(filePath, vaultRoot) {
-  const prefix = vaultRoot + sep;
-  if (!filePath.startsWith(prefix)) return false;
-  if (!filePath.endsWith('.md')) return false;
-  const rel = filePath.slice(prefix.length);
-  const firstSegment = rel.split(sep)[0];
-  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
-  return true;
-}
+import { runHook, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared, isVaultNote } from './lib/common.mjs';
 
 function parseFrontmatter(content) {
   const m = content.match(/^---\n([\s\S]*?)\n---/);
