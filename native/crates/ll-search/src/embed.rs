@@ -44,3 +44,11 @@ pub fn embed_query(text: &str) -> Vec<f32> {
 pub fn embed_documents(texts: &[String]) -> Vec<Vec<f32>> {
     provider().embed_documents(texts).expect("embed_documents failed")
 }
+
+pub fn try_embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
+    provider().embed_query(text).map_err(|e| anyhow::anyhow!("embed_query: {e}"))
+}
+
+pub fn try_embed_documents(texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
+    provider().embed_documents(texts).map_err(|e| anyhow::anyhow!("embed_documents: {e}"))
+}
