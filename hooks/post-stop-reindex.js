@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { resolveVaultPath, readStdin, findBinary } from './lib/common.mjs';
+import { resolveVaultPath, resolvePluginData, readStdin, findBinary } from './lib/common.mjs';
 
 const LOCK_PATH = join(tmpdir(), 'learning-loop-reindex.lock');
 const STALE_LOCK_MS = 10 * 60 * 1000;
@@ -52,7 +52,12 @@ if (!existsSync(dbPath)) { trace(`exit: no db at ${dbPath}`); process.exit(0); }
 
 if (isLockHeld()) { trace('exit: lock held'); process.exit(0); }
 
-const child = spawn(binary.bin, ['index', vaultRoot, dbPath], {
+const pluginData = resolvePluginData();
+const fedConfigPath = pluginData ? join(pluginData, 'federation', 'config.json') : null;
+const args = ['index', vaultRoot, dbPath];
+if (fedConfigPath && existsSync(fedConfigPath)) args.push('--sync');
+
+const child = spawn(binary.bin, args, {
   detached: true,
   stdio: 'ignore',
   env: {

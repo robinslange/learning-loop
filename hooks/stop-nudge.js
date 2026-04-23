@@ -3,11 +3,10 @@
 // Nudges consolidation once if the session was substantial.
 
 import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { home, resolvePluginData, resolveVaultPath, readStdin, findBinary as findBinaryShared } from './lib/common.mjs';
+import { home, resolvePluginData, readStdin } from './lib/common.mjs';
 
 const tmp = tmpdir();
 
@@ -29,40 +28,7 @@ try {
 // Check if stop hook is already active (prevent loops)
 if (hookData.stop_hook_active) process.exit(0);
 
-// Reindex + federation sync via binary (fire and forget)
-const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-
 const pluginData = resolvePluginData();
-
-function isWatchRunning() {
-  if (!pluginData) return false;
-  try {
-    const pid = parseInt(readFileSync(join(pluginData, 'watch.pid'), 'utf8').trim(), 10);
-    process.kill(pid, 0);
-    return true;
-  } catch { return false; }
-}
-
-if (!isWatchRunning()) {
-  const fedConfig = pluginData ? join(pluginData, 'federation', 'config.json') : null;
-  try {
-    const vaultRoot = resolveVaultPath();
-    if (!vaultRoot) throw new Error('no vault');
-    const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
-    const binary = findBinaryShared();
-    if (binary) {
-      const args = (fedConfig && existsSync(fedConfig))
-        ? ['index', vaultRoot, dbPath, '--sync']
-        : ['index', vaultRoot, dbPath];
-      const child = spawn(binary.bin, args, {
-        detached: true,
-        stdio: 'ignore',
-        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
-      });
-      child.unref();
-    }
-  } catch {}
-}
 
 // Skip if /reflect was run recently (within last 5 minutes)
 const reflectMarker = join(tmp, 'learning-loop-last-reflect');
