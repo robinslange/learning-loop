@@ -182,6 +182,18 @@ pub fn sync_all(
         }
 
         eprintln!("Fetching index for {}...", peer.peer_id);
+
+        send_json(&mut ws, &ClientMessage::GetPeerEnvelope {
+            peer_id: peer.peer_id.clone(),
+        })?;
+        let envelope_msg = recv_json::<HubMessage>(&mut ws)?;
+        let expected_hash = match envelope_msg {
+            HubMessage::PeerEnvelope { envelope: Some(ref env) } => {
+                env.get("sha256").and_then(|v| v.as_str()).map(String::from)
+            }
+            _ => None,
+        };
+
         send_json(&mut ws, &ClientMessage::GetPeerIndex {
             peer_id: peer.peer_id.clone(),
         })?;
@@ -189,6 +201,20 @@ pub fn sync_all(
         let msg = ws.read()?;
         match msg {
             Message::Binary(data) => {
+                if data.len() > 100 * 1024 * 1024 {
+                    eprintln!("Peer {} index too large ({}MB), skipping",
+                        peer.peer_id, data.len() / 1024 / 1024);
+                    continue;
+                }
+
+                if let Some(ref expected) = expected_hash {
+                    let actual = hex::encode(Sha256::digest(&data));
+                    if actual != *expected {
+                        eprintln!("Peer {} hash mismatch, skipping", peer.peer_id);
+                        continue;
+                    }
+                }
+
                 std::fs::create_dir_all(&peer_dir)?;
                 std::fs::write(peer_dir.join("index.db"), &data)?;
                 let peer_db_path = peer_dir.join("index.db");
