@@ -83,10 +83,11 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
 
     let (fs_tx, fs_rx) = mpsc::channel();
     let vault_search_dir = cfg.vault_path.join(".vault-search");
+    let db_dir = cfg.db_path.parent().unwrap_or(&cfg.db_path).to_path_buf();
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(event) = res {
             let dominated_by_md = event.paths.iter().any(|p| {
-                if p.starts_with(&vault_search_dir) {
+                if p.starts_with(&vault_search_dir) || p.starts_with(&db_dir) {
                     return false;
                 }
                 p.extension().map_or(false, |e| e == "md")
