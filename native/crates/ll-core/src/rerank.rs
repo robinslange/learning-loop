@@ -52,7 +52,13 @@ pub fn rerank(query: &str, documents: &[(String, String)], top_n: usize) -> Vec<
     let mut results: Vec<RerankResult> = Vec::with_capacity(documents.len());
 
     for (i, (path, text)) in documents.iter().enumerate() {
-        let score = score_pair(st, query, text);
+        let score = match score_pair(st, query, text) {
+            Some(s) => s,
+            None => {
+                eprintln!("rerank: skipping document, inference failed");
+                continue;
+            }
+        };
         results.push(RerankResult {
             index: i,
             score,
@@ -65,11 +71,11 @@ pub fn rerank(query: &str, documents: &[(String, String)], top_n: usize) -> Vec<
     results
 }
 
-fn score_pair(st: &RerankState, query: &str, document: &str) -> f64 {
+fn score_pair(st: &RerankState, query: &str, document: &str) -> Option<f64> {
     let encoding = st
         .tokenizer
         .encode((query, document), true)
-        .expect("tokenize pair");
+        .ok()?;
 
     let ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
     let mask: Vec<i64> = encoding
@@ -87,11 +93,11 @@ fn score_pair(st: &RerankState, query: &str, document: &str) -> f64 {
     let shape = vec![1i64, len];
 
     let input_ids =
-        Tensor::from_array((shape.clone(), ids.into_boxed_slice())).expect("input_ids tensor");
+        Tensor::from_array((shape.clone(), ids.into_boxed_slice())).ok()?;
     let attention_mask =
-        Tensor::from_array((shape.clone(), mask.into_boxed_slice())).expect("attention_mask tensor");
+        Tensor::from_array((shape.clone(), mask.into_boxed_slice())).ok()?;
     let token_type_ids =
-        Tensor::from_array((shape, type_ids.into_boxed_slice())).expect("token_type_ids tensor");
+        Tensor::from_array((shape, type_ids.into_boxed_slice())).ok()?;
 
     let inputs = ort::inputs! {
         "input_ids" => input_ids,
@@ -99,11 +105,11 @@ fn score_pair(st: &RerankState, query: &str, document: &str) -> f64 {
         "token_type_ids" => token_type_ids,
     };
 
-    let mut session = st.session.lock().expect("session lock");
-    let outputs = session.run(inputs).expect("reranker inference");
+    let mut session = st.session.lock().ok()?;
+    let outputs = session.run(inputs).ok()?;
     let (_, data) = outputs[0]
         .try_extract_tensor::<f32>()
-        .expect("extract reranker output");
+        .ok()?;
 
-    data[0] as f64
+    Some(data[0] as f64)
 }
