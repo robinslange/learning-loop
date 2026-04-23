@@ -6,7 +6,7 @@ use serde::Serialize;
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
-use super::scoring::{cosine, finalize_rrf};
+use super::scoring::{dot_product, finalize_rrf};
 use super::query::{local_rrf_scores, load_titles_map, SearchResult};
 use super::graph::load_link_graph;
 use super::federation::{add_peer_rrf_scores, batch_load_bodies, batch_load_bodies_federated};
@@ -94,7 +94,7 @@ pub fn reflect_scan(
             all_embeddings
                 .iter()
                 .find(|(_, path, _)| *path == best.path)
-                .map(|(_, _, emb)| cosine(query_vec, emb) as f64)
+                .map(|(_, _, emb)| dot_product(query_vec, emb) as f64)
         }).unwrap_or(0.0);
 
         for r in &results {
@@ -229,13 +229,13 @@ pub fn reflect_scan_federated(
                         .and_then(|(_, embs, _)| {
                             embs.iter()
                                 .find(|(_, p, _)| p == actual)
-                                .map(|(_, _, emb)| cosine(query_vec, emb) as f64)
+                                .map(|(_, _, emb)| dot_product(query_vec, emb) as f64)
                         })
                 } else {
                     all_embeddings
                         .iter()
                         .find(|(_, path, _)| *path == best.path)
-                        .map(|(_, _, emb)| cosine(query_vec, emb) as f64)
+                        .map(|(_, _, emb)| dot_product(query_vec, emb) as f64)
                 }
             })
             .unwrap_or(0.0);

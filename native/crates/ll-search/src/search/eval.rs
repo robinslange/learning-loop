@@ -6,7 +6,7 @@ use serde::Serialize;
 
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, cosine, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf_with, PrfParams};
+use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf_with, PrfParams};
 use super::graph::{load_link_graph, personalized_pagerank, tag_expand};
 use super::store::EmbeddingStore;
 
@@ -104,7 +104,7 @@ fn rrf_baseline(
 ) -> Vec<String> {
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .par_iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
+        .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
         .collect();
     vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     vec_scored.truncate(30);
@@ -134,7 +134,7 @@ fn rrf_hybrid_prf(
 ) -> Vec<String> {
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .par_iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(query_vec, emb) as f64))
+        .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
         .collect();
     vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     vec_scored.truncate(30);

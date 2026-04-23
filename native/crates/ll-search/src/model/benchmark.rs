@@ -36,11 +36,11 @@ pub struct BenchmarkSummary {
     pub model_b_query_time_ms: u64,
 }
 
-fn cosine(a: &[f32], b: &[f32]) -> f32 {
+fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-fn rank_by_cosine(
+fn rank_by_dot_product(
     query: &[f32],
     embeddings: &[Vec<f32>],
     paths: &[String],
@@ -48,7 +48,7 @@ fn rank_by_cosine(
     let mut scored: Vec<(String, f64)> = paths
         .iter()
         .zip(embeddings.iter())
-        .map(|(path, emb)| (path.clone(), cosine(query, emb) as f64))
+        .map(|(path, emb)| (path.clone(), dot_product(query, emb) as f64))
         .collect();
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored
@@ -144,12 +144,12 @@ pub fn run_benchmark(
     for query_text in queries {
         let t0 = Instant::now();
         let q_emb_a = provider_a.embed_query(query_text)?;
-        let ranked_a = rank_by_cosine(&q_emb_a, &embeddings_a, &paths);
+        let ranked_a = rank_by_dot_product(&q_emb_a, &embeddings_a, &paths);
         total_query_time_a += t0.elapsed().as_millis() as u64;
 
         let t0 = Instant::now();
         let q_emb_b = provider_b.embed_query(query_text)?;
-        let ranked_b = rank_by_cosine(&q_emb_b, &embeddings_b, &paths);
+        let ranked_b = rank_by_dot_product(&q_emb_b, &embeddings_b, &paths);
         total_query_time_b += t0.elapsed().as_millis() as u64;
 
         let top5_a: Vec<String> = ranked_a.iter().take(5).map(|(p, _)| p.clone()).collect();
@@ -199,16 +199,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cosine_identical() {
+    fn test_dot_product_identical() {
         let v = vec![0.6, 0.8];
-        assert!((cosine(&v, &v) - 1.0).abs() < 1e-6);
+        assert!((dot_product(&v, &v) - 1.0).abs() < 1e-6);
     }
 
     #[test]
-    fn test_cosine_orthogonal() {
+    fn test_dot_product_orthogonal() {
         let a = vec![1.0, 0.0];
         let b = vec![0.0, 1.0];
-        assert!((cosine(&a, &b)).abs() < 1e-6);
+        assert!((dot_product(&a, &b)).abs() < 1e-6);
     }
 
     #[test]
@@ -226,11 +226,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rank_by_cosine_ordering() {
+    fn test_rank_by_dot_product_ordering() {
         let query = vec![1.0, 0.0];
         let embeddings = vec![vec![0.0, 1.0], vec![1.0, 0.0], vec![0.7, 0.7]];
         let paths = vec!["a".into(), "b".into(), "c".into()];
-        let ranked = rank_by_cosine(&query, &embeddings, &paths);
+        let ranked = rank_by_dot_product(&query, &embeddings, &paths);
         assert_eq!(ranked[0].0, "b");
         assert_eq!(ranked[1].0, "c");
         assert_eq!(ranked[2].0, "a");

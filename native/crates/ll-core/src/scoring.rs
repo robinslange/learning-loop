@@ -36,7 +36,11 @@ pub const VAULT_FTS: FtsConfig = FtsConfig {
     bm25_weights: "10.0, 5.0, 1.0",
 };
 
-pub fn cosine(a: &[f32], b: &[f32]) -> f32 {
+pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
+    debug_assert!(
+        (a.iter().map(|x| x * x).sum::<f32>().sqrt() - 1.0).abs() < 0.01,
+        "dot_product assumes L2-normalized vectors"
+    );
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
@@ -164,7 +168,7 @@ pub fn rocchio_prf_with(
 
     let mut prf_scored: Vec<(String, f64)> = all_embeddings
         .iter()
-        .map(|(_, path, emb)| (path.clone(), cosine(&expanded, emb) as f64))
+        .map(|(_, path, emb)| (path.clone(), dot_product(&expanded, emb) as f64))
         .collect();
     prf_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     prf_scored.truncate(30);
@@ -176,17 +180,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_cosine_identical() {
+    fn test_dot_product_identical() {
         let v = vec![1.0f32, 0.0, 0.0];
-        let sim = cosine(&v, &v);
+        let sim = dot_product(&v, &v);
         assert!((sim - 1.0).abs() < 1e-5);
     }
 
     #[test]
-    fn test_cosine_orthogonal() {
+    fn test_dot_product_orthogonal() {
         let a = vec![1.0f32, 0.0, 0.0];
         let b = vec![0.0f32, 1.0, 0.0];
-        let sim = cosine(&a, &b);
+        let sim = dot_product(&a, &b);
         assert!(sim.abs() < 1e-5);
     }
 

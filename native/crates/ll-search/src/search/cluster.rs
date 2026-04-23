@@ -4,7 +4,7 @@ use serde::Serialize;
 
 use crate::db::load_embedding;
 
-use super::scoring::cosine;
+use super::scoring::dot_product;
 use super::graph::load_tags_map;
 use super::query::{find_note_id, resolve_note_id_like};
 use super::store::EmbeddingStore;
@@ -42,7 +42,7 @@ pub fn similar_notes(conn: &Connection, note_path: &str, top_n: usize, store: &E
     let mut scored: Vec<(i64, String, f32)> = all
         .iter()
         .filter(|(id, _, _)| *id != note_id)
-        .map(|(id, path, emb)| (*id, path.clone(), cosine(&note_emb, emb)))
+        .map(|(id, path, emb)| (*id, path.clone(), dot_product(&note_emb, emb)))
         .collect();
 
     scored.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
@@ -81,7 +81,7 @@ pub fn cluster_notes(_conn: &Connection, threshold: f32, store: &EmbeddingStore)
             if assigned[j] {
                 continue;
             }
-            if cosine(&all[i].2, &all[j].2) >= threshold {
+            if dot_product(&all[i].2, &all[j].2) >= threshold {
                 assigned[j] = true;
                 cluster.push(all[j].1.clone());
             }
@@ -130,7 +130,7 @@ pub fn discriminate_pairs(
         .flat_map(|i| {
             let mut local_pairs = Vec::new();
             for j in (i + 1)..n {
-                let sim = cosine(&embeddings[i].1, &embeddings[j].1);
+                let sim = dot_product(&embeddings[i].1, &embeddings[j].1);
                 if sim >= threshold {
                     local_pairs.push(DiscriminatePair {
                         note_a: embeddings[i].0.clone(),

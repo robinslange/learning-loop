@@ -1,6 +1,6 @@
 pub(crate) use ll_core::scoring::{
     PrfParams,
-    cosine,
+    dot_product,
     add_ranked_rrf, finalize_rrf,
     collect_seeds, rocchio_prf_with,
 };
@@ -70,17 +70,17 @@ mod tests {
     }
 
     #[test]
-    fn test_cosine_identical() {
+    fn test_dot_product_identical() {
         let v = norm(&[1.0, 0.0, 0.0]);
-        let sim = cosine(&v, &v);
+        let sim = dot_product(&v, &v);
         assert!((sim - 1.0).abs() < 1e-5);
     }
 
     #[test]
-    fn test_cosine_orthogonal() {
+    fn test_dot_product_orthogonal() {
         let a = norm(&[1.0, 0.0, 0.0]);
         let b = norm(&[0.0, 1.0, 0.0]);
-        let sim = cosine(&a, &b);
+        let sim = dot_product(&a, &b);
         assert!(sim.abs() < 1e-5);
     }
 }
