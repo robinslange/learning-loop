@@ -3,7 +3,7 @@ use rusqlite::{params, Connection};
 use std::fs;
 use std::path::Path;
 
-use crate::embed::model_id;
+use crate::embed;
 
 use super::index::IndexResult;
 
@@ -100,7 +100,9 @@ pub(crate) fn create_schema(conn: &Connection) {
     let upsert = "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)";
     conn.execute(upsert, params!["schema_version", SCHEMA_VERSION.to_string()])
         .unwrap();
-    conn.execute(upsert, params!["model_id", model_id()]).unwrap();
+    if let Some(p) = embed::try_provider() {
+        conn.execute(upsert, params!["model_id", p.model_id()]).unwrap();
+    }
     conn.execute(upsert, params!["dtype", DTYPE]).unwrap();
     conn.execute(upsert, params!["indexed_at", ""]).unwrap();
     conn.execute(upsert, params!["note_count", "0"]).unwrap();

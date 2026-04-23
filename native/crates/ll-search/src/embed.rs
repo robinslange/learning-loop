@@ -45,6 +45,10 @@ pub fn embed_documents(texts: &[String]) -> Vec<Vec<f32>> {
     provider().embed_documents(texts).expect("embed_documents failed")
 }
 
+pub fn try_provider() -> Option<&'static dyn EmbeddingProvider> {
+    PROVIDER.get().map(|b| b.as_ref())
+}
+
 pub fn try_embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
     provider().embed_query(text).map_err(|e| anyhow::anyhow!("embed_query: {e}"))
 }
