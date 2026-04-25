@@ -61,7 +61,10 @@ const llWatchShim = `#!/bin/bash
 set -euo pipefail
 
 CACHE_DIR="${cacheParent}"
-LATEST="$(ls -d "\${CACHE_DIR}"/*/ 2>/dev/null | sort -V | tail -1)"
+# Filter to version-named dirs (start with a digit) — Claude Code's plugin
+# manager leaves orphan hash dirs (e.g. e27a4322c362/) containing only a
+# .orphaned_at marker, and sort -V picks letter-prefixed names as "latest".
+LATEST="$(ls -d "\${CACHE_DIR}"/[0-9]*/ 2>/dev/null | sort -V | tail -1)"
 
 if [ -z "\${LATEST}" ]; then
   echo "error: learning-loop plugin not found in cache" >&2
