@@ -114,7 +114,15 @@ After writing the note, before returning it, run two verification passes. The br
 Compare every source in the note against the research brief provided as input:
 - Author names, URLs, and years must match exactly between note and brief
 - If you introduced a source not in the brief, resolve it via `source-resolver.mjs resolve`
-- Check claim-strength matches source-strength (don't drop scope, inflate evidence breadth, or round numbers)
+
+Then walk the note for the four overclaim shapes (see `capture-rules.md` → "Claim Shapes Requiring Verbatim Anchoring"). For each shape, apply its rule before emitting the note:
+
+1. **Numbers** — for every numerical figure in the note (X%, X billion, <X, >X, X ms, X-fold, n=X), locate the exact phrasing in the research brief or a page you fetched this session. If not exact (including hedges like "roughly", "~", "may"), either drop the figure or append `[not in source]` inline. Common failures: chained-summary numbers (search-result summary cites paper, you cite paper but the figure was in the summary); strengthened comparators ("roughly 65%" → ">65%"); fabricated specificity ("21 codes wrong").
+2. **Universals** — grep the note for "no X does", "X is the only Y", "none of the X", "all X are", "every X". For each, require either an explicit survey citation OR rewrite as first-person evidence ("I haven't found X that does Y"). Default to the softened form. One counter-example refutes a universal.
+3. **Named attributions** — for every "Author said", "Paper shows", "RFC defines", "X documents Y", confirm the cited source contains a verbatim sentence-fragment supporting the attribution. If you can't pull verbatim, either fetch and quote, or strip the named anchor and state the claim in your own voice.
+4. **Hedges** — for every quantitative or qualitative claim, compare your hedge level to the source's. Don't promote "preferential" → "exclusive", "may" → "does", "in some implementations" → "always". The hedge IS the claim.
+
+If a shape check fires and you can't resolve it (no verbatim, no survey, no fetched source), the note is not ready — either edit the claim to the softened form or mark it inline so /verify catches it later.
 
 ### Pass 2: API verification
 

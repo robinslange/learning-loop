@@ -106,11 +106,14 @@ When called from note-writer or other agents that need deterministic verificatio
 ### Check quantitative claims
 
 1. Run: `node PLUGIN/scripts/source-resolver.mjs check-claims <tmpdir>/ll-note-verify-TIMESTAMP.md`
-2. For each claim:
-   - `in_abstract: true` -- confirmed
-   - `in_abstract: false` -- read the abstract independently; if the number appears nowhere, add `[not in abstract]` after the claim. Do NOT remove the claim.
-3. Runs once (informational, not corrective).
-4. Clean up the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-note-verify-TIMESTAMP.md') } catch(e) {}"`
+2. The script checks numbers against:
+   - **Abstracts** (when source has PMID, DOI, or arXiv ID) — `source_kind: "abstract"` in output
+   - **Page text** (when source is a non-academic URL — docs, blogs, vendor pages) — `source_kind: "page"` in output. Paywalled/PDF domains are skipped.
+3. For each claim:
+   - `in_abstract: true` -- confirmed in source
+   - `in_abstract: false` -- the number does not appear in the fetched source (abstract or page). Read independently; if it appears nowhere, add `[not in source]` after the claim. Do NOT remove the claim.
+4. Runs once (informational, not corrective).
+5. Clean up the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-note-verify-TIMESTAMP.md') } catch(e) {}"`
 
 ## Output
 

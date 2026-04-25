@@ -29,6 +29,10 @@
 - **`skills/reflect/SKILL.md`** and **`skills/ingest/SKILL.md`** -- the post-batch sweep block dropped its inline `LL_BIN=…` resolution (which silently fell back to a version-pinned dev-build path) and now calls `ll-search index …` directly via the shim.
 - **`skills/init/SKILL.md`** Phase 3d -- renamed from "Install ll-watch CLI" to "Install CLI shims"; documents both shims and instructs running `install-shims.mjs --install`. The dashboard line in Phase 1 and the post-init summary now show both shims.
 
+### Added
+
+- **Overclaim mitigation, Tracks A+B.** Verify finding "overclaim" was 44% of all flags but the existing `check-claims` script only fired for PMID/DOI/arXiv sources — silent on the ~90% of vault notes that cite docs/blogs/vendor pages. Two-track fix: (a) `agents/_skills/capture-rules.md` adds a "Claim Shapes Requiring Verbatim Anchoring" section enumerating four write-time-checkable shapes (numerical figures, universal claims, named attributions, strengthened hedges) with per-shape rules, and a new `[not in source]` inline marker; `agents/note-writer.md` Pass 1 verification now walks the note for each shape before emit. (b) `scripts/source-resolver.mjs check-claims` extends to non-academic URLs by fetching and stripping page HTML (`fetchPageText`), with a `WEB_FETCH_BLOCKLIST` for paywalled/PDF domains (sciencedirect, springer, doi.org, etc). Output now includes `source_kind: "abstract" | "page"` and the source `url`. `agents/_skills/source-verification.md` updated to reflect both source kinds and the new marker. Track C (regex shape audit) deferred pending next provenance report.
+
 ## v1.16.7
 
 ### Added

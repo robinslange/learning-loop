@@ -1189,6 +1189,46 @@ function findNumberInAbstract(number, abstract) {
   return match ? { found: true, excerpt: match[0].trim() } : { found: false, excerpt: null };
 }
 
+// Domains that paywall, bot-block, or return PDFs — never fetch as HTML for claim-checking.
+const WEB_FETCH_BLOCKLIST = [
+  /sciencedirect\.com/i,
+  /linkinghub\.elsevier\.com/i,
+  /doi\.org/i,
+  /springer\.com/i,
+  /tandfonline\.com/i,
+  /ieeexplore\.ieee\.org/i,
+  /eprints\..*\.ac\.uk/i,
+  /\.pdf(\?|$)/i,
+];
+
+function isBlockedFetch(url) {
+  return WEB_FETCH_BLOCKLIST.some(re => re.test(url));
+}
+
+async function fetchPageText(url) {
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; learning-loop/1.0)' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return null;
+    const html = await res.text();
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+  } catch {
+    return null;
+  }
+}
+
 async function checkClaims(notePath) {
   const content = readFileSync(notePath, 'utf-8');
   const sources = extractSourcesFromNote(content);
@@ -1203,23 +1243,35 @@ async function checkClaims(notePath) {
 
   for (const src of sources) {
     let metadata = null;
+    let sourceKind = null;
 
     if (src.pmid) {
       metadata = await pubmedFetch(src.pmid);
+      sourceKind = 'abstract';
     } else if (src.arxivId) {
       metadata = await arxivFetchById(src.arxivId);
+      sourceKind = 'abstract';
     } else if (src.doi) {
       const url = 'https://api.crossref.org/works/' + encodeURIComponent(src.doi);
       const crData = await fetchJSON(url);
       if (crData?.message) {
         const abstract = (crData.message.abstract || '').replace(/<[^>]+>/g, '');
         metadata = { abstract, title: crData.message.title?.[0] };
+        sourceKind = 'abstract';
+      }
+    } else if (src.url && !isBlockedFetch(src.url)) {
+      const pageText = await fetchPageText(src.url);
+      if (pageText) {
+        metadata = { abstract: pageText };
+        sourceKind = 'page';
       }
     }
 
     if (!metadata?.abstract) continue;
 
-    const srcLabel = src.claimedAuthor ? (src.claimedAuthor + ' ' + (src.claimedYear || '')).trim() : (src.pmid || src.doi);
+    const srcLabel = src.claimedAuthor
+      ? (src.claimedAuthor + ' ' + (src.claimedYear || '')).trim()
+      : (src.pmid || src.doi || src.url);
 
     for (const num of allNumbers) {
       const { found, excerpt } = findNumberInAbstract(num, metadata.abstract);
@@ -1227,6 +1279,8 @@ async function checkClaims(notePath) {
         source: srcLabel,
         pmid: src.pmid || null,
         doi: src.doi || null,
+        url: src.url || null,
+        source_kind: sourceKind,
         claim: num,
         in_abstract: found,
         abstract_excerpt: excerpt

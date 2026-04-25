@@ -65,6 +65,28 @@ The `source:` field lives in frontmatter only. Do NOT write a `**Source:**` or `
 
 If no URL exists, write `source: "[no URL found]"` rather than omitting the field. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone.
 
+## Claim Shapes Requiring Verbatim Anchoring
+
+Four claim shapes account for ~94% of overclaim findings in vault audits. Each has a write-time rule:
+
+**1. Numerical figures** — any "X%", "X billion", "<X", ">X", "X ms", "X-fold"
+
+Copy the exact phrasing from the source, including hedges. Don't strengthen "roughly 65%" into ">65%". Don't translate "preferential CNS distribution" into "undetectable in serum". If the figure isn't verbatim in the research brief or a page you fetched this session, drop the figure or write `[not in source]` next to it.
+
+**2. Universal claims** — "no X does Y", "X is the only Y", "none of the X", "all X are Y", "every X"
+
+These are population claims that one counter-example refutes. They require either a survey-style citation (a paper or doc that explicitly enumerated the population) OR softening to a first-person evidence claim: "I haven't found an X that does Y" / "no X I tested does Y". Default to the softened form when no survey exists.
+
+**3. Named attributions** — "Author surname said X", "Paper shows Y", "RFC defines Z", "X documents Y"
+
+Every named attribution must include a verbatim sentence-fragment locatable in the cited source. If you can't pull a verbatim fragment, the attribution is paraphrase from memory — either fetch and quote, or remove the named attribution and state the claim in your own voice without the source-name anchor.
+
+**4. Strengthened hedges** — promoting comparative/qualitative source language to absolutes
+
+If the source says "preferential", don't write "exclusive". If the source says "may", don't write "does". If the source says "in some implementations", don't write "always". The hedge IS the claim — preserve it.
+
+These shapes should be checked at write time, not deferred to /verify.
+
 ## What to Capture
 
 - Decisions made — what was chosen, what was rejected
@@ -91,5 +113,6 @@ These inline markers are set by the note-writer's API verification step. All age
 - `[unresolved]` -- source could not be found in PubMed, Semantic Scholar, or CrossRef. The citation may still be correct (non-academic source, preprint, or unusual identifier). `/deepen` should attempt to resolve it.
 - `[unverified]` -- source was found but author/year mismatch could not be auto-corrected after 2 attempts. Manual review needed.
 - `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. `/verify` should check the full text when possible.
+- `[not in source]` -- a specific number in the note does not appear in the fetched source page (for non-academic URLs: docs, blogs, vendor pages). Check the source manually; if absent, soften the figure or remove it.
 
 These markers are informational, not errors. They signal where human or deeper automated review should focus.
