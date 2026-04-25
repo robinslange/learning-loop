@@ -25,6 +25,10 @@ federation/config.json
 scripts/node_modules/
 federation/node_modules/
 federation/relay/node_modules/
+native/node_modules/
+
+# Wrangler local state (Cloudflare Workers dev)
+native/.wrangler/
 
 # Training data (adapter weights, pair datasets)
 native/training_data/
