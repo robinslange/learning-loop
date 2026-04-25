@@ -99,6 +99,7 @@ Using the reflect-scan results from Step 2.5:
 - Existing memories without a confidence field default to `medium` throughout the system
 - Feedback memories: lead with the rule, then Why and How to apply
 - Project memories: lead with the fact, then Why and How to apply
+- **Keep memories tight at capture.** Target body sizes: feedback/user under 400 chars, project/reference under 800 chars. These targets sit below the dream COMPRESS thresholds (500 / 1,000) — capturing tighter avoids round-trips through dream. Cut filler, keep the rule + Why + How to apply.
 - Update MEMORY.md index
 
 **For Obsidian vault items:**

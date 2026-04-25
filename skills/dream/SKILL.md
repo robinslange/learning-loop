@@ -38,17 +38,11 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 5. Read MEMORY.md. Check links resolve to actual files. Flag orphaned pointers.
 
-6. Check retrieval tracking data:
-   ```bash
-   ls ${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop}/retrieval/access-*.jsonl 2>/dev/null | tail -3
-   ```
-
-7. Report:
+6. Report:
    ```
    Dreaming: [project name]
    Memory files: N (N feedback, N project, N user, N reference)
    Index entries: N (N orphaned)
-   Retrieval data: N sessions tracked (or "not yet available")
    ```
 
 ## Phase 2: Gather Signal
@@ -56,40 +50,40 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 1. **Group by type, sort newest-last within each group.**
    Order: feedback, user, project, reference. Within each group, oldest first (exploits recency bias per Chattaraj & Raj 2026).
 
-2. **Flag MERGE candidates.**
+   *Steps 2–8 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
+
+2. **Flag DATE NORMALIZE candidates.**
+   Files containing relative temporal references ("yesterday", "last week", etc.).
+
+3. **Flag MERGE candidates.**
    Within each type group, flag pairs where both descriptions reference the same tool/concept, one is a subset of the other, or both contain the same rule. Skip pairs that contradict each other (those go to RESOLVE).
 
-3. **Flag RESOLVE candidates.**
+4. **Flag RESOLVE candidates.**
    Within each type group, flag pairs where two memories assert opposite rules or facts about the same subject.
 
-4. **Flag ABSTRACT candidates.**
+5. **Flag ABSTRACT candidates.**
    Clusters of 4+ memories within the same type group describing variations of the same pattern. For each cluster, note: the memories, the candidate abstraction (one sentence), which would be archived (fully subsumed), which would remain (unique detail). Conservative: only flag clear patterns.
 
-5. **Flag COMPRESS candidates.**
+6. **Flag COMPRESS candidates.**
    Memory files exceeding 15 lines or exceeding size limits (feedback/user: 500 chars, project/reference: 1,000 chars body).
 
-6. **Flag PRUNE candidates.**
+7. **Flag PRUNE candidates.**
    - Orphaned index entries
-   - Outdated project memories (superseded versions, ended sprints, reversed decisions)
-   - Low-retrieval memories (if tracking data exists): scan JSONL entries for sessions where a memory file appears in the `memories` array. Note: this tracks file presence in the memory directory at session start, not whether Claude actually read the file. Thresholds account for this: `weak` + absent from 10 consecutive session snapshots, `medium` + absent from 15. `strong` memories never auto-prune on retrieval alone.
+   - Outdated project memories (superseded versions, ended sprints, reversed decisions, "resolved" handoffs)
 
-7. **Flag LINK candidates.**
+8. **Flag LINK candidates.**
    Cross-type pairs sharing a keyword or concept. Descriptions only. Cap at 30 most recent files if 50+.
-
-8. **Flag DATE NORMALIZE candidates.**
-   Files containing relative temporal references ("yesterday", "last week", etc.).
 
 9. **Present signal summary and ask for approval:**
    ```
-   Dream signal:
+   Dream signal (operators in execution order):
    - DATE NORMALIZE: N candidates
    - MERGE: N candidate pairs
    - RESOLVE: N contradiction pairs
    - ABSTRACT: N clusters (N source memories)
    - COMPRESS: N candidates (N over size limit)
-   - PRUNE: N candidates (N orphaned, N stale, N low-retrieval)
+   - PRUNE: N candidates (N orphaned, N stale)
    - LINK: N candidate pairs
-   Retrieval data: N sessions tracked
 
    Proceed with consolidation? [yes/no]
    Note: ABSTRACT has a separate per-cluster gate.
@@ -110,7 +104,7 @@ For each operator, read its instruction file from `operators/` and execute:
 | RESOLVE | `operators/resolve.md` | Contradiction pairs |
 | ABSTRACT | `operators/abstract.md` | Flagged clusters (per-cluster user gate) |
 | COMPRESS | `operators/compress.md` | Files over line/size thresholds |
-| PRUNE | `operators/prune.md` | Orphaned, stale, low-retrieval candidates |
+| PRUNE | `operators/prune.md` | Orphaned and stale candidates |
 | LINK | `operators/link.md` | Cross-type pairs |
 
 Log every operation to `_dream_log.md` (append, create if needed).
