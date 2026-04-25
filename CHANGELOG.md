@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Two new vault-librarian classifiers** running as single structured-output calls against gemma4:e2b. **Tag suggester** runs on notes with 0–1 tags and proposes up to 2 vocabulary-bounded tags per note (vocabulary built from existing vault tags, frequency-curated, top 60, structural categories excluded). Manual precision on a 40-note sample: 0.78 strict / 0.84 charitable. **Duplicate detector** runs on every visited note, comparing against three nearest neighbours from `ll-search similar` with 500-char body context per side, emitting a 3-way enum (`duplicate`/`same_topic`/`unrelated`). Both follow the established `voiceCheck` pattern — pre-fetched context, single `format=` schema call, no tool-use loop. New queue task types: `tag_suggestion`, `duplicate_flag`. New state counters: `tag_suggestions`, `duplicate_flags`. New submit functions in `scripts/lib/librarian-tools.mjs`. 15 new tests in `tests/tag-classifier.test.mjs` and `tests/duplicate-classifier.test.mjs`.
+
+### Changed
+
+- **`noteNeedsInvestigation` returns an array of tasks** (`link_check`, `voice_gate`, `tag_suggest`, `duplicate_check`) instead of a single value. Each note can trigger multiple tasks per visit; the main loop dispatches each in turn.
+- **`/health --librarian` review mode** (Step L2) renamed to "Phase 1 — Advisory Review" with subsections for tag suggestions (apply by merging into the target's frontmatter `tags:` field) and duplicate flags (per-item `merge` / `link` / `dismiss` choice). Step 7.5 dashboard groups all five task types.
+- **`/inbox` Step 1.5** now surfaces voice flags, tag suggestions, and duplicate flags for inbox notes during triage (was voice flags only).
+- **Doc updates**: `skills/help`, `guide/agents`, `guide/configuration` describe the new classifiers and queue task types. `guide/agents` reflects that link investigation runs as a tool-use loop while voice/tag/duplicate run as single structured-output calls.
+
+### Fixed
+
+- **`getPluginData` / `resolvePluginData` no longer stomp the data-path marker with temp paths.** The previous implementation wrote `$CLAUDE_PLUGIN_DATA` to `~/.claude/plugins/data/.ll-data-path` on every call. Tests that set the env var to a `tmpdir()` path persisted that path into the marker; once the test cleaned up its temp dir, shell-only `ll-search` invocations (which fall back to the marker) hit "binary not found" until the next real Claude Code session re-stamped the marker. Both functions (`scripts/lib/config.mjs` and `hooks/lib/common.mjs`) now skip the write when the path looks transient (`tmpdir()`, `/tmp/`, `/var/folders/`, `/private/var/folders/`) and skip redundant writes when the marker already matches. New regression test: `tests/plugin-data-marker.test.mjs` (4 cases).
+
+### Added
+
+- **`ll-search` CLI shim** -- a stable shell script at `~/.local/bin/ll-search` that resolves `PLUGIN_DATA` from `$CLAUDE_PLUGIN_DATA` or the saved `~/.claude/plugins/data/.ll-data-path` marker, then exec's the binary at `$PLUGIN_DATA/bin/ll-search` with `ORT_DYLIB_PATH` and `ORT_LIB_LOCATION` set to the binary's directory (matches `scripts/lib/binary.mjs`). Survives plugin updates because the binary lives in `PLUGIN_DATA`, not in the plugin cache. Fixes the "command not found" failure mode for the `ll-search` invocations in `skills/init/SKILL.md`, `agents/_skills/promote-gate.md`, and other places that assumed `ll-search` was already on `PATH`.
+- **`scripts/install-shims.mjs`** -- canonical multi-shim installer. Writes both `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`. Supports `--install` (default) and `--check`. The SessionStart hook auto-runs `--install` whenever either shim is missing.
+
+### Changed
+
+- **`scripts/watch.mjs --install`** now delegates to `install-shims.mjs --install` so the legacy invocation still works and writes both shims.
+- **`hooks/session-start.js`** auto-install path now writes both shims (was: `ll-watch` only).
+- **`skills/reflect/SKILL.md`** and **`skills/ingest/SKILL.md`** -- the post-batch sweep block dropped its inline `LL_BIN=…` resolution (which silently fell back to a version-pinned dev-build path) and now calls `ll-search index …` directly via the shim.
+- **`skills/init/SKILL.md`** Phase 3d -- renamed from "Install ll-watch CLI" to "Install CLI shims"; documents both shims and instructs running `install-shims.mjs --install`. The dashboard line in Phase 1 and the post-init summary now show both shims.
+
 ## v1.16.7
 
 ### Added
