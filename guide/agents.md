@@ -30,14 +30,14 @@ Fourteen working agents plus the `diagram-rules` shared reference file.
 
 ## Vault librarian (local, optional)
 
-A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It has 10 tools backed by `ll-search` and SQL queries, and writes observations to a JSONL queue. Claude reviews the queue on demand via `/health --librarian`.
+A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. Link investigation runs as a tool-use loop with 10 tools backed by `ll-search` and SQL queries; the other classifiers (voice gate, tag suggester, duplicate detector) run as single structured-output calls with pre-fetched context. All five tasks write observations to a JSONL queue. Claude reviews the queue on demand via `/health --librarian`.
 
 | Agent | Engine | Tasks | Speed |
 |---|---|---|---|
-| librarian | Gemma 4 E2B (ollama, local) | Link validation, voice gate, staleness flagging | ~15s/note |
+| librarian | Gemma 4 E2B (ollama, local) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note |
 | Claude (on-demand) | Opus/Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
 
-E2B is excellent at classification with evidence (90% link accuracy, 93% voice gate) but poor at open-ended investigation. The architecture splits accordingly.
+E2B is excellent at classification with evidence (90% link accuracy, 93% voice gate F1 0.78, tag suggester precision 0.78–0.84, duplicate detector ~3% false-positive with body context) but poor at open-ended investigation. The architecture splits accordingly.
 
 ## Model selection
 

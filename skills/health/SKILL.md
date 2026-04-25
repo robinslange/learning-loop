@@ -92,9 +92,9 @@ If `--librarian` flag is present, skip all vault health checks and enter librari
 
 Read `PLUGIN_DATA/librarian/queue.jsonl`. Parse all lines. Filter to `status === 'pending'`. If no pending items, report "No pending librarian observations." and stop.
 
-**Step L2: Phase 1 — Link Suggestions + Voice Flags**
+**Step L2: Phase 1 — Advisory Review**
 
-Group pending items into link suggestions and voice flags.
+Group pending items into link suggestions, tag suggestions, voice flags, and duplicate flags. Each subsection is independent — present and resolve one at a time.
 
 **Link suggestions:**
 Present in a table grouped by confidence:
@@ -119,6 +119,26 @@ For each approved link suggestion:
 
 For rejected items, update status to `rejected`.
 
+**Tag suggestions:**
+Present as a table:
+
+```
+Tag suggestions (N):
+  Target                                    Existing tags    Suggested tags
+  3-permanent/ginkgo-biloba-acute-pk...     nootropic        pharmacology, neuroscience
+  ...
+```
+
+Ask user: "Apply tag suggestions? Enter numbers, 'all', or 'skip'."
+
+For each approved tag suggestion:
+1. Read the target's frontmatter
+2. Merge `suggested_tags` into the existing `tags:` list (dedupe)
+3. Write the updated frontmatter back via Edit
+4. Update queue item status to `approved`
+
+For rejected items, update status to `rejected`.
+
 **Voice flags:**
 Present as a list:
 
@@ -129,6 +149,17 @@ Voice flags (N):
 ```
 
 These are advisory — present them for awareness. Ask: "Acknowledge voice flags? (y/n)" — on yes, update all to `acknowledged`.
+
+**Duplicate flags:**
+Present as a list:
+
+```
+Duplicate flags (N):
+  1. 0-inbox/foo-claim.md  ↔  3-permanent/foo-claim-original.md  (similarity 0.93)
+  ...
+```
+
+For each, ask the user to choose one of: `merge` (read both, decide which to keep, the user does the merge), `link` (add a wikilink between them — drop a `[[other]]` reference into the newer note's body), `dismiss`. Update queue item status to `merged`, `linked`, or `dismissed`.
 
 **Step L3: Phase 2 — Staleness Suspects**
 
@@ -155,7 +186,7 @@ After investigation, ask user what to do with each: "update", "dismiss", or "fla
 After both phases:
 1. Expire processed/old items: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))"`
 2. Reset librarian state to allow re-investigation: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.resetState())"`
-3. Report summary: "Processed N items: X links applied, Y voice flags acknowledged, Z suspects investigated."
+3. Report summary: "Processed N items: X links applied, Y tags applied, V voice flags acknowledged, D duplicates resolved, Z suspects investigated."
 
 Then stop (do not proceed to Step 1).
 
@@ -234,16 +265,20 @@ Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DAT
 If the queue file doesn't exist or is empty, skip this step silently.
 
 Group pending items by `task` field:
-- `link_suggestion` — link suggestions
-- `voice_flag` — voice flags
-- `staleness_suspect` — staleness suspects
+- `link_suggestion` — link suggestions (orphan notes that should be linked)
+- `tag_suggestion` — tag suggestions (under-tagged notes with proposed vocabulary tags)
+- `voice_flag` — voice flags (topic-style titles)
+- `duplicate_flag` — duplicate flags (notes that make the same claim as a near-neighbour)
+- `staleness_suspect` — staleness suspects (Claude investigates)
 
 Add to the dashboard output:
 
 ```
   Librarian:       N pending observations (visited M/T notes)
     Link suggestions:     N (X high, Y review)
-    Voice flags:           N
+    Tag suggestions:      N
+    Voice flags:          N
+    Duplicate flags:      N
     Staleness suspects:   N (for Claude to investigate)
     Queue:                P% full (N/CAP cap)
 ```

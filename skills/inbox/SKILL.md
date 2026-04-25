@@ -43,21 +43,26 @@ The agent definition is at `PLUGIN/agents/inbox-organiser.md`.
 
 Use `subagent_type: "learning-loop:note-scorer"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 
-### Step 1.5: Surface Librarian Voice Flags
+### Step 1.5: Surface Librarian Observations for Inbox Notes
 
-Before the agent returns, check the librarian queue for voice flags targeting inbox notes.
+Before the agent returns, check the librarian queue for pending observations targeting inbox notes.
 
-Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'` and `task === 'voice_flag'` and `target` starts with `0-inbox/`.
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'`, `target` starts with `0-inbox/`, and `task` is one of: `voice_flag`, `tag_suggestion`, `duplicate_flag`.
 
-If matches exist, include them as advisory context when presenting the agent's results:
+If matches exist, include them as advisory context when presenting the agent's results, grouped by task type:
 
 ```
 Librarian observations:
-  "gmail multi daemon pull deduplication" — Names a topic, not an insight. Consider retitling.
+  Voice flags:
+    "gmail multi daemon pull deduplication" — Names a topic, not an insight. Consider retitling.
+  Tag suggestions:
+    "ginkgo biloba acute pk profile" → pharmacology, neuroscience
+  Duplicate flags:
+    "foo-claim.md" ↔ 3-permanent/foo-claim-original.md (similarity 0.93)
   ...
 ```
 
-These are informational — the user decides whether to act on them during triage.
+These are informational — the user decides whether to act on them during triage. Apply or dismiss them in `/health --librarian`.
 
 ### Step 2: Handle Gated Actions
 

@@ -88,7 +88,7 @@ An optional background agent that uses Gemma 4 E2B via ollama to continuously ma
 | `queue_cap` | `200` | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
 | `ollama_url` | `http://localhost:11434` | Ollama API endpoint. |
 
-The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes, checking them mechanically (staleness regex) and via ollama tool calling (link investigation, voice gate), and writing observations to `PLUGIN_DATA/librarian/queue.jsonl`. A separate `state.json` tracks visited notes and resets after a full pass.
+The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes and dispatching multiple tasks per note. Mechanical: staleness regex. Ollama tool-use loop: link investigation for orphans. Ollama structured-output classifiers: voice gate (topic-style titles in inbox/fleeting notes), tag suggestion (under-tagged notes with vocabulary-bounded picks from the vault's existing tags), duplicate detection (3-way enum against three nearest neighbours with body context). Each task writes its observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field (`link_suggestion`, `voice_flag`, `tag_suggestion`, `duplicate_flag`, `staleness_suspect`). A separate `state.json` tracks visited notes and resets after a full pass.
 
 Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act.
 

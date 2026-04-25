@@ -1,20 +1,26 @@
-import { run } from './binary.mjs';
-import { openReadonly } from './sqljs.mjs';
-import { readFileSync, existsSync } from 'fs';
-import { join, basename } from 'path';
-import { appendItem, newItemId, loadState, saveState, incrementCounter } from './librarian-queue.mjs';
-import { VAULT_PATH, DB_PATH } from './constants.mjs';
+import { run } from "./binary.mjs";
+import { openReadonly } from "./sqljs.mjs";
+import { readFileSync, existsSync } from "fs";
+import { join, basename } from "path";
+import {
+  appendItem,
+  newItemId,
+  loadState,
+  saveState,
+  incrementCounter,
+} from "./librarian-queue.mjs";
+import { VAULT_PATH, DB_PATH } from "./constants.mjs";
 
 const MAX_RESULT = 1500;
 
 function cap(str) {
-  if (typeof str !== 'string') str = JSON.stringify(str);
-  return str.length > MAX_RESULT ? str.slice(0, MAX_RESULT) + '…' : str;
+  if (typeof str !== "string") str = JSON.stringify(str);
+  return str.length > MAX_RESULT ? str.slice(0, MAX_RESULT) + "…" : str;
 }
 
 function slug(notePath) {
-  const name = notePath.split('/').pop();
-  return name.replace(/\.md$/, '');
+  const name = notePath.split("/").pop();
+  return name.replace(/\.md$/, "");
 }
 
 let _db = null;
@@ -26,17 +32,17 @@ async function getDb() {
 }
 
 async function findSimilar({ note_path }) {
-  const results = run(['similar', DB_PATH, note_path, '--top', '5']);
+  const results = run(["similar", DB_PATH, note_path, "--top", "5"]);
   return cap(JSON.stringify(results));
 }
 
 async function searchVault({ query }) {
-  const results = run(['query', DB_PATH, query, '--top', '5']);
+  const results = run(["query", DB_PATH, query, "--top", "5"]);
   return cap(JSON.stringify(results));
 }
 
 async function findClusters() {
-  const results = run(['cluster', DB_PATH, '--threshold', '0.85']);
+  const results = run(["cluster", DB_PATH, "--threshold", "0.85"]);
   return cap(JSON.stringify(results));
 }
 
@@ -45,9 +51,9 @@ async function getInlinks({ note_path }) {
   const s = slug(note_path);
   const rows = db.exec(
     `SELECT COUNT(*) as count FROM links WHERE target_path = ? AND target_path NOT LIKE '%[%'`,
-    [s]
+    [s],
   );
-  if (!rows.length) return '0';
+  if (!rows.length) return "0";
   const count = rows[0].values[0][0];
   return String(count);
 }
@@ -56,25 +62,25 @@ async function getOutlinks({ note_path }) {
   const db = await getDb();
   const rows = db.exec(
     `SELECT target_path FROM links WHERE source_path = ? AND target_path NOT LIKE '%[%'`,
-    [note_path]
+    [note_path],
   );
   if (!rows.length) return cap(JSON.stringify([]));
-  const targets = rows[0].values.map(r => r[0]);
+  const targets = rows[0].values.map((r) => r[0]);
   return cap(JSON.stringify(targets));
 }
 
 async function getTags() {
-  const results = run(['tags', DB_PATH]);
+  const results = run(["tags", DB_PATH]);
   return cap(JSON.stringify(results));
 }
 
 async function readNote({ note_path }) {
   const fullPath = join(VAULT_PATH, note_path);
   if (!existsSync(fullPath)) return `Note not found: ${note_path}`;
-  let content = readFileSync(fullPath, 'utf-8');
+  let content = readFileSync(fullPath, "utf-8");
   // Strip YAML frontmatter
-  if (content.startsWith('---')) {
-    const end = content.indexOf('\n---', 3);
+  if (content.startsWith("---")) {
+    const end = content.indexOf("\n---", 3);
     if (end !== -1) {
       content = content.slice(end + 4).trimStart();
     }
@@ -86,43 +92,43 @@ async function submitLink({ target, suggested_link, confidence, reason }) {
   // Fix 2: reject self-links
   if (target === suggested_link) {
     let state = loadState();
-    state = incrementCounter(state, 'rejected_self_link');
+    state = incrementCounter(state, "rejected_self_link");
     saveState(state);
-    return 'Rejected: self-link';
+    return "Rejected: self-link";
   }
 
   // Fix 2: reject missing files
   const fullSuggestedPath = join(VAULT_PATH, suggested_link);
   if (!existsSync(fullSuggestedPath)) {
     let state = loadState();
-    state = incrementCounter(state, 'rejected_missing_file');
+    state = incrementCounter(state, "rejected_missing_file");
     saveState(state);
-    return 'Rejected: suggested_link file does not exist';
+    return "Rejected: suggested_link file does not exist";
   }
 
   // Fix 1: reject already-linked
-  const suggestedSlug = basename(suggested_link, '.md');
+  const suggestedSlug = basename(suggested_link, ".md");
   const targetFullPath = join(VAULT_PATH, target);
   if (existsSync(targetFullPath)) {
-    const targetContent = readFileSync(targetFullPath, 'utf-8');
-    const escapedSlug = suggestedSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const targetContent = readFileSync(targetFullPath, "utf-8");
+    const escapedSlug = suggestedSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const linkPattern = new RegExp(`\\[\\[${escapedSlug}(\\|[^\\]]*)?\\]\\]`);
     if (linkPattern.test(targetContent)) {
       let state = loadState();
-      state = incrementCounter(state, 'rejected_already_linked');
+      state = incrementCounter(state, "rejected_already_linked");
       saveState(state);
-      return 'Rejected: link already present in target note';
+      return "Rejected: link already present in target note";
     }
   }
 
   const item = {
     id: newItemId(),
-    task: 'link_suggestion',
+    task: "link_suggestion",
     target,
     suggested_link,
     confidence,
     reason,
-    status: 'pending',
+    status: "pending",
     created_at: new Date().toISOString(),
   };
   appendItem(item);
@@ -137,11 +143,11 @@ async function submitLink({ target, suggested_link, confidence, reason }) {
 async function submitVoiceFlag({ target, current_title, reason }) {
   const item = {
     id: newItemId(),
-    task: 'voice_flag',
+    task: "voice_flag",
     target,
     current_title,
     reason,
-    status: 'pending',
+    status: "pending",
     created_at: new Date().toISOString(),
   };
   appendItem(item);
@@ -156,10 +162,10 @@ async function submitVoiceFlag({ target, current_title, reason }) {
 async function submitSuspect({ target, reason }) {
   const item = {
     id: newItemId(),
-    task: 'staleness_suspect',
+    task: "staleness_suspect",
     target,
     reason,
-    status: 'pending',
+    status: "pending",
     created_at: new Date().toISOString(),
   };
   appendItem(item);
@@ -171,146 +177,237 @@ async function submitSuspect({ target, reason }) {
   return `Queued suspect: ${item.id}`;
 }
 
+async function submitTagSuggestion({
+  target,
+  suggested_tags,
+  existing_tags,
+  reason,
+}) {
+  const item = {
+    id: newItemId(),
+    task: "tag_suggestion",
+    target,
+    suggested_tags,
+    existing_tags: existing_tags || "",
+    reason: reason || "classifier suggestion",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  appendItem(item);
+
+  let state = loadState();
+  state = { ...state, tag_suggestions: (state.tag_suggestions || 0) + 1 };
+  saveState(state);
+
+  return `Queued tag suggestion: ${item.id}`;
+}
+
+async function submitDuplicateFlag({
+  target,
+  duplicate_of,
+  similarity,
+  reason,
+}) {
+  if (target === duplicate_of) {
+    let state = loadState();
+    state = incrementCounter(state, "rejected_self_duplicate");
+    saveState(state);
+    return "Rejected: self-duplicate";
+  }
+
+  const item = {
+    id: newItemId(),
+    task: "duplicate_flag",
+    target,
+    duplicate_of,
+    similarity: typeof similarity === "number" ? similarity : null,
+    reason: reason || "classifier flag",
+    status: "pending",
+    created_at: new Date().toISOString(),
+  };
+  appendItem(item);
+
+  let state = loadState();
+  state = { ...state, duplicate_flags: (state.duplicate_flags || 0) + 1 };
+  saveState(state);
+
+  return `Queued duplicate flag: ${item.id}`;
+}
+
 export const TOOL_DEFS = [
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'find_similar',
-      description: 'Find semantically similar notes by embedding distance',
+      name: "find_similar",
+      description: "Find semantically similar notes by embedding distance",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          note_path: { type: 'string', description: 'Path to the note, e.g. 3-permanent/foo.md' },
+          note_path: {
+            type: "string",
+            description: "Path to the note, e.g. 3-permanent/foo.md",
+          },
         },
-        required: ['note_path'],
+        required: ["note_path"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'search_vault',
-      description: 'Semantic text search across all vault notes',
+      name: "search_vault",
+      description: "Semantic text search across all vault notes",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          query: { type: 'string', description: 'Search query text' },
+          query: { type: "string", description: "Search query text" },
         },
-        required: ['query'],
+        required: ["query"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'find_clusters',
-      description: 'Find near-duplicate note pairs above similarity threshold',
+      name: "find_clusters",
+      description: "Find near-duplicate note pairs above similarity threshold",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {},
         required: [],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'get_inlinks',
-      description: 'Count inbound links to a note',
+      name: "get_inlinks",
+      description: "Count inbound links to a note",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          note_path: { type: 'string', description: 'Path to the note, e.g. 3-permanent/foo.md' },
+          note_path: {
+            type: "string",
+            description: "Path to the note, e.g. 3-permanent/foo.md",
+          },
         },
-        required: ['note_path'],
+        required: ["note_path"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'get_outlinks',
-      description: 'List outbound link targets from a note',
+      name: "get_outlinks",
+      description: "List outbound link targets from a note",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          note_path: { type: 'string', description: 'Path to the note, e.g. 3-permanent/foo.md' },
+          note_path: {
+            type: "string",
+            description: "Path to the note, e.g. 3-permanent/foo.md",
+          },
         },
-        required: ['note_path'],
+        required: ["note_path"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'get_tags',
-      description: 'List all tags with their note counts',
+      name: "get_tags",
+      description: "List all tags with their note counts",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {},
         required: [],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'read_note',
-      description: 'Read note body (frontmatter stripped, capped at 500 chars)',
+      name: "read_note",
+      description: "Read note body (frontmatter stripped, capped at 500 chars)",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          note_path: { type: 'string', description: 'Path to the note, e.g. 3-permanent/foo.md' },
+          note_path: {
+            type: "string",
+            description: "Path to the note, e.g. 3-permanent/foo.md",
+          },
         },
-        required: ['note_path'],
+        required: ["note_path"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'submit_link',
-      description: 'Submit a link suggestion between two notes',
+      name: "submit_link",
+      description: "Submit a link suggestion between two notes",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          target: { type: 'string', description: 'Path of the orphan note that needs a link' },
-          suggested_link: { type: 'string', description: 'Path of the note to link to' },
-          confidence: { type: 'string', description: 'Confidence level: "high" or "review"' },
-          reason: { type: 'string', description: 'Reason for the link suggestion' },
+          target: {
+            type: "string",
+            description: "Path of the orphan note that needs a link",
+          },
+          suggested_link: {
+            type: "string",
+            description: "Path of the note to link to",
+          },
+          confidence: {
+            type: "string",
+            description: 'Confidence level: "high" or "review"',
+          },
+          reason: {
+            type: "string",
+            description: "Reason for the link suggestion",
+          },
         },
-        required: ['target', 'suggested_link', 'confidence', 'reason'],
+        required: ["target", "suggested_link", "confidence", "reason"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'submit_voice_flag',
-      description: 'Flag a note title as topic-not-insight (voice issue)',
+      name: "submit_voice_flag",
+      description: "Flag a note title as topic-not-insight (voice issue)",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          target: { type: 'string', description: 'Path of the note to flag' },
-          current_title: { type: 'string', description: 'The current title of the note' },
-          reason: { type: 'string', description: 'Why the title is topic-not-insight' },
+          target: { type: "string", description: "Path of the note to flag" },
+          current_title: {
+            type: "string",
+            description: "The current title of the note",
+          },
+          reason: {
+            type: "string",
+            description: "Why the title is topic-not-insight",
+          },
         },
-        required: ['target', 'current_title', 'reason'],
+        required: ["target", "current_title", "reason"],
       },
     },
   },
   {
-    type: 'function',
+    type: "function",
     function: {
-      name: 'submit_suspect',
-      description: 'Flag a note for Claude investigation (staleness, accuracy concern, etc.)',
+      name: "submit_suspect",
+      description:
+        "Flag a note for Claude investigation (staleness, accuracy concern, etc.)",
       parameters: {
-        type: 'object',
+        type: "object",
         properties: {
-          target: { type: 'string', description: 'Path of the note to flag' },
-          reason: { type: 'string', description: 'Reason for flagging this note' },
+          target: { type: "string", description: "Path of the note to flag" },
+          reason: {
+            type: "string",
+            description: "Reason for flagging this note",
+          },
         },
-        required: ['target', 'reason'],
+        required: ["target", "reason"],
       },
     },
   },
@@ -333,7 +430,7 @@ export async function executeTool(name, args) {
   const handler = HANDLERS[name];
   if (!handler) throw new Error(`Unknown tool: ${name}`);
   const result = await handler(args);
-  return typeof result === 'string' ? result : cap(JSON.stringify(result));
+  return typeof result === "string" ? result : cap(JSON.stringify(result));
 }
 
-export { submitVoiceFlag };
+export { submitVoiceFlag, submitTagSuggestion, submitDuplicateFlag };
