@@ -123,16 +123,15 @@ Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier i
 Replay the hook chain on any vault notes missing structural backlinks. Idempotent — safe to run on already-hooked notes.
 
 ```bash
-# Resolve plugin data dir, vault path, and ll-search binary at runtime.
+# Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
+# installed by /init or the SessionStart hook) handles binary location and ORT
+# env vars itself.
 PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
 LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
-LL_BIN="$PLUGIN_DATA/bin/ll-search"
-[ -x "$LL_BIN" ] || LL_BIN="${CLAUDE_PLUGIN_ROOT}/native/target/release/ll-search"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
 # Incremental by default; only embeds notes that are new or mtime-changed.
-ORT_DYLIB_PATH="$(dirname "$LL_BIN")" ORT_LIB_LOCATION="$(dirname "$LL_BIN")" \
-  "$LL_BIN" index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
+ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
 # Detect unlinked candidates (exclude 4-projects — free-form indexes)
 LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt

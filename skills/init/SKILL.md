@@ -33,7 +33,7 @@ Run all checks silently before asking anything. Use Node.js APIs:
 12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the template version from `PLUGIN/templates/claudemd-section.version` (a single-line file containing the template version, e.g. `1`). Compare against the version in the user's comment tag. Note: present/missing/outdated (version mismatch).
 13. **Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 14. **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
-15. **ll-watch CLI:** Check if `~/.local/bin/ll-watch` exists. If it does, run `ll-watch status` to check if the watcher is running.
+15. **CLI shims:** Run `node PLUGIN/scripts/install-shims.mjs --check` to see whether `~/.local/bin/ll-watch` and `~/.local/bin/ll-search` exist. If `ll-watch` exists, run `ll-watch status` to check if the watcher is running.
 
 Present a dashboard:
 
@@ -51,7 +51,7 @@ Learning Loop Setup
   Hub sync:      working (1,200 notes exported, 1 peer downloaded)
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   Librarian:     [status]
-  ll-watch:      installed (not running)
+  Shims:         ll-watch installed, ll-search installed (watcher not running)
 
 Everything looks good. Nothing to set up.
 ```
@@ -196,9 +196,14 @@ Confirm `PLUGIN/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored i
 
 Run `ll-search index` to build the search index. Report progress.
 
-### 3d: Install ll-watch CLI
+### 3d: Install CLI shims
 
-Run `node PLUGIN/scripts/watch.mjs --install` to write a stable shim to `~/.local/bin/ll-watch`. The shim resolves the latest plugin cache version at runtime, so it survives plugin updates. If `~/.local/bin` is not in the user's PATH, inform them to add it.
+Run `node PLUGIN/scripts/install-shims.mjs --install` to write two stable shims to `~/.local/bin/`:
+
+- `ll-watch` — resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
+- `ll-search` — resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
+
+Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node PLUGIN/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
 
 ### 3e: Plugin Dependencies
 
@@ -535,7 +540,7 @@ Learning loop configured.
   CLAUDE.md:   learning-loop section present
   Cache health: installed (or skipped — oh-my-claude not found)
   Librarian:   enabled (or skipped — ollama/hardware not available)
-  ll-watch:    installed
+  Shims:       ll-watch + ll-search installed in ~/.local/bin
 
 Start the watcher with: ll-watch
 Run /learning-loop:help to see available commands.

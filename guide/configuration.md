@@ -155,7 +155,7 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
-Restart Claude Code. The session-start hook auto-applies config changes on first run after update.
+Restart Claude Code. The session-start hook auto-applies config changes on first run after update. It also re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
 
 ## Project structure
 

@@ -24,6 +24,10 @@ Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) 
 
 Check that `librarian.enabled` is `true` in your config, ollama is running (`ollama serve`), and Gemma 4 E2B is pulled (`ollama pull gemma4:e2b`). The librarian starts as a child of `ll-watch`; it won't run standalone without the watcher. Run `ll-watch status` to check if the watcher is running. Check stderr output with `ll-watch --foreground` for "Waiting for ollama..." or "Librarian disabled in config".
 
+## `ll-search: command not found`
+
+Both `ll-watch` and `ll-search` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
+
 ## Episodic memory not available
 
 Install episodic-memory first:
