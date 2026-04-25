@@ -6,11 +6,22 @@ let lockFd = null;
 
 export function acquireLock(dbPath, retries = 3, delayMs = 50) {
   const lockPath = dbPath + '.lock';
+  if (lockFd !== null) return false;
+
   for (let i = 0; i < retries; i++) {
     try {
       lockFd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY);
+      writeFileSync(lockFd, String(process.pid));
       return true;
     } catch {
+      // Check for stale lock (process no longer alive)
+      try {
+        const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+        if (pid && !isProcessAlive(pid)) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch {}
       if (i < retries - 1) {
         const start = Date.now();
         while (Date.now() - start < delayMs) {}
@@ -18,6 +29,10 @@ export function acquireLock(dbPath, retries = 3, delayMs = 50) {
     }
   }
   return false;
+}
+
+function isProcessAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
 export function releaseLock(dbPath) {
