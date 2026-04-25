@@ -39,7 +39,11 @@ pub const VAULT_FTS: FtsConfig = FtsConfig {
 pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     debug_assert!(
         (a.iter().map(|x| x * x).sum::<f32>().sqrt() - 1.0).abs() < 0.01,
-        "dot_product assumes L2-normalized vectors"
+        "dot_product assumes L2-normalized vectors (a)"
+    );
+    debug_assert!(
+        (b.iter().map(|x| x * x).sum::<f32>().sqrt() - 1.0).abs() < 0.01,
+        "dot_product assumes L2-normalized vectors (b)"
     );
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
