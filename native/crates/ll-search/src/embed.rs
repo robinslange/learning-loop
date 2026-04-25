@@ -50,9 +50,15 @@ pub fn try_provider() -> Option<&'static dyn EmbeddingProvider> {
 }
 
 pub fn try_embed_query(text: &str) -> anyhow::Result<Vec<f32>> {
-    provider().embed_query(text).map_err(|e| anyhow::anyhow!("embed_query: {e}"))
+    try_provider()
+        .ok_or_else(|| anyhow::anyhow!("embedding provider not initialized"))?
+        .embed_query(text)
+        .map_err(|e| anyhow::anyhow!("embed_query: {e}"))
 }
 
 pub fn try_embed_documents(texts: &[String]) -> anyhow::Result<Vec<Vec<f32>>> {
-    provider().embed_documents(texts).map_err(|e| anyhow::anyhow!("embed_documents: {e}"))
+    try_provider()
+        .ok_or_else(|| anyhow::anyhow!("embedding provider not initialized"))?
+        .embed_documents(texts)
+        .map_err(|e| anyhow::anyhow!("embed_documents: {e}"))
 }
