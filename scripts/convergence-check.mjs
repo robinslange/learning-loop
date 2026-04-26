@@ -53,7 +53,7 @@ function initSession(sessionId) {
     queryCount: 0,
   };
   saveState(sessionId, state);
-  console.log(JSON.stringify({ ok: true, sessionId }, null, 2));
+  console.log(JSON.stringify({ ok: true, session_id: sessionId }, null, 2));
 }
 
 function checkResult(sessionId, query, resultFile) {
@@ -150,21 +150,21 @@ function checkResult(sessionId, query, resultFile) {
   const result = {
     stop,
     reason,
-    queryNumber,
+    query_number: queryNumber,
     signals: {
-      queryCycle,
-      maxCosineToPrior: Math.round(maxCosineToPrior * 1000) / 1000,
-      semanticCycle,
-      noveltyRate: Math.round(noveltyRate * 1000) / 1000,
-      novelSentences,
-      totalSentences,
-      novelEntities,
-      totalEntities: currentEntities.length,
-      entityNoveltyRate: Math.round(entityNoveltyRate * 1000) / 1000,
-      novelCitations,
-      totalCitations: currentCitations.length,
-      runningAvgRate: runningAvgRate !== null ? Math.round(runningAvgRate * 1000) / 1000 : null,
-      belowMVTThreshold,
+      query_cycle: queryCycle,
+      max_cosine_to_prior: Math.round(maxCosineToPrior * 1000) / 1000,
+      semantic_cycle: semanticCycle,
+      novelty_rate: Math.round(noveltyRate * 1000) / 1000,
+      novel_sentences: novelSentences,
+      total_sentences: totalSentences,
+      novel_entities: novelEntities,
+      total_entities: currentEntities.length,
+      entity_novelty_rate: Math.round(entityNoveltyRate * 1000) / 1000,
+      novel_citations: novelCitations,
+      total_citations: currentCitations.length,
+      running_avg_rate: runningAvgRate !== null ? Math.round(runningAvgRate * 1000) / 1000 : null,
+      below_mvt_threshold: belowMVTThreshold,
     },
   };
 
@@ -200,14 +200,14 @@ function showStatus(sessionId) {
   console.log(
     JSON.stringify(
       {
-        sessionId,
-        queryCount: state.queryCount,
+        session_id: sessionId,
+        query_count: state.queryCount,
         queries: state.queries,
-        totalSentences: state.sentenceEmbeddings.length,
-        totalEntities: state.entities.length,
-        totalCitations: state.citations.length,
-        noveltyRates: state.noveltyRates,
-        runningAvgRate: state.runningAvgRate,
+        total_sentences: state.sentenceEmbeddings.length,
+        total_entities: state.entities.length,
+        total_citations: state.citations.length,
+        novelty_rates: state.noveltyRates,
+        running_avg_rate: state.runningAvgRate,
       },
       null,
       2,

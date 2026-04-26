@@ -1,0 +1,54 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+
+const SCRIPT = new URL('../scripts/convergence-check.mjs', import.meta.url).pathname;
+
+function runCheck(...args) {
+  return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf-8' });
+}
+
+test('convergence-check init emits snake_case keys', () => {
+  const session = `t-${randomBytes(4).toString('hex')}`;
+  try {
+    const out = JSON.parse(runCheck('init', session));
+    assert.equal(out.ok, true);
+    assert.equal(out.session_id, session);
+    assert.equal(out.sessionId, undefined, 'sessionId camelCase should be gone');
+  } finally {
+    try {
+      runCheck('reset', session);
+    } catch {}
+  }
+});
+
+test('convergence-check status emits snake_case keys', () => {
+  const session = `t-${randomBytes(4).toString('hex')}`;
+  try {
+    runCheck('init', session);
+    const status = JSON.parse(runCheck('status', session));
+    for (const camel of [
+      'sessionId',
+      'queryCount',
+      'totalSentences',
+      'totalEntities',
+      'totalCitations',
+      'noveltyRates',
+      'runningAvgRate',
+    ]) {
+      assert.equal(status[camel], undefined, `camelCase ${camel} should not appear`);
+    }
+    assert.ok('session_id' in status);
+    assert.ok('query_count' in status);
+    assert.ok('total_sentences' in status);
+    assert.ok('total_entities' in status);
+    assert.ok('total_citations' in status);
+    assert.ok('novelty_rates' in status);
+    assert.ok('running_avg_rate' in status);
+  } finally {
+    try {
+      runCheck('reset', session);
+    } catch {}
+  }
+});
