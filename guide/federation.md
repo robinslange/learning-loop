@@ -45,6 +45,30 @@ Federation is configured during `/learning-loop:init` (Phase 4). Onboarding is s
 
 Re-running `/learning-loop:init` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
 
+## Seed version notice
+
+When `/learning-loop:init` Phase 4 succeeds, init writes `PLUGIN_DATA/federation/.seed-meta.json` alongside the seed. The file records the plugin version and major number at federation creation time:
+
+```json
+{
+  "created_at": "2026-04-26T03:00:00.000Z",
+  "plugin_version": "1.16.9",
+  "plugin_major": 1
+}
+```
+
+On every session start, `hooks/session-start.js` compares the recorded `plugin_major` against the current plugin version. If they differ, it prints a one-line notice to stderr:
+
+```
+learning-loop federation: seed created on plugin v1.16.9 (current: v2.0.0). Run /learning-loop:init to rotate.
+```
+
+The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same major mismatch does not nag on every session. Rotating via `/learning-loop:init` removes the marker, so the next major bump fires a fresh notice.
+
+Federations created before this marker existed get a backfill: the hook stamps `.seed-meta.json` with the current version on first run after upgrade, so the notice stays silent until the next major bump.
+
+To rotate manually, re-run `/learning-loop:init`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version.
+
 ## Visibility rules
 
 Default configuration in `PLUGIN_DATA/federation/config.json`:
