@@ -65,3 +65,27 @@ Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
 - **source-quality** -- rates source reliability
 - **preview-format** -- standardized output formatting
 - **fleeting-sweep** -- identifies stale fleeting notes for archival
+
+## Source verification and overclaim mitigation
+
+Two layers run on every note the `note-writer` agent emits: a write-time shape check against the prose, and a post-write resolver pass against the cited source.
+
+The shape check lives in `agents/_skills/capture-rules.md` under "Claim Shapes Requiring Verbatim Anchoring". Four shapes account for ~94% of overclaim findings in vault audits:
+
+1. **Numerical figures** -- any "X%", "X billion", "<X", ">X", "X ms", "X-fold". Must match the source phrasing including hedges. Strengthening "roughly 65%" into ">65%" fails the check.
+2. **Universal claims** -- "no X does Y", "X is the only Y", "every X". Require a survey-style citation or softening to a first-person evidence claim.
+3. **Named attributions** -- "Author said", "Paper shows", "RFC defines". Require a verbatim sentence-fragment from the cited source.
+4. **Strengthened hedges** -- promoting "preferential" to "exclusive", "may" to "does". The hedge IS the claim; preserve it.
+
+If a shape fires and the writer cannot resolve it (no verbatim, no survey, no fetched source), the figure or attribution gets the inline marker `[not in source]` so a later `/verify` pass catches it.
+
+After the note is on disk, `scripts/source-resolver.mjs check-claims` runs the resolver pass. For PubMed, DOI, and arXiv sources it diffs the note's quantitative claims against the abstract. For non-academic URLs (docs, blog posts, vendor pages), it fetches the page, strips HTML, and runs the same diff against the page text. A `WEB_FETCH_BLOCKLIST` skips paywalled domains and PDF endpoints (sciencedirect, springer, raw `doi.org`). Output records `source_kind: "abstract" | "page"` and the resolved URL so a reader can see which path ran.
+
+The four inline markers are documented in `capture-rules.md` under "Verification Markers" and understood by every agent that handles notes:
+
+- `[unresolved]` -- citation not found via any academic API.
+- `[unverified]` -- source found but author or year mismatch could not auto-correct.
+- `[not in abstract]` -- figure absent from the academic abstract; may be in full text.
+- `[not in source]` -- figure absent from a fetched non-academic page; check manually or soften.
+
+See `agents/_skills/capture-rules.md` for the full shape rules and `agents/note-writer.md` Pass 1 for the write-time procedure.
