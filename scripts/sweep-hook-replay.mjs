@@ -71,8 +71,23 @@ function replayOne(absPath) {
 
 function main() {
   const args = process.argv.slice(2);
-  if (args.length === 0) {
-    process.stderr.write('usage: sweep-hook-replay.mjs <file> [<file> ...] | --stdin\n');
+  const wantsHelp = args.includes('--help') || args.includes('-h');
+  if (args.length === 0 || wantsHelp) {
+    const helpText = `sweep-hook-replay.mjs <file> [<file> ...]
+sweep-hook-replay.mjs --stdin                 Read newline-separated paths from stdin
+
+Replays post-write hooks (post-write-autolink.js, post-write-edge-infer.js)
+on one or more vault notes. Used after subagent writes to compensate for
+PostToolUse hooks not firing on subagent tool calls.
+
+Output: JSON summary {processed, ok, failed, failures}. Exit code 0 on full
+success, 1 if any file failed, 2 on usage error.
+`;
+    if (wantsHelp) {
+      process.stdout.write(helpText);
+      process.exit(0);
+    }
+    process.stderr.write(helpText);
     process.exit(2);
   }
 
