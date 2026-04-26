@@ -17,7 +17,7 @@ pub fn open_db(db_path: &str) -> Result<Connection> {
 
     let conn = Connection::open(db_path)
         .context("failed to open database")?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
         .context("failed to set pragmas")?;
 
     let has_meta: bool = conn
