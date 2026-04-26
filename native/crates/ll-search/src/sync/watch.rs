@@ -154,6 +154,9 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
     let mut pending_reindex = false;
     let mut last_change = Instant::now();
 
+    let mut last_resync = Instant::now();
+    const RESYNC_INTERVAL: Duration = Duration::from_secs(300);
+
     while !stopped.load(Ordering::Relaxed) {
         match fs_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(()) => {
@@ -178,6 +181,11 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
                 &cfg.config_dir,
                 fed_config.as_ref().unwrap(),
             );
+        }
+
+        if last_resync.elapsed() >= RESYNC_INTERVAL {
+            last_resync = Instant::now();
+            do_reindex(&cfg.db_path, &cfg.vault_path);
         }
     }
 
