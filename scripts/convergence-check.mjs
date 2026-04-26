@@ -221,7 +221,23 @@ function resetSession(sessionId) {
   console.log(JSON.stringify({ ok: true, reset: sessionId }, null, 2));
 }
 
+const HELP_TEXT = `convergence-check.mjs <command> <session-id> [args...]
+
+Commands:
+  init <session-id>                            Initialise a new convergence session
+  check <session-id> <query> <result-file>     Check convergence on a query result
+  status <session-id>                          Show session state
+  reset <session-id>                           Delete session state
+
+Output: snake_case JSON. See agents/discovery-researcher.md for verdict semantics.
+`;
+
 const [cmd, sessionId, ...rest] = process.argv.slice(2);
+
+if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  console.log(HELP_TEXT);
+  process.exit(0);
+}
 
 switch (cmd) {
   case 'init':
@@ -237,6 +253,6 @@ switch (cmd) {
     resetSession(sessionId);
     break;
   default:
-    console.error('Usage: convergence-check.mjs <init|check|status|reset> <session-id> [args...]');
+    console.error(HELP_TEXT);
     process.exit(1);
 }
