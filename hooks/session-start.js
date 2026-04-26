@@ -467,12 +467,19 @@ try {
 
 // 12. Episodic memory pre-warm
 try {
-  const epBin = findEpisodicBinary() || "episodic-memory";
-  const child = spawn(epBin, ["search", "--vector", "--limit", "1", "warmup"], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  const epBin = findEpisodicBinary();
+  if (epBin) {
+    const child = spawn(epBin, ["search", "--vector", "--limit", "1", "warmup"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+  } else if (!globalThis.__llEpisodicWarned) {
+    globalThis.__llEpisodicWarned = true;
+    process.stderr.write(
+      "learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n",
+    );
+  }
 } catch {}
 
 // Output as JSON for additionalContext injection

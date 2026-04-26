@@ -148,15 +148,30 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const llCmd = llBinary ? llBinary.bin : 'll-search';
   const llEnv = llBinary ? { ...process.env, ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir } : undefined;
 
-  const epCmd = useRealBinaries ? (findEpisodicBinary() || 'episodic-memory') : 'episodic-memory';
+  const epCmd = useRealBinaries ? findEpisodicBinary() : 'episodic-memory';
+  if (useRealBinaries && !epCmd) {
+    warnEpisodicUnavailableOnce();
+  }
 
-  const results = await Promise.allSettled([
+  const tasks = [
     spawnSearch(spawnFn, llCmd, ['query', '--top', '5', vaultDbPath, query], controller.signal, llEnv),
-    spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal),
-  ]);
+  ];
+  if (epCmd) {
+    tasks.push(spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal));
+  }
+
+  const results = await Promise.allSettled(tasks);
   clearTimeout(timer);
 
   const vault = results[0].status === 'fulfilled' ? parseVault(results[0].value) : { hits: [], error: 'rejected' };
-  const episodic = results[1].status === 'fulfilled' ? parseEpisodic(results[1].value) : { hits: [], error: 'rejected' };
+  const episodic = epCmd && results[1]
+    ? (results[1].status === 'fulfilled' ? parseEpisodic(results[1].value) : { hits: [], error: 'rejected' })
+    : { hits: [], error: 'episodic_unavailable' };
   return { vault, episodic };
+}
+
+function warnEpisodicUnavailableOnce() {
+  if (globalThis.__llEpisodicWarned) return;
+  globalThis.__llEpisodicWarned = true;
+  process.stderr.write('learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n');
 }
