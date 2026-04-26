@@ -190,7 +190,9 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
-LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
+
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
 root = os.environ["LL_VAULT"]
 for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
@@ -206,9 +208,10 @@ for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
             except: pass
 PY
 
-if [ -s /tmp/ll-sweep-candidates.txt ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+if [ -s "$SWEEP_CANDIDATES" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
 fi
+rm -f "$SWEEP_CANDIDATES"
 ```
 
 Skip if Step 4 took no actions. Report failures in Step 6.

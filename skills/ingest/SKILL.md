@@ -143,7 +143,9 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
-LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
+
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
 root = os.environ["LL_VAULT"]
 for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
@@ -159,9 +161,10 @@ for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
             except: pass
 PY
 
-if [ -s /tmp/ll-sweep-candidates.txt ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+if [ -s "$SWEEP_CANDIDATES" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
 fi
+rm -f "$SWEEP_CANDIDATES"
 ```
 
 Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch (ingest typically produces few subagent-written notes that the routing step hasn't already linked via its prompt).
@@ -176,11 +179,14 @@ When the routing subagent in Step 5 writes new vault notes, those notes may shar
 
 The routing subagent doesn't return file paths directly. Use `git diff` against HEAD to detect new files in the vault since ingest started:
 
+All temp files in 5.6 use a session-keyed prefix so parallel `/ingest` invocations don't race. Each bash block re-derives the same paths from `$CLAUDE_SESSION_ID` (stable across the session); when passing paths into agent prompts or other tools, substitute the resolved literal value.
+
 ```bash
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
 cd "$HOME/brain"
 git diff --name-only --diff-filter=A HEAD -- brain/0-inbox/ brain/1-fleeting/ brain/2-literature/ brain/3-permanent/ brain/5-maps/ \
   | sed "s|^|$HOME/brain/|" \
-  > /tmp/ll-ingest-new-notes.txt
+  > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
 If the file is empty, skip the rest of 5.6 and report `Refinement: 0 new notes from ingest`.
@@ -190,20 +196,22 @@ If the file is empty, skip the rest of 5.6 and report `Refinement: 0 new notes f
 #### 5.6.b — Build candidate pairs (capped)
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out /tmp/ll-refinement-pairs.json < /tmp/ll-ingest-new-notes.txt > /dev/null
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
 If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap).
 
 ```bash
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
 DATA_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
 mkdir -p "$DATA_DIR"
-python3 - <<'PY'
-import json
-pairs = json.load(open("/tmp/ll-refinement-pairs.json"))
+LL_PAIRS_PATH="${LL_TMP_PREFIX}-refinement-pairs.json" python3 - <<'PY'
+import json, os
+pairs_path = os.environ["LL_PAIRS_PATH"]
+pairs = json.load(open(pairs_path))
 keep, defer = pairs[:50], pairs[50:]
-json.dump(keep, open("/tmp/ll-refinement-pairs.json", "w"), indent=2)
-import os
+json.dump(keep, open(pairs_path, "w"), indent=2)
 data_dir = os.environ.get("CLAUDE_PLUGIN_DATA", os.path.expanduser("~/.claude/plugins/data/learning-loop-learning-loop-marketplace"))
 defer_path = os.path.join(data_dir, "refinement-deferred.jsonl")
 if defer:
@@ -217,12 +225,13 @@ PY
 
 Same as `/reflect` Step 4.6.b through 4.6.f. Spawn `refinement-proposer` with the pairs file, validate via `refinement-validate.mjs`, present preview-format table, apply approved edits via `Write`, route counterpoints via `Edit`, emit provenance events.
 
-The `subagent_type` is `learning-loop:refinement-proposer`. The `pairs_file` is `/tmp/ll-refinement-pairs.json`. Use `AskUserQuestion` for batch confirmation.
+The `subagent_type` is `learning-loop:refinement-proposer`. The `pairs_file` is the resolved value of `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest-refinement-pairs.json` (substitute the literal path before passing to the agent). Likewise for the agent output (`-refinement-agent-output.json`) and validated output (`-refinement-validated.json`). Use `AskUserQuestion` for batch confirmation.
 
 #### 5.6.d — Cleanup
 
 ```bash
-rm -f /tmp/ll-ingest-new-notes.txt /tmp/ll-refinement-pairs.json /tmp/ll-refinement-agent-output.json /tmp/ll-refinement-validated.json
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
+rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
 Report counts in Step 6.

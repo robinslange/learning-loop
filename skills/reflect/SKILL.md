@@ -108,13 +108,14 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **After each vault note Write, append its absolute path to `/tmp/ll-reflect-new-notes.txt`** (one per line). Step 4.6 (Upstream Refinement) reads this file. If you write zero vault notes in this step, leave the file empty or absent.
+- **After each vault note Write, append its absolute path to the session-keyed reflect new-notes file** (one per line). Step 4.6 (Upstream Refinement) reads this file. If you write zero vault notes in this step, leave the file empty or absent. The path is `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-new-notes.txt`; use the same env-keyed expansion in every block that touches it so parallel `/reflect` invocations don't race.
 
 ```bash
-# Initialize at the start of Step 4 (truncates any stale file from a prior reflect):
-: > /tmp/ll-reflect-new-notes.txt
+# Initialize at the start of Step 4 (truncates any stale file from a prior reflect in this session):
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
+: > "${LL_TMP_PREFIX}-new-notes.txt"
 # After each vault Write:
-echo "<absolute-path-to-just-written-note>" >> /tmp/ll-reflect-new-notes.txt
+echo "<absolute-path-to-just-written-note>" >> "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
 ### Step 4.4: Post-Batch Sweep
@@ -134,8 +135,10 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 # Incremental by default; only embeds notes that are new or mtime-changed.
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
+SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
+
 # Detect unlinked candidates (exclude 4-projects — free-form indexes)
-LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
 root = os.environ["LL_VAULT"]
 for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
@@ -151,9 +154,10 @@ for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
             except: pass
 PY
 
-if [ -s /tmp/ll-sweep-candidates.txt ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+if [ -s "$SWEEP_CANDIDATES" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
 fi
+rm -f "$SWEEP_CANDIDATES"
 ```
 
 Expected output is a JSON summary `{processed, ok, failed, failures}`. Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
@@ -178,42 +182,44 @@ This ensures new notes with intentions appear in the next session's intention su
 
 When a new vault note touches a claim already in the vault, the existing claim should be refined to incorporate the new evidence. This step finds those pairs, asks the `refinement-proposer` agent to draft edits, validates them, presents the batch for confirmation, and applies via `Write`. Contradictions route to inline counter-argument linking instead of editing the upstream body.
 
-Skip this entire step if `/tmp/ll-reflect-new-notes.txt` does not exist or is empty (the session wrote no vault notes).
+Skip this entire step if the reflect new-notes file (`${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-new-notes.txt`) does not exist or is empty (the session wrote no vault notes).
 
 #### 4.6.a — Build candidate pairs
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out /tmp/ll-refinement-pairs.json < /tmp/ll-reflect-new-notes.txt > /dev/null
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
-If the resulting `/tmp/ll-refinement-pairs.json` is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
+If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
 
 #### 4.6.b — Dispatch refinement-proposer agent
 
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt:
+Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-pairs.json` after expansion):
 
 ```
 Read the agent definition at PLUGIN/agents/refinement-proposer.md and follow it exactly.
 
-pairs_file: /tmp/ll-refinement-pairs.json
+pairs_file: <resolved-pairs-path>
 vault_path: {{VAULT}}/
 
 Return the JSON response only, no commentary, no markdown fences.
 ```
 
-Capture the agent's stdout response. Write it to `/tmp/ll-refinement-agent-output.json`.
+Capture the agent's stdout response. Write it to `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-agent-output.json` (resolve before writing).
 
 #### 4.6.c — Validate
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" /tmp/ll-refinement-agent-output.json /tmp/ll-refinement-pairs.json > /tmp/ll-refinement-validated.json
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
 The validator strips em-dashes, computes sentence delta, and tags each decision with status `ok`, `oversized_warning`, or `auto_rejected`. The cleaned proposed bodies replace the agent's originals.
 
 #### 4.6.d — Present batch for confirmation
 
-Read `/tmp/ll-refinement-validated.json`. Build a preview-format table from the `decisions` array:
+Read the validated JSON at `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-validated.json`. Build a preview-format table from the `decisions` array:
 
 ```markdown
 ## Refinement Proposals (N total)
@@ -266,7 +272,8 @@ For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `
 #### 4.6.g — Cleanup
 
 ```bash
-rm -f /tmp/ll-reflect-new-notes.txt /tmp/ll-refinement-pairs.json /tmp/ll-refinement-agent-output.json /tmp/ll-refinement-validated.json
+LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
+rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
 Report counts in Step 5: `Refinement: N edits applied, M counterpoints linked, K passed, J auto-rejected`.
