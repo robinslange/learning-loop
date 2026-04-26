@@ -56,7 +56,7 @@ printf '%s\n' "$NOTE_PATH" \
   | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
-Where `$NOTE_PATH` is the absolute path the note-writer returned. See `skills/_shared/hook-replay.md` for context.
+Where `$NOTE_PATH` is constructed from the agent's response (e.g. `{{VAULT}}/0-inbox/<filename>`, where `<filename>` is the kebab-case filename note-writer returned). See `skills/_shared/hook-replay.md` for context.
 
 ### Step 3: Report
 
