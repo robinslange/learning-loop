@@ -221,7 +221,7 @@ For academic sources, use `node PLUGIN/scripts/source-resolver.mjs resolve "Auth
 
 **Never re-fetch a URL you already fetched.** The verification loop should check claims against findings already in memory, not re-fetch every source. If you fetched a URL during research, its content is already in your context.
 
-**Cap WebFetch at 15 calls per session.** If you've hit 15, stop fetching and mark remaining URLs as `unfetched` in the verified sources table.
+**Cap WebFetch at 10 calls per session.** If you've hit 10, stop fetching and mark remaining URLs as `unfetched` in the verified sources table. See `_skills/source-verification.md#webfetch-budget` for the canonical cap.
 
 ## Rules
 

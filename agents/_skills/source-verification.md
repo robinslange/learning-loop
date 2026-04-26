@@ -18,6 +18,10 @@ WebFetch has no timeout parameter. Hanging fetches stall the entire agent.
 
 **Never re-fetch a URL already in your context.** If the research brief or prior agent already fetched it, use that content.
 
+## WebFetch budget
+
+Cap WebFetch calls at **10 per agent invocation**. After 10 fetches, mark remaining sources as `[unfetched]` and continue. This bounds session latency when sources are slow or paywalled.
+
 ## Verify Source URLs
 
 For each URL in a note or research brief:
