@@ -157,6 +157,27 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 
 Restart Claude Code. The session-start hook auto-applies config changes on first run after update. It also re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
 
+## CLI shims
+
+Two shell scripts in `~/.local/bin/` give vault tools a stable name regardless of plugin version:
+
+- `~/.local/bin/ll-search` -- search, indexing, identity, and similarity queries.
+- `~/.local/bin/ll-watch` -- vault watcher that runs the librarian and incremental reindex.
+
+The `ll-search` shim resolves `PLUGIN_DATA` from `$CLAUDE_PLUGIN_DATA` if set, otherwise from the marker file at `~/.claude/plugins/data/.ll-data-path` that the SessionStart hook writes, otherwise from the canonical default `~/.claude/plugins/data/learning-loop-learning-loop-marketplace`. It then exec's the binary at `$PLUGIN_DATA/bin/ll-search`, with `ORT_DYLIB_PATH` and `ORT_LIB_LOCATION` pointed at the binary's directory so the ONNX runtime loader finds the bundled `libonnxruntime` next to the binary.
+
+The `ll-watch` shim picks the latest version-named directory under `~/.claude/plugins/cache/learning-loop-marketplace/learning-loop/` and exec's `node ${LATEST}/scripts/watch.mjs`. Filtering to digit-prefixed names skips orphan hash directories the plugin manager leaves behind.
+
+The point of the indirection: each shim resolves its target at runtime. Plugin updates that move the binary inside `PLUGIN_DATA/bin/` or land a new cache version are invisible to the shim, which is why `ll-search` and `ll-watch` continue working after `/plugin install learning-loop@learning-loop-marketplace` without a restart of the shell.
+
+The SessionStart hook auto-installs both shims if either is missing. To install or repair them manually:
+
+```bash
+node scripts/install-shims.mjs --install
+```
+
+`--check` prints the install status of each shim and exits 0 without writing.
+
 ## Project structure
 
 ```
