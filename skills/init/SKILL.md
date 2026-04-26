@@ -432,7 +432,7 @@ Generate the section using the detected vault path and current template version.
 
 Three stores, three purposes:
 
-- **Auto-memory** (~/.claude/projects/\*/memory/) -- preferences, corrections, project context.
+- **Auto-memory** (~/.claude/projects/*/memory/) -- preferences, corrections, project context.
 - **Obsidian vault** (VAULT_PATH) -- decisions, patterns, domain insights.
 - **Episodic memory** (plugin) -- conversation history across sessions.
 
@@ -462,15 +462,15 @@ After substantial work, suggest `/learning-loop:reflect` to run the consolidatio
 
 Captures go to 0-inbox/ as atomic notes. Tag with source project. Link to the project index note in 4-projects/.
 
-Follow the rules in \_system/capture-rules.md. Read \_system/persona.md for voice and tone.
+Follow the rules in _system/capture-rules.md. Read _system/persona.md for voice and tone.
 ```
 
 **Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vX.Y` with the template version from `PLUGIN/templates/claudemd-section.version`.
 
 **Conditional lines:** Before generating, check which system files and folders exist:
 
-- If `_system/capture-rules.md` does not exist, remove the "Follow the rules in \_system/capture-rules.md." line
-- If `_system/persona.md` does not exist, remove the "Read \_system/persona.md for voice and tone." line
+- If `_system/capture-rules.md` does not exist, remove the "Follow the rules in _system/capture-rules.md." line
+- If `_system/persona.md` does not exist, remove the "Read _system/persona.md for voice and tone." line
 - If both are missing, omit the entire last line of the "Second Brain" section
 - If `0-inbox/` or `4-projects/` do not exist, omit the "Second Brain (Obsidian)" section entirely
 
