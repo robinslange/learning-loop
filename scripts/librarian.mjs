@@ -228,23 +228,31 @@ function readNoteBody(notePath, maxChars = 500) {
 
 async function voiceCheck(notePath) {
   const title = basename(notePath, '.md');
-  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: VOICE_PROMPT },
-        { role: 'user', content: `Title: ${title}\nClassify:` },
-      ],
-      format: {
-        type: 'object',
-        properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
-        required: ['label'],
-      },
-      stream: false,
-    }),
-  });
+  let resp;
+  try {
+    resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: VOICE_PROMPT },
+          { role: 'user', content: `Title: ${title}\nClassify:` },
+        ],
+        format: {
+          type: 'object',
+          properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
+          required: ['label'],
+        },
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    log(`voiceCheck ${kind} for ${notePath}: ${err.message}\n`);
+    return;
+  }
   if (!resp.ok) {
     log(`voiceCheck HTTP ${resp.status} for ${notePath}\n`);
     return;
@@ -283,30 +291,38 @@ async function tagCheck(notePath, _deps = {}) {
   const title = basename(notePath, '.md');
   const userContent = `Title: ${title}\nExisting tags: ${existingTags || '(none)'}\nBody:\n${body}\n\nVocabulary (tags you may use, nothing else): ${vocabulary.join(', ')}`;
 
-  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: TAG_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-      format: {
-        type: 'object',
-        properties: {
-          suggested_tags: {
-            type: 'array',
-            items: { type: 'string' },
-            maxItems: 2,
+  let resp;
+  try {
+    resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: TAG_PROMPT },
+          { role: 'user', content: userContent },
+        ],
+        format: {
+          type: 'object',
+          properties: {
+            suggested_tags: {
+              type: 'array',
+              items: { type: 'string' },
+              maxItems: 2,
+            },
           },
+          required: ['suggested_tags'],
         },
-        required: ['suggested_tags'],
-      },
-      options: { temperature: 0 },
-      stream: false,
-    }),
-  });
+        options: { temperature: 0 },
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    log(`tagCheck ${kind} for ${notePath}: ${err.message}\n`);
+    return;
+  }
   if (!resp.ok) {
     log(`tagCheck HTTP ${resp.status} for ${notePath}\n`);
     return;
@@ -361,30 +377,38 @@ async function duplicateCheck(notePath, _deps = {}) {
 
   const userContent = `Note (path ${notePath}): "${title}"\n${body}\n\n${neighbourBlocks}`;
 
-  const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: 'system', content: DUPLICATE_PROMPT },
-        { role: 'user', content: userContent },
-      ],
-      format: {
-        type: 'object',
-        properties: {
-          relationship: {
-            type: 'string',
-            enum: ['duplicate', 'same_topic', 'unrelated'],
+  let resp;
+  try {
+    resp = await fetch(`${OLLAMA_URL}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MODEL,
+        messages: [
+          { role: 'system', content: DUPLICATE_PROMPT },
+          { role: 'user', content: userContent },
+        ],
+        format: {
+          type: 'object',
+          properties: {
+            relationship: {
+              type: 'string',
+              enum: ['duplicate', 'same_topic', 'unrelated'],
+            },
+            duplicate_of: { type: ['string', 'null'] },
           },
-          duplicate_of: { type: ['string', 'null'] },
+          required: ['relationship', 'duplicate_of'],
         },
-        required: ['relationship', 'duplicate_of'],
-      },
-      options: { temperature: 0 },
-      stream: false,
-    }),
-  });
+        options: { temperature: 0 },
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    log(`duplicateCheck ${kind} for ${notePath}: ${err.message}\n`);
+    return;
+  }
   if (!resp.ok) {
     log(`duplicateCheck HTTP ${resp.status} for ${notePath}\n`);
     return;

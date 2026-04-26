@@ -1,39 +1,33 @@
-import { describe, it, before, after, mock } from "node:test";
-import assert from "node:assert/strict";
-import {
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  existsSync,
-  rmSync,
-} from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomBytes } from "node:crypto";
+import { describe, it, before, after, mock } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
-const runId = randomBytes(4).toString("hex");
+const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-tag-classifier-${runId}`);
-const TEMP_VAULT = join(TEMP_ROOT, "vault");
-const TEMP_DATA = join(TEMP_ROOT, "plugin-data");
-const LIBRARIAN_DIR = join(TEMP_DATA, "librarian");
+const TEMP_VAULT = join(TEMP_ROOT, 'vault');
+const TEMP_DATA = join(TEMP_ROOT, 'plugin-data');
+const LIBRARIAN_DIR = join(TEMP_DATA, 'librarian');
 
-const VOCAB = ["pharmacology", "neuroscience", "graphql", "networking"];
+const VOCAB = ['pharmacology', 'neuroscience', 'graphql', 'networking'];
 
 function queuePath() {
-  return join(LIBRARIAN_DIR, "queue.jsonl");
+  return join(LIBRARIAN_DIR, 'queue.jsonl');
 }
 
 function readQueue() {
   const p = queuePath();
   if (!existsSync(p)) return [];
-  return readFileSync(p, "utf-8")
-    .split("\n")
+  return readFileSync(p, 'utf-8')
+    .split('\n')
     .filter((line) => line.trim())
     .map((line) => JSON.parse(line));
 }
 
 function statePath() {
-  return join(LIBRARIAN_DIR, "state.json");
+  return join(LIBRARIAN_DIR, 'state.json');
 }
 
 function resetState() {
@@ -47,12 +41,12 @@ function resetState() {
       tag_suggestions: 0,
       staleness_suspects: 0,
       counters: {},
-    }) + "\n",
+    }) + '\n',
   );
   if (existsSync(queuePath())) rmSync(queuePath());
 }
 
-describe("tag classifier structured-output suggestion", () => {
+describe('tag classifier structured-output suggestion', () => {
   let originalFetch;
 
   before(() => {
@@ -70,7 +64,7 @@ describe("tag classifier structured-output suggestion", () => {
     rmSync(TEMP_ROOT, { recursive: true, force: true });
   });
 
-  it("queues tag_suggestion with cleaned vocabulary-bounded tags", async () => {
+  it('queues tag_suggestion with cleaned vocabulary-bounded tags', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({
@@ -78,33 +72,31 @@ describe("tag classifier structured-output suggestion", () => {
       json: async () => ({
         message: {
           content: JSON.stringify({
-            suggested_tags: ["pharmacology", "neuroscience"],
+            suggested_tags: ['pharmacology', 'neuroscience'],
           }),
         },
       }),
     }));
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-happy-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Body about pharmacokinetics of a nootropic.",
-      existingTagsOverride: "",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-happy-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body about pharmacokinetics of a nootropic.',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
     const items = readQueue();
-    assert.equal(items.length, 1, "expected one queue item");
-    assert.equal(items[0].task, "tag_suggestion");
-    assert.equal(items[0].target, "3-permanent/foo.md");
-    assert.deepEqual(items[0].suggested_tags, ["pharmacology", "neuroscience"]);
-    assert.equal(items[0].existing_tags, "");
+    assert.equal(items.length, 1, 'expected one queue item');
+    assert.equal(items[0].task, 'tag_suggestion');
+    assert.equal(items[0].target, '3-permanent/foo.md');
+    assert.deepEqual(items[0].suggested_tags, ['pharmacology', 'neuroscience']);
+    assert.equal(items[0].existing_tags, '');
 
-    const state = JSON.parse(readFileSync(statePath(), "utf-8"));
+    const state = JSON.parse(readFileSync(statePath(), 'utf-8'));
     assert.equal(state.tag_suggestions, 1);
   });
 
-  it("does not queue when model returns empty array", async () => {
+  it('does not queue when model returns empty array', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({
@@ -114,19 +106,17 @@ describe("tag classifier structured-output suggestion", () => {
       }),
     }));
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-empty-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Some body.",
-      existingTagsOverride: "",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-empty-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Some body.',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
     assert.equal(readQueue().length, 0);
   });
 
-  it("filters out tags outside the vocabulary", async () => {
+  it('filters out tags outside the vocabulary', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({
@@ -134,27 +124,25 @@ describe("tag classifier structured-output suggestion", () => {
       json: async () => ({
         message: {
           content: JSON.stringify({
-            suggested_tags: ["pharmacology", "made-up-tag"],
+            suggested_tags: ['pharmacology', 'made-up-tag'],
           }),
         },
       }),
     }));
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-vocab-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Body.",
-      existingTagsOverride: "",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-vocab-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body.',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
     const items = readQueue();
     assert.equal(items.length, 1);
-    assert.deepEqual(items[0].suggested_tags, ["pharmacology"]);
+    assert.deepEqual(items[0].suggested_tags, ['pharmacology']);
   });
 
-  it("filters out tags already on the note", async () => {
+  it('filters out tags already on the note', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({
@@ -162,80 +150,97 @@ describe("tag classifier structured-output suggestion", () => {
       json: async () => ({
         message: {
           content: JSON.stringify({
-            suggested_tags: ["pharmacology", "neuroscience"],
+            suggested_tags: ['pharmacology', 'neuroscience'],
           }),
         },
       }),
     }));
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-existing-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Body.",
-      existingTagsOverride: "pharmacology",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-existing-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body.',
+      existingTagsOverride: 'pharmacology',
       vocabularyOverride: VOCAB,
     });
 
     const items = readQueue();
     assert.equal(items.length, 1);
-    assert.deepEqual(items[0].suggested_tags, ["neuroscience"]);
+    assert.deepEqual(items[0].suggested_tags, ['neuroscience']);
   });
 
-  it("does not crash on malformed response", async () => {
+  it('does not crash on malformed response', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({
       ok: true,
-      json: async () => ({ message: { content: "not json" } }),
+      json: async () => ({ message: { content: 'not json' } }),
     }));
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-malformed-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Body.",
-      existingTagsOverride: "",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-malformed-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body.',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
     assert.equal(readQueue().length, 0);
   });
 
-  it("skips gracefully on HTTP error from ollama", async () => {
+  it('skips gracefully on HTTP error from ollama', async () => {
     resetState();
 
     globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
 
     const mod = await import(`../scripts/librarian.mjs?bust=tag-http-${runId}`);
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "Body.",
-      existingTagsOverride: "",
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body.',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
     assert.equal(readQueue().length, 0);
   });
 
-  it("returns without queueing when body is empty", async () => {
+  it('logs timeout and skips submission when fetch aborts', async () => {
+    resetState();
+
+    globalThis.fetch = mock.fn(async (_url, init) => {
+      await new Promise((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
+        });
+      });
+    });
+
+    const mod = await import(
+      `../scripts/librarian.mjs?bust=tag-timeout-${runId}-${randomBytes(4).toString('hex')}`
+    );
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: 'Body.',
+      existingTagsOverride: '',
+      vocabularyOverride: VOCAB,
+    });
+
+    assert.equal(readQueue().length, 0);
+  });
+
+  it('returns without queueing when body is empty', async () => {
     resetState();
 
     let fetchCalled = false;
     globalThis.fetch = mock.fn(async () => {
       fetchCalled = true;
-      return { ok: true, json: async () => ({ message: { content: "{}" } }) };
+      return { ok: true, json: async () => ({ message: { content: '{}' } }) };
     });
 
-    const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-emptybody-${runId}`
-    );
-    await mod.__test__.tagCheck("3-permanent/foo.md", {
-      bodyOverride: "",
-      existingTagsOverride: "",
+    const mod = await import(`../scripts/librarian.mjs?bust=tag-emptybody-${runId}`);
+    await mod.__test__.tagCheck('3-permanent/foo.md', {
+      bodyOverride: '',
+      existingTagsOverride: '',
       vocabularyOverride: VOCAB,
     });
 
-    assert.equal(fetchCalled, false, "should short-circuit before fetch");
+    assert.equal(fetchCalled, false, 'should short-circuit before fetch');
     assert.equal(readQueue().length, 0);
   });
 });
