@@ -47,6 +47,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Check for resolved paths in agents and skills
         run: |
           set -e
@@ -56,3 +64,6 @@ jobs:
             echo "$matches"
             exit 1
           fi
+
+      - name: Prettier check
+        run: npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
