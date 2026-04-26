@@ -203,6 +203,28 @@ try {
   }
 } catch {}
 
+// Federation seed version check — one-shot notice when seed predates current
+// plugin major. Dedupe via marker; init clears the marker on successful re-run
+// so a future major bump re-fires.
+if (pluginData) {
+  try {
+    const seedMetaPath = join(pluginData, "federation", ".seed-meta.json");
+    const noticePath = join(pluginData, "federation", ".seed-notice-shown");
+    if (existsSync(seedMetaPath) && !existsSync(noticePath)) {
+      const meta = JSON.parse(
+        readFileSync(seedMetaPath, "utf-8").replace(/^﻿/, ""),
+      );
+      const currentMajor = parseInt(pluginVersion.split(".")[0], 10);
+      if (meta.plugin_major !== currentMajor) {
+        process.stderr.write(
+          `learning-loop federation: seed created on plugin v${meta.plugin_version} (current: v${pluginVersion}). Run /learning-loop:init to rotate.\n`,
+        );
+        writeFileSync(noticePath, new Date().toISOString());
+      }
+    }
+  } catch {}
+}
+
 // 0. Incremental reindex (fast: 39ms no-op, <500ms with changes)
 const DB_DIR = join(vaultRoot, ".vault-search");
 const DB_PATH = join(DB_DIR, "vault-index.db");

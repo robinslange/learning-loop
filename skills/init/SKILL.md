@@ -345,6 +345,29 @@ Be explicit about the trade: "The token is single-use and was consumed. If sync 
 
 Only reached if 4h succeeded. Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from 4c), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
 
+Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `PLUGIN/package.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
+
+```javascript
+const pluginVersion = JSON.parse(
+  readFileSync(join(PLUGIN, "package.json"), "utf-8"),
+).version;
+const meta = {
+  created_at: new Date().toISOString(),
+  plugin_version: pluginVersion,
+  plugin_major: parseInt(pluginVersion.split(".")[0], 10),
+};
+writeFileSync(
+  join(PLUGIN_DATA, "federation", ".seed-meta.json"),
+  JSON.stringify(meta, null, 2),
+);
+
+// Successful (re-)init clears any prior version-mismatch notice
+const noticePath = join(PLUGIN_DATA, "federation", ".seed-notice-shown");
+if (existsSync(noticePath)) unlinkSync(noticePath);
+```
+
+**Why:** the SessionStart hook compares `meta.plugin_major` against the running plugin's major version and emits a single stderr line when they differ, suggesting `/learning-loop:init` to rotate. Resetting `.seed-notice-shown` on every successful re-init guarantees a future major bump (e.g. v2.x → v3.x after the user already cleared a v1.x → v2.x notice) re-fires correctly. The notice is informational only -- nothing auto-rotates.
+
 **Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped — the file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed init runs leave no config behind, so re-running /init from a fresh shell always re-enters Phase 4 cleanly. The seed at `PLUGIN_DATA/federation/.seed` is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey -- the user will need a fresh token if the previous one was already redeemed.
 
 ---
