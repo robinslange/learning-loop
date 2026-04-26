@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { initSQL } from '../scripts/lib/sqljs.mjs';
 
 const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'retraction-notify.mjs');
-const PLUGIN_DATA = '/tmp/ll-test-plugin-data-retraction';
+const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-retraction-${randomBytes(8).toString('hex')}`);
 const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
 const PEERS_DIR = join(FEDERATION_DIR, 'data', 'peers');
 const OUTBOX_DIR = join(FEDERATION_DIR, 'outbox');

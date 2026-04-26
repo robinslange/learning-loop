@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import { openEdgeDb, getEdgesFrom, getEdgesTo, getPendingReview, addEdge, saveDb } from '../scripts/lib/edges.mjs';
 
 const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-write-edge-infer.js');
-const VAULT = '/tmp/ll-test-vault-edge-infer';
-const PLUGIN_DATA = '/tmp/ll-test-plugin-data-edge-infer';
+const runId = randomBytes(8).toString('hex');
+const VAULT = join(tmpdir(), `ll-test-vault-edge-infer-${runId}`);
+const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-edge-infer-${runId}`);
+const NON_VAULT = join(tmpdir(), `ll-test-somewhere-else-${runId}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
 
 function run(toolName, filePath, content, success = true) {
@@ -144,7 +148,7 @@ describe('post-write-edge-infer', () => {
 
   it('ignores non-vault writes', async () => {
     const content = '# Note\n\nThis proves [[anything]].\n';
-    run('Write', '/tmp/somewhere-else/note.md', content);
+    run('Write', join(NON_VAULT, 'note.md'), content);
     if (existsSync(DB_PATH)) {
       const db = await openEdgeDb(DB_PATH);
       const all = db.exec('SELECT COUNT(*) FROM edges');

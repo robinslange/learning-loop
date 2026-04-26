@@ -3,9 +3,12 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 const HOOK = join(import.meta.dirname, '..', 'hooks', 'pre-write-check.js');
-const VAULT = '/tmp/ll-test-vault';
+const VAULT = join(tmpdir(), `ll-test-vault-${randomBytes(8).toString('hex')}`);
+const NON_VAULT = join(tmpdir(), `ll-test-other-${randomBytes(8).toString('hex')}`);
 
 function run(toolName, filePath, content) {
   const input = JSON.stringify({
@@ -35,7 +38,7 @@ describe('pre-write-check', () => {
   });
 
   it('ignores non-vault writes', () => {
-    const result = run('Write', '/tmp/other/file.md', '---\ntags: [a, a]\n---\n');
+    const result = run('Write', join(NON_VAULT, 'file.md'), '---\ntags: [a, a]\n---\n');
     assert.equal(result, null);
   });
 

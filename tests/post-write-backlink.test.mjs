@@ -3,9 +3,13 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-write-autolink.js');
-const VAULT = '/tmp/ll-test-vault-backlink';
+const runId = randomBytes(8).toString('hex');
+const VAULT = join(tmpdir(), `ll-test-vault-backlink-${runId}`);
+const NON_VAULT = join(tmpdir(), `ll-test-other-backlink-${runId}`);
 
 function run(toolName, filePath, content, success = true) {
   const input = JSON.stringify({
@@ -68,7 +72,7 @@ describe('post-write-backlink', () => {
   it('ignores non-vault writes', () => {
     writeFileSync(join(VAULT, '3-permanent', 'outside-target.md'), '---\ntitle: outside\n---\nContent.\n');
     const sourceContent = 'Links to [[outside-target]].';
-    run('Write', '/tmp/other/file.md', sourceContent);
+    run('Write', join(NON_VAULT, 'file.md'), sourceContent);
 
     const targetAfter = readFileSync(join(VAULT, '3-permanent', 'outside-target.md'), 'utf-8');
     assert.ok(!targetAfter.includes('[[file]]'), 'should not modify target for non-vault writes');

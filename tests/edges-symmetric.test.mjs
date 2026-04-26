@@ -2,12 +2,14 @@ import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomBytes } from 'node:crypto';
 import {
   openEdgeDb, addEdge, saveDb,
   getDownstreamSymmetric, getSoleJustificationDependentsSymmetric,
 } from '../scripts/lib/edges.mjs';
 
-const PLUGIN_DATA = '/tmp/ll-test-plugin-data-symmetric';
+const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-symmetric-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
 
 describe('symmetric edge queries', () => {
