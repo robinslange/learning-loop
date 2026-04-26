@@ -3,5 +3,8 @@
   "version": "1.16.9",
   "private": true,
   "type": "module",
-  "description": "Self-improving learning loop across Claude sessions"
+  "description": "Self-improving learning loop across Claude sessions",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs"
+  }
 }

@@ -1,0 +1,58 @@
+name: Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Run tests
+        run: npm test
+
+  cargo:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: cargo-test-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Run cargo test
+        run: cargo test --workspace
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for resolved paths in agents and skills
+        run: |
+          set -e
+          matches=$(grep -rEl '\$HOME/brain/learning-loop|~/brain/learning-loop|\$HOME/brain/brain|~/brain/brain' agents skills 2>/dev/null || true)
+          if [ -n "$matches" ]; then
+            echo "ERROR: the following files contain resolved paths — use PLUGIN or {{VAULT}} tokens"
+            echo "$matches"
+            exit 1
+          fi
