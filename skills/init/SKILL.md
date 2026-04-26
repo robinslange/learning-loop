@@ -1,6 +1,6 @@
 ---
 name: init
-description: 'First-time setup or upgrade for the learning-loop plugin. Configures vault path, persona voice, federation, CLAUDE.md integration, and verifies the installation. Safe to re-run -- detects existing state and skips completed steps.'
+description: "First-time setup or upgrade for the learning-loop plugin. Configures vault path, persona voice, federation, CLAUDE.md integration, and verifies the installation. Safe to re-run -- detects existing state and skips completed steps."
 ---
 
 # Init -- Learning Loop Setup
@@ -57,12 +57,14 @@ Everything looks good. Nothing to set up.
 ```
 
 **Librarian status values:**
+
 - `enabled (ollama running, gemma4:e2b loaded)` — librarian is enabled and working
 - `available (ollama installed, XGB RAM)` — hardware capable but not enabled
 - `skipped (requires ollama + 16GB+ RAM)` — hardware insufficient
 - `skipped (ollama not installed)` — ollama missing
 
 **Federation status rules:**
+
 - Only report what the connectivity test actually returned. Never infer or guess peer registration status.
 - If sync succeeded: report note counts and peers downloaded.
 - If sync failed with auth error: report "auth failed -- your pubkey may not be registered on the hub."
@@ -97,6 +99,7 @@ Only run sub-steps where detection found issues.
 **If not found:** Detect by walking home directory (max depth 4) looking for `.obsidian` directories using Node.js `fs.readdirSync` recursive walk. Present candidates. If none found, ask for the path manually.
 
 Validate the path exists and contains `.md` files. Write to config.json (merge, never overwrite existing fields):
+
 ```json
 { "vault_path": "<chosen-path>" }
 ```
@@ -121,6 +124,7 @@ For each missing system file, write defaults after confirmation:
 ---
 tags: [system]
 ---
+
 # Capture Rules
 
 ## Always Capture
@@ -244,6 +248,7 @@ Skip to summary.
 The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `PLUGIN/federation/.seed` (gets wiped on reinstall).
 
 **Migration check:** If `PLUGIN/federation/.seed` exists but `PLUGIN_DATA/federation/.seed` does not, migrate it:
+
 1. Copy the seed to `PLUGIN_DATA/federation/.seed` (mode 0o600)
 2. Delete the old one from the marketplace directory
 3. Verify the pubkey matches `config.identity.pubkey` -- if not, warn and offer to update the hub
@@ -258,21 +263,29 @@ The `pubkey_b64` value is the raw 32-byte public key as base64 -- ready to send 
 
 ### 4c: Redeem
 
-Ask for the token. POST to `https://interchange.live/api/redeem` with:
+Ask for the token. POST to `https://interchange.live/api/redeem` with a **30-second timeout** so a hung connection can't stall the whole init session:
 
-```json
-{ "token": "<token>", "peer_id": "<peer_id>", "pubkey": "<base64-32-bytes>" }
+```js
+const res = await fetch("https://interchange.live/api/redeem", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ token, peer_id, pubkey: pubkey_b64 }),
+  signal: AbortSignal.timeout(30_000),
+});
 ```
 
 The `peer_id` is bound to the token server-side — the user does not choose it. The redeem response returns the `peer_id` along with the headscale auth key and hub endpoint. Store these in memory for the rest of Phase 4. Do NOT write config yet — wait for the sync test to succeed.
 
 Handle server errors:
+
 - `404` -> "invalid token, check the URL you were sent"
-- `409` -> "this token was already redeemed"
+- `409` -> "this token was already redeemed -- if a previous init redeemed but failed at sync, contact robin for a fresh token; the burned one cannot be replayed"
 - `410` -> "this token has expired, contact robin for a new one"
 - `502` -> "provisioning service is unreachable, try again later"
 
-On any failure, exit Phase 4 without writing config.
+On `AbortError` (timeout) or any network error: surface "interchange.live unreachable, retry later" and exit Phase 4 without writing config. The token has not been spent on a connection failure -- the same token will work on the next /init run.
+
+On HTTP failure: exit Phase 4 without writing config.
 
 ### 4d: Network Connection
 
@@ -282,11 +295,12 @@ Check for Tailscale. If not installed, guide installation (brew for macOS, curl 
 tailscale up --auth-key <headscale_auth_key> --login-server https://hs.interchange.live
 ```
 
-Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window) — surface the error and exit Phase 4 without writing config. The pubkey is already registered so re-running init should work.
+Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window) — surface the error and exit Phase 4 without writing config. The redeem token has already been consumed, so re-running /init will need a fresh token from robin (the same `409` rule as 4h applies).
 
 ### 4e: Visibility Rules
 
 Present defaults:
+
 - `3-permanent/` -> public (full content shared)
 - `1-fleeting/` -> listed (title + tags + summary)
 - Everything else -> private
@@ -303,21 +317,41 @@ If yes, set `"graph": true` in the generated config. If no, set `"graph": false`
 
 Ask: "Share anonymized pipeline stats? (Tier 1: action counts only)"
 
-### 4h: Write Config
+### 4h: First Sync Test
 
-Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from 4c), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
+The federation config is **not yet on disk**. Run the sync test against the in-memory identity and the hub endpoint from the redeem response, with a **15-second timeout** so a stalled connection cannot hang init:
 
-### 4i: First Sync Test
+```js
+const { spawn } = await import("node:child_process");
+const child = spawn(LL_SEARCH, ["sync", dbPath, vaultPath], {
+  env: { ...process.env, LL_HUB_ENDPOINT: hubEndpoint },
+});
+const timer = setTimeout(() => child.kill("SIGKILL"), 15_000);
+// await close, clearTimeout(timer) on exit
+```
 
-Run `ll-search sync`. On success: report counts. On failure: the pubkey is registered but something else is wrong — surface the error and suggest re-running init.
+(Or invoke the binary via the existing helper and pass the same 15s deadline.)
 
-**Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped. The token prompt only fires on fresh federation setup, so existing peers re-running init are unaffected.
+On success: report counts (notes exported, peers downloaded). Proceed to 4i.
+
+On failure or timeout: **do not write config**. Surface the specific error and offer the user a choice:
+
+1. **Retry sync now** — re-run 4h against the same in-memory identity (no token re-burn, no re-redeem). Useful for transient network blips.
+2. **Exit Phase 4** — leave federation unconfigured. The redeem token has been spent. To complete federation later the user must contact robin for a fresh token; re-running /init will see no `PLUGIN_DATA/federation/config.json` and start Phase 4 from scratch, but the burned token will return `409` on redeem.
+
+Be explicit about the trade: "The token is single-use and was consumed. If sync keeps failing, you can either retry now or get a new token from robin -- there is no way to replay this one."
+
+### 4i: Write Config
+
+Only reached if 4h succeeded. Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from 4c), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
+
+**Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped — the file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed init runs leave no config behind, so re-running /init from a fresh shell always re-enters Phase 4 cleanly. The seed at `PLUGIN_DATA/federation/.seed` is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey -- the user will need a fresh token if the previous one was already redeemed.
 
 ---
 
 ## Phase 5: CLAUDE.md Integration
 
-CLAUDE.md tells Claude *how to behave* with the learning loop throughout a session. Without it, the plugin is installed but Claude does not know when to retrieve, how to capture, or when to suggest consolidation.
+CLAUDE.md tells Claude _how to behave_ with the learning loop throughout a session. Without it, the plugin is installed but Claude does not know when to retrieve, how to capture, or when to suggest consolidation.
 
 ### Dependencies
 
@@ -337,12 +371,12 @@ Read the template version from `PLUGIN/templates/claudemd-section.version`. Then
 
 Four possible states:
 
-| State | Action |
-|-------|--------|
-| No CLAUDE.md exists | Offer to create one (Phase 5b) |
+| State                                      | Action                             |
+| ------------------------------------------ | ---------------------------------- |
+| No CLAUDE.md exists                        | Offer to create one (Phase 5b)     |
 | CLAUDE.md exists, no learning-loop section | Offer to append section (Phase 5c) |
-| Section exists, version matches | Skip -- already configured |
-| Section exists, version outdated | Offer to update section (Phase 5d) |
+| Section exists, version matches            | Skip -- already configured         |
+| Section exists, version outdated           | Offer to update section (Phase 5d) |
 
 ### 5b: New CLAUDE.md (prompt-driven generation)
 
@@ -354,6 +388,7 @@ If the user has no `~/.claude/CLAUDE.md`, offer to generate a starter. Ask up to
 4. "Any code style rules Claude should follow?" (free text, optional)
 
 Generate a concise CLAUDE.md (~50-80 lines) with:
+
 - `## Git` section based on answer 2
 - `## Code Style` section based on answers 1 and 4
 - `## Workflow` section based on answer 3
@@ -373,13 +408,15 @@ Generate the section using the detected vault path and current template version.
 <!-- learning-loop vX.Y -->
 
 Three stores, three purposes:
-- **Auto-memory** (~/.claude/projects/*/memory/) -- preferences, corrections, project context.
+
+- **Auto-memory** (~/.claude/projects/\*/memory/) -- preferences, corrections, project context.
 - **Obsidian vault** (VAULT_PATH) -- decisions, patterns, domain insights.
 - **Episodic memory** (plugin) -- conversation history across sessions.
 
 ### Retrieval (every session)
 
 On session start, the learning-loop plugin injects context. Act on it:
+
 1. Read any auto-memories flagged as relevant by the hook.
 2. Search episodic memory for relevant past conversations about the current topic/project.
 3. Search the Obsidian vault for relevant knowledge notes.
@@ -402,14 +439,15 @@ After substantial work, suggest `/learning-loop:reflect` to run the consolidatio
 
 Captures go to 0-inbox/ as atomic notes. Tag with source project. Link to the project index note in 4-projects/.
 
-Follow the rules in _system/capture-rules.md. Read _system/persona.md for voice and tone.
+Follow the rules in \_system/capture-rules.md. Read \_system/persona.md for voice and tone.
 ```
 
 **Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vX.Y` with the template version from `PLUGIN/templates/claudemd-section.version`.
 
 **Conditional lines:** Before generating, check which system files and folders exist:
-- If `_system/capture-rules.md` does not exist, remove the "Follow the rules in _system/capture-rules.md." line
-- If `_system/persona.md` does not exist, remove the "Read _system/persona.md for voice and tone." line
+
+- If `_system/capture-rules.md` does not exist, remove the "Follow the rules in \_system/capture-rules.md." line
+- If `_system/persona.md` does not exist, remove the "Read \_system/persona.md for voice and tone." line
 - If both are missing, omit the entire last line of the "Second Brain" section
 - If `0-inbox/` or `4-projects/` do not exist, omit the "Second Brain (Obsidian)" section entirely
 
@@ -495,6 +533,7 @@ Use Phase 1's librarian detection results:
 Present:
 
 > The librarian is a background agent that continuously maintains your vault:
+>
 > - Finds orphan notes that should be linked to their neighbors
 > - Flags topic-style titles in inbox notes
 > - Marks potentially stale claims for investigation
@@ -509,9 +548,11 @@ Present:
 On confirmation:
 
 1. **Pull model** (if not already pulled):
+
    ```bash
    ollama pull gemma4:e2b
    ```
+
    Show progress. This is an ~8GB download.
 
 2. **Update config:** Set `librarian.enabled: true` in config.json (merge, don't overwrite).
