@@ -18,6 +18,7 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } from 'fs';
 import { join, resolve, basename } from 'path';
+import { fileURLToPath } from 'url';
 import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 import { getPluginData } from './lib/config.mjs';
 
@@ -1356,7 +1357,14 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch(err => {
-  console.error(err.message);
-  process.exit(1);
-});
+const isDirectRun =
+  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+
+if (isDirectRun) {
+  main().catch(err => {
+    console.error(err.message);
+    process.exit(1);
+  });
+}
+
+export const __test__ = { checkClaims, fetchPageText, isBlockedFetch, WEB_FETCH_BLOCKLIST };
