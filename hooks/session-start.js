@@ -23,6 +23,7 @@ import {
   findBinary as findBinaryShared,
   findEpisodicBinary,
 } from './lib/common.mjs';
+import { warnOnce } from '../scripts/lib/warn-once.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
@@ -484,9 +485,9 @@ try {
       stdio: 'ignore',
     });
     child.unref();
-  } else if (!globalThis.__llEpisodicWarned) {
-    globalThis.__llEpisodicWarned = true;
-    process.stderr.write(
+  } else {
+    warnOnce(
+      'episodic-unavailable',
       'learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n',
     );
   }

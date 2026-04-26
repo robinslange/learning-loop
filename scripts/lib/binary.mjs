@@ -2,6 +2,7 @@ import { execFileSync } from 'child_process';
 import { join, resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { getPluginData } from './config.mjs';
+import { warnOnce } from './warn-once.mjs';
 
 const BINARY_NAME = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
 
@@ -44,6 +45,10 @@ export function binaryVersion() {
 export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const bin = binaryPath();
   if (!bin) {
+    warnOnce(
+      'll-search-missing',
+      'learning-loop: ll-search binary not found. Run /learning-loop:init to install.\n',
+    );
     throw new Error('ll-search binary not found. Run /learning-loop:init to install.');
   }
 
@@ -58,6 +63,10 @@ export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
 export function runRaw(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const bin = binaryPath();
   if (!bin) {
+    warnOnce(
+      'll-search-missing',
+      'learning-loop: ll-search binary not found. Run /learning-loop:init to install.\n',
+    );
     throw new Error('ll-search binary not found. Run /learning-loop:init to install.');
   }
 

@@ -1,5 +1,6 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 import { findBinary, findEpisodicBinary } from './common.mjs';
+import { warnOnce } from '../../scripts/lib/warn-once.mjs';
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/g,
@@ -185,7 +186,10 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
 
   const epCmd = useRealBinaries ? findEpisodicBinary() : 'episodic-memory';
   if (useRealBinaries && !epCmd) {
-    warnEpisodicUnavailableOnce();
+    warnOnce(
+      'episodic-unavailable',
+      'learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n',
+    );
   }
 
   const tasks = [
@@ -219,10 +223,3 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   return { vault, episodic };
 }
 
-function warnEpisodicUnavailableOnce() {
-  if (globalThis.__llEpisodicWarned) return;
-  globalThis.__llEpisodicWarned = true;
-  process.stderr.write(
-    'learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n',
-  );
-}

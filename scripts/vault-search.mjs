@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
 import { relativeToVault } from './lib/paths.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
+import { warnOnce } from './lib/warn-once.mjs';
 
 const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
 
@@ -289,7 +290,10 @@ try {
         const { binaryPath: bp } = await import('./lib/binary.mjs');
         const bin = bp();
         if (!bin) {
-          process.stderr.write('ll-search binary not found for watch mode\n');
+          warnOnce(
+            'll-search-missing',
+            'learning-loop: ll-search binary not found. Run /learning-loop:init to install.\n',
+          );
           break;
         }
         const watchArgs = ['watch', VAULT_PATH, DB_PATH];
