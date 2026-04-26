@@ -144,3 +144,49 @@ describe('source-resolver check-claims', () => {
     assert.equal(fetchCalls, 0, 'no fetch should happen if no numbers to verify');
   });
 });
+
+describe('fetchPageText error surfacing', () => {
+  let originalFetch;
+  before(() => {
+    originalFetch = globalThis.fetch;
+  });
+  after(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('returns { ok: false, kind: "timeout" } on AbortError', async () => {
+    globalThis.fetch = async () => {
+      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
+    };
+    const { __test__ } = await import(
+      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/x');
+    assert.equal(result.ok, false);
+    assert.equal(result.kind, 'timeout');
+  });
+
+  it('returns { ok: false, kind: "http", status } on 4xx', async () => {
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    const { __test__ } = await import(
+      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/y');
+    assert.equal(result.ok, false);
+    assert.equal(result.kind, 'http');
+    assert.equal(result.status, 404);
+  });
+
+  it('returns { ok: true, text } on success', async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      text: async () => '<html><body>hello world</body></html>',
+    });
+    const { __test__ } = await import(
+      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/z');
+    assert.equal(result.ok, true);
+    assert.match(result.text, /hello world/);
+  });
+});

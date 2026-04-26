@@ -21,6 +21,7 @@ import { join, resolve, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 import { getPluginData } from './lib/config.mjs';
+import { warnOnce } from './lib/warn-once.mjs';
 
 const PLUGIN_DATA = getPluginData();
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
@@ -1373,27 +1374,42 @@ function isBlockedFetch(url) {
 }
 
 async function fetchPageText(url) {
+  let res;
   try {
-    const res = await fetch(url, {
+    res = await fetch(url, {
       redirect: 'follow',
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; learning-loop/1.0)' },
       signal: AbortSignal.timeout(15000),
     });
-    if (!res.ok) return null;
-    const html = await res.text();
-    return html
-      .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-      .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&nbsp;/gi, ' ')
-      .replace(/&amp;/gi, '&')
-      .replace(/&lt;/gi, '<')
-      .replace(/&gt;/gi, '>')
-      .replace(/\s+/g, ' ')
-      .trim();
-  } catch {
-    return null;
+  } catch (err) {
+    const kind =
+      err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    warnOnce(
+      `fetchPageText-${kind}`,
+      `learning-loop: source-resolver page fetch ${kind} (e.g. ${url}); proceeding without page text. Further ${kind}s will be silent this session.\n`,
+    );
+    return { ok: false, kind, error: err.message };
   }
+  if (!res.ok) {
+    return { ok: false, kind: 'http', status: res.status };
+  }
+  let html;
+  try {
+    html = await res.text();
+  } catch (err) {
+    return { ok: false, kind: 'parse', error: err.message };
+  }
+  const text = html
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return { ok: true, text };
 }
 
 async function checkClaims(notePath) {
@@ -1427,9 +1443,9 @@ async function checkClaims(notePath) {
         sourceKind = 'abstract';
       }
     } else if (src.url && !isBlockedFetch(src.url)) {
-      const pageText = await fetchPageText(src.url);
-      if (pageText) {
-        metadata = { abstract: pageText };
+      const result = await fetchPageText(src.url);
+      if (result.ok) {
+        metadata = { abstract: result.text };
         sourceKind = 'page';
       }
     }
