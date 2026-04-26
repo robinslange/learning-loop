@@ -1479,19 +1479,26 @@ async function checkClaims(notePath) {
 async function main() {
   const [, , command, ...args] = process.argv;
 
-  if (!command) {
-    console.log(`Usage:
-  source-resolver.mjs resolve "Author Year Topic"        Resolve a citation to verified metadata
-  source-resolver.mjs verify-pmid <pmid> "Author" <year> Verify a specific PMID against claimed author/year
-  source-resolver.mjs verify-doi <doi> "Author" <year>   Verify a specific DOI against claimed author/year
-  source-resolver.mjs verify-arxiv <arxiv-id>             Verify an arXiv paper by ID (e.g. 1706.03762)
-  source-resolver.mjs verify-rfc <rfc-number>             Verify an RFC by number (e.g. 9110)
-  source-resolver.mjs verify-isbn <isbn>                  Verify a book by ISBN
-  source-resolver.mjs verify-note <path>                  Verify all sources in a vault note
-  source-resolver.mjs lookup-compound <name>              Look up a compound in ChEMBL
-  source-resolver.mjs check-claims <path>                 Check quantitative claims against source abstracts
-  source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms`);
-    process.exit(1);
+  const HELP_TEXT = `source-resolver.mjs <command> [args...]
+
+Commands:
+  resolve "<author year topic>"          Resolve a citation against PubMed/Crossref/etc
+  verify-pmid <pmid> "<author>" [year]   Confirm a PMID matches author/year
+  verify-doi <doi> "<author>" [year]     Confirm a DOI matches author/year
+  verify-arxiv <arxiv-id>                Fetch arXiv metadata
+  verify-rfc <rfc-number>                Fetch RFC metadata
+  verify-isbn <isbn>                     Fetch ISBN metadata from Open Library
+  lookup-compound "<name>"               Look up a compound in ChEMBL
+  verify-note <path>                     Verify all sources/claims in a note
+  search-pubmed "<query>" [--mesh]       Structured PubMed search
+  check-claims <path>                    Verify claims against fetched URLs
+
+Output: JSON. Exit 0 on success, 1 on unknown command or error.
+`;
+
+  if (!command || command === '--help' || command === '-h' || command === 'help') {
+    console.log(HELP_TEXT);
+    process.exit(0);
   }
 
   let result;
@@ -1535,7 +1542,7 @@ async function main() {
       result = await checkClaims(resolve(args[0]));
       break;
     default:
-      console.error(`Unknown command: ${command}`);
+      console.error(`Unknown command: ${command}\n\n${HELP_TEXT}`);
       process.exit(1);
   }
 
