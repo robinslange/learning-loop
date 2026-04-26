@@ -180,6 +180,39 @@ Based on user choices:
 - "Create all blindspot placeholders" — batch create stub notes for missing territory
 - "Flag all blindspots for /discovery" — add all to research queue
 
+### Step 4.5: Replay Post-Write Hooks
+
+If Step 4 launched any `note-writer` subagents (counterpoints, rewrites, or blindspot stubs), their Write/Edit calls bypassed PostToolUse — backlinks and edge inference didn't run. Run the unlinked-body sweep documented in `skills/_shared/hook-replay.md` to catch them. Idempotent — safe even if Step 4 wrote nothing.
+
+```bash
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
+
+ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
+
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+import os, re
+root = os.environ["LL_VAULT"]
+for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
+    for dirpath, _, files in os.walk(os.path.join(root, d)):
+        for f in files:
+            if not f.endswith(".md"): continue
+            p = os.path.join(dirpath, f)
+            try:
+                body = open(p).read()
+                body = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.DOTALL)
+                if not re.search(r"\[\[[^\]]+\]\]", body):
+                    print(p)
+            except: pass
+PY
+
+if [ -s /tmp/ll-sweep-candidates.txt ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+fi
+```
+
+Skip if Step 4 took no actions. Report failures in Step 6.
+
 ### Step 5: Track
 
 After analysis completes:

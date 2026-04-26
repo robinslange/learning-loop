@@ -57,6 +57,41 @@ The agent definition is at `PLUGIN/agents/note-deepener.md`.
 
 If no note name was provided, pass no note_path — the agent will pick the shallowest inbox note.
 
+### Step 1.5: Replay Post-Write Hooks
+
+The `note-deepener` is a subagent. Its Write/Edit tool calls bypass PostToolUse, so the deepened note (and any split note in `0-inbox/`) miss `post-write-autolink.js` and `post-write-edge-infer.js`.
+
+Run the unlinked-body sweep from `skills/_shared/hook-replay.md` to catch them. Idempotent — safe on already-hooked notes:
+
+```bash
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
+
+ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
+
+LL_VAULT="$LL_VAULT" python3 - <<'PY' > /tmp/ll-sweep-candidates.txt
+import os, re
+root = os.environ["LL_VAULT"]
+for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
+    for dirpath, _, files in os.walk(os.path.join(root, d)):
+        for f in files:
+            if not f.endswith(".md"): continue
+            p = os.path.join(dirpath, f)
+            try:
+                body = open(p).read()
+                body = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.DOTALL)
+                if not re.search(r"\[\[[^\]]+\]\]", body):
+                    print(p)
+            except: pass
+PY
+
+if [ -s /tmp/ll-sweep-candidates.txt ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < /tmp/ll-sweep-candidates.txt
+fi
+```
+
+Report failures in Step 2 if any.
+
 ### Step 2: Present Results
 
 The agent returns a structured report with before/after comparison, maturity transition, and destination. Present it to the user.

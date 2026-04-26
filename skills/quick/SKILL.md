@@ -88,6 +88,19 @@ Return the filename and title when done.
 
 **If either fails:** No capture. Move to report.
 
+### Step 4.5: Replay Post-Write Hooks
+
+If Step 4 dispatched the `note-writer` subagent, replay the post-write hook chain on the new note. Subagent Write/Edit calls bypass PostToolUse, so without this the note misses `post-write-autolink.js` and `post-write-edge-infer.js`.
+
+The note-writer returned the absolute filename. Pipe it directly:
+
+```bash
+printf '%s\n' "$NOTE_PATH" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Skip this step if Step 4 didn't capture (novelty/substance gate failed). See `skills/_shared/hook-replay.md` for the full pattern.
+
 ### Step 5: Report
 
 One line:

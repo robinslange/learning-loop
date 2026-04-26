@@ -47,6 +47,17 @@ Write the note directly to {{VAULT}}/0-inbox/<filename>.md using the Write tool.
 Return the filename and title when done.
 ```
 
+### Step 2.5: Replay Post-Write Hooks
+
+The note-writer is a subagent. Its Write call bypassed PostToolUse, so backlinks and edge inference didn't run. Replay them on the returned path:
+
+```bash
+printf '%s\n' "$NOTE_PATH" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Where `$NOTE_PATH` is the absolute path the note-writer returned. See `skills/_shared/hook-replay.md` for context.
+
 ### Step 3: Report
 
 Show one line:

@@ -43,6 +43,17 @@ The agent definition is at `PLUGIN/agents/literature-capturer.md`.
 
 The agent may identify existing vault notes that reference the source without wiki-links. Present these to the user and execute approved edits.
 
+### Step 2.5: Replay Post-Write Hooks
+
+The `literature-capturer` is a subagent. The literature note it wrote to `2-literature/` bypassed PostToolUse, so backlinks and edge inference didn't run. Replay on the returned path:
+
+```bash
+printf '%s\n' "$LITERATURE_NOTE_PATH" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Where `$LITERATURE_NOTE_PATH` is the absolute path the agent returned. The backlink edits from Step 2 happen via main-thread `Edit` and trigger PostToolUse normally — no replay needed for those. See `skills/_shared/hook-replay.md` for the full pattern.
+
 ### Step 3: Present Results
 
 The agent returns a structured report with the captured note, connections, counterpoints, and related sources. Present it to the user.
