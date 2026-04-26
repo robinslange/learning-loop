@@ -1,16 +1,18 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
 const HOOK = join(import.meta.dirname, '..', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
-const DREAM_MARKER = join(tmp, 'learning-loop-last-dream');
 const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');
 
-const FAKE_PROJECT_DIR = '/tmp/ll-test-dream-project';
+const PLUGIN_DATA = mkdtempSync(join(tmp, 'll-test-dream-plugin-data-'));
+const DREAM_MARKER = join(PLUGIN_DATA, 'retrieval', 'last-dream');
+
+const FAKE_PROJECT_DIR = join(tmp, 'll-test-dream-project');
 const encodedPath = FAKE_PROJECT_DIR.replace(/[/\\]/g, '-');
 const home = process.env.HOME || process.env.USERPROFILE || homedir();
 const memoryDir = join(home, '.claude', 'projects', encodedPath, 'memory');
@@ -18,7 +20,11 @@ const memoryDir = join(home, '.claude', 'projects', encodedPath, 'memory');
 function run() {
   return execFileSync('node', [HOOK], {
     encoding: 'utf-8',
-    env: { ...process.env, CLAUDE_PROJECT_DIR: FAKE_PROJECT_DIR },
+    env: {
+      ...process.env,
+      CLAUDE_PROJECT_DIR: FAKE_PROJECT_DIR,
+      CLAUDE_PLUGIN_DATA: PLUGIN_DATA,
+    },
     timeout: 5000,
   });
 }
@@ -34,20 +40,19 @@ function restoreTmpFile(path, data) {
 }
 
 describe('dream-gate', () => {
-  let savedMarker;
   let savedLock;
 
   before(() => {
-    savedMarker = saveTmpFile(DREAM_MARKER);
     savedLock = saveTmpFile(DREAM_LOCK);
 
+    mkdirSync(join(PLUGIN_DATA, 'retrieval'), { recursive: true });
     mkdirSync(memoryDir, { recursive: true });
   });
 
   after(() => {
-    restoreTmpFile(DREAM_MARKER, savedMarker);
     restoreTmpFile(DREAM_LOCK, savedLock);
 
+    rmSync(PLUGIN_DATA, { recursive: true, force: true });
     rmSync(memoryDir, { recursive: true, force: true });
   });
 
