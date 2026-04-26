@@ -89,3 +89,11 @@ The four inline markers are documented in `capture-rules.md` under "Verification
 - `[not in source]` -- figure absent from a fetched non-academic page; check manually or soften.
 
 See `agents/_skills/capture-rules.md` for the full shape rules and `agents/note-writer.md` Pass 1 for the write-time procedure.
+
+## Subagent writes and hook replay
+
+PostToolUse hooks (`post-write-autolink.js`, `post-write-edge-infer.js`) do not fire on Write or Edit calls made inside a subagent. Notes written by `note-writer`, `literature-capturer`, `note-deepener`, and the other write-capable agents bypass the structural backlink and typed-edge passes by default.
+
+Skills that dispatch write-capable subagents replay the hook chain explicitly via `scripts/sweep-hook-replay.mjs`. The script accepts vault paths on stdin or as positional args, runs both PostToolUse hooks against each, and emits a JSON summary. Hooks are idempotent, so replaying on already-hooked notes is safe.
+
+The canonical patterns (an unlinked-body filter for end-of-skill sweeps and a targeted variant for known paths) live in `skills/_shared/hook-replay.md`. Skills like `/reflect`, `/ingest`, `/quick`, and `/literature` reference that snippet rather than reimplementing it.
