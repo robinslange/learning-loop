@@ -347,10 +347,17 @@ No fixes applied. N issues found — see recommendations above.
 Reuses the `note-scorer` agent. Only invoked for stale inbox notes in `--deep` mode.
 
 **Launch pattern:**
+
+Spawn `note-scorer` subagent(s) (subagent_type: `learning-loop:note-scorer`) with this prompt:
+
 ```
-SendMessage to note-scorer:
-  "Score these notes: <file-path-1>, <file-path-2>, ...
-   Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specific issues found."
+Score these notes for inbox staleness assessment.
+
+notes: <file-path-1>, <file-path-2>, ...
+vault_path: {{VAULT}}/
+scope: stale inbox triage (health --deep)
+
+Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specific issues found.
 ```
 
 **Batching:** One agent per ~10 notes. Parallel for larger sets.

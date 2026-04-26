@@ -25,14 +25,16 @@ If a topic was provided, use it. If not, ask.
 
 ### Step 2: Launch Vault Scout
 
-Use the `discovery-vault-scout` agent to search the vault and episodic memory:
+Spawn a single `discovery-vault-scout` subagent (subagent_type: `learning-loop:discovery-vault-scout`) with this prompt:
 
 ```
-SendMessage to discovery-vault-scout:
-  "Search for everything we have on: <topic>"
+Search for everything we have on: <topic>
+
+topic: <topic>
+vault_path: {{VAULT}}/
 ```
 
-The scout handles vault content search, filename matching, episodic memory, and project index checks in parallel. Wait for it to return results.
+The scout handles vault content search (mgrep + Glob + `vault-search.mjs`), episodic memory, and discrimination of confusable pairs. Wait for it to return results.
 
 ### Step 3: Read Top Matches
 
