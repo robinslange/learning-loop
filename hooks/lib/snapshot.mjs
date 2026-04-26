@@ -1,4 +1,4 @@
-// hooks/lib/snapshot.mjs — On-disk vault-snapshot cache.
+// hooks/lib/snapshot.mjs : On-disk vault-snapshot cache.
 //
 // Replaces the per-hook recursive-readdir of the seven vault folders with a
 // JSON file at <plugin-data>/vault-snapshot.json that hot-path Write/Edit

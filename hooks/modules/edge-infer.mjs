@@ -1,4 +1,4 @@
-// hooks/modules/edge-infer.mjs — Wikilink → edge classification.
+// hooks/modules/edge-infer.mjs : Wikilink → edge classification.
 // Extracted from hooks/post-write-edge-infer.js. Snapshot-backed vault index
 // (no per-call recursive readdir).
 

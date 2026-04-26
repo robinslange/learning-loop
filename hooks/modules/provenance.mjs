@@ -1,22 +1,9 @@
-// hooks/modules/provenance.mjs — provenance event emission.
-// Extracted from hooks/post-tool-provenance.js. Spawns scripts/provenance.mjs
-// once per qualifying event with the same JSON payload shape the old hook
-// produced. Vault-less: runs without ctx.vaultRoot for Agent/Skill events.
+// hooks/modules/provenance.mjs: provenance event emission.
+// Extracted from hooks/post-tool-provenance.js. Calls emitProvenance inline
+// (no subprocess) to keep the post-tool hot path under 60ms. Vault-less:
+// runs without ctx.vaultRoot for Agent/Skill events.
 
-import { execFileSync } from 'node:child_process';
-import { resolve } from 'node:path';
-import { vaultRelPath, classifyVaultPath } from '../lib/common.mjs';
-
-const PROVENANCE_SCRIPT = resolve(import.meta.dirname, '..', '..', 'scripts', 'provenance.mjs');
-
-function emit(event) {
-  try {
-    execFileSync('node', [PROVENANCE_SCRIPT, JSON.stringify({ source: 'hook', ...event })], {
-      timeout: 3000,
-      stdio: 'ignore',
-    });
-  } catch {}
-}
+import { emitProvenance, vaultRelPath, classifyVaultPath } from '../lib/common.mjs';
 
 export async function runProvenance(ctx) {
   try {
@@ -39,12 +26,12 @@ export async function runProvenance(ctx) {
           event.tags = tagMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
         }
       }
-      emit(event);
+      emitProvenance(event);
       return;
     }
 
     if (tool === 'Agent') {
-      emit({
+      emitProvenance({
         action: 'agent-spawn',
         agent: input.subagent_type || 'general-purpose',
         description: input.description || '',
@@ -54,7 +41,7 @@ export async function runProvenance(ctx) {
     }
 
     if (tool === 'Skill') {
-      emit({
+      emitProvenance({
         action: 'skill-invoke',
         skill: input.skill || '',
         args: input.args || '',

@@ -1,4 +1,4 @@
-// hooks/modules/autolink.mjs — backlink loop + similarity-based auto-links.
+// hooks/modules/autolink.mjs : backlink loop + similarity-based auto-links.
 // Extracted from hooks/post-write-autolink.js. The synchronous indexer-fallback
 // that the old file ran when the watch daemon was absent is intentionally
 // dropped here; under the new architecture the daemon owns all writes to

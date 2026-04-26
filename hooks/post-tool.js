@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// hooks/post-tool.js — coalesced post-tool dispatcher.
+// hooks/post-tool.js : coalesced post-tool dispatcher.
 //
 // Single Node entry replacing the three previous PostToolUse hooks
 // (autolink, edge-infer, provenance). One stdin read, one snapshot load,
