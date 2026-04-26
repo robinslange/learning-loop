@@ -208,8 +208,26 @@ try {
 // so a future major bump re-fires.
 if (pluginData) {
   try {
+    const seedConfigPath = join(pluginData, "federation", "config.json");
     const seedMetaPath = join(pluginData, "federation", ".seed-meta.json");
     const noticePath = join(pluginData, "federation", ".seed-notice-shown");
+    // Backfill seed-meta for existing federations (pre-Phase 10 installs).
+    // Stamp as current major so the notice is silent today; fires on next major bump.
+    if (existsSync(seedConfigPath) && !existsSync(seedMetaPath)) {
+      writeFileSync(
+        seedMetaPath,
+        JSON.stringify(
+          {
+            created_at: new Date().toISOString(),
+            plugin_version: pluginVersion,
+            plugin_major: parseInt(pluginVersion.split(".")[0], 10),
+            backfilled: true,
+          },
+          null,
+          2,
+        ),
+      );
+    }
     if (existsSync(seedMetaPath) && !existsSync(noticePath)) {
       const meta = JSON.parse(
         readFileSync(seedMetaPath, "utf-8").replace(/^﻿/, ""),
