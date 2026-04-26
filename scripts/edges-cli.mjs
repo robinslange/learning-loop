@@ -28,6 +28,30 @@ const DB_FILE = join(PLUGIN_DATA, 'edges.db');
 const args = process.argv.slice(2);
 const cmd = args[0];
 
+const HELP_TEXT = `edges-cli.mjs <command> [args...]
+
+Commands:
+  add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]
+  remove <id>
+  list <note-path>
+  downstream <note-path> [--max-depth 10] [--symmetric]
+  sole-dependents <note-path> [--symmetric]
+  review                          Show pending edges with source-note context
+  review-count
+  super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]
+  super-list
+  super-check <query>
+  super-remove <id>
+  confirm <id> [--type new-type]
+  reject <id>
+  stats
+`;
+
+if (!cmd || cmd === '--help' || cmd === '-h' || cmd === 'help') {
+  console.log(HELP_TEXT);
+  process.exit(0);
+}
+
 function parseFlag(flag, defaultVal) {
   const idx = args.indexOf(flag);
   if (idx < 0) return defaultVal;
