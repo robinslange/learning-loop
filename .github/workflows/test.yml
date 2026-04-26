@@ -67,3 +67,14 @@ jobs:
 
       - name: Prettier check
         run: npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
+
+      - name: Code-fence tag check
+        run: |
+          if grep -rEn '^```(sh|shell|typescript)( |$)' \
+              --exclude-dir=vendor \
+              skills/ agents/ docs/ guide/ hooks/ scripts/ \
+              CHANGELOG.md README.md \
+              --include='*.md' 2>/dev/null; then
+            echo "ERROR: non-canonical code-fence tags found. Use bash, js, or ts."
+            exit 1
+          fi
