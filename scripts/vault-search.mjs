@@ -38,8 +38,29 @@ function tryFederationExport() {
   }
 }
 
+const USAGE = `Usage:
+  vault-search.mjs query "text" [--top N] [--rerank] [--candidates N]   Hybrid search (default top: 10)
+  vault-search.mjs search <keywords> [--top N] [--rerank] [--candidates N]  Hybrid search (default top: 20)
+  vault-search.mjs similar <note-path> [--top N]             Find similar notes (default: 10)
+  vault-search.mjs cluster [--threshold 0.7]                 Cluster notes by similarity
+  vault-search.mjs discriminate [--threshold ${DISCRIMINATE_THRESHOLD}] [paths...]  Find confusable pairs
+  vault-search.mjs reflect-scan "q1" "q2" [--top N] [--candidates N]  Batch search+rerank+discriminate
+  vault-search.mjs index [--force] [--watch] [--sync]        Build/update search index
+  vault-search.mjs status                                    Index health check
+  vault-search.mjs list [--top N]                            List indexed notes (default: all)
+  vault-search.mjs intentions                                List intention contexts with counts (summary)
+  vault-search.mjs intentions "<context>"                    Show notes + cues for matching context (detail)
+  vault-search.mjs export-index                              Export federation index
+  vault-search.mjs sync                                      Sync with federation hub`;
+
 const args = process.argv.slice(2);
 const cmd = args[0];
+
+const wantsHelp = !cmd || cmd === '--help' || cmd === '-h' || cmd === 'help';
+if (wantsHelp) {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 function parseFlag(flag, defaultVal) {
   const idx = args.indexOf(flag);
@@ -152,21 +173,6 @@ function intentions(projectFilter) {
   }
   return Object.fromEntries(filtered);
 }
-
-const USAGE = `Usage:
-  vault-search.mjs query "text" [--top N] [--rerank] [--candidates N]   Hybrid search (default top: 10)
-  vault-search.mjs search <keywords> [--top N] [--rerank] [--candidates N]  Hybrid search (default top: 20)
-  vault-search.mjs similar <note-path> [--top N]             Find similar notes (default: 10)
-  vault-search.mjs cluster [--threshold 0.7]                 Cluster notes by similarity
-  vault-search.mjs discriminate [--threshold ${DISCRIMINATE_THRESHOLD}] [paths...]  Find confusable pairs
-  vault-search.mjs reflect-scan "q1" "q2" [--top N] [--candidates N]  Batch search+rerank+discriminate
-  vault-search.mjs index [--force] [--watch] [--sync]        Build/update search index
-  vault-search.mjs status                                    Index health check
-  vault-search.mjs list [--top N]                            List indexed notes (default: all)
-  vault-search.mjs intentions                                List intention contexts with counts (summary)
-  vault-search.mjs intentions "<context>"                    Show notes + cues for matching context (detail)
-  vault-search.mjs export-index                              Export federation index
-  vault-search.mjs sync                                      Sync with federation hub`;
 
 try {
   switch (cmd) {
