@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v1.16.9
+
 ### Added
 
 - **Two new vault-librarian classifiers** running as single structured-output calls against gemma4:e2b. **Tag suggester** runs on notes with 0–1 tags and proposes up to 2 vocabulary-bounded tags per note (vocabulary built from existing vault tags, frequency-curated, top 60, structural categories excluded). Manual precision on a 40-note sample: 0.78 strict / 0.84 charitable. **Duplicate detector** runs on every visited note, comparing against three nearest neighbours from `ll-search similar` with 500-char body context per side, emitting a 3-way enum (`duplicate`/`same_topic`/`unrelated`). Both follow the established `voiceCheck` pattern — pre-fetched context, single `format=` schema call, no tool-use loop. New queue task types: `tag_suggestion`, `duplicate_flag`. New state counters: `tag_suggestions`, `duplicate_flags`. New submit functions in `scripts/lib/librarian-tools.mjs`. 15 new tests in `tests/tag-classifier.test.mjs` and `tests/duplicate-classifier.test.mjs`.
