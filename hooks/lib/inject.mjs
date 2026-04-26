@@ -44,7 +44,11 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
   if (filtered.length > 0) {
     const top = filtered[0];
     const body = truncateAtSentenceBoundary(top.body, 300);
-    const lines = [`## From your vault (top match: ${top.title}, similarity ${top.score})`, '', body];
+    const lines = [
+      `## From your vault (top match: ${top.title}, similarity ${top.score})`,
+      '',
+      body,
+    ];
     injectedVaultPaths.push(top.path);
 
     const pointers = filtered.slice(1, 5);
@@ -74,9 +78,11 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
 }
 
 export function emitHookOutput({ event, additionalContext }) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: event, additionalContext },
-  }));
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: { hookEventName: event, additionalContext },
+    }),
+  );
 }
 
 function spawnSearch(spawnFn, cmd, args, abortSignal, env) {
@@ -88,27 +94,48 @@ function spawnSearch(spawnFn, cmd, args, abortSignal, env) {
     let stderr = '';
     const t0 = Date.now();
 
-    if (child.stdout) child.stdout.on('data', (c) => { stdout += c; });
-    if (child.stderr) child.stderr.on('data', (c) => { stderr += c; });
+    if (child.stdout)
+      child.stdout.on('data', (c) => {
+        stdout += c;
+      });
+    if (child.stderr)
+      child.stderr.on('data', (c) => {
+        stderr += c;
+      });
 
     child.on('close', (code) => {
-      resolve({ ok: code === 0, latency_ms: Date.now() - t0, stdout, stderr, code, killed: child.killed });
+      resolve({
+        ok: code === 0,
+        latency_ms: Date.now() - t0,
+        stdout,
+        stderr,
+        code,
+        killed: child.killed,
+      });
     });
     child.on('error', (err) => {
       resolve({ ok: false, latency_ms: Date.now() - t0, error: err.message, killed: child.killed });
     });
 
-    const onAbort = () => { if (!child.killed) child.kill('SIGTERM'); };
+    const onAbort = () => {
+      if (!child.killed) child.kill('SIGTERM');
+    };
     if (abortSignal.aborted) onAbort();
     else abortSignal.addEventListener('abort', onAbort, { once: true });
   });
 }
 
 function parseVault(result) {
-  if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
+  if (!result.ok)
+    return {
+      hits: [],
+      error: result.error || `exit ${result.code}`,
+      raced_out: result.killed || false,
+      latency_ms: result.latency_ms,
+    };
   try {
     const parsed = JSON.parse(result.stdout);
-    const hits = Array.isArray(parsed) ? parsed : (parsed?.results || []);
+    const hits = Array.isArray(parsed) ? parsed : parsed?.results || [];
     return { hits, raced_out: false, latency_ms: result.latency_ms };
   } catch {
     return { hits: [], error: 'parse_error', raced_out: false, latency_ms: result.latency_ms };
@@ -116,7 +143,13 @@ function parseVault(result) {
 }
 
 function parseEpisodic(result) {
-  if (!result.ok) return { hits: [], error: result.error || `exit ${result.code}`, raced_out: result.killed || false, latency_ms: result.latency_ms };
+  if (!result.ok)
+    return {
+      hits: [],
+      error: result.error || `exit ${result.code}`,
+      raced_out: result.killed || false,
+      latency_ms: result.latency_ms,
+    };
   const hits = [];
   const lines = result.stdout.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -146,7 +179,9 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const useRealBinaries = !_spawnFn;
   const llBinary = useRealBinaries ? findBinary() : null;
   const llCmd = llBinary ? llBinary.bin : 'll-search';
-  const llEnv = llBinary ? { ...process.env, ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir } : undefined;
+  const llEnv = llBinary
+    ? { ...process.env, ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir }
+    : undefined;
 
   const epCmd = useRealBinaries ? findEpisodicBinary() : 'episodic-memory';
   if (useRealBinaries && !epCmd) {
@@ -154,24 +189,40 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   }
 
   const tasks = [
-    spawnSearch(spawnFn, llCmd, ['query', '--top', '5', vaultDbPath, query], controller.signal, llEnv),
+    spawnSearch(
+      spawnFn,
+      llCmd,
+      ['query', '--top', '5', vaultDbPath, query],
+      controller.signal,
+      llEnv,
+    ),
   ];
   if (epCmd) {
-    tasks.push(spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal));
+    tasks.push(
+      spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal),
+    );
   }
 
   const results = await Promise.allSettled(tasks);
   clearTimeout(timer);
 
-  const vault = results[0].status === 'fulfilled' ? parseVault(results[0].value) : { hits: [], error: 'rejected' };
-  const episodic = epCmd && results[1]
-    ? (results[1].status === 'fulfilled' ? parseEpisodic(results[1].value) : { hits: [], error: 'rejected' })
-    : { hits: [], error: 'episodic_unavailable' };
+  const vault =
+    results[0].status === 'fulfilled'
+      ? parseVault(results[0].value)
+      : { hits: [], error: 'rejected' };
+  const episodic =
+    epCmd && results[1]
+      ? results[1].status === 'fulfilled'
+        ? parseEpisodic(results[1].value)
+        : { hits: [], error: 'rejected' }
+      : { hits: [], error: 'episodic_unavailable' };
   return { vault, episodic };
 }
 
 function warnEpisodicUnavailableOnce() {
   if (globalThis.__llEpisodicWarned) return;
   globalThis.__llEpisodicWarned = true;
-  process.stderr.write('learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n');
+  process.stderr.write(
+    'learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n',
+  );
 }

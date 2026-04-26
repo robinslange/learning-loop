@@ -1,24 +1,17 @@
-import {
-  statSync,
-  readFileSync,
-  appendFileSync,
-  existsSync,
-  renameSync,
-  mkdirSync,
-} from "fs";
-import { join, basename } from "path";
-import { fileURLToPath } from "url";
-import { getConfig, getPluginData } from "./lib/config.mjs";
-import { DB_PATH, VAULT_PATH } from "./lib/constants.mjs";
-import { openReadonly } from "./lib/sqljs.mjs";
+import { statSync, readFileSync, appendFileSync, existsSync, renameSync, mkdirSync } from 'fs';
+import { join, basename } from 'path';
+import { fileURLToPath } from 'url';
+import { getConfig, getPluginData } from './lib/config.mjs';
+import { DB_PATH, VAULT_PATH } from './lib/constants.mjs';
+import { openReadonly } from './lib/sqljs.mjs';
 import {
   TOOL_DEFS,
   executeTool,
   submitVoiceFlag,
   submitTagSuggestion,
   submitDuplicateFlag,
-} from "./lib/librarian-tools.mjs";
-import { run as runBinary } from "./lib/binary.mjs";
+} from './lib/librarian-tools.mjs';
+import { run as runBinary } from './lib/binary.mjs';
 import {
   loadState,
   saveState,
@@ -27,7 +20,7 @@ import {
   expireStaleItems,
   appendItem,
   newItemId,
-} from "./lib/librarian-queue.mjs";
+} from './lib/librarian-queue.mjs';
 
 const cfg = getConfig();
 const libCfg = cfg.librarian || {};
@@ -35,7 +28,7 @@ const libCfg = cfg.librarian || {};
 function resolveLogPath() {
   const pd = getPluginData();
   if (!pd) return null;
-  return join(pd, "librarian", "librarian.log");
+  return join(pd, 'librarian', 'librarian.log');
 }
 
 const LOG_PATH = resolveLogPath();
@@ -45,7 +38,7 @@ function rotateLogIfNeeded() {
   if (!LOG_PATH) return;
   try {
     if (existsSync(LOG_PATH) && statSync(LOG_PATH).size > LOG_MAX_BYTES) {
-      renameSync(LOG_PATH, LOG_PATH + ".1");
+      renameSync(LOG_PATH, LOG_PATH + '.1');
     }
   } catch {}
 }
@@ -55,15 +48,15 @@ function log(msg) {
   if (!LOG_PATH) return;
   const line = `[${new Date().toISOString()}] ${msg}`;
   try {
-    mkdirSync(join(LOG_PATH, ".."), { recursive: true });
-    appendFileSync(LOG_PATH, line, "utf-8");
+    mkdirSync(join(LOG_PATH, '..'), { recursive: true });
+    appendFileSync(LOG_PATH, line, 'utf-8');
   } catch {}
 }
 
-const MODEL = libCfg.model || "gemma4:e2b";
+const MODEL = libCfg.model || 'gemma4:e2b';
 const PACE = (libCfg.pace_seconds || 2) * 1000;
 const QUEUE_CAP = libCfg.queue_cap || 200;
-const OLLAMA_URL = libCfg.ollama_url || "http://localhost:11434";
+const OLLAMA_URL = libCfg.ollama_url || 'http://localhost:11434';
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -75,7 +68,7 @@ async function waitForOllama() {
       const res = await fetch(`${OLLAMA_URL}/api/tags`);
       if (res.ok) return;
     } catch {}
-    log("Waiting for ollama...\n");
+    log('Waiting for ollama...\n');
     await sleep(60000);
   }
 }
@@ -90,7 +83,7 @@ async function getDb() {
 
 async function getAllNotePaths() {
   const db = await getDb();
-  const result = db.exec("SELECT path FROM notes");
+  const result = db.exec('SELECT path FROM notes');
   if (!result.length) return [];
   return result[0].values.map((r) => r[0]);
 }
@@ -108,10 +101,9 @@ function checkStaleness(notePath) {
   const ageMs = Date.now() - mtime;
   if (ageMs < 60 * 24 * 60 * 60 * 1000) return false;
 
-  const body = readFileSync(fullPath, "utf-8");
+  const body = readFileSync(fullPath, 'utf-8');
   const versionPattern = /v\d+\.\d+|\b20\d{2}\b|deprecated/i;
-  const specificityPattern =
-    /\d+\.?\d*\s*(ms|s|MB|GB|%|fps|req\/s|items|notes|tokens)/i;
+  const specificityPattern = /\d+\.?\d*\s*(ms|s|MB|GB|%|fps|req\/s|items|notes|tokens)/i;
 
   if (versionPattern.test(body) && specificityPattern.test(body)) {
     const matched = [];
@@ -122,11 +114,11 @@ function checkStaleness(notePath) {
 
     appendItem({
       id: newItemId(),
-      task: "staleness_suspect",
+      task: 'staleness_suspect',
       target: notePath,
       reason: `Note is ${Math.floor(ageMs / 86400000)} days old and contains version/specificity signals.`,
       matched_patterns: matched,
-      status: "pending",
+      status: 'pending',
       created_at: new Date().toISOString(),
     });
     return true;
@@ -136,7 +128,7 @@ function checkStaleness(notePath) {
 
 async function noteNeedsInvestigation(notePath) {
   const db = await getDb();
-  const s = notePath.split("/").pop().replace(/\.md$/, "");
+  const s = notePath.split('/').pop().replace(/\.md$/, '');
   const inlinkRow = db.exec(
     `SELECT COUNT(*) FROM links WHERE target_path = ? AND target_path NOT LIKE '%[%'`,
     [s],
@@ -144,16 +136,15 @@ async function noteNeedsInvestigation(notePath) {
   const inlinks = inlinkRow.length ? inlinkRow[0].values[0][0] : 0;
 
   const tagRow = db.exec(`SELECT tags FROM notes WHERE path = ?`, [notePath]);
-  const tagsStr =
-    tagRow.length && tagRow[0].values.length ? tagRow[0].values[0][0] : "";
-  const tagCount = (tagsStr || "").split(" ").filter(Boolean).length;
+  const tagsStr = tagRow.length && tagRow[0].values.length ? tagRow[0].values[0][0] : '';
+  const tagCount = (tagsStr || '').split(' ').filter(Boolean).length;
 
   const tasks = [];
-  if (inlinks === 0) tasks.push("link_check");
-  if (notePath.startsWith("0-inbox/") || notePath.startsWith("1-fleeting/"))
-    tasks.push("voice_gate");
-  if (tagCount <= 1) tasks.push("tag_suggest");
-  tasks.push("duplicate_check");
+  if (inlinks === 0) tasks.push('link_check');
+  if (notePath.startsWith('0-inbox/') || notePath.startsWith('1-fleeting/'))
+    tasks.push('voice_gate');
+  if (tagCount <= 1) tasks.push('tag_suggest');
+  tasks.push('duplicate_check');
   return tasks;
 }
 
@@ -192,12 +183,7 @@ const DUPLICATE_PROMPT = `You compare an Obsidian note against its nearest neigh
 Most neighbours will be same_topic, not duplicate. True duplicates are rare.
 Only answer "duplicate" if the claims are interchangeable.`;
 
-const STRUCTURAL_TAGS = new Set([
-  "literature",
-  "counterpoint",
-  "synthesis",
-  "excalidraw",
-]);
+const STRUCTURAL_TAGS = new Set(['literature', 'counterpoint', 'synthesis', 'excalidraw']);
 
 let _vocabularyCache = null;
 async function getTagVocabulary() {
@@ -207,17 +193,14 @@ async function getTagVocabulary() {
   const counts = {};
   if (rows.length) {
     for (const [tagStr] of rows[0].values) {
-      for (const t of tagStr.split(" ").filter(Boolean)) {
+      for (const t of tagStr.split(' ').filter(Boolean)) {
         counts[t] = (counts[t] || 0) + 1;
       }
     }
   }
   const ranked = Object.entries(counts).sort((a, b) => b[1] - a[1]);
   _vocabularyCache = ranked
-    .filter(
-      ([t, n]) =>
-        n >= 3 && !STRUCTURAL_TAGS.has(t) && !t.startsWith("project/"),
-    )
+    .filter(([t, n]) => n >= 3 && !STRUCTURAL_TAGS.has(t) && !t.startsWith('project/'))
     .slice(0, 60)
     .map(([t]) => t);
   return _vocabularyCache;
@@ -226,29 +209,29 @@ async function getTagVocabulary() {
 function readNoteBody(notePath, maxChars = 500) {
   const fullPath = join(VAULT_PATH, notePath);
   if (!existsSync(fullPath)) return null;
-  let content = readFileSync(fullPath, "utf-8");
-  if (content.startsWith("---")) {
-    const end = content.indexOf("\n---", 3);
+  let content = readFileSync(fullPath, 'utf-8');
+  if (content.startsWith('---')) {
+    const end = content.indexOf('\n---', 3);
     if (end !== -1) content = content.slice(end + 4);
   }
   return content.trim().slice(0, maxChars);
 }
 
 async function voiceCheck(notePath) {
-  const title = basename(notePath, ".md");
+  const title = basename(notePath, '.md');
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       messages: [
-        { role: "system", content: VOICE_PROMPT },
-        { role: "user", content: `Title: ${title}\nClassify:` },
+        { role: 'system', content: VOICE_PROMPT },
+        { role: 'user', content: `Title: ${title}\nClassify:` },
       ],
       format: {
-        type: "object",
-        properties: { label: { type: "string", enum: ["claim", "topic"] } },
-        required: ["label"],
+        type: 'object',
+        properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
+        required: ['label'],
       },
       stream: false,
     }),
@@ -260,11 +243,11 @@ async function voiceCheck(notePath) {
   try {
     const { message } = await resp.json();
     const { label } = JSON.parse(message.content);
-    if (label === "topic") {
+    if (label === 'topic') {
       await submitVoiceFlag({
         target: notePath,
         current_title: title,
-        reason: "topic-style title (structured-output classifier)",
+        reason: 'topic-style title (structured-output classifier)',
       });
     }
   } catch (err) {
@@ -273,10 +256,7 @@ async function voiceCheck(notePath) {
 }
 
 async function tagCheck(notePath, _deps = {}) {
-  const body =
-    _deps.bodyOverride !== undefined
-      ? _deps.bodyOverride
-      : readNoteBody(notePath);
+  const body = _deps.bodyOverride !== undefined ? _deps.bodyOverride : readNoteBody(notePath);
   if (!body) return;
 
   let existingTags;
@@ -285,37 +265,34 @@ async function tagCheck(notePath, _deps = {}) {
   } else {
     const db = await getDb();
     const tagRow = db.exec(`SELECT tags FROM notes WHERE path = ?`, [notePath]);
-    existingTags =
-      tagRow.length && tagRow[0].values.length
-        ? tagRow[0].values[0][0] || ""
-        : "";
+    existingTags = tagRow.length && tagRow[0].values.length ? tagRow[0].values[0][0] || '' : '';
   }
 
   const vocabulary = _deps.vocabularyOverride || (await getTagVocabulary());
   if (!vocabulary.length) return;
 
-  const title = basename(notePath, ".md");
-  const userContent = `Title: ${title}\nExisting tags: ${existingTags || "(none)"}\nBody:\n${body}\n\nVocabulary (tags you may use, nothing else): ${vocabulary.join(", ")}`;
+  const title = basename(notePath, '.md');
+  const userContent = `Title: ${title}\nExisting tags: ${existingTags || '(none)'}\nBody:\n${body}\n\nVocabulary (tags you may use, nothing else): ${vocabulary.join(', ')}`;
 
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       messages: [
-        { role: "system", content: TAG_PROMPT },
-        { role: "user", content: userContent },
+        { role: 'system', content: TAG_PROMPT },
+        { role: 'user', content: userContent },
       ],
       format: {
-        type: "object",
+        type: 'object',
         properties: {
           suggested_tags: {
-            type: "array",
-            items: { type: "string" },
+            type: 'array',
+            items: { type: 'string' },
             maxItems: 2,
           },
         },
-        required: ["suggested_tags"],
+        required: ['suggested_tags'],
       },
       options: { temperature: 0 },
       stream: false,
@@ -328,13 +305,11 @@ async function tagCheck(notePath, _deps = {}) {
   try {
     const { message } = await resp.json();
     const parsed = JSON.parse(message.content);
-    const existingSet = new Set(existingTags.split(" ").filter(Boolean));
+    const existingSet = new Set(existingTags.split(' ').filter(Boolean));
     const vocabSet = new Set(vocabulary);
     const cleaned = [
       ...new Set(
-        (parsed.suggested_tags || []).filter(
-          (t) => vocabSet.has(t) && !existingSet.has(t),
-        ),
+        (parsed.suggested_tags || []).filter((t) => vocabSet.has(t) && !existingSet.has(t)),
       ),
     ].slice(0, 2);
     if (cleaned.length === 0) return;
@@ -342,7 +317,7 @@ async function tagCheck(notePath, _deps = {}) {
       target: notePath,
       suggested_tags: cleaned,
       existing_tags: existingTags,
-      reason: "tag classifier (gemma4:e2b structured output)",
+      reason: 'tag classifier (gemma4:e2b structured output)',
     });
   } catch (err) {
     log(`tagCheck parse error for ${notePath}: ${err.message}\n`);
@@ -350,10 +325,7 @@ async function tagCheck(notePath, _deps = {}) {
 }
 
 async function duplicateCheck(notePath, _deps = {}) {
-  const body =
-    _deps.bodyOverride !== undefined
-      ? _deps.bodyOverride
-      : readNoteBody(notePath);
+  const body = _deps.bodyOverride !== undefined ? _deps.bodyOverride : readNoteBody(notePath);
   if (!body) return;
 
   let neighbours;
@@ -361,7 +333,7 @@ async function duplicateCheck(notePath, _deps = {}) {
     neighbours = _deps.neighboursOverride;
   } else {
     try {
-      neighbours = runBinary(["similar", DB_PATH, notePath, "--top", "3"]);
+      neighbours = runBinary(['similar', DB_PATH, notePath, '--top', '3']);
     } catch (err) {
       log(`duplicateCheck similar error for ${notePath}: ${err.message}\n`);
       return;
@@ -369,36 +341,36 @@ async function duplicateCheck(notePath, _deps = {}) {
   }
   if (!neighbours || !neighbours.length) return;
 
-  const title = basename(notePath, ".md");
+  const title = basename(notePath, '.md');
   const neighbourBlocks = neighbours
     .map((n, i) => {
-      const nTitle = basename(n.path, ".md");
-      const nBody = readNoteBody(n.path) || "(empty)";
+      const nTitle = basename(n.path, '.md');
+      const nBody = readNoteBody(n.path) || '(empty)';
       return `Neighbour ${i + 1} (similarity ${n.score.toFixed(3)}, path ${n.path}): "${nTitle}"\n${nBody}`;
     })
-    .join("\n\n");
+    .join('\n\n');
 
   const userContent = `Note (path ${notePath}): "${title}"\n${body}\n\n${neighbourBlocks}`;
 
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       messages: [
-        { role: "system", content: DUPLICATE_PROMPT },
-        { role: "user", content: userContent },
+        { role: 'system', content: DUPLICATE_PROMPT },
+        { role: 'user', content: userContent },
       ],
       format: {
-        type: "object",
+        type: 'object',
         properties: {
           relationship: {
-            type: "string",
-            enum: ["duplicate", "same_topic", "unrelated"],
+            type: 'string',
+            enum: ['duplicate', 'same_topic', 'unrelated'],
           },
-          duplicate_of: { type: ["string", "null"] },
+          duplicate_of: { type: ['string', 'null'] },
         },
-        required: ["relationship", "duplicate_of"],
+        required: ['relationship', 'duplicate_of'],
       },
       options: { temperature: 0 },
       stream: false,
@@ -411,22 +383,18 @@ async function duplicateCheck(notePath, _deps = {}) {
   try {
     const { message } = await resp.json();
     const parsed = JSON.parse(message.content);
-    if (parsed.relationship !== "duplicate") return;
+    if (parsed.relationship !== 'duplicate') return;
     const claimed = parsed.duplicate_of;
-    const match = neighbours.find(
-      (n) => n.path === claimed || basename(n.path, ".md") === claimed,
-    );
+    const match = neighbours.find((n) => n.path === claimed || basename(n.path, '.md') === claimed);
     if (!match) {
-      log(
-        `duplicateCheck: model named non-neighbour ${claimed} for ${notePath}, skipping\n`,
-      );
+      log(`duplicateCheck: model named non-neighbour ${claimed} for ${notePath}, skipping\n`);
       return;
     }
     await submitDuplicateFlag({
       target: notePath,
       duplicate_of: match.path,
       similarity: match.score,
-      reason: "duplicate classifier (gemma4:e2b structured output)",
+      reason: 'duplicate classifier (gemma4:e2b structured output)',
     });
   } catch (err) {
     log(`duplicateCheck parse error for ${notePath}: ${err.message}\n`);
@@ -434,15 +402,15 @@ async function duplicateCheck(notePath, _deps = {}) {
 }
 
 async function investigateNote(notePath, task) {
-  if (task === "voice_gate") {
+  if (task === 'voice_gate') {
     await voiceCheck(notePath);
     return;
   }
-  if (task === "tag_suggest") {
+  if (task === 'tag_suggest') {
     await tagCheck(notePath);
     return;
   }
-  if (task === "duplicate_check") {
+  if (task === 'duplicate_check') {
     await duplicateCheck(notePath);
     return;
   }
@@ -450,8 +418,8 @@ async function investigateNote(notePath, task) {
   const userMessage = `Investigate this orphan note (0 inlinks): ${notePath}`;
 
   const messages = [
-    { role: "system", content: LINK_PROMPT },
-    { role: "user", content: userMessage },
+    { role: 'system', content: LINK_PROMPT },
+    { role: 'user', content: userMessage },
   ];
 
   for (let turn = 0; turn < 8; turn++) {
@@ -460,8 +428,8 @@ async function investigateNote(notePath, task) {
 
     try {
       const res = await fetch(`${OLLAMA_URL}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: MODEL,
           messages,
@@ -482,11 +450,8 @@ async function investigateNote(notePath, task) {
       }
 
       for (const tc of msg.tool_calls) {
-        const result = await executeTool(
-          tc.function.name,
-          tc.function.arguments,
-        );
-        messages.push({ role: "tool", content: result });
+        const result = await executeTool(tc.function.name, tc.function.arguments);
+        messages.push({ role: 'tool', content: result });
       }
     } catch (err) {
       clearTimeout(timer);
@@ -498,7 +463,7 @@ async function investigateNote(notePath, task) {
 
 async function main() {
   if (!libCfg.enabled) {
-    log("Librarian disabled in config\n");
+    log('Librarian disabled in config\n');
     process.exit(0);
   }
 
@@ -516,10 +481,10 @@ async function main() {
 
   while (true) {
     if (pendingCount() >= QUEUE_CAP) {
-      log("Queue full, expiring stale items...\n");
+      log('Queue full, expiring stale items...\n');
       expireStaleItems(VAULT_PATH);
       if (pendingCount() >= QUEUE_CAP) {
-        log("Queue still full, sleeping 5m...\n");
+        log('Queue still full, sleeping 5m...\n');
         await sleep(300000);
         continue;
       }
@@ -527,7 +492,7 @@ async function main() {
 
     const note = pickNote(allPaths, state.visited || []);
     if (!note) {
-      log("Full pass complete. Resetting visited set.\n");
+      log('Full pass complete. Resetting visited set.\n');
       state.visited = [];
       saveState(state);
       continue;
@@ -539,7 +504,7 @@ async function main() {
 
     const tasks = await noteNeedsInvestigation(note);
     if (tasks && tasks.length) {
-      log(`Investigating ${note} (${tasks.join(", ")})\n`);
+      log(`Investigating ${note} (${tasks.join(', ')})\n`);
       for (const task of tasks) {
         try {
           await investigateNote(note, task);
@@ -555,8 +520,7 @@ async function main() {
   }
 }
 
-const isDirectRun =
-  process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isDirectRun) {
   main().catch((err) => {

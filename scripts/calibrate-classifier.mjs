@@ -27,9 +27,11 @@ function flag(name, def) {
 function rowsToObjects(result) {
   if (!result || result.length === 0) return [];
   const { columns, values } = result[0];
-  return values.map(row => {
+  return values.map((row) => {
     const obj = {};
-    columns.forEach((col, i) => { obj[col] = row[i]; });
+    columns.forEach((col, i) => {
+      obj[col] = row[i];
+    });
     return obj;
   });
 }
@@ -49,7 +51,9 @@ function extractContext(fromPath, toTarget) {
     const content = readFileSync(fullPath, 'utf-8');
     const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
     const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-    const linkRe = new RegExp(`\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`);
+    const linkRe = new RegExp(
+      `\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
+    );
     const m = linkRe.exec(body);
     if (!m) return '(link not found)';
     const start = Math.max(0, m.index - 200);
@@ -141,7 +145,8 @@ function score(file) {
     else label = 'unlabeled';
 
     stats[confidence][label]++;
-    if (!stats.by_type[edgeType]) stats.by_type[edgeType] = { correct: 0, wrong_type: 0, wrong: 0, unlabeled: 0 };
+    if (!stats.by_type[edgeType])
+      stats.by_type[edgeType] = { correct: 0, wrong_type: 0, wrong: 0, unlabeled: 0 };
     stats.by_type[edgeType][label]++;
   }
 
@@ -156,17 +161,26 @@ function score(file) {
     };
   }
 
-  console.log(JSON.stringify({
-    high: { ...stats.high, ...(precision(stats.high) || {}) },
-    medium: { ...stats.medium, ...(precision(stats.medium) || {}) },
-    by_type: Object.fromEntries(
-      Object.entries(stats.by_type).map(([k, v]) => [k, { ...v, ...(precision(v) || {}) }]),
+  console.log(
+    JSON.stringify(
+      {
+        high: { ...stats.high, ...(precision(stats.high) || {}) },
+        medium: { ...stats.medium, ...(precision(stats.medium) || {}) },
+        by_type: Object.fromEntries(
+          Object.entries(stats.by_type).map(([k, v]) => [k, { ...v, ...(precision(v) || {}) }]),
+        ),
+      },
+      null,
+      2,
     ),
-  }, null, 2));
+  );
 }
 
 if (cmd === 'sample') {
-  sample().catch(err => { console.error(err); process.exit(1); });
+  sample().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 } else if (cmd === 'score') {
   score(args[1]);
 } else {

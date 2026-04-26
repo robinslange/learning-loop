@@ -1,4 +1,13 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, openSync, closeSync, unlinkSync, constants as fsConstants } from 'fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  closeSync,
+  unlinkSync,
+  constants as fsConstants,
+} from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
 
@@ -32,22 +41,35 @@ export function acquireLock(dbPath, retries = 3, delayMs = 50) {
 }
 
 function isProcessAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch { return false; }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function releaseLock(dbPath) {
   const lockPath = dbPath + '.lock';
   if (lockFd !== null) {
-    try { closeSync(lockFd); } catch {}
+    try {
+      closeSync(lockFd);
+    } catch {}
     lockFd = null;
   }
-  try { unlinkSync(lockPath); } catch {}
+  try {
+    unlinkSync(lockPath);
+  } catch {}
 }
 
 const VALID_TYPES = [
-  'evidence_for', 'supports',
-  'challenges_undermining', 'challenges_undercutting', 'challenges_rebuttal',
-  'derived_from', 'associative',
+  'evidence_for',
+  'supports',
+  'challenges_undermining',
+  'challenges_undercutting',
+  'challenges_rebuttal',
+  'derived_from',
+  'associative',
 ];
 
 const VALID_CONFIDENCE = ['high', 'medium', 'low'];
@@ -92,7 +114,7 @@ export async function openEdgeDb(dbPath) {
   }
   db.run(SCHEMA);
   const colsResult = db.exec('PRAGMA table_info(edges)');
-  const cols = colsResult[0] ? colsResult[0].values.map(r => r[1]) : [];
+  const cols = colsResult[0] ? colsResult[0].values.map((r) => r[1]) : [];
   if (!cols.includes('direction_flipped')) {
     db.run('ALTER TABLE edges ADD COLUMN direction_flipped INTEGER NOT NULL DEFAULT 0');
   }
@@ -103,12 +125,17 @@ export async function openEdgeDb(dbPath) {
 //   'local'    — edge inferred from a write/edit on this machine (default)
 //   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
-export function addEdge(db, { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 }) {
+export function addEdge(
+  db,
+  { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 },
+) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);
   }
   if (!VALID_CONFIDENCE.includes(confidence)) {
-    throw new Error(`Invalid confidence: ${confidence}. Must be one of: ${VALID_CONFIDENCE.join(', ')}`);
+    throw new Error(
+      `Invalid confidence: ${confidence}. Must be one of: ${VALID_CONFIDENCE.join(', ')}`,
+    );
   }
   db.run(
     'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped) VALUES (?, ?, ?, ?, ?, ?)',
@@ -133,9 +160,11 @@ export function removeOutgoingEdges(db, notePath) {
 function rowsToObjects(result) {
   if (!result || result.length === 0) return [];
   const { columns, values } = result[0];
-  return values.map(row => {
+  return values.map((row) => {
     const obj = {};
-    columns.forEach((col, i) => { obj[col] = row[i]; });
+    columns.forEach((col, i) => {
+      obj[col] = row[i];
+    });
     return obj;
   });
 }
@@ -241,7 +270,10 @@ export function confirmEdge(db, id, newType) {
     if (!VALID_TYPES.includes(newType)) {
       throw new Error(`Invalid edge type: ${newType}. Must be one of: ${VALID_TYPES.join(', ')}`);
     }
-    db.run("UPDATE edges SET confidence = 'high', edge_type = ? WHERE id = ? AND confidence = 'medium'", [newType, id]);
+    db.run(
+      "UPDATE edges SET confidence = 'high', edge_type = ? WHERE id = ? AND confidence = 'medium'",
+      [newType, id],
+    );
   } else {
     db.run("UPDATE edges SET confidence = 'high' WHERE id = ? AND confidence = 'medium'", [id]);
   }
@@ -251,12 +283,17 @@ export function rejectEdge(db, id) {
   db.run("DELETE FROM edges WHERE id = ? AND confidence = 'medium'", [id]);
 }
 
-export function addSupersession(db, { oldPatternQuery, replacementNotePath = null, reason = null, supersededDate = null }) {
+export function addSupersession(
+  db,
+  { oldPatternQuery, replacementNotePath = null, reason = null, supersededDate = null },
+) {
   if (!oldPatternQuery || !oldPatternQuery.trim()) {
     throw new Error('oldPatternQuery is required');
   }
   if (tokenize(oldPatternQuery).length === 0) {
-    throw new Error(`oldPatternQuery has no content words after stopword removal: "${oldPatternQuery}". Add at least one distinctive word.`);
+    throw new Error(
+      `oldPatternQuery has no content words after stopword removal: "${oldPatternQuery}". Add at least one distinctive word.`,
+    );
   }
   if (supersededDate) {
     db.run(
@@ -282,21 +319,85 @@ export function listSupersessions(db) {
 }
 
 const STOPWORDS = new Set([
-  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
-  'do', 'does', 'did', 'have', 'has', 'had', 'i', 'you', 'we', 'they',
-  'should', 'would', 'could', 'will', 'shall', 'may', 'might', 'can',
-  'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'from', 'as',
-  'and', 'or', 'but', 'not', 'no', 'so', 'if', 'than', 'then', 'when',
-  'how', 'what', 'why', 'which', 'where', 'who', 'whose', 'whom',
-  'me', 'my', 'mine', 'your', 'yours', 'our', 'ours', 'their', 'theirs',
-  'this', 'that', 'these', 'those', 'it', 'its',
+  'a',
+  'an',
+  'the',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'been',
+  'being',
+  'do',
+  'does',
+  'did',
+  'have',
+  'has',
+  'had',
+  'i',
+  'you',
+  'we',
+  'they',
+  'should',
+  'would',
+  'could',
+  'will',
+  'shall',
+  'may',
+  'might',
+  'can',
+  'in',
+  'on',
+  'at',
+  'to',
+  'for',
+  'of',
+  'with',
+  'by',
+  'from',
+  'as',
+  'and',
+  'or',
+  'but',
+  'not',
+  'no',
+  'so',
+  'if',
+  'than',
+  'then',
+  'when',
+  'how',
+  'what',
+  'why',
+  'which',
+  'where',
+  'who',
+  'whose',
+  'whom',
+  'me',
+  'my',
+  'mine',
+  'your',
+  'yours',
+  'our',
+  'ours',
+  'their',
+  'theirs',
+  'this',
+  'that',
+  'these',
+  'those',
+  'it',
+  'its',
 ]);
 
 function tokenize(text) {
-  return text.toLowerCase()
+  return text
+    .toLowerCase()
     .replace(/[^\w\s-]/g, ' ')
     .split(/\s+/)
-    .filter(t => t && !STOPWORDS.has(t));
+    .filter((t) => t && !STOPWORDS.has(t));
 }
 
 export function findMatchingSupersessions(db, query) {

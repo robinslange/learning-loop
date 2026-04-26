@@ -59,6 +59,6 @@ for (const file of readdirSync(memoryDir)) {
 if (modifiedCount >= 5) {
   const dreamDate = new Date(lastDreamTs * 1000).toISOString().slice(0, 10);
   process.stdout.write(
-    `Auto-memory has ${modifiedCount} files modified since last dream (${dreamDate}). Run /dream to consolidate.`
+    `Auto-memory has ${modifiedCount} files modified since last dream (${dreamDate}). Run /dream to consolidate.`,
   );
 }

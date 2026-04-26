@@ -18,7 +18,7 @@ async function checkSupersessions(query) {
     db = await openEdgeDb(dbPath);
     const matches = findMatchingSupersessions(db, query);
     if (matches.length === 0) return null;
-    const lines = matches.map(m => {
+    const lines = matches.map((m) => {
       const replacement = m.replacement_note_path
         ? ` → see [[${m.replacement_note_path.replace(/\.md$/, '').split('/').pop()}]]`
         : '';
@@ -40,11 +40,13 @@ runHook(async ({ tool, input }) => {
   if (!query) return;
   const annotation = await checkSupersessions(query);
   if (annotation) {
-    process.stdout.write(JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUse',
-        additionalContext: annotation,
-      },
-    }));
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: annotation,
+        },
+      }),
+    );
   }
 });

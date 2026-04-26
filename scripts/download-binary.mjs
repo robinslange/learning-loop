@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
-import { mkdirSync, chmodSync, existsSync, readFileSync, writeFileSync, createWriteStream, unlinkSync } from 'fs';
+import {
+  mkdirSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  createWriteStream,
+  unlinkSync,
+} from 'fs';
 import { join } from 'path';
 import { platform, arch } from 'os';
 import { execFileSync, spawnSync } from 'child_process';
@@ -41,33 +49,37 @@ async function download(url, dest) {
     const follow = (u, redirects = 0) => {
       if (redirects > 5) return reject(new Error('Too many redirects'));
       const mod = u.startsWith('https') ? https : http;
-      mod.get(u, { headers: { 'User-Agent': 'learning-loop' } }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          return follow(res.headers.location, redirects + 1);
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} from ${u}`));
-        }
-
-        const total = parseInt(res.headers['content-length'] || '0', 10);
-        let downloaded = 0;
-        const file = createWriteStream(dest);
-
-        res.on('data', (chunk) => {
-          downloaded += chunk.length;
-          if (total > 0) {
-            const pct = Math.round(downloaded / total * 100);
-            process.stderr.write(`\r  Downloading... ${pct}% (${(downloaded / 1024 / 1024).toFixed(1)}MB)`);
+      mod
+        .get(u, { headers: { 'User-Agent': 'learning-loop' } }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            return follow(res.headers.location, redirects + 1);
           }
-        });
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          if (total > 0) process.stderr.write('\n');
-          resolve();
-        });
-        file.on('error', reject);
-      }).on('error', reject);
+          if (res.statusCode !== 200) {
+            return reject(new Error(`HTTP ${res.statusCode} from ${u}`));
+          }
+
+          const total = parseInt(res.headers['content-length'] || '0', 10);
+          let downloaded = 0;
+          const file = createWriteStream(dest);
+
+          res.on('data', (chunk) => {
+            downloaded += chunk.length;
+            if (total > 0) {
+              const pct = Math.round((downloaded / total) * 100);
+              process.stderr.write(
+                `\r  Downloading... ${pct}% (${(downloaded / 1024 / 1024).toFixed(1)}MB)`,
+              );
+            }
+          });
+          res.pipe(file);
+          file.on('finish', () => {
+            file.close();
+            if (total > 0) process.stderr.write('\n');
+            resolve();
+          });
+          file.on('error', reject);
+        })
+        .on('error', reject);
     };
     follow(url);
   });
@@ -81,7 +93,15 @@ function extractZip(zipPath, destDir) {
   if (tarRes.status === 0) return;
 
   if (platform() === 'win32') {
-    const psRes = spawnSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${destDir}' -Force`], { stdio: 'ignore' });
+    const psRes = spawnSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-Command',
+        `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${destDir}' -Force`,
+      ],
+      { stdio: 'ignore' },
+    );
     if (psRes.status === 0) return;
   } else {
     const unzipRes = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });

@@ -6,15 +6,28 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveVaultPath, resolveConfig, resolvePluginData, emitRetrieval } from './lib/common.mjs';
-import { buildInjection, emitHookOutput, runBackendsWithRaceCap, scrubSecrets } from './lib/inject.mjs';
+import {
+  resolveVaultPath,
+  resolveConfig,
+  resolvePluginData,
+  emitRetrieval,
+} from './lib/common.mjs';
+import {
+  buildInjection,
+  emitHookOutput,
+  runBackendsWithRaceCap,
+  scrubSecrets,
+} from './lib/inject.mjs';
 
-const input = await new Promise(resolve => {
+const input = await new Promise((resolve) => {
   let data = '';
   process.stdin.setEncoding('utf8');
   const timeout = setTimeout(() => resolve(''), 3000);
-  process.stdin.on('data', chunk => data += chunk);
-  process.stdin.on('end', () => { clearTimeout(timeout); resolve(data); });
+  process.stdin.on('data', (chunk) => (data += chunk));
+  process.stdin.on('end', () => {
+    clearTimeout(timeout);
+    resolve(data);
+  });
 });
 
 if (!input.trim()) process.exit(0);
@@ -191,7 +204,7 @@ function loadDedupeState(sid) {
   try {
     const raw = JSON.parse(readFileSync(p, 'utf8'));
     const cutoff = Date.now() - 180_000;
-    return new Set(raw.filter(e => new Date(e.ts).getTime() >= cutoff).map(e => e.path));
+    return new Set(raw.filter((e) => new Date(e.ts).getTime() >= cutoff).map((e) => e.path));
   } catch {
     return new Set();
   }
@@ -201,9 +214,11 @@ function persistDedupeState(sid, newPaths) {
   const p = dedupeStatePath(sid);
   if (!p) return;
   let existing = [];
-  try { if (existsSync(p)) existing = JSON.parse(readFileSync(p, 'utf8')); } catch {}
+  try {
+    if (existsSync(p)) existing = JSON.parse(readFileSync(p, 'utf8'));
+  } catch {}
   const cutoff = Date.now() - 180_000;
-  const kept = existing.filter(e => new Date(e.ts).getTime() >= cutoff);
+  const kept = existing.filter((e) => new Date(e.ts).getTime() >= cutoff);
   const ts = new Date().toISOString();
   for (const path of newPaths) kept.push({ path, ts });
   writeFileSync(p, JSON.stringify(kept));
@@ -222,17 +237,30 @@ function logShadow(record) {
 
 function summarizeBackends(results) {
   return {
-    vault: { latency_ms: results.vault?.latency_ms, hits: results.vault?.hits?.length || 0, top_path: results.vault?.hits?.[0]?.path, error: results.vault?.error, raced_out: results.vault?.raced_out },
-    episodic: { latency_ms: results.episodic?.latency_ms, hits: results.episodic?.hits?.length || 0, error: results.episodic?.error, raced_out: results.episodic?.raced_out },
+    vault: {
+      latency_ms: results.vault?.latency_ms,
+      hits: results.vault?.hits?.length || 0,
+      top_path: results.vault?.hits?.[0]?.path,
+      error: results.vault?.error,
+      raced_out: results.vault?.raced_out,
+    },
+    episodic: {
+      latency_ms: results.episodic?.latency_ms,
+      hits: results.episodic?.hits?.length || 0,
+      error: results.episodic?.error,
+      raced_out: results.episodic?.raced_out,
+    },
   };
 }
 
 writeFileSync(labelFile, label);
 
 try {
-  if (process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR === '1') throw new Error('forced error for test');
+  if (process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR === '1')
+    throw new Error('forced error for test');
 
-  const mode = process.env.LEARNING_LOOP_INJECTION_MODE || resolveConfig().injection_mode || 'shadow';
+  const mode =
+    process.env.LEARNING_LOOP_INJECTION_MODE || resolveConfig().injection_mode || 'shadow';
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
@@ -245,7 +273,7 @@ try {
     process.exit(0);
   }
 
-  const priorMsgs = messages.slice(-3, -1).map(m => (m || '').slice(0, 200));
+  const priorMsgs = messages.slice(-3, -1).map((m) => (m || '').slice(0, 200));
   const query = [(prompt || '').slice(0, 400), ...priorMsgs].join(' ');
 
   const vaultRoot = resolveVaultPath();
@@ -261,24 +289,36 @@ try {
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
   const episodicTop = results.episodic?.hits?.[0]?.score || 0;
 
-  const gateThreshold = Number(process.env.LEARNING_LOOP_INJECTION_THRESHOLD || resolveConfig().injection_threshold || 0.35);
+  const gateThreshold = Number(
+    process.env.LEARNING_LOOP_INJECTION_THRESHOLD || resolveConfig().injection_threshold || 0.35,
+  );
   if (vaultTop < gateThreshold && episodicTop < gateThreshold) {
-    logShadow({ gate: { passed: false, vault_top_score: vaultTop, episodic_top_score: episodicTop, threshold: gateThreshold }, backends: summarizeBackends(results) });
+    logShadow({
+      gate: {
+        passed: false,
+        vault_top_score: vaultTop,
+        episodic_top_score: episodicTop,
+        threshold: gateThreshold,
+      },
+      backends: summarizeBackends(results),
+    });
     process.exit(0);
   }
 
   const alreadyInjectedPaths = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
-  const enrichedVaultHits = (results.vault?.hits || []).map(h => {
-    if (h.body) return h;
-    try {
-      const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
-      const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
-      return { ...h, body };
-    } catch {
-      return { ...h, body: '' };
-    }
-  }).filter(h => h.body);
+  const enrichedVaultHits = (results.vault?.hits || [])
+    .map((h) => {
+      if (h.body) return h;
+      try {
+        const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
+        const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+        return { ...h, body };
+      } catch {
+        return { ...h, body: '' };
+      }
+    })
+    .filter((h) => h.body);
   const injection = buildInjection({
     vaultHits: enrichedVaultHits,
     episodicHits: results.episodic?.hits || [],
@@ -288,7 +328,12 @@ try {
   const dedupeFilteredCount = rawVaultHitCount - (injection?.injectedVaultPaths?.length || 0);
 
   if (!injection) {
-    logShadow({ gate: { passed: true }, backends: summarizeBackends(results), payload: null, dedupe_filtered_count: dedupeFilteredCount });
+    logShadow({
+      gate: { passed: true },
+      backends: summarizeBackends(results),
+      payload: null,
+      dedupe_filtered_count: dedupeFilteredCount,
+    });
     process.exit(0);
   }
 
@@ -296,7 +341,10 @@ try {
     logShadow({
       gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
       backends: summarizeBackends(results),
-      payload: { tokens_estimated: Math.ceil(injection.additionalContext.length / 4), vault_notes: injection.injectedVaultPaths.length },
+      payload: {
+        tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
+        vault_notes: injection.injectedVaultPaths.length,
+      },
       dedupe_filtered_count: dedupeFilteredCount,
       would_inject: scrubSecrets(injection.additionalContext),
     });

@@ -19,28 +19,28 @@
 //    $PLUGIN_DATA/bin/ll-search with ORT_DYLIB_PATH and ORT_LIB_LOCATION
 //    pointing at the binary's directory (matches scripts/lib/binary.mjs).
 
-import { writeFileSync, mkdirSync, chmodSync, existsSync } from "fs";
-import { join, resolve } from "path";
-import { homedir } from "os";
-import { getPluginRoot } from "./lib/config.mjs";
+import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'fs';
+import { join, resolve } from 'path';
+import { homedir } from 'os';
+import { getPluginRoot } from './lib/config.mjs';
 
-const command = process.argv[2] || "--install";
+const command = process.argv[2] || '--install';
 
-const binDir = join(homedir(), ".local", "bin");
-const llWatchPath = join(binDir, "ll-watch");
-const llSearchPath = join(binDir, "ll-search");
+const binDir = join(homedir(), '.local', 'bin');
+const llWatchPath = join(binDir, 'll-watch');
+const llSearchPath = join(binDir, 'll-search');
 
-if (command === "--check" || command === "check") {
-  const w = existsSync(llWatchPath) ? "installed" : "missing";
-  const s = existsSync(llSearchPath) ? "installed" : "missing";
+if (command === '--check' || command === 'check') {
+  const w = existsSync(llWatchPath) ? 'installed' : 'missing';
+  const s = existsSync(llSearchPath) ? 'installed' : 'missing';
   console.log(`ll-watch:  ${w} (${llWatchPath})`);
   console.log(`ll-search: ${s} (${llSearchPath})`);
   process.exit(0);
 }
 
-if (command !== "--install" && command !== "install") {
+if (command !== '--install' && command !== 'install') {
   console.error(`unknown command: ${command}`);
-  console.error("usage: install-shims.mjs [--install|--check]");
+  console.error('usage: install-shims.mjs [--install|--check]');
   process.exit(2);
 }
 
@@ -48,11 +48,11 @@ mkdirSync(binDir, { recursive: true });
 
 // ── Resolve cache parent for the ll-watch shim ──
 const pluginRoot = getPluginRoot();
-const cacheBase = join(homedir(), ".claude", "plugins", "cache");
+const cacheBase = join(homedir(), '.claude', 'plugins', 'cache');
 const inCache = pluginRoot.startsWith(cacheBase);
 const cacheParent = inCache
-  ? resolve(pluginRoot, "..")
-  : join(cacheBase, "learning-loop-marketplace", "learning-loop");
+  ? resolve(pluginRoot, '..')
+  : join(cacheBase, 'learning-loop-marketplace', 'learning-loop');
 
 // ── ll-watch shim ──
 const llWatchShim = `#!/bin/bash
@@ -131,11 +131,9 @@ chmodSync(llSearchPath, 0o755);
 
 console.log(`Wrote ${llWatchPath}`);
 console.log(`Wrote ${llSearchPath}`);
-console.log(
-  `Both shims resolve their targets at runtime — survive plugin updates.`,
-);
+console.log(`Both shims resolve their targets at runtime — survive plugin updates.`);
 
-const pathDirs = (process.env.PATH || "").split(":");
+const pathDirs = (process.env.PATH || '').split(':');
 if (!pathDirs.includes(binDir)) {
   console.log(`\nAdd to your shell rc:  export PATH="$HOME/.local/bin:$PATH"`);
 }

@@ -8,7 +8,14 @@
 // For each peer in federation/config.json whose index.db contains the retracted note,
 // the event is marked as targeted to that peer.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
+import {
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+} from 'fs';
 import { join, dirname } from 'path';
 import { initSQL } from './lib/sqljs.mjs';
 import { PLUGIN_DATA } from './lib/constants.mjs';
@@ -32,7 +39,8 @@ function out(data) {
 
 function usage() {
   out({
-    error: 'Usage: retraction-notify <note_path> [--reason "<reason>"] [--replacement <new_path>] [--source-graph local]',
+    error:
+      'Usage: retraction-notify <note_path> [--reason "<reason>"] [--replacement <new_path>] [--source-graph local]',
   });
   process.exit(1);
 }
@@ -77,8 +85,8 @@ function listIndexedPeerIds() {
   if (!existsSync(PEERS_DIR)) return [];
   try {
     return readdirSync(PEERS_DIR, { withFileTypes: true })
-      .filter(e => e.isDirectory())
-      .map(e => e.name);
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
   } catch {
     return [];
   }
@@ -93,10 +101,7 @@ async function main() {
   const peers = loadPeers();
   const indexedPeers = listIndexedPeerIds();
 
-  const candidatePeerIds = new Set([
-    ...peers.map(p => p.id),
-    ...indexedPeers,
-  ]);
+  const candidatePeerIds = new Set([...peers.map((p) => p.id), ...indexedPeers]);
 
   const targets = [];
   for (const peerId of candidatePeerIds) {
@@ -129,7 +134,7 @@ async function main() {
   });
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err.message);
   process.exit(1);
 });

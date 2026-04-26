@@ -21,10 +21,35 @@ const YEAR_RE = /^(19[5-9]\d|20[0-3]\d)$/;
 // Words tagged PROPN by winkNLP but aren't author names.
 // Months are proper nouns grammatically; common false positives from vault audits included.
 const NOT_AUTHORS = new Set([
-  'january', 'february', 'march', 'april', 'june',
-  'july', 'august', 'september', 'october', 'november', 'december',
-  'jan', 'feb', 'mar', 'apr', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec',
-  'reports', 'figure', 'table', 'section', 'chapter', 'issue', 'version',
+  'january',
+  'february',
+  'march',
+  'april',
+  'june',
+  'july',
+  'august',
+  'september',
+  'october',
+  'november',
+  'december',
+  'jan',
+  'feb',
+  'mar',
+  'apr',
+  'jun',
+  'jul',
+  'aug',
+  'sep',
+  'oct',
+  'nov',
+  'dec',
+  'reports',
+  'figure',
+  'table',
+  'section',
+  'chapter',
+  'issue',
+  'version',
 ]);
 
 function isAuthorToken(token) {
@@ -62,8 +87,11 @@ export function extractAuthorYearCitations(text) {
         } else if (next.text === '&' || next.text === 'and') {
           authorParts.push(next.text);
           j++;
-        } else if (next.text.toLowerCase() === 'et' && j + 1 < tokens.length &&
-                   (tokens[j + 1].text === 'al.' || tokens[j + 1].text === 'al')) {
+        } else if (
+          next.text.toLowerCase() === 'et' &&
+          j + 1 < tokens.length &&
+          (tokens[j + 1].text === 'al.' || tokens[j + 1].text === 'al')
+        ) {
           // "et al." -- winkNLP tags both as NOUN, but it's a citation pattern
           authorParts.push('et al.');
           j += 2;
@@ -78,16 +106,26 @@ export function extractAuthorYearCitations(text) {
       let yearIdx = j;
       while (yearIdx < tokens.length) {
         const tk = tokens[yearIdx];
-        if (/^[,()\s]$/.test(tk.text)) { yearIdx++; continue; }
+        if (/^[,()\s]$/.test(tk.text)) {
+          yearIdx++;
+          continue;
+        }
         // Skip initials (single letter + optional period)
-        if (tk.pos === 'PROPN' && tk.text.replace(/\./g, '').length < 2) { yearIdx++; continue; }
+        if (tk.pos === 'PROPN' && tk.text.replace(/\./g, '').length < 2) {
+          yearIdx++;
+          continue;
+        }
         break;
       }
 
-      if (yearIdx < tokens.length && tokens[yearIdx].pos === 'NUM' && YEAR_RE.test(tokens[yearIdx].text)) {
+      if (
+        yearIdx < tokens.length &&
+        tokens[yearIdx].pos === 'NUM' &&
+        YEAR_RE.test(tokens[yearIdx].text)
+      ) {
         const author = authorParts.join(' ');
         const year = parseInt(tokens[yearIdx].text);
-        if (!results.some(r => r.author === author && r.year === year)) {
+        if (!results.some((r) => r.author === author && r.year === year)) {
           results.push({ author, year });
         }
         // Skip past all consumed tokens to avoid re-matching parts of multi-author citations

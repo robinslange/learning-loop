@@ -12,7 +12,9 @@ function findBinary() {
     if (existsSync(installed)) return installed;
   }
 
-  const devBuild = resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release', BINARY_NAME));
+  const devBuild = resolve(
+    join(import.meta.dirname, '..', '..', 'native', 'target', 'release', BINARY_NAME),
+  );
   if (existsSync(devBuild)) return devBuild;
 
   return null;

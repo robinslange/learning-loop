@@ -22,11 +22,16 @@ export function buildVaultIndex(vaultRoot) {
         const full = join(dirPath, String(e));
         try {
           if (!statSync(full).isFile()) continue;
-        } catch { continue; }
+        } catch {
+          continue;
+        }
         const name = basename(String(e), '.md');
         if (!String(e).endsWith('.md')) continue;
         if (!map.has(name)) {
-          const relFromVault = full.slice(vaultRoot.length + 1).split(sep).join('/');
+          const relFromVault = full
+            .slice(vaultRoot.length + 1)
+            .split(sep)
+            .join('/');
           map.set(name, relFromVault);
         }
       }
@@ -51,11 +56,7 @@ export const PATTERNS = [
       /\bextends?\b/i,
       /\bsets?\s+the\s+baseline\b/i,
     ],
-    medium: [
-      /\bcomes?\s+from\b/i,
-      /\boriginated\b/i,
-      /\binspired\s+by\b/i,
-    ],
+    medium: [/\bcomes?\s+from\b/i, /\boriginated\b/i, /\binspired\s+by\b/i],
   },
   {
     type: 'evidence_for',
@@ -74,12 +75,7 @@ export const PATTERNS = [
   },
   {
     type: 'supports',
-    high: [
-      /\breinforces?\b/i,
-      /\bstrengthens?\b/i,
-      /\bbolsters?\b/i,
-      /\bcorroborates?\b/i,
-    ],
+    high: [/\breinforces?\b/i, /\bstrengthens?\b/i, /\bbolsters?\b/i, /\bcorroborates?\b/i],
     medium: [
       /\baligns?\s+with\b/i,
       /\bconsistent\s+with\b/i,
@@ -88,12 +84,7 @@ export const PATTERNS = [
   },
   {
     type: 'challenges_undermining',
-    high: [
-      /\bcontradicts?\b/i,
-      /\brefutes?\b/i,
-      /\bdisproves?\b/i,
-      /\bundermines?\b/i,
-    ],
+    high: [/\bcontradicts?\b/i, /\brefutes?\b/i, /\bdisproves?\b/i, /\bundermines?\b/i],
     medium: [
       /\bchallenges?\b/i,
       /\bquestions?\s+(?:whether|if)\b/i,
@@ -102,26 +93,13 @@ export const PATTERNS = [
   },
   {
     type: 'challenges_undercutting',
-    high: [
-      /\bundercuts?\b/i,
-      /\bweakens?\s+the\s+(?:basis|foundation|premise)\b/i,
-    ],
-    medium: [
-      /\bweakens?\b/i,
-      /\blimits?\s+the\s+(?:scope|applicability)\b/i,
-    ],
+    high: [/\bundercuts?\b/i, /\bweakens?\s+the\s+(?:basis|foundation|premise)\b/i],
+    medium: [/\bweakens?\b/i, /\blimits?\s+the\s+(?:scope|applicability)\b/i],
   },
   {
     type: 'challenges_rebuttal',
-    high: [
-      /\brebuts?\b/i,
-      /\bdebunks?\b/i,
-      /\bcounterexample\s+to\b/i,
-    ],
-    medium: [
-      /\bcounters?\b/i,
-      /\bcounterpoint\b/i,
-    ],
+    high: [/\brebuts?\b/i, /\bdebunks?\b/i, /\bcounterexample\s+to\b/i],
+    medium: [/\bcounters?\b/i, /\bcounterpoint\b/i],
   },
 ];
 
@@ -162,8 +140,8 @@ export function classifyLink(context, targetName) {
   if (beforeBoundary !== -1) before = before.slice(beforeBoundary + 1);
 
   const afterBoundaries = ['[[', '. ', '! ', '? ', '\n']
-    .map(s => after.indexOf(s))
-    .filter(i => i !== -1);
+    .map((s) => after.indexOf(s))
+    .filter((i) => i !== -1);
   if (afterBoundaries.length) after = after.slice(0, Math.min(...afterBoundaries));
 
   const beforeTail = before.slice(-100);
@@ -192,8 +170,8 @@ export function classifyLink(context, targetName) {
 }
 
 function detectFlip(beforeTail, afterHead, patterns) {
-  const verbInBefore = patterns.some(re => re.test(beforeTail));
-  const verbInAfter = patterns.some(re => re.test(afterHead));
+  const verbInBefore = patterns.some((re) => re.test(beforeTail));
+  const verbInAfter = patterns.some((re) => re.test(afterHead));
   if (verbInBefore && !verbInAfter) return false;
   if (verbInAfter && !verbInBefore) return true;
   return false;

@@ -2,8 +2,19 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { runHook, resolvePluginData, resolveVaultPath, isVaultNote } from './lib/common.mjs';
-import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb, acquireLock, releaseLock } from '../scripts/lib/edges.mjs';
-import { classifyNoteEdges, buildVaultIndex, makeResolver } from '../scripts/lib/edge-classifier.mjs';
+import {
+  openEdgeDb,
+  addEdge,
+  removeOutgoingEdges,
+  saveDb,
+  acquireLock,
+  releaseLock,
+} from '../scripts/lib/edges.mjs';
+import {
+  classifyNoteEdges,
+  buildVaultIndex,
+  makeResolver,
+} from '../scripts/lib/edge-classifier.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   evidence_for: 'evidence-for',
@@ -23,19 +34,22 @@ function parseInlineArray(value) {
   if (!m) return null;
   return m[1]
     .split(',')
-    .map(s => s.trim().replace(/^["']|["']$/g, ''))
+    .map((s) => s.trim().replace(/^["']|["']$/g, ''))
     .filter(Boolean);
 }
 
 function formatInlineArray(items) {
-  return '[' + items.map(s => `"${s}"`).join(', ') + ']';
+  return '[' + items.map((s) => `"${s}"`).join(', ') + ']';
 }
 
 function parseBlockArray(lines, startIdx) {
   const items = [];
   let i = startIdx + 1;
   while (i < lines.length && /^\s*-\s+/.test(lines[i])) {
-    const item = lines[i].replace(/^\s*-\s+/, '').replace(/^["']|["']$/g, '').trim();
+    const item = lines[i]
+      .replace(/^\s*-\s+/, '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
     if (item) items.push(item);
     i++;
   }
@@ -46,7 +60,11 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   if (highConfidenceEdges.length === 0) return false;
 
   let content;
-  try { content = readFileSync(filePath, 'utf-8'); } catch { return false; }
+  try {
+    content = readFileSync(filePath, 'utf-8');
+  } catch {
+    return false;
+  }
 
   const grouped = {};
   for (const edge of highConfidenceEdges) {
@@ -76,7 +94,7 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   let changed = false;
 
   for (const [key, links] of Object.entries(grouped)) {
-    const lineIdx = lines.findIndex(l => new RegExp(`^${key}:\\s*`).test(l));
+    const lineIdx = lines.findIndex((l) => new RegExp(`^${key}:\\s*`).test(l));
     if (lineIdx === -1) {
       lines.push(`${key}: ${formatInlineArray([...links])}`);
       changed = true;
@@ -90,10 +108,17 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
       const merged = new Set(block.items);
       let added = false;
       for (const link of links) {
-        if (!merged.has(link)) { merged.add(link); added = true; }
+        if (!merged.has(link)) {
+          merged.add(link);
+          added = true;
+        }
       }
       if (added) {
-        lines.splice(lineIdx, block.endIdx - lineIdx + 1, `${key}: ${formatInlineArray([...merged])}`);
+        lines.splice(
+          lineIdx,
+          block.endIdx - lineIdx + 1,
+          `${key}: ${formatInlineArray([...merged])}`,
+        );
         changed = true;
       }
       continue;
@@ -104,7 +129,10 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
     const merged = new Set(existingArray);
     let added = false;
     for (const link of links) {
-      if (!merged.has(link)) { merged.add(link); added = true; }
+      if (!merged.has(link)) {
+        merged.add(link);
+        added = true;
+      }
     }
     if (added) {
       lines[lineIdx] = `${key}: ${formatInlineArray([...merged])}`;
@@ -138,7 +166,11 @@ runHook(async ({ tool, input, response }) => {
   if (tool === 'Write') {
     content = input.content || '';
   } else {
-    try { content = readFileSync(filePath, 'utf-8'); } catch { return; }
+    try {
+      content = readFileSync(filePath, 'utf-8');
+    } catch {
+      return;
+    }
   }
 
   if (!content.includes('[[')) return;
@@ -149,7 +181,7 @@ runHook(async ({ tool, input, response }) => {
   const classified = classifyNoteEdges(content, sourceName, resolver);
   if (classified.length === 0) return;
 
-  const edges = classified.map(e => ({
+  const edges = classified.map((e) => ({
     fromPath: sourceRel,
     toPath: e.toPath,
     edgeType: e.edgeType,
@@ -176,6 +208,6 @@ runHook(async ({ tool, input, response }) => {
     releaseLock(dbPath);
   }
 
-  const highConfidenceEdges = edges.filter(e => e.confidence === 'high' && !e.flip);
+  const highConfidenceEdges = edges.filter((e) => e.confidence === 'high' && !e.flip);
   syncFrontmatterEdges(filePath, highConfidenceEdges);
 });

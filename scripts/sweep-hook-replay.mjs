@@ -30,7 +30,10 @@ const PER_FILE_TIMEOUT_MS = 15000;
 
 function readStdinPaths() {
   const raw = readFileSync(0, 'utf-8');
-  return raw.split('\n').map(s => s.trim()).filter(Boolean);
+  return raw
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function replayOne(absPath) {

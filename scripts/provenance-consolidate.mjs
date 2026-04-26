@@ -12,11 +12,13 @@ function readEventLogs() {
 
   for (const file of readdirSync(PROVENANCE_DIR)) {
     if (!file.startsWith('events-') || !file.endsWith('.jsonl')) continue;
-    const lines = readFileSync(join(PROVENANCE_DIR, file), 'utf-8')
-      .split('\n')
-      .filter(Boolean);
+    const lines = readFileSync(join(PROVENANCE_DIR, file), 'utf-8').split('\n').filter(Boolean);
     for (const line of lines) {
-      try { events.push(JSON.parse(line)); } catch { /* skip malformed */ }
+      try {
+        events.push(JSON.parse(line));
+      } catch {
+        /* skip malformed */
+      }
     }
   }
 
@@ -81,10 +83,7 @@ if (events.length === 0) {
   const pluginData = getPluginData();
   const outDir = join(pluginData, 'federation');
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(
-    join(outDir, 'provenance-local.json'),
-    JSON.stringify(output, null, 2) + '\n'
-  );
+  writeFileSync(join(outDir, 'provenance-local.json'), JSON.stringify(output, null, 2) + '\n');
 
   console.log(JSON.stringify(output, null, 2));
 }

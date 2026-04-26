@@ -2,7 +2,13 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath, findBinary as findBinaryShared, isVaultNote } from './lib/common.mjs';
+import {
+  runHook,
+  resolvePluginData,
+  resolveVaultPath,
+  findBinary as findBinaryShared,
+  isVaultNote,
+} from './lib/common.mjs';
 
 function parseFrontmatter(content) {
   const m = content.match(/^---\n([\s\S]*?)\n---/);
@@ -13,12 +19,21 @@ function parseFrontmatter(content) {
 function parseTags(fm) {
   const inlineMatch = fm.match(/^tags:\s*\[([^\]]*)\]/m);
   if (inlineMatch) {
-    return inlineMatch[1].split(',').map(t => t.trim().replace(/['"]/g, '')).filter(Boolean);
+    return inlineMatch[1]
+      .split(',')
+      .map((t) => t.trim().replace(/['"]/g, ''))
+      .filter(Boolean);
   }
   const blockMatch = fm.match(/^tags:\s*\n((?:\s+-\s+.*\n?)*)/m);
   if (blockMatch) {
-    return blockMatch[1].split('\n')
-      .map(l => l.replace(/^\s*-\s*/, '').trim().replace(/['"]/g, ''))
+    return blockMatch[1]
+      .split('\n')
+      .map((l) =>
+        l
+          .replace(/^\s*-\s*/, '')
+          .trim()
+          .replace(/['"]/g, ''),
+      )
       .filter(Boolean);
   }
   return [];
@@ -73,11 +88,15 @@ function checkDuplicateNote(filePath, title, vaultRoot) {
     const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
     if (!existsSync(dbPath)) return null;
 
-    const out = execFileSync(binary.bin, ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'], {
-      encoding: 'utf-8',
-      timeout: 3000,
-      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
-    });
+    const out = execFileSync(
+      binary.bin,
+      ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
+      {
+        encoding: 'utf-8',
+        timeout: 3000,
+        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
+      },
+    );
     const result = JSON.parse(out);
     const q = result.queries && result.queries[0];
     if (!q || !q.top_match_similarity || q.top_match_similarity < 0.85) return null;
@@ -141,9 +160,11 @@ runHook(({ tool, input }) => {
   const body = fmEnd ? content.slice(fmEnd[0].length) : content;
   const links = extractWikilinks(body);
   const noteIndex = buildNoteIndex(vaultRoot);
-  const broken = links.filter(l => !noteExistsInIndex(l, noteIndex));
+  const broken = links.filter((l) => !noteExistsInIndex(l, noteIndex));
   if (broken.length > 0) {
-    warnings.push(`Broken wikilinks: ${broken.map(l => '[[' + l + ']]').join(', ')} not found in vault.`);
+    warnings.push(
+      `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
+    );
   }
 
   const titleMatch = content.match(/^#\s+(.+)$/m);

@@ -2,7 +2,13 @@
 import { readFileSync, appendFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { runHook, resolvePluginData, resolveVaultPath, findBinary, isVaultNote } from './lib/common.mjs';
+import {
+  runHook,
+  resolvePluginData,
+  resolveVaultPath,
+  findBinary,
+  isVaultNote,
+} from './lib/common.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_AUTO_LINKS = 3;
@@ -14,7 +20,9 @@ function isWatchRunning() {
     const pid = parseInt(readFileSync(join(resolvePluginData(), 'watch.pid'), 'utf8').trim(), 10);
     process.kill(pid, 0);
     return true;
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function extractWikilinks(content) {
@@ -65,7 +73,11 @@ runHook(({ tool, input, response }) => {
   if (tool === 'Write') {
     content = input.content || '';
   } else {
-    try { content = readFileSync(filePath, 'utf-8'); } catch { return; }
+    try {
+      content = readFileSync(filePath, 'utf-8');
+    } catch {
+      return;
+    }
   }
 
   const existingLinks = extractWikilinks(content);
@@ -90,7 +102,8 @@ runHook(({ tool, input, response }) => {
   if (!isWatchRunning()) {
     try {
       execFileSync(binary.bin, ['index', vaultRoot, dbPath], {
-        timeout: 5000, stdio: 'ignore',
+        timeout: 5000,
+        stdio: 'ignore',
         env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
       });
     } catch {}
@@ -99,17 +112,20 @@ runHook(({ tool, input, response }) => {
   let similar;
   try {
     const out = execFileSync(binary.bin, ['similar', dbPath, relativePath, '--top', '5'], {
-      encoding: 'utf-8', timeout: 1000,
+      encoding: 'utf-8',
+      timeout: 1000,
       env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
     });
     similar = JSON.parse(out);
-  } catch { return; }
+  } catch {
+    return;
+  }
 
   const currentContent = readFileSync(filePath, 'utf-8');
   const diskLinks = extractWikilinks(currentContent);
   const candidates = similar
-    .filter(r => r.score >= SIMILARITY_THRESHOLD)
-    .filter(r => {
+    .filter((r) => r.score >= SIMILARITY_THRESHOLD)
+    .filter((r) => {
       const name = basename(r.path, '.md');
       return name !== sourceName && !diskLinks.has(name);
     })
@@ -117,7 +133,7 @@ runHook(({ tool, input, response }) => {
 
   if (candidates.length === 0) return;
 
-  const autoLinks = candidates.map(r => `[[${basename(r.path, '.md')}]]`).join('\n');
+  const autoLinks = candidates.map((r) => `[[${basename(r.path, '.md')}]]`).join('\n');
   const needsNewline = currentContent.length > 0 && !currentContent.endsWith('\n');
   appendFileSync(filePath, (needsNewline ? '\n' : '') + autoLinks + '\n');
 

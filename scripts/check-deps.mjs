@@ -10,7 +10,9 @@ const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
 const INSTALLED_PATH = join(
   process.env.HOME || process.env.USERPROFILE || homedir(),
-  '.claude', 'plugins', 'installed_plugins.json'
+  '.claude',
+  'plugins',
+  'installed_plugins.json',
 );
 
 function satisfiesVersion(installed, constraint) {

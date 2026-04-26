@@ -9,34 +9,31 @@
  * Usage: node scripts/spike-classifiers-v2.mjs [--sample N] [--only duplicate|tags]
  */
 
-import { readFileSync, existsSync } from "fs";
-import { join, basename } from "path";
-import { getPluginData } from "./lib/config.mjs";
-import { openReadonly } from "./lib/sqljs.mjs";
-import { run } from "./lib/binary.mjs";
+import { readFileSync, existsSync } from 'fs';
+import { join, basename } from 'path';
+import { getPluginData } from './lib/config.mjs';
+import { openReadonly } from './lib/sqljs.mjs';
+import { run } from './lib/binary.mjs';
 
-const VAULT_PATH =
-  process.env.VAULT_PATH || join(process.env.HOME, "brain", "brain");
+const VAULT_PATH = process.env.VAULT_PATH || join(process.env.HOME, 'brain', 'brain');
 const PLUGIN_DATA = getPluginData();
-const DB_PATH = join(PLUGIN_DATA, "search.db");
-const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
-const MODEL = process.env.MODEL || "gemma4:e2b";
+const DB_PATH = join(PLUGIN_DATA, 'search.db');
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+const MODEL = process.env.MODEL || 'gemma4:e2b';
 
 const args = process.argv.slice(2);
-const sampleSize = parseInt(
-  args.find((_, i, a) => a[i - 1] === "--sample") || "30",
-);
-const only = args.find((_, i, a) => a[i - 1] === "--only") || null;
+const sampleSize = parseInt(args.find((_, i, a) => a[i - 1] === '--sample') || '30');
+const only = args.find((_, i, a) => a[i - 1] === '--only') || null;
 
 async function ollamaChat(systemPrompt, userContent, format, options = {}) {
   const resp = await fetch(`${OLLAMA_URL}/api/chat`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
       messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userContent },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent },
       ],
       format,
       options: { temperature: 0, ...options },
@@ -51,9 +48,9 @@ async function ollamaChat(systemPrompt, userContent, format, options = {}) {
 function readNoteBody(notePath, maxChars = 500) {
   const fullPath = join(VAULT_PATH, notePath);
   if (!existsSync(fullPath)) return null;
-  let content = readFileSync(fullPath, "utf-8");
-  if (content.startsWith("---")) {
-    const end = content.indexOf("\n---", 3);
+  let content = readFileSync(fullPath, 'utf-8');
+  if (content.startsWith('---')) {
+    const end = content.indexOf('\n---', 3);
     if (end !== -1) content = content.slice(end + 4);
   }
   return content.trim().slice(0, maxChars);
@@ -80,67 +77,59 @@ Most neighbours will be same_topic, not duplicate. True duplicates are rare.
 Only answer "duplicate" if the claims are interchangeable.`;
 
 const DUPLICATE_FORMAT = {
-  type: "object",
+  type: 'object',
   properties: {
     relationship: {
-      type: "string",
-      enum: ["duplicate", "same_topic", "unrelated"],
+      type: 'string',
+      enum: ['duplicate', 'same_topic', 'unrelated'],
     },
-    duplicate_of: { type: ["string", "null"] },
+    duplicate_of: { type: ['string', 'null'] },
   },
-  required: ["relationship", "duplicate_of"],
+  required: ['relationship', 'duplicate_of'],
 };
 
 async function spikeDuplicate(db) {
-  const rows = db.exec("SELECT path FROM notes");
+  const rows = db.exec('SELECT path FROM notes');
   if (!rows.length) return [];
   const paths = shuffle(rows[0].values.map((r) => r[0])).slice(0, sampleSize);
   const results = [];
 
   for (const notePath of paths) {
-    const title = basename(notePath, ".md");
+    const title = basename(notePath, '.md');
     const body = readNoteBody(notePath);
     if (body === null) continue;
 
     let neighbours;
     try {
-      neighbours = run(["similar", DB_PATH, notePath, "--top", "3"]);
+      neighbours = run(['similar', DB_PATH, notePath, '--top', '3']);
     } catch {
       continue;
     }
     if (!neighbours || !neighbours.length) continue;
 
     const neighbourBlocks = neighbours.map((n, i) => {
-      const nTitle = basename(n.path, ".md");
-      const nBody = readNoteBody(n.path) || "(empty)";
+      const nTitle = basename(n.path, '.md');
+      const nBody = readNoteBody(n.path) || '(empty)';
       return `Neighbour ${i + 1} (similarity ${n.score.toFixed(3)}): "${nTitle}"\n${nBody}`;
     });
 
-    const userContent = `Note: "${title}"\n${body}\n\n${neighbourBlocks.join("\n\n")}`;
+    const userContent = `Note: "${title}"\n${body}\n\n${neighbourBlocks.join('\n\n')}`;
 
     try {
-      const result = await ollamaChat(
-        DUPLICATE_PROMPT,
-        userContent,
-        DUPLICATE_FORMAT,
-      );
+      const result = await ollamaChat(DUPLICATE_PROMPT, userContent, DUPLICATE_FORMAT);
       results.push({
         path: notePath,
         title,
         neighbours: neighbours.map((n) => ({
           path: n.path,
-          title: basename(n.path, ".md"),
+          title: basename(n.path, '.md'),
           score: n.score,
         })),
         ...result,
       });
-      process.stderr.write(
-        `  dup: ${title.slice(0, 45).padEnd(45)} -> ${result.relationship}\n`,
-      );
+      process.stderr.write(`  dup: ${title.slice(0, 45).padEnd(45)} -> ${result.relationship}\n`);
     } catch (err) {
-      process.stderr.write(
-        `  dup error: ${title.slice(0, 45)}: ${err.message}\n`,
-      );
+      process.stderr.write(`  dup error: ${title.slice(0, 45)}: ${err.message}\n`);
     }
   }
   return results;
@@ -168,15 +157,15 @@ Do NOT add a tag because it is general or familiar. Do NOT pad to two tags. If o
 Tags like "cognition", "design", or "psychology" are usually too broad. Prefer narrower tags ("pharmacology", "neuroscience", "habit-formation") whenever they fit.`;
 
 const TAG_FORMAT = {
-  type: "object",
+  type: 'object',
   properties: {
     suggested_tags: {
-      type: "array",
-      items: { type: "string" },
+      type: 'array',
+      items: { type: 'string' },
       maxItems: 2,
     },
   },
-  required: ["suggested_tags"],
+  required: ['suggested_tags'],
 };
 
 function buildTagVocabulary(db) {
@@ -184,22 +173,15 @@ function buildTagVocabulary(db) {
   const tagCounts = {};
   if (tagRows.length) {
     for (const [tagStr] of tagRows[0].values) {
-      for (const t of tagStr.split(" ").filter(Boolean)) {
+      for (const t of tagStr.split(' ').filter(Boolean)) {
         tagCounts[t] = (tagCounts[t] || 0) + 1;
       }
     }
   }
   const ranked = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]);
-  const STRUCTURAL = new Set([
-    "literature",
-    "counterpoint",
-    "synthesis",
-    "excalidraw",
-  ]);
+  const STRUCTURAL = new Set(['literature', 'counterpoint', 'synthesis', 'excalidraw']);
   return ranked
-    .filter(
-      ([t, n]) => n >= 3 && !STRUCTURAL.has(t) && !t.startsWith("project/"),
-    )
+    .filter(([t, n]) => n >= 3 && !STRUCTURAL.has(t) && !t.startsWith('project/'))
     .slice(0, 60)
     .map(([t]) => t);
 }
@@ -207,48 +189,40 @@ function buildTagVocabulary(db) {
 async function spikeTags(db) {
   const vocabulary = buildTagVocabulary(db);
 
-  const rows = db.exec("SELECT path, tags FROM notes");
+  const rows = db.exec('SELECT path, tags FROM notes');
   if (!rows.length) return [];
   const candidates = rows[0].values
     .map((r) => ({ path: r[0], tags: r[1] }))
-    .filter((n) => !n.tags || n.tags.split(" ").filter(Boolean).length <= 1);
+    .filter((n) => !n.tags || n.tags.split(' ').filter(Boolean).length <= 1);
   const paths = shuffle(candidates).slice(0, sampleSize);
   const results = [];
 
   for (const { path: notePath, tags: existingTags } of paths) {
-    const title = basename(notePath, ".md");
+    const title = basename(notePath, '.md');
     const body = readNoteBody(notePath);
     if (body === null) continue;
 
-    const userContent = `Title: ${title}\nExisting tags: ${existingTags || "(none)"}\nBody:\n${body}\n\nVocabulary (tags you may use, nothing else): ${vocabulary.join(", ")}`;
+    const userContent = `Title: ${title}\nExisting tags: ${existingTags || '(none)'}\nBody:\n${body}\n\nVocabulary (tags you may use, nothing else): ${vocabulary.join(', ')}`;
 
     try {
       const result = await ollamaChat(TAG_PROMPT, userContent, TAG_FORMAT);
-      const existingSet = new Set(
-        (existingTags || "").split(" ").filter(Boolean),
-      );
+      const existingSet = new Set((existingTags || '').split(' ').filter(Boolean));
       const vocabSet = new Set(vocabulary);
       const cleaned = [
         ...new Set(
-          (result.suggested_tags || []).filter(
-            (t) => vocabSet.has(t) && !existingSet.has(t),
-          ),
+          (result.suggested_tags || []).filter((t) => vocabSet.has(t) && !existingSet.has(t)),
         ),
       ].slice(0, 2);
       results.push({
         path: notePath,
         title,
-        existing_tags: existingTags || "",
+        existing_tags: existingTags || '',
         suggested_tags: cleaned,
         raw_suggested_tags: result.suggested_tags || [],
       });
-      process.stderr.write(
-        `  tag: ${title.slice(0, 45)} -> [${cleaned.join(", ")}]\n`,
-      );
+      process.stderr.write(`  tag: ${title.slice(0, 45)} -> [${cleaned.join(', ')}]\n`);
     } catch (err) {
-      process.stderr.write(
-        `  tag error: ${title.slice(0, 45)}: ${err.message}\n`,
-      );
+      process.stderr.write(`  tag error: ${title.slice(0, 45)}: ${err.message}\n`);
     }
   }
 
@@ -262,7 +236,7 @@ async function spikeTags(db) {
     .map(([t]) => t);
   if (overused.length) {
     process.stderr.write(
-      `  filler filter: dropping overused tags ${overused.join(", ")} (>${threshold} of ${results.length})\n`,
+      `  filler filter: dropping overused tags ${overused.join(', ')} (>${threshold} of ${results.length})\n`,
     );
     for (const r of results) {
       r.suggested_tags = r.suggested_tags.filter((t) => !overused.includes(t));
@@ -277,30 +251,26 @@ async function main() {
   const db = await openReadonly(DB_PATH);
   const output = {};
 
-  if (!only || only === "duplicate") {
+  if (!only || only === 'duplicate') {
     process.stderr.write(
       `\n=== Duplicate Detector v2 (${sampleSize} notes, with body context) ===\n`,
     );
     output.duplicate = await spikeDuplicate(db);
     const counts = { duplicate: 0, same_topic: 0, unrelated: 0 };
-    for (const r of output.duplicate)
-      counts[r.relationship] = (counts[r.relationship] || 0) + 1;
+    for (const r of output.duplicate) counts[r.relationship] = (counts[r.relationship] || 0) + 1;
     process.stderr.write(
       `\nDuplicates: ${counts.duplicate} dup, ${counts.same_topic} same_topic, ${counts.unrelated} unrelated (of ${output.duplicate.length})\n`,
     );
   }
 
-  if (!only || only === "tags") {
+  if (!only || only === 'tags') {
     process.stderr.write(
       `\n=== Tag Suggester v2 (${sampleSize} under-tagged notes, max 3 tags) ===\n`,
     );
     output.tags = await spikeTags(db);
-    const taggedCount = output.tags.filter(
-      (r) => r.suggested_tags.length > 0,
-    ).length;
+    const taggedCount = output.tags.filter((r) => r.suggested_tags.length > 0).length;
     const avgTags =
-      output.tags.reduce((s, r) => s + r.suggested_tags.length, 0) /
-      (output.tags.length || 1);
+      output.tags.reduce((s, r) => s + r.suggested_tags.length, 0) / (output.tags.length || 1);
     process.stderr.write(
       `\nTags: ${taggedCount}/${output.tags.length} got suggestions, avg ${avgTags.toFixed(1)} tags/note\n`,
     );

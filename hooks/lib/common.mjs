@@ -3,10 +3,10 @@
 // scripts/lib/config.mjs as the single source of truth; this module re-exports
 // `resolvePluginData` for backward compatibility with hook callers.
 
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
-import { homedir, tmpdir } from "node:os";
-import { resolvePluginData } from "../../scripts/lib/config.mjs";
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { join, resolve, sep } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
+import { resolvePluginData } from '../../scripts/lib/config.mjs';
 
 export { resolvePluginData };
 
@@ -15,7 +15,7 @@ export function home() {
 }
 
 function readJsonStripBom(path) {
-  let raw = readFileSync(path, "utf-8");
+  let raw = readFileSync(path, 'utf-8');
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   return JSON.parse(raw);
 }
@@ -24,13 +24,11 @@ export function resolveConfig() {
   const pluginData = resolvePluginData();
   if (pluginData) {
     try {
-      return readJsonStripBom(join(pluginData, "config.json"));
+      return readJsonStripBom(join(pluginData, 'config.json'));
     } catch {}
   }
   try {
-    return readJsonStripBom(
-      join(resolve(import.meta.dirname, "..", ".."), "config.json"),
-    );
+    return readJsonStripBom(join(resolve(import.meta.dirname, '..', '..'), 'config.json'));
   } catch {}
   return {};
 }
@@ -43,43 +41,38 @@ export function resolveVaultPath() {
 }
 
 export function binaryName() {
-  return process.platform === "win32" ? "ll-search.exe" : "ll-search";
+  return process.platform === 'win32' ? 'll-search.exe' : 'll-search';
 }
 
 export function findBinary() {
   const name = binaryName();
   const pluginData = resolvePluginData();
   if (pluginData) {
-    const installed = join(pluginData, "bin", name);
-    if (existsSync(installed))
-      return { bin: installed, binDir: join(pluginData, "bin") };
+    const installed = join(pluginData, 'bin', name);
+    if (existsSync(installed)) return { bin: installed, binDir: join(pluginData, 'bin') };
   }
   const devBuild = resolve(
-    join(import.meta.dirname, "..", "..", "native", "target", "release", name),
+    join(import.meta.dirname, '..', '..', 'native', 'target', 'release', name),
   );
   if (existsSync(devBuild))
     return {
       bin: devBuild,
-      binDir: resolve(
-        join(import.meta.dirname, "..", "..", "native", "target", "release"),
-      ),
+      binDir: resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release')),
     };
   return null;
 }
 
 export function findEpisodicBinary() {
-  const claudeDir = join(home(), ".claude", "plugins");
-  const exe = process.platform === "win32" ? ".exe" : "";
+  const claudeDir = join(home(), '.claude', 'plugins');
+  const exe = process.platform === 'win32' ? '.exe' : '';
   try {
-    const raw = JSON.parse(
-      readFileSync(join(claudeDir, "installed_plugins.json"), "utf-8"),
-    );
+    const raw = JSON.parse(readFileSync(join(claudeDir, 'installed_plugins.json'), 'utf-8'));
     const plugins = raw.plugins || raw;
     for (const [key, entries] of Object.entries(plugins)) {
-      if (!key.startsWith("episodic-memory@")) continue;
+      if (!key.startsWith('episodic-memory@')) continue;
       const entry = entries[0];
       if (!entry?.installPath) continue;
-      const bin = join(entry.installPath, "cli", `episodic-memory${exe}`);
+      const bin = join(entry.installPath, 'cli', `episodic-memory${exe}`);
       if (existsSync(bin)) return bin;
     }
   } catch {}
@@ -89,15 +82,12 @@ export function findEpisodicBinary() {
 export function getSessionId() {
   const tmp = tmpdir();
   try {
-    return readFileSync(
-      join(tmp, `learning-loop-session-id-${process.ppid}`),
-      "utf8",
-    ).trim();
+    return readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
   } catch {}
   try {
-    return readFileSync(join(tmp, "learning-loop-session-id"), "utf8").trim();
+    return readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
   } catch {
-    return "unknown";
+    return 'unknown';
   }
 }
 
@@ -112,33 +102,32 @@ export function vaultRelPath(filePath, vaultPath) {
 export function isVaultNote(filePath, vaultRoot) {
   const prefix = vaultRoot + sep;
   if (!filePath.startsWith(prefix)) return false;
-  if (!filePath.endsWith(".md")) return false;
+  if (!filePath.endsWith('.md')) return false;
   const rel = filePath.slice(prefix.length);
   const firstSegment = rel.split(sep)[0];
-  if (firstSegment.startsWith("_") || firstSegment.startsWith("."))
-    return false;
+  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
   return true;
 }
 
 export function classifyVaultPath(relPath) {
-  const p = relPath.replace(/\\/g, "/");
-  if (p.startsWith("0-inbox/")) return "inbox";
-  if (p.startsWith("1-fleeting/")) return "fleeting";
-  if (p.startsWith("2-literature/")) return "literature";
-  if (p.startsWith("3-permanent/")) return "permanent";
-  if (p.startsWith("4-projects/")) return "project";
-  if (p.startsWith("5-maps/")) return "map";
-  if (p.startsWith("_system/")) return "system";
-  return "other";
+  const p = relPath.replace(/\\/g, '/');
+  if (p.startsWith('0-inbox/')) return 'inbox';
+  if (p.startsWith('1-fleeting/')) return 'fleeting';
+  if (p.startsWith('2-literature/')) return 'literature';
+  if (p.startsWith('3-permanent/')) return 'permanent';
+  if (p.startsWith('4-projects/')) return 'project';
+  if (p.startsWith('5-maps/')) return 'map';
+  if (p.startsWith('_system/')) return 'system';
+  return 'other';
 }
 
 export function readStdin() {
   return new Promise((res) => {
-    let data = "";
-    process.stdin.setEncoding("utf8");
-    const timeout = setTimeout(() => res(""), 3000);
-    process.stdin.on("data", (chunk) => (data += chunk));
-    process.stdin.on("end", () => {
+    let data = '';
+    process.stdin.setEncoding('utf8');
+    const timeout = setTimeout(() => res(''), 3000);
+    process.stdin.on('data', (chunk) => (data += chunk));
+    process.stdin.on('end', () => {
       clearTimeout(timeout);
       res(data);
     });
@@ -163,43 +152,37 @@ export async function runHook(handler) {
 
 function monthStr() {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 const provenanceDedupeKeys = new Set();
 
 export function emitProvenance(event) {
-  const key = `${event.session_id || ""}|${event.agent_id || ""}|${event.path || ""}`;
-  if (key !== "||" && provenanceDedupeKeys.has(key)) return;
+  const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
+  if (key !== '||' && provenanceDedupeKeys.has(key)) return;
   provenanceDedupeKeys.add(key);
   const pd = resolvePluginData();
   if (!pd) return;
-  const dir = join(pd, "provenance");
+  const dir = join(pd, 'provenance');
   mkdirSync(dir, { recursive: true });
   const record = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
-    source: "hook",
+    source: 'hook',
     ...event,
   };
-  appendFileSync(
-    join(dir, `events-${monthStr()}.jsonl`),
-    JSON.stringify(record) + "\n",
-  );
+  appendFileSync(join(dir, `events-${monthStr()}.jsonl`), JSON.stringify(record) + '\n');
 }
 
 export function emitRetrieval(prefix, event) {
   const pd = resolvePluginData();
   if (!pd) return;
-  const dir = join(pd, "retrieval");
+  const dir = join(pd, 'retrieval');
   mkdirSync(dir, { recursive: true });
   const record = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
     ...event,
   };
-  appendFileSync(
-    join(dir, `${prefix}-${monthStr()}.jsonl`),
-    JSON.stringify(record) + "\n",
-  );
+  appendFileSync(join(dir, `${prefix}-${monthStr()}.jsonl`), JSON.stringify(record) + '\n');
 }

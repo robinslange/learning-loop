@@ -46,10 +46,14 @@ const projectDir = process.env.CLAUDE_PROJECT_DIR;
 // Resolve session ID: hook input > ppid-keyed file > global file (legacy)
 let sessionId = hookData.session_id || '';
 if (!sessionId) {
-  try { sessionId = readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim(); } catch {}
+  try {
+    sessionId = readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
+  } catch {}
 }
 if (!sessionId) {
-  try { sessionId = readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim(); } catch {}
+  try {
+    sessionId = readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
+  } catch {}
 }
 
 const snapshotFile = sessionId
@@ -80,7 +84,7 @@ if (projectDir && existsSync(snapshotFile)) {
           JSON.stringify({
             decision: 'block',
             reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
-          })
+          }),
         );
         process.exit(0);
       }
@@ -110,7 +114,8 @@ if (fileSize > 51200) {
   process.stdout.write(
     JSON.stringify({
       decision: 'block',
-      reason: 'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
-    })
+      reason:
+        'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
+    }),
   );
 }

@@ -14,7 +14,15 @@
 //   1 — oh-my-claude not found
 //   2 — error during install
 
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, rmSync, lstatSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  mkdirSync,
+  existsSync,
+  rmSync,
+  lstatSync,
+} from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -44,27 +52,35 @@ function detect() {
 
 function readConfig() {
   if (!existsSync(OMC_CONFIG)) return null;
-  try { return JSON.parse(readFileSync(OMC_CONFIG, 'utf8')); }
-  catch { return null; }
+  try {
+    return JSON.parse(readFileSync(OMC_CONFIG, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function isConfigured(cfg) {
   if (!cfg) return false;
-  const inLines = (cfg.lines || []).some(line =>
-    ['left', 'right', 'center'].some(pos => (line[pos] || []).includes('cache-health'))
+  const inLines = (cfg.lines || []).some((line) =>
+    ['left', 'right', 'center'].some((pos) => (line[pos] || []).includes('cache-health')),
   );
   const hasConfig = cfg.plugins?.['cache-health'] != null;
   return inLines && hasConfig;
 }
 
 function isDevSymlink() {
-  try { return lstatSync(OMC_TARGET_DIR).isSymbolicLink(); }
-  catch { return false; }
+  try {
+    return lstatSync(OMC_TARGET_DIR).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function installPluginFile() {
   if (isDevSymlink()) return 'dev-symlink';
-  try { mkdirSync(OMC_TARGET_DIR, { recursive: true }); } catch {}
+  try {
+    mkdirSync(OMC_TARGET_DIR, { recursive: true });
+  } catch {}
   copyFileSync(SOURCE, OMC_TARGET);
   return 'copied';
 }
@@ -138,12 +154,18 @@ const state = detect();
 
 if (checkOnly) {
   const cfg = readConfig();
-  console.log(JSON.stringify({
-    ...state,
-    configured: isConfigured(cfg),
-    source_path: SOURCE,
-    target_path: OMC_TARGET,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        ...state,
+        configured: isConfigured(cfg),
+        source_path: SOURCE,
+        target_path: OMC_TARGET,
+      },
+      null,
+      2,
+    ),
+  );
   process.exit(0);
 }
 
@@ -157,7 +179,11 @@ if (uninstall) {
     rmSync(OMC_TARGET_DIR, { recursive: true, force: true });
   }
   const removed = removeFromConfig();
-  console.log(removed || state.plugin_file_installed ? 'cache-health uninstalled' : 'cache-health not installed');
+  console.log(
+    removed || state.plugin_file_installed
+      ? 'cache-health uninstalled'
+      : 'cache-health not installed',
+  );
   process.exit(0);
 }
 

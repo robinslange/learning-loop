@@ -9,10 +9,10 @@ import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 
 const MAX_QUERIES = 12;
 const COSINE_CYCLE_THRESHOLD = 0.83;
-const NOVELTY_SATURATION = 0.10;
+const NOVELTY_SATURATION = 0.1;
 const EMA_ALPHA = 0.3;
 const MVT_BUFFER = 0.5;
-const SENTENCE_NOVELTY_THRESHOLD = 0.70;
+const SENTENCE_NOVELTY_THRESHOLD = 0.7;
 
 const STATE_DIR = join(tmpdir(), 'll-convergence');
 
@@ -64,8 +64,13 @@ function checkResult(sessionId, query, resultFile) {
   // 1. Query cycle detection
   let queryCycle = 'none';
   for (const prior of state.queries) {
-    if (queryLower === prior) { queryCycle = 'exact'; break; }
-    if (queryLower.includes(prior) || prior.includes(queryLower)) { queryCycle = 'substring'; }
+    if (queryLower === prior) {
+      queryCycle = 'exact';
+      break;
+    }
+    if (queryLower.includes(prior) || prior.includes(queryLower)) {
+      queryCycle = 'substring';
+    }
   }
 
   // 2. Result-level cosine
@@ -103,13 +108,13 @@ function checkResult(sessionId, query, resultFile) {
   const entitySet = extractEntities(resultText);
   const currentEntities = [...entitySet];
   const priorEntitySet = new Set(state.entities);
-  const novelEntities = currentEntities.filter(e => !priorEntitySet.has(e)).length;
+  const novelEntities = currentEntities.filter((e) => !priorEntitySet.has(e)).length;
   const entityNoveltyRate = currentEntities.length > 0 ? novelEntities / currentEntities.length : 0;
 
   // 5. Citation overlap
   const currentCitations = extractAuthorYearCitations(resultText);
-  const novelCitations = currentCitations.filter(c =>
-    !state.citations.some(p => p.author === c.author && p.year === c.year)
+  const novelCitations = currentCitations.filter(
+    (c) => !state.citations.some((p) => p.author === c.author && p.year === c.year),
   ).length;
 
   // 6. EMA threshold
@@ -171,14 +176,15 @@ function checkResult(sessionId, query, resultFile) {
     if (!priorEntitySet.has(e)) state.entities.push(e);
   }
   for (const c of currentCitations) {
-    if (!state.citations.some(p => p.author === c.author && p.year === c.year)) {
+    if (!state.citations.some((p) => p.author === c.author && p.year === c.year)) {
       state.citations.push(c);
     }
   }
   state.noveltyRates.push(noveltyRate);
   if (queryNumber >= 2) {
     if (runningAvgRate === null) {
-      state.runningAvgRate = state.noveltyRates.reduce((a, b) => a + b, 0) / state.noveltyRates.length;
+      state.runningAvgRate =
+        state.noveltyRates.reduce((a, b) => a + b, 0) / state.noveltyRates.length;
     } else {
       state.runningAvgRate = EMA_ALPHA * noveltyRate + (1 - EMA_ALPHA) * runningAvgRate;
     }
@@ -191,16 +197,22 @@ function checkResult(sessionId, query, resultFile) {
 
 function showStatus(sessionId) {
   const state = loadState(sessionId);
-  console.log(JSON.stringify({
-    sessionId,
-    queryCount: state.queryCount,
-    queries: state.queries,
-    totalSentences: state.sentenceEmbeddings.length,
-    totalEntities: state.entities.length,
-    totalCitations: state.citations.length,
-    noveltyRates: state.noveltyRates,
-    runningAvgRate: state.runningAvgRate,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        sessionId,
+        queryCount: state.queryCount,
+        queries: state.queries,
+        totalSentences: state.sentenceEmbeddings.length,
+        totalEntities: state.entities.length,
+        totalCitations: state.citations.length,
+        noveltyRates: state.noveltyRates,
+        runningAvgRate: state.runningAvgRate,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 function resetSession(sessionId) {

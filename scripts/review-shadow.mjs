@@ -16,7 +16,9 @@ if (!existsSync(dir)) {
   process.exit(0);
 }
 
-const files = readdirSync(dir).filter(f => f.startsWith('shadow-injection-') && f.endsWith('.jsonl'));
+const files = readdirSync(dir).filter(
+  (f) => f.startsWith('shadow-injection-') && f.endsWith('.jsonl'),
+);
 if (files.length === 0) {
   console.log('No shadow-injection logs found.');
   process.exit(0);
@@ -26,22 +28,22 @@ const entries = [];
 for (const f of files) {
   for (const line of readFileSync(join(dir, f), 'utf8').trim().split('\n')) {
     if (!line) continue;
-    try { entries.push(JSON.parse(line)); } catch {}
+    try {
+      entries.push(JSON.parse(line));
+    } catch {}
   }
 }
 
 const total = entries.length;
-const fastPathSkips = entries.filter(e => e.gate?.fast_path_skip).length;
+const fastPathSkips = entries.filter((e) => e.gate?.fast_path_skip).length;
 
-const vaultOk = entries.filter(e => !e.backends?.vault?.error);
-const episodicOk = entries.filter(e => !e.backends?.episodic?.error);
-const healthy = entries.filter(e =>
-  !e.gate?.fast_path_skip &&
-  !e.backends?.vault?.error &&
-  !e.backends?.episodic?.error
+const vaultOk = entries.filter((e) => !e.backends?.vault?.error);
+const episodicOk = entries.filter((e) => !e.backends?.episodic?.error);
+const healthy = entries.filter(
+  (e) => !e.gate?.fast_path_skip && !e.backends?.vault?.error && !e.backends?.episodic?.error,
 );
-const passed = entries.filter(e => e.gate?.passed === true);
-const passedHealthy = healthy.filter(e => e.gate?.passed === true);
+const passed = entries.filter((e) => e.gate?.passed === true);
+const passedHealthy = healthy.filter((e) => e.gate?.passed === true);
 
 function percentiles(values) {
   if (values.length === 0) return { p50: 0, p95: 0, max: 0 };
@@ -61,9 +63,13 @@ function topErrors(list, key) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
 }
 
-const vaultLat = healthy.map(e => e.backends?.vault?.latency_ms).filter(v => typeof v === 'number');
-const episodicLat = healthy.map(e => e.backends?.episodic?.latency_ms).filter(v => typeof v === 'number');
-const racedOut = healthy.filter(e => e.backends?.episodic?.raced_out).length;
+const vaultLat = healthy
+  .map((e) => e.backends?.vault?.latency_ms)
+  .filter((v) => typeof v === 'number');
+const episodicLat = healthy
+  .map((e) => e.backends?.episodic?.latency_ms)
+  .filter((v) => typeof v === 'number');
+const racedOut = healthy.filter((e) => e.backends?.episodic?.raced_out).length;
 
 const threshold = Number(process.env.LEARNING_LOOP_INJECTION_THRESHOLD || 0.35);
 
@@ -76,15 +82,21 @@ const vaultHealthPct = (vaultOk.length / total) * 100;
 const episodicHealthPct = (episodicOk.length / total) * 100;
 console.log(`  Vault:    ${vaultOk.length} / ${total} healthy (${vaultHealthPct.toFixed(1)}%)`);
 for (const [err, n] of topErrors(entries, 'vault')) console.log(`            ${n}x ${err}`);
-console.log(`  Episodic: ${episodicOk.length} / ${total} healthy (${episodicHealthPct.toFixed(1)}%)`);
+console.log(
+  `  Episodic: ${episodicOk.length} / ${total} healthy (${episodicHealthPct.toFixed(1)}%)`,
+);
 for (const [err, n] of topErrors(entries, 'episodic')) console.log(`            ${n}x ${err}`);
 console.log(`  Both OK (excl. fast-path): ${healthy.length}`);
 
 console.log('\n## Gate (threshold=' + threshold + ')');
-console.log(`  Overall pass rate:  ${passed.length} / ${total} = ${((passed.length / total) * 100).toFixed(1)}%`);
+console.log(
+  `  Overall pass rate:  ${passed.length} / ${total} = ${((passed.length / total) * 100).toFixed(1)}%`,
+);
 if (healthy.length > 0) {
   const healthyPct = (passedHealthy.length / healthy.length) * 100;
-  console.log(`  Healthy pass rate:  ${passedHealthy.length} / ${healthy.length} = ${healthyPct.toFixed(1)}%  <-- meaningful metric`);
+  console.log(
+    `  Healthy pass rate:  ${passedHealthy.length} / ${healthy.length} = ${healthyPct.toFixed(1)}%  <-- meaningful metric`,
+  );
 }
 
 if (healthy.length > 0) {
@@ -99,9 +111,10 @@ if (healthy.length > 0) {
   for (let i = 0; i < 10; i++) {
     const n = buckets.get(i) || 0;
     if (n === 0) continue;
-    const lo = (i * step).toFixed(1), hi = ((i + 1) * step).toFixed(1);
-    const marker = (i * step) >= threshold ? '  [PASS]' : '';
-    const bar = '#'.repeat(Math.min(40, Math.ceil(n / Math.max(1, healthy.length) * 40)));
+    const lo = (i * step).toFixed(1),
+      hi = ((i + 1) * step).toFixed(1);
+    const marker = i * step >= threshold ? '  [PASS]' : '';
+    const bar = '#'.repeat(Math.min(40, Math.ceil((n / Math.max(1, healthy.length)) * 40)));
     console.log(`  ${lo}-${hi}: ${String(n).padStart(4)}  ${bar}${marker}`);
   }
 }
@@ -121,13 +134,20 @@ if (healthyRate < 0.6 && total >= 50) {
   console.log(`  INFRASTRUCTURE: backend health <60% (${(healthyRate * 100).toFixed(0)}%).`);
   console.log(`  Fix backend errors above before drawing conclusions about the gate.`);
 } else if (healthy.length < 100) {
-  console.log(`  NOT READY: ${healthy.length} healthy entries (need >=100 for meaningful pass-rate).`);
+  console.log(
+    `  NOT READY: ${healthy.length} healthy entries (need >=100 for meaningful pass-rate).`,
+  );
 } else if (passedHealthy.length >= 20 && passRate >= 0.05) {
-  console.log(`  READY FOR REVIEW: ${passedHealthy.length} passed at ${(passRate * 100).toFixed(1)}% pass rate on healthy entries.`);
+  console.log(
+    `  READY FOR REVIEW: ${passedHealthy.length} passed at ${(passRate * 100).toFixed(1)}% pass rate on healthy entries.`,
+  );
   console.log(`  Top 20 highest-confidence injections follow — judge quality before go-live.`);
   const ranked = [...passedHealthy]
-    .sort((a, b) => Math.max(b.gate?.vault_top_score || 0, b.gate?.episodic_top_score || 0) -
-                    Math.max(a.gate?.vault_top_score || 0, a.gate?.episodic_top_score || 0))
+    .sort(
+      (a, b) =>
+        Math.max(b.gate?.vault_top_score || 0, b.gate?.episodic_top_score || 0) -
+        Math.max(a.gate?.vault_top_score || 0, a.gate?.episodic_top_score || 0),
+    )
     .slice(0, 20);
   for (const [i, e] of ranked.entries()) {
     const s = Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0);
@@ -136,9 +156,17 @@ if (healthyRate < 0.6 && total >= 50) {
     if (e.would_inject) console.log(`Would inject:\n${e.would_inject}`);
   }
 } else if (healthy.length >= 300 && passRate < 0.02) {
-  console.log(`  GATE LIKELY TOO STRICT: ${(passRate * 100).toFixed(1)}% pass rate on ${healthy.length} healthy entries.`);
-  console.log(`  Consider lowering LEARNING_LOOP_INJECTION_THRESHOLD below ${threshold} and re-review.`);
+  console.log(
+    `  GATE LIKELY TOO STRICT: ${(passRate * 100).toFixed(1)}% pass rate on ${healthy.length} healthy entries.`,
+  );
+  console.log(
+    `  Consider lowering LEARNING_LOOP_INJECTION_THRESHOLD below ${threshold} and re-review.`,
+  );
 } else {
-  console.log(`  INCONCLUSIVE: ${passedHealthy.length} passed on ${healthy.length} healthy entries (${(passRate * 100).toFixed(1)}%).`);
-  console.log(`  Keep collecting — ${Math.max(0, 20 - passedHealthy.length)} more passes needed for a quality review.`);
+  console.log(
+    `  INCONCLUSIVE: ${passedHealthy.length} passed on ${healthy.length} healthy entries (${(passRate * 100).toFixed(1)}%).`,
+  );
+  console.log(
+    `  Keep collecting — ${Math.max(0, 20 - passedHealthy.length)} more passes needed for a quality review.`,
+  );
 }

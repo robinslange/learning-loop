@@ -4,8 +4,10 @@
 
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 
-console.log(JSON.stringify({
-  PLUGIN: getPluginRoot(),
-  PLUGIN_DATA: getPluginData(),
-  VAULT: getVaultPath()
-}));
+console.log(
+  JSON.stringify({
+    PLUGIN: getPluginRoot(),
+    PLUGIN_DATA: getPluginData(),
+    VAULT: getVaultPath(),
+  }),
+);

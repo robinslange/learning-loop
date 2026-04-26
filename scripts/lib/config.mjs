@@ -1,24 +1,12 @@
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  copyFileSync,
-  mkdirSync,
-} from "fs";
-import { resolve, join, dirname } from "path";
-import { fileURLToPath } from "url";
-import { homedir, tmpdir } from "os";
-import { expandHome } from "./paths.mjs";
+import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync } from 'fs';
+import { resolve, join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { homedir, tmpdir } from 'os';
+import { expandHome } from './paths.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const DATA_PATH_MARKER = join(
-  homedir(),
-  ".claude",
-  "plugins",
-  "data",
-  ".ll-data-path",
-);
+const DATA_PATH_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
 
 // True if `p` looks like a transient/test path. We never stamp these into the
 // marker file: tests set CLAUDE_PLUGIN_DATA to a temp dir, and a write-on-read
@@ -29,9 +17,9 @@ export function isTransientPath(p) {
   const tmp = tmpdir();
   return (
     p.startsWith(tmp) ||
-    p.startsWith("/tmp/") ||
-    p.startsWith("/var/folders/") ||
-    p.startsWith("/private/var/folders/")
+    p.startsWith('/tmp/') ||
+    p.startsWith('/var/folders/') ||
+    p.startsWith('/private/var/folders/')
   );
 }
 
@@ -39,10 +27,10 @@ function persistMarker(p) {
   if (isTransientPath(p)) return;
   try {
     if (existsSync(DATA_PATH_MARKER)) {
-      const current = readFileSync(DATA_PATH_MARKER, "utf-8").trim();
+      const current = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
       if (current === p) return;
     }
-    writeFileSync(DATA_PATH_MARKER, p, "utf-8");
+    writeFileSync(DATA_PATH_MARKER, p, 'utf-8');
   } catch {}
 }
 
@@ -54,13 +42,11 @@ export function getPluginData() {
   }
 
   try {
-    const saved = readFileSync(DATA_PATH_MARKER, "utf-8").trim();
+    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
     if (saved && existsSync(saved)) return saved;
   } catch {}
 
-  process.stderr.write(
-    "[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n",
-  );
+  process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
   return null;
 }
 
@@ -69,22 +55,22 @@ export function getPluginData() {
 export const resolvePluginData = getPluginData;
 
 function readJsonStripBom(path) {
-  let raw = readFileSync(path, "utf-8");
+  let raw = readFileSync(path, 'utf-8');
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   return JSON.parse(raw);
 }
 
 export function getPluginRoot() {
-  return resolve(join(__dirname, "..", ".."));
+  return resolve(join(__dirname, '..', '..'));
 }
 
 function configPath() {
   const pd = getPluginData();
-  return pd ? join(pd, "config.json") : null;
+  return pd ? join(pd, 'config.json') : null;
 }
 
 function legacyConfigPath() {
-  return join(getPluginRoot(), "config.json");
+  return join(getPluginRoot(), 'config.json');
 }
 
 let _config = null;

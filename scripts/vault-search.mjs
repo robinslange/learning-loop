@@ -24,7 +24,13 @@ function ensureBinary() {
 function tryFederationExport() {
   if (!existsSync(FEDERATION_CONFIG) || !hasBinary()) return;
   try {
-    const result = run(['export', DB_PATH, join(tmpdir(), 'll-search-export.db'), VAULT_PATH, ...federationArgs()]);
+    const result = run([
+      'export',
+      DB_PATH,
+      join(tmpdir(), 'll-search-export.db'),
+      VAULT_PATH,
+      ...federationArgs(),
+    ]);
     process.stderr.write(`Federation export: ${result.exported} notes\n`);
   } catch (err) {
     process.stderr.write(`Federation export failed: ${err.message}\n`);
@@ -64,12 +70,14 @@ function logRetrieval(command, query, results) {
     const now = new Date();
     const file = join(dir, `queries-${now.toISOString().slice(0, 7)}.jsonl`);
     let sessionId = '';
-    try { sessionId = readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf-8').trim(); } catch {}
+    try {
+      sessionId = readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf-8').trim();
+    } catch {}
     const federated = existsSync(FEDERATION_CONFIG);
     const topPaths = Array.isArray(results)
-      ? results.slice(0, 10).map(r => r.path || r.note_a || '')
+      ? results.slice(0, 10).map((r) => r.path || r.note_a || '')
       : [];
-    const peerCount = topPaths.filter(p => p.startsWith('peer:')).length;
+    const peerCount = topPaths.filter((p) => p.startsWith('peer:')).length;
     const entry = {
       ts: now.toISOString(),
       session_id: sessionId,
@@ -89,7 +97,11 @@ function intentions(projectFilter) {
 
   function walkDir(dir) {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
       const full = join(dir, entry.name);
@@ -97,7 +109,11 @@ function intentions(projectFilter) {
         walkDir(full);
       } else if (entry.name.endsWith('.md')) {
         let content;
-        try { content = readFileSync(full, 'utf-8'); } catch { continue; }
+        try {
+          content = readFileSync(full, 'utf-8');
+        } catch {
+          continue;
+        }
         const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
         if (!fmMatch) continue;
 
@@ -160,11 +176,29 @@ try {
       const threshold = parseFlag('--threshold', '0.15');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '20');
-        const results = run(['rerank', DB_PATH, text, '--top', topN, '--candidates', candidates, ...federationArgs()]);
+        const results = run([
+          'rerank',
+          DB_PATH,
+          text,
+          '--top',
+          topN,
+          '--candidates',
+          candidates,
+          ...federationArgs(),
+        ]);
         logRetrieval('rerank', text, results);
         out(results);
       } else {
-        const response = run(['query', DB_PATH, text, '--top', topN, '--threshold', threshold, ...federationArgs()]);
+        const response = run([
+          'query',
+          DB_PATH,
+          text,
+          '--top',
+          topN,
+          '--threshold',
+          threshold,
+          ...federationArgs(),
+        ]);
         logRetrieval('query', text, response.results || response);
         out(response);
       }
@@ -178,11 +212,29 @@ try {
       const threshold = parseFlag('--threshold', '0.15');
       if (hasFlag('--rerank')) {
         const candidates = parseFlag('--candidates', '40');
-        const results = run(['rerank', DB_PATH, keywords, '--top', topN, '--candidates', candidates, ...federationArgs()]);
+        const results = run([
+          'rerank',
+          DB_PATH,
+          keywords,
+          '--top',
+          topN,
+          '--candidates',
+          candidates,
+          ...federationArgs(),
+        ]);
         logRetrieval('rerank', keywords, results);
         out(results);
       } else {
-        const response = run(['query', DB_PATH, keywords, '--top', topN, '--threshold', threshold, ...federationArgs()]);
+        const response = run([
+          'query',
+          DB_PATH,
+          keywords,
+          '--top',
+          topN,
+          '--threshold',
+          threshold,
+          ...federationArgs(),
+        ]);
         logRetrieval('query', keywords, response.results || response);
         out(response);
       }
@@ -271,9 +323,10 @@ try {
       const { openReadonly } = await import('./lib/sqljs.mjs');
       const db = await openReadonly(DB_PATH);
       const topN = parseInt(parseFlag('--top', '0'));
-      const query = topN > 0
-        ? `SELECT path, tags FROM notes ORDER BY path LIMIT ${topN}`
-        : 'SELECT path, tags FROM notes ORDER BY path';
+      const query =
+        topN > 0
+          ? `SELECT path, tags FROM notes ORDER BY path LIMIT ${topN}`
+          : 'SELECT path, tags FROM notes ORDER BY path';
       const result = db.exec(query);
       if (result[0]) {
         for (const row of result[0].values) {
@@ -308,11 +361,24 @@ try {
       const threshold = parseFlag('--threshold', String(DISCRIMINATE_THRESHOLD));
       const queries = stripFlags(1, '--top', '--candidates', '--threshold');
       if (queries.length === 0) {
-        console.error('Usage: vault-search.mjs reflect-scan "query1" "query2" ... [--top N] [--candidates N]');
+        console.error(
+          'Usage: vault-search.mjs reflect-scan "query1" "query2" ... [--top N] [--candidates N]',
+        );
         process.exit(1);
       }
-      const results = run(['reflect-scan', DB_PATH, ...queries, '--top', topN, '--candidates', candidates, '--threshold', threshold, ...federationArgs()]);
-      for (const q of (results.queries || [])) {
+      const results = run([
+        'reflect-scan',
+        DB_PATH,
+        ...queries,
+        '--top',
+        topN,
+        '--candidates',
+        candidates,
+        '--threshold',
+        threshold,
+        ...federationArgs(),
+      ]);
+      for (const q of results.queries || []) {
         logRetrieval('reflect-scan', q.query, q.results);
       }
       out(results);

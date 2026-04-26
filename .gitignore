@@ -22,6 +22,7 @@ docs/
 federation/.seed
 federation/data/
 federation/config.json
+node_modules/
 scripts/node_modules/
 federation/node_modules/
 federation/relay/node_modules/

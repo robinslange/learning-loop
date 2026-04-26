@@ -27,8 +27,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 
-const OVERSIZED_THRESHOLD = 0.20;
-const AUTO_REJECT_THRESHOLD = 0.50;
+const OVERSIZED_THRESHOLD = 0.2;
+const AUTO_REJECT_THRESHOLD = 0.5;
 const EM_DASH = '\u2014';
 const EM_DASH_REPLACEMENT = ', ';
 
@@ -87,7 +87,10 @@ function validateEdit(decision, currentBody) {
   const currentFm = extractFrontmatter(currentBody);
   const normalize = (s) => s.replace(new RegExp(EM_DASH, 'g'), EM_DASH_REPLACEMENT);
   if (normalize(currentFm) !== normalize(proposedFmRaw)) {
-    flags.push({ type: 'frontmatter_modified', detail: 'frontmatter byte-mismatch after em-dash normalization' });
+    flags.push({
+      type: 'frontmatter_modified',
+      detail: 'frontmatter byte-mismatch after em-dash normalization',
+    });
   }
 
   // Reassemble the cleaned body using the upstream's ORIGINAL frontmatter to
@@ -227,7 +230,7 @@ function main() {
   }
 
   const pairs = JSON.parse(readFileSync(pairsPath, 'utf-8'));
-  const pairById = new Map(pairs.map(p => [p.id, p]));
+  const pairById = new Map(pairs.map((p) => [p.id, p]));
 
   const validated = [];
   for (const d of parsed.decisions || []) {
@@ -244,7 +247,10 @@ function main() {
       } catch (e) {
         validated.push({
           ...d,
-          validation: { status: 'upstream_unreadable', flags: [{ type: 'read_error', detail: e.message }] },
+          validation: {
+            status: 'upstream_unreadable',
+            flags: [{ type: 'read_error', detail: e.message }],
+          },
         });
         continue;
       }
@@ -281,13 +287,23 @@ function main() {
   // Summary stats
   const summary = {
     total: validated.length,
-    pass: validated.filter(d => d.decision === 'pass').length,
-    edit_ok: validated.filter(d => d.decision === 'edit' && d.validation.status === 'ok').length,
-    edit_oversized: validated.filter(d => d.decision === 'edit' && d.validation.status === 'oversized_warning').length,
-    edit_auto_rejected: validated.filter(d => d.decision === 'edit' && d.validation.status === 'auto_rejected').length,
-    counterpoint_ok: validated.filter(d => d.decision === 'counterpoint' && d.validation.status === 'ok').length,
-    em_dash_violations: validated.filter(d => d.validation.flags.some(f => f.type === 'em_dash_violation')).length,
-    frontmatter_violations: validated.filter(d => d.validation.flags.some(f => f.type === 'frontmatter_modified')).length,
+    pass: validated.filter((d) => d.decision === 'pass').length,
+    edit_ok: validated.filter((d) => d.decision === 'edit' && d.validation.status === 'ok').length,
+    edit_oversized: validated.filter(
+      (d) => d.decision === 'edit' && d.validation.status === 'oversized_warning',
+    ).length,
+    edit_auto_rejected: validated.filter(
+      (d) => d.decision === 'edit' && d.validation.status === 'auto_rejected',
+    ).length,
+    counterpoint_ok: validated.filter(
+      (d) => d.decision === 'counterpoint' && d.validation.status === 'ok',
+    ).length,
+    em_dash_violations: validated.filter((d) =>
+      d.validation.flags.some((f) => f.type === 'em_dash_violation'),
+    ).length,
+    frontmatter_violations: validated.filter((d) =>
+      d.validation.flags.some((f) => f.type === 'frontmatter_modified'),
+    ).length,
   };
 
   process.stdout.write(JSON.stringify({ summary, decisions: validated }, null, 2) + '\n');

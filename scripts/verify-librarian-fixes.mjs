@@ -29,26 +29,17 @@ process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
 // Note A: has existing link to "foo"
 writeFileSync(
   join(TEMP_VAULT, '3-permanent', 'note-a.md'),
-  '# Note A\n\nSome content. See also [[foo]] for more.\n'
+  '# Note A\n\nSome content. See also [[foo]] for more.\n',
 );
 
 // Note B: orphan, no outlinks
-writeFileSync(
-  join(TEMP_VAULT, '3-permanent', 'note-b.md'),
-  '# Note B\n\nOrphan content.\n'
-);
+writeFileSync(join(TEMP_VAULT, '3-permanent', 'note-b.md'), '# Note B\n\nOrphan content.\n');
 
 // foo.md exists
-writeFileSync(
-  join(TEMP_VAULT, '3-permanent', 'foo.md'),
-  '# Foo\n\nFoo content.\n'
-);
+writeFileSync(join(TEMP_VAULT, '3-permanent', 'foo.md'), '# Foo\n\nFoo content.\n');
 
 // bar.md exists
-writeFileSync(
-  join(TEMP_VAULT, '3-permanent', 'bar.md'),
-  '# Bar\n\nBar content.\n'
-);
+writeFileSync(join(TEMP_VAULT, '3-permanent', 'bar.md'), '# Bar\n\nBar content.\n');
 
 // ghost.md does NOT exist (hallucinated slug)
 
@@ -66,7 +57,14 @@ writeFileSync(configPath, JSON.stringify({ vault_path: TEMP_VAULT }));
 const { appendItem, loadState, saveState, newItemId } = await import('./lib/librarian-queue.mjs');
 
 // Write a blank initial state
-saveState({ visited: [], notes_visited: 0, link_suggestions: 0, voice_flags: 0, staleness_suspects: 0, counters: {} });
+saveState({
+  visited: [],
+  notes_visited: 0,
+  link_suggestions: 0,
+  voice_flags: 0,
+  staleness_suspects: 0,
+  counters: {},
+});
 
 // ---- import submit helpers by inlining the logic under test ----
 // We replicate submitLink logic here using the real queue + real fs, pointing at temp vault.
@@ -75,7 +73,8 @@ import { existsSync as fsExists, readFileSync as fsRead } from 'fs';
 import { join as pathJoin, basename } from 'path';
 
 async function submitLink(target, suggested_link, confidence, reason) {
-  const { loadState, saveState, incrementCounter, appendItem, newItemId } = await import('./lib/librarian-queue.mjs');
+  const { loadState, saveState, incrementCounter, appendItem, newItemId } =
+    await import('./lib/librarian-queue.mjs');
 
   if (target === suggested_link) {
     let state = loadState();
@@ -162,7 +161,10 @@ function assert(label, condition) {
   const state = loadState();
   assert('Rule 5 — rejected_self_link counter = 1', state.counters.rejected_self_link === 1);
   assert('Rule 5 — rejected_missing_file counter = 1', state.counters.rejected_missing_file === 1);
-  assert('Rule 5 — rejected_already_linked counter = 1', state.counters.rejected_already_linked === 1);
+  assert(
+    'Rule 5 — rejected_already_linked counter = 1',
+    state.counters.rejected_already_linked === 1,
+  );
   assert('Rule 5 — link_suggestions counter = 1', state.link_suggestions === 1);
 }
 
@@ -170,30 +172,35 @@ function assert(label, condition) {
 {
   writeFileSync(
     join(TEMP_VAULT, '3-permanent', 'note-c.md'),
-    '# Note C\n\nSee [[foo|Foo Note]] for details.\n'
+    '# Note C\n\nSee [[foo|Foo Note]] for details.\n',
   );
   const r = await submitLink('3-permanent/note-c.md', '3-permanent/foo.md', 'high', 'test');
-  assert('Rule 6 — already-linked with display text rejected', r === 'Rejected: link already present in target note');
+  assert(
+    'Rule 6 — already-linked with display text rejected',
+    r === 'Rejected: link already present in target note',
+  );
 }
 
 // Rule 7: slug with regex metacharacters (e.g. foo.excalidraw) must not match arbitrary chars
 {
   // Create a slug-with-dot file: Excalidraw-style ".excalidraw.md" extension
-  writeFileSync(
-    join(TEMP_VAULT, '3-permanent', 'foo.excalidraw.md'),
-    '# Excalidraw stub\n'
-  );
+  writeFileSync(join(TEMP_VAULT, '3-permanent', 'foo.excalidraw.md'), '# Excalidraw stub\n');
   // Target contains a similar-looking but DIFFERENT wikilink — [[fooXexcalidraw]].
   // Without regex escape, the `.` in the slug would match the `X` and cause a
   // false-positive "already linked" rejection.
   writeFileSync(
     join(TEMP_VAULT, '3-permanent', 'note-d.md'),
-    '# Note D\n\nSee [[fooXexcalidraw]] for details.\n'
+    '# Note D\n\nSee [[fooXexcalidraw]] for details.\n',
   );
-  const r = await submitLink('3-permanent/note-d.md', '3-permanent/foo.excalidraw.md', 'high', 'test');
+  const r = await submitLink(
+    '3-permanent/note-d.md',
+    '3-permanent/foo.excalidraw.md',
+    'high',
+    'test',
+  );
   assert(
     'Rule 7 — slug with dot does not false-match arbitrary chars',
-    r.startsWith('Queued link suggestion:')
+    r.startsWith('Queued link suggestion:'),
   );
 }
 

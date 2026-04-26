@@ -25,8 +25,8 @@ const sessionFilter = args.includes('--session') ? args[args.indexOf('--session'
 const monthFilter = args.includes('--month') ? args[args.indexOf('--month') + 1] : null;
 
 const files = readdirSync(dir)
-  .filter(f => f.startsWith('cache-health-') && f.endsWith('.jsonl'))
-  .filter(f => !monthFilter || f.includes(monthFilter));
+  .filter((f) => f.startsWith('cache-health-') && f.endsWith('.jsonl'))
+  .filter((f) => !monthFilter || f.includes(monthFilter));
 
 if (files.length === 0) {
   console.log('No cache-health logs found.');
@@ -56,17 +56,17 @@ function percentile(arr, p) {
   return sorted[Math.floor((p / 100) * (sorted.length - 1))];
 }
 
-const hitRates = rows.map(r => r.turn_hit_rate ?? r.hit_rate ?? 0);
+const hitRates = rows.map((r) => r.turn_hit_rate ?? r.hit_rate ?? 0);
 const totalRead = rows.reduce((s, r) => s + r.cache_read, 0);
 const totalCreate = rows.reduce((s, r) => s + r.cache_creation, 0);
 const totalUncached = rows.reduce((s, r) => s + r.uncached_input, 0);
 const totalInput = totalRead + totalCreate + totalUncached;
 const overallHitRate = totalInput > 0 ? totalRead / totalInput : 0;
-const zeroHits = rows.filter(r => (r.turn_hit_rate ?? r.hit_rate) === 0).length;
+const zeroHits = rows.filter((r) => (r.turn_hit_rate ?? r.hit_rate) === 0).length;
 
-const sessionIds = new Set(rows.map(r => r.session_id));
-const sessions = [...sessionIds].map(sid => {
-  const sr = rows.filter(r => r.session_id === sid);
+const sessionIds = new Set(rows.map((r) => r.session_id));
+const sessions = [...sessionIds].map((sid) => {
+  const sr = rows.filter((r) => r.session_id === sid);
   const sRead = sr.reduce((s, r) => s + r.cache_read, 0);
   const sCreate = sr.reduce((s, r) => s + r.cache_creation, 0);
   const sUncached = sr.reduce((s, r) => s + r.uncached_input, 0);
@@ -105,14 +105,16 @@ console.log('## Top sessions by turn count');
 console.log('session   turns  hit%   cost      tokens');
 for (const s of sessions.slice(0, 10)) {
   console.log(
-    `${s.id}  ${String(s.turns).padStart(5)}  ${(s.hit_rate * 100).toFixed(1).padStart(5)}%  $${s.cost.toFixed(2).padStart(6)}  ${s.total_tokens.toLocaleString()}`
+    `${s.id}  ${String(s.turns).padStart(5)}  ${(s.hit_rate * 100).toFixed(1).padStart(5)}%  $${s.cost.toFixed(2).padStart(6)}  ${s.total_tokens.toLocaleString()}`,
   );
 }
 
 if (zeroHits > 0) {
   console.log('\n## Zero-hit events (cache busts)');
-  const busts = rows.filter(r => (r.turn_hit_rate ?? r.hit_rate) === 0).slice(0, 10);
+  const busts = rows.filter((r) => (r.turn_hit_rate ?? r.hit_rate) === 0).slice(0, 10);
   for (const r of busts) {
-    console.log(`${r.ts}  session=${r.session_id.slice(0, 8)}  create=${r.cache_creation.toLocaleString()}`);
+    console.log(
+      `${r.ts}  session=${r.session_id.slice(0, 8)}  create=${r.cache_creation.toLocaleString()}`,
+    );
   }
 }

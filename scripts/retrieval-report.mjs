@@ -34,7 +34,7 @@ if (vaultQueries.length === 0 && memoryReads.length === 0 && episodicQueries.len
 // --- Vault search queries ---
 if (vaultQueries.length > 0) {
   vaultQueries.sort((a, b) => a.ts.localeCompare(b.ts));
-  const sessions = new Set(vaultQueries.map(e => e.session_id).filter(Boolean));
+  const sessions = new Set(vaultQueries.map((e) => e.session_id).filter(Boolean));
   const commands = {};
   const queryFreq = {};
   const pathFreq = {};
@@ -45,7 +45,7 @@ if (vaultQueries.length > 0) {
     commands[e.command] = (commands[e.command] || 0) + 1;
     const q = e.query?.toLowerCase().trim();
     if (q) queryFreq[q] = (queryFreq[q] || 0) + 1;
-    for (const p of (e.top_paths || [])) {
+    for (const p of e.top_paths || []) {
       pathFreq[p] = (pathFreq[p] || 0) + 1;
     }
     if (e.peer_results > 0) {
@@ -54,16 +54,26 @@ if (vaultQueries.length > 0) {
     }
   }
 
-  const topQueries = Object.entries(queryFreq).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  const topPaths = Object.entries(pathFreq).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topQueries = Object.entries(queryFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  const topPaths = Object.entries(pathFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
 
   console.log(`Vault Search`);
   console.log(`${'='.repeat(60)}`);
-  console.log(`  Period:          ${vaultQueries[0].ts.slice(0, 10)} to ${vaultQueries.at(-1).ts.slice(0, 10)}`);
+  console.log(
+    `  Period:          ${vaultQueries[0].ts.slice(0, 10)} to ${vaultQueries.at(-1).ts.slice(0, 10)}`,
+  );
   console.log(`  Total queries:   ${vaultQueries.length}`);
   console.log(`  Sessions:        ${sessions.size}`);
-  console.log(`  Federated:       ${vaultQueries.filter(e => e.federated).length}/${vaultQueries.length}`);
-  console.log(`  With peer hits:  ${queriesWithPeers}/${vaultQueries.length} (${totalPeerResults} peer results total)`);
+  console.log(
+    `  Federated:       ${vaultQueries.filter((e) => e.federated).length}/${vaultQueries.length}`,
+  );
+  console.log(
+    `  With peer hits:  ${queriesWithPeers}/${vaultQueries.length} (${totalPeerResults} peer results total)`,
+  );
   console.log();
 
   console.log(`  Commands:`);
@@ -91,16 +101,20 @@ if (vaultQueries.length > 0) {
 // --- Memory reads ---
 if (memoryReads.length > 0) {
   memoryReads.sort((a, b) => a.ts.localeCompare(b.ts));
-  const sessions = new Set(memoryReads.map(e => e.session_id).filter(Boolean));
+  const sessions = new Set(memoryReads.map((e) => e.session_id).filter(Boolean));
   const fileFreq = {};
   for (const e of memoryReads) {
     fileFreq[e.file] = (fileFreq[e.file] || 0) + 1;
   }
-  const topFiles = Object.entries(fileFreq).sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const topFiles = Object.entries(fileFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 15);
 
   console.log(`Memory Reads`);
   console.log(`${'='.repeat(60)}`);
-  console.log(`  Period:          ${memoryReads[0].ts.slice(0, 10)} to ${memoryReads.at(-1).ts.slice(0, 10)}`);
+  console.log(
+    `  Period:          ${memoryReads[0].ts.slice(0, 10)} to ${memoryReads.at(-1).ts.slice(0, 10)}`,
+  );
   console.log(`  Total reads:     ${memoryReads.length}`);
   console.log(`  Unique files:    ${Object.keys(fileFreq).length}`);
   console.log(`  Sessions:        ${sessions.size}`);
@@ -117,17 +131,21 @@ if (memoryReads.length > 0) {
 // --- Episodic memory queries ---
 if (episodicQueries.length > 0) {
   episodicQueries.sort((a, b) => a.ts.localeCompare(b.ts));
-  const sessions = new Set(episodicQueries.map(e => e.session_id).filter(Boolean));
+  const sessions = new Set(episodicQueries.map((e) => e.session_id).filter(Boolean));
   const queryFreq = {};
   for (const e of episodicQueries) {
     const q = e.query?.toLowerCase().trim();
     if (q) queryFreq[q] = (queryFreq[q] || 0) + 1;
   }
-  const topQueries = Object.entries(queryFreq).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topQueries = Object.entries(queryFreq)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
 
   console.log(`Episodic Memory`);
   console.log(`${'='.repeat(60)}`);
-  console.log(`  Period:          ${episodicQueries[0].ts.slice(0, 10)} to ${episodicQueries.at(-1).ts.slice(0, 10)}`);
+  console.log(
+    `  Period:          ${episodicQueries[0].ts.slice(0, 10)} to ${episodicQueries.at(-1).ts.slice(0, 10)}`,
+  );
   console.log(`  Total queries:   ${episodicQueries.length}`);
   console.log(`  Sessions:        ${sessions.size}`);
   console.log();
@@ -147,4 +165,6 @@ console.log(`${'='.repeat(60)}`);
 console.log(`  Vault queries:     ${vaultQueries.length}`);
 console.log(`  Memory reads:      ${memoryReads.length}`);
 console.log(`  Episodic queries:  ${episodicQueries.length}`);
-console.log(`  Total events:      ${vaultQueries.length + memoryReads.length + episodicQueries.length}`);
+console.log(
+  `  Total events:      ${vaultQueries.length + memoryReads.length + episodicQueries.length}`,
+);

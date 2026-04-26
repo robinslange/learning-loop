@@ -45,7 +45,10 @@ function resolveVaultPath() {
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
     if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, homedir()));
   } catch {}
-  const pluginDataCfg = resolve(homedir(), '.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json');
+  const pluginDataCfg = resolve(
+    homedir(),
+    '.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json',
+  );
   try {
     const cfg = JSON.parse(readFileSync(pluginDataCfg, 'utf-8'));
     if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, homedir()));
@@ -54,7 +57,10 @@ function resolveVaultPath() {
 }
 
 function resolveBinary() {
-  const installed = resolve(homedir(), '.claude/plugins/data/learning-loop-learning-loop-marketplace/bin/ll-search');
+  const installed = resolve(
+    homedir(),
+    '.claude/plugins/data/learning-loop-learning-loop-marketplace/bin/ll-search',
+  );
   if (existsSync(installed)) return installed;
   const dev = resolve(__dirname, '..', 'native/target/release/ll-search');
   if (existsSync(dev)) return dev;
@@ -79,7 +85,10 @@ function topFolder(relPath) {
 }
 
 function readStdinPaths() {
-  return readFileSync(0, 'utf-8').split('\n').map(s => s.trim()).filter(Boolean);
+  return readFileSync(0, 'utf-8')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function querySimilar(bin, dbPath, vaultRoot, noteRel) {
@@ -106,7 +115,7 @@ function buildCandidates(newNotePaths, opts = {}) {
   const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
   const bin = resolveBinary();
 
-  const newSet = new Set(newNotePaths.map(p => vaultRel(resolve(p), vaultRoot)));
+  const newSet = new Set(newNotePaths.map((p) => vaultRel(resolve(p), vaultRoot)));
   const allPairs = [];
   let nextId = 1;
 

@@ -2,7 +2,13 @@
 // post-tool-provenance.js — Automatic provenance capture from PostToolUse hook
 // Logs vault writes, agent spawns, and skill invocations.
 
-import { runHook, resolveVaultPath, vaultRelPath, classifyVaultPath, emitProvenance } from './lib/common.mjs';
+import {
+  runHook,
+  resolveVaultPath,
+  vaultRelPath,
+  classifyVaultPath,
+  emitProvenance,
+} from './lib/common.mjs';
 
 const vaultPath = resolveVaultPath();
 
@@ -21,7 +27,7 @@ runHook(({ tool, input }) => {
       if (fmMatch) {
         const tagMatch = fmMatch[1].match(/tags:\s*\[([^\]]*)\]/);
         if (tagMatch) {
-          event.tags = tagMatch[1].split(',').map(t => t.trim().replace(/['"]/g, ''));
+          event.tags = tagMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
         }
       }
       emitProvenance(event);

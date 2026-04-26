@@ -47,7 +47,9 @@ function walkVault(root, dirs, max) {
         try {
           const st = statSync(full);
           if (!st.isFile()) continue;
-        } catch { continue; }
+        } catch {
+          continue;
+        }
         if (!String(e).endsWith('.md')) continue;
         out.push(full);
         if (max && out.length >= max) return out;
@@ -60,7 +62,10 @@ function walkVault(root, dirs, max) {
 function countOrphanEdges(db, orphanFromPaths) {
   let total = 0;
   for (const orphan of orphanFromPaths) {
-    const res = db.exec("SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+    const res = db.exec(
+      "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
+      [orphan],
+    );
     total += res[0] ? res[0].values[0][0] : 0;
   }
   return total;
@@ -88,7 +93,14 @@ async function main() {
     by_confidence: { high: 0, medium: 0 },
   };
 
-  const walkedSourceRels = new Set(files.map(fp => fp.slice(VAULT_PATH.length + 1).split(sep).join('/')));
+  const walkedSourceRels = new Set(
+    files.map((fp) =>
+      fp
+        .slice(VAULT_PATH.length + 1)
+        .split(sep)
+        .join('/'),
+    ),
+  );
 
   let progress = 0;
   for (const filePath of files) {
@@ -97,10 +109,17 @@ async function main() {
       console.error(`  ${progress}/${files.length} (edges so far: ${stats.edges_total})`);
     }
     let content;
-    try { content = readFileSync(filePath, 'utf-8'); } catch { continue; }
+    try {
+      content = readFileSync(filePath, 'utf-8');
+    } catch {
+      continue;
+    }
 
     const sourceName = basename(filePath, '.md');
-    const sourceRel = filePath.slice(VAULT_PATH.length + 1).split(sep).join('/');
+    const sourceRel = filePath
+      .slice(VAULT_PATH.length + 1)
+      .split(sep)
+      .join('/');
     const classified = classifyNoteEdges(content, sourceName, resolver);
 
     stats.notes_scanned++;
@@ -130,11 +149,14 @@ async function main() {
 
   if (db) {
     const allFromPathsRes = db.exec('SELECT DISTINCT from_path FROM edges');
-    const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map(r => r[0]) : [];
-    const orphanFromPaths = allFromPaths.filter(fp => !walkedSourceRels.has(fp));
+    const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
+    const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
     let orphansRemoved = 0;
     for (const orphan of orphanFromPaths) {
-      const countRes = db.exec("SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+      const countRes = db.exec(
+        "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
+        [orphan],
+      );
       const count = countRes[0] ? countRes[0].values[0][0] : 0;
       if (count > 0) {
         db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
@@ -149,8 +171,8 @@ async function main() {
     const dryDb = await openEdgeDb(DB_FILE);
     try {
       const allFromPathsRes = dryDb.exec('SELECT DISTINCT from_path FROM edges');
-      const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map(r => r[0]) : [];
-      const orphanFromPaths = allFromPaths.filter(fp => !walkedSourceRels.has(fp));
+      const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
+      const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
       stats.orphans_would_remove = countOrphanEdges(dryDb, orphanFromPaths);
       stats.orphan_from_paths = orphanFromPaths.length;
     } finally {
@@ -161,7 +183,7 @@ async function main() {
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err.stack || err.message);
   process.exit(1);
 });

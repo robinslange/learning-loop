@@ -31,12 +31,12 @@ export function readQueue() {
   if (!existsSync(p)) return [];
   return readFileSync(p, 'utf-8')
     .split('\n')
-    .filter(line => line.trim())
-    .map(line => JSON.parse(line));
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line));
 }
 
 export function pendingItems() {
-  return readQueue().filter(item => item.status === 'pending');
+  return readQueue().filter((item) => item.status === 'pending');
 }
 
 export function pendingCount() {
@@ -44,17 +44,15 @@ export function pendingCount() {
 }
 
 export function updateItem(id, updates) {
-  const items = readQueue().map(item =>
-    item.id === id ? { ...item, ...updates } : item
-  );
+  const items = readQueue().map((item) => (item.id === id ? { ...item, ...updates } : item));
   ensureDir();
-  writeFileSync(queuePath(), items.map(item => JSON.stringify(item)).join('\n') + '\n', 'utf-8');
+  writeFileSync(queuePath(), items.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf-8');
 }
 
 export function expireStaleItems(vaultPath) {
   const now = Date.now();
   const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-  const items = readQueue().map(item => {
+  const items = readQueue().map((item) => {
     if (item.status !== 'pending') return item;
     const created = new Date(item.created_at).getTime();
     if (now - created > thirtyDays) {
@@ -73,7 +71,7 @@ export function expireStaleItems(vaultPath) {
     return item;
   });
   ensureDir();
-  writeFileSync(queuePath(), items.map(item => JSON.stringify(item)).join('\n') + '\n', 'utf-8');
+  writeFileSync(queuePath(), items.map((item) => JSON.stringify(item)).join('\n') + '\n', 'utf-8');
 }
 
 const DEFAULT_STATE = {

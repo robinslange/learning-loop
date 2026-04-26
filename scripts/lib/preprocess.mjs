@@ -25,7 +25,11 @@ export function preprocessNote(raw, filename) {
 
   // Build embedding text
   let text = `Title: ${title}\n\n${cleaned}`;
-  if (tags) text += `\n\nTags: ${tags.split(/\s+/).map(t => `#${t}`).join(' ')}`;
+  if (tags)
+    text += `\n\nTags: ${tags
+      .split(/\s+/)
+      .map((t) => `#${t}`)
+      .join(' ')}`;
   text = text.slice(0, MAX_TEXT_LENGTH);
 
   return { title, tags, body: cleaned, text };
@@ -45,8 +49,8 @@ export function preprocessExcalidraw(raw, filename) {
   }
 
   const texts = (data.elements || [])
-    .filter(el => el.type === 'text' && el.text && !el.isDeleted)
-    .map(el => el.text);
+    .filter((el) => el.type === 'text' && el.text && !el.isDeleted)
+    .map((el) => el.text);
 
   if (texts.length === 0) return null;
 
@@ -82,8 +86,12 @@ if (process.argv.includes('--test')) {
   let failed = 0;
 
   function assert(condition, name) {
-    if (condition) { passed++; }
-    else { failed++; console.error(`FAIL: ${name}`); }
+    if (condition) {
+      passed++;
+    } else {
+      failed++;
+      console.error(`FAIL: ${name}`);
+    }
   }
 
   // Frontmatter stripping
@@ -102,7 +110,8 @@ if (process.argv.includes('--test')) {
   assert(r2.tags === '', 'no tags = empty string');
 
   // Wikilinks
-  const withLinks = '---\ntags: []\n---\n\nSee [[some-note]] and [[other|display text]] for details.';
+  const withLinks =
+    '---\ntags: []\n---\n\nSee [[some-note]] and [[other|display text]] for details.';
   const r3 = preprocessNote(withLinks, 'links.md');
   assert(r3.body === 'See some-note and display text for details.', 'wikilinks cleaned');
 
@@ -142,12 +151,16 @@ excalidraw-plugin: parsed
 
   // Real vault note
   const { join } = await import('path');
-  const realResult = preprocessFile(join(VAULT_PATH, '3-permanent', 'caffeine-acute-pk-profile.md'));
+  const realResult = preprocessFile(
+    join(VAULT_PATH, '3-permanent', 'caffeine-acute-pk-profile.md'),
+  );
   assert(realResult !== null, 'real vault note preprocessed');
   assert(realResult.title.length > 0, 'real note has title');
 
   // Real excalidraw
-  const exResult = preprocessFile(join(VAULT_PATH, 'Excalidraw', 'vault-embedding-pipeline.excalidraw.md'));
+  const exResult = preprocessFile(
+    join(VAULT_PATH, 'Excalidraw', 'vault-embedding-pipeline.excalidraw.md'),
+  );
   assert(exResult !== null, 'real excalidraw preprocessed');
   assert(exResult.body.length > 0, 'excalidraw has text content');
 

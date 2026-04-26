@@ -4,12 +4,24 @@ import { join, basename } from 'path';
 import { readFileSync } from 'fs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import {
-  openEdgeDb, addEdge, removeEdge, removeEdgesByNote,
-  getEdgesFrom, getEdgesTo, getDownstream, getDownstreamSymmetric,
-  getSoleJustificationDependents, getSoleJustificationDependentsSymmetric,
+  openEdgeDb,
+  addEdge,
+  removeEdge,
+  removeEdgesByNote,
+  getEdgesFrom,
+  getEdgesTo,
+  getDownstream,
+  getDownstreamSymmetric,
+  getSoleJustificationDependents,
+  getSoleJustificationDependentsSymmetric,
   getPendingReview,
-  confirmEdge, rejectEdge, saveDb,
-  addSupersession, removeSupersession, listSupersessions, findMatchingSupersessions,
+  confirmEdge,
+  rejectEdge,
+  saveDb,
+  addSupersession,
+  removeSupersession,
+  listSupersessions,
+  findMatchingSupersessions,
 } from './lib/edges.mjs';
 
 const DB_FILE = join(PLUGIN_DATA, 'edges.db');
@@ -32,7 +44,9 @@ function extractEdgeContext(fromPath, toTarget) {
     const content = readFileSync(fullPath, 'utf-8');
     const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
     const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-    const linkRe = new RegExp(`\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`);
+    const linkRe = new RegExp(
+      `\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
+    );
     const m = linkRe.exec(body);
     if (!m) return null;
     const start = Math.max(0, m.index - 100);
@@ -84,7 +98,14 @@ async function main() {
         const confidence = parseFlag('--confidence', 'high');
         const sourceGraph = parseFlag('--source-graph', 'local');
         const directionFlipped = parseFlag('--direction-flipped', '0') === '1' ? 1 : 0;
-        const id = addEdge(db, { fromPath, toPath, edgeType, confidence, sourceGraph, directionFlipped });
+        const id = addEdge(db, {
+          fromPath,
+          toPath,
+          edgeType,
+          confidence,
+          sourceGraph,
+          directionFlipped,
+        });
         saveDb(db, DB_FILE);
         out({ ok: true, id });
         break;
@@ -145,7 +166,7 @@ async function main() {
 
       case 'review': {
         const pending = getPendingReview(db);
-        const enriched = pending.map(edge => {
+        const enriched = pending.map((edge) => {
           const ctx = extractEdgeContext(edge.from_path, edge.to_path);
           return ctx ? { ...edge, context: ctx } : edge;
         });
@@ -188,13 +209,21 @@ async function main() {
       case 'super-add': {
         const pattern = args[1];
         if (!pattern) {
-          out({ error: 'Usage: super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]' });
+          out({
+            error:
+              'Usage: super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]',
+          });
           process.exit(1);
         }
         const replacementNotePath = parseFlag('--replacement', null);
         const reason = parseFlag('--reason', null);
         const supersededDate = parseFlag('--date', null);
-        const id = addSupersession(db, { oldPatternQuery: pattern, replacementNotePath, reason, supersededDate });
+        const id = addSupersession(db, {
+          oldPatternQuery: pattern,
+          replacementNotePath,
+          reason,
+          supersededDate,
+        });
         saveDb(db, DB_FILE);
         out({ ok: true, id });
         break;
@@ -233,17 +262,32 @@ async function main() {
         const allRows = db.exec('SELECT COUNT(*) as total FROM edges');
         const total = allRows.length ? allRows[0].values[0][0] : 0;
 
-        const byType = db.exec('SELECT edge_type, COUNT(*) as count FROM edges GROUP BY edge_type ORDER BY count DESC');
+        const byType = db.exec(
+          'SELECT edge_type, COUNT(*) as count FROM edges GROUP BY edge_type ORDER BY count DESC',
+        );
         const types = {};
-        if (byType.length) byType[0].values.forEach(([t, c]) => { types[t] = c; });
+        if (byType.length)
+          byType[0].values.forEach(([t, c]) => {
+            types[t] = c;
+          });
 
-        const byConf = db.exec('SELECT confidence, COUNT(*) as count FROM edges GROUP BY confidence ORDER BY count DESC');
+        const byConf = db.exec(
+          'SELECT confidence, COUNT(*) as count FROM edges GROUP BY confidence ORDER BY count DESC',
+        );
         const confidence = {};
-        if (byConf.length) byConf[0].values.forEach(([c, n]) => { confidence[c] = n; });
+        if (byConf.length)
+          byConf[0].values.forEach(([c, n]) => {
+            confidence[c] = n;
+          });
 
-        const bySource = db.exec('SELECT source_graph, COUNT(*) as count FROM edges GROUP BY source_graph ORDER BY count DESC');
+        const bySource = db.exec(
+          'SELECT source_graph, COUNT(*) as count FROM edges GROUP BY source_graph ORDER BY count DESC',
+        );
         const sources = {};
-        if (bySource.length) bySource[0].values.forEach(([s, n]) => { sources[s] = n; });
+        if (bySource.length)
+          bySource[0].values.forEach(([s, n]) => {
+            sources[s] = n;
+          });
 
         out({ total, by_type: types, by_confidence: confidence, by_source: sources });
         break;
@@ -257,7 +301,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error(err.message);
   process.exit(1);
 });
