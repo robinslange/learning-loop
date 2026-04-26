@@ -2,7 +2,7 @@
 // Used by hooks/post-write-edge-infer.js (single-note write) and
 // scripts/backfill-edges.mjs (bulk vault scan).
 
-import { readdirSync, statSync } from 'fs';
+import { readdirSync } from 'fs';
 import { join, basename, sep } from 'path';
 
 // Iteration order is the resolution-priority order: when two folders contain
@@ -17,23 +17,18 @@ export function buildVaultIndex(vaultRoot) {
   for (const dir of VAULT_DIRS) {
     const dirPath = join(vaultRoot, dir);
     try {
-      const entries = readdirSync(dirPath, { recursive: true });
+      const entries = readdirSync(dirPath, { recursive: true, withFileTypes: true });
       for (const e of entries) {
-        const full = join(dirPath, String(e));
-        try {
-          if (!statSync(full).isFile()) continue;
-        } catch {
-          continue;
-        }
-        const name = basename(String(e), '.md');
-        if (!String(e).endsWith('.md')) continue;
-        if (!map.has(name)) {
-          const relFromVault = full
-            .slice(vaultRoot.length + 1)
-            .split(sep)
-            .join('/');
-          map.set(name, relFromVault);
-        }
+        if (!e.isFile()) continue;
+        if (!e.name.endsWith('.md')) continue;
+        const name = basename(e.name, '.md');
+        if (map.has(name)) continue;
+        const full = join(e.parentPath, e.name);
+        const relFromVault = full
+          .slice(vaultRoot.length + 1)
+          .split(sep)
+          .join('/');
+        map.set(name, relFromVault);
       }
     } catch {}
   }
