@@ -24,7 +24,7 @@ const DATA_PATH_MARKER = join(
 // marker file: tests set CLAUDE_PLUGIN_DATA to a temp dir, and a write-on-read
 // stomp would persist a path that vanishes when the test cleans up — breaking
 // shell-only ll-search invocations until the next real session re-stamps.
-function isTransientPath(p) {
+export function isTransientPath(p) {
   if (!p) return true;
   const tmp = tmpdir();
   return (
@@ -64,6 +64,16 @@ export function getPluginData() {
   return null;
 }
 
+// Alias retained for hooks/lib/common.mjs compatibility — same function,
+// historical naming difference.
+export const resolvePluginData = getPluginData;
+
+function readJsonStripBom(path) {
+  let raw = readFileSync(path, "utf-8");
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
+  return JSON.parse(raw);
+}
+
 export function getPluginRoot() {
   return resolve(join(__dirname, "..", ".."));
 }
@@ -87,7 +97,7 @@ export function getConfig() {
 
   if (primary && existsSync(primary)) {
     try {
-      _config = JSON.parse(readFileSync(primary, "utf-8"));
+      _config = readJsonStripBom(primary);
       return _config;
     } catch {
       /* fall through */
@@ -96,7 +106,7 @@ export function getConfig() {
 
   if (existsSync(legacy)) {
     try {
-      _config = JSON.parse(readFileSync(legacy, "utf-8"));
+      _config = readJsonStripBom(legacy);
       if (primary) migrateConfig(legacy, primary);
       return _config;
     } catch {

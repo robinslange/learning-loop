@@ -1,69 +1,17 @@
 // hooks/lib/common.mjs — Shared utilities for all learning-loop hooks
-// Single source of truth for plugin data resolution, session ID, vault path,
-// stdin parsing, and retrieval/provenance emission.
+// Plugin-data resolution and the transient-path guard live in
+// scripts/lib/config.mjs as the single source of truth; this module re-exports
+// `resolvePluginData` for backward compatibility with hook callers.
 
-import {
-  appendFileSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-  existsSync,
-} from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { resolvePluginData } from "../../scripts/lib/config.mjs";
+
+export { resolvePluginData };
 
 export function home() {
   return process.env.HOME || process.env.USERPROFILE || homedir();
-}
-
-const DATA_PATH_MARKER = join(
-  homedir(),
-  ".claude",
-  "plugins",
-  "data",
-  ".ll-data-path",
-);
-
-// True if `p` looks like a transient/test path. We never stamp these into the
-// marker file: tests set CLAUDE_PLUGIN_DATA to a temp dir, and a write-on-read
-// stomp would persist a path that vanishes when the test cleans up — breaking
-// shell-only ll-search invocations until the next real session re-stamps.
-function isTransientPath(p) {
-  if (!p) return true;
-  const tmp = tmpdir();
-  return (
-    p.startsWith(tmp) ||
-    p.startsWith("/tmp/") ||
-    p.startsWith("/var/folders/") ||
-    p.startsWith("/private/var/folders/")
-  );
-}
-
-function persistMarker(p) {
-  if (isTransientPath(p)) return;
-  try {
-    if (existsSync(DATA_PATH_MARKER)) {
-      const current = readFileSync(DATA_PATH_MARKER, "utf-8").trim();
-      if (current === p) return;
-    }
-    writeFileSync(DATA_PATH_MARKER, p, "utf-8");
-  } catch {}
-}
-
-export function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) {
-    persistMarker(fromEnv);
-    return fromEnv;
-  }
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, "utf-8").trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch {}
-  process.stderr.write(
-    "[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n",
-  );
-  return null;
 }
 
 function readJsonStripBom(path) {
