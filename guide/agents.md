@@ -30,14 +30,29 @@ Fourteen working agents plus the `diagram-rules` shared reference file.
 
 ## Vault librarian (local, optional)
 
-A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. Link investigation runs as a tool-use loop with 10 tools backed by `ll-search` and SQL queries; the other classifiers (voice gate, tag suggester, duplicate detector) run as single structured-output calls with pre-fetched context. All five tasks write observations to a JSONL queue. Claude reviews the queue on demand via `/health --librarian`.
+A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It dispatches up to four tasks per visited note, mixing one tool-use loop with three single-call structured-output classifiers.
+
+| Task | Mode | Trigger | Output |
+|---|---|---|---|
+| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Orphan notes (no inbound or outbound links) | `link_suggestion` queue entry per candidate |
+| Voice gate | Single structured-output call | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag` |
+| Tag suggestion | Single structured-output call | Notes with 0 or 1 tags | `tag_suggestion` with up to 2 tags |
+| Duplicate detection | Single structured-output call | Every visited note | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |
+
+The structured-output classifiers all follow the same shape: pre-fetch context, one schema-bound call, no tool-use. Specifics:
+
+- **Tag suggester.** Vocabulary is built from the vault's existing tag set, frequency-curated, top 60, with structural categories (folder labels, status tags) excluded. The classifier picks 0, 1, or 2 tags from that bounded vocabulary; it cannot invent new tags. Manual precision on a 40-note sample: 0.78 strict, 0.84 charitable.
+- **Duplicate detector.** Compares the visited note against three nearest neighbours from `ll-search similar`, with 500 characters of body context per side. Returns one of `duplicate` (merge), `same_topic` (link), or `unrelated` (drop). False-positive rate ~3% with body context; the body context is what makes the call accurate at this model size.
+- **Voice gate.** Inspects the title only. Returns a flag if the title states a topic ("Spaced Repetition") rather than an insight ("Spaced repetition works because forgetting is active"). F1 0.78 against a hand-labelled set.
+
+All four tasks write observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field. A separate `state.json` tracks visited notes and resets after a full pass. Claude reviews the queue on demand via `/health --librarian`.
 
 | Agent | Engine | Tasks | Speed |
 |---|---|---|---|
 | librarian | Gemma 4 E2B (ollama, local) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note |
-| Claude (on-demand) | Opus/Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
+| Claude (on-demand) | Opus or Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
 
-E2B is excellent at classification with evidence (90% link accuracy, 93% voice gate F1 0.78, tag suggester precision 0.78–0.84, duplicate detector ~3% false-positive with body context) but poor at open-ended investigation. The architecture splits accordingly.
+E2B is good at classification with evidence (90% link accuracy, voice gate F1 0.78, tag suggester precision 0.78 to 0.84, duplicate detector ~3% false-positive with body context) and weak at open-ended investigation. The architecture splits accordingly.
 
 ## Model selection
 
