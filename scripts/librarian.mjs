@@ -62,14 +62,23 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function waitForOllama() {
-  while (true) {
+async function waitForOllama({ maxAttempts = 10, intervalMs = 60000 } = {}) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await fetch(`${OLLAMA_URL}/api/tags`);
+      const res = await fetch(`${OLLAMA_URL}/api/tags`, {
+        signal: AbortSignal.timeout(5000),
+      });
       if (res.ok) return;
     } catch {}
-    log('Waiting for ollama...\n');
-    await sleep(60000);
+    if (attempt === maxAttempts) {
+      const err = new Error(
+        `ollama unreachable at ${OLLAMA_URL} after ${maxAttempts} attempts (${(maxAttempts * intervalMs) / 1000}s). Install ollama or set librarian.ollama_url; disable via librarian.enabled=false in config.json.`,
+      );
+      err.code = 'OLLAMA_UNREACHABLE';
+      throw err;
+    }
+    log(`Waiting for ollama (${attempt}/${maxAttempts})...\n`);
+    await sleep(intervalMs);
   }
 }
 
@@ -525,8 +534,8 @@ const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === proces
 if (isDirectRun) {
   main().catch((err) => {
     log(`Librarian fatal: ${err.message}\n`);
-    process.exit(1);
+    process.exit(err.code === 'OLLAMA_UNREACHABLE' ? 2 : 1);
   });
 }
 
-export const __test__ = { voiceCheck, tagCheck, duplicateCheck };
+export const __test__ = { voiceCheck, tagCheck, duplicateCheck, waitForOllama };
