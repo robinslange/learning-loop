@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Fixed
+
+- **Multi-session filesystem pile-ups under parallel Claude Code sessions.** Per-Write hot path opened a node process for each of three hooks (autolink, edge-infer, provenance), each walking the vault to build a basename→path index and stat'ing every `.md` file. With N sessions writing concurrently, file-descriptor and inode pressure climbed fast enough to trigger `EMFILE` ("too many open files") within seconds of starting `ll-watch`. The fix is daemon-centric: the Rust `ll-search watch` daemon owns vault indexing exclusively, JS hooks consult an on-disk vault-snapshot cache instead of walking, and the three Write/Edit hooks coalesce into one `post-tool.js` dispatcher.
+
+### Changed
+
+- **Daemon DB path aligned.** `scripts/watch.mjs` and `hooks/session-start.js` now spawn the daemon against `VAULT/.vault-search/vault-index.db` (the same path JS hooks read), eliminating the three-way split-brain where the daemon wrote to `PLUGIN_DATA/retrieval/search.db`, hooks read `vault-index.db`, and federation read a third copy. ORT env (`ORT_DYLIB_PATH`, `ORT_LIB_LOCATION`) is now passed to both foreground and detached spawns.
+- **Daemon hardened against concurrent spawn.** `PidGuard::new` uses `OpenOptions::create_new` with bounded retry on empty/stale PID files, so racing session-start invocations cannot both win. The daemon also writes `watch.version` next to `watch.pid` on start (and removes both on Drop), which lets the spawn protocol detect a running-but-out-of-date daemon and SIGTERM-replace it on plugin upgrade.
+- **Periodic 5-min mtime-diff resync** as an FSEvents safety net — recovers from missed events after sleep/wake or watcher hiccups without forcing a full rebuild.
+- **`PRAGMA busy_timeout = 5000`** so the daemon and short-lived JS readers don't abort on transient WAL contention.
+- **Auto-spawn from `session-start.js`** with a four-state liveness probe (alive / dead / corrupt / writer-in-progress / missing), `watch.version` comparison for upgrade-replace, and an outer `wx`-flag lock-marker that prevents a thundering-herd of hook invocations all racing to spawn.
+- **Vault-snapshot cache (`hooks/lib/snapshot.mjs`).** New on-disk JSON snapshot at `PLUGIN_DATA/vault-snapshot.json` (v1, 30s TTL) caches every `.md` path under `0-inbox`/`1-fleeting`/`2-literature`/`3-permanent`/`4-projects`/`5-maps`/`Excalidraw`. Hooks build basename→path indexes from the snapshot instead of walking the vault on every Write. Atomic-rename writer with PID-suffixed temp files; `maybeSplice` adds new entries on the fly without rebuild.
+- **Coalesced post-tool dispatcher.** `hooks/post-tool.js` reads stdin once, builds a shared `ctx` (with snapshot loaded once for the turn), and dispatches to extracted modules `runAutolink`/`runEdgeInfer`/`runProvenance` from `hooks/modules/`. Replaces three separate node spawns per Write event with one.
+- **`scripts/lib/edge-classifier.mjs`** drops the redundant `statSync` per directory entry — `Dirent.isFile()` already carries that information from a single `readdirSync({withFileTypes: true})` call.
+- **Intentions in SQLite (schema v4).** New `intentions` table populated by the indexer's reindex transaction, with `idx_intentions_context` and orphan cleanup. The indexer pulls intentions from frontmatter via a new `parse_intentions` parser supporting block-array, inline-array, and legacy `"context — cue"` flat-string forms. New `ll-search intentions <db> [<context>]` subcommand (summary mode groups by context, detail mode joins notes). `scripts/vault-search.mjs intentions` now shells out to the CLI instead of walking the vault and regex-parsing frontmatter.
+
+### Removed
+
+- `hooks/post-write-autolink.js`, `hooks/post-write-edge-infer.js`, `hooks/post-tool-provenance.js`, `hooks/post-stop-reindex.js` — superseded by the coalesced `post-tool.js` dispatcher.
+
+### Migration
+
+- `/learning-loop:init` now best-effort deletes orphan `search.db` files (plus `-shm`/`-wal` siblings) at `PLUGIN_DATA/retrieval/search.db`, `PLUGIN_DATA/search.db`, and `PLUGIN_DATA/db/search.db`. No user action required.
+- Existing v3 databases backfill the new intentions table on first reindex (the schema upgrade resets `mtime` to 0 to force re-walk).
+
 ## v1.16.9
 
 ### Added
