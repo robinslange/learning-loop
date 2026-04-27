@@ -67,6 +67,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         hash: String,
         mtime: f64,
         links: Vec<String>,
+        intentions: Vec<crate::preprocess::Intention>,
     }
 
     let mut to_embed: Vec<EmbedItem> = Vec::new();
@@ -121,6 +122,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
                 hash,
                 mtime: file.mtime,
                 links: result.links,
+                intentions: result.intentions,
             });
         } else {
             to_embed.push(EmbedItem {
@@ -132,6 +134,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
                 hash,
                 mtime: file.mtime,
                 links: result.links,
+                intentions: result.intentions,
             });
         }
     }
@@ -215,6 +218,19 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
             )
             .unwrap();
         }
+
+        conn.execute(
+            "DELETE FROM intentions WHERE note_id = ?1",
+            params![note_id],
+        )
+        .unwrap();
+        for intent in &item.intentions {
+            conn.execute(
+                "INSERT OR REPLACE INTO intentions (note_id, context, cue) VALUES (?1, ?2, ?3)",
+                params![note_id, intent.context, intent.cue],
+            )
+            .unwrap();
+        }
     }
 
     for &(id, mtime) in &to_update_mtime {
@@ -229,6 +245,8 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         conn.execute("DELETE FROM embeddings WHERE id = ?1", params![id])
             .unwrap();
         conn.execute("DELETE FROM links WHERE source_id = ?1", params![id])
+            .unwrap();
+        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])
             .unwrap();
         conn.execute("DELETE FROM notes_content WHERE id = ?1", params![id])
             .unwrap();
@@ -259,6 +277,12 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
 
     compute_sessions(conn);
     compute_project_phases(conn);
+
+    conn.execute(
+        "DELETE FROM intentions WHERE note_id NOT IN (SELECT id FROM notes)",
+        [],
+    )
+    .ok();
 
     IndexResult {
         embedded: embedded_items.len(),

@@ -238,31 +238,96 @@ if (pluginData) {
 const DB_DIR = join(vaultRoot, '.vault-search');
 const DB_PATH = join(DB_DIR, 'vault-index.db');
 
-function isWatchRunning() {
-  if (!pluginData) return false;
-  try {
-    const pid = parseInt(readFileSync(join(pluginData, 'watch.pid'), 'utf8').trim(), 10);
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 const binary = findBinaryShared();
-if (binary && existsSync(DB_PATH) && !isWatchRunning()) {
-  try {
-    const child = spawn(binary.bin, ['index', vaultRoot, DB_PATH], {
-      detached: true,
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        ORT_DYLIB_PATH: binary.binDir,
-        ORT_LIB_LOCATION: binary.binDir,
-      },
-    });
-    child.unref();
-  } catch {}
+if (binary && existsSync(DB_PATH) && pluginData) {
+  const pidPath = join(pluginData, 'watch.pid');
+  const versionPath = join(pluginData, 'watch.version');
+  const lockPath = pidPath + '.lock';
+
+  function checkAlive() {
+    let raw;
+    try {
+      raw = readFileSync(pidPath, 'utf8').trim();
+    } catch {
+      return { state: 'missing' };
+    }
+    if (raw === '') return { state: 'writer-in-progress' };
+    const pid = parseInt(raw, 10);
+    if (!Number.isFinite(pid)) return { state: 'corrupt' };
+    try {
+      process.kill(pid, 0);
+      return { state: 'alive', pid };
+    } catch {
+      return { state: 'dead', pid };
+    }
+  }
+
+  function syncSleep(ms) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {}
+  }
+
+  let probe = checkAlive();
+  if (probe.state === 'writer-in-progress') {
+    syncSleep(50);
+    probe = checkAlive();
+  }
+
+  let shouldSpawn = true;
+  if (probe.state === 'alive') {
+    let runningVersion = '';
+    try {
+      runningVersion = readFileSync(versionPath, 'utf8').trim();
+    } catch {}
+    if (runningVersion === pluginVersion) {
+      shouldSpawn = false;
+    } else {
+      try {
+        process.kill(probe.pid, 'SIGTERM');
+      } catch {}
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const p = checkAlive();
+        if (p.state !== 'alive') break;
+        syncSleep(50);
+      }
+    }
+  } else if (probe.state === 'dead' || probe.state === 'corrupt') {
+    try {
+      rmSync(pidPath, { force: true });
+    } catch {}
+  }
+
+  if (shouldSpawn) {
+    let lockAcquired = false;
+    try {
+      writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
+      lockAcquired = true;
+    } catch {}
+
+    if (lockAcquired) {
+      try {
+        const child = spawn(
+          binary.bin,
+          ['watch', vaultRoot, DB_PATH, '--config-dir', pluginData, '--pid-file', pidPath],
+          {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: true,
+            env: {
+              ...process.env,
+              ORT_DYLIB_PATH: binary.binDir,
+              ORT_LIB_LOCATION: binary.binDir,
+            },
+          },
+        );
+        child.unref();
+      } catch {}
+      try {
+        rmSync(lockPath, { force: true });
+      } catch {}
+    }
+  }
 }
 
 let context = '';

@@ -7,7 +7,7 @@ use crate::embed;
 
 use super::index::IndexResult;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 pub(crate) const DTYPE: &str = "q8";
 
 pub fn open_db(db_path: &str) -> Result<Connection> {
@@ -17,7 +17,7 @@ pub fn open_db(db_path: &str) -> Result<Connection> {
 
     let conn = Connection::open(db_path)
         .context("failed to open database")?;
-    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;")
         .context("failed to set pragmas")?;
 
     let has_meta: bool = conn
@@ -35,6 +35,7 @@ pub fn open_db(db_path: &str) -> Result<Connection> {
 
     ensure_embeddings_table(&conn);
     ensure_links_table(&conn);
+    ensure_intentions_table(&conn);
     Ok(conn)
 }
 
@@ -77,6 +78,14 @@ pub(crate) fn create_schema(conn: &Connection) {
             UNIQUE(source_id, target_path)
         );
         CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);
+
+        CREATE TABLE IF NOT EXISTS intentions (
+            note_id INTEGER NOT NULL,
+            context TEXT NOT NULL,
+            cue TEXT,
+            PRIMARY KEY (note_id, context)
+        );
+        CREATE INDEX IF NOT EXISTS idx_intentions_context ON intentions(context);
 
         CREATE TRIGGER IF NOT EXISTS notes_content_ai AFTER INSERT ON notes_content BEGIN
             INSERT INTO notes_fts(rowid, title, tags, body)
@@ -128,6 +137,22 @@ fn ensure_links_table(conn: &Connection) {
             CREATE INDEX IF NOT EXISTS idx_links_target ON links(target_path);",
         )
         .expect("failed to create links table");
+    }
+}
+
+fn ensure_intentions_table(conn: &Connection) {
+    if !table_exists(conn, "intentions") {
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS intentions (
+                note_id INTEGER NOT NULL,
+                context TEXT NOT NULL,
+                cue TEXT,
+                PRIMARY KEY (note_id, context)
+            );
+            CREATE INDEX IF NOT EXISTS idx_intentions_context ON intentions(context);",
+        )
+        .expect("failed to create intentions table");
+        conn.execute("UPDATE notes SET mtime = 0", []).ok();
     }
 }
 

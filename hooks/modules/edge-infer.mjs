@@ -1,7 +1,11 @@
-#!/usr/bin/env node
+// hooks/modules/edge-infer.mjs : Wikilink → edge classification.
+// Extracted from hooks/post-write-edge-infer.js. Snapshot-backed vault index
+// (no per-call recursive readdir).
+
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { runHook, resolvePluginData, resolveVaultPath, isVaultNote } from './lib/common.mjs';
+import { resolvePluginData, isVaultNote } from '../lib/common.mjs';
+import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -9,12 +13,8 @@ import {
   saveDb,
   acquireLock,
   releaseLock,
-} from '../scripts/lib/edges.mjs';
-import {
-  classifyNoteEdges,
-  buildVaultIndex,
-  makeResolver,
-} from '../scripts/lib/edge-classifier.mjs';
+} from '../../scripts/lib/edges.mjs';
+import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   evidence_for: 'evidence-for',
@@ -147,15 +147,16 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   return true;
 }
 
-runHook(async ({ tool, input, response }) => {
+export async function runEdgeInfer(ctx) {
+  const { tool, input, response, vaultRoot, snapshot } = ctx;
   if (tool !== 'Write' && tool !== 'Edit') return;
   if (!response || (typeof response === 'object' && response.success === false)) return;
+  if (!vaultRoot) return;
 
   const filePath = input.file_path;
   if (!filePath) return;
-
-  const vaultRoot = resolveVaultPath();
-  if (!vaultRoot || !isVaultNote(filePath, vaultRoot)) return;
+  if (!isVaultNote(filePath, vaultRoot)) return;
+  if (!snapshot) return;
 
   const pluginData = resolvePluginData();
   if (!pluginData) return;
@@ -177,7 +178,7 @@ runHook(async ({ tool, input, response }) => {
 
   const sourceName = basename(filePath, '.md');
   const sourceRel = vaultRelPath(filePath, vaultRoot);
-  const resolver = makeResolver(buildVaultIndex(vaultRoot));
+  const resolver = makeResolver(buildVaultIndexFromSnapshot(snapshot));
   const classified = classifyNoteEdges(content, sourceName, resolver);
   if (classified.length === 0) return;
 
@@ -210,4 +211,4 @@ runHook(async ({ tool, input, response }) => {
 
   const highConfidenceEdges = edges.filter((e) => e.confidence === 'high' && !e.flip);
   syncFrontmatterEdges(filePath, highConfidenceEdges);
-});
+}

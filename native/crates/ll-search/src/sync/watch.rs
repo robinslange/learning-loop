@@ -1,3 +1,5 @@
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -20,21 +22,63 @@ pub struct WatchConfig {
 
 struct PidGuard {
     path: PathBuf,
+    version_path: PathBuf,
 }
 
 impl PidGuard {
     fn new(path: &Path) -> std::io::Result<Self> {
         std::fs::create_dir_all(path.parent().unwrap_or(Path::new(".")))?;
-        std::fs::write(path, std::process::id().to_string())?;
-        Ok(PidGuard {
-            path: path.to_path_buf(),
-        })
+        const MAX_RETRIES: u32 = 3;
+        for _ in 0..MAX_RETRIES {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+            {
+                Ok(mut f) => {
+                    write!(f, "{}", std::process::id())?;
+                    let version_path = path.with_file_name("watch.version");
+                    std::fs::write(&version_path, env!("CARGO_PKG_VERSION")).ok();
+                    return Ok(PidGuard {
+                        path: path.to_path_buf(),
+                        version_path,
+                    });
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                    let raw = std::fs::read_to_string(path).unwrap_or_default();
+                    let trimmed = raw.trim();
+                    if trimmed.is_empty() {
+                        std::thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
+                    let existing: Option<u32> = trimmed.parse().ok();
+                    match existing {
+                        Some(pid) if pid != std::process::id() && is_process_running(pid) => {
+                            return Err(std::io::Error::new(
+                                ErrorKind::AlreadyExists,
+                                format!("daemon already running with pid {}", pid),
+                            ));
+                        }
+                        _ => {
+                            std::fs::remove_file(path).ok();
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(std::io::Error::new(
+            ErrorKind::Other,
+            "exceeded retry budget acquiring pid file",
+        ))
     }
 }
 
 impl Drop for PidGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(&self.version_path);
     }
 }
 
@@ -110,6 +154,9 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
     let mut pending_reindex = false;
     let mut last_change = Instant::now();
 
+    let mut last_resync = Instant::now();
+    const RESYNC_INTERVAL: Duration = Duration::from_secs(300);
+
     while !stopped.load(Ordering::Relaxed) {
         match fs_rx.recv_timeout(Duration::from_millis(500)) {
             Ok(()) => {
@@ -134,6 +181,11 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
                 &cfg.config_dir,
                 fed_config.as_ref().unwrap(),
             );
+        }
+
+        if last_resync.elapsed() >= RESYNC_INTERVAL {
+            last_resync = Instant::now();
+            do_reindex(&cfg.db_path, &cfg.vault_path);
         }
     }
 

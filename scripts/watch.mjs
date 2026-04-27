@@ -10,7 +10,7 @@
 
 import { spawn, spawnSync } from 'child_process';
 import { existsSync, readFileSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 
 const command = process.argv[2];
@@ -43,7 +43,7 @@ if (!existsSync(bin)) {
   process.exit(1);
 }
 
-const db = join(pluginData, 'retrieval', 'search.db');
+const db = join(vault, '.vault-search', 'vault-index.db');
 const pidFile = join(pluginData, 'watch.pid');
 const librarianScript = join(pluginRoot, 'scripts', 'librarian.mjs');
 
@@ -92,11 +92,13 @@ if (existsSync(librarianScript)) {
 
 const foreground = process.argv.includes('--foreground');
 
+const ortEnv = { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) };
+
 if (foreground) {
-  const child = spawn(bin, args, { stdio: 'inherit' });
+  const child = spawn(bin, args, { stdio: 'inherit', env: ortEnv });
   child.on('exit', (code) => process.exit(code ?? 1));
 } else {
-  const child = spawn(bin, args, { detached: true, stdio: 'ignore' });
+  const child = spawn(bin, args, { detached: true, stdio: 'ignore', env: ortEnv });
   child.unref();
   console.log(`ll-search watch started (pid ${child.pid})`);
   console.log(`  vault:  ${vault}`);

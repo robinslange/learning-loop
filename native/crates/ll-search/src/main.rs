@@ -91,6 +91,10 @@ enum Commands {
         #[arg(long, default_value_t = 3, help = "Minimum notes per tag")]
         min_count: usize,
     },
+    Intentions {
+        db_path: String,
+        context: Option<String>,
+    },
     Sessions {
         db_path: String,
         #[arg(long, default_value_t = 2, help = "Minimum notes per session")]
@@ -297,6 +301,48 @@ fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let tags = ll_search::db::list_tags(&conn, min_count);
             out(&tags);
+        }
+        Commands::Intentions { db_path, context } => {
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            match context {
+                Some(ctx) => {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT n.path, i.cue FROM intentions i \
+                             JOIN notes n ON i.note_id = n.id \
+                             WHERE i.context = ?1 ORDER BY n.path",
+                        )
+                        .expect("failed to prepare intentions detail query");
+                    let rows = stmt
+                        .query_map(rusqlite::params![ctx], |row| {
+                            Ok(serde_json::json!({
+                                "path": row.get::<_, String>(0)?,
+                                "cue": row.get::<_, Option<String>>(1)?,
+                            }))
+                        })
+                        .expect("failed to execute intentions detail query");
+                    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
+                    out(&items);
+                }
+                None => {
+                    let mut stmt = conn
+                        .prepare(
+                            "SELECT context, COUNT(*) AS count FROM intentions \
+                             GROUP BY context ORDER BY count DESC",
+                        )
+                        .expect("failed to prepare intentions summary query");
+                    let rows = stmt
+                        .query_map([], |row| {
+                            Ok(serde_json::json!({
+                                "context": row.get::<_, String>(0)?,
+                                "count": row.get::<_, i64>(1)?,
+                            }))
+                        })
+                        .expect("failed to execute intentions summary query");
+                    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
+                    out(&items);
+                }
+            }
         }
         Commands::Sessions { db_path, min_notes } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
