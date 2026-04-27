@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 
-import { readFileSync, readdirSync, existsSync, appendFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
-import { relativeToVault } from './lib/paths.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 
@@ -49,7 +48,7 @@ const USAGE = `Usage:
   vault-search.mjs status                                    Index health check
   vault-search.mjs list [--top N]                            List indexed notes (default: all)
   vault-search.mjs intentions                                List intention contexts with counts (summary)
-  vault-search.mjs intentions "<context>"                    Show notes + cues for matching context (detail)
+  vault-search.mjs intentions "<context>"                    Show notes + cues for exact context (detail)
   vault-search.mjs export-index                              Export federation index
   vault-search.mjs sync                                      Sync with federation hub`;
 
@@ -114,64 +113,15 @@ function logRetrieval(command, query, results) {
   } catch {}
 }
 
-function intentions(projectFilter) {
-  const results = new Map();
-
-  function walkDir(dir) {
-    let entries;
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
-      const full = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walkDir(full);
-      } else if (entry.name.endsWith('.md')) {
-        let content;
-        try {
-          content = readFileSync(full, 'utf-8');
-        } catch {
-          continue;
-        }
-        const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-        if (!fmMatch) continue;
-
-        const intentMatch = fmMatch[1].match(/intentions:\n((?:\s+-[\s\S]*?)(?=\n\w|\n---|$))/);
-        if (!intentMatch) continue;
-
-        const intentBlock = intentMatch[1];
-        const flatItems = [...intentBlock.matchAll(/- "([^"]+)"/g)];
-
-        for (const item of flatItems) {
-          const parts = item[1].split(' \u2014 ');
-          const ctx = parts[0].trim();
-          const cue = parts.length > 1 ? parts.slice(1).join(' \u2014 ').trim() : '';
-          if (!results.has(ctx)) results.set(ctx, []);
-          const relPath = relativeToVault(full, VAULT_PATH) || full;
-          results.get(ctx).push({ path: relPath, cue });
-        }
-      }
-    }
+function intentions(context) {
+  try {
+    ensureBinary();
+    const args = ['intentions', DB_PATH];
+    if (context) args.push(context);
+    return run(args);
+  } catch {
+    return [];
   }
-  walkDir(VAULT_PATH);
-
-  if (!projectFilter) {
-    const summary = [...results.entries()]
-      .map(([context, notes]) => ({ context, count: notes.length }))
-      .sort((a, b) => b.count - a.count);
-    return summary;
-  }
-
-  const filtered = new Map();
-  for (const [ctx, notes] of results) {
-    if (ctx.toLowerCase().includes(projectFilter.toLowerCase())) {
-      filtered.set(ctx, notes);
-    }
-  }
-  return Object.fromEntries(filtered);
 }
 
 try {
