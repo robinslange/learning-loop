@@ -196,6 +196,18 @@ This detects the platform and downloads the correct binary from GitHub releases.
 
 Confirm `PLUGIN/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored in `PLUGIN/vendor/` and require no npm install.
 
+### 3b.5: Clean up orphan search.db files
+
+Earlier plugin versions wrote the daemon index to `PLUGIN_DATA/retrieval/search.db`. The current daemon writes to `VAULT/.vault-search/vault-index.db`, so any old `search.db` files are dead weight and create three-way split-brain when a stray hook still reads them.
+
+Best-effort delete (ignore errors), each with its `-shm` and `-wal` siblings:
+
+- `PLUGIN_DATA/retrieval/search.db`
+- `PLUGIN_DATA/search.db`
+- `PLUGIN_DATA/db/search.db`
+
+Use Node `fs.rmSync(path, { force: true })`. Do not prompt — these files are unconditionally orphaned. If none exist this step is a no-op and silent.
+
 ### 3c: Initial Vault Index
 
 Run `ll-search index` to build the search index. Report progress.
