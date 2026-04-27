@@ -146,12 +146,8 @@ describe('voice-gate structured-output classification', () => {
   it('logs timeout and skips submission when fetch aborts', async () => {
     resetState();
 
-    globalThis.fetch = mock.fn(async (_url, init) => {
-      await new Promise((resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => {
-          reject(Object.assign(new Error('aborted'), { name: 'TimeoutError' }));
-        });
-      });
+    globalThis.fetch = mock.fn(async () => {
+      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
     });
 
     const mod = await import(

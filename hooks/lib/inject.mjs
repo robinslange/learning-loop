@@ -222,4 +222,3 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
       : { hits: [], error: 'episodic_unavailable' };
   return { vault, episodic };
 }
-

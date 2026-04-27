@@ -1382,8 +1382,7 @@ async function fetchPageText(url) {
       signal: AbortSignal.timeout(15000),
     });
   } catch (err) {
-    const kind =
-      err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
     warnOnce(
       `fetchPageText-${kind}`,
       `learning-loop: source-resolver page fetch ${kind} (e.g. ${url}); proceeding without page text. Further ${kind}s will be silent this session.\n`,
