@@ -556,6 +556,23 @@ async function main() {
 const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isDirectRun) {
+  const args = process.argv.slice(2);
+  if (args.includes('--help') || args.includes('-h')) {
+    console.log(`librarian.mjs
+
+Long-running vault librarian daemon. Investigates notes that need attention
+(low quality, missing tags, duplicates) using the local Ollama model.
+
+Configuration: config.json -> librarian section
+  enabled, model, pace_seconds, queue_cap, ...
+
+Logs:    PLUGIN_DATA/librarian/librarian.log
+State:   PLUGIN_DATA/librarian/state.json
+
+This script runs until interrupted. There are no positional arguments.
+`);
+    process.exit(0);
+  }
   main().catch((err) => {
     log(`Librarian fatal: ${err.message}\n`);
     process.exit(err.code === 'OLLAMA_UNREACHABLE' ? 2 : 1);
