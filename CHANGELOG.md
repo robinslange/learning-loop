@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Schema-v3-to-v4 intentions backfill was silently a no-op for unchanged notes.** The schema-upgrade trigger sets `notes.mtime = 0` to force the indexer to re-walk every file, but the reindex loop only writes intentions in the `to_embed` path. Notes whose content hash matches the existing row fall through to `to_update_mtime`, which only updated mtime — intentions were never written. So the entire intentions migration was empty for any v3 DB where most note bodies hadn't changed. Reindex now also writes intentions on the mtime-only path, reusing the already-computed `result.intentions` from preprocess. Verified by resetting all 4,129 mtimes on a real vault and re-running index: 1,269 intentions backfilled in 1.6 s, 0 re-embedded.
+
+## v1.16.10
+
+### Fixed
+
 - **Multi-session filesystem pile-ups under parallel Claude Code sessions.** Per-Write hot path opened a node process for each of three hooks (autolink, edge-infer, provenance), each walking the vault to build a basename→path index and stat'ing every `.md` file. With N sessions writing concurrently, file-descriptor and inode pressure climbed fast enough to trigger `EMFILE` ("too many open files") within seconds of starting `ll-watch`. The fix is daemon-centric: the Rust `ll-search watch` daemon owns vault indexing exclusively, JS hooks consult an on-disk vault-snapshot cache instead of walking, and the three Write/Edit hooks coalesce into one `post-tool.js` dispatcher.
 
 ### Changed

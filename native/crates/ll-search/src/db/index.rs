@@ -72,6 +72,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
 
     let mut to_embed: Vec<EmbedItem> = Vec::new();
     let mut to_update_mtime: Vec<(i64, f64)> = Vec::new();
+    let mut to_update_intentions: Vec<(i64, Vec<crate::preprocess::Intention>)> = Vec::new();
     let mut to_delete: Vec<i64> = Vec::new();
     let mut skipped: usize = 0;
 
@@ -111,6 +112,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         if let Some(&(id, ref ex_hash, _)) = ex {
             if *ex_hash == hash {
                 to_update_mtime.push((id, file.mtime));
+                to_update_intentions.push((id, result.intentions));
                 continue;
             }
             to_embed.push(EmbedItem {
@@ -239,6 +241,18 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
             params![mtime, id],
         )
         .unwrap();
+    }
+
+    for (id, intentions) in &to_update_intentions {
+        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])
+            .unwrap();
+        for intent in intentions {
+            conn.execute(
+                "INSERT OR REPLACE INTO intentions (note_id, context, cue) VALUES (?1, ?2, ?3)",
+                params![id, intent.context, intent.cue],
+            )
+            .unwrap();
+        }
     }
 
     for &id in &to_delete {
