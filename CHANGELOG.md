@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- **Auto-started watcher never spawned the librarian.** `hooks/session-start.js` spawns `ll-search watch` directly when no watcher is alive, but it was missing the `--librarian-script` flag that the manual `ll-watch` CLI passes. The Rust binary only forks the librarian Node child when that flag is set, so every session-auto-started daemon ran without librarian tasks (voice gates, tag suggestions, duplicate detection, link investigations) — gemma4:e2b sat idle except in sessions where the user manually ran `ll-watch`. Hook now mirrors the CLI: appends `--librarian-script <PLUGIN>/scripts/librarian.mjs` when the script exists. Librarian itself short-circuits cleanly if `librarian.enabled=false` in config, so the flag is safe to pass unconditionally.
+
+## v1.16.11
+
+### Fixed
+
 - **Schema-v3-to-v4 intentions backfill was silently a no-op for unchanged notes.** The schema-upgrade trigger sets `notes.mtime = 0` to force the indexer to re-walk every file, but the reindex loop only writes intentions in the `to_embed` path. Notes whose content hash matches the existing row fall through to `to_update_mtime`, which only updated mtime — intentions were never written. So the entire intentions migration was empty for any v3 DB where most note bodies hadn't changed. Reindex now also writes intentions on the mtime-only path, reusing the already-computed `result.intentions` from preprocess. Verified by resetting all 4,129 mtimes on a real vault and re-running index: 1,269 intentions backfilled in 1.6 s, 0 re-embedded.
 
 ## v1.16.10
@@ -495,6 +501,7 @@ Write-time source verification, POS-tagged citation extraction, and improved res
 ### Baseline
 
 50-note sample measured before deployment:
+
 - 32% of resolvable sources passed verification
 - 31% failed (wrong_author dominated)
 - 37% had no resolvable identifier (blog/GitHub/docs)

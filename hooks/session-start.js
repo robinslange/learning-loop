@@ -307,20 +307,29 @@ if (binary && existsSync(DB_PATH) && pluginData) {
 
     if (lockAcquired) {
       try {
-        const child = spawn(
-          binary.bin,
-          ['watch', vaultRoot, DB_PATH, '--config-dir', pluginData, '--pid-file', pidPath],
-          {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true,
-            env: {
-              ...process.env,
-              ORT_DYLIB_PATH: binary.binDir,
-              ORT_LIB_LOCATION: binary.binDir,
-            },
+        const watchArgs = [
+          'watch',
+          vaultRoot,
+          DB_PATH,
+          '--config-dir',
+          pluginData,
+          '--pid-file',
+          pidPath,
+        ];
+        const librarianScript = join(PLUGIN_DIR, 'scripts', 'librarian.mjs');
+        if (existsSync(librarianScript)) {
+          watchArgs.push('--librarian-script', librarianScript);
+        }
+        const child = spawn(binary.bin, watchArgs, {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+          env: {
+            ...process.env,
+            ORT_DYLIB_PATH: binary.binDir,
+            ORT_LIB_LOCATION: binary.binDir,
           },
-        );
+        });
         child.unref();
       } catch {}
       try {
