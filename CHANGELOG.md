@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.17.0
+
+This release ships a structural refactor pass driven by an internal plugin review. No breaking changes for end users; the install flow gains a separate `/learning-loop:federation` skill.
+
+### Added
+
+- **`/learning-loop:federation` skill.** The full federation flow (identity, token redeem, Tailscale, visibility rules, sync test) is now a standalone skill. `/init` Phase 4 is reduced to a single yes/no question that hands off. Most installs do not need federation on first run, so the previous Phase 4 fragility (single-use tokens, contact-Robin recovery) no longer pollutes init.
+- **Single-writer JSONL helper** at `scripts/lib/jsonl.mjs` (`appendJsonlLine`, `appendJsonlLineSafe`). Atomic up to PIPE_BUF on POSIX, fixes the Windows interleave that `fs.appendFileSync` silently allows when concurrent sessions write to the same file. Migrated callers: `hooks/lib/common.mjs` (provenance + retrieval), `hooks/post-tool.js` (hook errors), `hooks/session-start.js` (retrieval access log), `scripts/provenance.mjs`, `scripts/retraction-notify.mjs`, `scripts/vault-search.mjs`.
+- **Hook-error counter.** `hooks/post-tool.js` appends silent module failures to `<plugin-data>/hook-errors-YYYY-MM.jsonl` so degraded autolink / edge-infer / provenance modules become observable instead of failing invisibly.
+- **Windows .cmd shims.** `scripts/install-shims.mjs` now writes `ll-watch.cmd` and `ll-search.cmd` on `process.platform === 'win32'`. PowerShell's `[version]` sort handles semver ordering correctly. Mirrors the POSIX priority order (`%CLAUDE_PLUGIN_DATA%` → marker file → canonical default).
+- **`/learning-loop:init` orchestrator.** Init now reads phase files from `skills/init/phases/0X-*.md` rather than inlining 636 lines of prose. Easier to edit one phase without touching the rest.
+- **102 ll-search lib tests** (was 98) including 26 sync state-machine tests covering Ed25519 sign/verify roundtrip, envelope construction with sha256 binding, tampered-envelope rejection, all `SyncMessage` enum variants, hub message deserialisation, and `summarize`/frontmatter edge cases.
+- **213 JS tests** (was 154): `tests/jsonl.test.mjs` (concurrency), `tests/semver.test.mjs` (cache-prune flagging), `tests/sweep-hook-replay.test.mjs` (regression guard for legacy hook filenames), `tests/snapshot-race.test.mjs` (two-process splice persistence), `tests/install-shims.test.mjs` (macOS smoke + best-effort Windows content check), 53 tests under `tests/sources/` covering each adapter contract and the citation-index lock.
+
+### Changed
+
+- **`scripts/source-resolver.mjs` split from 1560 lines to 141.** Ten API clients (PubMed, arXiv, CrossRef, Semantic Scholar, Europe PMC, OpenAlex, bioRxiv, DBLP, Unpaywall, RFC, Open Library, ChEMBL, PMC) now live as adapters under `scripts/lib/sources/adapters/*.mjs` with a uniform `{matches, search, fetch, verify}` interface. The `verifyNote` driver moved to `scripts/verify/verify-note.mjs`. Public CLI surface (`resolve`, `verify-pmid`, `verify-doi`, etc.) and the `__test__` export are unchanged.
+- **`SearchContext` extracted** in `native/crates/ll-search/src/search/context.rs` (~300 lines). Owns embeddings + link graph + titles + mtimes + tags as a single struct. The four near-duplicate query pipelines in `query.rs` / `tune.rs` / `eval.rs` / `reflect.rs` now build the context once per pipeline (or once per query for the CLI). Multi-query callers (`tune_prf`, `eval_prf`, `reflect_scan`) reuse cached signal-loaders across the loop, materially cutting wall-clock per query.
+- **`ll-core` `EmbeddingStore::get_by_id` is now O(1).** New `id_index: HashMap<i64, usize>` built at construction.
+- **`scripts/release.sh` gates on `npm test` and `cargo test --workspace`** before tagging. `--skip-tests` escape hatch retained for emergency hotfixes.
+- **Marketplace metadata fleshed out** (`homepage`, `license`, `keywords`, `categories`, fuller description, owner/author URLs).
+- **CHANGELOG header** declares Keep-a-Changelog conformance.
+- **`hooks/session-start.js` `syncSleep`** replaced its busy-loop with `Atomics.wait` on a `SharedArrayBuffer` so the daemon-spawn probe stops melting a CPU core.
+- **`hooks/pre-write-check.js` no longer recurses the vault per Write.** Uses the existing snapshot cache instead of a fresh `readdirSync` of all six vault folders.
+- **Hardcoded `learning-loop-learning-loop-marketplace` literal removed** from 5 skill files. Replaced with `node $CLAUDE_PLUGIN_ROOT/scripts/resolve-paths.mjs PLUGIN_DATA` so a marketplace rename or republish doesn't break the plugin-data fallback.
+- **Em-dashes purged** from skills/ and agents/ markdown (vault rule applied to the plugin's own prompts).
+
+### Fixed
+
+- **Snapshot writes race across concurrent sessions.** `hooks/lib/snapshot.mjs` `maybeSplice` and `removeFromSnapshot` previously rewrote the on-disk snapshot without a lock, so two sessions splicing different notes would clobber each other (one splice lost until the next 30-second rebuild). Now wrapped in a PID-tracked file lock with stale-lock detection. New `tests/snapshot-race.test.mjs` forks two child processes and asserts both splices land.
+- **Citation-index unlocked write race.** `scripts/lib/sources/citation-index.mjs` (extracted from source-resolver) now uses the same file-lock pattern plus an in-process promise queue so concurrent `verifyNote` calls no longer corrupt the JSON. `verify-note.mjs` correctly awaits the queue before reading the index for cross-vault duplicate detection.
+- **24 `.unwrap()` calls inside the `db/index.rs` reindexing transaction** converted to `?` propagation. Reindex now returns `anyhow::Result<IndexResult>` instead of panicking on transient SQLite errors. Callers in `main.rs` and `sync/watch.rs` updated.
+- **Orphan-detection SQL incorrectly classified ~8% of vault notes as orphans.** Two distinct bugs in `db/query.rs:380-388` and `:413-422`: (a) the `REPLACE(REPLACE(... INSTR()))` chain only stripped the first folder, so `2-literature/sub/note.md` produced stem `sub/note` and never matched `target_path = "note"`; (b) `target_path` is stored lowercased but `n.path` is case-preserving, with no `LOWER()` in the SQL. Replaced with a Rust-side set-difference computation that handles both correctly. 6 new tests cover depth-1 through depth-3 paths plus case-mismatch.
+- **`hooks/post-tool.js` module errors** were swallowed silently unless `LL_HOOK_DEBUG=1` was set. Now appended to `hook-errors-YYYY-MM.jsonl` regardless, so `/health` can surface degraded modules.
+- **`scripts/sweep-hook-replay.mjs`** invokes `hooks/post-tool.js` (the v1.16.10 dispatcher) instead of the long-deleted per-hook files. Released in v1.16.13 but the regression test guarding against re-introducing the legacy filenames is in this release.
+- **Two `findBinary` implementations** consolidated. `hooks/lib/common.mjs::findBinary` now delegates to `scripts/lib/binary.mjs::binaryPath` while preserving the `{bin, binDir}` return shape needed by ORT env-var callers.
+
+### MIGRATION
+
+No user action required. Federation users who previously ran `/learning-loop:init` to rotate seeds should now use `/learning-loop:federation` (the redirect is documented in `guide/federation.md` and the seed-version notice in `hooks/session-start.js`).
+
 ## v1.16.13
 
 ### Fixed
