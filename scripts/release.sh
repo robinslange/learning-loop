@@ -61,8 +61,10 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
-# Test gate: run JS + Rust suites before tagging.
+# Test gate: run prettier + JS + Rust suites before tagging.
 if ! $SKIP_TESTS; then
+  echo "Running prettier check..."
+  npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
   echo "Running npm test..."
   npm test
   if [ -d native ]; then
