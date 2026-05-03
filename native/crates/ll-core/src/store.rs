@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub struct EmbeddingStore {
     data: Vec<(i64, String, Vec<f32>)>,
     path_index: HashMap<String, usize>,
+    id_index: HashMap<i64, usize>,
 }
 
 impl EmbeddingStore {
@@ -13,7 +14,12 @@ impl EmbeddingStore {
             .enumerate()
             .map(|(i, (_, path, _))| (path.clone(), i))
             .collect();
-        Arc::new(Self { data, path_index })
+        let id_index: HashMap<i64, usize> = data
+            .iter()
+            .enumerate()
+            .map(|(i, (id, _, _))| (*id, i))
+            .collect();
+        Arc::new(Self { data, path_index, id_index })
     }
 
     pub fn all(&self) -> &[(i64, String, Vec<f32>)] {
@@ -26,10 +32,8 @@ impl EmbeddingStore {
     }
 
     pub fn get_by_id(&self, id: i64) -> Option<Vec<f32>> {
-        self.data
-            .iter()
-            .find(|(eid, _, _)| *eid == id)
-            .map(|(_, _, emb)| emb.clone())
+        let &i = self.id_index.get(&id)?;
+        Some(self.data[i].2.clone())
     }
 
     pub fn len(&self) -> usize {

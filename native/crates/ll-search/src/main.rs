@@ -216,7 +216,7 @@ fn main() {
         Commands::Index { vault_path, db_path, force, sync, config_dir, .. } => {
             init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let result = ll_search::db::reindex(&conn, &vault_path, force);
+            let result = ll_search::db::reindex(&conn, &vault_path, force).expect("reindex failed");
             out(&result);
             if sync {
                 let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);

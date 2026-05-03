@@ -98,3 +98,131 @@ pub fn create_envelope(
         "graph": graph,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ed25519_dalek::{Verifier, VerifyingKey, Signature};
+
+    fn fixed_key() -> SigningKey {
+        SigningKey::from_bytes(&[1u8; 32])
+    }
+
+    #[test]
+    fn pubkey_b64_roundtrip() {
+        let key = fixed_key();
+        let encoded = pubkey_b64(&key);
+        let decoded = B64.decode(&encoded).expect("valid base64");
+        let bytes: [u8; 32] = decoded.try_into().expect("32 bytes");
+        let recovered = VerifyingKey::from_bytes(&bytes).expect("valid key");
+        assert_eq!(recovered.as_bytes(), key.verifying_key().as_bytes());
+    }
+
+    #[test]
+    fn sign_challenge_produces_valid_signature() {
+        let key = fixed_key();
+        let nonce_bytes = b"testnonce123";
+        let nonce_b64 = B64.encode(nonce_bytes);
+        let peer_id = "peer-abc";
+        let hub_pubkey = "hubkey-xyz";
+
+        let sig_b64 = sign_challenge(&key, &nonce_b64, peer_id, hub_pubkey)
+            .expect("sign_challenge succeeds");
+
+        let sig_bytes = B64.decode(&sig_b64).expect("valid base64");
+        let sig = Signature::try_from(sig_bytes.as_slice()).expect("valid signature bytes");
+
+        let mut message = Vec::new();
+        message.extend_from_slice(nonce_bytes);
+        message.extend_from_slice(peer_id.as_bytes());
+        message.extend_from_slice(hub_pubkey.as_bytes());
+
+        key.verifying_key().verify(&message, &sig).expect("signature verifies");
+    }
+
+    #[test]
+    fn sign_challenge_wrong_nonce_fails_verification() {
+        let key = fixed_key();
+        let nonce_b64 = B64.encode(b"originalnonce");
+        let sig_b64 = sign_challenge(&key, &nonce_b64, "peer", "hub")
+            .expect("sign_challenge succeeds");
+
+        let sig_bytes = B64.decode(&sig_b64).expect("valid base64");
+        let sig = Signature::try_from(sig_bytes.as_slice()).expect("valid signature bytes");
+
+        let mut tampered = Vec::new();
+        tampered.extend_from_slice(b"WRONGNONCE!!");
+        tampered.extend_from_slice(b"peer");
+        tampered.extend_from_slice(b"hub");
+
+        assert!(key.verifying_key().verify(&tampered, &sig).is_err());
+    }
+
+    #[test]
+    fn create_envelope_contains_required_fields() {
+        let key = fixed_key();
+        let data = b"index content";
+        let env = create_envelope(&key, data, "my-peer", false);
+
+        assert_eq!(env["peer_id"].as_str(), Some("my-peer"));
+        assert_eq!(env["graph"].as_bool(), Some(false));
+        assert!(env["sha256"].as_str().is_some());
+        assert!(env["signature"].as_str().is_some());
+        assert!(env["pub_key"].as_str().is_some());
+        assert!(env["signed_at"].as_str().is_some());
+    }
+
+    #[test]
+    fn create_envelope_sha256_matches_data() {
+        use sha2::{Sha256, Digest};
+        let key = fixed_key();
+        let data = b"known bytes";
+        let env = create_envelope(&key, data, "p", false);
+        let expected = hex::encode(Sha256::digest(data));
+        assert_eq!(env["sha256"].as_str(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn create_envelope_signature_verifies_against_hash() {
+        use sha2::{Sha256, Digest};
+        let key = fixed_key();
+        let data = b"payload data";
+        let env = create_envelope(&key, data, "p", false);
+
+        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
+
+        let hash = Sha256::digest(data);
+        key.verifying_key().verify(&hash, &sig).expect("envelope signature verifies");
+    }
+
+    #[test]
+    fn create_envelope_tampered_data_fails_verification() {
+        use sha2::{Sha256, Digest};
+        let key = fixed_key();
+        let data = b"original";
+        let env = create_envelope(&key, data, "p", false);
+
+        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
+
+        let tampered_hash = Sha256::digest(b"tampered");
+        assert!(key.verifying_key().verify(&tampered_hash, &sig).is_err());
+    }
+
+    #[test]
+    fn sign_download_is_base64_encoded_signature() {
+        let key = fixed_key();
+        let sig_b64 = sign_download(&key, "peer-1", 1000000);
+        let decoded = B64.decode(&sig_b64).expect("valid base64");
+        assert_eq!(decoded.len(), 64, "Ed25519 signature is 64 bytes");
+    }
+
+    #[test]
+    fn sign_download_different_timestamps_differ() {
+        let key = fixed_key();
+        let s1 = sign_download(&key, "peer-1", 1000);
+        let s2 = sign_download(&key, "peer-1", 1001);
+        assert_ne!(s1, s2, "different timestamps produce different signatures");
+    }
+}

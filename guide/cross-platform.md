@@ -8,7 +8,7 @@ learning-loop is built to run on macOS, Linux, and Windows. The core hook layer 
 |---|---|---|---|
 | macOS | arm64 (Apple Silicon) | `ll-search-darwin-arm64.tar.gz` | Primary development target. All features verified. |
 | Linux | x64 (glibc) | `ll-search-linux-x64.tar.gz` | CI-built. Hook layer verified. End-to-end tested by external users. |
-| Windows | x64 | `ll-search-windows-x64.zip` | CI-built. Hook layer designed cross-platform. End-to-end **not** verified by maintainers — please report issues. |
+| Windows | x64 | `ll-search-windows-x64.zip` | CI-built. Hook layer designed cross-platform. `.cmd` shims installed by `/init`. End-to-end **not** verified by maintainers — please report issues. |
 
 Intel Macs are not currently supported (no prebuilt artifact). Build from source via `cd native && cargo build --release`.
 
@@ -28,6 +28,7 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 
 ### Windows
 
+- **CLI shims are `.cmd` files.** `/init` writes `ll-watch.cmd` and `ll-search.cmd` to `%USERPROFILE%\.local\bin\`. cmd.exe does not add this directory to `PATH` automatically. After install, run once in cmd.exe: `setx PATH "%USERPROFILE%\.local\bin;%PATH%"` then restart your terminal. PowerShell `.ps1` shims are not currently generated — the `.cmd` files work in both cmd.exe and PowerShell.
 - **`appendFileSync` is not atomic.** POSIX provides kernel-level `O_APPEND` atomicity for writes under `PIPE_BUF` (4096 bytes); Windows does not. Concurrent hook processes appending to the same JSONL log can interleave records. In practice, the only hooks that append concurrently are the per-event provenance/retrieval logs, and turn-level concurrency is low. If you observe corrupted log records, it is likely this. The pre-existing `feedback_crossplatform_atomicity.md` memory tracks this.
 - **`process.kill(pid, 'SIGTERM')` is unconditional.** No graceful-shutdown semantics. The injection pipeline's race-cap abort already treats SIGTERM as "kill now," so this is not a behavioral change.
 - **`fs.rename()` can throw EXDEV** when temp and destination are on different volumes, or when a cloud sync filter (Dropbox, OneDrive) intercepts the rename. learning-loop does not use rename-after-write atomic patterns; this affects Claude Code itself more than this plugin (see anthropics/claude-code issues #25476, #42119).

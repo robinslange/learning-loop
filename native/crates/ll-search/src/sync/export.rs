@@ -237,3 +237,85 @@ fn summarize(text: &str, max_chars: usize) -> String {
     let last_space = truncated.rfind(' ').unwrap_or(byte_end);
     format!("{}...", &truncated[..last_space])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn summarize_short_text_unchanged() {
+        let text = "A short note.";
+        assert_eq!(summarize(text, 300), "A short note.");
+    }
+
+    #[test]
+    fn summarize_uses_first_paragraph_only() {
+        let text = "First paragraph content.\n\nSecond paragraph that should be excluded.";
+        let result = summarize(text, 300);
+        assert_eq!(result, "First paragraph content.");
+        assert!(!result.contains("Second"));
+    }
+
+    #[test]
+    fn summarize_truncates_at_word_boundary() {
+        let text = "word1 word2 word3 word4 word5 word6 word7 word8 word9 word10";
+        let result = summarize(text, 20);
+        assert!(result.ends_with("..."), "should end with ellipsis");
+        let without_ellipsis = result.trim_end_matches("...");
+        assert!(!without_ellipsis.ends_with(' '), "no trailing space before ellipsis");
+        assert!(without_ellipsis.len() < 20, "truncated portion fits within limit");
+    }
+
+    #[test]
+    fn summarize_exact_length_not_truncated() {
+        let text = "hello";
+        assert_eq!(summarize(text, 5), "hello");
+    }
+
+    #[test]
+    fn summarize_empty_string() {
+        assert_eq!(summarize("", 100), "");
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_returns_value() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "---\nvisibility: public\ntitle: Test\n---\n\nBody.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_missing_key_returns_none() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "---\ntitle: No visibility key\n---\n\nBody.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_no_frontmatter_returns_none() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "Just plain content without frontmatter.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_trims_whitespace() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "---\nvisibility:  listed  \n---\n\nBody.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result.as_deref(), Some("listed"));
+    }
+}

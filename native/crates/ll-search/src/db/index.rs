@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
+use anyhow::Result;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
@@ -27,7 +28,7 @@ pub struct IndexResult {
     pub total: usize,
 }
 
-pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult {
+pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<IndexResult> {
     if force {
         eprintln!("Force rebuild: dropping all tables...");
         drop_all(conn);
@@ -40,8 +41,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
     let mut existing: HashMap<String, (i64, String, f64)> = HashMap::new();
     {
         let mut stmt = conn
-            .prepare("SELECT id, path, content_hash, mtime FROM notes")
-            .unwrap();
+            .prepare("SELECT id, path, content_hash, mtime FROM notes")?;
         let rows = stmt
             .query_map([], |row| {
                 Ok((
@@ -50,10 +50,9 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
                     row.get::<_, String>(2)?,
                     row.get::<_, f64>(3)?,
                 ))
-            })
-            .unwrap();
+            })?;
         for row in rows {
-            let (id, path, hash, mtime) = row.unwrap();
+            let (id, path, hash, mtime) = row?;
             existing.insert(path, (id, hash, mtime));
         }
     }
@@ -174,7 +173,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         );
     }
 
-    conn.execute_batch("BEGIN TRANSACTION;").unwrap();
+    conn.execute_batch("BEGIN TRANSACTION;")?;
 
     for &(idx, ref vec) in &embedded_items {
         let item = &to_embed[idx];
@@ -184,54 +183,45 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
              ON CONFLICT(path) DO UPDATE SET
                content_hash = ?2, mtime = ?3, title = ?4, tags = ?5",
             params![item.path, item.hash, item.mtime, item.title, item.tags],
-        )
-        .unwrap();
+        )?;
 
         let note_id: i64 = conn
             .query_row(
                 "SELECT id FROM notes WHERE path = ?1",
                 params![item.path],
                 |row| row.get(0),
-            )
-            .unwrap();
+            )?;
 
         conn.execute(
             "INSERT OR REPLACE INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
             params![note_id, item.title, item.tags, item.body],
-        )
-        .unwrap();
+        )?;
 
-        conn.execute("DELETE FROM embeddings WHERE id = ?1", params![note_id])
-            .unwrap();
+        conn.execute("DELETE FROM embeddings WHERE id = ?1", params![note_id])?;
 
         let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
         conn.execute(
             "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
             params![note_id, blob],
-        )
-        .unwrap();
+        )?;
 
-        conn.execute("DELETE FROM links WHERE source_id = ?1", params![note_id])
-            .unwrap();
+        conn.execute("DELETE FROM links WHERE source_id = ?1", params![note_id])?;
         for target in &item.links {
             conn.execute(
                 "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
                 params![note_id, target],
-            )
-            .unwrap();
+            )?;
         }
 
         conn.execute(
             "DELETE FROM intentions WHERE note_id = ?1",
             params![note_id],
-        )
-        .unwrap();
+        )?;
         for intent in &item.intentions {
             conn.execute(
                 "INSERT OR REPLACE INTO intentions (note_id, context, cue) VALUES (?1, ?2, ?3)",
                 params![note_id, intent.context, intent.cue],
-            )
-            .unwrap();
+            )?;
         }
     }
 
@@ -239,33 +229,25 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
         conn.execute(
             "UPDATE notes SET mtime = ?1 WHERE id = ?2",
             params![mtime, id],
-        )
-        .unwrap();
+        )?;
     }
 
     for (id, intentions) in &to_update_intentions {
-        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])
-            .unwrap();
+        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])?;
         for intent in intentions {
             conn.execute(
                 "INSERT OR REPLACE INTO intentions (note_id, context, cue) VALUES (?1, ?2, ?3)",
                 params![id, intent.context, intent.cue],
-            )
-            .unwrap();
+            )?;
         }
     }
 
     for &id in &to_delete {
-        conn.execute("DELETE FROM embeddings WHERE id = ?1", params![id])
-            .unwrap();
-        conn.execute("DELETE FROM links WHERE source_id = ?1", params![id])
-            .unwrap();
-        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])
-            .unwrap();
-        conn.execute("DELETE FROM notes_content WHERE id = ?1", params![id])
-            .unwrap();
-        conn.execute("DELETE FROM notes WHERE id = ?1", params![id])
-            .unwrap();
+        conn.execute("DELETE FROM embeddings WHERE id = ?1", params![id])?;
+        conn.execute("DELETE FROM links WHERE source_id = ?1", params![id])?;
+        conn.execute("DELETE FROM intentions WHERE note_id = ?1", params![id])?;
+        conn.execute("DELETE FROM notes_content WHERE id = ?1", params![id])?;
+        conn.execute("DELETE FROM notes WHERE id = ?1", params![id])?;
     }
 
     let total: i64 = conn
@@ -276,15 +258,13 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         params!["indexed_at", now],
-    )
-    .unwrap();
+    )?;
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
         params!["note_count", total.to_string()],
-    )
-    .unwrap();
+    )?;
 
-    conn.execute_batch("COMMIT;").unwrap();
+    conn.execute_batch("COMMIT;")?;
 
     let total = total as usize;
     eprintln!("Index complete: {} notes indexed", total);
@@ -298,11 +278,11 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> IndexResult 
     )
     .ok();
 
-    IndexResult {
+    Ok(IndexResult {
         embedded: embedded_items.len(),
         deleted: to_delete.len(),
         total,
-    }
+    })
 }
 
 pub fn walk_vault(vault_path: &str) -> Vec<WalkEntry> {

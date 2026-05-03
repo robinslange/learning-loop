@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -362,41 +362,44 @@ pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphan
         )
         .unwrap_or(0);
 
-    let mut folder_counts: HashMap<String, (i64, i64)> = HashMap::new();
-    {
+    // Fetch all note paths once.
+    let all_paths: Vec<String> = {
         let mut stmt = conn.prepare("SELECT path FROM notes").unwrap();
-        let paths: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(0))
+        stmt.query_map([], |r| r.get::<_, String>(0))
             .unwrap()
             .filter_map(|r| r.ok())
-            .collect();
-        for path in &paths {
-            let folder = path.split('/').next().unwrap_or("").to_string();
-            folder_counts.entry(folder).or_insert((0, 0)).0 += 1;
-        }
-    }
+            .collect()
+    };
 
-    {
-        let mut stmt = conn.prepare(
-            "SELECT n.path FROM notes n \
-             WHERE NOT EXISTS ( \
-               SELECT 1 FROM links l \
-               WHERE l.target_path = REPLACE( \
-                 REPLACE(n.path, '.md', ''), \
-                 SUBSTR(n.path, 1, INSTR(n.path, '/')), '') \
-               AND l.target_path NOT LIKE '%[%' \
-             )"
-        ).unwrap();
-        let orphan_paths: Vec<String> = stmt
-            .query_map([], |r| r.get::<_, String>(0))
+    // Fetch all linked target_path values (bare lowercase basenames) into a set.
+    // Exclude spurious entries that contain '[' (embedded wikilink fragments).
+    let linked: HashSet<String> = {
+        let mut stmt = conn
+            .prepare("SELECT target_path FROM links WHERE target_path NOT LIKE '%[%'")
+            .unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
             .unwrap()
             .filter_map(|r| r.ok())
-            .collect();
-        for path in &orphan_paths {
-            let folder = path.split('/').next().unwrap_or("").to_string();
-            if let Some(entry) = folder_counts.get_mut(&folder) {
-                entry.1 += 1;
-            }
+            .collect()
+    };
+
+    // Derive the stem for a note path: bare basename, .md stripped, lowercased.
+    // This matches how extract_wikilinks stores target_path (see preprocess.rs).
+    let stem = |path: &str| -> String {
+        let basename = path.rsplit('/').next().unwrap_or(path);
+        let without_ext = basename.strip_suffix(".md").unwrap_or(basename);
+        without_ext.to_lowercase()
+    };
+
+    let is_orphan = |path: &str| -> bool { !linked.contains(&stem(path)) };
+
+    let mut folder_counts: HashMap<String, (i64, i64)> = HashMap::new();
+    for path in &all_paths {
+        let folder = path.split('/').next().unwrap_or("").to_string();
+        let entry = folder_counts.entry(folder).or_insert((0, 0));
+        entry.0 += 1;
+        if is_orphan(path) {
+            entry.1 += 1;
         }
     }
 
@@ -410,22 +413,12 @@ pub fn link_stats(conn: &Connection, folder_filter: Option<&str>, include_orphan
 
     let orphans = if include_orphans {
         let filter = folder_filter.unwrap_or("3-permanent/");
-        let mut stmt = conn.prepare(
-            "SELECT n.path FROM notes n \
-             WHERE n.path LIKE ?1 \
-             AND NOT EXISTS ( \
-               SELECT 1 FROM links l \
-               WHERE l.target_path = REPLACE( \
-                 REPLACE(n.path, '.md', ''), \
-                 SUBSTR(n.path, 1, INSTR(n.path, '/')), '') \
-               AND l.target_path NOT LIKE '%[%' \
-             ) ORDER BY n.path"
-        ).unwrap();
-        Some(stmt
-            .query_map(params![format!("{}%", filter)], |r| r.get::<_, String>(0))
-            .unwrap()
-            .filter_map(|r| r.ok())
-            .collect())
+        let mut filtered: Vec<String> = all_paths
+            .into_iter()
+            .filter(|p| p.starts_with(filter) && is_orphan(p))
+            .collect();
+        filtered.sort();
+        Some(filtered)
     } else {
         None
     };
@@ -470,4 +463,76 @@ pub fn days_to_ymd(days_since_epoch: u64) -> (u64, u64, u64) {
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
     (y, m, d)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn setup_db(notes: &[&str], links: &[&str]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT NOT NULL);
+             CREATE TABLE links (id INTEGER PRIMARY KEY, target_path TEXT NOT NULL);",
+        )
+        .unwrap();
+        for path in notes {
+            conn.execute("INSERT INTO notes (path) VALUES (?1)", [path]).unwrap();
+        }
+        for target in links {
+            conn.execute("INSERT INTO links (target_path) VALUES (?1)", [target]).unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn depth1_linked_note_is_not_orphan() {
+        // 0-inbox/foo.md is linked via [[foo]]
+        let conn = setup_db(&["0-inbox/foo.md"], &["foo"]);
+        let stats = link_stats(&conn, None, true);
+        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-1 linked note wrongly flagged");
+    }
+
+    #[test]
+    fn depth2_linked_note_is_not_orphan() {
+        // 2-literature/sub/note.md — old SQL produced stem "sub/note", never matched
+        let conn = setup_db(&["2-literature/sub/note.md"], &["note"]);
+        let stats = link_stats(&conn, Some("2-literature/"), true);
+        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-2 note wrongly flagged as orphan");
+    }
+
+    #[test]
+    fn depth3_linked_note_is_not_orphan() {
+        // 4-projects/deep/nested/path/x.md — old SQL produced "deep/nested/path/x"
+        let conn = setup_db(&["4-projects/deep/nested/path/x.md"], &["x"]);
+        let stats = link_stats(&conn, Some("4-projects/"), true);
+        assert!(stats.orphans.as_ref().unwrap().is_empty(), "depth-3 note wrongly flagged as orphan");
+    }
+
+    #[test]
+    fn case_mismatch_linked_note_is_not_orphan() {
+        // 0-inbox/Foo-Bar.md linked via [[foo-bar]] (target_path is lowercase)
+        let conn = setup_db(&["0-inbox/Foo-Bar.md"], &["foo-bar"]);
+        let stats = link_stats(&conn, Some("0-inbox/"), true);
+        assert!(stats.orphans.as_ref().unwrap().is_empty(), "case-mixed note wrongly flagged as orphan");
+    }
+
+    #[test]
+    fn unlinked_note_is_orphan() {
+        let conn = setup_db(&["3-permanent/lonely.md"], &[]);
+        let stats = link_stats(&conn, None, true);
+        assert_eq!(stats.orphans.as_ref().unwrap(), &["3-permanent/lonely.md"]);
+    }
+
+    #[test]
+    fn mixed_linked_and_unlinked() {
+        let conn = setup_db(
+            &["3-permanent/a.md", "3-permanent/sub/b.md", "3-permanent/c.md"],
+            &["a", "b"],
+        );
+        let stats = link_stats(&conn, None, true);
+        let orphans = stats.orphans.as_ref().unwrap();
+        assert_eq!(orphans, &["3-permanent/c.md"], "only unlinked note should be orphan");
+    }
 }

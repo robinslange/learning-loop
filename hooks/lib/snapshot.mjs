@@ -5,7 +5,16 @@
 // hooks load in microseconds. Daemon-side rebuilds are bounded by a 30s TTL;
 // hook-side splice/remove keeps the cache fresh between rebuilds.
 
-import { readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  readdirSync,
+  openSync,
+  closeSync,
+  unlinkSync,
+  constants as fsConstants,
+} from 'node:fs';
 import { join, basename, sep } from 'node:path';
 import { resolvePluginData } from './common.mjs';
 
@@ -40,6 +49,46 @@ function snapshotPath() {
   return join(pd, 'vault-snapshot.json');
 }
 
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const lockSleepBuf = new Int32Array(new SharedArrayBuffer(4));
+function acquireSnapshotLock(lockPath, retries = 5, delayMs = 20) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const fd = openSync(
+        lockPath,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
+      );
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      return true;
+    } catch {
+      try {
+        const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
+        if (pid && !isProcessAlive(pid)) {
+          unlinkSync(lockPath);
+          continue;
+        }
+      } catch {}
+      if (i < retries - 1) Atomics.wait(lockSleepBuf, 0, 0, delayMs);
+    }
+  }
+  return false;
+}
+
+function releaseSnapshotLock(lockPath) {
+  try {
+    unlinkSync(lockPath);
+  } catch {}
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -60,6 +109,42 @@ function writeSnapshot(snap) {
   const tmp = path + '.' + process.pid + '.tmp';
   writeFileSync(tmp, JSON.stringify(serialisable));
   renameSync(tmp, path);
+}
+
+function writeSnapshotLocked(snap) {
+  const path = snapshotPath();
+  if (!path) return;
+  const lockPath = path + '.lock';
+  const held = acquireSnapshotLock(lockPath);
+  try {
+    writeSnapshot(snap);
+  } finally {
+    if (held) releaseSnapshotLock(lockPath);
+  }
+}
+
+// Re-reads the on-disk snapshot under lock, applies mutate(snap) → boolean,
+// writes if mutate returned true, then releases the lock.
+// Returns false if the lock could not be acquired or the path is unavailable.
+function lockedMutate(mutate) {
+  const path = snapshotPath();
+  if (!path) return false;
+  const lockPath = path + '.lock';
+  const held = acquireSnapshotLock(lockPath);
+  if (!held) return false;
+  try {
+    let snap;
+    try {
+      snap = attachRuntime(JSON.parse(readFileSync(path, 'utf-8')));
+    } catch {
+      return false;
+    }
+    const changed = mutate(snap);
+    if (changed) writeSnapshot(snap);
+    return changed;
+  } finally {
+    releaseSnapshotLock(lockPath);
+  }
 }
 
 export function rebuildVaultSnapshot(vaultRoot) {
@@ -93,7 +178,7 @@ export function rebuildVaultSnapshot(vaultRoot) {
     notes,
   };
   attachRuntime(snap);
-  writeSnapshot(snap);
+  writeSnapshotLocked(snap);
   return snap;
 }
 
@@ -117,7 +202,13 @@ export function maybeSplice(snap, newEntry) {
   snap.notes.push(newEntry);
   snap.relPathSet.add(newEntry.rel_path);
   snap.expires_at = expiresIso();
-  writeSnapshot(snap);
+  lockedMutate((fresh) => {
+    if (fresh.relPathSet.has(newEntry.rel_path)) return false;
+    fresh.notes.push(newEntry);
+    fresh.relPathSet.add(newEntry.rel_path);
+    fresh.expires_at = snap.expires_at;
+    return true;
+  });
   return true;
 }
 
@@ -126,7 +217,12 @@ export function removeFromSnapshot(snap, relPath) {
   if (!snap.relPathSet.has(relPath)) return false;
   snap.notes = snap.notes.filter((n) => n.rel_path !== relPath);
   snap.relPathSet.delete(relPath);
-  writeSnapshot(snap);
+  lockedMutate((fresh) => {
+    if (!fresh.relPathSet.has(relPath)) return false;
+    fresh.notes = fresh.notes.filter((n) => n.rel_path !== relPath);
+    fresh.relPathSet.delete(relPath);
+    return true;
+  });
   return true;
 }
 

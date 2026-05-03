@@ -209,11 +209,13 @@ fn do_reindex(db_path: &Path, vault_path: &Path) {
             return;
         }
     };
-    let result = crate::db::reindex(&conn, &vault_str, false);
-    eprintln!(
-        "Reindex: {} embedded, {} deleted, {} total",
-        result.embedded, result.deleted, result.total
-    );
+    match crate::db::reindex(&conn, &vault_str, false) {
+        Ok(result) => eprintln!(
+            "Reindex: {} embedded, {} deleted, {} total",
+            result.embedded, result.deleted, result.total
+        ),
+        Err(e) => eprintln!("Reindex failed: {e}"),
+    }
     conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
 }
 
