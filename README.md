@@ -59,7 +59,8 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | `/health --librarian` | Review librarian observations |
 | `/ingest` | Pull from Linear, repos, or any content Claude can read |
 | `/diagram "concept"` | Generate Excalidraw diagram |
-| `/init` | First-time setup: vault path, persona, binary, federation |
+| `/init` | First-time setup: vault path, persona, binary, optional integrations |
+| `/federation` | Set up federation: identity, token redeem, peers, visibility, sync |
 | `/help` | Show all commands with usage details |
 
 All commands are prefixed with `/learning-loop:` (e.g., `/learning-loop:discovery "caffeine"`).

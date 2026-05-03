@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { readFileSync, existsSync, appendFileSync, mkdirSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
@@ -109,7 +110,7 @@ function logRetrieval(command, query, results) {
       peer_results: peerCount,
       top_paths: topPaths,
     };
-    appendFileSync(file, JSON.stringify(entry) + '\n');
+    appendJsonlLine(file, entry);
   } catch {}
 }
 

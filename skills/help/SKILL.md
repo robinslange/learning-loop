@@ -146,6 +146,7 @@ It fetches the data, extracts atomic insights, previews them for your confirmati
 
 ```
 first time → /learning-loop:init       → vault path, persona, folder structure
+federation → /learning-loop:federation  → identity, token redeem, visibility, sync test
 external   → /learning-loop:ingest     → auto-memory + inbox notes
 curiosity  → /learning-loop:discovery   → inbox notes  → /learning-loop:deepen  → permanent notes
 question   → /learning-loop:quick      → answer + auto-capture if novel
@@ -162,7 +163,7 @@ librarian  → /learning-loop:health --librarian → approve links + tags, revie
 
 ### Federation
 
-If you've configured federation via `/learning-loop:init`, search results automatically include notes from connected peers. Peer results appear with a `peer:<name>/` prefix in their path.
+If you've configured federation via `/learning-loop:federation` (also reachable from `/learning-loop:init`), search results automatically include notes from connected peers. Peer results appear with a `peer:<name>/` prefix in their path.
 
 - **Manual sync:** `node vault-search.mjs sync` refreshes peer indexes from the hub
 - **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
@@ -174,7 +175,7 @@ If you've configured federation via `/learning-loop:init`, search results automa
 | Command | What it does |
 |---------|-------------|
 | `/learning-loop:init` | First-time setup: vault path, persona, folder structure |
-| `/learning-loop:init` (Phase 4) | Configure federation: identity, peers, visibility |
+| `/learning-loop:federation` | Configure federation: identity, token redeem, peers, visibility, sync |
 | `/learning-loop:discovery "topic"` | Interactive research journey: explore something new or go deeper |
 | `/learning-loop:quick "question"` | Fast verified answer: vault + web, auto-captures if novel |
 | `/learning-loop:literature <URL>` | Capture an external source as a literature note |

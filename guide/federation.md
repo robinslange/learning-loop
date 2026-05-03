@@ -8,7 +8,7 @@ A curated knowledge network for sharing verified insights across vaults. Federat
 
 Three responsibilities:
 
-1. **Invitation issuance.** An existing peer (or the admin) generates a redeem token bound to a display name and an expiry. You paste the token into `/learning-loop:init` Phase 4. Tokens are one-shot -- once redeemed, they're burned.
+1. **Invitation issuance.** An existing peer (or the admin) generates a redeem token bound to a display name and an expiry. You paste the token into `/learning-loop:federation`. Tokens are one-shot -- once redeemed, they're burned.
 2. **Pubkey registration and network provisioning.** The redeem endpoint (`interchange.live/api/redeem`) accepts your raw Ed25519 public key (extracted locally via `ll-search identity`) and returns a [headscale](https://headscale.net) pre-auth key. Headscale is a self-hosted coordination server for [tailscale](https://tailscale.com) -- your peer connects over a WireGuard mesh, not over the public internet. Each peer's identity is cryptographic, not credential-based.
 3. **Index exchange rendezvous.** Peers sync their filtered index databases (titles, embeddings, tags, graph edges -- never body text unless a note is `public`) over the tailnet. The interchange service only facilitates the handshake; the actual index transfer is peer-to-peer.
 
@@ -18,7 +18,7 @@ What the interchange service deliberately does *not* do:
 
 - Store your vault content. Public-tier notes live in your own index DB; peers pull them on demand.
 - Decrypt anything. WireGuard terminates on the peers, not on the coordinator.
-- Operate without your key. You can revoke participation by rotating the seed at `PLUGIN_DATA/federation/.seed` and re-running `/learning-loop:init`.
+- Operate without your key. You can revoke participation by rotating the seed at `PLUGIN_DATA/federation/.seed` and re-running `/learning-loop:federation`.
 
 The architecture mirrors Signal's sealed-sender or Matrix's federated-room model: a neutral rendezvous, not a content host. The trust boundary is the tailnet; the content boundary is your disk.
 
@@ -35,7 +35,7 @@ Each peer exports a filtered index of their vault (respecting visibility rules) 
 
 ## Setup
 
-Federation is configured during `/learning-loop:init` (Phase 4). Onboarding is self-service via `interchange.live` invitation tokens:
+Federation is configured during `/learning-loop:federation`. Onboarding is self-service via `interchange.live` invitation tokens:
 
 1. Paste an invitation redeem token from `interchange.live`
 2. Init extracts your Ed25519 pubkey via `ll-search identity` (creating the seed on first run) and posts it to `interchange.live/api/redeem`, which returns a headscale pre-auth key
@@ -43,11 +43,11 @@ Federation is configured during `/learning-loop:init` (Phase 4). Onboarding is s
 4. Init configures default visibility rules
 5. Sync test confirms peer reachability
 
-Re-running `/learning-loop:init` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
+Re-running `/learning-loop:federation` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
 
 ## Seed version notice
 
-When `/learning-loop:init` Phase 4 succeeds, init writes `PLUGIN_DATA/federation/.seed-meta.json` alongside the seed. The file records the plugin version and major number at federation creation time:
+When `/learning-loop:federation` succeeds, init writes `PLUGIN_DATA/federation/.seed-meta.json` alongside the seed. The file records the plugin version and major number at federation creation time:
 
 ```json
 {
@@ -60,14 +60,14 @@ When `/learning-loop:init` Phase 4 succeeds, init writes `PLUGIN_DATA/federation
 On every session start, `hooks/session-start.js` compares the recorded `plugin_major` against the current plugin version. If they differ, it prints a one-line notice to stderr:
 
 ```
-learning-loop federation: seed created on plugin v1.16.9 (current: v2.0.0). Run /learning-loop:init to rotate.
+learning-loop federation: seed created on plugin v1.16.9 (current: v2.0.0). Run /learning-loop:federation to rotate.
 ```
 
-The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same major mismatch does not nag on every session. Rotating via `/learning-loop:init` removes the marker, so the next major bump fires a fresh notice.
+The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same major mismatch does not nag on every session. Rotating via `/learning-loop:federation` removes the marker, so the next major bump fires a fresh notice.
 
 Federations created before this marker existed get a backfill: the hook stamps `.seed-meta.json` with the current version on first run after upgrade, so the notice stays silent until the next major bump.
 
-To rotate manually, re-run `/learning-loop:init`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version.
+To rotate manually, re-run `/learning-loop:federation`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version.
 
 ## Visibility rules
 

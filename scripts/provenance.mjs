@@ -3,7 +3,8 @@
 // Usage as module: import { emitProvenance } from './provenance.mjs'
 // Usage as CLI:    node provenance.mjs '{"agent":"x","action":"create","target":"y.md"}'
 
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getPluginData } from './lib/config.mjs';
@@ -51,7 +52,7 @@ export function emitProvenance(event) {
     source: 'skill',
     ...event,
   };
-  appendFileSync(getCurrentMonthFile(), JSON.stringify(record) + '\n');
+  appendJsonlLine(getCurrentMonthFile(), record);
 }
 
 if (process.argv[2]) {

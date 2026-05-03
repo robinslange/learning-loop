@@ -11,11 +11,11 @@
 import {
   readFileSync,
   writeFileSync,
-  appendFileSync,
   mkdirSync,
   existsSync,
   readdirSync,
 } from 'fs';
+import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join, dirname } from 'path';
 import { initSQL } from './lib/sqljs.mjs';
 import { PLUGIN_DATA } from './lib/constants.mjs';
@@ -123,7 +123,7 @@ async function main() {
   mkdirSync(OUTBOX_DIR, { recursive: true });
   const month = new Date().toISOString().slice(0, 7);
   const outboxFile = join(OUTBOX_DIR, `retractions-${month}.jsonl`);
-  appendFileSync(outboxFile, JSON.stringify(event) + '\n');
+  appendJsonlLine(outboxFile, event);
 
   out({
     ok: true,

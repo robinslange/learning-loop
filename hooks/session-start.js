@@ -5,7 +5,6 @@
 import {
   readFileSync,
   writeFileSync,
-  appendFileSync,
   mkdirSync,
   existsSync,
   readdirSync,
@@ -24,6 +23,8 @@ import {
   findEpisodicBinary,
 } from './lib/common.mjs';
 import { warnOnce } from '../scripts/lib/warn-once.mjs';
+import { appendJsonlLine } from '../scripts/lib/jsonl.mjs';
+import { semverCmp, isPlainSemver } from '../scripts/lib/semver.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
@@ -36,13 +37,8 @@ try {
   const currentVersion = JSON.parse(
     readFileSync(join(PLUGIN_DIR, 'package.json'), 'utf-8'),
   ).version;
-  const semverCmp = (a, b) => {
-    const pa = a.split('.').map(Number);
-    const pb = b.split('.').map(Number);
-    return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
-  };
   for (const entry of readdirSync(cacheParent)) {
-    if (!/^\d+\.\d+\.\d+$/.test(entry)) continue;
+    if (!isPlainSemver(entry)) continue;
     if (semverCmp(entry, currentVersion) < 0) {
       rmSync(join(cacheParent, entry), { recursive: true, force: true });
     }
@@ -226,7 +222,7 @@ if (pluginData) {
       const currentMajor = parseInt(pluginVersion.split('.')[0], 10);
       if (meta.plugin_major !== currentMajor) {
         process.stderr.write(
-          `learning-loop federation: seed created on plugin v${meta.plugin_version} (current: v${pluginVersion}). Run /learning-loop:init to rotate.\n`,
+          `learning-loop federation: seed created on plugin v${meta.plugin_version} (current: v${pluginVersion}). Run /learning-loop:federation to rotate.\n`,
         );
         writeFileSync(noticePath, new Date().toISOString());
       }
@@ -500,14 +496,14 @@ if (projectDir) {
     try {
       const retrievalDir = join(pluginData, 'retrieval');
       mkdirSync(retrievalDir, { recursive: true });
-      const entry = JSON.stringify({
+      const entry = {
         ts: new Date().toISOString(),
         session_id: sessionId,
         memories: files,
-      });
-      appendFileSync(
+      };
+      appendJsonlLine(
         join(retrievalDir, `access-${new Date().toISOString().slice(0, 7)}.jsonl`),
-        entry + '\n',
+        entry,
       );
     } catch {}
   } catch {}

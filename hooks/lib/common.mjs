@@ -3,11 +3,12 @@
 // scripts/lib/config.mjs as the single source of truth; this module re-exports
 // `resolvePluginData` for backward compatibility with hook callers.
 
-import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
+import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve, sep, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
+import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 
 export { resolvePluginData };
 
@@ -160,7 +161,7 @@ export function emitProvenance(event) {
     source: 'hook',
     ...event,
   };
-  appendFileSync(join(dir, `events-${monthStr()}.jsonl`), JSON.stringify(record) + '\n');
+  appendJsonlLine(join(dir, `events-${monthStr()}.jsonl`), record);
 }
 
 export function emitRetrieval(prefix, event) {
@@ -173,5 +174,5 @@ export function emitRetrieval(prefix, event) {
     session_id: getSessionId(),
     ...event,
   };
-  appendFileSync(join(dir, `${prefix}-${monthStr()}.jsonl`), JSON.stringify(record) + '\n');
+  appendJsonlLine(join(dir, `${prefix}-${monthStr()}.jsonl`), record);
 }
