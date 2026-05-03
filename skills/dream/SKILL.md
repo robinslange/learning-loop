@@ -3,7 +3,7 @@ name: dream
 description: 'Consolidate auto-memory between sessions. Usage: /learning-loop:dream (no args). Four-phase cycle: Orient, Gather Signal, Consolidate, Prune Index. Seven operators: MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK, DATE NORMALIZE. Rebuilds MEMORY.md.'
 ---
 
-# Dream — Auto-Memory Consolidation
+# Dream: Auto-Memory Consolidation
 
 Seven operators, each defined in `operators/`. This file orchestrates the four-phase cycle. Read operator files only when executing Phase 3.
 
@@ -113,7 +113,7 @@ Remove lock file when done using Bash: `node -e "try { require('fs').unlinkSync(
 
 ## Phase 4: Rebuild Index and Report
 
-1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md) — description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
+1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md): description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
 
 2. Write MEMORY.md (full overwrite). Write timestamp using Bash: `node -e "require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'learning-loop-last-dream'), Math.floor(Date.now()/1000).toString())"`.
 

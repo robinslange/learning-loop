@@ -4,9 +4,10 @@
 // `resolvePluginData` for backward compatibility with hook callers.
 
 import { appendFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve, sep, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
+import { binaryPath } from '../../scripts/lib/binary.mjs';
 
 export { resolvePluginData };
 
@@ -45,21 +46,9 @@ export function binaryName() {
 }
 
 export function findBinary() {
-  const name = binaryName();
-  const pluginData = resolvePluginData();
-  if (pluginData) {
-    const installed = join(pluginData, 'bin', name);
-    if (existsSync(installed)) return { bin: installed, binDir: join(pluginData, 'bin') };
-  }
-  const devBuild = resolve(
-    join(import.meta.dirname, '..', '..', 'native', 'target', 'release', name),
-  );
-  if (existsSync(devBuild))
-    return {
-      bin: devBuild,
-      binDir: resolve(join(import.meta.dirname, '..', '..', 'native', 'target', 'release')),
-    };
-  return null;
+  const bin = binaryPath();
+  if (!bin) return null;
+  return { bin, binDir: dirname(bin) };
 }
 
 export function findEpisodicBinary() {

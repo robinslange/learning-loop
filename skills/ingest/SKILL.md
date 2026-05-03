@@ -3,7 +3,7 @@ name: ingest
 description: 'Pull external context into the second brain. Handles any format Claude can read: PDFs, images, code, conversations, docs, or raw text. Usage: /learning-loop:ingest linear ["project"], /learning-loop:ingest repo [path], /learning-loop:ingest context, /learning-loop:ingest (prompts for source).'
 ---
 
-# Ingest — External Context Import
+# Ingest: External Context Import
 
 ## Overview
 
@@ -11,14 +11,14 @@ Pulls data from external sources (Linear, repositories, or any content Claude ca
 
 ## When to Use
 
-- `/ingest linear` — pull my assigned Linear tickets
-- `/ingest linear "Project Name"` — pull tickets from a specific project
-- `/ingest linear --state "In Progress"` — filter by ticket state
-- `/ingest repo ~/path/to/repo` — scan a repository
-- `/ingest repo` — prompt for repo path
-- `/ingest context` — provide any content (paste text, give a file path, drop an image)
-- `/ingest` — ask which source type
-- `--refine` — append to any source mode (e.g., `/ingest context --refine`) to enable Step 5.6 upstream refinement after ingest. Off by default; will move to default-on after a few validation runs.
+- `/ingest linear`: pull my assigned Linear tickets
+- `/ingest linear "Project Name"`: pull tickets from a specific project
+- `/ingest linear --state "In Progress"`: filter by ticket state
+- `/ingest repo ~/path/to/repo`: scan a repository
+- `/ingest repo`: prompt for repo path
+- `/ingest context`: provide any content (paste text, give a file path, drop an image)
+- `/ingest`: ask which source type
+- `--refine`: append to any source mode (e.g., `/ingest context --refine`) to enable Step 5.6 upstream refinement after ingest. Off by default; will move to default-on after a few validation runs.
 
 ## Process
 
@@ -31,9 +31,9 @@ Use `AskUserQuestion`:
 
 > What would you like to ingest?
 >
-> - **linear** — Pull Linear tickets (my assigned, or a specific project)
-> - **repo** — Scan a repository for architecture and patterns
-> - **context** — Provide any content (text, PDF, image, code, doc) to extract insights from
+> - **linear**: Pull Linear tickets (my assigned, or a specific project)
+> - **repo**: Scan a repository for architecture and patterns
+> - **context**: Provide any content (text, PDF, image, code, doc) to extract insights from
 
 **Source type provided:**
 Parse remaining args as source-specific parameters.
@@ -129,15 +129,15 @@ Confirmed insights:
 
 ### Step 5.5: Post-Batch Sweep
 
-The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse hooks, so notes it creates miss `post-write-autolink.js` and `post-write-edge-infer.js` — ending up without suggested backlinks or typed edges.
+The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse hooks, so notes it creates miss `post-write-autolink.js` and `post-write-edge-infer.js`: ending up without suggested backlinks or typed edges.
 
-Replay the hook chain on any vault notes missing structural backlinks. Idempotent — safe on already-hooked notes.
+Replay the hook chain on any vault notes missing structural backlinks. Idempotent: safe on already-hooked notes.
 
 ```bash
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
 # installed by /init or the SessionStart hook) handles binary location and ORT
 # env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
@@ -175,7 +175,7 @@ Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candida
 
 When the routing subagent in Step 5 writes new vault notes, those notes may sharpen, qualify, or extend existing claims. This step finds those pairs, dispatches the `refinement-proposer` agent, validates the output, and applies edits via `Write`. Same flow as `/reflect` Step 4.6.
 
-#### 5.6.a — Detect new vault notes from this ingest
+#### 5.6.a: Detect new vault notes from this ingest
 
 The routing subagent doesn't return file paths directly. Use `git diff` against HEAD to detect new files in the vault since ingest started:
 
@@ -193,18 +193,18 @@ If the file is empty, skip the rest of 5.6 and report `Refinement: 0 new notes f
 
 **Caveat**: this assumes the vault was at clean HEAD state when ingest started. If the user had uncommitted vault work, it may include unrelated files. The hard cap on LLM calls (50, below) bounds the worst case.
 
-#### 5.6.b — Build candidate pairs (capped)
+#### 5.6.b: Build candidate pairs (capped)
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
-If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap).
+If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap).
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"
-DATA_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+DATA_DIR="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 mkdir -p "$DATA_DIR"
 LL_PAIRS_PATH="${LL_TMP_PREFIX}-refinement-pairs.json" python3 - <<'PY'
 import json, os
@@ -212,7 +212,7 @@ pairs_path = os.environ["LL_PAIRS_PATH"]
 pairs = json.load(open(pairs_path))
 keep, defer = pairs[:50], pairs[50:]
 json.dump(keep, open(pairs_path, "w"), indent=2)
-data_dir = os.environ.get("CLAUDE_PLUGIN_DATA", os.path.expanduser("~/.claude/plugins/data/learning-loop-learning-loop-marketplace"))
+data_dir = os.environ["CLAUDE_PLUGIN_DATA"]
 defer_path = os.path.join(data_dir, "refinement-deferred.jsonl")
 if defer:
     with open(defer_path, "a") as f:
@@ -221,13 +221,13 @@ if defer:
 PY
 ```
 
-#### 5.6.c — Dispatch, validate, present, apply
+#### 5.6.c: Dispatch, validate, present, apply
 
 Same as `/reflect` Step 4.6.b through 4.6.f. Spawn `refinement-proposer` with the pairs file, validate via `refinement-validate.mjs`, present preview-format table, apply approved edits via `Write`, route counterpoints via `Edit`, emit provenance events.
 
 The `subagent_type` is `learning-loop:refinement-proposer`. The `pairs_file` is the resolved value of `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest-refinement-pairs.json` (substitute the literal path before passing to the agent). Likewise for the agent output (`-refinement-agent-output.json`) and validated output (`-refinement-validated.json`). Use `AskUserQuestion` for batch confirmation.
 
-#### 5.6.d — Cleanup
+#### 5.6.d: Cleanup
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-ingest"

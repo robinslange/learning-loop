@@ -58,10 +58,10 @@ Everything looks good. Nothing to set up.
 
 **Librarian status values:**
 
-- `enabled (ollama running, gemma4:e2b loaded)` — librarian is enabled and working
-- `available (ollama installed, XGB RAM)` — hardware capable but not enabled
-- `skipped (requires ollama + 16GB+ RAM)` — hardware insufficient
-- `skipped (ollama not installed)` — ollama missing
+- `enabled (ollama running, gemma4:e2b loaded)`: librarian is enabled and working
+- `available (ollama installed, XGB RAM)`: hardware capable but not enabled
+- `skipped (requires ollama + 16GB+ RAM)`: hardware insufficient
+- `skipped (ollama not installed)`: ollama missing
 
 **Federation status rules:**
 
@@ -206,7 +206,7 @@ Best-effort delete (ignore errors), each with its `-shm` and `-wal` siblings:
 - `PLUGIN_DATA/search.db`
 - `PLUGIN_DATA/db/search.db`
 
-Use Node `fs.rmSync(path, { force: true })`. Do not prompt — these files are unconditionally orphaned. If none exist this step is a no-op and silent.
+Use Node `fs.rmSync(path, { force: true })`. Do not prompt: these files are unconditionally orphaned. If none exist this step is a no-op and silent.
 
 ### 3c: Initial Vault Index
 
@@ -216,8 +216,8 @@ Run `ll-search index` to build the search index. Report progress.
 
 Run `node PLUGIN/scripts/install-shims.mjs --install` to write two stable shims to `~/.local/bin/`:
 
-- `ll-watch` — resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
-- `ll-search` — resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
+- `ll-watch`: resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
+- `ll-search`: resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
 
 Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node PLUGIN/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
 
@@ -286,7 +286,7 @@ const res = await fetch("https://interchange.live/api/redeem", {
 });
 ```
 
-The `peer_id` is bound to the token server-side — the user does not choose it. The redeem response returns the `peer_id` along with the headscale auth key and hub endpoint. Store these in memory for the rest of Phase 4. Do NOT write config yet — wait for the sync test to succeed.
+The `peer_id` is bound to the token server-side: the user does not choose it. The redeem response returns the `peer_id` along with the headscale auth key and hub endpoint. Store these in memory for the rest of Phase 4. Do NOT write config yet: wait for the sync test to succeed.
 
 Handle server errors:
 
@@ -307,7 +307,7 @@ Check for Tailscale. If not installed, guide installation (brew for macOS, curl 
 tailscale up --auth-key <headscale_auth_key> --login-server https://hs.interchange.live
 ```
 
-Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window) — surface the error and exit Phase 4 without writing config. The redeem token has already been consumed, so re-running /init will need a fresh token from robin (the same `409` rule as 4h applies).
+Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window): surface the error and exit Phase 4 without writing config. The redeem token has already been consumed, so re-running /init will need a fresh token from robin (the same `409` rule as 4h applies).
 
 ### 4e: Visibility Rules
 
@@ -348,8 +348,8 @@ On success: report counts (notes exported, peers downloaded). Proceed to 4i.
 
 On failure or timeout: **do not write config**. Surface the specific error and offer the user a choice:
 
-1. **Retry sync now** — re-run 4h against the same in-memory identity (no token re-burn, no re-redeem). Useful for transient network blips.
-2. **Exit Phase 4** — leave federation unconfigured. The redeem token has been spent. To complete federation later the user must contact robin for a fresh token; re-running /init will see no `PLUGIN_DATA/federation/config.json` and start Phase 4 from scratch, but the burned token will return `409` on redeem.
+1. **Retry sync now**: re-run 4h against the same in-memory identity (no token re-burn, no re-redeem). Useful for transient network blips.
+2. **Exit Phase 4**: leave federation unconfigured. The redeem token has been spent. To complete federation later the user must contact robin for a fresh token; re-running /init will see no `PLUGIN_DATA/federation/config.json` and start Phase 4 from scratch, but the burned token will return `409` on redeem.
 
 Be explicit about the trade: "The token is single-use and was consumed. If sync keeps failing, you can either retry now or get a new token from robin -- there is no way to replay this one."
 
@@ -380,7 +380,7 @@ if (existsSync(noticePath)) unlinkSync(noticePath);
 
 **Why:** the SessionStart hook compares `meta.plugin_major` against the running plugin's major version and emits a single stderr line when they differ, suggesting `/learning-loop:init` to rotate. Resetting `.seed-notice-shown` on every successful re-init guarantees a future major bump (e.g. v2.x → v3.x after the user already cleared a v1.x → v2.x notice) re-fires correctly. The notice is informational only -- nothing auto-rotates.
 
-**Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped — the file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed init runs leave no config behind, so re-running /init from a fresh shell always re-enters Phase 4 cleanly. The seed at `PLUGIN_DATA/federation/.seed` is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey -- the user will need a fresh token if the previous one was already redeemed.
+**Key behavioural detail:** if Phase 1 detection found `PLUGIN_DATA/federation/config.json` already exists, Phase 4 is entirely skipped: the file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed init runs leave no config behind, so re-running /init from a fresh shell always re-enters Phase 4 cleanly. The seed at `PLUGIN_DATA/federation/.seed` is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey -- the user will need a fresh token if the previous one was already redeemed.
 
 ---
 
@@ -614,8 +614,8 @@ Learning loop configured.
   Search:      2,031 notes indexed
   Federation:  configured, 1 peer
   CLAUDE.md:   learning-loop section present
-  Cache health: installed (or skipped — oh-my-claude not found)
-  Librarian:   enabled (or skipped — ollama/hardware not available)
+  Cache health: installed (or skipped: oh-my-claude not found)
+  Librarian:   enabled (or skipped: ollama/hardware not available)
   Shims:       ll-watch + ll-search installed in ~/.local/bin
 
 Start the watcher with: ll-watch

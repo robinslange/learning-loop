@@ -3,7 +3,7 @@ name: quick
 description: 'Fast verified answer to a question with vault context. Usage: /learning-loop:quick "question" or /learning-loop:quick (infers from context). One-shot: web research + vault awareness + auto-capture if novel.'
 ---
 
-# Quick — Fast Verified Answers
+# Quick: Fast Verified Answers
 
 ## Overview
 
@@ -11,8 +11,8 @@ Answer a question quickly with web research, vault awareness, and source verific
 
 ## When to Use
 
-- `/learning-loop:quick "how much have jaguar prices dropped recently?"` — direct question
-- `/learning-loop:quick` — infer question from conversation context
+- `/learning-loop:quick "how much have jaguar prices dropped recently?"`: direct question
+- `/learning-loop:quick`: infer question from conversation context
 
 ## Process
 
@@ -43,7 +43,7 @@ Answer this specific question with web research.
 
 Topic: <the question>
 Depth: shallow
-Existing knowledge: (empty — vault results not available yet)
+Existing knowledge: (empty: vault results not available yet)
 
 Focus on answering the question directly, not mapping the landscape.
 Find 2-3 sources. Source-resolve any academic claims.
@@ -61,7 +61,7 @@ Merge vault-scout and researcher results into a direct answer.
 - Keep it to 3-10 sentences. Cite sources inline.
 - End with confidence: high (multiple concordant sources), medium (single source or mixed), low (sparse evidence, flag uncertainty)
 
-**Tone:** Conversational. Plain language. No hedging paragraphs — if uncertain, one line says so.
+**Tone:** Conversational. Plain language. No hedging paragraphs: if uncertain, one line says so.
 
 ### Step 4: Auto-Capture Gate
 

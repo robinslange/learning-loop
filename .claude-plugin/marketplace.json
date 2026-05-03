@@ -2,15 +2,30 @@
   "name": "learning-loop-marketplace",
   "description": "Learning loop plugin marketplace",
   "owner": {
-    "name": "Robin"
+    "name": "Robin Lange",
+    "url": "https://github.com/robinslange"
   },
   "plugins": [
     {
       "name": "learning-loop",
-      "description": "Self-improving learning loop across Claude sessions",
+      "description": "Self-improving learning loop across Claude sessions: retrieval, capture, consolidation, and cross-project transfer with a hybrid-search Rust binary, Obsidian vault integration, and federation.",
       "source": "./",
+      "homepage": "https://github.com/robinslange/learning-loop",
+      "license": "SEE LICENSE IN LICENSE",
+      "keywords": [
+        "learning",
+        "knowledge-management",
+        "zettelkasten",
+        "obsidian",
+        "second-brain",
+        "memory",
+        "retrieval",
+        "hybrid-search"
+      ],
+      "categories": ["knowledge-management", "productivity", "search"],
       "author": {
-        "name": "Robin"
+        "name": "Robin Lange",
+        "url": "https://github.com/robinslange"
       }
     }
   ]

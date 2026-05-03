@@ -3,17 +3,17 @@ name: refresh
 description: 'See what you already know about a topic (no web research). Usage: /learning-loop:refresh "topic". Searches vault notes, episodic memory, and literature. Optionally tests discrimination of confusable note pairs. Good before /learning-loop:discovery or when returning to a topic.'
 ---
 
-# Refresh — What Do I Already Know?
+# Refresh: What Do I Already Know?
 
 ## Overview
 
-Quick retrieval of everything the vault holds on a topic. No web research, no enrichment — just surfaces what's already captured. The inward-facing counterpart to `/discovery`.
+Quick retrieval of everything the vault holds on a topic. No web research, no enrichment: just surfaces what's already captured. The inward-facing counterpart to `/discovery`.
 
 ## When to Use
 
-- `/refresh "topic"` — what do I know about this?
-- `/refresh` — no argument; ask what the user wants to recall
-- Before starting `/discovery` — orient on existing knowledge first
+- `/refresh "topic"`: what do I know about this?
+- `/refresh`: no argument; ask what the user wants to recall
+- Before starting `/discovery`: orient on existing knowledge first
 - When returning to a project or domain after a break
 - When you can't remember if you've captured something
 
@@ -40,7 +40,7 @@ The scout handles vault content search (mgrep + Glob + `vault-search.mjs`), epis
 
 Read the top note matches from the scout's results (up to 10 notes). For each:
 - One-line summary of what it captures
-- Location (which vault folder — inbox, fleeting, literature, permanent, projects)
+- Location (which vault folder: inbox, fleeting, literature, permanent, projects)
 - Links it contains (what does it connect to?)
 
 ### Step 4: Present
@@ -51,17 +51,17 @@ Organize by knowledge depth, not by folder:
 ## What you know about: [topic]
 
 ### Strong knowledge (permanent / well-sourced)
-- [[note-name]] — one-line summary
-- [[note-name]] — one-line summary
+- [[note-name]]: one-line summary
+- [[note-name]]: one-line summary
 
 ### Working knowledge (fleeting / partially developed)
-- [[note-name]] — one-line summary
+- [[note-name]]: one-line summary
 
 ### Raw captures (inbox / unprocessed)
-- [[note-name]] — one-line summary
+- [[note-name]]: one-line summary
 
 ### Literature
-- [[source-note]] — what it covers
+- [[source-note]]: what it covers
 
 ### Past conversations
 - [context]: key insight from episodic memory
@@ -103,11 +103,11 @@ If no confusable pairs were found, skip this section silently.
 
 | Agent | Purpose | When |
 |-------|---------|------|
-| `discovery-vault-scout` | Vault content/filename search, episodic memory, project index | Step 2 — always launched for the search phase |
+| `discovery-vault-scout` | Vault content/filename search, episodic memory, project index | Step 2: always launched for the search phase |
 
 ## Key Principles
 
-- **Read before summarizing.** Don't guess from titles alone — read the notes.
+- **Read before summarizing.** Don't guess from titles alone: read the notes.
 - **No enrichment.** This is retrieval, not research. Don't search the web. Don't rewrite notes.
 - **Fast.** This should feel like checking your own notes, not waiting for a report.
 - **Honest gaps.** If the vault is thin on a topic, say so. That's useful information.

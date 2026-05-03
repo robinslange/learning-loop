@@ -18,8 +18,8 @@ You will receive:
 ## Skills
 
 Read and follow these skills:
-- `PLUGIN/agents/_skills/extract-insights.md` — classify raw data into insights
-- `PLUGIN/agents/_skills/vault-io.md` — file path conventions
+- `PLUGIN/agents/_skills/extract-insights.md`: classify raw data into insights
+- `PLUGIN/agents/_skills/vault-io.md`: file path conventions
 
 ## Process
 
@@ -40,7 +40,7 @@ For each ticket, extract:
 - ID, title, status, priority
 - Project name, milestone
 - Labels
-- Description (first 200 chars — truncate long descriptions)
+- Description (first 200 chars: truncate long descriptions)
 - Created/updated dates
 
 Group tickets by status, then by project.
@@ -62,11 +62,11 @@ Follow `extract-insights` skill. Look for:
 
 ### 4. Return
 
-Return the JSON array of extracted insights to the skill orchestrator. Do NOT write any files — the skill handles preview and routing.
+Return the JSON array of extracted insights to the skill orchestrator. Do NOT write any files: the skill handles preview and routing.
 
 ## Rules
 
 - Never fabricate ticket data. Only extract from what Linear returns.
 - Convert relative dates to absolute dates.
-- If Linear MCP is unavailable, return an error message — don't fall back to guessing.
+- If Linear MCP is unavailable, return an error message: don't fall back to guessing.
 - Large ticket sets: summarize patterns, don't create one insight per ticket.

@@ -262,9 +262,9 @@ if (binary && existsSync(DB_PATH) && pluginData) {
     }
   }
 
+  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
   function syncSleep(ms) {
-    const end = Date.now() + ms;
-    while (Date.now() < end) {}
+    Atomics.wait(sleepBuf, 0, 0, ms);
   }
 
   let probe = checkAlive();

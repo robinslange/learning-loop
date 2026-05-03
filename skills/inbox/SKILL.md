@@ -3,7 +3,7 @@ name: inbox
 description: 'Batch triage inbox notes and sweep fleeting for archival. Usage: /learning-loop:inbox (no args). Classifies intention status (intentioned/resolved/limbo), clusters by topic, auto-promotes mature notes, surfaces top-5 limbo notes for close-or-plan decision, sweeps 1-fleeting/ for promoted/stale notes to archive, recommends merge/deepen/delete for the rest (asks before destructive actions).'
 ---
 
-# Inbox — Batch Triage and Processing
+# Inbox: Batch Triage and Processing
 
 ## Overview
 
@@ -54,7 +54,7 @@ If matches exist, include them as advisory context when presenting the agent's r
 ```
 Librarian observations:
   Voice flags:
-    "gmail multi daemon pull deduplication" — Names a topic, not an insight. Consider retitling.
+    "gmail multi daemon pull deduplication": Names a topic, not an insight. Consider retitling.
   Tag suggestions:
     "ginkgo biloba acute pk profile" → pharmacology, neuroscience
   Duplicate flags:
@@ -62,7 +62,7 @@ Librarian observations:
   ...
 ```
 
-These are informational — the user decides whether to act on them during triage. Apply or dismiss them in `/health --librarian`.
+These are informational: the user decides whether to act on them during triage. Apply or dismiss them in `/health --librarian`.
 
 ### Step 2: Handle Gated Actions
 

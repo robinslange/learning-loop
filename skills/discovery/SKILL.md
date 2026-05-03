@@ -3,17 +3,17 @@ name: discovery
 description: 'Explore a topic interactively with web research and vault context. Usage: /learning-loop:discovery "topic" [--style guided|branch|checkpoint] [--tone academic|conversational|persona] [--surf]. --surf skips note creation.'
 ---
 
-# Discovery — Interactive Research Journeys
+# Discovery: Interactive Research Journeys
 
 ## Overview
 
-Guided exploration of a topic through iterative research and conversation. You steer, subagents dig. Each round presents findings and offers directions. The journey produces vault artifacts (or not — your choice).
+Guided exploration of a topic through iterative research and conversation. You steer, subagents dig. Each round presents findings and offers directions. The journey produces vault artifacts (or not: your choice).
 
 ## When to Use
 
-- `/discovery "topic"` — cold start, curious about something new
-- `/discovery "topic"` with existing vault notes — warm start, build on what you know
-- `/discovery` — no argument; ask what the user is curious about
+- `/discovery "topic"`: cold start, curious about something new
+- `/discovery "topic"` with existing vault notes: warm start, build on what you know
+- `/discovery`: no argument; ask what the user is curious about
 - After reading something that sparked questions
 - To explore connections between existing vault notes
 
@@ -28,9 +28,9 @@ Parse from the invocation or ask the user. All have defaults.
 | **capture** | `full` / `surf` | `full` |
 
 **Examples:**
-- `/discovery "spaced repetition"` — all defaults
+- `/discovery "spaced repetition"`: all defaults
 - `/discovery "spaced repetition" --style branch`
-- `/discovery "spaced repetition" --surf` — lightweight, no artifacts until asked
+- `/discovery "spaced repetition" --surf`: lightweight, no artifacts until asked
 - `/discovery --academic "CRISPR gene drives"`
 
 ## Styles
@@ -77,10 +77,10 @@ Ask what the user is curious about. Include a brief mention of available options
 > - **Mode:** `full` (captures notes, default) · `surf` (explore only, no artifacts)
 
 **Topic provided, no other params (`/discovery "topic"`):**
-Proceed with defaults. Do NOT prompt — the user chose speed. Defaults are good.
+Proceed with defaults. Do NOT prompt: the user chose speed. Defaults are good.
 
 **Topic + partial params (`/discovery "topic" --surf`):**
-Proceed with provided params + defaults for the rest. Do NOT prompt for missing params — if they wanted to set them, they would have.
+Proceed with provided params + defaults for the rest. Do NOT prompt for missing params: if they wanted to set them, they would have.
 
 **Full params provided:**
 Just run.
@@ -93,7 +93,7 @@ Spawn both subagents in the same turn (a single message with two Agent tool call
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)
 
 2. **Researcher** (`discovery-researcher`): Search the web for landscape overview.
-   - Pass: topic, existing_knowledge (empty on first pass — vault scout results feed into subsequent rounds)
+   - Pass: topic, existing_knowledge (empty on first pass: vault scout results feed into subsequent rounds)
 
 While agents work, confirm parameters with the user if any were ambiguous.
 
@@ -119,13 +119,13 @@ Then, based on style:
 
 Repeat until the user says "done", "wrap up", or similar:
 
-1. **User steers** — picks a direction, asks a question, says "go deeper", or redirects
-2. **Research** — launch `discovery-researcher` subagent with:
+1. **User steers**: picks a direction, asks a question, says "go deeper", or redirects
+2. **Research**: launch `discovery-researcher` subagent with:
    - The new angle/question
    - `prior_rounds`: summary of what's been covered (prevent repetition)
    - `existing_knowledge`: vault scout findings + prior round findings
-3. **Present** — deliver findings in chosen style and tone
-4. **Capture** (if `full` mode) — after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body — don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
+3. **Present**: deliver findings in chosen style and tone
+4. **Capture** (if `full` mode): after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body: don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
 
 **Steering keywords the skill should recognize:**
 - "go deeper" / "more on that" → same angle, increase detail
@@ -150,12 +150,12 @@ Repeat until the user says "done", "wrap up", or similar:
 - If yes: let the user indicate what was valuable, write selective inbox notes
 - If no: end cleanly, nothing persisted
 
-**Both modes — source handoff:**
+**Both modes (source handoff):**
 If noteworthy sources were found but not captured as literature notes:
 ```
 Sources worth capturing (run /literature):
-- "Source Title" — why it matters
-- "Source Title" — why it matters
+- "Source Title": why it matters
+- "Source Title": why it matters
 ```
 
 ### Step 5: Report
@@ -187,13 +187,13 @@ Sources found: N (run /literature to capture)
 ## Tone Guide
 
 ### Conversational (default)
-Plain language. Analogies welcome. "Here's the intuition behind this..." — accessible, not dumbed down. Use this for the journey itself.
+Plain language. Analogies welcome. "Here's the intuition behind this..." Accessible, not dumbed down. Use this for the journey itself.
 
 ### Academic
-Precise terminology. Source attribution inline. Caveats acknowledged. "The evidence suggests..." — rigorous but not dry.
+Precise terminology. Source attribution inline. Caveats acknowledged. "The evidence suggests..." Rigorous, not dry.
 
 ### Persona
-Hemingway/Musashi/Lao Tzu vault voice. Short sentences. No filler. Active voice. Present tense. Use sparingly for the journey — it's intense over long sessions.
+Hemingway/Musashi/Lao Tzu vault voice. Short sentences. No filler. Active voice. Present tense. Use sparingly for the journey: it's intense over long sessions.
 
 **Regardless of journey tone, all vault artifacts are written in persona voice.** The journey is exploration; what sticks gets the Hemingway treatment.
 

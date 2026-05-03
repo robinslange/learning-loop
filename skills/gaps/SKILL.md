@@ -3,17 +3,17 @@ name: gaps
 description: 'Challenge vault knowledge through coverage, confidence, and counterpoint analysis. Usage: /learning-loop:gaps "topic" | /learning-loop:gaps (auto-pick) | /learning-loop:gaps --sweep. Scales depth to note maturity. Creates counterpoint notes, offers rewrites.'
 ---
 
-# Gaps — Epistemic Gap Analysis
+# Gaps: Epistemic Gap Analysis
 
 ## Overview
 
-The vault grows by accumulation. `/gaps` shakes the cage. It surfaces tensions, questions absences, and flags thin ice. The truth doesn't need to defend itself — weak beliefs get questioned, strong beliefs get stress-tested.
+The vault grows by accumulation. `/gaps` shakes the cage. It surfaces tensions, questions absences, and flags thin ice. The truth doesn't need to defend itself: weak beliefs get questioned, strong beliefs get stress-tested.
 
 ## When to Use
 
-- `/gaps "topic"` — focused analysis on a specific topic
-- `/gaps` — auto-picks the densest unchallenged cluster in the vault
-- `/gaps --sweep` — runs across all major domain clusters
+- `/gaps "topic"`: focused analysis on a specific topic
+- `/gaps`: auto-picks the densest unchallenged cluster in the vault
+- `/gaps --sweep`: runs across all major domain clusters
 
 ## Parameters
 
@@ -59,10 +59,10 @@ Before auto-picking, ask:
 
 > What would you like to challenge? Options:
 >
-> - **A topic** — e.g., `/gaps "theanine"` — focused analysis on one domain
-> - **Auto-pick** — I'll find the densest unchallenged cluster
-> - **Sweep** — analyse all major domain clusters (`--sweep`)
-> - **Dry-run** — show what would be analysed without running (`--dry-run`)
+> - **A topic**: e.g., `/gaps "theanine"`: focused analysis on one domain
+> - **Auto-pick**: I'll find the densest unchallenged cluster
+> - **Sweep**: analyse all major domain clusters (`--sweep`)
+> - **Dry-run**: show what would be analysed without running (`--dry-run`)
 >
 > Optional: `--depth shallow|medium|deep` (defaults to note maturity)
 
@@ -77,7 +77,7 @@ Proceed immediately.
 **Auto-pick (`/gaps` with no topic):**
 1. Run `node PLUGIN/scripts/vault-search.mjs cluster --threshold 0.7`
 2. Find the densest cluster without recent `#gaps-reviewed` tag
-3. Tell the user: "Analysing [cluster topic] — [N] notes, last reviewed [date/never]"
+3. Tell the user: "Analysing [cluster topic]: [N] notes, last reviewed [date/never]"
 4. Proceed to Step 1 with inferred topic
 
 **Sweep (`/gaps --sweep`):**
@@ -102,10 +102,10 @@ Spawn all three subagents in the same turn (a single message with three Agent to
 2. **Adversarial Researcher** (`discovery-researcher`):
    - Pass: topic, depth (scaled to note maturity), angle: "Find counterarguments, methodological criticisms, alternative explanations, and evidence that contradicts the following claims: [list top claims from vault notes if known]"
    - existing_knowledge: empty on first pass (vault scout results aren't available yet)
-   - The adversarial angle is critical — the researcher must look for challenges, not confirmations
+   - The adversarial angle is critical: the researcher must look for challenges, not confirmations
 
 3. **Domain Survey Researcher** (`discovery-researcher`):
-   - Pass: topic, depth (scaled to note maturity), angle: "Comprehensively map the domain of [topic]. What are all the major subtopics, frameworks, debates, methods, and open questions? Survey the full landscape — not just what confirms or challenges existing knowledge, but the complete territory."
+   - Pass: topic, depth (scaled to note maturity), angle: "Comprehensively map the domain of [topic]. What are all the major subtopics, frameworks, debates, methods, and open questions? Survey the full landscape: not just what confirms or challenges existing knowledge, but the complete territory."
    - existing_knowledge: empty on first pass
    - The survey angle finds what's missing entirely, not what's wrong
 
@@ -135,7 +135,7 @@ For each finding, offer actions inline:
 
 ```
 Thin ice: "empty-stomach-maximizes-theanine-at-both-gates"
-  — mechanistic inference from transporter competition.
+ : mechanistic inference from transporter competition.
   Direct meal-timing studies?
   → [C] Create counterpoint note  [D] Flag for /deepen  [skip]
 
@@ -148,7 +148,7 @@ Blindspot: The field of n-of-1 methodology covers adaptive randomization designs
 
 Based on user choices:
 
-**Create counterpoint note** (free — just inbox):
+**Create counterpoint note** (free: just inbox):
 - Launch `note-writer` with:
   - insight: the counterpoint or question
   - research: the evidence that raised it
@@ -167,7 +167,7 @@ Based on user choices:
 
 **Research blindspot** (via /discovery):
 - Add to a suggested `/discovery` queue shown at the end
-- These are topics the vault doesn't cover at all — they need research, not counterpoints
+- These are topics the vault doesn't cover at all: they need research, not counterpoints
 
 **Create placeholder note** (for blindspots):
 - Launch `note-writer` with the domain survey's description of the missing territory
@@ -175,17 +175,17 @@ Based on user choices:
 - Lands in `0-inbox/` as a stub for later `/deepen`
 
 **Batch actions:**
-- "Create all counterpoint notes" — batch launch note-writers
-- "Flag all thin ice for /deepen" — add all to queue
-- "Create all blindspot placeholders" — batch create stub notes for missing territory
-- "Flag all blindspots for /discovery" — add all to research queue
+- "Create all counterpoint notes": batch launch note-writers
+- "Flag all thin ice for /deepen": add all to queue
+- "Create all blindspot placeholders": batch create stub notes for missing territory
+- "Flag all blindspots for /discovery": add all to research queue
 
 ### Step 4.5: Replay Post-Write Hooks
 
-If Step 4 launched any `note-writer` subagents (counterpoints, rewrites, or blindspot stubs), their Write/Edit calls bypassed PostToolUse — backlinks and edge inference didn't run. Run the unlinked-body sweep documented in `skills/_shared/hook-replay.md` to catch them. Idempotent — safe even if Step 4 wrote nothing.
+If Step 4 launched any `note-writer` subagents (counterpoints, rewrites, or blindspot stubs), their Write/Edit calls bypassed PostToolUse: backlinks and edge inference didn't run. Run the unlinked-body sweep documented in `skills/_shared/hook-replay.md` to catch them. Idempotent: safe even if Step 4 wrote nothing.
 
 ```bash
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
 
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
@@ -258,13 +258,13 @@ Strongest domain: [cluster with fewest findings]
 
 ### discovery-researcher (adversarial)
 - Launch at Step 1 in parallel with vault-scout and domain survey
-- Adversarial angle is mandatory — always search for counter-evidence
+- Adversarial angle is mandatory: always search for counter-evidence
 - Depth matches note maturity scaling
 - Internally verifies its own findings before returning
 
 ### discovery-researcher (domain survey)
 - Launch at Step 1 in parallel with vault-scout and adversarial researcher
-- Survey angle — map the full domain landscape, not challenge claims
+- Survey angle: map the full domain landscape, not challenge claims
 - Depth matches note maturity scaling
 - Output feeds blindspot detection in the analyser
 - Internally verifies its own findings before returning

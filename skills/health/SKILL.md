@@ -3,7 +3,7 @@ name: health
 description: 'Vault health dashboard. Usage: /learning-loop:health [--deep] [--auto]. Light mode (default) shows counts + file lists. --deep uses note-scorer for full analysis. --auto fixes safe issues without asking.'
 ---
 
-# Health — Vault Health Dashboard
+# Health: Vault Health Dashboard
 
 ## Overview
 
@@ -11,9 +11,9 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 
 ## When to Use
 
-- `/health` or `/health --light` — quick vault status check (default)
-- `/health --deep` — full diagnostic with note-scorer analysis
-- `/health --auto` — auto-fix safe issues (combinable with either mode)
+- `/health` or `/health --light`: quick vault status check (default)
+- `/health --deep`: full diagnostic with note-scorer analysis
+- `/health --auto`: auto-fix safe issues (combinable with either mode)
 - After a burst of `/reflect` sessions
 - Before `/inbox` to see what needs attention
 - Periodic maintenance
@@ -37,15 +37,15 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 Use `AskUserQuestion` when no arguments are provided to help users discover modes.
 
 **No arguments (`/health`):**
-Run light mode immediately (fast, no prompting needed — it's the default and completes in seconds).
+Run light mode immediately (fast, no prompting needed: it's the default and completes in seconds).
 
 **But after presenting results**, if issues were found, mention available modes:
 
 > Found N issues. Options:
-> - `/health --deep` — full analysis with note scoring
-> - `/health --auto` — auto-fix safe issues (ghost dupes, broken links)
-> - `/health --provenance` — pipeline observability (fabrication rates, agent stats)
-> - `/health --deep --auto` — both
+> - `/health --deep`: full analysis with note scoring
+> - `/health --auto`: auto-fix safe issues (ghost dupes, broken links)
+> - `/health --provenance`: pipeline observability (fabrication rates, agent stats)
+> - `/health --deep --auto`: both
 
 This teaches the modes through use rather than upfront prompting.
 
@@ -92,9 +92,9 @@ If `--librarian` flag is present, skip all vault health checks and enter librari
 
 Read `PLUGIN_DATA/librarian/queue.jsonl`. Parse all lines. Filter to `status === 'pending'`. If no pending items, report "No pending librarian observations." and stop.
 
-**Step L2: Phase 1 — Advisory Review**
+**Step L2: Phase 1: Advisory Review**
 
-Group pending items into link suggestions, tag suggestions, voice flags, and duplicate flags. Each subsection is independent — present and resolve one at a time.
+Group pending items into link suggestions, tag suggestions, voice flags, and duplicate flags. Each subsection is independent: present and resolve one at a time.
 
 **Link suggestions:**
 Present in a table grouped by confidence:
@@ -144,11 +144,11 @@ Present as a list:
 
 ```
 Voice flags (N):
-  0-inbox/gmail-multi-daemon-pull-dedup...  "gmail multi daemon pull deduplication" — Names a topic without stating a claim
+  0-inbox/gmail-multi-daemon-pull-dedup...  "gmail multi daemon pull deduplication": Names a topic without stating a claim
   ...
 ```
 
-These are advisory — present them for awareness. Ask: "Acknowledge voice flags? (y/n)" — on yes, update all to `acknowledged`.
+These are advisory: present them for awareness. Ask: "Acknowledge voice flags? (y/n)": on yes, update all to `acknowledged`.
 
 **Duplicate flags:**
 Present as a list:
@@ -159,9 +159,9 @@ Duplicate flags (N):
   ...
 ```
 
-For each, ask the user to choose one of: `merge` (read both, decide which to keep, the user does the merge), `link` (add a wikilink between them — drop a `[[other]]` reference into the newer note's body), `dismiss`. Update queue item status to `merged`, `linked`, or `dismissed`.
+For each, ask the user to choose one of: `merge` (read both, decide which to keep, the user does the merge), `link` (add a wikilink between them: drop a `[[other]]` reference into the newer note's body), `dismiss`. Update queue item status to `merged`, `linked`, or `dismissed`.
 
-**Step L3: Phase 2 — Staleness Suspects**
+**Step L3: Phase 2: Staleness Suspects**
 
 Present staleness suspects:
 
@@ -204,7 +204,7 @@ Collect the raw data needed for all checks. Run these in parallel:
 8. **Plugin dependencies:** `node PLUGIN/scripts/check-deps.mjs`
 9. **Binary version:** Check `ll-search` binary via `node -e "import { binaryVersion } from 'PLUGIN/scripts/lib/binary.mjs'; console.log(binaryVersion());"` -- returns version string or null
 
-### Step 1.5: Check — Plugin Dependencies
+### Step 1.5: Check: Plugin Dependencies
 
 Parse the check-deps output from Step 1.
 
@@ -215,28 +215,28 @@ For each dependency:
 
 This check runs in both light and deep modes -- there's no deeper analysis needed.
 
-### Step 2: Check — Ghost Duplicates
+### Step 2: Check: Ghost Duplicates
 
 Compare inbox filenames against filenames in `1-fleeting/` and `3-permanent/`. A ghost duplicate exists when the same filename appears in inbox AND a promoted folder.
 
 **Light:** List each ghost duplicate with its promoted location.
-**Deep:** Read both versions of each ghost duplicate. If content is identical or the inbox version is a subset, confirm as true duplicate. If content has diverged, flag as "diverged copy — review before deleting".
+**Deep:** Read both versions of each ghost duplicate. If content is identical or the inbox version is a subset, confirm as true duplicate. If content has diverged, flag as "diverged copy: review before deleting".
 
-### Step 3: Check — Near-Duplicate Pairs
+### Step 3: Check: Near-Duplicate Pairs
 
-Parse the cluster output from Step 1. Filter to pairs with similarity > 0.85 that are NOT ghost duplicates (same filename in different folders — already caught in Step 2).
+Parse the cluster output from Step 1. Filter to pairs with similarity > 0.85 that are NOT ghost duplicates (same filename in different folders: already caught in Step 2).
 
 **Light:** List each pair with similarity score.
 **Deep:** Read both notes in each pair. Compare content. Recommend which to keep (prefer the more mature version) or merge.
 
-### Step 4: Check — Orphan Notes
+### Step 4: Check: Orphan Notes
 
 For each note across all content folders (0-inbox, 1-fleeting, 3-permanent), grep for `\[\[` outgoing wikilinks. Notes with zero outgoing links are orphans. Exclude `_system/` and `2-literature/` from orphan checks (system docs and literature notes don't need outlinks).
 
 **Light:** List orphan filenames with their folder.
 **Deep:** For each orphan, run `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 3` to suggest link targets.
 
-### Step 5: Check — Stale Inbox
+### Step 5: Check: Stale Inbox
 
 For each inbox note, check file modification time using Bash: `node -e "console.log(require('fs').statSync('FILE').mtimeMs)"`. Flag notes older than 14 days.
 
@@ -245,31 +245,31 @@ For each inbox note, check file modification time using Bash: `node -e "console.
 
 **Batching:** If > 10 stale notes, split into batches of ~10 and launch parallel note-scorer agents.
 
-### Step 6: Check — Embedding Staleness
+### Step 6: Check: Embedding Staleness
 
 Compare the full vault file list (all .md files in content folders) against the output of `vault-search.mjs list`. Notes present in the vault but missing from the embedding index are stale.
 
-**Light and Deep:** List missing notes. No difference between modes — there's nothing deeper to analyze.
+**Light and Deep:** List missing notes. No difference between modes: there's nothing deeper to analyze.
 
-### Step 7: Check — Broken Links
+### Step 7: Check: Broken Links
 
 Grep all `\[\[...\]\]` wikilink references across all vault notes. For each unique link target, check if a matching .md file exists anywhere in the vault (case-insensitive filename match). Broken links are references to non-existent notes.
 
 **Light:** List each broken link with the source note that contains it.
 **Deep:** For each broken link, find the closest matching vault filename using fuzzy/substring match and suggest it as a correction.
 
-### Step 7.5: Check — Librarian Queue
+### Step 7.5: Check: Librarian Queue
 
 Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
 
 If the queue file doesn't exist or is empty, skip this step silently.
 
 Group pending items by `task` field:
-- `link_suggestion` — link suggestions (orphan notes that should be linked)
-- `tag_suggestion` — tag suggestions (under-tagged notes with proposed vocabulary tags)
-- `voice_flag` — voice flags (topic-style titles)
-- `duplicate_flag` — duplicate flags (notes that make the same claim as a near-neighbour)
-- `staleness_suspect` — staleness suspects (Claude investigates)
+- `link_suggestion`: link suggestions (orphan notes that should be linked)
+- `tag_suggestion`: tag suggestions (under-tagged notes with proposed vocabulary tags)
+- `voice_flag`: voice flags (topic-style titles)
+- `duplicate_flag`: duplicate flags (notes that make the same claim as a near-neighbour)
+- `staleness_suspect`: staleness suspects (Claude investigates)
 
 Add to the dashboard output:
 
@@ -294,7 +294,7 @@ If the queue has pending items, add recommendation:
 Output the summary dashboard:
 
 ```
-Vault Health — YYYY-MM-DD
+Vault Health: YYYY-MM-DD
 
   Binary:        ll-search vX.Y.Z (installed) | not installed
   Dependencies:  N satisfied, M missing
@@ -305,7 +305,7 @@ Vault Health — YYYY-MM-DD
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
 
-  Status: [total] issues [— run /health --deep for full analysis]
+  Status: [total] issues [run /health --deep for full analysis]
 ```
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
@@ -322,8 +322,8 @@ If `--auto` flag is set:
 - Report what was fixed
 
 If `--auto` flag is NOT set:
-- **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)" — wait for approval, then delete
-- **Broken links:** Ask "Remove N broken wikilinks? (y/n)" — wait for approval, then fix
+- **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
+- **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
 
 ### Step 10: Summary
@@ -331,13 +331,13 @@ If `--auto` flag is NOT set:
 Output a one-line summary of actions taken:
 
 ```
-Fixed: N ghost dupes removed, N broken links cleaned. Remaining: N issues — see recommendations above.
+Fixed: N ghost dupes removed, N broken links cleaned. Remaining: N issues: see recommendations above.
 ```
 
 If nothing was fixed (no `--auto`, user declined, or nothing fixable):
 
 ```
-No fixes applied. N issues found — see recommendations above.
+No fixes applied. N issues found: see recommendations above.
 ```
 
 ## Subagent Usage
@@ -379,8 +379,8 @@ Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specif
 
 ## Key Principles
 
-- **Fast by default.** Light mode should complete in seconds — no agent launches, no note reading beyond filenames.
+- **Fast by default.** Light mode should complete in seconds: no agent launches, no note reading beyond filenames.
 - **Deep is thorough.** When the user asks for `--deep`, give them the full picture. Use note-scorer, read content, diff duplicates.
 - **Safe fixes only.** `--auto` only touches ghost dupes (inbox copy of promoted note) and broken links (references to nothing). Never auto-merge, auto-delete non-duplicate notes, or auto-promote.
-- **Route, don't replicate.** Health diagnoses — it doesn't do the work of `/verify`, `/inbox`, or `/deepen`. Recommend the right tool for each issue.
-- **Respect vault boundaries.** Never modify notes outside `0-inbox/` without asking. Broken link fixes edit the source note, which may be in any folder — always ask unless `--auto`.
+- **Route, don't replicate.** Health diagnoses: it doesn't do the work of `/verify`, `/inbox`, or `/deepen`. Recommend the right tool for each issue.
+- **Respect vault boundaries.** Never modify notes outside `0-inbox/` without asking. Broken link fixes edit the source note, which may be in any folder: always ask unless `--auto`.

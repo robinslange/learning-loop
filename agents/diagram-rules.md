@@ -17,11 +17,11 @@ Generate a diagram when the insight involves a **mechanism, pathway, or multi-st
 **Do NOT diagram:**
 - Simple factual claims (theanine has 65-75% bioavailability)
 - Lists or comparisons that work fine as tables
-- **Taxonomies and classifications** — "X belongs to category Y" is a table, not a diagram. If nothing connects to anything else, it's not a diagram.
-- Single cause-effect pairs (A causes B — just say it)
+- **Taxonomies and classifications**: "X belongs to category Y" is a table, not a diagram. If nothing connects to anything else, it's not a diagram.
+- Single cause-effect pairs (A causes B: just say it)
 - Anything where a sentence does the job
 
-**The test:** If you removed all the arrows and the diagram still "works," it was never a diagram — it was a layout. Diagrams derive meaning from connections, not positions.
+**The test:** If you removed all the arrows and the diagram still "works," it was never a diagram: it was a layout. Diagrams derive meaning from connections, not positions.
 
 ## Where to Save
 
@@ -37,7 +37,7 @@ The accompanying vault note embeds the diagram:
 
 ## File Format
 
-Use the `.excalidraw.md` format. The `## Text Elements` section is **left empty** — the Obsidian Excalidraw plugin auto-fills it from the JSON data.
+Use the `.excalidraw.md` format. The `## Text Elements` section is **left empty**: the Obsidian Excalidraw plugin auto-fills it from the JSON data.
 
 ```markdown
 ---
@@ -71,7 +71,7 @@ tags: [excalidraw]
 
 Keep diagrams clean and readable:
 
-- **Colors:** Use soft fills — `#a5d8ff` (blue), `#b2f2bb` (green), `#ffec99` (yellow), `#ffc9c9` (red), `#d0bfff` (purple). Stroke color `#1e1e1e`.
+- **Colors:** Use soft fills: `#a5d8ff` (blue), `#b2f2bb` (green), `#ffec99` (yellow), `#ffc9c9` (red), `#d0bfff` (purple). Stroke color `#1e1e1e`.
 - **Shapes:** Rectangles for processes/states, ellipses for start/end points, diamonds for decisions/branches.
 - **Text:** `fontSize: 20` for labels in containers, `fontSize: 16` for free-floating labels and annotations. `fontFamily: 5` (Excalifont).
 - **Arrows:** Solid for direct causation, dashed (`strokeStyle: "dashed"`) for indirect/modulatory effects.
@@ -89,7 +89,7 @@ Use font size and color to create visual hierarchy without boxes. A 20px title d
 
 ### Required Fields
 
-Every element needs these fields. **Do NOT include** `frameId`, `index`, `versionNonce`, or `rawText` — they cause issues.
+Every element needs these fields. **Do NOT include** `frameId`, `index`, `versionNonce`, or `rawText`: they cause issues.
 
 ```json
 {
@@ -118,7 +118,7 @@ Every element needs these fields. **Do NOT include** `frameId`, `index`, `versio
 
 ### Text in Containers
 
-Text element needs `containerId` pointing to parent shape. Parent shape needs `{"type": "text", "id": "textId"}` in its `boundElements` array. **One text element per container — never two.** If you need a header + subtitle, combine into a single text element with `\n` line breaks.
+Text element needs `containerId` pointing to parent shape. Parent shape needs `{"type": "text", "id": "textId"}` in its `boundElements` array. **One text element per container: never two.** If you need a header + subtitle, combine into a single text element with `\n` line breaks.
 
 ```json
 {
@@ -170,7 +170,7 @@ For labels, annotations, and titles that don't need a container:
 
 ### Arrows
 
-Arrows use `startBinding`/`endBinding` to connect to shapes. The shapes they connect to do NOT need the arrow in their `boundElements` — only text bindings go there.
+Arrows use `startBinding`/`endBinding` to connect to shapes. The shapes they connect to do NOT need the arrow in their `boundElements`: only text bindings go there.
 
 ```json
 {
@@ -239,4 +239,4 @@ Choose pattern based on what the concept does:
 
 ## Scope
 
-Keep diagrams focused on one mechanism. A diagram with 15+ elements is too complex — split into multiple diagrams or simplify. Aim for 4-8 core elements with connecting arrows.
+Keep diagrams focused on one mechanism. A diagram with 15+ elements is too complex: split into multiple diagrams or simplify. Aim for 4-8 core elements with connecting arrows.

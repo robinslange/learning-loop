@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { existsSync, readdirSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   runHook,
@@ -9,6 +9,7 @@ import {
   findBinary as findBinaryShared,
   isVaultNote,
 } from './lib/common.mjs';
+import { loadVaultSnapshot } from './lib/snapshot.mjs';
 
 function parseFrontmatter(content) {
   const m = content.match(/^---\n([\s\S]*?)\n---/);
@@ -60,21 +61,9 @@ function extractWikilinks(body) {
   return [...links];
 }
 
-const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
-const TITLE_INDEX_EXTRA_DIRS = ['Excalidraw'];
-
 function buildNoteIndex(vaultRoot) {
-  const index = new Set();
-  for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS]) {
-    try {
-      const files = readdirSync(join(vaultRoot, dir), { recursive: true });
-      for (const f of files) {
-        const name = basename(f);
-        if (name.endsWith('.md')) index.add(name);
-      }
-    } catch {}
-  }
-  return index;
+  const snap = loadVaultSnapshot(vaultRoot);
+  return new Set((snap?.notes ?? []).map((n) => `${n.basename}.md`));
 }
 
 function noteExistsInIndex(name, noteIndex) {

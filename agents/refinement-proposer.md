@@ -24,9 +24,9 @@ The pairs have already been pre-filtered by cosine similarity (0.78–0.92) and 
 
 Read these shared agent skills before working:
 
-- `PLUGIN/agents/_skills/counter-argument-linking.md` — patterns for detecting contradictions and the bidirectional link format
-- `PLUGIN/agents/_skills/capture-rules.md` — vault note format constraints
-- `PLUGIN/agents/_skills/vault-io.md` — how to read vault files
+- `PLUGIN/agents/_skills/counter-argument-linking.md`: patterns for detecting contradictions and the bidirectional link format
+- `PLUGIN/agents/_skills/capture-rules.md`: vault note format constraints
+- `PLUGIN/agents/_skills/vault-io.md`: how to read vault files
 
 ## ABSOLUTE RULES
 
@@ -40,9 +40,9 @@ These are not guidelines. Violation means the driver discards your output.
 
 4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. The post-write hook chain handles edge frontmatter sync; you do not.
 
-5. **20% ceiling on body change.** Count the sentences in the upstream body (excluding frontmatter). Your edit may add at most `ceil(0.20 * sentence_count)` new sentences. If the change would be larger, return `pass` instead. The driver also enforces this and auto-rejects oversized proposals — but if you self-limit, the user sees fewer rejected items in the review.
+5. **20% ceiling on body change.** Count the sentences in the upstream body (excluding frontmatter). Your edit may add at most `ceil(0.20 * sentence_count)` new sentences. If the change would be larger, return `pass` instead. The driver also enforces this and auto-rejects oversized proposals: but if you self-limit, the user sees fewer rejected items in the review.
 
-6. **Default to `pass` when in doubt.** A missed refinement is recoverable (the new note still exists; the next /reflect can try again). A bad edit is not — it ages into the vault as if it were original. Precision over recall at the agent layer; the driver handles precision again.
+6. **Default to `pass` when in doubt.** A missed refinement is recoverable (the new note still exists; the next /reflect can try again). A bad edit is not: it ages into the vault as if it were original. Precision over recall at the agent layer; the driver handles precision again.
 
 ## Decision rubric
 
@@ -55,7 +55,7 @@ The new note is topically related but does not touch the same specific claim. Us
 - You cannot point to a single sentence in the upstream that would be sharpened
 - You're uncertain
 
-### `edit` — sharpens, qualifies, or extends
+### `edit`: sharpens, qualifies, or extends
 The new note provides evidence that strengthens a specific claim in the upstream. Sub-types:
 - **sharpens**: replaces a vague phrasing with a tighter one ("often" → "in 30-60 seconds")
 - **qualifies**: adds a boundary condition or exception ("X works, except in case Y")
@@ -64,7 +64,7 @@ The new note provides evidence that strengthens a specific claim in the upstream
 Return the **full proposed body** of the upstream note with the change applied. The body must be byte-for-byte identical to the original except for the specific sentences your edit touches.
 
 ### `counterpoint`
-The new note materially contradicts a claim in the upstream. Do NOT propose an edit. Return link texts the driver will append to both notes via the existing counter-argument-linking pattern. The upstream note's body is never modified for counterpoints — the link is the entire intervention.
+The new note materially contradicts a claim in the upstream. Do NOT propose an edit. Return link texts the driver will append to both notes via the existing counter-argument-linking pattern. The upstream note's body is never modified for counterpoints: the link is the entire intervention.
 
 ## Process
 

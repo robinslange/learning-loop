@@ -3,7 +3,7 @@ name: literature
 description: 'Capture an external source as a literature note. Usage: /learning-loop:literature <URL> or /learning-loop:literature "paper title". Fetches content, extracts core ideas in vault voice, writes to 2-literature/ with vault links.'
 ---
 
-# Literature — Source Material Capture
+# Literature: Source Material Capture
 
 ## Overview
 
@@ -11,9 +11,9 @@ Launches the `literature-capturer` agent to capture an external source as a lite
 
 ## When to Use
 
-- `/literature <URL>` — fetch and capture a web source
-- `/literature <paper title or citation>` — search for and capture an academic source
-- `/literature` — no argument; asks the user what to capture
+- `/literature <URL>`: fetch and capture a web source
+- `/literature <paper title or citation>`: search for and capture an academic source
+- `/literature`: no argument; asks the user what to capture
 - When `/deepen` flags uncaptured sources worth preserving
 
 ## Process
@@ -25,8 +25,8 @@ Use `AskUserQuestion`:
 
 > What source would you like to capture?
 >
-> - **A URL** — I'll fetch and extract core ideas
-> - **A paper title or citation** — I'll search for it first
+> - **A URL**: I'll fetch and extract core ideas
+> - **A paper title or citation**: I'll search for it first
 
 **Argument provided:**
 Proceed immediately.
@@ -52,7 +52,7 @@ printf '%s\n' "$LITERATURE_NOTE_PATH" \
   | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
-Where `$LITERATURE_NOTE_PATH` is constructed from the agent's response (e.g. `{{VAULT}}/2-literature/<filename>`, where `<filename>` is the kebab-case filename literature-capturer returned). The backlink edits from Step 2 happen via main-thread `Edit` and trigger PostToolUse normally — no replay needed for those. See `skills/_shared/hook-replay.md` for the full pattern.
+Where `$LITERATURE_NOTE_PATH` is constructed from the agent's response (e.g. `{{VAULT}}/2-literature/<filename>`, where `<filename>` is the kebab-case filename literature-capturer returned). The backlink edits from Step 2 happen via main-thread `Edit` and trigger PostToolUse normally: no replay needed for those. See `skills/_shared/hook-replay.md` for the full pattern.
 
 ### Step 3: Present Results
 

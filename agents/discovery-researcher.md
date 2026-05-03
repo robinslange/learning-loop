@@ -21,10 +21,10 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `PLUGIN/agents/_skills/overlap-check.md` — check if existing knowledge already covers this topic
-- `PLUGIN/agents/_skills/cross-validation.md` — compare findings against existing vault knowledge
-- `PLUGIN/agents/_skills/decision-gates.md` — checkpoints between research phases
-- `PLUGIN/agents/_skills/source-verification.md` — how to verify sources
+- `PLUGIN/agents/_skills/overlap-check.md`: check if existing knowledge already covers this topic
+- `PLUGIN/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
+- `PLUGIN/agents/_skills/decision-gates.md`: checkpoints between research phases
+- `PLUGIN/agents/_skills/source-verification.md`: how to verify sources
 
 ## Process
 
@@ -33,7 +33,7 @@ Read and follow these skills during work:
 Run overlap-check against `existing_knowledge` and `prior_rounds`. Classify the topic.
 
 Run novelty gate (decision-gates):
-- If **redundant**: return early — tell the caller what already covers this.
+- If **redundant**: return early: tell the caller what already covers this.
 - If **partial**: narrow scope to the uncovered angle.
 - If **novel**: proceed with full research.
 
@@ -62,9 +62,9 @@ Repeat:
    ```
 
 5. **Read the verdict**:
-   - `stop: false` — continue to next query, adjust angle based on findings
-   - `stop: true, reason: "hard_stop:*"` — stop immediately, compile findings
-   - `stop: true, reason: "soft_stop:*"` — stop searching, compile findings
+   - `stop: false`: continue to next query, adjust angle based on findings
+   - `stop: true, reason: "hard_stop:*"`: stop immediately, compile findings
+   - `stop: true, reason: "soft_stop:*"`: stop searching, compile findings
 
 6. **Clean up**: Delete the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-result-SESSION_ID-N.txt') } catch(e) {}"`
 
@@ -79,9 +79,9 @@ After the search loop ends, run `node PLUGIN/scripts/source-resolver.mjs resolve
 - Evidence grade: study type (RCT, review, animal study), species, sample size
 - Funding/COI when available
 
-**Replace** your LLM-inferred metadata with the API-verified metadata in the brief. If the resolver returns different authors than you expected, use the resolver's authors — it checked the actual database.
+**Replace** your LLM-inferred metadata with the API-verified metadata in the brief. If the resolver returns different authors than you expected, use the resolver's authors: it checked the actual database.
 
-**Flag** any source that `source-resolver.mjs` cannot resolve as `[unresolved — needs manual verification]`.
+**Flag** any source that `source-resolver.mjs` cannot resolve as `[unresolved: needs manual verification]`.
 
 **Include in the brief** for each source:
 - `study_type`: RCT, meta-analysis, review, cohort, animal, in-vitro, etc.

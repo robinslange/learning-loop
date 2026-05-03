@@ -3,7 +3,7 @@ name: diagram
 description: 'Generate an Excalidraw diagram for the vault. Usage: /learning-loop:diagram "concept or mechanism" or /learning-loop:diagram (infers from context). Produces .excalidraw.md in vault Excalidraw/ folder.'
 ---
 
-# Diagram — Excalidraw Generation
+# Diagram: Excalidraw Generation
 
 ## Overview
 

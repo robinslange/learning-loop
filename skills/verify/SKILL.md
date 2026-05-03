@@ -1,9 +1,9 @@
 ---
 name: verify
-description: 'Assess note quality and verify claims against cited sources. Usage: /learning-loop:verify "note-name" | inbox | permanent | "topic" (defaults to inbox). Scores quality, checks source integrity, detects duplicates — produces fix plan.'
+description: 'Assess note quality and verify claims against cited sources. Usage: /learning-loop:verify "note-name" | inbox | permanent | "topic" (defaults to inbox). Scores quality, checks source integrity, detects duplicates: produces fix plan.'
 ---
 
-# Verify — Note Quality and Source Integrity
+# Verify: Note Quality and Source Integrity
 
 ## Overview
 
@@ -11,11 +11,11 @@ Assesses vault notes on two dimensions: structural quality (depth, sourcing, lin
 
 ## When to Use
 
-- `/verify "note-name"` — single note
-- `/verify inbox` — everything in `0-inbox/`
-- `/verify permanent` — everything in `3-permanent/`
-- `/verify "topic"` — all notes matching a topic
-- `/verify` — defaults to `0-inbox/`
+- `/verify "note-name"`: single note
+- `/verify inbox`: everything in `0-inbox/`
+- `/verify permanent`: everything in `3-permanent/`
+- `/verify "topic"`: all notes matching a topic
+- `/verify`: defaults to `0-inbox/`
 - After a burst of captures to check what landed well
 - Before promoting notes from inbox to permanent
 - When deciding where to invest `/deepen` effort
@@ -66,10 +66,10 @@ Use `AskUserQuestion`:
 
 > What would you like to verify?
 >
-> - **`inbox`** — check all inbox notes (default)
-> - **`permanent`** — check all permanent notes
-> - **`"note-name"`** — check a specific note
-> - **`"topic"`** — check all notes matching a topic
+> - **`inbox`**: check all inbox notes (default)
+> - **`permanent`**: check all permanent notes
+> - **`"note-name"`**: check a specific note
+> - **`"topic"`**: check all notes matching a topic
 
 **Argument provided:**
 Proceed immediately.
@@ -125,7 +125,7 @@ Check for cross-note issues using Smart Connections embeddings:
 
 **Near-duplicates** (similarity > 0.85):
 - Notes covering the same insight with different wording
-- Recommend: merge candidate — flag for user
+- Recommend: merge candidate: flag for user
 
 **Contradictions** (similarity > 0.7, conflicting claims):
 - Notes that are semantically related but make opposing claims
@@ -133,7 +133,7 @@ Check for cross-note issues using Smart Connections embeddings:
 
 ### Step 5: Source Verification (Parallel Subagents)
 
-Filter notes to those with sources/citations. Skip sourceless notes (report as "no sources — skipped").
+Filter notes to those with sources/citations. Skip sourceless notes (report as "no sources: skipped").
 
 Spawn `note-verifier` agent(s). When spawning multiple, dispatch them all in the same turn:
 
@@ -160,22 +160,22 @@ Merge outputs from all agents into a single report:
 | [[note]] | shallow | 2/6 (missing: sourcing, voice, source integrity, depth) | 0 | 0 | no sources, topic-as-title |
 
 ### Consistency
-- [[note-A]] ↔ [[note-B]] (0.91 similarity) — near-duplicate, merge candidate
-- [[note-C]] ↔ [[note-D]] (0.78 similarity) — potential contradiction: [specific conflict]
+- [[note-A]] ↔ [[note-B]] (0.91 similarity): near-duplicate, merge candidate
+- [[note-C]] ↔ [[note-D]] (0.78 similarity): potential contradiction: [specific conflict]
 
 ### Source Issues
-#### [[note-name]] — N issues
+#### [[note-name]]: N issues
 | Type | Detail | Severity |
 |------|--------|----------|
 | Dead URL | [url] returns 404 | high |
-| Unsupported claim | "[claim]" — source actually says [what] | high |
+| Unsupported claim | "[claim]": source actually says [what] | high |
 | Missing citation | "[claim]" has no source | medium |
 
 ### Clean
-- [[note-name]] — all sources verified
+- [[note-name]]: all sources verified
 ```
 
-Notes with `wrong_author` or fabricated sources should be flagged in the top section regardless of quality score — a well-written note with fabricated sources is worse than a thin note with real ones.
+Notes with `wrong_author` or fabricated sources should be flagged in the top section regardless of quality score: a well-written note with fabricated sources is worse than a thin note with real ones.
 
 ### Step 7: Fix Plan
 
@@ -187,9 +187,9 @@ Prioritize notes by combined quality + source issues:
 
 ```
 ## Fix Plan (prioritized)
-1. [[note-name]] — fabricated source + shallow → `/deepen "note-name"`
-2. [[note-name]] — 2 dead URLs → `/deepen "note-name"`
-3. [[note-name]] — shallow, no links → `/deepen "note-name"`
+1. [[note-name]]: fabricated source + shallow → `/deepen "note-name"`
+2. [[note-name]]: 2 dead URLs → `/deepen "note-name"`
+3. [[note-name]]: shallow, no links → `/deepen "note-name"`
 ```
 
 For each note needing work, suggest the right tool:
@@ -200,7 +200,7 @@ For each note needing work, suggest the right tool:
 | Missing sources | `/literature` to capture, then link |
 | Covers multiple ideas | Split (manual or via `/deepen`) |
 | Wrong folder for maturity | Promote or demote |
-| Duplicate of another note | Merge candidate — flag for user |
+| Duplicate of another note | Merge candidate: flag for user |
 
 ### Step 7.5: Detect Promotion Clusters
 
@@ -297,7 +297,7 @@ When reporting, include marker counts in the summary. These markers indicate the
 
 - **Verify, don't rewrite.** Report issues. Fixing is `/deepen`'s job.
 - **Read every note.** No scoring from titles alone.
-- **Skip sourceless notes for verification.** Notes with no citations have nothing to verify — still score their quality.
+- **Skip sourceless notes for verification.** Notes with no citations have nothing to verify: still score their quality.
 - **URL checks are mandatory.** Every URL gets fetched. Dead links are high severity.
 - **Be specific.** "Source doesn't support claim" is useless. Say what the source actually says.
 - **Shallow is not bad.** A shallow note is a seed. Verify identifies where to invest, not what to discard.

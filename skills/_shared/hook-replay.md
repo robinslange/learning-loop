@@ -12,7 +12,7 @@ This is the pattern used by `/reflect` Step 4.4 and `/ingest` Step 5.5. It walks
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
 # installed by /init or the SessionStart hook) handles binary location and ORT
 # env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.

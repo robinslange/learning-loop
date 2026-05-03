@@ -3,15 +3,15 @@ name: reflect
 description: 'End-of-session consolidation. Usage: /learning-loop:reflect (no args). Reviews conversation, extracts learnings, routes to auto-memory or vault, cross-links projects, promotes inbox notes. Run after substantial work sessions.'
 ---
 
-# Reflect — Learning Consolidation
+# Reflect: Learning Consolidation
 
 ## Overview
 
-Structured checkpoint that extracts what was learned in this session and persists it to the right stores. This is how the learning loop closes — without this step, knowledge captured during the session rots.
+Structured checkpoint that extracts what was learned in this session and persists it to the right stores. This is how the learning loop closes: without this step, knowledge captured during the session rots.
 
 ## When to Use
 
-- End of a substantial work session (any domain — code, research, theorycrafting, coaching, anything)
+- End of a substantial work session (any domain: code, research, theorycrafting, coaching, anything)
 - When the Stop hook nudges you
 - When the user explicitly asks to consolidate or reflect
 - After receiving multiple corrections in a session
@@ -34,14 +34,14 @@ Per-note tracking is handled automatically by the PostToolUse hook.
 
 ## Process
 
-Work through these steps in order. Be concise throughout — the vault voice is Hemingway, not Tolstoy.
+Work through these steps in order. Be concise throughout: the vault voice is Hemingway, not Tolstoy.
 
 ### Step 1: Session Review
 
 Silently review the conversation. Identify:
 - **Domain**: What area of work/knowledge was this? (project name, topic area)
 - **Nature**: Was this building, debugging, researching, deciding, learning, discussing?
-- **Substance**: Rate the session — was it routine or did genuine learning happen?
+- **Substance**: Rate the session: was it routine or did genuine learning happen?
 
 If the session was purely routine (config change, typo fix, quick lookup), say so and skip to Step 5. Not every session produces learnings.
 
@@ -99,7 +99,7 @@ Using the reflect-scan results from Step 2.5:
 - Existing memories without a confidence field default to `medium` throughout the system
 - Feedback memories: lead with the rule, then Why and How to apply
 - Project memories: lead with the fact, then Why and How to apply
-- **Keep memories tight at capture.** Target body sizes: feedback/user under 400 chars, project/reference under 800 chars. These targets sit below the dream COMPRESS thresholds (500 / 1,000) — capturing tighter avoids round-trips through dream. Cut filler, keep the rule + Why + How to apply.
+- **Keep memories tight at capture.** Target body sizes: feedback/user under 400 chars, project/reference under 800 chars. These targets sit below the dream COMPRESS thresholds (500 / 1,000): capturing tighter avoids round-trips through dream. Cut filler, keep the rule + Why + How to apply.
 - Update MEMORY.md index
 
 **For Obsidian vault items:**
@@ -120,15 +120,15 @@ echo "<absolute-path-to-just-written-note>" >> "${LL_TMP_PREFIX}-new-notes.txt"
 
 ### Step 4.4: Post-Batch Sweep
 
-Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed `post-write-autolink.js` and `post-write-edge-infer.js` entirely — ending up without suggested backlinks or typed edges.
+Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed `post-write-autolink.js` and `post-write-edge-infer.js` entirely: ending up without suggested backlinks or typed edges.
 
-Replay the hook chain on any vault notes missing structural backlinks. Idempotent — safe to run on already-hooked notes.
+Replay the hook chain on any vault notes missing structural backlinks. Idempotent: safe to run on already-hooked notes.
 
 ```bash
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
 # installed by /init or the SessionStart hook) handles binary location and ORT
 # env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace}"
+PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
@@ -137,7 +137,7 @@ ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail
 
 SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
 
-# Detect unlinked candidates (exclude 4-projects — free-form indexes)
+# Detect unlinked candidates (exclude 4-projects: free-form indexes)
 LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
 root = os.environ["LL_VAULT"]
@@ -172,7 +172,7 @@ After writing new vault captures, scan each new note's body for intention patter
 If an intention pattern is found, extract to frontmatter:
 ```yaml
 intentions:
-  - "<extracted project/topic> — <the full intention sentence>"
+  - "<extracted project/topic>: <the full intention sentence>"
 status: intentioned
 ```
 
@@ -184,7 +184,7 @@ When a new vault note touches a claim already in the vault, the existing claim s
 
 Skip this entire step if the reflect new-notes file (`${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-new-notes.txt`) does not exist or is empty (the session wrote no vault notes).
 
-#### 4.6.a — Build candidate pairs
+#### 4.6.a: Build candidate pairs
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
@@ -193,7 +193,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-o
 
 If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
 
-#### 4.6.b — Dispatch refinement-proposer agent
+#### 4.6.b: Dispatch refinement-proposer agent
 
 Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-pairs.json` after expansion):
 
@@ -208,7 +208,7 @@ Return the JSON response only, no commentary, no markdown fences.
 
 Capture the agent's stdout response. Write it to `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-agent-output.json` (resolve before writing).
 
-#### 4.6.c — Validate
+#### 4.6.c: Validate
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"
@@ -217,7 +217,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-r
 
 The validator strips em-dashes, computes sentence delta, and tags each decision with status `ok`, `oversized_warning`, or `auto_rejected`. The cleaned proposed bodies replace the agent's originals.
 
-#### 4.6.d — Present batch for confirmation
+#### 4.6.d: Present batch for confirmation
 
 Read the validated JSON at `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect-refinement-validated.json`. Build a preview-format table from the `decisions` array:
 
@@ -250,7 +250,7 @@ Use `AskUserQuestion` for the action selection.
 
 If the user types `diff N`, print the unified diff between the upstream's current body and the validated `proposed_body` for decision N, then re-prompt.
 
-#### 4.6.e — Apply approved edits
+#### 4.6.e: Apply approved edits
 
 For each decision in the approved set:
 
@@ -259,7 +259,7 @@ For each decision in the approved set:
 - **auto_rejected**: never apply. Log only.
 - **pass**: never apply. Log only.
 
-#### 4.6.f — Emit provenance
+#### 4.6.f: Emit provenance
 
 For each applied refinement:
 
@@ -269,7 +269,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"refinement-pr
 
 For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"`.
 
-#### 4.6.g — Cleanup
+#### 4.6.g: Cleanup
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-reflect"

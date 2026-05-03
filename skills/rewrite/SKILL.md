@@ -3,19 +3,19 @@ name: rewrite
 description: 'Cross-store correction for a retracted or updated belief. Usage: /learning-loop:rewrite "old pattern" "new pattern" [reason]. Searches vault, auto-memory, and episodic history; presents an impact map for triage; executes user-approved changes; records a supersession so future episodic searches get annotated.'
 ---
 
-# Rewrite — Context Gene Editing
+# Rewrite: Context Gene Editing
 
 When a belief turns out to be wrong (or refined), the wrong version sits in three places: the vault as durable notes, the auto-memory as preferences/feedback, and the episodic history as past conversations the LLM may resurface. This skill edits all three coherently.
 
 The Katsuno-Mendelzon split:
-- **Vault and auto-memory** use *revision* semantics — actively rewritten or archived. The world model changes.
-- **Episodic memory** is append-only history — *update* semantics. We do not edit past conversations; we annotate them via the supersessions table so future retrievals carry the correction inline.
+- **Vault and auto-memory** use *revision* semantics: actively rewritten or archived. The world model changes.
+- **Episodic memory** is append-only history: *update* semantics. We do not edit past conversations; we annotate them via the supersessions table so future retrievals carry the correction inline.
 
 ## When to Use
 
-- `/learning-loop:rewrite "old pattern" "new pattern"` — full form, with reason inferred
-- `/learning-loop:rewrite "old pattern" "new pattern" "reason"` — explicit reason for the supersession record
-- `/learning-loop:rewrite` — no args, infer the change from recent conversation context
+- `/learning-loop:rewrite "old pattern" "new pattern"`: full form, with reason inferred
+- `/learning-loop:rewrite "old pattern" "new pattern" "reason"`: explicit reason for the supersession record
+- `/learning-loop:rewrite`: no args, infer the change from recent conversation context
 
 ## Process
 
@@ -40,23 +40,23 @@ Rewriting: "<old>" → "<new>" (reason: <reason>)
 
 Search every store for the OLD pattern. Run all four searches in parallel (single message, multiple Bash calls):
 
-1. **Vault — semantic + keyword:**
+1. **Vault: semantic + keyword:**
    ```
    node PLUGIN/scripts/vault-search.mjs search "<old pattern>" --rerank
    ```
 
-2. **Vault — wiki-link/title hits:**
+2. **Vault: wiki-link/title hits:**
    Use `Glob` for filename matches: `**/*<key-noun>*.md` in `{{VAULT}}/`
 
 3. **Auto-memory:**
    `Grep` the project's `~/.claude/projects/*/memory/` directory for substrings of the old pattern. Read `MEMORY.md` and any matching files.
 
 4. **Episodic memory:**
-   Call `mcp__plugin_episodic-memory_episodic-memory__search` with the old pattern. The post-search-tracking hook will already annotate the result if a supersession exists — do not pre-create one yet.
+   Call `mcp__plugin_episodic-memory_episodic-memory__search` with the old pattern. The post-search-tracking hook will already annotate the result if a supersession exists: do not pre-create one yet.
 
 ### Phase 3: Edge Impact (correction-analyser)
 
-For every vault note hit from Phase 2, identify the *primary* note that codifies the old belief (or notes — there may be more than one). For each primary note, dispatch the `learning-loop:correction-analyser` agent:
+For every vault note hit from Phase 2, identify the *primary* note that codifies the old belief (or notes: there may be more than one). For each primary note, dispatch the `learning-loop:correction-analyser` agent:
 
 ```
 subagent_type: learning-loop:correction-analyser
@@ -78,23 +78,23 @@ Show the user a single consolidated triage map:
 # Rewrite Plan: <old> → <new>
 
 ## Vault notes (N hits)
-- `path/to/primary.md` — primary belief codification
+- `path/to/primary.md`: primary belief codification
   - Suggested: REWRITE (replace old claim with new)
   - Downstream impact: 3 critical, 1 high, 0 medium (from correction-analyser)
-- `path/to/related.md` — references the old belief
+- `path/to/related.md`: references the old belief
   - Suggested: AMEND (update the wiki-link surrounding text)
 
 ## Auto-memory (N hits)
-- `feedback_<name>.md` — captures the old guidance
+- `feedback_<name>.md`: captures the old guidance
   - Suggested: REWRITE
 
 ## Episodic memory (N matches)
 - N past conversations contain the pattern
-- Suggested: SUPERSESSION RECORD (no edits — annotation only)
+- Suggested: SUPERSESSION RECORD (no edits: annotation only)
 
 ## Downstream cascade (from correction-analyser)
-- `path/dependent-a.md` — CRITICAL (sole-dependent rebuttal)
-- `path/dependent-b.md` — HIGH (sole-dependent undercutting)
+- `path/dependent-a.md`: CRITICAL (sole-dependent rebuttal)
+- `path/dependent-b.md`: HIGH (sole-dependent undercutting)
 - ...
 
 Total proposed actions: <N>
@@ -111,12 +111,12 @@ Wait for confirmation. Do not proceed until the user has answered. If they say n
 Run the approved actions. Use the right tool per store.
 
 **Vault rewrites/amends:**
-- Use `Edit` for surgical changes (preferred — preserves frontmatter, links)
+- Use `Edit` for surgical changes (preferred: preserves frontmatter, links)
 - **Always `Read` the file immediately before each `Edit`**, even if you read it during Phase 2. The triage map can grow stale between rendering and execution if other tools touched the file in the meantime. The fresh read also lets you verify the surrounding text still matches what you'll pass to `Edit`.
 - For an ARCHIVE action, follow this exact sequence:
   1. **Dump outgoing edges first.** Run `node PLUGIN/scripts/edges-cli.mjs list <archived-note>` and capture the `outgoing` array from the JSON response. Each entry has `from_path`, `to_path`, `edge_type`, `confidence`, and `direction_flipped`.
   2. **Move the file** to `_archive/` (create the dir if missing).
-  3. **Write the stub** at the original path with a single line: `Superseded — see [[<replacement>]]`. The stub Write fires the post-write hook chain, which calls `removeOutgoingEdges`. With the v1.14.1 fix, that query now skips `source_graph='archived'` rows — but we have not added any yet, so this pass correctly wipes the live edges as intended.
+  3. **Write the stub** at the original path with a single line: `Superseded: see [[<replacement>]]`. The stub Write fires the post-write hook chain, which calls `removeOutgoingEdges`. With the v1.14.1 fix, that query now skips `source_graph='archived'` rows: but we have not added any yet, so this pass correctly wipes the live edges as intended.
   4. **Re-insert the dumped edges** with `source_graph='archived'`. For each edge in the dumped `outgoing` array, run:
      ```bash
      node PLUGIN/scripts/edges-cli.mjs add <from_path> <to_path> <edge_type> \
@@ -169,20 +169,20 @@ Future episodic searches matching "<old>" will be annotated automatically.
 - **Never edit episodic memory directly.** Episodic is append-only history. The supersession record is the only correction mechanism.
 - **Always ask before executing.** This skill is destructive; the triage step is non-negotiable.
 - **One supersession per rewrite.** Even if no notes were edited, record the supersession so future retrievals carry the annotation.
-- **Transition note is mandatory if vault was touched.** This is the "context gene editing" footprint — future you needs to find why a note changed.
+- **Transition note is mandatory if vault was touched.** This is the "context gene editing" footprint: future you needs to find why a note changed.
 - **Preserve archived edges via `source_graph='archived'` marker.** The dump-and-re-insert sequence in Phase 5 keeps the historical justification graph intact. Downstream queries surface them; `removeOutgoingEdges` will not wipe them on subsequent stub writes.
 - **Be terse in reporting.** One framing line, one triage map, one approval prompt, one completion block. No filler.
 
 ## Failure Modes to Avoid
 
-- **Mass edits without triage** — always show the user the plan first
-- **Skipping the supersession record** — if you skip it, future episodic searches will still surface the wrong belief unannotated
-- **Editing past conversations** — episodic is read-only; the post-search hook does the annotation work
-- **Touching unrelated notes** — only edit notes that the hit map identified, never explore-and-edit
-- **Auto-archive without confirmation** — archive is destructive even though reversible; confirm explicitly
+- **Mass edits without triage**: always show the user the plan first
+- **Skipping the supersession record**: if you skip it, future episodic searches will still surface the wrong belief unannotated
+- **Editing past conversations**: episodic is read-only; the post-search hook does the annotation work
+- **Touching unrelated notes**: only edit notes that the hit map identified, never explore-and-edit
+- **Auto-archive without confirmation**: archive is destructive even though reversible; confirm explicitly
 
 ## Related Skills
 
-- `/learning-loop:deepen` — strengthens a single note in place (no cross-store coordination)
-- `/learning-loop:reflect` — end-of-session consolidation (different intent: capture, not retract)
-- `learning-loop:correction-analyser` (agent, not skill) — the edge-traversal subroutine this skill calls
+- `/learning-loop:deepen`: strengthens a single note in place (no cross-store coordination)
+- `/learning-loop:reflect`: end-of-session consolidation (different intent: capture, not retract)
+- `learning-loop:correction-analyser` (agent, not skill): the edge-traversal subroutine this skill calls

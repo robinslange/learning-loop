@@ -7,8 +7,9 @@
 #   ./scripts/release.sh major    # 1.2.2 -> 2.0.0
 #
 # Flags:
-#   --dry-run   Show what would happen without making changes
-#   --no-push   Commit and tag locally but don't push
+#   --dry-run     Show what would happen without making changes
+#   --no-push     Commit and tag locally but don't push
+#   --skip-tests  Skip the npm + cargo test gate (use only for emergency hotfixes)
 
 set -euo pipefail
 
@@ -19,11 +20,13 @@ cd "$ROOT"
 BUMP="${1:-}"
 DRY_RUN=false
 NO_PUSH=false
+SKIP_TESTS=false
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --no-push) NO_PUSH=true ;;
+    --skip-tests) SKIP_TESTS=true ;;
   esac
 done
 
@@ -56,6 +59,18 @@ fi
 if ! git diff --quiet || ! git diff --cached --quiet; then
   echo "Error: uncommitted changes. Commit or stash first."
   exit 1
+fi
+
+# Test gate: run JS + Rust suites before tagging.
+if ! $SKIP_TESTS; then
+  echo "Running npm test..."
+  npm test
+  if [ -d native ]; then
+    echo "Running cargo test --workspace..."
+    (cd native && cargo test --workspace --quiet)
+  fi
+else
+  echo "Skipping tests (--skip-tests). Hope you know what you're doing."
 fi
 
 # Update all versioned manifests

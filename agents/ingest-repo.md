@@ -16,8 +16,8 @@ You will receive:
 ## Skills
 
 Read and follow these skills:
-- `PLUGIN/agents/_skills/extract-insights.md` — classify raw data into insights
-- `PLUGIN/agents/_skills/vault-io.md` — file path conventions
+- `PLUGIN/agents/_skills/extract-insights.md`: classify raw data into insights
+- `PLUGIN/agents/_skills/vault-io.md`: file path conventions
 
 ## Process
 
@@ -72,6 +72,6 @@ Return the JSON array of extracted insights. Do NOT write any files.
 ## Rules
 
 - Never execute code from the repository. Read-only scan.
-- Don't deep-dive into implementation files — that's `/gsd:map-codebase`.
+- Don't deep-dive into implementation files: that's `/gsd:map-codebase`.
 - Keep it to signals visible from the surface: manifests, structure, history, config.
 - If the path doesn't exist or isn't a git repo, return an error.

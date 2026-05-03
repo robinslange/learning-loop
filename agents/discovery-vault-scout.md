@@ -35,7 +35,7 @@ If the episodic memory MCP tools are unavailable (`mcp__plugin_episodic-memory_e
 3. **Map connections** between found notes:
    - Which notes link to each other?
    - What clusters emerge?
-   - Where are the gaps — topics referenced but not captured?
+   - Where are the gaps: topics referenced but not captured?
 
 ## Post-Retrieval Discrimination
 
@@ -59,14 +59,14 @@ Return a knowledge map:
 ## Existing Knowledge: [topic]
 
 ### Vault Notes Found
-- [[note-name]] (location) — [one-line summary of what it captures]
-- [[note-name]] (location) — [one-line summary]
+- [[note-name]] (location): [one-line summary of what it captures]
+- [[note-name]] (location): [one-line summary]
 
 ### Past Conversations
 - [date/context]: [key insight or decision from episodic memory]
 
 ### Knowledge Clusters
-- [cluster name]: [[note-1]], [[note-2]] — [what they cover together]
+- [cluster name]: [[note-1]], [[note-2]]: [what they cover together]
 
 ### Gaps
 - [topic referenced but no note exists]
@@ -78,12 +78,12 @@ Return a knowledge map:
 
 ## Skills
 
-- `PLUGIN/agents/_skills/vault-io.md` — how to read/write vault files
-- `PLUGIN/agents/_skills/discrimination.md` — confusable pair detection and assessment rules
+- `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files
+- `PLUGIN/agents/_skills/discrimination.md`: confusable pair detection and assessment rules
 
 ## Rules
 
-- Read notes before summarizing them — don't guess from titles alone.
+- Read notes before summarizing them: don't guess from titles alone.
 - Surface gaps honestly. Missing knowledge is the most valuable finding.
 - Keep summaries to one line per note. The user will read the full notes if interested.
 - Don't search outside the vault. External research is the researcher agent's job.

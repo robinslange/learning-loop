@@ -3,7 +3,7 @@ name: quick-note
 description: 'Quick mid-conversation capture to inbox. Usage: /learning-loop:quick-note (infers from context), /learning-loop:quick-note "insight title", or /learning-loop:quick-note "title" "body". Writes to 0-inbox/ without breaking flow.'
 ---
 
-# Quick Note — Zero-Friction Capture
+# Quick Note: Zero-Friction Capture
 
 ## Overview
 
@@ -11,15 +11,15 @@ Captures a single insight to `0-inbox/` mid-conversation. No preview, no approva
 
 ## When to Use
 
-- `/learning-loop:quick-note` — infer the insight from conversation context
-- `/learning-loop:quick-note "insight as title"` — user provides the title
-- `/learning-loop:quick-note "title" "body"` — user provides everything
+- `/learning-loop:quick-note`: infer the insight from conversation context
+- `/learning-loop:quick-note "insight as title"`: user provides the title
+- `/learning-loop:quick-note "title" "body"`: user provides everything
 
 ## Process
 
 ### Step 1: Extract the Insight
 
-**If no args:** Read the recent conversation. Identify the most capture-worthy insight — a decision made, pattern discovered, or connection drawn. If nothing stands out, tell the user and stop.
+**If no args:** Read the recent conversation. Identify the most capture-worthy insight: a decision made, pattern discovered, or connection drawn. If nothing stands out, tell the user and stop.
 
 **If title only:** Use it as the insight title. Derive body from conversation context.
 

@@ -3,15 +3,15 @@ name: help
 description: 'Show all learning-loop commands with usage and modifiers. Usage: /learning-loop:help (no args).'
 ---
 
-# Help — Learning Loop Commands
+# Help: Learning Loop Commands
 
 ## Overview
 
-Present the guide below when the user runs `/learning-loop:help` or asks what the learning loop can do. Adapt the level of detail to context — if they seem experienced, lean on the quick reference at the end. If they're new, walk them through the narrative.
+Present the guide below when the user runs `/learning-loop:help` or asks what the learning loop can do. Adapt the level of detail to context: if they seem experienced, lean on the quick reference at the end. If they're new, walk them through the narrative.
 
 ## When to Use
 
-- `/learning-loop:help` — show all commands
+- `/learning-loop:help`: show all commands
 - When the user asks "what can the learning loop do?"
 - When suggesting a next action and the user seems unsure of their options
 
@@ -33,7 +33,7 @@ The learning loop turns conversations into lasting knowledge. Ideas start rough,
 /learning-loop:discovery "spaced repetition"
 ```
 
-It searches your vault for what you already know, researches the web for what you don't, and walks you through the topic interactively. You steer — it digs. At the end, key insights land in your inbox as atomic notes.
+It searches your vault for what you already know, researches the web for what you don't, and walks you through the topic interactively. You steer: it digs. At the end, key insights land in your inbox as atomic notes.
 
 Want to just browse without saving anything? Add `--surf`:
 
@@ -49,7 +49,7 @@ Other options: `--style guided|branch|checkpoint`, `--tone academic|conversation
 /learning-loop:literature https://example.com/article
 ```
 
-It fetches the source, extracts the core ideas, and writes a literature note to `2-literature/`. The source's ideas, captured clean — your commentary goes in separate notes that link back.
+It fetches the source, extracts the core ideas, and writes a literature note to `2-literature/`. The source's ideas, captured clean: your commentary goes in separate notes that link back.
 
 **Need a quick answer?** Run `/learning-loop:quick`.
 
@@ -65,11 +65,11 @@ It searches your vault and the web in parallel, verifies key claims, and gives y
 /learning-loop:quick-note "insight as title"
 ```
 
-It grabs the insight, finds vault links, and drops an atomic note in `0-inbox/`. No preview, no approval — just a one-line confirmation and back to work. Run it with no args and it infers the insight from conversation context.
+It grabs the insight, finds vault links, and drops an atomic note in `0-inbox/`. No preview, no approval: just a one-line confirmation and back to work. Run it with no args and it infers the insight from conversation context.
 
 **Finishing a work session?** Run `/learning-loop:reflect`.
 
-It reviews what happened in the conversation, extracts anything worth keeping, and routes it to the right place — behavioral stuff to auto-memory, knowledge to your vault. This is how the loop closes. Without it, insights from the session evaporate.
+It reviews what happened in the conversation, extracts anything worth keeping, and routes it to the right place: behavioral stuff to auto-memory, knowledge to your vault. This is how the loop closes. Without it, insights from the session evaporate.
 
 ### Making notes stronger
 
@@ -91,7 +91,7 @@ Notes land in `0-inbox/` as rough captures. Two commands move them forward:
 
 ### Challenging what you know
 
-**`/learning-loop:gaps`** is the scientific method applied to your vault. It doesn't just find what's missing — it challenges what you believe. For any topic, it extracts your vault's claims, searches for counterarguments and criticisms, and surfaces tensions, absences, and thin ice. Findings are framed as questions, not verdicts. You decide what they mean.
+**`/learning-loop:gaps`** is the scientific method applied to your vault. It doesn't just find what's missing: it challenges what you believe. For any topic, it extracts your vault's claims, searches for counterarguments and criticisms, and surfaces tensions, absences, and thin ice. Findings are framed as questions, not verdicts. You decide what they mean.
 
 ```
 /learning-loop:gaps "theanine"
@@ -99,7 +99,7 @@ Notes land in `0-inbox/` as rough captures. Two commands move them forward:
 /learning-loop:gaps --sweep
 ```
 
-Focused mode analyses a topic. No-argument mode auto-picks your densest unchallenged knowledge cluster. Sweep mode runs across the entire vault. Depth scales to note maturity — permanent notes get deep scrutiny. Counterpoint notes land in your inbox like any other knowledge, tagged `#counterpoint` and linked back to the challenged note.
+Focused mode analyses a topic. No-argument mode auto-picks your densest unchallenged knowledge cluster. Sweep mode runs across the entire vault. Depth scales to note maturity: permanent notes get deep scrutiny. Counterpoint notes land in your inbox like any other knowledge, tagged `#counterpoint` and linked back to the challenged note.
 
 ### Keeping things tidy
 
@@ -123,7 +123,7 @@ If you've enabled the librarian (see below), `/health` also shows pending librar
 
 Phase 1 presents link suggestions, tag suggestions, voice flags, and duplicate flags for approval. Phase 2 hands staleness suspects to Claude for deep investigation. Enable via `/init` Phase 7 (requires ollama + 16GB+ RAM). No API calls, completely local and free.
 
-**`/learning-loop:refresh`** is pure recall — what does your vault already hold on a topic? No research, no new notes. Just surfaces what's there, organized by knowledge depth, and suggests what to do next.
+**`/learning-loop:refresh`** is pure recall: what does your vault already hold on a topic? No research, no new notes. Just surfaces what's there, organized by knowledge depth, and suggests what to do next.
 
 ```
 /learning-loop:refresh "authentication patterns"
@@ -175,19 +175,19 @@ If you've configured federation via `/learning-loop:init`, search results automa
 |---------|-------------|
 | `/learning-loop:init` | First-time setup: vault path, persona, folder structure |
 | `/learning-loop:init` (Phase 4) | Configure federation: identity, peers, visibility |
-| `/learning-loop:discovery "topic"` | Interactive research journey — explore something new or go deeper |
-| `/learning-loop:quick "question"` | Fast verified answer — vault + web, auto-captures if novel |
+| `/learning-loop:discovery "topic"` | Interactive research journey: explore something new or go deeper |
+| `/learning-loop:quick "question"` | Fast verified answer: vault + web, auto-captures if novel |
 | `/learning-loop:literature <URL>` | Capture an external source as a literature note |
-| `/learning-loop:quick-note [title] [body]` | Quick capture to inbox — no args infers from context |
-| `/learning-loop:reflect` | End-of-session — extract and persist learnings |
+| `/learning-loop:quick-note [title] [body]` | Quick capture to inbox: no args infers from context |
+| `/learning-loop:reflect` | End-of-session: extract and persist learnings |
 | `/learning-loop:deepen <note>` | Strengthen a single note with research |
 | `/learning-loop:verify [scope]` | Score quality + verify sources, find what needs work |
 | `/learning-loop:inbox` | Batch triage inbox notes |
-| `/learning-loop:refresh "topic"` | Surface what you already know — no research |
-| `/learning-loop:gaps "topic"` | Challenge vault knowledge — find tensions, thin ice, and missing perspectives |
+| `/learning-loop:refresh "topic"` | Surface what you already know: no research |
+| `/learning-loop:gaps "topic"` | Challenge vault knowledge: find tensions, thin ice, and missing perspectives |
 | `/learning-loop:ingest [linear\|repo\|context]` | Pull external context into vault + auto-memory |
-| `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard — ghost dupes, orphans, stale notes, broken links |
-| `/learning-loop:health --librarian` | Review librarian queue — approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
+| `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard: ghost dupes, orphans, stale notes, broken links |
+| `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
 | `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
 | `/learning-loop:help` | This guide |

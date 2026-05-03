@@ -1,10 +1,20 @@
 # Changelog
 
+All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Breaking changes are marked **BREAKING**; entries that require user action after upgrade are marked **MIGRATION**.
+
 ## Unreleased
+
+## v1.16.13
 
 ### Fixed
 
-- **Auto-started watcher never spawned the librarian.** `hooks/session-start.js` spawns `ll-search watch` directly when no watcher is alive, but it was missing the `--librarian-script` flag that the manual `ll-watch` CLI passes. The Rust binary only forks the librarian Node child when that flag is set, so every session-auto-started daemon ran without librarian tasks (voice gates, tag suggestions, duplicate detection, link investigations) — gemma4:e2b sat idle except in sessions where the user manually ran `ll-watch`. Hook now mirrors the CLI: appends `--librarian-script <PLUGIN>/scripts/librarian.mjs` when the script exists. Librarian itself short-circuits cleanly if `librarian.enabled=false` in config, so the flag is safe to pass unconditionally.
+- **`scripts/sweep-hook-replay.mjs` was broken since the post-tool dispatcher consolidation in v1.16.10.** It still shelled out to `post-write-autolink.js` and `post-write-edge-infer.js`, which had been merged into `hooks/post-tool.js`. The script silently failed (non-zero exit) on every replay, leaving subagent-written notes without structural backlinks and typed edges. Replaced the per-hook loop with a single `post-tool.js` invocation, updated the doc comment and help text. Also gitignored `native/crates/*/spikes/` for spike scratch directories.
+
+## v1.16.12
+
+### Fixed
+
+- **Auto-started watcher never spawned the librarian.** `hooks/session-start.js` spawns `ll-search watch` directly when no watcher is alive, but it was missing the `--librarian-script` flag that the manual `ll-watch` CLI passes. The Rust binary only forks the librarian Node child when that flag is set, so every session-auto-started daemon ran without librarian tasks (voice gates, tag suggestions, duplicate detection, link investigations), gemma4:e2b sat idle except in sessions where the user manually ran `ll-watch`. Hook now mirrors the CLI: appends `--librarian-script <PLUGIN>/scripts/librarian.mjs` when the script exists. Librarian itself short-circuits cleanly if `librarian.enabled=false` in config, so the flag is safe to pass unconditionally.
 
 ## v1.16.11
 
