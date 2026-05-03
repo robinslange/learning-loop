@@ -49,6 +49,10 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
     edges.into_iter().map(|(k, v)| (k, v.into_iter().collect())).collect()
 }
 
+// Legacy standalone implementation kept for the legacy local_rrf_scores
+// regression path and graph.rs's own tag-IDF tests. Production callers use
+// SearchContext::tag_expand_from_map (in-memory cached tags).
+#[cfg(test)]
 pub(crate) fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(String, f64)> {
     let tags_map = load_tags_map(conn);
     let total_notes = tags_map.len() as f64;

@@ -7,6 +7,7 @@ pub mod reflect;
 pub mod store;
 pub mod tune;
 pub mod eval;
+pub mod context;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
@@ -17,3 +18,4 @@ pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_s
 pub use store::{EmbeddingStore, load_store};
 pub use tune::tune_prf;
 pub use eval::eval_prf;
+pub use context::SearchContext;

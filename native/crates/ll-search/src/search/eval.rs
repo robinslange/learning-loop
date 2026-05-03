@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use rayon::prelude::*;
 use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf_with, PrfParams};
-use super::graph::{load_link_graph, personalized_pagerank, tag_expand};
+use super::scoring::{finalize_rrf, rocchio_prf_with, PrfParams, add_ranked_rrf};
 use super::store::EmbeddingStore;
+use super::context::SearchContext;
 
 #[derive(Debug, Serialize)]
 pub struct EvalResult {
@@ -95,68 +94,25 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
     queries
 }
 
-fn rrf_baseline(
+fn eval_ranking(
+    ctx: &SearchContext,
     conn: &Connection,
     query_vec: &[f32],
     query_text: &str,
-    all_embeddings: &[(i64, String, Vec<f32>)],
-    graph: &HashMap<String, Vec<String>>,
+    prf_params: Option<&PrfParams>,
 ) -> Vec<String> {
-    let mut vec_scored: Vec<(String, f64)> = all_embeddings
-        .par_iter()
-        .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
-        .collect();
-    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(30);
+    let all_embeddings = ctx.store.all();
+    let signals = ctx.compute_signals(conn, query_vec, query_text);
 
-    let fts_results = fts_bm25_query(conn, query_text, 30);
+    let mut rrf = ctx.rrf_from_signals(&signals, None);
 
-    let mut rrf: HashMap<String, f64> = HashMap::new();
-    add_ranked_rrf(&mut rrf, vec_scored.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, fts_results.iter().map(|(_, p, _)| p.as_str()));
-
-    let seeds = collect_seeds(&vec_scored, &fts_results);
-    let ppr_results = personalized_pagerank(graph, &seeds, 0.5, 20);
-    let tag_results = tag_expand(conn, &seeds);
-    add_ranked_rrf(&mut rrf, ppr_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, tag_results.iter().map(|(p, _)| p.as_str()));
-
-    finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect()
-}
-
-fn rrf_hybrid_prf(
-    conn: &Connection,
-    query_vec: &[f32],
-    query_text: &str,
-    all_embeddings: &[(i64, String, Vec<f32>)],
-    graph: &HashMap<String, Vec<String>>,
-    params: &PrfParams,
-) -> Vec<String> {
-    let mut vec_scored: Vec<(String, f64)> = all_embeddings
-        .par_iter()
-        .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
-        .collect();
-    vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(30);
-
-    let fts_results = fts_bm25_query(conn, query_text, 30);
-
-    let mut rrf: HashMap<String, f64> = HashMap::new();
-    add_ranked_rrf(&mut rrf, vec_scored.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, fts_results.iter().map(|(_, p, _)| p.as_str()));
-
-    let seeds = collect_seeds(&vec_scored, &fts_results);
-    let ppr_results = personalized_pagerank(graph, &seeds, 0.5, 20);
-    let tag_results = tag_expand(conn, &seeds);
-    add_ranked_rrf(&mut rrf, ppr_results.iter().map(|(p, _)| p.as_str()));
-    add_ranked_rrf(&mut rrf, tag_results.iter().map(|(p, _)| p.as_str()));
-
-    // Hybrid-feedback PRF
-    let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
-    initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    initial.truncate(30);
-    let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, params);
-    add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+    if let Some(params) = prf_params {
+        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
+        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        initial.truncate(30);
+        let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, params);
+        add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+    }
 
     finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect()
 }
@@ -179,10 +135,9 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
     (recall_5, recall_10, mrr, hit_1)
 }
 
-pub fn eval_prf(conn: &Connection, store: &EmbeddingStore, min_links: usize) -> EvalResult {
+pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) -> EvalResult {
     let queries = build_eval_set(conn, min_links);
-    let all_embeddings = store.all();
-    let graph = load_link_graph(conn);
+    let ctx = SearchContext::build(conn);
 
     eprintln!("Eval set: {} queries with {}+ resolved links", queries.len(), min_links);
 
@@ -210,10 +165,7 @@ pub fn eval_prf(conn: &Connection, store: &EmbeddingStore, min_links: usize) -> 
 
         for q in &queries {
             let qvec = embed_query(&q.title);
-            let results = match params {
-                None => rrf_baseline(conn, &qvec, &q.title, &all_embeddings, &graph),
-                Some(p) => rrf_hybrid_prf(conn, &qvec, &q.title, &all_embeddings, &graph, p),
-            };
+            let results = eval_ranking(&ctx, conn, &qvec, &q.title, params.as_ref());
             let (r5, r10, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
             total_r5 += r5;
             total_r10 += r10;

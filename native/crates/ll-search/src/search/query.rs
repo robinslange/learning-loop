@@ -1,16 +1,23 @@
 use std::collections::{HashMap, HashSet};
 
-use rayon::prelude::*;
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, finalize_rrf, rocchio_prf_with, PrfParams};
-use super::graph::{load_link_graph, personalized_pagerank, tag_expand};
+use super::scoring::{add_ranked_rrf, fts_bm25_query, finalize_rrf};
+#[cfg(test)]
+use super::graph::tag_expand;
+#[cfg(test)]
+use super::graph::personalized_pagerank;
+#[cfg(test)]
+use super::scoring::{collect_seeds, dot_product, rocchio_prf_with, PrfParams};
+#[cfg(test)]
+use rayon::prelude::*;
 use super::federation::{add_peer_rrf_scores, load_title_federated};
 use super::store::EmbeddingStore;
+use super::context::SearchContext;
 
 #[derive(Serialize)]
 pub struct SearchResult {
@@ -57,6 +64,10 @@ impl TemporalParams {
     }
 }
 
+// Legacy standalone implementation kept for the regression test in
+// search/context.rs that asserts SearchContext::local_rrf_scores produces
+// identical output. Production code uses the SearchContext method.
+#[cfg(test)]
 pub(crate) fn local_rrf_scores(
     conn: &Connection,
     query_vec: &[f32],
@@ -106,23 +117,20 @@ pub(crate) fn hybrid_query_inner(
     query_text: &str,
     top_n: usize,
     temporal: &TemporalParams,
-    store: &EmbeddingStore,
+    _store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
-    let all_embeddings = store.all();
-    let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
-    let titles = load_titles_map(conn);
-    let mtimes = load_mtime_map(conn);
+    let ctx = SearchContext::build(conn);
+    let mut rrf = ctx.local_rrf_scores(conn, query_vec, query_text);
 
     if temporal.has_any() {
-        apply_temporal_boost(&mut rrf, &mtimes, temporal, conn);
+        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn);
     }
 
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
-            title: titles.get(&path).cloned().flatten(),
-            mtime: mtimes.get(&path).copied(),
+            title: ctx.titles.get(&path).cloned().flatten(),
+            mtime: ctx.mtimes.get(&path).copied(),
             path,
             score,
         })
@@ -148,12 +156,10 @@ pub(crate) fn hybrid_query_federated_inner(
     top_n: usize,
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
-    store: &EmbeddingStore,
+    _store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
-    let all_embeddings = store.all();
-    let graph = load_link_graph(conn);
-    let mut rrf = local_rrf_scores(conn, query_vec, query_text, &all_embeddings, &graph);
-    let mtimes = load_mtime_map(conn);
+    let ctx = SearchContext::build(conn);
+    let mut rrf = ctx.local_rrf_scores(conn, query_vec, query_text);
 
     let local_dim = query_vec.len();
 
@@ -177,14 +183,14 @@ pub(crate) fn hybrid_query_federated_inner(
     }
 
     if temporal.has_any() {
-        apply_temporal_boost(&mut rrf, &mtimes, temporal, conn);
+        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn);
     }
 
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: load_title_federated(&path, conn, peers),
-            mtime: mtimes.get(&path).copied(),
+            mtime: ctx.mtimes.get(&path).copied(),
             path,
             score,
         })

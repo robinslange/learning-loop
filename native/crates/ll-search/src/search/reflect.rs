@@ -7,11 +7,11 @@ use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
 use super::scoring::{dot_product, finalize_rrf};
-use super::query::{local_rrf_scores, load_titles_map, SearchResult};
-use super::graph::load_link_graph;
+use super::query::{SearchResult, load_titles_map};
 use super::federation::{add_peer_rrf_scores, batch_load_bodies, batch_load_bodies_federated};
 use super::cluster::discriminate_pairs;
 use super::store::EmbeddingStore;
+use super::context::SearchContext;
 
 #[derive(Serialize)]
 pub struct ReflectQueryResult {
@@ -34,21 +34,20 @@ pub fn reflect_scan(
     discriminate_threshold: f32,
     store: &EmbeddingStore,
 ) -> ReflectScanResult {
-    let all_embeddings = store.all();
-    let titles = load_titles_map(conn);
-    let graph = load_link_graph(conn);
+    let ctx = SearchContext::build(conn);
+    let all_embeddings = ctx.store.all();
 
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
+        let rrf = ctx.local_rrf_scores(conn, &query_vec, query_text);
 
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
             .map(|(path, score)| SearchResult {
-                title: titles.get(&path).cloned().flatten(),
+                title: ctx.titles.get(&path).cloned().flatten(),
                 mtime: None,
                 path,
                 score,
@@ -85,7 +84,7 @@ pub fn reflect_scan(
             .map(|r| SearchResult {
                 path: r.path.clone(),
                 score: r.score,
-                title: titles.get(&r.path).cloned().flatten(),
+                title: ctx.titles.get(&r.path).cloned().flatten(),
                 mtime: None,
             })
             .collect();
@@ -127,8 +126,8 @@ pub fn reflect_scan_federated(
     peers: &[(String, Connection)],
     store: &EmbeddingStore,
 ) -> ReflectScanResult {
-    let all_embeddings = store.all();
-    let titles = load_titles_map(conn);
+    let ctx = SearchContext::build(conn);
+    let all_embeddings = ctx.store.all();
 
     let peer_data: Vec<(&str, Vec<(i64, String, Vec<f32>)>, HashMap<String, Option<String>>)> =
         peers
@@ -142,21 +141,19 @@ pub fn reflect_scan_federated(
             })
             .collect();
 
-    let mut merged_titles = titles.clone();
+    let mut merged_titles = (*ctx.titles).clone();
     for (pid, _, pt) in &peer_data {
         for (path, title) in pt {
             merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
         }
     }
 
-    let graph = load_link_graph(conn);
-
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
 
     for query_text in queries {
         let query_vec = embed_query(query_text);
-        let mut rrf = local_rrf_scores(conn, &query_vec, query_text, &all_embeddings, &graph);
+        let mut rrf = ctx.local_rrf_scores(conn, &query_vec, query_text);
 
         for (peer_id, peer_conn) in peers {
             let peer_embs = peer_data
