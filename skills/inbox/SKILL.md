@@ -41,7 +41,7 @@ Launch the `inbox-organiser` agent with:
 
 The agent definition is at `PLUGIN/agents/inbox-organiser.md`.
 
-Use `subagent_type: "learning-loop:note-scorer"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
+Use `subagent_type: "learning-loop:inbox-organiser"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 
 ### Step 1.5: Surface Librarian Observations for Inbox Notes
 
