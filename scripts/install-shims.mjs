@@ -75,8 +75,9 @@ setlocal enabledelayedexpansion
 set "CACHE_DIR=${cacheParent}"
 set "LATEST="
 
-rem Find the highest version-named directory (starts with a digit).
-for /f "delims=" %%D in ('dir /b /ad "!CACHE_DIR!" 2^>nul ^| findstr /r "^[0-9]" ^| sort') do (
+rem Find the highest semver-named directory. Uses PowerShell because cmd's
+rem built-in sort is alphabetical: "1.10.0" would sort before "1.9.0".
+for /f "delims=" %%D in ('powershell -NoProfile -Command "Get-ChildItem '!CACHE_DIR!' -Directory -ErrorAction SilentlyContinue ^| Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } ^| Sort-Object { [version]$_.Name } ^| Select-Object -Last 1 -ExpandProperty Name"') do (
   set "LATEST=!CACHE_DIR!\\%%D"
 )
 

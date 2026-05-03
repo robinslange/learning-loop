@@ -116,10 +116,11 @@ function writeSnapshotLocked(snap) {
   if (!path) return;
   const lockPath = path + '.lock';
   const held = acquireSnapshotLock(lockPath);
+  if (!held) return;
   try {
     writeSnapshot(snap);
   } finally {
-    if (held) releaseSnapshotLock(lockPath);
+    releaseSnapshotLock(lockPath);
   }
 }
 

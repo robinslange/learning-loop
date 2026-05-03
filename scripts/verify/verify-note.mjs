@@ -61,7 +61,7 @@ export async function verifyNote(notePath, config = {}) {
     }
 
     if (result.metadata?.pmid) {
-      updateCitationIndex(result.metadata.pmid, result.metadata, noteFilename);
+      await updateCitationIndex(result.metadata.pmid, result.metadata, noteFilename);
     }
 
     results.push({ source: src, ...result });
