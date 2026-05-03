@@ -33,4 +33,8 @@ native/.wrangler/
 
 # Training data (adapter weights, pair datasets)
 native/training_data/
+
+# Spike scratch (eval sets, model downloads, ad-hoc runs)
+native/crates/*/spikes/
+
 .worktrees/

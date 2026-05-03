@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-// sweep-hook-replay.mjs — Replay autolink + edge-infer hooks on vault notes.
+// sweep-hook-replay.mjs — Replay the post-tool dispatcher on vault notes.
 //
-// Background: PostToolUse hooks (post-write-autolink.js, post-write-edge-infer.js)
-// don't fire on subagent Write/Edit tool calls. Notes written by note-writer,
-// discovery-researcher, literature-capturer, etc. bypass the structural backlink
-// and typed-edge infrastructure entirely. This script replays the hook chain on
-// one or more vault notes as if a main-thread Write had triggered them.
+// Background: PostToolUse hooks don't fire on subagent Write/Edit tool calls.
+// Notes written by note-writer, discovery-researcher, literature-capturer,
+// etc. bypass the structural backlink and typed-edge infrastructure entirely.
+// This script invokes hooks/post-tool.js (the coalesced dispatcher running
+// autolink + edge-infer + provenance) on one or more vault notes as if a
+// main-thread Write had triggered it.
 //
 // Used by the post-batch sweep step in /reflect and /ingest, and by backfill
 // runs for historical unhooked notes.
@@ -14,9 +15,9 @@
 //   sweep-hook-replay.mjs <file> [<file> ...]
 //   sweep-hook-replay.mjs --stdin                 # read newline-separated paths
 //
-// The hooks are idempotent (autolink checks for existing [[links]] before
-// appending; edge-infer removes outgoing edges before re-adding), so running
-// on already-hooked notes is safe.
+// The dispatcher's modules are idempotent (autolink checks for existing
+// [[links]] before appending; edge-infer removes outgoing edges before
+// re-adding), so running on already-hooked notes is safe.
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -24,8 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOOKS_DIR = resolve(__dirname, '..', 'hooks');
-const HOOKS = ['post-write-autolink.js', 'post-write-edge-infer.js'];
+const HOOK_PATH = resolve(__dirname, '..', 'hooks', 'post-tool.js');
 const PER_FILE_TIMEOUT_MS = 15000;
 
 function readStdinPaths() {
@@ -50,21 +50,18 @@ function replayOne(absPath) {
     tool_response: { success: true },
   });
 
-  for (const hook of HOOKS) {
-    const hookPath = resolve(HOOKS_DIR, hook);
-    const result = spawnSync('node', [hookPath], {
-      input: stdin,
-      encoding: 'utf-8',
-      timeout: PER_FILE_TIMEOUT_MS,
-    });
-    if (result.status !== 0) {
-      return {
-        path: absPath,
-        ok: false,
-        reason: `${hook} exit ${result.status}`,
-        stderr: (result.stderr || '').trim().slice(0, 500),
-      };
-    }
+  const result = spawnSync('node', [HOOK_PATH], {
+    input: stdin,
+    encoding: 'utf-8',
+    timeout: PER_FILE_TIMEOUT_MS,
+  });
+  if (result.status !== 0) {
+    return {
+      path: absPath,
+      ok: false,
+      reason: `post-tool.js exit ${result.status}`,
+      stderr: (result.stderr || '').trim().slice(0, 500),
+    };
   }
   return { path: absPath, ok: true };
 }
@@ -76,9 +73,10 @@ function main() {
     const helpText = `sweep-hook-replay.mjs <file> [<file> ...]
 sweep-hook-replay.mjs --stdin                 Read newline-separated paths from stdin
 
-Replays post-write hooks (post-write-autolink.js, post-write-edge-infer.js)
-on one or more vault notes. Used after subagent writes to compensate for
-PostToolUse hooks not firing on subagent tool calls.
+Invokes the post-tool dispatcher (hooks/post-tool.js) on one or more vault
+notes, running autolink + edge-infer + provenance in fixed order. Used after
+subagent writes to compensate for PostToolUse hooks not firing on subagent
+tool calls.
 
 Output: JSON summary {processed, ok, failed, failures}. Exit code 0 on full
 success, 1 if any file failed, 2 on usage error.
