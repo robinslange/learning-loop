@@ -8,13 +8,7 @@
 // For each peer in federation/config.json whose index.db contains the retracted note,
 // the event is marked as targeted to that peer.
 
-import {
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  existsSync,
-  readdirSync,
-} from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join, dirname } from 'path';
 import { initSQL } from './lib/sqljs.mjs';
