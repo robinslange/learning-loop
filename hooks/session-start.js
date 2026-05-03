@@ -172,25 +172,7 @@ try {
   }
 } catch {}
 
-// Apply config tokens if needed (runs once after install/update)
-const configMarker = join(PLUGIN_DIR, '.config-applied');
 const pluginData = resolvePluginData();
-try {
-  const pluginDataConfig = pluginData ? join(pluginData, 'config.json') : null;
-  const legacyConfig = join(PLUGIN_DIR, 'config.json');
-  const activeConfig =
-    pluginDataConfig && existsSync(pluginDataConfig) ? pluginDataConfig : legacyConfig;
-  const configExists = existsSync(activeConfig);
-  const markerExists = existsSync(configMarker);
-  const configNewer =
-    configExists && markerExists && statSync(activeConfig).mtimeMs > statSync(configMarker).mtimeMs;
-  if (!markerExists || configNewer) {
-    execFileSync('node', [join(PLUGIN_DIR, 'scripts', 'apply-config.mjs')], {
-      stdio: 'ignore',
-    });
-    writeFileSync(configMarker, '');
-  }
-} catch {}
 
 // Federation seed version check — one-shot notice when seed predates current
 // plugin major. Dedupe via marker; init clears the marker on successful re-run
