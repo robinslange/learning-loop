@@ -15,6 +15,12 @@ use super::protocol::{ClientMessage, HubMessage};
 
 const SCHEMA_VERSION: u32 = 1;
 
+fn is_safe_peer_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 #[derive(Serialize)]
 pub struct SyncResult {
     pub export: Option<ExportResult>,
@@ -168,6 +174,10 @@ pub fn sync_all(
     let mut skipped = Vec::new();
 
     for peer in &peers {
+        if !is_safe_peer_id(&peer.peer_id) {
+            eprintln!("rejecting peer with unsafe peer_id: {:?}", peer.peer_id);
+            continue;
+        }
         let peer_dir = peers_base.join(&peer.peer_id);
         let meta_path = peer_dir.join("index.db.meta");
 
@@ -380,4 +390,40 @@ fn ensure_peer_embeddings(db_path: &Path, peer_id: &str) -> anyhow::Result<()> {
 
     eprintln!("Peer {} embeddings complete", peer_id);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_safe_peer_id_accepts_valid() {
+        assert!(is_safe_peer_id("abc123"));
+        assert!(is_safe_peer_id("peer-01"));
+        assert!(is_safe_peer_id("peer_01"));
+        assert!(is_safe_peer_id("ABC_123-xyz"));
+    }
+
+    #[test]
+    fn is_safe_peer_id_rejects_traversal() {
+        assert!(!is_safe_peer_id("../etc"));
+        assert!(!is_safe_peer_id(".."));
+        assert!(!is_safe_peer_id("foo/bar"));
+        assert!(!is_safe_peer_id("foo\\bar"));
+        assert!(!is_safe_peer_id(""));
+        assert!(!is_safe_peer_id("foo bar"));
+    }
+
+    #[test]
+    fn is_safe_peer_id_rejects_overlong() {
+        let long = "a".repeat(129);
+        assert!(!is_safe_peer_id(&long));
+        assert!(is_safe_peer_id(&"a".repeat(128)));
+    }
+
+    #[test]
+    fn is_safe_peer_id_rejects_unicode() {
+        assert!(!is_safe_peer_id("peer\u{200B}id"));
+        assert!(!is_safe_peer_id("café"));
+    }
 }
