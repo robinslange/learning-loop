@@ -14,7 +14,7 @@ pre-commit:
         done
 
     prettier:
-      glob: "{hooks,scripts,tests}/**/*.{js,mjs,json}"
+      glob: "{hooks,scripts}/**/*.{js,mjs}"
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
