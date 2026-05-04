@@ -91,7 +91,6 @@ async function main() {
   console.error('Building vault index for link resolution...');
   const resolver = makeResolver(buildVaultIndex(VAULT_PATH));
 
-  const db = dryRun ? null : await openEdgeDb(DB_FILE);
   const stats = {
     notes_scanned: 0,
     notes_with_edges: 0,
@@ -109,90 +108,93 @@ async function main() {
     ),
   );
 
-  let progress = 0;
-  for (const filePath of files) {
-    progress++;
-    if (progress % 100 === 0) {
-      console.error(`  ${progress}/${files.length} (edges so far: ${stats.edges_total})`);
-    }
-    let content;
-    try {
-      content = readFileSync(filePath, 'utf-8');
-    } catch {
-      continue;
-    }
-
-    const sourceName = basename(filePath, '.md');
-    const sourceRel = filePath
-      .slice(VAULT_PATH.length + 1)
-      .split(sep)
-      .join('/');
-    const classified = classifyNoteEdges(content, sourceName, resolver);
-
-    stats.notes_scanned++;
-
-    if (db) {
-      removeOutgoingEdges(db, sourceRel);
-    }
-
-    if (classified.length === 0) continue;
-    stats.notes_with_edges++;
-
-    for (const edge of classified) {
-      stats.edges_total++;
-      stats.by_type[edge.edgeType] = (stats.by_type[edge.edgeType] || 0) + 1;
-      stats.by_confidence[edge.confidence]++;
-      if (db) {
-        addEdge(db, {
-          fromPath: sourceRel,
-          toPath: edge.toPath,
-          edgeType: edge.edgeType,
-          confidence: edge.confidence,
-          directionFlipped: edge.flip ? 1 : 0,
-        });
-      }
-    }
+  if (!dryRun && !acquireLock(DB_FILE)) {
+    console.error('edges: another writer holds the lock; retry shortly');
+    process.exit(1);
   }
 
-  if (db) {
-    const allFromPathsRes = db.exec('SELECT DISTINCT from_path FROM edges');
-    const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
-    const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
-    let orphansRemoved = 0;
-    for (const orphan of orphanFromPaths) {
-      const countRes = db.exec(
-        "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
-        [orphan],
-      );
-      const count = countRes[0] ? countRes[0].values[0][0] : 0;
-      if (count > 0) {
-        db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
-        orphansRemoved += count;
+  try {
+    const db = dryRun ? null : await openEdgeDb(DB_FILE);
+
+    let progress = 0;
+    for (const filePath of files) {
+      progress++;
+      if (progress % 100 === 0) {
+        console.error(`  ${progress}/${files.length} (edges so far: ${stats.edges_total})`);
+      }
+      let content;
+      try {
+        content = readFileSync(filePath, 'utf-8');
+      } catch {
+        continue;
+      }
+
+      const sourceName = basename(filePath, '.md');
+      const sourceRel = filePath
+        .slice(VAULT_PATH.length + 1)
+        .split(sep)
+        .join('/');
+      const classified = classifyNoteEdges(content, sourceName, resolver);
+
+      stats.notes_scanned++;
+
+      if (db) {
+        removeOutgoingEdges(db, sourceRel);
+      }
+
+      if (classified.length === 0) continue;
+      stats.notes_with_edges++;
+
+      for (const edge of classified) {
+        stats.edges_total++;
+        stats.by_type[edge.edgeType] = (stats.by_type[edge.edgeType] || 0) + 1;
+        stats.by_confidence[edge.confidence]++;
+        if (db) {
+          addEdge(db, {
+            fromPath: sourceRel,
+            toPath: edge.toPath,
+            edgeType: edge.edgeType,
+            confidence: edge.confidence,
+            directionFlipped: edge.flip ? 1 : 0,
+          });
+        }
       }
     }
-    stats.orphans_removed = orphansRemoved;
-    stats.orphan_from_paths = orphanFromPaths.length;
-    if (!acquireLock(DB_FILE)) {
-      console.error('edges: another writer holds the lock; retry shortly');
-      process.exit(1);
-    }
-    try {
-      saveDb(db, DB_FILE);
-    } finally {
-      releaseLock(DB_FILE);
-    }
-    db.close();
-  } else {
-    const dryDb = await openEdgeDb(DB_FILE);
-    try {
-      const allFromPathsRes = dryDb.exec('SELECT DISTINCT from_path FROM edges');
+
+    if (db) {
+      const allFromPathsRes = db.exec('SELECT DISTINCT from_path FROM edges');
       const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
       const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
-      stats.orphans_would_remove = countOrphanEdges(dryDb, orphanFromPaths);
+      let orphansRemoved = 0;
+      for (const orphan of orphanFromPaths) {
+        const countRes = db.exec(
+          "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
+          [orphan],
+        );
+        const count = countRes[0] ? countRes[0].values[0][0] : 0;
+        if (count > 0) {
+          db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+          orphansRemoved += count;
+        }
+      }
+      stats.orphans_removed = orphansRemoved;
       stats.orphan_from_paths = orphanFromPaths.length;
-    } finally {
-      dryDb.close();
+      saveDb(db, DB_FILE);
+      db.close();
+    } else {
+      const dryDb = await openEdgeDb(DB_FILE);
+      try {
+        const allFromPathsRes = dryDb.exec('SELECT DISTINCT from_path FROM edges');
+        const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
+        const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
+        stats.orphans_would_remove = countOrphanEdges(dryDb, orphanFromPaths);
+        stats.orphan_from_paths = orphanFromPaths.length;
+      } finally {
+        dryDb.close();
+      }
     }
+  } finally {
+    if (!dryRun) releaseLock(DB_FILE);
   }
 
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
