@@ -99,7 +99,7 @@ If `existing_note` is provided:
 
 When the note describes a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves, generate an accompanying Excalidraw diagram.
 
-Read `PLUGIN/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `PLUGIN/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 Write the diagram to `{{VAULT}}/Excalidraw/{insight-slug}.excalidraw.md` and embed it in the note with `![[{insight-slug}]]`.
 

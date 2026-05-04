@@ -136,7 +136,7 @@ After completing research, verify your own findings before returning them. Unver
 
 After drafting findings and before verification, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
 
-Read `PLUGIN/agents/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `PLUGIN/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 **In the research brief**, include a `### Diagram` section with:
 - The diagram filename (e.g., `glutamate-inflammation-loop.excalidraw.md`)

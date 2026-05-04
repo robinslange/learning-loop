@@ -11,6 +11,7 @@ provenance/summaries/
 # Data files (local-only)
 data/
 
+.config-applied
 .config-state
 
 docs/
