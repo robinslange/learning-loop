@@ -22,6 +22,8 @@ import {
   removeSupersession,
   listSupersessions,
   findMatchingSupersessions,
+  acquireLock,
+  releaseLock,
 } from './lib/edges.mjs';
 
 const DB_FILE = join(PLUGIN_DATA, 'edges.db');
@@ -130,7 +132,15 @@ async function main() {
           sourceGraph,
           directionFlipped,
         });
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, id });
         break;
       }
@@ -142,7 +152,15 @@ async function main() {
           process.exit(1);
         }
         removeEdge(db, id);
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, removed: id });
         break;
       }
@@ -213,7 +231,15 @@ async function main() {
         }
         const newType = parseFlag('--type', null);
         confirmEdge(db, id, newType);
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, confirmed: id });
         break;
       }
@@ -225,7 +251,15 @@ async function main() {
           process.exit(1);
         }
         rejectEdge(db, id);
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, rejected: id });
         break;
       }
@@ -248,7 +282,15 @@ async function main() {
           reason,
           supersededDate,
         });
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, id });
         break;
       }
@@ -277,7 +319,15 @@ async function main() {
           process.exit(1);
         }
         removeSupersession(db, id);
-        saveDb(db, DB_FILE);
+        if (!acquireLock(DB_FILE)) {
+          console.error('edges: another writer holds the lock; retry shortly');
+          process.exit(1);
+        }
+        try {
+          saveDb(db, DB_FILE);
+        } finally {
+          releaseLock(DB_FILE);
+        }
         out({ ok: true, removed: id });
         break;
       }

@@ -15,7 +15,14 @@
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename, sep } from 'path';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
-import { openEdgeDb, addEdge, removeOutgoingEdges, saveDb } from './lib/edges.mjs';
+import {
+  openEdgeDb,
+  addEdge,
+  removeOutgoingEdges,
+  saveDb,
+  acquireLock,
+  releaseLock,
+} from './lib/edges.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
@@ -165,7 +172,15 @@ async function main() {
     }
     stats.orphans_removed = orphansRemoved;
     stats.orphan_from_paths = orphanFromPaths.length;
-    saveDb(db, DB_FILE);
+    if (!acquireLock(DB_FILE)) {
+      console.error('edges: another writer holds the lock; retry shortly');
+      process.exit(1);
+    }
+    try {
+      saveDb(db, DB_FILE);
+    } finally {
+      releaseLock(DB_FILE);
+    }
     db.close();
   } else {
     const dryDb = await openEdgeDb(DB_FILE);
