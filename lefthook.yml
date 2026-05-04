@@ -12,3 +12,11 @@ pre-commit:
             exit 1
           fi
         done
+
+    prettier:
+      glob: "{hooks,scripts,tests}/**/*.{js,mjs,json}"
+      run: npx --no-install prettier --check {staged_files}
+      stage_fixed: true
+
+    test:
+      run: npm test --silent
