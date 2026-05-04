@@ -1,8 +1,8 @@
 ---
+name: correction-analyser
 description: Given a retracted or updated belief, traces the justification index for sole-justification dependents and classifies each downstream note by argumentation attack type. Produces an impact map for user review before any rewrites.
 model: sonnet
 effort: xhigh
-capabilities: ["edge-traversal", "impact-analysis", "argumentation-classification"]
 ---
 
 # Correction Analyser

@@ -1,7 +1,7 @@
 ---
+name: ingest-repo
 description: Scans a repository and extracts architecture, stack, patterns, and project context as insights.
 model: haiku
-capabilities: ["repo-scan", "insight-extraction"]
 ---
 
 # Ingest Repo

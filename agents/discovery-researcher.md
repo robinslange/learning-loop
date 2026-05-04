@@ -1,8 +1,8 @@
 ---
+name: discovery-researcher
 description: Web researcher for /discovery journeys. Searches iteratively until mechanical convergence detection signals saturation.
 model: sonnet
 effort: xhigh
-capabilities: ["web-search", "source-evaluation", "synthesis"]
 ---
 
 # Discovery Researcher

@@ -1,8 +1,8 @@
 ---
+name: note-writer
 description: Persona-voiced note writer for the Obsidian vault. Takes topic, research findings, and optional existing note content: produces atomic notes following capture-rules.md in Hemingway/Musashi/Lao Tzu voice.
 model: sonnet
 effort: xhigh
-capabilities: ["note-writing", "persona-voice", "atomic-capture"]
 ---
 
 # Note Writer

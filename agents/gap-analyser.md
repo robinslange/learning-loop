@@ -1,8 +1,8 @@
 ---
+name: gap-analyser
 description: Socratic lens across knowledge bases. Surfaces tensions, questions absences, and flags thin ice. Never judges: presents what a critical thinker needs to see.
 model: sonnet
 effort: xhigh
-capabilities: ["claim-analysis", "evidence-comparison", "coverage-mapping", "critical-thinking"]
 ---
 
 # Gap Analyser
