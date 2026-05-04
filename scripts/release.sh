@@ -84,6 +84,29 @@ for cargo_toml in native/crates/*/Cargo.toml; do
   [ -f "$cargo_toml" ] && perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" "$cargo_toml"
 done
 
+# CHANGELOG: refuse if Unreleased section is empty; otherwise rename and stub.
+if [ ! -f CHANGELOG.md ]; then
+  echo "Error: CHANGELOG.md missing"
+  git checkout -- package.json .claude-plugin/plugin.json native/crates/*/Cargo.toml
+  exit 1
+fi
+
+UNRELEASED_BODY=$(awk '
+  /^## Unreleased/ { in_section = 1; next }
+  /^## / && in_section { exit }
+  in_section { print }
+' CHANGELOG.md | grep -E '^[^[:space:]]' || true)
+
+if [ -z "$UNRELEASED_BODY" ]; then
+  echo "Error: CHANGELOG.md ## Unreleased section is empty; nothing to release"
+  echo "Add a section under '## Unreleased' describing this release, then re-run."
+  git checkout -- package.json .claude-plugin/plugin.json native/crates/*/Cargo.toml
+  exit 1
+fi
+
+# Rename '## Unreleased' to '## Unreleased\n\n## v$NEW' (preserves Unreleased as a future stub).
+perl -i -pe "s/^## Unreleased\$/## Unreleased\n\n## v$NEW/" CHANGELOG.md
+
 # Verify
 for f in package.json .claude-plugin/plugin.json; do
   v=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$f','utf-8')).version)")
@@ -94,7 +117,7 @@ for f in package.json .claude-plugin/plugin.json; do
   fi
 done
 
-git add package.json .claude-plugin/plugin.json
+git add package.json .claude-plugin/plugin.json CHANGELOG.md
 git add native/crates/*/Cargo.toml 2>/dev/null
 git commit -m "release: v$NEW"
 git tag "v$NEW"
