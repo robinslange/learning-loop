@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.17.2
+
 This batch addresses the verified P0/P1 findings from a multi-agent internal review of the plugin. No breaking changes for end users.
 
 ### Fixed
