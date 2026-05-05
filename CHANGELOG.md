@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+This batch addresses the verified P0/P1 findings from a multi-agent internal review of the plugin. No breaking changes for end users.
+
+### Fixed
+
+- **Edges DB lost-update race.** `scripts/lib/edges.mjs` exported `acquireLock`/`releaseLock` helpers that were never called. Concurrent `edges-cli add` invocations both opened the DB, mutated independently against the same in-memory snapshot, then raced on `saveDb`. The loser's edge was silently overwritten. Fix brackets the entire load+mutate+save lifecycle in one lock per write command (`add`, `remove`, `confirm`, `reject`, `super-add`, `super-remove`); read-only commands stay lock-free. Same pattern for `scripts/backfill-edges.mjs`. New `tests/edges-locking.test.mjs` covers same-process semantics and forks a second Node process to verify cross-process exclusion. Note: `hooks/modules/edge-infer.mjs` has the same gap and is captured as deferred follow-up #4a.
+- **Federation peer-id path traversal.** `native/crates/ll-search/src/sync/client.rs:171` joined `peer.peer_id` (returned by the hub) into local FS paths with no validation. A malicious or buggy hub returning `../foo` could traverse outside the peers directory. New `is_safe_peer_id` helper restricts to ASCII alphanumeric + `-` + `_`, 1-128 chars; rejected peers are logged and skipped via `continue`. 4 unit tests cover valid IDs, traversal characters, length boundary, and unicode.
+- **Secret scrubbing missed three formats.** `hooks/lib/inject.mjs` already covered AWS / GitHub PAT / Anthropic / Stripe / OpenAI / Cloudflare / Bearer. Added Slack tokens (`xox[abprs]-`), JWTs (three-segment base64url), and PEM private key blocks (multi-line lazy match including `RSA PRIVATE KEY` variants). Closes the most likely leak surface in the `would_inject` shadow log.
+- **`/learning-loop:inbox` dispatched the wrong agent.** `skills/inbox/SKILL.md:44` told the orchestrator to use `subagent_type: "learning-loop:note-scorer"` when the surrounding prose said to launch `inbox-organiser`. Fixed.
+
+### Changed
+
+- **`scripts/release.sh` now gates on a non-empty `## Unreleased` section** before bumping. Refuses with an actionable error and reverts the manifest changes if no entries exist. On success, renames the heading to `## vX.Y.Z` and inserts a fresh empty `## Unreleased` stub above. Prevents the silent CHANGELOG drift seen when v1.17.1 shipped without a section. CHANGELOG is now committed alongside the manifests.
+- **Lefthook pre-commit gates.** Adds `prettier --check` (scoped to `{hooks,scripts}/**/*.{js,mjs}` to match the CI lint job) and `npm test --silent` (scoped to `{hooks,scripts,tests,agents,skills,native}/**` so doc-only commits skip the ~5s suite). The existing `no-resolved-paths` grep is preserved.
+- **All 14 agent definitions now declare `name:` in frontmatter** so they resolve via `subagent_type: "learning-loop:<name>"` deterministically rather than relying on filename fallback. Dead `capabilities:` field (silently ignored by Claude Code) removed from each. Closes a tracked TODO from 2026-04-09.
+- **`agents/diagram-rules.md` moved to `agents/_skills/diagram-rules.md`.** It is an include-only ruleset, never dispatched as an agent. Living in `/agents/` registered it as `learning-loop:diagram-rules` in the agent picker, which was misleading. References in `agents/note-writer.md`, `agents/discovery-researcher.md`, `skills/diagram/SKILL.md` updated to the new path.
+
+### Removed
+
+- **`scripts/apply-config.mjs`** (a 4-line `process.stderr.write` no-op deprecated since v1.4) and the `session-start.js` block that invoked it. The block also wrote a `.config-applied` marker that nothing else read; gitignore entry retained for older installs that still produce the file.
+
 ## v1.17.0
 
 This release ships a structural refactor pass driven by an internal plugin review. No breaking changes for end users; the install flow gains a separate `/learning-loop:federation` skill.
