@@ -10,6 +10,9 @@ const SECRET_PATTERNS = [
   /sk-[A-Za-z0-9_-]{20,}/g,
   /cfpat-[A-Za-z0-9_-]{20,}/g,
   /Bearer\s+[A-Za-z0-9._\-\/+=]{20,}/g,
+  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
+  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
 ];
 
 export function scrubSecrets(text) {

@@ -36,6 +36,34 @@ describe('scrubSecrets', () => {
     const plain = 'just some normal text with no secrets';
     assert.equal(scrubSecrets(plain), plain);
   });
+
+  it('masks Slack bot/user/app tokens', () => {
+    const slack = 'token=xoxb-FAKE-FAKE-not-a-real-slack-token';
+    assert.ok(!scrubSecrets(slack).includes('xoxb-'));
+    assert.ok(scrubSecrets(slack).includes('[REDACTED]'));
+
+    const userToken = 'xoxp-FAKE-FAKE-test-fixture-not-real';
+    assert.ok(!scrubSecrets(userToken).includes('xoxp-'));
+    assert.ok(scrubSecrets(userToken).includes('[REDACTED]'));
+  });
+
+  it('masks JWTs', () => {
+    const jwt = 'eyJ_fake_test_fixture.fake_payload_test.fake_signature_test';
+    assert.ok(!scrubSecrets(jwt).includes('eyJ'));
+    assert.ok(scrubSecrets(jwt).includes('[REDACTED]'));
+  });
+
+  it('masks PEM private key blocks across lines', () => {
+    const pem =
+      '-----BEGIN PRIVATE KEY-----\nFAKEKEYFAKEKEYFAKEKEY\n-----END PRIVATE KEY-----';
+    assert.ok(!scrubSecrets(pem).includes('FAKEKEY'));
+    assert.ok(scrubSecrets(pem).includes('[REDACTED]'));
+
+    const rsaPem =
+      '-----BEGIN RSA PRIVATE KEY-----\nFAKERSAKEYFAKERSAKEY\n-----END RSA PRIVATE KEY-----';
+    assert.ok(!scrubSecrets(rsaPem).includes('FAKERSAKEY'));
+    assert.ok(scrubSecrets(rsaPem).includes('[REDACTED]'));
+  });
 });
 
 describe('buildInjection', () => {
