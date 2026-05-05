@@ -2,9 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { acquireLock, releaseLock } from '../scripts/lib/edges.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const EDGES_MODULE_URL = pathToFileURL(join(HERE, '..', 'scripts/lib/edges.mjs')).href;
 
 test('acquireLock + releaseLock create and clean up the lock file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-lock-'));
@@ -39,7 +43,7 @@ test('acquireLock excludes a second process while the first holds it', () => {
       process.execPath,
       [
         '-e',
-        `import('${join(process.cwd(), 'scripts/lib/edges.mjs').replace(/\\/g, '/')}')` +
+        `import(${JSON.stringify(EDGES_MODULE_URL)})` +
           `.then(({ acquireLock }) => process.exit(acquireLock(${JSON.stringify(dbPath)}) ? 0 : 1));`,
       ],
       { encoding: 'utf8', timeout: 5000 },
