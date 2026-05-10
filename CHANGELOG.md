@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`ll-watch` dispatcher silently spawned watchers on unknown subcommands.** `ll-watch --help`, `ll-watch help`, and any typo previously fell through the `if`-chain in `scripts/watch.mjs` to the "start watcher" default. The dispatcher now prints usage and exits non-zero on unknown input; `--help` / `-h` / `help` all print the usage block and exit 0. New `tests/watch-dispatch.test.mjs` pins the regression.
+- **`ll-watch` lied about start success when the binary failed.** The wrapper printed `started (pid …)` immediately after `spawn()` even when the Rust binary exited 1 on pid-file conflict, because `stdio: 'ignore'` dropped the binary's stderr. The wrapper now (a) refuses to spawn when an alive watcher already holds the pid file, (b) redirects the detached binary's stdout/stderr to `<plugin-data>/watch.log`, and (c) waits 300 ms after spawn to verify the child survived, surfacing the log tail if it didn't.
+
 ## v1.17.2
 
 This batch addresses the verified P0/P1 findings from a multi-agent internal review of the plugin. No breaking changes for end users.

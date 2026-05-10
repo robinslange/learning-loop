@@ -7,13 +7,29 @@
 //   ll-watch --install       — write stable shim to ~/.local/bin/ll-watch
 //   ll-watch stop            — stop a running watcher
 //   ll-watch status          — check watcher status
+//   ll-watch --help          — show this help
 
 import { spawn, spawnSync } from 'child_process';
-import { existsSync, readFileSync, unlinkSync } from 'fs';
+import { existsSync, openSync, readFileSync, unlinkSync } from 'fs';
+import { setTimeout as delay } from 'timers/promises';
 import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 
+const USAGE = `Usage:
+  ll-watch                 — start watcher in background
+  ll-watch --foreground    — start watcher in foreground (for tmux/launchd)
+  ll-watch stop            — stop a running watcher
+  ll-watch status          — check watcher status
+  ll-watch --install       — reinstall ~/.local/bin shims
+  ll-watch --help          — show this help`;
+
 const command = process.argv[2];
+
+// ── --help: print usage, exit 0 ──
+if (command === '--help' || command === '-h' || command === 'help') {
+  console.log(USAGE);
+  process.exit(0);
+}
 
 // ── --install: delegate to install-shims.mjs (canonical multi-shim installer) ──
 if (command === '--install' || command === 'install') {
@@ -22,6 +38,14 @@ if (command === '--install' || command === 'install') {
     stdio: 'inherit',
   });
   process.exit(result.status ?? 1);
+}
+
+// ── reject unknown commands before resolving anything heavy ──
+const isStart = command === undefined || command === '--foreground';
+if (!isStart && command !== 'stop' && command !== 'status') {
+  console.error(`unknown command: ${command}`);
+  console.error(USAGE);
+  process.exit(2);
 }
 
 const pluginData = getPluginData();
@@ -83,14 +107,29 @@ if (command === 'status') {
   }
 }
 
-// ── default: start watcher ──
+// ── start: refuse if a watcher is already alive, then spawn the binary ──
+
+if (existsSync(pidFile)) {
+  const existingPid = parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
+  if (Number.isFinite(existingPid)) {
+    try {
+      process.kill(existingPid, 0);
+      console.error(`Watcher already running (pid ${existingPid})`);
+      console.error(`Run 'll-watch stop' first, or 'll-watch status' to verify.`);
+      process.exit(1);
+    } catch {
+      // stale pid file — fall through; the binary will overwrite it
+    }
+  }
+}
+
 const args = ['watch', vault, db, '--config-dir', pluginData, '--pid-file', pidFile];
 
 if (existsSync(librarianScript)) {
   args.push('--librarian-script', librarianScript);
 }
 
-const foreground = process.argv.includes('--foreground');
+const foreground = command === '--foreground';
 
 const ortEnv = { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) };
 
@@ -98,10 +137,35 @@ if (foreground) {
   const child = spawn(bin, args, { stdio: 'inherit', env: ortEnv });
   child.on('exit', (code) => process.exit(code ?? 1));
 } else {
-  const child = spawn(bin, args, { detached: true, stdio: 'ignore', env: ortEnv });
+  const logPath = join(pluginData, 'watch.log');
+  const logFd = openSync(logPath, 'a');
+  const child = spawn(bin, args, {
+    detached: true,
+    stdio: ['ignore', logFd, logFd],
+    env: ortEnv,
+  });
   child.unref();
+
+  // Confirm the binary survived past its early-exit window before claiming
+  // success. The Rust side fails fast on pid-file conflict and on missing
+  // ORT shared libraries — both happen well within 300ms.
+  await delay(300);
+  try {
+    process.kill(child.pid, 0);
+  } catch {
+    let tail = '(no output)';
+    try {
+      const lines = readFileSync(logPath, 'utf8').trim().split('\n');
+      tail = lines.slice(-5).join('\n') || tail;
+    } catch {}
+    console.error(`Watcher failed to start. Last log lines from ${logPath}:`);
+    console.error(tail);
+    process.exit(1);
+  }
+
   console.log(`ll-search watch started (pid ${child.pid})`);
   console.log(`  vault:  ${vault}`);
   console.log(`  index:  ${db}`);
   console.log(`  pid:    ${pidFile}`);
+  console.log(`  log:    ${logPath}`);
 }
