@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.17.3
+
 ### Fixed
 
 - **`ll-watch` dispatcher silently spawned watchers on unknown subcommands.** `ll-watch --help`, `ll-watch help`, and any typo previously fell through the `if`-chain in `scripts/watch.mjs` to the "start watcher" default. The dispatcher now prints usage and exits non-zero on unknown input; `--help` / `-h` / `help` all print the usage block and exit 0. New `tests/watch-dispatch.test.mjs` pins the regression.
