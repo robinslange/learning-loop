@@ -284,6 +284,18 @@ cargo deny check                      # license + advisory policy
 cargo tree -p ll-core --depth 1       # transitive surface area
 ```
 
+**keyring 3.6.3 pin (track 2K).** The keyring crate ecosystem split in April 2026:
+`keyring 4.0.0` published 2026-04-26 with README notes explicitly saying "Do not depend
+on this crate" - it is a sample CLI, not a library. The production-recommended all-in-one
+crate remains `keyring 3.6.3` (MIT/Apache-2.0). ll-search pins exactly to `"=3.6.3"`
+(no caret/tilde) so cargo never auto-upgrades into 4.x. Evaluate `keyring-core 1.0` +
+per-platform store provider crates in 2026-Q4 once the 4.x ecosystem has stabilised.
+
+On Debian/Ubuntu build hosts, `libdbus-1-dev` is required at compile time for the
+`sync-secret-service` keyring feature. Install with `apt-get install libdbus-1-dev`.
+GitHub Actions `ubuntu-latest` images have this package pre-installed. macOS builders
+require no additional setup (Keychain is available by default).
+
 **Pre-release dependencies.** `ort = "2.0.0-rc.12"` (ONNX inference) is the only pre-release dependency in either crate. It is not expected to have a stable 2.0 release imminently. Before shipping a crates.io publish (track 2R), either upgrade to a stable ort release or vendor the ONNX model loading to remove the dependency. See `.planning/inventory/rust-audit.md` findings §9 for the risk note.
 
 **Bundled SQLite.** `rusqlite = { version = "0.32", features = ["bundled"] }` bundles SQLite at compile time. This is intentional: it ensures a consistent SQLite version across macOS, Linux, and Windows without relying on the system library. Do not remove the `bundled` feature.

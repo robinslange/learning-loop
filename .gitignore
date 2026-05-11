@@ -56,3 +56,4 @@ tests/fixtures/**/.vault-search/
 coverage/
 calibration/
 native/docs/
+native/crates/ll-search/src/sync/test_write.txt

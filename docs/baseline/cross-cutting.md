@@ -272,7 +272,7 @@ When the shape of a persisted JSON file changes (config.json, state.json), the p
 
 ### auth seed
 
-The federation auth seed is stored as a plain file today (`sync/auth.rs`). Track 2K moves it to the OS keyring (macOS Keychain, Linux Secret Service) with an encrypted fallback for headless environments. Until 2K merges, treat the seed file path as secret -- do not log it, do not include it in snapshots.
+Track 2K (shipped) moves the federation auth seed off `federation/.seed` (plaintext 32 bytes, mode 0600) into the OS keyring (macOS Keychain, Linux Secret Service) with an encrypted-at-rest fallback for headless installs. The plaintext file is migration-source only; run `ll-search migrate-seed` to upgrade. See the "Federation seed storage" section below for backend details.
 
 ### vault path exposure
 
@@ -283,6 +283,82 @@ The vault path is a user-specific local path. Do not log it at info level. Do no
 `LL_HOOK_DEBUG=1` enables verbose logging to stderr. Do not set it in production or leave it in `.env` committed to the repo. It may expose vault paths and embedding details in hook output.
 
 ---
+
+---
+
+## Federation seed storage
+
+The federation Ed25519 signing seed is stored in one of three backends, probed in order:
+
+| Backend | When used | File |
+|---|---|---|
+| `keyring` | macOS (always), Linux desktop with DBus | OS keyring, no file |
+| `encrypted` | Linux headless, WSL, CI | `federation/.seed.enc` (64 bytes) |
+| `plaintext-legacy` | Pre-2K installs (migration source only) | `federation/.seed` |
+
+### Encrypted-at-rest layout
+
+```
+offset  bytes  meaning
+0       4      magic = b"LLS1"
+4       12     nonce (random per write)
+16      48     ciphertext (32-byte seed + 16-byte poly1305 tag)
+total: 64 bytes
+```
+
+Key derivation: `HKDF-SHA256(ikm=machine_id, salt="ll-search-seed-v1", info="federation-signing-seed")`.
+Machine ID source: `machine-uid 0.6.0` (`gethostuuid(3)` on macOS; `/etc/machine-id` on Linux).
+
+### Threat model
+
+The encrypted-at-rest fallback protects against naive backups, `rsync /home`, and
+over-the-shoulder file readers. It does NOT protect against an attacker with root
+on the host (root can read machine-id and rederive the HKDF key). The OS keyring
+is the strong path; encrypted-at-rest is "no raw seed bytes on disk" hardening for
+environments that cannot run a keyring daemon.
+
+### Migrating from plaintext
+
+```bash
+ll-search migrate-seed --config-dir <plugin-data-root>
+# outputs: {"from":"plaintext-legacy","to":"keyring","plaintext_removed":true,...}
+```
+
+The migration is fail-closed: the plaintext `.seed` file is deleted only after the
+new copy has been written and verified by round-trip read. Running `migrate-seed`
+twice is safe (idempotent; returns `already_migrated: true`).
+
+### Rolling back a migration
+
+If you need to revert to pre-2K code after migrating:
+
+```bash
+ll-search migrate-seed --config-dir <plugin-data-root> --rollback
+```
+
+This reads the seed from keyring/encrypted, writes it back to `federation/.seed`,
+and removes the secure-backend copy. The signing key bytes are preserved so
+federation peers continue to trust the identity.
+
+**If rollback is impossible** (e.g., keyring was cleared): rotate identity via
+`/learning-loop:federation`. All peers must re-trust the new public key.
+
+### Manual rotate
+
+```bash
+# Delete the seed from the OS keyring
+security delete-generic-password -s ai.learning-loop.federation   # macOS
+# On Linux with Secret Service: use the `secret-tool` CLI
+# Then run identity to generate a fresh seed
+ll-search identity --config-dir <plugin-data-root>
+# Inform peers of the new pubkey via /learning-loop:federation
+```
+
+### LL_SEED_BACKEND override
+
+Set `LL_SEED_BACKEND=encrypted` to force the encrypted-at-rest path (CI, reproducible
+builds, paranoid users). Set `LL_SEED_BACKEND=mock` in tests to use an in-process store
+without real keyring or machine-id access.
 
 ---
 
