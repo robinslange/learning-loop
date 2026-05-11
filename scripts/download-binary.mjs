@@ -13,6 +13,9 @@ import { join } from 'path';
 import { platform, arch } from 'os';
 import { execFileSync, spawnSync } from 'child_process';
 import { getPluginData } from './lib/config.mjs';
+import { env } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -26,19 +29,16 @@ function detectArtifact() {
 }
 
 function getRepo() {
-  return process.env.LL_REPO || 'robinslange/learning-loop';
+  return env.LL_REPO;
 }
 
 function getVersion() {
   if (process.argv[2]) return process.argv[2];
 
   const pkgPath = join(import.meta.dirname, '..', 'package.json');
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-    return `v${pkg.version}`;
-  } catch {
-    return 'latest';
-  }
+  const { value: pkg } = safeLoad(pkgPath);
+  if (pkg?.version) return `v${pkg.version}`;
+  return 'latest';
 }
 
 async function download(url, dest) {

@@ -20,6 +20,7 @@ export function appendJsonlLine(path, obj) {
   const line = JSON.stringify(obj) + '\n';
   try {
     mkdirSync(dirname(path), { recursive: true });
+    // eslint-disable-next-line learning-loop/no-empty-catch
   } catch {}
   let fd;
   try {
@@ -29,6 +30,7 @@ export function appendJsonlLine(path, obj) {
     if (fd !== undefined) {
       try {
         closeSync(fd);
+        // eslint-disable-next-line learning-loop/no-empty-catch
       } catch {}
     }
   }

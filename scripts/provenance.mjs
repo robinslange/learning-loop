@@ -8,6 +8,7 @@ import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getPluginData } from './lib/config.mjs';
+import { logError } from './lib/log.mjs';
 
 const PROVENANCE_DIR = join(getPluginData(), 'provenance');
 const TEMPLATE_DIR = join(import.meta.dirname, '..', 'provenance');
@@ -16,10 +17,13 @@ function getSessionId() {
   const tmp = tmpdir();
   try {
     return readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
-  } catch {}
+  } catch (err) {
+    logError('provenance.getSessionId.ppid', err);
+  }
   try {
     return readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
-  } catch {
+  } catch (err) {
+    logError('provenance.getSessionId.legacy', err);
     return 'unknown';
   }
 }

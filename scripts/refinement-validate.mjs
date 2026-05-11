@@ -26,6 +26,8 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const OVERSIZED_THRESHOLD = 0.2;
 const AUTO_REJECT_THRESHOLD = 0.5;
@@ -181,14 +183,18 @@ function main() {
     try {
       const direct = JSON.parse(text);
       if (direct && Array.isArray(direct.decisions)) return direct;
-    } catch {}
+    } catch (err) {
+      logError('refinement-validate.extractDecisions.direct', err);
+    }
     // Strip code fences if present
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (fenced) {
       try {
         const inner = JSON.parse(fenced[1]);
         if (inner && Array.isArray(inner.decisions)) return inner;
-      } catch {}
+      } catch (err) {
+        logError('refinement-validate.extractDecisions.fenced', err);
+      }
     }
     // Scan for the first { that opens a balanced object containing "decisions"
     for (let start = 0; start < text.length; start++) {
@@ -213,7 +219,9 @@ function main() {
               try {
                 const obj = JSON.parse(candidate);
                 if (obj && Array.isArray(obj.decisions)) return obj;
-              } catch {}
+              } catch (err) {
+                logError('refinement-validate.extractDecisions.scan', err);
+              }
               break;
             }
           }
@@ -229,8 +237,9 @@ function main() {
     process.exit(1);
   }
 
-  const pairs = JSON.parse(readFileSync(pairsPath, 'utf-8'));
-  const pairById = new Map(pairs.map((p) => [p.id, p]));
+  const { value: pairs, error: pairsError } = safeLoad(pairsPath, { fallback: [] });
+  if (pairsError) { logError('refinement-validate.loadPairs', pairsError); process.exit(1); }
+  const pairById = new Map((Array.isArray(pairs) ? pairs : []).map((p) => [p.id, p]));
 
   const validated = [];
   for (const d of parsed.decisions || []) {

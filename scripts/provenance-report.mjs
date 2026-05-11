@@ -4,6 +4,8 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const PROVENANCE_DIR = join(getPluginData(), 'provenance');
 const SUMMARIES_DIR = join(PROVENANCE_DIR, 'summaries');
@@ -22,7 +24,9 @@ function readAllEvents() {
     for (const line of lines) {
       try {
         events.push(JSON.parse(line));
-      } catch {}
+      } catch (err) {
+        logError('provenance-report.parseLine', err);
+      }
     }
   }
   return events;
@@ -34,11 +38,9 @@ function loadSummaries() {
     .filter((f) => f.endsWith('.json'))
     .sort()
     .map((f) => {
-      try {
-        return JSON.parse(readFileSync(join(SUMMARIES_DIR, f), 'utf8'));
-      } catch {
-        return null;
-      }
+      const { value, error } = safeLoad(join(SUMMARIES_DIR, f));
+      if (error) logError('provenance-report.loadSummary', error);
+      return value;
     })
     .filter(Boolean);
 }

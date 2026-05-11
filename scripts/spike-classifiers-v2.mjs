@@ -14,12 +14,14 @@ import { join, basename } from 'path';
 import { getPluginData } from './lib/config.mjs';
 import { openReadonly } from './lib/sqljs.mjs';
 import { run } from './lib/binary.mjs';
+import { env } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
 
-const VAULT_PATH = process.env.VAULT_PATH || join(process.env.HOME, 'brain', 'brain');
+const VAULT_PATH = env.VAULT_PATH || join(env.HOME, 'brain', 'brain');
 const PLUGIN_DATA = getPluginData();
 const DB_PATH = join(PLUGIN_DATA, 'search.db');
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
-const MODEL = process.env.MODEL || 'gemma4:e2b';
+const OLLAMA_URL = env.OLLAMA_URL;
+const MODEL = env.MODEL;
 
 const args = process.argv.slice(2);
 const sampleSize = parseInt(args.find((_, i, a) => a[i - 1] === '--sample') || '30');
@@ -102,7 +104,8 @@ async function spikeDuplicate(db) {
     let neighbours;
     try {
       neighbours = run(['similar', DB_PATH, notePath, '--top', '3']);
-    } catch {
+    } catch (err) {
+      logError('spike-classifiers-v2.similar', err);
       continue;
     }
     if (!neighbours || !neighbours.length) continue;

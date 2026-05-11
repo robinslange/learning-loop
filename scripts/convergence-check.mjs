@@ -7,6 +7,7 @@ import { run } from './lib/binary.mjs';
 import { splitSentences, extractEntities } from './lib/sentence-split.mjs';
 import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
 import { getPluginData } from './lib/config.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const MAX_QUERIES = 12;
 const COSINE_CYCLE_THRESHOLD = 0.83;
@@ -28,7 +29,9 @@ function statePath(sessionId) {
 function loadState(sessionId) {
   const p = statePath(sessionId);
   if (!existsSync(p)) throw new Error(`Session "${sessionId}" not found`);
-  return JSON.parse(readFileSync(p, 'utf-8'));
+  const { value, error } = safeLoad(p);
+  if (error) throw new Error(`Failed to load session "${sessionId}": ${error}`);
+  return value;
 }
 
 function saveState(sessionId, state) {

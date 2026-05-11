@@ -2,14 +2,16 @@
 // Checks plugin dependencies declared in config.json against installed_plugins.json.
 // Returns JSON: { "plugin-name": { status, installed, required, marketplace, reason } }
 
-import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import { env } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
 const INSTALLED_PATH = join(
-  process.env.HOME || process.env.USERPROFILE || homedir(),
+  env.HOME || env.USERPROFILE || homedir(),
   '.claude',
   'plugins',
   'installed_plugins.json',
@@ -26,10 +28,8 @@ function satisfiesVersion(installed, constraint) {
   return insPatch >= reqPatch;
 }
 
-let config;
-try {
-  config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-} catch {
+const { value: config, error: configError } = safeLoad(CONFIG_PATH, { fallback: null });
+if (configError || !config) {
   process.stdout.write('{}');
   process.exit(0);
 }
@@ -40,13 +40,8 @@ if (deps.length === 0) {
   process.exit(0);
 }
 
-let installed;
-try {
-  const raw = JSON.parse(readFileSync(INSTALLED_PATH, 'utf-8'));
-  installed = raw.plugins || raw;
-} catch {
-  installed = {};
-}
+const { value: rawInstalled } = safeLoad(INSTALLED_PATH, { fallback: {} });
+const installed = rawInstalled?.plugins || rawInstalled || {};
 
 const result = {};
 

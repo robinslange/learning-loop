@@ -13,6 +13,8 @@ import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join, dirname } from 'path';
 import { initSQL } from './lib/sqljs.mjs';
 import { PLUGIN_DATA } from './lib/constants.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
+import { logError } from './lib/log.mjs';
 
 const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
 const OUTBOX_DIR = join(FEDERATION_DIR, 'outbox');
@@ -66,13 +68,9 @@ async function peerHasNote(peerId, notePath) {
 }
 
 function loadPeers() {
-  if (!existsSync(CONFIG_PATH)) return [];
-  try {
-    const config = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-    return config.peers || [];
-  } catch {
-    return [];
-  }
+  const { value: config, error } = safeLoad(CONFIG_PATH, { fallback: null });
+  if (error || !config) { if (error) logError('retraction-notify.loadPeers', error); return []; }
+  return config.peers || [];
 }
 
 function listIndexedPeerIds() {

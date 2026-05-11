@@ -23,6 +23,7 @@ import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { getPluginRoot } from './lib/config.mjs';
+import { env } from './lib/env.mjs';
 
 const isWindows = process.platform === 'win32';
 const command = process.argv[2] || '--install';
@@ -233,7 +234,7 @@ exec env ORT_DYLIB_PATH="\$BIN_DIR" ORT_LIB_LOCATION="\$BIN_DIR" "\$BIN" "\$@"
   console.log(`Wrote ${llSearchPath}`);
   console.log(`Both shims resolve their targets at runtime — survive plugin updates.`);
 
-  const pathDirs = (process.env.PATH || '').split(':');
+  const pathDirs = (env.PATH || '').split(':');
   if (!pathDirs.includes(binDir)) {
     console.log(`\nAdd to your shell rc:  export PATH="$HOME/.local/bin:$PATH"`);
   }

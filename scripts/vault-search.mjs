@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
+import { logError } from './lib/log.mjs';
 
 const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
 
@@ -94,7 +95,9 @@ function logRetrieval(command, query, results) {
     let sessionId = '';
     try {
       sessionId = readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf-8').trim();
-    } catch {}
+    } catch (err) {
+      logError('vault-search.getSessionId', err);
+    }
     const federated = existsSync(FEDERATION_CONFIG);
     const topPaths = Array.isArray(results)
       ? results.slice(0, 10).map((r) => r.path || r.note_a || '')
@@ -111,7 +114,9 @@ function logRetrieval(command, query, results) {
       top_paths: topPaths,
     };
     appendJsonlLine(file, entry);
-  } catch {}
+  } catch (err) {
+    logError('vault-search.logQuery', err);
+  }
 }
 
 function intentions(context) {
@@ -120,7 +125,8 @@ function intentions(context) {
     const args = ['intentions', DB_PATH];
     if (context) args.push(context);
     return run(args);
-  } catch {
+  } catch (err) {
+    logError('vault-search.intentions', err);
     return [];
   }
 }

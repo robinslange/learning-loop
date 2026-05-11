@@ -14,6 +14,8 @@ import { existsSync, openSync, readFileSync, unlinkSync } from 'fs';
 import { setTimeout as delay } from 'timers/promises';
 import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
+import { spawnEnv } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
 
 const USAGE = `Usage:
   ll-watch                 — start watcher in background
@@ -81,12 +83,15 @@ if (command === 'stop') {
   try {
     process.kill(pid, 'SIGTERM');
     console.log(`Stopped watcher (pid ${pid})`);
-  } catch {
+  } catch (err) {
+    logError('watch.stop.sigterm', err);
     console.log(`Watcher not running (stale pid ${pid})`);
   }
   try {
     unlinkSync(pidFile);
-  } catch {}
+  } catch (err) {
+    logError('watch.stop.unlinkPid', err);
+  }
   process.exit(0);
 }
 
@@ -101,7 +106,8 @@ if (command === 'status') {
     process.kill(pid, 0);
     console.log(`Running (pid ${pid})`);
     process.exit(0);
-  } catch {
+  } catch (err) {
+    logError('watch.status.kill0', err);
     console.log(`Not running (stale pid ${pid})`);
     process.exit(1);
   }
@@ -117,7 +123,8 @@ if (existsSync(pidFile)) {
       console.error(`Watcher already running (pid ${existingPid})`);
       console.error(`Run 'll-watch stop' first, or 'll-watch status' to verify.`);
       process.exit(1);
-    } catch {
+    } catch (err) {
+      logError('watch.start.existingPidCheck', err);
       // stale pid file — fall through; the binary will overwrite it
     }
   }
@@ -131,7 +138,7 @@ if (existsSync(librarianScript)) {
 
 const foreground = command === '--foreground';
 
-const ortEnv = { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) };
+const ortEnv = spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) });
 
 if (foreground) {
   const child = spawn(bin, args, { stdio: 'inherit', env: ortEnv });
@@ -152,12 +159,15 @@ if (foreground) {
   await delay(300);
   try {
     process.kill(child.pid, 0);
-  } catch {
+  } catch (err) {
+    logError('watch.start.confirmAlive', err);
     let tail = '(no output)';
     try {
       const lines = readFileSync(logPath, 'utf8').trim().split('\n');
       tail = lines.slice(-5).join('\n') || tail;
-    } catch {}
+    } catch (readErr) {
+      logError('watch.start.readLog', readErr);
+    }
     console.error(`Watcher failed to start. Last log lines from ${logPath}:`);
     console.error(tail);
     process.exit(1);

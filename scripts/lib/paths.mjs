@@ -1,8 +1,9 @@
 import { sep, resolve, join } from 'path';
 import { tmpdir, homedir } from 'os';
+import { env } from './env.mjs';
 
 export function home() {
-  return process.env.HOME || process.env.USERPROFILE || homedir();
+  return env.HOME || env.USERPROFILE || homedir();
 }
 
 export function tmp() {

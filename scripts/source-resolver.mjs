@@ -29,12 +29,9 @@ mkdirSync(DATA_DIR, { recursive: true });
 const CONFIG_PATH = join(DATA_DIR, 'resolver-config.json');
 
 function loadResolverConfig() {
-  if (!existsSync(CONFIG_PATH)) return {};
-  try {
-    return JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'));
-  } catch {
-    return {};
-  }
+  const { value, error } = safeLoad(CONFIG_PATH, { fallback: {} });
+  if (error) logError('source-resolver.loadResolverConfig', error);
+  return value ?? {};
 }
 
 import pubmed from './lib/sources/adapters/pubmed.mjs';
@@ -48,6 +45,8 @@ import { verifyNote } from './verify/verify-note.mjs';
 import { structuredPubmedSearch } from './verify/structured-pubmed.mjs';
 import { checkClaims } from './verify/check-claims.mjs';
 import { isBlockedFetch, fetchPageText, WEB_FETCH_BLOCKLIST } from './lib/sources/web-fetch.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
+import { logError } from './lib/log.mjs';
 
 // --- CLI ---
 

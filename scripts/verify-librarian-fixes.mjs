@@ -22,6 +22,7 @@ mkdirSync(join(TEMP_VAULT, '3-permanent'), { recursive: true });
 mkdirSync(LIBRARIAN_DIR, { recursive: true });
 
 // Set env so librarian-queue picks up the temp data dir
+// eslint-disable-next-line learning-loop/no-process-env-outside-env-module
 process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
 
 // ---- create vault notes ----

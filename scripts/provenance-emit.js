@@ -4,12 +4,13 @@
 // Replaces provenance-emit.sh for Windows compatibility.
 
 import { emitProvenance } from './provenance.mjs';
+import { logError } from './lib/log.mjs';
 
 const arg = process.argv[2];
 if (!arg) process.exit(0);
 
 try {
   emitProvenance(JSON.parse(arg));
-} catch {
-  // Fire-and-forget: never block the caller
+} catch (err) {
+  logError('provenance-emit', err);
 }

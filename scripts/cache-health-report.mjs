@@ -9,9 +9,11 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { env } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
 
 const pluginData =
-  process.env.CLAUDE_PLUGIN_DATA ||
+  env.CLAUDE_PLUGIN_DATA ||
   join(homedir(), '.claude', 'plugins', 'data', 'learning-loop-learning-loop-marketplace');
 const dir = join(pluginData, 'retrieval');
 
@@ -41,7 +43,9 @@ for (const f of files) {
       const r = JSON.parse(line);
       if (sessionFilter && r.session_id !== sessionFilter) continue;
       rows.push(r);
-    } catch {}
+    } catch (err) {
+      logError('cache-health-report.parseLine', err);
+    }
   }
 }
 

@@ -24,6 +24,9 @@ import { resolve, basename, dirname, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { spawnEnv } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -41,18 +44,14 @@ const EXCLUDE_FOLDERS = ['Excalidraw', '4-projects', '6-writing'];
 
 function resolveVaultPath() {
   const cfgPath = resolve(__dirname, '..', 'config.json');
-  try {
-    const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-    if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, homedir()));
-  } catch {}
+  const { value: cfg1 } = safeLoad(cfgPath);
+  if (cfg1?.vault_path) return resolve(cfg1.vault_path.replace(/^~/, homedir()));
   const pluginDataCfg = resolve(
     homedir(),
     '.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json',
   );
-  try {
-    const cfg = JSON.parse(readFileSync(pluginDataCfg, 'utf-8'));
-    if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, homedir()));
-  } catch {}
+  const { value: cfg2 } = safeLoad(pluginDataCfg);
+  if (cfg2?.vault_path) return resolve(cfg2.vault_path.replace(/^~/, homedir()));
   return resolve(homedir(), 'brain/brain');
 }
 
@@ -92,20 +91,16 @@ function readStdinPaths() {
 }
 
 function querySimilar(bin, dbPath, vaultRoot, noteRel) {
-  const env = {
-    ...process.env,
-    ORT_DYLIB_PATH: dirname(bin),
-    ORT_LIB_LOCATION: dirname(bin),
-  };
   const result = spawnSync(bin, ['similar', '--top', String(TOP_K), dbPath, noteRel], {
     encoding: 'utf-8',
-    env,
+    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
     timeout: 5000,
   });
   if (result.status !== 0) return [];
   try {
     return JSON.parse(result.stdout);
-  } catch {
+  } catch (err) {
+    logError('refinement-candidates.querySimilar', err);
     return [];
   }
 }

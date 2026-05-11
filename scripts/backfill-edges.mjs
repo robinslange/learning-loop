@@ -14,6 +14,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename, sep } from 'path';
+import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import {
   openEdgeDb,
@@ -54,14 +55,17 @@ function walkVault(root, dirs, max) {
         try {
           const st = statSync(full);
           if (!st.isFile()) continue;
-        } catch {
+        } catch (err) {
+          logError('backfill-edges.statFile', err);
           continue;
         }
         if (!String(e).endsWith('.md')) continue;
         out.push(full);
         if (max && out.length >= max) return out;
       }
-    } catch {}
+    } catch (err) {
+      logError('backfill-edges.readdir', err);
+    }
   }
   return out;
 }
@@ -125,7 +129,8 @@ async function main() {
       let content;
       try {
         content = readFileSync(filePath, 'utf-8');
-      } catch {
+      } catch (err) {
+        logError('backfill-edges.readFile', err);
         continue;
       }
 

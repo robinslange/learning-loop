@@ -3,6 +3,8 @@ import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
 import { expandHome } from './paths.mjs';
+import { env } from './env.mjs';
+import { logError } from './log.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,10 +33,13 @@ function persistMarker(p) {
       if (current === p) return;
     }
     writeFileSync(DATA_PATH_MARKER, p, 'utf-8');
-  } catch {}
+  } catch (err) {
+    logError('config.persistMarker', err);
+  }
 }
 
 export function getPluginData() {
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
   const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
   if (fromEnv) {
     persistMarker(fromEnv);
@@ -44,7 +49,9 @@ export function getPluginData() {
   try {
     const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
     if (saved && existsSync(saved)) return saved;
-  } catch {}
+  } catch (err) {
+    logError('config.getPluginData', err);
+  }
 
   process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
   return null;
@@ -85,8 +92,8 @@ export function getConfig() {
     try {
       _config = readJsonStripBom(primary);
       return _config;
-    } catch {
-      /* fall through */
+    } catch (err) {
+      logError('config.getConfig.primary', err);
     }
   }
 
@@ -95,8 +102,8 @@ export function getConfig() {
       _config = readJsonStripBom(legacy);
       if (primary) migrateConfig(legacy, primary);
       return _config;
-    } catch {
-      /* fall through */
+    } catch (err) {
+      logError('config.getConfig.legacy', err);
     }
   }
 
@@ -112,6 +119,7 @@ function migrateConfig(from, to) {
 
 export function getVaultPath() {
   const cfg = getConfig();
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
   const raw = process.env.VAULT_PATH || cfg.vault_path;
   if (!raw) return null;
   return expandHome(raw);

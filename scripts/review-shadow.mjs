@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { env } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
 
 function resolvePluginData() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
+  const fromEnv = env.CLAUDE_PLUGIN_DATA;
   if (fromEnv) return fromEnv;
   console.error('CLAUDE_PLUGIN_DATA not set');
   process.exit(1);
@@ -30,7 +32,9 @@ for (const f of files) {
     if (!line) continue;
     try {
       entries.push(JSON.parse(line));
-    } catch {}
+    } catch (err) {
+      logError('review-shadow.parseLine', err);
+    }
   }
 }
 
@@ -71,7 +75,7 @@ const episodicLat = healthy
   .filter((v) => typeof v === 'number');
 const racedOut = healthy.filter((e) => e.backends?.episodic?.raced_out).length;
 
-const threshold = Number(process.env.LEARNING_LOOP_INJECTION_THRESHOLD || 0.35);
+const threshold = env.LEARNING_LOOP_INJECTION_THRESHOLD;
 
 console.log('# Shadow injection review\n');
 console.log(`Total entries: ${total}`);

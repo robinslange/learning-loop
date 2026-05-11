@@ -12,6 +12,7 @@ import {
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { getPluginData } from '../config.mjs';
+import { safeLoad } from '../safe-load.mjs';
 
 const PLUGIN_DATA = getPluginData();
 const PLUGIN_DIR = resolve(fileURLToPath(import.meta.url), '../../../../..');
@@ -47,6 +48,7 @@ function acquireLock(retries = 5, delayMs = 30) {
           unlinkSync(lockPath);
           continue;
         }
+        // eslint-disable-next-line learning-loop/no-empty-catch
       } catch {}
       if (i < retries - 1) Atomics.wait(lockSleepBuf, 0, 0, delayMs);
     }
@@ -59,21 +61,19 @@ function releaseLock() {
   if (lockFd !== null) {
     try {
       closeSync(lockFd);
+      // eslint-disable-next-line learning-loop/no-empty-catch
     } catch {}
     lockFd = null;
   }
   try {
     unlinkSync(lockPath);
+    // eslint-disable-next-line learning-loop/no-empty-catch
   } catch {}
 }
 
 export function loadCitationIndex() {
-  if (!existsSync(INDEX_PATH)) return {};
-  try {
-    return JSON.parse(readFileSync(INDEX_PATH, 'utf-8'));
-  } catch {
-    return {};
-  }
+  const { value } = safeLoad(INDEX_PATH, { fallback: {} });
+  return value ?? {};
 }
 
 export function saveCitationIndex(index) {

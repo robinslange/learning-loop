@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getPluginData } from './lib/config.mjs';
+import { logError } from './lib/log.mjs';
 
 const PROVENANCE_DIR = join(getPluginData(), 'provenance');
 
@@ -16,8 +17,8 @@ function readEventLogs() {
     for (const line of lines) {
       try {
         events.push(JSON.parse(line));
-      } catch {
-        /* skip malformed */
+      } catch (err) {
+        logError('provenance-consolidate.parseLine', err);
       }
     }
   }

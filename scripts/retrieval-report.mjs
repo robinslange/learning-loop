@@ -3,6 +3,7 @@
 import { readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { getPluginData } from './lib/config.mjs';
+import { logError } from './lib/log.mjs';
 
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
@@ -18,7 +19,9 @@ function loadJsonl(prefix) {
         results.push(JSON.parse(line));
       }
     }
-  } catch {}
+  } catch (err) {
+    logError('retrieval-report.loadJsonl', err);
+  }
   return results;
 }
 

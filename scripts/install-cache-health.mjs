@@ -26,6 +26,8 @@ import {
 import { join, resolve, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = resolve(SCRIPT_DIR, '..');
@@ -51,12 +53,9 @@ function detect() {
 }
 
 function readConfig() {
-  if (!existsSync(OMC_CONFIG)) return null;
-  try {
-    return JSON.parse(readFileSync(OMC_CONFIG, 'utf8'));
-  } catch {
-    return null;
-  }
+  const { value, error } = safeLoad(OMC_CONFIG, { fallback: null });
+  if (error) logError('install-cache-health.readConfig', error);
+  return value;
 }
 
 function isConfigured(cfg) {
@@ -71,7 +70,8 @@ function isConfigured(cfg) {
 function isDevSymlink() {
   try {
     return lstatSync(OMC_TARGET_DIR).isSymbolicLink();
-  } catch {
+  } catch (err) {
+    logError('install-cache-health.isDevSymlink', err);
     return false;
   }
 }
@@ -80,7 +80,9 @@ function installPluginFile() {
   if (isDevSymlink()) return 'dev-symlink';
   try {
     mkdirSync(OMC_TARGET_DIR, { recursive: true });
-  } catch {}
+  } catch (err) {
+    logError('install-cache-health.mkdirSync', err);
+  }
   copyFileSync(SOURCE, OMC_TARGET);
   return 'copied';
 }
@@ -124,7 +126,8 @@ function updateConfig() {
 
 function removeFromConfig() {
   if (!existsSync(OMC_CONFIG)) return false;
-  const cfg = JSON.parse(readFileSync(OMC_CONFIG, 'utf8'));
+  const { value: cfg } = safeLoad(OMC_CONFIG, { fallback: null });
+  if (!cfg) return false;
   let changed = false;
 
   for (const line of cfg.lines || []) {

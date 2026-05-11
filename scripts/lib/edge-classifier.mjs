@@ -4,6 +4,7 @@
 
 import { readdirSync } from 'fs';
 import { join, basename, sep } from 'path';
+import { logError } from './log.mjs';
 
 // Iteration order is the resolution-priority order: when two folders contain
 // notes with the same basename, the first folder in this list wins. Permanent
@@ -30,7 +31,9 @@ export function buildVaultIndex(vaultRoot) {
           .join('/');
         map.set(name, relFromVault);
       }
-    } catch {}
+    } catch (err) {
+      logError('edge-classifier.buildVaultIndex', err);
+    }
   }
   return map;
 }

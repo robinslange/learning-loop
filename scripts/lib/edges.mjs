@@ -30,6 +30,7 @@ export function acquireLock(dbPath, retries = 3, delayMs = 50) {
           unlinkSync(lockPath);
           continue;
         }
+        // eslint-disable-next-line learning-loop/no-empty-catch
       } catch {}
       if (i < retries - 1) {
         const start = Date.now();
@@ -54,11 +55,13 @@ export function releaseLock(dbPath) {
   if (lockFd !== null) {
     try {
       closeSync(lockFd);
+      // eslint-disable-next-line learning-loop/no-empty-catch
     } catch {}
     lockFd = null;
   }
   try {
     unlinkSync(lockPath);
+    // eslint-disable-next-line learning-loop/no-empty-catch
   } catch {}
 }
 
