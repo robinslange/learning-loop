@@ -93,6 +93,7 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
 
     if let Some(ref f) = force {
         match f.as_str() {
+            "" => {} // empty string: no override, fall through to auto-detect
             "mock" => return load_or_create_mock(config_dir),
             "encrypted" => return load_or_create_encrypted(config_dir),
             "keyring" => return load_or_create_keyring(config_dir),
@@ -499,17 +500,12 @@ mod tests {
     }
 
     #[test]
-    fn legacy_plaintext_read_then_load_returns_plaintext_legacy_backend() {
+    fn legacy_plaintext_read_returns_correct_bytes() {
         let tmp = tempdir().unwrap();
         let fed = tmp.path().join("federation");
         std::fs::create_dir_all(&fed).unwrap();
         let legacy_path = fed.join(".seed");
         std::fs::write(&legacy_path, [5u8; 32]).unwrap();
-
-        // Force encrypted to ensure we exercise plaintext-legacy detection
-        std::env::set_var("LL_SEED_BACKEND", "");
-        // Remove env override so auto-detection runs
-        std::env::remove_var("LL_SEED_BACKEND");
 
         let result = read_plaintext_legacy(tmp.path()).unwrap().unwrap();
         assert_eq!(result, [5u8; 32]);
