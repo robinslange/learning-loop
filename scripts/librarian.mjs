@@ -1,6 +1,7 @@
 import { statSync, readFileSync, appendFileSync, existsSync, renameSync, mkdirSync } from 'fs';
 import { join, basename } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 import { getConfig, getPluginData } from './lib/config.mjs';
 import { DB_PATH, VAULT_PATH } from './lib/constants.mjs';
 import { openReadonly } from './lib/sqljs.mjs';
@@ -57,9 +58,21 @@ const MODEL = libCfg.model || 'gemma4:e2b';
 const PACE = (libCfg.pace_seconds || 2) * 1000;
 const QUEUE_CAP = libCfg.queue_cap || 200;
 const OLLAMA_URL = libCfg.ollama_url || 'http://localhost:11434';
+const PAUSE_ON_BATTERY = libCfg.pause_on_battery !== false;
+const BATTERY_POLL = (libCfg.battery_poll_seconds || 60) * 1000;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function isOnBattery() {
+  if (process.platform !== 'darwin') return false;
+  try {
+    const out = execFileSync('pmset', ['-g', 'batt'], { encoding: 'utf-8', timeout: 2000 });
+    return /drawing from 'Battery Power'/i.test(out);
+  } catch {
+    return false;
+  }
 }
 
 async function waitForOllama({ maxAttempts = 10, intervalMs = 60000 } = {}) {
@@ -455,6 +468,8 @@ async function investigateNote(notePath, task) {
     { role: 'user', content: userMessage },
   ];
 
+  const toolCtx = { neighbourScores: new Map() };
+
   for (let turn = 0; turn < 8; turn++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 120000);
@@ -483,7 +498,7 @@ async function investigateNote(notePath, task) {
       }
 
       for (const tc of msg.tool_calls) {
-        const result = await executeTool(tc.function.name, tc.function.arguments);
+        const result = await executeTool(tc.function.name, tc.function.arguments, toolCtx);
         messages.push({ role: 'tool', content: result });
       }
     } catch (err) {
@@ -512,7 +527,21 @@ async function main() {
   const allPaths = await getAllNotePaths();
   log(`Loaded ${allPaths.length} notes\n`);
 
+  let batteryLogged = false;
   while (true) {
+    if (PAUSE_ON_BATTERY && isOnBattery()) {
+      if (!batteryLogged) {
+        log(`On battery power, pausing (polling every ${BATTERY_POLL / 1000}s)\n`);
+        batteryLogged = true;
+      }
+      await sleep(BATTERY_POLL);
+      continue;
+    }
+    if (batteryLogged) {
+      log('AC power restored, resuming\n');
+      batteryLogged = false;
+    }
+
     if (pendingCount() >= QUEUE_CAP) {
       log('Queue full, expiring stale items...\n');
       expireStaleItems(VAULT_PATH);

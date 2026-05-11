@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Librarian pauses on battery power (macOS).** A continuously running `gemma4:e2b` classifier kept the GPU warm and drained battery on unplugged laptops. The main loop now polls `pmset -g batt` at the top of each iteration; on `'Battery Power'` it logs once and sleeps `battery_poll_seconds` (default 60) until AC is restored, then logs and resumes. Two new config keys under `librarian`: `pause_on_battery` (default `true`) and `battery_poll_seconds` (default `60`). Non-macOS platforms always treat the system as plugged in. Ollama itself stays resident — this gates inference, not the daemon.
+
 ## v1.17.3
 
 ### Fixed
