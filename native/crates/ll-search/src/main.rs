@@ -124,6 +124,13 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
+    MigrateSeed {
+        #[arg(long)]
+        config_dir: Option<String>,
+        /// Reverse a completed migration: restore plaintext seed from secure backend.
+        #[arg(long)]
+        rollback: bool,
+    },
     Watch {
         vault_path: String,
         db_path: String,
@@ -388,14 +395,35 @@ fn main() {
         }
         Commands::Identity { config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let seed_path = ll_search::sync::config::seed_path(&config_dir);
-            let result = ll_search::sync::auth::load_or_create_seed(&seed_path)
+            let result = ll_search::sync::seed_store::load_or_create(&config_dir)
                 .expect("failed to load or create seed");
             out(&serde_json::json!({
                 "pubkey_b64": ll_search::sync::auth::pubkey_b64(&result.signing_key),
-                "seed_path": seed_path.display().to_string(),
+                "backend": result.backend.to_string(),
                 "created": result.created,
             }));
+        }
+        Commands::MigrateSeed { config_dir, rollback } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            if rollback {
+                let result = ll_search::sync::seed_migrate::migrate_rollback(&config_dir)
+                    .expect("seed migration rollback failed");
+                out(&serde_json::json!({
+                    "from": result.from.to_string(),
+                    "to": result.to.to_string(),
+                    "plaintext_removed": result.plaintext_removed,
+                    "already_migrated": result.already_migrated,
+                }));
+            } else {
+                let result = ll_search::sync::seed_migrate::migrate(&config_dir)
+                    .expect("seed migration failed");
+                out(&serde_json::json!({
+                    "from": result.from.to_string(),
+                    "to": result.to.to_string(),
+                    "plaintext_removed": result.plaintext_removed,
+                    "already_migrated": result.already_migrated,
+                }));
+            }
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
             init_embedding();
