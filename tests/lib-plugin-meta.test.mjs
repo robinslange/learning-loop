@@ -18,8 +18,8 @@ const MOD = JSON.stringify(
 
 test('pluginRoot resolves to repo root', () => {
   const root = pluginRoot();
-  // Should end with /learning-loop (direct or worktree checkout).
-  assert.match(root, /learning-loop(\/\.worktrees\/[^/]+)?$/);
+  // Should end with /learning-loop (direct checkout or worktree under .worktrees/ or .claude/worktrees/).
+  assert.match(root, /learning-loop(\/(\.claude\/)?\.?worktrees\/[^/]+)?$/);
 });
 
 test('pluginRoot is an absolute path', () => {
