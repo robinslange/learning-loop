@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.18.1
+
+### Fixed
+
+- **GitHub Actions Linux jobs now install `libdbus-1-dev` + `pkg-config`** before invoking cargo. The `keyring = "=3.6.3"` dep added in v1.18.0 (federation seed storage) enables the `sync-secret-service` feature, which transitively pulls `libdbus-sys` and fails to compile on a stock `ubuntu-latest` runner without DBus development headers. Both the `Test` workflow (cargo job) and the `Build ll-search` workflow (Linux matrix entry) install the package as a new first step. v1.18.0 shipped no release artifact because of this; v1.18.1 is the first installable build of the v1.18 line. macOS and Windows builds were not affected (Keychain + Credential Manager use OS-native crypto, no system deps).
+
 ## v1.18.0
 
 ### Added

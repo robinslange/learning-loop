@@ -27,6 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Linux build deps (libdbus-1-dev for keyring sync-secret-service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
