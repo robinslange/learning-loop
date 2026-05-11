@@ -19,11 +19,6 @@ tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "net", "tim
 tokio-tungstenite = { version = "0.29", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 thiserror = "1"
-keyring = "=3.6.3"
-chacha20poly1305 = "0.10.1"
-machine-uid = "0.6.0"
-hkdf = "0.12"
-zeroize = "1"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 globset = "0.4"
 rand = "0.8"

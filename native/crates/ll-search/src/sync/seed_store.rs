@@ -273,7 +273,8 @@ fn is_platform_unavailable(e: &keyring::Error) -> bool {
 
 /// Derive the AEAD key from the machine ID using HKDF-SHA256.
 fn derive_enc_key() -> anyhow::Result<[u8; 32]> {
-    let machine_id = machine_uid::get().context("failed to read machine-id")?;
+    let machine_id = machine_uid::get()
+        .map_err(|e| anyhow::anyhow!("failed to read machine-id: {e}"))?;
     let hk = Hkdf::<Sha256>::new(Some(b"ll-search-seed-v1"), machine_id.as_bytes());
     let mut prk = [0u8; 32];
     hk.expand(b"federation-signing-seed", &mut prk)
