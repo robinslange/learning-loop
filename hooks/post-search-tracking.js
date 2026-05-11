@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
 import { openEdgeDb, findMatchingSupersessions } from '../scripts/lib/edges.mjs';
+import { logError } from '../scripts/lib/log.mjs';
+import { emitJson } from './lib/io.mjs';
 
 async function checkSupersessions(query) {
   const pluginData = resolvePluginData();
@@ -26,7 +28,8 @@ async function checkSupersessions(query) {
       return `  - "${m.old_pattern_query}" superseded ${m.superseded_date}${replacement}${reason}`;
     });
     return `Episodic search hit superseded pattern(s):\n${lines.join('\n')}\nHistorical results may be outdated; prefer the replacement note.`;
-  } catch {
+  } catch (err) {
+    logError('post-search-tracking.checkSupersessions', err);
     return null;
   } finally {
     if (db) db.close();
@@ -40,13 +43,11 @@ runHook(async ({ tool, input }) => {
   if (!query) return;
   const annotation = await checkSupersessions(query);
   if (annotation) {
-    process.stdout.write(
-      JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: 'PostToolUse',
-          additionalContext: annotation,
-        },
-      }),
-    );
+    emitJson({
+      hookSpecificOutput: {
+        hookEventName: 'PostToolUse',
+        additionalContext: annotation,
+      },
+    });
   }
 });

@@ -1,6 +1,7 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 import { findBinary, findEpisodicBinary } from './common.mjs';
 import { warnOnce } from '../../scripts/lib/warn-once.mjs';
+import { spawnEnv } from '../../scripts/lib/env.mjs';
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/g,
@@ -184,7 +185,7 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const llBinary = useRealBinaries ? findBinary() : null;
   const llCmd = llBinary ? llBinary.bin : 'll-search';
   const llEnv = llBinary
-    ? { ...process.env, ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir }
+    ? spawnEnv({ ORT_DYLIB_PATH: llBinary.binDir, ORT_LIB_LOCATION: llBinary.binDir })
     : undefined;
 
   const epCmd = useRealBinaries ? findEpisodicBinary() : 'episodic-memory';

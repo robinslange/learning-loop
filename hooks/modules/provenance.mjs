@@ -4,6 +4,8 @@
 // runs without ctx.vaultRoot for Agent/Skill events.
 
 import { emitProvenance, vaultRelPath, classifyVaultPath } from '../lib/common.mjs';
+import { parseFrontmatter, parseTags } from '../../scripts/lib/markdown-parse.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 export async function runProvenance(ctx) {
   try {
@@ -19,12 +21,10 @@ export async function runProvenance(ctx) {
         folder: classifyVaultPath(rel),
       };
       const content = input.content || input.new_string || '';
-      const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-      if (fmMatch) {
-        const tagMatch = fmMatch[1].match(/tags:\s*\[([^\]]*)\]/);
-        if (tagMatch) {
-          event.tags = tagMatch[1].split(',').map((t) => t.trim().replace(/['"]/g, ''));
-        }
+      const { fm } = parseFrontmatter(content);
+      if (Object.keys(fm).length > 0) {
+        const tags = parseTags(fm);
+        if (tags.length > 0) event.tags = tags;
       }
       emitProvenance(event);
       return;
@@ -47,5 +47,7 @@ export async function runProvenance(ctx) {
         args: input.args || '',
       });
     }
-  } catch {}
+  } catch (err) {
+    logError('provenance', err);
+  }
 }

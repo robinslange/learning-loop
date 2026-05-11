@@ -5,18 +5,12 @@
 // hooks load in microseconds. Daemon-side rebuilds are bounded by a 30s TTL;
 // hook-side splice/remove keeps the cache fresh between rebuilds.
 
-import {
-  readFileSync,
-  writeFileSync,
-  renameSync,
-  readdirSync,
-  openSync,
-  closeSync,
-  unlinkSync,
-  constants as fsConstants,
-} from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join, basename, sep } from 'node:path';
 import { resolvePluginData } from './common.mjs';
+import { withLock, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
+import { safeLoad } from '../../scripts/lib/safe-load.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 export const SNAPSHOT_VERSION = 1;
 export const TTL_MS = 30_000;
@@ -49,46 +43,6 @@ function snapshotPath() {
   return join(pd, 'vault-snapshot.json');
 }
 
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const lockSleepBuf = new Int32Array(new SharedArrayBuffer(4));
-function acquireSnapshotLock(lockPath, retries = 5, delayMs = 20) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const fd = openSync(
-        lockPath,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
-      );
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
-      return true;
-    } catch {
-      try {
-        const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
-        if (pid && !isProcessAlive(pid)) {
-          unlinkSync(lockPath);
-          continue;
-        }
-      } catch {}
-      if (i < retries - 1) Atomics.wait(lockSleepBuf, 0, 0, delayMs);
-    }
-  }
-  return false;
-}
-
-function releaseSnapshotLock(lockPath) {
-  try {
-    unlinkSync(lockPath);
-  } catch {}
-}
-
 function nowIso() {
   return new Date().toISOString();
 }
@@ -114,13 +68,11 @@ function writeSnapshot(snap) {
 function writeSnapshotLocked(snap) {
   const path = snapshotPath();
   if (!path) return;
-  const lockPath = path + '.lock';
-  const held = acquireSnapshotLock(lockPath);
-  if (!held) return;
   try {
-    writeSnapshot(snap);
-  } finally {
-    releaseSnapshotLock(lockPath);
+    withLock(path, { retries: 5, retryDelayMs: 20 }, () => writeSnapshot(snap));
+  } catch (err) {
+    if (err.code === 'ELOCK_TIMEOUT') return;
+    logError('snapshot.writeSnapshotLocked', err);
   }
 }
 
@@ -130,21 +82,23 @@ function writeSnapshotLocked(snap) {
 function lockedMutate(mutate) {
   const path = snapshotPath();
   if (!path) return false;
-  const lockPath = path + '.lock';
-  const held = acquireSnapshotLock(lockPath);
-  if (!held) return false;
+  let handle;
   try {
-    let snap;
-    try {
-      snap = attachRuntime(JSON.parse(readFileSync(path, 'utf-8')));
-    } catch {
-      return false;
-    }
+    handle = acquireLock(path, { retries: 5, retryDelayMs: 20 });
+  } catch (err) {
+    logError('snapshot.lockedMutate.acquire', err);
+    return false;
+  }
+  if (!handle) return false;
+  try {
+    const { value, error } = safeLoad(path);
+    if (error || !value) return false;
+    const snap = attachRuntime(value);
     const changed = mutate(snap);
     if (changed) writeSnapshot(snap);
     return changed;
   } finally {
-    releaseSnapshotLock(lockPath);
+    releaseLock(handle);
   }
 }
 
@@ -169,7 +123,9 @@ export function rebuildVaultSnapshot(vaultRoot) {
           rel_path: rel,
         });
       }
-    } catch {}
+    } catch (err) {
+      logError('snapshot.rebuildVaultSnapshot.readdir', err);
+    }
   }
   const snap = {
     version: SNAPSHOT_VERSION,
@@ -186,15 +142,12 @@ export function rebuildVaultSnapshot(vaultRoot) {
 export function loadVaultSnapshot(vaultRoot) {
   const path = snapshotPath();
   if (!path) return rebuildVaultSnapshot(vaultRoot);
-  try {
-    const snap = JSON.parse(readFileSync(path, 'utf-8'));
-    if (snap.version !== SNAPSHOT_VERSION) return rebuildVaultSnapshot(vaultRoot);
-    if (snap.vault_root !== vaultRoot) return rebuildVaultSnapshot(vaultRoot);
-    if (Date.now() > Date.parse(snap.expires_at)) return rebuildVaultSnapshot(vaultRoot);
-    return attachRuntime(snap);
-  } catch {
-    return rebuildVaultSnapshot(vaultRoot);
-  }
+  const { value: snap, error } = safeLoad(path);
+  if (error || !snap) return rebuildVaultSnapshot(vaultRoot);
+  if (snap.version !== SNAPSHOT_VERSION) return rebuildVaultSnapshot(vaultRoot);
+  if (snap.vault_root !== vaultRoot) return rebuildVaultSnapshot(vaultRoot);
+  if (Date.now() > Date.parse(snap.expires_at)) return rebuildVaultSnapshot(vaultRoot);
+  return attachRuntime(snap);
 }
 
 export function maybeSplice(snap, newEntry) {

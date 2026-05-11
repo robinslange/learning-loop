@@ -1,0 +1,211 @@
+// hooks/session-start/context-assembly.mjs : build the additionalContext string.
+// Reads update-check cache, memory indices, intention summary, dream gate,
+// learned patterns, and federation status. Mutates ctx.context.
+
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { join, basename, resolve } from 'node:path';
+import { safeLoad } from '../../scripts/lib/safe-load.mjs';
+import { HookConfig } from '../../scripts/lib/hook-config.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
+
+export async function run(ctx) {
+  const {
+    pluginDir,
+    pluginData,
+    vaultRoot,
+    projectDir,
+    memoryDir,
+    updateCacheFile,
+    depsAllSatisfied,
+    depsMissing,
+  } = ctx;
+
+  const VAULT_INBOX = join(vaultRoot, '0-inbox');
+  const searchCmd = `node ${join(pluginDir, 'scripts', 'vault-search.mjs')}`;
+
+  // 0.5. Inject resolved paths for skill consumption.
+  ctx.context += `## Learning Loop Paths\n`;
+  ctx.context += `PLUGIN=${pluginDir}\n`;
+  ctx.context += `PLUGIN_DATA=${pluginData}\n`;
+  ctx.context += `VAULT=${vaultRoot}\n`;
+
+  // 0.6. Update notification from cached check.
+  if (updateCacheFile) {
+    try {
+      const { value: cached } = safeLoad(updateCacheFile, { fallback: null });
+      if (cached?.update_available) {
+        ctx.context += `\n## Plugin Update Available\n`;
+        ctx.context += `learning-loop ${cached.installed} → ${cached.latest}. Run \`/learning-loop:init\` to update.\n`;
+      }
+    } catch (err) {
+      logError('session-start.context-assembly.updateCache', err);
+    }
+  }
+
+  // 1. Detect project from working directory.
+  if (projectDir) {
+    ctx.context += `Current project: ${basename(projectDir)}\n`;
+  }
+
+  if (depsMissing) {
+    ctx.context += depsMissing;
+  }
+
+  // 2. Project-specific auto-memory.
+  if (projectDir) {
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const memoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
+    if (existsSync(memoryIndex)) {
+      try {
+        const index = readFileSync(memoryIndex, 'utf8').trim();
+        if (index) {
+          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
+        }
+      } catch (err) {
+        logError('session-start.context-assembly.projectMemory', err);
+      }
+    }
+  }
+
+  // 3. Global memory (keyed to vault parent).
+  const vaultParent = resolve(vaultRoot, '..');
+  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
+  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
+  if (existsSync(globalMemory)) {
+    try {
+      const globalIndex = readFileSync(globalMemory, 'utf8').trim();
+      if (globalIndex) {
+        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
+      }
+    } catch (err) {
+      logError('session-start.context-assembly.globalMemory', err);
+    }
+  }
+
+  // 4. On-demand vault captures pointer.
+  ctx.context += '\n## Recent vault captures\n';
+  ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
+
+  // 5. Intention summary.
+  try {
+    const intentionOutput = execFileSync(
+      'node',
+      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions'],
+      {
+        encoding: 'utf8',
+        timeout: HookConfig.REINDEX_TIMEOUT_MS,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    ).trim();
+
+    if (intentionOutput && intentionOutput !== '[]') {
+      let data;
+      try {
+        data = JSON.parse(intentionOutput);
+      } catch (err) {
+        logError('session-start.context-assembly.parseIntentions', err);
+      }
+      if (Array.isArray(data) && data.length > 0) {
+        ctx.context += '\n## Notes with active intentions:\n';
+        for (const item of data) {
+          ctx.context += `- ${item.context} (${item.count} notes)\n`;
+        }
+        ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
+      }
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.intentions', err);
+  }
+
+  // 6. Retrieval protocol footer.
+  ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
+  ctx.context +=
+    "You have a learning loop active. Before responding to the user's first message:\n";
+  ctx.context +=
+    '1. Check if any auto-memories (listed above) are relevant to the task at hand. If so, read them.\n';
+  if (depsAllSatisfied) {
+    ctx.context +=
+      '2. Search episodic memory for relevant past conversations about this topic/project.\n';
+  } else {
+    ctx.context += '2. (Skipped — episodic memory plugin not installed. Run /init to set up.)\n';
+  }
+  ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
+  ctx.context += `4. Check the intention summary above (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
+  ctx.context +=
+    "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
+  ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
+  ctx.context += '7. After substantial work, suggest /reflect to consolidate learnings.\n';
+  ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
+
+  // 7. Dream gate check.
+  try {
+    const dreamNudge = execFileSync(
+      'node',
+      [join(import.meta.dirname, '..', 'lib', 'dream-gate.js')],
+      {
+        encoding: 'utf8',
+        timeout: HookConfig.REINDEX_TIMEOUT_MS,
+        stdio: ['pipe', 'pipe', 'ignore'],
+      },
+    ).trim();
+    if (dreamNudge) {
+      ctx.context += `\n## Dream Consolidation Due\n${dreamNudge}\n`;
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.dreamGate', err);
+  }
+
+  // 7.5. Learned patterns.
+  if (pluginData) {
+    const patternsFile = join(pluginData, 'provenance', 'learned-patterns.md');
+    if (existsSync(patternsFile)) {
+      try {
+        const patternsContent = readFileSync(patternsFile, 'utf8');
+        const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
+        if (patternCount > 0) {
+          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
+        }
+      } catch (err) {
+        logError('session-start.context-assembly.learnedPatterns', err);
+      }
+    }
+
+    // 7.6. Federation status.
+    try {
+      const fedConfigPath = join(pluginData, 'federation', 'config.json');
+      if (existsSync(fedConfigPath)) {
+        const peersDir = join(pluginData, 'federation', 'data', 'peers');
+        if (existsSync(peersDir)) {
+          const peerNames = readdirSync(peersDir, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => e.name);
+          if (peerNames.length > 0) {
+            ctx.context += '\n## Federation\n';
+            ctx.context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
+          }
+        }
+      }
+    } catch (err) {
+      logError('session-start.context-assembly.federation', err);
+    }
+  }
+
+  // 10. Emit session-start provenance event.
+  try {
+    execFileSync(
+      'node',
+      [
+        join(pluginDir, 'scripts', 'provenance.mjs'),
+        JSON.stringify({
+          agent: 'session',
+          action: 'session-start',
+          source: 'hook',
+        }),
+      ],
+      { timeout: HookConfig.PROVENANCE_TIMEOUT_MS, stdio: 'ignore' },
+    );
+  } catch (err) {
+    logError('session-start.context-assembly.provenance', err);
+  }
+}

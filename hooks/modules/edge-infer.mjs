@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { resolvePluginData, isVaultNote } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -169,7 +170,8 @@ export async function runEdgeInfer(ctx) {
   } else {
     try {
       content = readFileSync(filePath, 'utf-8');
-    } catch {
+    } catch (err) {
+      logError('edge-infer.readContent', err);
       return;
     }
   }

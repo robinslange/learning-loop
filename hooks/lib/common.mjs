@@ -9,11 +9,14 @@ import { homedir, tmpdir } from 'node:os';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
+import { env } from '../../scripts/lib/env.mjs';
+import { safeLoad } from '../../scripts/lib/safe-load.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 export { resolvePluginData };
 
 export function home() {
-  return process.env.HOME || process.env.USERPROFILE || homedir();
+  return env.HOME || env.USERPROFILE || homedir();
 }
 
 function readJsonStripBom(path) {
@@ -27,15 +30,20 @@ export function resolveConfig() {
   if (pluginData) {
     try {
       return readJsonStripBom(join(pluginData, 'config.json'));
-    } catch {}
+    } catch (err) {
+      logError('common.resolveConfig.pluginData', err);
+    }
   }
   try {
     return readJsonStripBom(join(resolve(import.meta.dirname, '..', '..'), 'config.json'));
-  } catch {}
+  } catch (err) {
+    logError('common.resolveConfig.fallback', err);
+  }
   return {};
 }
 
 export function resolveVaultPath() {
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
   if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
   const cfg = resolveConfig();
   if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, home()));
@@ -55,8 +63,9 @@ export function findBinary() {
 export function findEpisodicBinary() {
   const claudeDir = join(home(), '.claude', 'plugins');
   const exe = process.platform === 'win32' ? '.exe' : '';
+  const { value: raw } = safeLoad(join(claudeDir, 'installed_plugins.json'), { fallback: null });
+  if (!raw) return null;
   try {
-    const raw = JSON.parse(readFileSync(join(claudeDir, 'installed_plugins.json'), 'utf-8'));
     const plugins = raw.plugins || raw;
     for (const [key, entries] of Object.entries(plugins)) {
       if (!key.startsWith('episodic-memory@')) continue;
@@ -65,7 +74,9 @@ export function findEpisodicBinary() {
       const bin = join(entry.installPath, 'cli', `episodic-memory${exe}`);
       if (existsSync(bin)) return bin;
     }
-  } catch {}
+  } catch (err) {
+    logError('common.findEpisodicBinary', err);
+  }
   return null;
 }
 
@@ -73,10 +84,13 @@ export function getSessionId() {
   const tmp = tmpdir();
   try {
     return readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
-  } catch {}
+  } catch (err) {
+    logError('common.getSessionId.ppid', err);
+  }
   try {
     return readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
-  } catch {
+  } catch (err) {
+    logError('common.getSessionId.legacy', err);
     return 'unknown';
   }
 }
@@ -135,7 +149,9 @@ export async function runHook(handler) {
       response: raw.tool_response,
       raw,
     });
-  } catch {}
+  } catch (err) {
+    logError('common.runHook', err);
+  }
 }
 
 // --- Emission helpers ---

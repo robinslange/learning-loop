@@ -3,6 +3,7 @@ import { join, resolve, dirname } from 'path';
 import { existsSync } from 'fs';
 import { getPluginData } from './config.mjs';
 import { warnOnce } from './warn-once.mjs';
+import { spawnEnv } from './env.mjs';
 
 const BINARY_NAME = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
 
@@ -37,7 +38,7 @@ export function binaryVersion() {
   if (!hasBinary()) return null;
   try {
     return runRaw(['version']).trim();
-  } catch {
+  } catch (_err) {
     return null;
   }
 }
@@ -55,7 +56,7 @@ export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const stdout = execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) },
+    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
   });
   return JSON.parse(stdout);
 }
@@ -73,6 +74,6 @@ export function runRaw(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   return execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: { ...process.env, ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) },
+    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
   });
 }

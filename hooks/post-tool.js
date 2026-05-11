@@ -3,7 +3,7 @@
 //
 // Single Node entry replacing the three previous PostToolUse hooks
 // (autolink, edge-infer, provenance). One stdin read, one snapshot load,
-// fixed module order, per-module try/catch isolation.
+// fixed module order, per-module timeout isolation.
 
 import { join } from 'node:path';
 import { readStdin, resolveVaultPath } from './lib/common.mjs';
@@ -13,6 +13,9 @@ import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { env } from '../scripts/lib/env.mjs';
+import { logError } from '../scripts/lib/log.mjs';
 
 function logHookError(moduleName, err) {
   const pluginData = getPluginData();
@@ -21,8 +24,16 @@ function logHookError(moduleName, err) {
   appendJsonlLineSafe(join(pluginData, `hook-errors-${month}.jsonl`), {
     ts: new Date().toISOString(),
     module: moduleName,
-    message: err && err.message ? String(err.message).slice(0, 500) : String(err).slice(0, 500),
+    message: err && err.message ? String(err.message).slice(0, HookConfig.ERROR_MSG_MAX_CHARS) : String(err).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
   });
+}
+
+function withTimeout(p, ms, label) {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error(`${label} timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([p.finally(() => clearTimeout(t)), timeout]);
 }
 
 let raw;
@@ -50,10 +61,10 @@ const modules = isWriteEdit ? [runAutolink, runEdgeInfer, runProvenance] : [runP
 
 for (const mod of modules) {
   try {
-    await mod(ctx);
+    await withTimeout(Promise.resolve(mod(ctx)), HookConfig.POST_TOOL_MODULE_TIMEOUT_MS, mod.name);
   } catch (err) {
     logHookError(mod.name, err);
-    if (process.env.LL_HOOK_DEBUG === '1') {
+    if (env.LL_HOOK_DEBUG) {
       process.stderr.write(`[post-tool] ${mod.name} failed: ${err.message}\n`);
     }
   }

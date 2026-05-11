@@ -3,7 +3,7 @@
 // Runs on every UserPromptSubmit. Updates as the session evolves.
 // Scores topics by recency (current prompt >> old messages).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -18,11 +18,17 @@ import {
   runBackendsWithRaceCap,
   scrubSecrets,
 } from './lib/inject.mjs';
+import { safeLoad } from '../scripts/lib/safe-load.mjs';
+import { withLock } from '../scripts/lib/file-lock.mjs';
+import { env } from '../scripts/lib/env.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { logError } from '../scripts/lib/log.mjs';
+import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
 
 const input = await new Promise((resolve) => {
   let data = '';
   process.stdin.setEncoding('utf8');
-  const timeout = setTimeout(() => resolve(''), 3000);
+  const timeout = setTimeout(() => resolve(''), HookConfig.LABEL_TIMEOUT_MS);
   process.stdin.on('data', (chunk) => (data += chunk));
   process.stdin.on('end', () => {
     clearTimeout(timeout);
@@ -32,7 +38,14 @@ const input = await new Promise((resolve) => {
 
 if (!input.trim()) process.exit(0);
 
-const { session_id, prompt, transcript_path, cwd } = JSON.parse(input);
+let parsed;
+try {
+  parsed = JSON.parse(input);
+} catch (err) {
+  logError('session-label.parseStdin', err);
+  process.exit(0);
+}
+const { session_id, prompt, transcript_path, cwd } = parsed;
 if (!session_id || !prompt) process.exit(0);
 
 const labelFile = join(tmpdir(), `claude-session-label-${session_id}.txt`);
@@ -42,7 +55,7 @@ let messages = [];
 if (transcript_path && existsSync(transcript_path)) {
   try {
     const lines = readFileSync(transcript_path, 'utf8').trim().split('\n');
-    for (const line of lines.slice(-80)) {
+    for (const line of lines.slice(-HookConfig.RECENT_MSG_WINDOW)) {
       try {
         const entry = JSON.parse(line);
         if (entry.type === 'user') {
@@ -55,39 +68,15 @@ if (transcript_path && existsSync(transcript_path)) {
             }
           }
         }
-      } catch {}
-    }
-  } catch {}
-}
-messages.push(prompt);
-
-// --- Scored matching ---
-// Each message gets a weight: current prompt = 10, previous = 3, older = 1
-function scorePatterns(patterns, textBlocks) {
-  const scores = new Map();
-  for (let i = 0; i < textBlocks.length; i++) {
-    const text = textBlocks[i].toLowerCase();
-    const isCurrentPrompt = i === textBlocks.length - 1;
-    const isRecent = i >= textBlocks.length - 4;
-    const weight = isCurrentPrompt ? 10 : isRecent ? 3 : 1;
-
-    for (const [pattern, label] of patterns) {
-      if (pattern.test(text)) {
-        scores.set(label, (scores.get(label) || 0) + weight);
+      } catch (err) {
+        logError('session-label.parseTranscriptLine', err);
       }
     }
+  } catch (err) {
+    logError('session-label.readTranscript', err);
   }
-  // Return highest-scoring label
-  let best = '';
-  let bestScore = 0;
-  for (const [label, score] of scores) {
-    if (score > bestScore) {
-      best = label;
-      bestScore = score;
-    }
-  }
-  return best;
 }
+messages.push(prompt);
 
 // --- Topic patterns ---
 const topicPatterns = [
@@ -150,7 +139,7 @@ function topN(patterns, textBlocks, n) {
     const text = textBlocks[i].toLowerCase();
     const isCurrentPrompt = i === textBlocks.length - 1;
     const isRecent = i >= textBlocks.length - 4;
-    const weight = isCurrentPrompt ? 10 : isRecent ? 3 : 1;
+    const weight = isCurrentPrompt ? HookConfig.MSG_WEIGHT_CURRENT : isRecent ? HookConfig.MSG_WEIGHT_RECENT : HookConfig.MSG_WEIGHT_OLDER;
     for (const [pattern, label] of patterns) {
       if (pattern.test(text)) {
         scores.set(label, (scores.get(label) || 0) + weight);
@@ -170,7 +159,6 @@ const topic2 = topics[1] || '';
 const action = actions[0] || '';
 
 // --- Compose label ---
-// Combine: "Project subtopic action" or "Topic action" or just "Topic"
 let label;
 if (topic && topic2 && action) {
   label = `${topic} ${topic2} ${action}`;
@@ -186,8 +174,8 @@ if (topic && topic2 && action) {
   label = basename(cwd || 'session');
 }
 
-if (label.length > 35) {
-  label = label.slice(0, 34) + '\u2026';
+if (label.length > HookConfig.LABEL_MAX_LENGTH) {
+  label = label.slice(0, HookConfig.LABEL_MAX_LENGTH - 1) + '\u2026';
 }
 
 function dedupeStatePath(sid) {
@@ -200,39 +188,45 @@ function dedupeStatePath(sid) {
 
 function loadDedupeState(sid) {
   const p = dedupeStatePath(sid);
-  if (!p || !existsSync(p)) return new Set();
-  try {
-    const raw = JSON.parse(readFileSync(p, 'utf8'));
-    const cutoff = Date.now() - 180_000;
-    return new Set(raw.filter((e) => new Date(e.ts).getTime() >= cutoff).map((e) => e.path));
-  } catch {
-    return new Set();
-  }
+  if (!p) return new Set();
+  const { value } = safeLoad(p, { fallback: [] });
+  const arr = Array.isArray(value) ? value : [];
+  const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
+  return new Set(arr.filter((e) => new Date(e.ts).getTime() >= cutoff).map((e) => e.path));
 }
 
 function persistDedupeState(sid, newPaths) {
   const p = dedupeStatePath(sid);
   if (!p) return;
-  let existing = [];
   try {
-    if (existsSync(p)) existing = JSON.parse(readFileSync(p, 'utf8'));
-  } catch {}
-  const cutoff = Date.now() - 180_000;
-  const kept = existing.filter((e) => new Date(e.ts).getTime() >= cutoff);
-  const ts = new Date().toISOString();
-  for (const path of newPaths) kept.push({ path, ts });
-  writeFileSync(p, JSON.stringify(kept));
+    withLock(p, { retries: 1, retryDelayMs: 5 }, () => {
+      const { value } = safeLoad(p, { fallback: [] });
+      const existing = Array.isArray(value) ? value : [];
+      const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
+      const kept = existing.filter((e) => new Date(e.ts).getTime() >= cutoff);
+      const ts = new Date().toISOString();
+      for (const path of newPaths) kept.push({ path, ts });
+      const tmp = `${p}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(kept));
+      renameSync(tmp, p);
+    });
+  } catch (err) {
+    if (err.code === 'ELOCK_TIMEOUT') return;
+    logError('session-label.persistDedupeState', err);
+  }
 }
 
 function logShadow(record) {
   try {
     emitRetrieval('shadow-injection', {
       session_label: label,
-      prompt: scrubSecrets((prompt || '').slice(0, 200)),
+      prompt: scrubSecrets((prompt || '').slice(0, HookConfig.PROMPT_SLICE_CHARS)),
       prompt_length: (prompt || '').length,
       ...record,
     });
-  } catch {}
+  } catch (err) {
+    logError('session-label.logShadow', err);
+  }
 }
 
 function summarizeBackends(results) {
@@ -256,16 +250,18 @@ function summarizeBackends(results) {
 writeFileSync(labelFile, label);
 
 try {
-  if (process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR === '1')
+  if (env.LEARNING_LOOP_INJECTION_FORCE_ERROR)
     throw new Error('forced error for test');
 
-  const mode =
-    process.env.LEARNING_LOOP_INJECTION_MODE || resolveConfig().injection_mode || 'shadow';
+  // Mode cascade: env (if set) > config > default 'shadow'.
+  const mode = env.LEARNING_LOOP_INJECTION_MODE_SET
+    ? env.LEARNING_LOOP_INJECTION_MODE
+    : (resolveConfig().injection_mode || 'shadow');
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
   if (
-    trimmed.length < 20 ||
+    trimmed.length < HookConfig.MIN_LABEL_LENGTH ||
     /^(ok|yes|no|thanks|try\s+again|continue|go|sure|done)$/i.test(trimmed) ||
     trimmed.startsWith('<')
   ) {
@@ -273,8 +269,8 @@ try {
     process.exit(0);
   }
 
-  const priorMsgs = messages.slice(-3, -1).map((m) => (m || '').slice(0, 200));
-  const query = [(prompt || '').slice(0, 400), ...priorMsgs].join(' ');
+  const priorMsgs = messages.slice(-3, -1).map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
+  const query = [(prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS), ...priorMsgs].join(' ');
 
   const vaultRoot = resolveVaultPath();
   if (!vaultRoot) {
@@ -283,15 +279,16 @@ try {
   }
   const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
 
-  const raceCapMs = Number(process.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS || 1500);
+  const raceCapMs = env.LEARNING_LOOP_INJECTION_RACE_CAP_MS;
   const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs });
 
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
   const episodicTop = results.episodic?.hits?.[0]?.score || 0;
 
-  const gateThreshold = Number(
-    process.env.LEARNING_LOOP_INJECTION_THRESHOLD || resolveConfig().injection_threshold || 0.35,
-  );
+  // Threshold cascade: env (if set) > config > HookConfig default.
+  const gateThreshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
+    ? env.LEARNING_LOOP_INJECTION_THRESHOLD
+    : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
   if (vaultTop < gateThreshold && episodicTop < gateThreshold) {
     logShadow({
       gate: {
@@ -312,9 +309,10 @@ try {
       if (h.body) return h;
       try {
         const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
-        const body = raw.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+        const body = stripFrontmatter(raw).trim();
         return { ...h, body };
-      } catch {
+      } catch (err) {
+        logError('session-label.enrichVaultHit', err);
         return { ...h, body: '' };
       }
     })

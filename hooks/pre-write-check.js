@@ -10,35 +10,11 @@ import {
   isVaultNote,
 } from './lib/common.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
-
-function parseFrontmatter(content) {
-  const m = content.match(/^---\n([\s\S]*?)\n---/);
-  if (!m) return null;
-  return m[1];
-}
-
-function parseTags(fm) {
-  const inlineMatch = fm.match(/^tags:\s*\[([^\]]*)\]/m);
-  if (inlineMatch) {
-    return inlineMatch[1]
-      .split(',')
-      .map((t) => t.trim().replace(/['"]/g, ''))
-      .filter(Boolean);
-  }
-  const blockMatch = fm.match(/^tags:\s*\n((?:\s+-\s+.*\n?)*)/m);
-  if (blockMatch) {
-    return blockMatch[1]
-      .split('\n')
-      .map((l) =>
-        l
-          .replace(/^\s*-\s*/, '')
-          .trim()
-          .replace(/['"]/g, ''),
-      )
-      .filter(Boolean);
-  }
-  return [];
-}
+import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { spawnEnv } from '../scripts/lib/env.mjs';
+import { logError } from '../scripts/lib/log.mjs';
+import { emitJson } from './lib/io.mjs';
 
 function findDuplicateTags(tags) {
   const seen = new Set();
@@ -48,17 +24,6 @@ function findDuplicateTags(tags) {
     seen.add(t);
   }
   return [...dupes];
-}
-
-function extractWikilinks(body) {
-  const links = new Set();
-  const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
-  let m;
-  while ((m = re.exec(body)) !== null) {
-    const target = m[1].split('#')[0].trim();
-    if (target) links.add(target);
-  }
-  return [...links];
 }
 
 function buildNoteIndex(vaultRoot) {
@@ -82,13 +47,13 @@ function checkDuplicateNote(filePath, title, vaultRoot) {
       ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
       {
         encoding: 'utf-8',
-        timeout: 3000,
-        env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
+        timeout: HookConfig.QUERY_TIMEOUT_MS,
+        env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
       },
     );
     const result = JSON.parse(out);
     const q = result.queries && result.queries[0];
-    if (!q || !q.top_match_similarity || q.top_match_similarity < 0.85) return null;
+    if (!q || !q.top_match_similarity || q.top_match_similarity < HookConfig.SIMILARITY_THRESHOLD) return null;
     const topResult = q.results && q.results[0];
     if (!topResult) return null;
 
@@ -97,30 +62,29 @@ function checkDuplicateNote(filePath, title, vaultRoot) {
 
     const pct = Math.round(q.top_match_similarity * 100);
     return `Potential duplicate: "${topResult.title || topResult.path}" at ${topResult.path} (${pct}% similar).`;
-  } catch {
+  } catch (err) {
+    logError('pre-write-check.checkDuplicateNote', err);
     return null;
   }
 }
 
 function deny(reason) {
-  const out = {
+  emitJson({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason: reason,
     },
-  };
-  process.stdout.write(JSON.stringify(out));
+  });
 }
 
 function warn(context) {
-  const out = {
+  emitJson({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       additionalContext: context,
     },
-  };
-  process.stdout.write(JSON.stringify(out));
+  });
 }
 
 runHook(({ tool, input }) => {
@@ -133,8 +97,8 @@ runHook(({ tool, input }) => {
   const vaultRoot = resolveVaultPath();
   if (!isVaultNote(filePath, vaultRoot)) return;
 
-  const fm = parseFrontmatter(content);
-  if (fm) {
+  const { fm, body: fmBody } = parseFrontmatter(content);
+  if (Object.keys(fm).length > 0) {
     const tags = parseTags(fm);
     const dupes = findDuplicateTags(tags);
     if (dupes.length > 0) {
@@ -145,11 +109,12 @@ runHook(({ tool, input }) => {
 
   const warnings = [];
 
-  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-  const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-  const links = extractWikilinks(body);
+  const links = extractWikilinks(fmBody);
   const noteIndex = buildNoteIndex(vaultRoot);
-  const broken = links.filter((l) => !noteExistsInIndex(l, noteIndex));
+  const broken = links.filter((l) => {
+    const target = l.split('#')[0].trim();
+    return target && !noteExistsInIndex(target, noteIndex);
+  });
   if (broken.length > 0) {
     warnings.push(
       `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,

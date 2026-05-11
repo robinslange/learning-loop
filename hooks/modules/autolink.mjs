@@ -9,22 +9,13 @@ import { join, basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { findBinary, isVaultNote } from '../lib/common.mjs';
 import { buildNoteMapFromSnapshot, maybeSplice, removeFromSnapshot } from '../lib/snapshot.mjs';
+import { extractWikilinks, stripFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
+import { HookConfig } from '../../scripts/lib/hook-config.mjs';
+import { spawnEnv } from '../../scripts/lib/env.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
 const MAX_AUTO_LINKS = 3;
-
-function extractWikilinks(content) {
-  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-  const body = fmEnd ? content.slice(fmEnd[0].length) : content;
-  const links = new Set();
-  const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
-  let m;
-  while ((m = re.exec(body)) !== null) {
-    const target = m[1].split('#')[0].trim();
-    if (target) links.add(target);
-  }
-  return links;
-}
 
 export async function runAutolink(ctx) {
   const { tool, input, response, vaultRoot, snapshot } = ctx;
@@ -47,7 +38,8 @@ export async function runAutolink(ctx) {
   } else {
     try {
       content = readFileSync(filePath, 'utf-8');
-    } catch {
+    } catch (err) {
+      logError('autolink.readFile', err);
       return;
     }
   }
@@ -59,7 +51,12 @@ export async function runAutolink(ctx) {
     rel_path: relativePath.split('\\').join('/'),
   });
 
-  const existingLinks = extractWikilinks(content);
+  const body = stripFrontmatter(content);
+  const existingLinks = new Set(
+    extractWikilinks(body)
+      .map((l) => l.split('#')[0].trim())
+      .filter(Boolean),
+  );
   const binary = findBinary();
   const noteMap = buildNoteMapFromSnapshot(snapshot, vaultRoot);
 
@@ -92,16 +89,22 @@ export async function runAutolink(ctx) {
   try {
     const out = execFileSync(binary.bin, ['similar', dbPath, relativePath, '--top', '5'], {
       encoding: 'utf-8',
-      timeout: 1000,
-      env: { ...process.env, ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir },
+      timeout: HookConfig.AUTOLINK_ML_TIMEOUT_MS,
+      env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
     });
     similar = JSON.parse(out);
-  } catch {
+  } catch (err) {
+    logError('autolink.execFileSync', err);
     return;
   }
 
   const currentContent = readFileSync(filePath, 'utf-8');
-  const diskLinks = extractWikilinks(currentContent);
+  const currentBody = stripFrontmatter(currentContent);
+  const diskLinks = new Set(
+    extractWikilinks(currentBody)
+      .map((l) => l.split('#')[0].trim())
+      .filter(Boolean),
+  );
   const candidates = similar
     .filter((r) => r.score >= SIMILARITY_THRESHOLD)
     .filter((r) => {
@@ -124,6 +127,8 @@ export async function runAutolink(ctx) {
       if (targetContent.includes(`[[${sourceName}]]`)) continue;
       const needsNl = targetContent.length > 0 && !targetContent.endsWith('\n');
       appendFileSync(targetPath, (needsNl ? '\n' : '') + `[[${sourceName}]]\n`);
-    } catch {}
+    } catch (err) {
+      logError('autolink.readTargetContent', err);
+    }
   }
 }

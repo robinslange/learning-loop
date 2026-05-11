@@ -2,6 +2,8 @@
 // Learning Loop — PreCompact hook
 // Nudges capture before context compression.
 
+import { emitJson } from './lib/io.mjs';
+
 const output = {
   hookSpecificOutput: {
     hookEventName: 'PreCompact',
@@ -10,4 +12,4 @@ const output = {
   },
 };
 
-process.stdout.write(JSON.stringify(output));
+emitJson(output);

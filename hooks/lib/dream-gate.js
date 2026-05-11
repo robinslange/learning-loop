@@ -7,20 +7,23 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from '
 import { join, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { home, resolvePluginData } from './common.mjs';
+import { env } from '../../scripts/lib/env.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 const tmp = tmpdir();
 const pluginData = resolvePluginData();
 const DREAM_MARKER = pluginData
   ? join(pluginData, 'retrieval', 'last-dream')
   : join(tmp, 'learning-loop-last-dream');
-const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');
+// DREAM_RUNNING_MARKER is a presence signal (not a lock) — checked via existsSync only.
+const DREAM_RUNNING_MARKER = join(tmp, 'learning-loop-dream-lock');
 
 function now() {
   return Math.floor(Date.now() / 1000);
 }
 
 // Abort if a dream is already running
-if (existsSync(DREAM_LOCK)) process.exit(0);
+if (existsSync(DREAM_RUNNING_MARKER)) process.exit(0);
 
 // Check time gate: 24+ hours since last dream
 if (existsSync(DREAM_MARKER)) {
@@ -33,7 +36,7 @@ if (existsSync(DREAM_MARKER)) {
 }
 
 // Check session gate: 5+ memory files modified since last dream
-const projectDir = process.env.CLAUDE_PROJECT_DIR;
+const projectDir = env.CLAUDE_PROJECT_DIR;
 if (!projectDir) process.exit(0);
 
 const encodedPath = projectDir.replace(/[/\\]/g, '-');
@@ -41,7 +44,8 @@ const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
 
 try {
   statSync(memoryDir);
-} catch {
+} catch (err) {
+  logError('dream-gate.statMemoryDir', err);
   process.exit(0);
 }
 
@@ -53,7 +57,9 @@ for (const file of readdirSync(memoryDir)) {
   try {
     const mtime = Math.floor(statSync(join(memoryDir, file)).mtimeMs / 1000);
     if (mtime > lastDreamTs) modifiedCount++;
-  } catch {}
+  } catch (err) {
+    logError('dream-gate.statFile', err);
+  }
 }
 
 if (modifiedCount >= 5) {
