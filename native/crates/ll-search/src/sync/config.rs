@@ -66,6 +66,22 @@ pub fn seed_path(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join(".seed")
 }
 
+/// Path for the migration-only `.seed-meta.json` sidecar file.
+pub fn seed_meta_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join(".seed-meta.json")
+}
+
+/// Path for the encrypted-at-rest seed fallback (`.seed.enc`).
+pub fn encrypted_seed_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join(".seed.enc")
+}
+
+/// Keyring service name. Stable; bump the `-v1` suffix if the seed format changes.
+pub const KEYRING_SERVICE: &str = "ai.learning-loop.federation";
+
+/// Keyring account name for the signing seed.
+pub const KEYRING_USER: &str = "signing-seed-v1";
+
 pub fn data_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("data")
 }
