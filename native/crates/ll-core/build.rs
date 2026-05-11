@@ -1,10 +1,10 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const RERANKER_MODEL_URL: &str = "https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/onnx/model_quantized.onnx";
 const RERANKER_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2/resolve/main/tokenizer.json";
 
-fn download(url: &str, dest: &PathBuf) {
+fn download(url: &str, dest: &Path) {
     if dest.exists() {
         return;
     }

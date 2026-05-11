@@ -1,6 +1,6 @@
 [package]
 name = "ll-core"
-version = "1.17.3"
+version = "0.1.4"
 edition.workspace = true
 rust-version = "1.88"
 description = "Hybrid semantic search engine: BM25 + vector + PageRank + cross-encoder reranking over SQLite, with on-device ONNX inference"
@@ -12,6 +12,7 @@ keywords = ["search", "embeddings", "rag", "onnx", "sqlite"]
 categories = ["database", "science"]
 
 [dependencies]
+thiserror = "1"
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }

@@ -1,7 +1,25 @@
+//! Personalized PageRank over a wikilink graph.
+//!
+//! The graph is represented as an adjacency map where each key is a note path
+//! and each value is the list of paths that note links to (outgoing edges).
+
 use std::collections::{HashMap, HashSet};
 
+/// Directed adjacency map for the note wikilink graph.
+///
+/// Keys are note paths (e.g. `"brain/0-inbox/my-note.md"`). Values are lists
+/// of paths that the key note links to (outgoing edges). Paths not present as
+/// keys are sink nodes with no outgoing edges.
 pub type GraphEdges = HashMap<String, Vec<String>>;
 
+/// Rank notes reachable from `seeds` using personalized PageRank.
+///
+/// Seeds are the starting set (e.g. vector + FTS top results). The algorithm
+/// runs `iterations` power-iteration steps with damping factor `damping`.
+/// Seed nodes are excluded from the output -- only related notes are returned.
+///
+/// Returns at most [`crate::TOP_K`] results as `(path, score)` pairs sorted
+/// by descending score. Returns an empty vec if `seeds` or `graph` is empty.
 pub fn personalized_pagerank(
     graph: &GraphEdges,
     seeds: &[String],
@@ -68,7 +86,7 @@ pub fn personalized_pagerank(
         .filter(|(path, score)| *score > 1e-6 && !seed_set.contains(path.as_str()))
         .collect();
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(30);
+    results.truncate(crate::config::TOP_K);
     results
 }
 
