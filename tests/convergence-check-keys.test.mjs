@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { hasBinary } from '../scripts/lib/binary.mjs';
 
 const SCRIPT = new URL('../scripts/convergence-check.mjs', import.meta.url).pathname;
 
@@ -27,26 +28,32 @@ test('convergence-check init emits snake_case keys', () => {
   }
 });
 
-test('convergence-check accepts result text on stdin via "-"', () => {
-  const session = `t-${randomBytes(4).toString('hex')}`;
-  try {
-    runCheck('init', session);
-    const out = JSON.parse(
-      runCheckStdin(
-        ['check', session, 'phosphatidylserine cortisol', '-'],
-        'Phosphatidylserine supplementation blunts cortisol after acute stress in healthy adults. Hellhammer 2004 used 400mg/day for three weeks.',
-      ),
-    );
-    assert.equal(out.stop, false);
-    assert.equal(out.query_number, 1);
-    assert.ok(out.signals);
-    assert.equal(typeof out.signals.novelty_rate, 'number');
-  } finally {
+test(
+  'convergence-check accepts result text on stdin via "-"',
+  // `check` invokes embed() which needs the native ll-search binary. Skip on
+  // environments without it (e.g. CI without the build-native job's artifact).
+  { skip: hasBinary() ? false : 'll-search binary not available' },
+  () => {
+    const session = `t-${randomBytes(4).toString('hex')}`;
     try {
-      runCheck('reset', session);
-    } catch {}
-  }
-});
+      runCheck('init', session);
+      const out = JSON.parse(
+        runCheckStdin(
+          ['check', session, 'phosphatidylserine cortisol', '-'],
+          'Phosphatidylserine supplementation blunts cortisol after acute stress in healthy adults. Hellhammer 2004 used 400mg/day for three weeks.',
+        ),
+      );
+      assert.equal(out.stop, false);
+      assert.equal(out.query_number, 1);
+      assert.ok(out.signals);
+      assert.equal(typeof out.signals.novelty_rate, 'number');
+    } finally {
+      try {
+        runCheck('reset', session);
+      } catch {}
+    }
+  },
+);
 
 test('convergence-check status emits snake_case keys', () => {
   const session = `t-${randomBytes(4).toString('hex')}`;
