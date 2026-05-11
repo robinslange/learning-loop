@@ -4,9 +4,22 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.18.0
+
 ### Added
 
-- **Librarian pauses on battery power (macOS).** A continuously running `gemma4:e2b` classifier kept the GPU warm and drained battery on unplugged laptops. The main loop now polls `pmset -g batt` at the top of each iteration; on `'Battery Power'` it logs once and sleeps `battery_poll_seconds` (default 60) until AC is restored, then logs and resumes. Two new config keys under `librarian`: `pause_on_battery` (default `true`) and `battery_poll_seconds` (default `60`). Non-macOS platforms always treat the system as plugged in. Ollama itself stays resident — this gates inference, not the daemon.
+- **Librarian pauses on battery power (macOS).** A continuously running `gemma4:e2b` classifier kept the GPU warm and drained battery on unplugged laptops. The main loop now polls `pmset -g batt` at the top of each iteration; on `'Battery Power'` it logs once and sleeps `battery_poll_seconds` (default 60) until AC is restored, then logs and resumes. Two new config keys under `librarian`: `pause_on_battery` (default `true`) and `battery_poll_seconds` (default `60`). Non-macOS platforms always treat the system as plugged in. Ollama itself stays resident: this gates inference, not the daemon.
+- **`ll-search migrate-seed` command.** Moves an existing plaintext federation signing seed into the new secure backend (OS keyring or encrypted-at-rest fallback). Fail-closed: refuses to delete the plaintext file until the new backend has been written and round-trip verified. `--rollback` reverses a completed migration, restoring the plaintext seed from the secure backend. Records a `.seed-meta.json` sidecar capturing the migration timestamp and target backend.
+- **`LL_SEED_BACKEND` env override** for the federation signing seed. Accepts `keyring`, `encrypted`, or `mock` (empty string is treated as a no-op). Useful in CI and tests; production should leave it unset so the runtime picks the best available backend.
+
+### Changed
+
+- **Federation signing seed now stored in the OS keyring** with an encrypted-at-rest fallback for headless installs. macOS uses Keychain via `keyring = "=3.6.3"` (pinned to 3.x because the 4.0.0 release on crates.io carries a "do not depend on this crate" notice and the ecosystem is mid-split into `keyring-core` + per-provider crates). Linux uses Secret Service when a DBus session is available; otherwise an encrypted file (chacha20poly1305 AEAD with HKDF-SHA256 derived from `machine-uid`). The plaintext `.seed` file is removed after migration. The `Identity` JSON output adds a `"backend"` field (`"keyring"` | `"encrypted"` | `"plaintext-legacy"`) and drops the now-irrelevant `"seed_path"` field. Threat model: the machine-id-derived encrypted backend protects against backup leak and laptop theft but NOT root-on-host. **MIGRATION:** existing installs continue to work against the plaintext seed file until you run `ll-search migrate-seed [--config-dir ...]`. Backend detection on every launch tries keyring first, falls back to encrypted, then falls back to plaintext-legacy. No automatic migration; the user runs the migrate command explicitly.
+- **Rerank failures now surface on stderr.** The `Commands::Rerank` handler and the two reflective-scan paths in `search/reflect.rs` migrated from the legacy `rerank()` to `rerank_with_report()`. Documents that fail to score (model unavailable, payload too large, decoder error) emit one stderr line per call (`rerank (scope): N of M documents failed to score (first: path=... reason=...)`) instead of being silently dropped from results. JSON wire format on stdout is unchanged; downstream consumers see the same `Vec<RerankResult>` shape as before.
+
+### Security
+
+- **Plaintext federation seed eliminated post-migration.** Prior to this release the Ed25519 signing seed sat as a plain 32-byte file at `<config-dir>/federation/.seed` with 0600 perms. Backup tooling, accidental commits, and laptop forensics could expose it. After running `ll-search migrate-seed`, the seed lives only in the OS keyring (macOS Keychain or Linux Secret Service) or, on headless installs, in an encrypted file sealed with a machine-derived key. The plaintext file is deleted in the same fail-closed transaction.
 
 ## v1.17.3
 
