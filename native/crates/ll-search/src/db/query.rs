@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+use crate::config::{
+    SESSION_SEARCH_RANGE_MAX_M, SESSION_SEARCH_RANGE_MIN_M, SESSION_THRESHOLD_DEFAULT_M,
+};
 use super::index::walk_vault;
 
 #[derive(Serialize)]
@@ -214,7 +217,7 @@ pub fn compute_sessions(conn: &Connection) {
 
 fn find_session_threshold(gaps_min: &[f64]) -> f64 {
     if gaps_min.is_empty() {
-        return 30.0;
+        return SESSION_THRESHOLD_DEFAULT_M;
     }
 
     let max_bucket = 480;
@@ -226,7 +229,7 @@ fn find_session_threshold(gaps_min: &[f64]) -> f64 {
 
     let window = 10i32;
     let mut smoothed = vec![0.0f64; max_bucket + 1];
-    for m in 0..=max_bucket {
+    for (m, slot) in smoothed.iter_mut().enumerate() {
         let mut sum = 0.0;
         let mut n = 0;
         for d in -window..=window {
@@ -236,17 +239,17 @@ fn find_session_threshold(gaps_min: &[f64]) -> f64 {
                 n += 1;
             }
         }
-        smoothed[m] = sum / n as f64;
+        *slot = sum / n as f64;
     }
 
-    let search_start = 15;
-    let search_end = 120.min(max_bucket);
+    let search_start = SESSION_SEARCH_RANGE_MIN_M;
+    let search_end = SESSION_SEARCH_RANGE_MAX_M.min(max_bucket);
     let mut min_val = f64::MAX;
-    let mut min_idx = 30;
+    let mut min_idx = SESSION_THRESHOLD_DEFAULT_M as usize;
 
-    for m in search_start..=search_end {
-        if smoothed[m] < min_val {
-            min_val = smoothed[m];
+    for (m, &val) in smoothed.iter().enumerate().take(search_end + 1).skip(search_start) {
+        if val < min_val {
+            min_val = val;
             min_idx = m;
         }
     }

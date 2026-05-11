@@ -93,7 +93,7 @@ fn embed_all_batched(
 ) -> Result<Vec<Vec<f32>>> {
     let mut all = Vec::with_capacity(texts.len());
     for chunk in texts.chunks(batch_size) {
-        let batch = provider.embed_documents(&chunk.to_vec())?;
+        let batch = provider.embed_documents(chunk)?;
         all.extend(batch);
     }
     Ok(all)

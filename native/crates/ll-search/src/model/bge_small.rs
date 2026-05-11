@@ -122,27 +122,26 @@ impl EmbeddingProvider for BgeSmallProvider {
 
         let mut results = Vec::with_capacity(batch_size);
 
-        for i in 0..batch_size {
-            let enc = &encodings[i];
+        for (i, enc) in encodings.iter().enumerate() {
             let seq_len = enc.get_attention_mask().iter().filter(|&&v| v == 1).count();
 
             let mut pooled = vec![0.0f32; hidden_dim];
             for j in 0..seq_len {
                 let offset = i * max_len * hidden_dim + j * hidden_dim;
-                for d in 0..hidden_dim {
-                    pooled[d] += out_data[offset + d];
+                for (d, val) in pooled.iter_mut().enumerate() {
+                    *val += out_data[offset + d];
                 }
             }
 
             let denom = seq_len as f32;
-            for d in 0..hidden_dim {
-                pooled[d] /= denom;
+            for val in &mut pooled {
+                *val /= denom;
             }
 
             let norm: f32 = pooled.iter().map(|x| x * x).sum::<f32>().sqrt();
             if norm > 0.0 {
-                for d in 0..hidden_dim {
-                    pooled[d] /= norm;
+                for val in &mut pooled {
+                    *val /= norm;
                 }
             }
 

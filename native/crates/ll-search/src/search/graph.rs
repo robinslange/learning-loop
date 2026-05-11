@@ -2,6 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use rusqlite::Connection;
 
+#[cfg(test)]
+use crate::config::{TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN, TOP_K_GRAPH};
 pub(crate) use ll_core::graph::personalized_pagerank;
 
 pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
@@ -81,7 +83,7 @@ pub(crate) fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(Strin
         .iter()
         .filter_map(|t| {
             let freq = *tag_freq.get(t.as_str()).unwrap_or(&0);
-            if (2..=20).contains(&freq) {
+            if (TAG_FREQ_BAND_MIN..=TAG_FREQ_BAND_MAX).contains(&freq) {
                 Some(t.as_str())
             } else {
                 None
@@ -116,7 +118,7 @@ pub(crate) fn tag_expand(conn: &Connection, seed_paths: &[String]) -> Vec<(Strin
         .map(|(path, score)| (path.to_string(), score))
         .collect();
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(30);
+    results.truncate(TOP_K_GRAPH);
     results
 }
 
@@ -236,10 +238,10 @@ mod tests {
             notes.push((&paths[i], &titles[i], "content", &emb));
         }
         let conn = create_test_db(&notes);
-        for i in 0..25 {
+        for path in &paths {
             conn.execute(
                 "UPDATE notes SET tags = 'popular' WHERE path = ?1",
-                params![paths[i]],
+                params![path],
             ).unwrap();
         }
 

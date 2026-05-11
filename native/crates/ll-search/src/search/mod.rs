@@ -11,7 +11,7 @@ pub mod context;
 #[cfg(test)]
 pub(crate) mod test_helpers;
 
-pub use query::{SearchResult, QueryResponse, QueryMeta, TemporalParams, hybrid_query, hybrid_query_federated, build_query_response};
+pub use query::{SearchResult, QueryResponse, QueryMeta, TemporalParams, hybrid_query, hybrid_query_federated, hybrid_query_with_ctx, hybrid_query_federated_with_ctx, build_query_response};
 pub use federation::{discover_peer_dbs, batch_load_bodies_federated};
 pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes, discriminate_pairs};
 pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_scan_federated};

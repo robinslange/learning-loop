@@ -3,6 +3,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OpenFlags};
 
+use crate::config::TOP_K_FEDERATION;
 use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
 
 pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
@@ -55,17 +56,22 @@ pub(crate) fn add_peer_rrf_scores(
     query_text: &str,
     peer_embeddings: &[(i64, String, Vec<f32>)],
 ) {
-    let mut peer_vec: Vec<(String, f64)> = peer_embeddings
+    // Score by index first; format! only for survivors (TOP_K_FEDERATION entries),
+    // not for all N peer embeddings.
+    let mut peer_scored: Vec<(usize, f64)> = peer_embeddings
         .iter()
-        .map(|(_, path, emb)| {
-            (format!("peer:{peer_id}/{path}"), dot_product(query_vec, emb) as f64)
-        })
+        .enumerate()
+        .map(|(i, (_, _, emb))| (i, dot_product(query_vec, emb) as f64))
         .collect();
-    peer_vec.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    peer_vec.truncate(30);
+    peer_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    peer_scored.truncate(TOP_K_FEDERATION);
+    let peer_vec: Vec<(String, f64)> = peer_scored
+        .into_iter()
+        .map(|(i, s)| (format!("peer:{peer_id}/{}", peer_embeddings[i].1), s))
+        .collect();
     add_ranked_rrf(rrf_scores, peer_vec.iter().map(|(p, _)| p.as_str()));
 
-    let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+    let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
     add_ranked_rrf(
         rrf_scores,
         peer_fts.iter().map(|(_, path, _)| format!("peer:{peer_id}/{path}")).collect::<Vec<_>>().iter().map(|s| s.as_str()),
@@ -152,7 +158,7 @@ pub fn batch_load_bodies_federated(
                 peer_groups.entry(pid).or_default().push(actual.to_string());
             }
         } else {
-            local_paths.push(path.clone());
+            local_paths.push(path.to_owned());
         }
     }
 

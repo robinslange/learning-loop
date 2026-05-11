@@ -187,7 +187,11 @@ fn init_embedding() {
 }
 
 fn out<T: serde::Serialize>(data: &T) {
-    println!("{}", serde_json::to_string_pretty(data).unwrap());
+    ll_search::app::emit(data, true).expect("emit");
+}
+
+fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app::AppState {
+    ll_search::app::AppState::from_db(db_path, config_dir).expect("failed to build AppState")
 }
 
 fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec<(String, rusqlite::Connection)> {
@@ -236,8 +240,9 @@ fn main() {
         }
         Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project, threshold } => {
             init_embedding();
+            let app = build_app_state(&db_path, config_dir.clone());
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
-            let store = ll_search::search::store::load_store(&conn);
+            let ctx = app.ensure_search_context(&conn);
             let temporal = ll_search::search::TemporalParams {
                 recency_days: recency,
                 after,
@@ -247,9 +252,9 @@ fn main() {
             };
             let peers = resolve_peers(&conn, config_dir);
             let results = if peers.is_empty() {
-                ll_search::search::hybrid_query(&conn, &text, top, &temporal, &store)
+                ll_search::search::hybrid_query_with_ctx(&ctx, &conn, &text, top, &temporal)
             } else {
-                ll_search::search::hybrid_query_federated(&conn, &text, top, &peers, &temporal, &store)
+                ll_search::search::hybrid_query_federated_with_ctx(&ctx, &conn, &text, top, &peers, &temporal)
             };
             let response = ll_search::search::build_query_response(text, results, &conn, threshold);
             out(&response);

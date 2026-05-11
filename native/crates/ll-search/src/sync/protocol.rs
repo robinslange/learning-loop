@@ -93,7 +93,7 @@ mod tests {
     fn unit_variants_serialize_without_extra_fields() {
         let list_peers = round_trip_client(&ClientMessage::ListPeers);
         assert_eq!(list_peers["type"].as_str(), Some("list-peers"));
-        assert!(list_peers.as_object().map_or(false, |o| o.len() == 1));
+        assert!(list_peers.as_object().is_some_and(|o| o.len() == 1));
 
         let skip = round_trip_client(&ClientMessage::SyncSkipUpload);
         assert_eq!(skip["type"].as_str(), Some("sync-skip-upload"));

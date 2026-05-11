@@ -4,18 +4,73 @@ use std::sync::Arc;
 use rayon::prelude::*;
 use rusqlite::Connection;
 
+use crate::config::{
+    PAGERANK_DAMPING, PAGERANK_ITERS, PRF_ALPHA, PRF_BETA, PRF_K,
+    TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN,
+    TOP_K_FTS, TOP_K_GRAPH, TOP_K_INITIAL, TOP_K_VEC,
+};
 use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, rocchio_prf_with, PrfParams};
 use super::graph::{load_link_graph, load_tags_map, personalized_pagerank};
 use super::store::{EmbeddingStore, load_store};
 use super::query::{load_titles_map, load_mtime_map};
 
+// ---------------------------------------------------------------------------
+// Decay LUT — normalised exponential, built once per SearchContext
+// ---------------------------------------------------------------------------
+
+/// Pre-computed normalised exponential decay table.
+///
+/// `decay(age_secs, half_life_secs)` replaces `(-ln2 * age / half_life).exp()`
+/// with a table lookup. The table covers the normalised domain `[0, NORM_MAX]`
+/// where `x = age_secs / half_life_secs`. Outside the domain the floor bucket
+/// value is returned.
+pub(crate) struct DecayLut {
+    buckets: Vec<f64>,
+}
+
+const DECAY_LUT_BUCKETS: usize = 4096;
+const DECAY_LUT_NORM_MAX: f64 = 8.0;
+const DECAY_LUT_STEP: f64 = DECAY_LUT_NORM_MAX / (DECAY_LUT_BUCKETS as f64);
+
+impl DecayLut {
+    fn new() -> Self {
+        let ln2 = std::f64::consts::LN_2;
+        let buckets: Vec<f64> = (0..DECAY_LUT_BUCKETS)
+            .map(|i| (-ln2 * i as f64 * DECAY_LUT_STEP).exp())
+            .collect();
+        Self { buckets }
+    }
+
+    /// Look up `exp(-ln2 * age_secs / half_life_secs)` from the table.
+    #[inline]
+    pub(crate) fn decay(&self, age_secs: f64, half_life_secs: f64) -> f64 {
+        if half_life_secs <= 0.0 || age_secs <= 0.0 {
+            return 1.0;
+        }
+        let normalised = age_secs / half_life_secs;
+        if normalised >= DECAY_LUT_NORM_MAX {
+            return *self.buckets.last().unwrap_or(&0.0);
+        }
+        let idx = (normalised / DECAY_LUT_STEP) as usize;
+        self.buckets[idx.min(DECAY_LUT_BUCKETS - 1)]
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SearchContext
+// ---------------------------------------------------------------------------
 
 pub struct SearchContext {
     pub(crate) store: Arc<EmbeddingStore>,
     pub(crate) graph: Arc<HashMap<String, Vec<String>>>,
-    pub(crate) titles: Arc<HashMap<String, Option<String>>>,
-    pub(crate) mtimes: Arc<HashMap<String, f64>>,
-    pub(crate) tags: Arc<HashMap<String, Vec<String>>>,
+    pub(crate) titles: Arc<HashMap<Arc<str>, Option<Arc<str>>>>,
+    pub(crate) mtimes: Arc<HashMap<Arc<str>, f64>>,
+    pub(crate) tags: Arc<HashMap<Arc<str>, Vec<Arc<str>>>>,
+    /// Paths interned to `Arc<str>`, parallel-indexed with `store.all()`.
+    /// Avoids per-entry `String::clone` in the par_iter candidate loop.
+    pub(crate) paths_interned: Arc<Vec<Arc<str>>>,
+    /// Cached normalised decay LUT — built once, reused across queries.
+    pub(crate) decay_lut: Arc<DecayLut>,
     pub(crate) data_version: i64,
 }
 
@@ -27,14 +82,41 @@ pub(crate) struct Signals {
 }
 
 impl SearchContext {
+    /// Build a fresh `SearchContext` from the given connection.
     pub fn build(conn: &Connection) -> Self {
         let store = load_store(conn);
+
+        // Intern paths matching store.all() order — one Arc<str> per path.
+        let paths_interned: Vec<Arc<str>> = store
+            .all()
+            .iter()
+            .map(|(_, p, _)| Arc::<str>::from(p.as_str()))
+            .collect();
+
+        // Build a path -> interned Arc lookup for re-interning secondary maps.
+        let mut by_path: HashMap<&str, Arc<str>> =
+            HashMap::with_capacity(paths_interned.len());
+        for arc in &paths_interned {
+            by_path.insert(arc.as_ref(), Arc::clone(arc));
+        }
+
         let graph = Arc::new(load_link_graph(conn));
-        let titles = Arc::new(load_titles_map(conn));
-        let mtimes = Arc::new(load_mtime_map(conn));
-        let tags = Arc::new(load_tags_map(conn));
+        let titles = Arc::new(intern_titles(load_titles_map(conn), &by_path));
+        let mtimes = Arc::new(intern_mtimes(load_mtime_map(conn), &by_path));
+        let tags = Arc::new(intern_tags(load_tags_map(conn), &by_path));
+        let decay_lut = Arc::new(DecayLut::new());
         let data_version = read_data_version(conn);
-        Self { store, graph, titles, mtimes, tags, data_version }
+
+        Self {
+            store,
+            graph,
+            titles,
+            mtimes,
+            tags,
+            paths_interned: Arc::new(paths_interned),
+            decay_lut,
+            data_version,
+        }
     }
 
     pub fn is_stale(&self, conn: &Connection) -> bool {
@@ -52,16 +134,26 @@ impl SearchContext {
         query_text: &str,
     ) -> Signals {
         let all_embeddings = self.store.all();
-        let mut vec_scored: Vec<(String, f64)> = all_embeddings
-            .par_iter()
-            .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
-            .collect();
-        vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        vec_scored.truncate(30);
+        let paths = &self.paths_interned;
 
-        let fts_results = fts_bm25_query(conn, query_text, 30);
+        // Hot path: Arc::clone is a refcount bump (~1 ns), not a String alloc.
+        let mut vec_scored_arc: Vec<(Arc<str>, f64)> = all_embeddings
+            .par_iter()
+            .enumerate()
+            .map(|(i, (_, _, emb))| (Arc::clone(&paths[i]), dot_product(query_vec, emb) as f64))
+            .collect();
+        vec_scored_arc.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        vec_scored_arc.truncate(TOP_K_VEC);
+
+        // Convert survivors to String (bounded to TOP_K_VEC = 30 allocs, negligible).
+        let vec_scored: Vec<(String, f64)> = vec_scored_arc
+            .iter()
+            .map(|(a, s)| (a.to_string(), *s))
+            .collect();
+
+        let fts_results = fts_bm25_query(conn, query_text, TOP_K_FTS);
         let seeds = collect_seeds(&vec_scored, &fts_results);
-        let ppr_results = personalized_pagerank(&self.graph, &seeds, 0.5, 20);
+        let ppr_results = personalized_pagerank(&self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS);
         let tag_results = tag_expand_from_map(&self.tags, &seeds);
 
         Signals { vec_scored, fts_results, ppr_results, tag_results }
@@ -97,8 +189,8 @@ impl SearchContext {
         // Hybrid-feedback PRF
         let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
         initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        initial.truncate(30);
-        let prf_params = PrfParams { alpha: 0.5, beta: 0.5, k: 1 };
+        initial.truncate(TOP_K_INITIAL);
+        let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
         let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
         add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
 
@@ -106,13 +198,63 @@ impl SearchContext {
     }
 }
 
-fn read_data_version(conn: &Connection) -> i64 {
-    conn.query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
-        .unwrap_or(0)
+// ---------------------------------------------------------------------------
+// Intern helpers — convert String-keyed maps to Arc<str>-keyed maps
+// ---------------------------------------------------------------------------
+
+fn intern_titles(
+    raw: HashMap<String, Option<String>>,
+    by_path: &HashMap<&str, Arc<str>>,
+) -> HashMap<Arc<str>, Option<Arc<str>>> {
+    let mut out = HashMap::with_capacity(raw.len());
+    for (k, v) in raw {
+        let key = by_path
+            .get(k.as_str())
+            .cloned()
+            .unwrap_or_else(|| Arc::from(k.as_str()));
+        let val = v.map(|s| Arc::<str>::from(s.as_str()));
+        out.insert(key, val);
+    }
+    out
 }
 
+fn intern_mtimes(
+    raw: HashMap<String, f64>,
+    by_path: &HashMap<&str, Arc<str>>,
+) -> HashMap<Arc<str>, f64> {
+    let mut out = HashMap::with_capacity(raw.len());
+    for (k, v) in raw {
+        let key = by_path
+            .get(k.as_str())
+            .cloned()
+            .unwrap_or_else(|| Arc::from(k.as_str()));
+        out.insert(key, v);
+    }
+    out
+}
+
+fn intern_tags(
+    raw: HashMap<String, Vec<String>>,
+    by_path: &HashMap<&str, Arc<str>>,
+) -> HashMap<Arc<str>, Vec<Arc<str>>> {
+    let mut out = HashMap::with_capacity(raw.len());
+    for (k, v) in raw {
+        let key = by_path
+            .get(k.as_str())
+            .cloned()
+            .unwrap_or_else(|| Arc::from(k.as_str()));
+        let tags: Vec<Arc<str>> = v.iter().map(|t| Arc::<str>::from(t.as_str())).collect();
+        out.insert(key, tags);
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// tag_expand_from_map — operates on Arc<str>-keyed tags map
+// ---------------------------------------------------------------------------
+
 fn tag_expand_from_map(
-    tags_map: &HashMap<String, Vec<String>>,
+    tags_map: &HashMap<Arc<str>, Vec<Arc<str>>>,
     seed_paths: &[String],
 ) -> Vec<(String, f64)> {
     use std::collections::HashSet;
@@ -123,11 +265,11 @@ fn tag_expand_from_map(
     }
     let seed_set: HashSet<&str> = seed_paths.iter().map(|s| s.as_str()).collect();
 
-    let mut seed_tags: HashSet<String> = HashSet::new();
+    let mut seed_tags: HashSet<&str> = HashSet::new();
     for path in seed_paths {
-        if let Some(tags) = tags_map.get(path) {
+        if let Some(tags) = tags_map.get(path.as_str()) {
             for tag in tags {
-                seed_tags.insert(tag.clone());
+                seed_tags.insert(tag.as_ref());
             }
         }
     }
@@ -135,16 +277,16 @@ fn tag_expand_from_map(
     let mut tag_freq: HashMap<&str, usize> = HashMap::new();
     for tags in tags_map.values() {
         for tag in tags {
-            *tag_freq.entry(tag.as_str()).or_default() += 1;
+            *tag_freq.entry(tag.as_ref()).or_default() += 1;
         }
     }
 
     let qualifying: HashSet<&str> = seed_tags
         .iter()
-        .filter_map(|t| {
-            let freq = *tag_freq.get(t.as_str()).unwrap_or(&0);
-            if (2..=20).contains(&freq) {
-                Some(t.as_str())
+        .filter_map(|&t| {
+            let freq = *tag_freq.get(t).unwrap_or(&0);
+            if (TAG_FREQ_BAND_MIN..=TAG_FREQ_BAND_MAX).contains(&freq) {
+                Some(t)
             } else {
                 None
             }
@@ -157,19 +299,19 @@ fn tag_expand_from_map(
 
     let mut candidate_scores: HashMap<&str, f64> = HashMap::new();
     for (path, tags) in tags_map {
-        if seed_set.contains(path.as_str()) {
+        if seed_set.contains(path.as_ref()) {
             continue;
         }
         let score: f64 = tags
             .iter()
-            .filter(|t| qualifying.contains(t.as_str()))
+            .filter(|t| qualifying.contains(t.as_ref()))
             .map(|t| {
-                let freq = *tag_freq.get(t.as_str()).unwrap_or(&1) as f64;
+                let freq = *tag_freq.get(t.as_ref()).unwrap_or(&1) as f64;
                 (total_notes / freq).ln()
             })
             .sum();
         if score > 0.0 {
-            candidate_scores.insert(path.as_str(), score);
+            candidate_scores.insert(path.as_ref(), score);
         }
     }
 
@@ -178,8 +320,13 @@ fn tag_expand_from_map(
         .map(|(path, score)| (path.to_string(), score))
         .collect();
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results.truncate(30);
+    results.truncate(TOP_K_GRAPH);
     results
+}
+
+fn read_data_version(conn: &Connection) -> i64 {
+    conn.query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -201,8 +348,22 @@ mod tests {
         let mtimes_inline = load_mtime_map(&conn);
         let graph_inline = load_link_graph(&conn);
 
-        assert_eq!(*ctx.titles, titles_inline);
-        assert_eq!(*ctx.mtimes, mtimes_inline);
+        // Titles map semantics: same keys, same values.
+        for (k, v) in &titles_inline {
+            let arc_key: Arc<str> = Arc::from(k.as_str());
+            let ctx_val = ctx.titles.get(&arc_key);
+            let expected = v.as_deref().map(Arc::from);
+            assert_eq!(ctx_val, Some(&expected));
+        }
+        assert_eq!(ctx.titles.len(), titles_inline.len());
+
+        // Mtimes map semantics preserved.
+        for (k, v) in &mtimes_inline {
+            let arc_key: Arc<str> = Arc::from(k.as_str());
+            assert_eq!(ctx.mtimes.get(&arc_key), Some(v));
+        }
+        assert_eq!(ctx.mtimes.len(), mtimes_inline.len());
+
         assert_eq!(ctx.graph.len(), graph_inline.len());
         assert_eq!(ctx.store.len(), 2);
     }
@@ -226,7 +387,8 @@ mod tests {
 
         ctx.refresh(&conn);
         assert_eq!(ctx.store.len(), 2);
-        assert!(ctx.titles.contains_key("b.md"));
+        let arc_b: Arc<str> = Arc::from("b.md");
+        assert!(ctx.titles.contains_key(&arc_b));
     }
 
     #[test]
@@ -267,5 +429,23 @@ mod tests {
         let legacy_paths: Vec<&str> = legacy_top.iter().map(|(p, _)| p.as_str()).collect();
         let ctx_paths: Vec<&str> = ctx_top.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(legacy_paths, ctx_paths);
+    }
+
+    #[test]
+    fn test_decay_lut_matches_direct_exp() {
+        let lut = DecayLut::new();
+        let ln2 = std::f64::consts::LN_2;
+        let half_life = 30.0 * 86_400.0; // 30 days in seconds
+        // Test within domain: DECAY_LUT_NORM_MAX = 8 half-lives = 240 days.
+        // Practical relevance beyond ~6 half-lives is near-zero anyway.
+        for age_days in [0.0f64, 1.0, 7.0, 30.0, 90.0, 180.0] {
+            let age_secs = age_days * 86_400.0;
+            let direct = (-ln2 * age_secs / half_life).exp();
+            let lut_val = lut.decay(age_secs, half_life);
+            let rel_err = (direct - lut_val).abs() / direct.max(1e-15);
+            assert!(rel_err < 0.01, "LUT relative error {rel_err:.4} at age {age_days} days");
+        }
+        // Ages beyond the domain return the near-zero floor; verify no panic.
+        let _ = lut.decay(500.0 * 86_400.0, half_life);
     }
 }

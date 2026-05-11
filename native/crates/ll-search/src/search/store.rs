@@ -25,8 +25,8 @@ mod tests {
         ]);
         let store = load_store(&conn);
         assert_eq!(store.len(), 2);
-        assert!(store.get_by_path("a.md").is_some());
-        assert!(store.get_by_path("nonexistent.md").is_none());
+        assert!(store.get_arc_by_path("a.md").is_some());
+        assert!(store.get_arc_by_path("nonexistent.md").is_none());
         assert_eq!(store.dim(), 3);
     }
 
@@ -35,7 +35,7 @@ mod tests {
         let emb = norm(&[1.0, 0.0, 0.0]);
         let conn = create_test_db(&[("a.md", "a", "content", &emb)]);
         let store = load_store(&conn);
-        assert!(store.get_by_id(1).is_some());
-        assert!(store.get_by_id(999).is_none());
+        assert!(store.get_arc_by_id(1).is_some());
+        assert!(store.get_arc_by_id(999).is_none());
     }
 }

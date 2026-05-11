@@ -1,6 +1,6 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // DeBERTa-v3-small fine-tuned on MNLI/FEVER/ANLI, exported as int8 ONNX by Xenova.
 // Used by the contradiction-check hook (pre-write-check.js -> ll-search nli-batch).
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 const NLI_MODEL_URL: &str = "https://huggingface.co/Xenova/nli-deberta-v3-small/resolve/main/onnx/model_quantized.onnx";
 const NLI_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/nli-deberta-v3-small/resolve/main/tokenizer.json";
 
-fn download(url: &str, dest: &PathBuf) {
+fn download(url: &str, dest: &Path) {
     if dest.exists() {
         return;
     }

@@ -3,6 +3,9 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 
+#[cfg(test)]
+use crate::config::{PAGERANK_DAMPING, PAGERANK_ITERS, PRF_ALPHA, PRF_BETA, PRF_K, TOP_K_FTS, TOP_K_INITIAL, TOP_K_VEC};
+use crate::config::{PHASE_SIGMA_DIVISOR, RECENCY_BOOST_SCALAR, SECS_PER_DAY, TOP_K_FEDERATION};
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
@@ -77,19 +80,19 @@ pub(crate) fn local_rrf_scores(
 ) -> HashMap<String, f64> {
     let mut vec_scored: Vec<(String, f64)> = all_embeddings
         .par_iter()
-        .map(|(_, path, emb)| (path.clone(), dot_product(query_vec, emb) as f64))
+        .map(|(_, path, emb)| (path.to_owned(), dot_product(query_vec, emb) as f64))
         .collect();
     vec_scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(30);
+    vec_scored.truncate(TOP_K_VEC);
 
-    let fts_results = fts_bm25_query(conn, query_text, 30);
+    let fts_results = fts_bm25_query(conn, query_text, TOP_K_FTS);
 
     let mut rrf_scores: HashMap<String, f64> = HashMap::new();
     add_ranked_rrf(&mut rrf_scores, vec_scored.iter().map(|(p, _)| p.as_str()));
     add_ranked_rrf(&mut rrf_scores, fts_results.iter().map(|(_, p, _)| p.as_str()));
 
     let seeds = collect_seeds(&vec_scored, &fts_results);
-    let ppr_results = personalized_pagerank(graph, &seeds, 0.5, 20);
+    let ppr_results = personalized_pagerank(graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS);
     let tag_results = tag_expand(conn, &seeds);
     add_ranked_rrf(&mut rrf_scores, ppr_results.iter().map(|(p, _)| p.as_str()));
     add_ranked_rrf(&mut rrf_scores, tag_results.iter().map(|(p, _)| p.as_str()));
@@ -98,8 +101,8 @@ pub(crate) fn local_rrf_scores(
     // so BM25/PPR/tag-surfaced documents teach the vector where to look
     let mut initial: Vec<(String, f64)> = rrf_scores.iter().map(|(p, s)| (p.clone(), *s)).collect();
     initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    initial.truncate(30);
-    let prf_params = PrfParams { alpha: 0.5, beta: 0.5, k: 1 };
+    initial.truncate(TOP_K_INITIAL);
+    let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
     let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
     add_ranked_rrf(&mut rrf_scores, prf_results.iter().map(|(p, _)| p.as_str()));
 
@@ -120,17 +123,40 @@ pub(crate) fn hybrid_query_inner(
     _store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
     let ctx = SearchContext::build(conn);
+    hybrid_query_with_ctx_inner(&ctx, conn, query_vec, query_text, top_n, temporal)
+}
+
+/// Query using a pre-built (cached) `SearchContext`, avoiding a rebuild per call.
+pub fn hybrid_query_with_ctx(
+    ctx: &SearchContext,
+    conn: &Connection,
+    query_text: &str,
+    top_n: usize,
+    temporal: &TemporalParams,
+) -> Vec<SearchResult> {
+    let query_vec = embed_query(query_text);
+    hybrid_query_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, temporal)
+}
+
+pub(crate) fn hybrid_query_with_ctx_inner(
+    ctx: &SearchContext,
+    conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    top_n: usize,
+    temporal: &TemporalParams,
+) -> Vec<SearchResult> {
     let mut rrf = ctx.local_rrf_scores(conn, query_vec, query_text);
 
     if temporal.has_any() {
-        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn);
+        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn, &ctx.decay_lut);
     }
 
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
-            title: ctx.titles.get(&path).cloned().flatten(),
-            mtime: ctx.mtimes.get(&path).copied(),
+            title: ctx.titles.get(path.as_str()).cloned().flatten().map(|a| a.to_string()),
+            mtime: ctx.mtimes.get(path.as_str()).copied(),
             path,
             score,
         })
@@ -149,16 +175,27 @@ pub fn hybrid_query_federated(
     hybrid_query_federated_inner(conn, &query_vec, query_text, top_n, peers, temporal, store)
 }
 
-pub(crate) fn hybrid_query_federated_inner(
+pub fn hybrid_query_federated_with_ctx(
+    ctx: &SearchContext,
+    conn: &Connection,
+    query_text: &str,
+    top_n: usize,
+    peers: &[(String, Connection)],
+    temporal: &TemporalParams,
+) -> Vec<SearchResult> {
+    let query_vec = embed_query(query_text);
+    hybrid_query_federated_with_ctx_inner(ctx, conn, &query_vec, query_text, top_n, peers, temporal)
+}
+
+pub(crate) fn hybrid_query_federated_with_ctx_inner(
+    ctx: &SearchContext,
     conn: &Connection,
     query_vec: &[f32],
     query_text: &str,
     top_n: usize,
     peers: &[(String, Connection)],
     temporal: &TemporalParams,
-    _store: &EmbeddingStore,
 ) -> Vec<SearchResult> {
-    let ctx = SearchContext::build(conn);
     let mut rrf = ctx.local_rrf_scores(conn, query_vec, query_text);
 
     let local_dim = query_vec.len();
@@ -170,7 +207,7 @@ pub(crate) fn hybrid_query_federated_inner(
         if peer_dim == local_dim && peer_dim > 0 {
             add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
         } else {
-            let peer_fts = fts_bm25_query(peer_conn, query_text, 30);
+            let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
             add_ranked_rrf(
                 &mut rrf,
                 peer_fts.iter()
@@ -183,18 +220,31 @@ pub(crate) fn hybrid_query_federated_inner(
     }
 
     if temporal.has_any() {
-        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn);
+        apply_temporal_boost(&mut rrf, &ctx.mtimes, temporal, conn, &ctx.decay_lut);
     }
 
     finalize_rrf(rrf, top_n)
         .into_iter()
         .map(|(path, score)| SearchResult {
             title: load_title_federated(&path, conn, peers),
-            mtime: ctx.mtimes.get(&path).copied(),
+            mtime: ctx.mtimes.get(path.as_str()).copied(),
             path,
             score,
         })
         .collect()
+}
+
+pub(crate) fn hybrid_query_federated_inner(
+    conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    top_n: usize,
+    peers: &[(String, Connection)],
+    temporal: &TemporalParams,
+    _store: &EmbeddingStore,
+) -> Vec<SearchResult> {
+    let ctx = SearchContext::build(conn);
+    hybrid_query_federated_with_ctx_inner(&ctx, conn, query_vec, query_text, top_n, peers, temporal)
 }
 
 pub fn total_note_count(conn: &Connection) -> usize {
@@ -293,13 +343,14 @@ fn load_project_phase(conn: &Connection, tag: &str) -> Option<(f64, f64)> {
 
 fn apply_temporal_boost(
     rrf_scores: &mut HashMap<String, f64>,
-    mtime_map: &HashMap<String, f64>,
+    mtime_map: &HashMap<std::sync::Arc<str>, f64>,
     params: &TemporalParams,
     conn: &Connection,
+    decay_lut: &crate::search::context::DecayLut,
 ) {
     if params.after.is_some() || params.before.is_some() {
         rrf_scores.retain(|path, _| {
-            let Some(&mtime) = mtime_map.get(path) else {
+            let Some(&mtime) = mtime_map.get(path.as_str()) else {
                 return true;
             };
             if let Some(after) = params.after {
@@ -338,15 +389,13 @@ fn apply_temporal_boost(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
-        let half_life_secs = half_life_days * 86400.0;
+        let half_life_secs = half_life_days * SECS_PER_DAY;
 
         if half_life_secs > 0.0 {
-            let ln2 = std::f64::consts::LN_2;
             for (path, score) in rrf_scores.iter_mut() {
-                if let Some(&mtime) = mtime_map.get(path) {
+                if let Some(&mtime) = mtime_map.get(path.as_str()) {
                     let age_secs = (now_secs - mtime).max(0.0);
-                    let decay = (-ln2 * age_secs / half_life_secs).exp();
-                    *score *= decay;
+                    *score *= decay_lut.decay(age_secs, half_life_secs);
                 }
             }
         }
@@ -354,16 +403,16 @@ fn apply_temporal_boost(
 
     if let Some(ref tag) = params.project_tag {
         if let Some((phase_start, phase_end)) = load_project_phase(conn, tag) {
-            let sigma = (phase_end - phase_start) / 4.0;
+            let sigma = (phase_end - phase_start) / PHASE_SIGMA_DIVISOR;
             if sigma > 0.0 {
                 let center = (phase_start + phase_end) / 2.0;
                 let two_sigma_sq = 2.0 * sigma * sigma;
 
                 for (path, score) in rrf_scores.iter_mut() {
-                    if let Some(&mtime) = mtime_map.get(path) {
+                    if let Some(&mtime) = mtime_map.get(path.as_str()) {
                         let diff = mtime - center;
                         let boost = (-(diff * diff) / two_sigma_sq).exp();
-                        *score *= 1.0 + 0.15 * (boost - 0.5);
+                        *score *= 1.0 + RECENCY_BOOST_SCALAR * (boost - 0.5);
                     }
                 }
             }

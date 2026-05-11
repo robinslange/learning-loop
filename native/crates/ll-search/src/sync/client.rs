@@ -246,10 +246,8 @@ pub fn sync_all(
                 });
             }
             Message::Text(text) => {
-                if let Ok(hub_msg) = serde_json::from_str::<HubMessage>(&text) {
-                    if let HubMessage::SyncReject { reason } = hub_msg {
-                        eprintln!("Peer {} rejected: {reason}", peer.peer_id);
-                    }
+                if let Ok(HubMessage::SyncReject { reason }) = serde_json::from_str::<HubMessage>(&text) {
+                    eprintln!("Peer {} rejected: {reason}", peer.peer_id);
                 }
             }
             _ => {}
@@ -273,12 +271,12 @@ fn max_md_mtime(dir: &Path) -> u64 {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.file_name().map_or(false, |n| n.to_str().map_or(false, |s| s.starts_with('.'))) {
+            if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
                 continue;
             }
             if path.is_dir() {
                 max = max.max(max_md_mtime(&path));
-            } else if path.extension().map_or(false, |e| e == "md") {
+            } else if path.extension().is_some_and(|e| e == "md") {
                 if let Ok(meta) = path.metadata() {
                     if let Ok(modified) = meta.modified() {
                         if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {

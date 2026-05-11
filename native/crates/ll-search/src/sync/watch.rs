@@ -68,8 +68,7 @@ impl PidGuard {
                 Err(e) => return Err(e),
             }
         }
-        Err(std::io::Error::new(
-            ErrorKind::Other,
+        Err(std::io::Error::other(
             "exceeded retry budget acquiring pid file",
         ))
     }
@@ -134,7 +133,7 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
                 if p.starts_with(&vault_search_dir) || p.starts_with(&db_dir) {
                     return false;
                 }
-                p.extension().map_or(false, |e| e == "md")
+                p.extension().is_some_and(|e| e == "md")
             });
             if dominated_by_md {
                 let _ = fs_tx.send(());
@@ -173,14 +172,16 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
             do_reindex(&cfg.db_path, &cfg.vault_path);
         }
 
-        if fed_config.is_some() && last_sync.elapsed() >= cfg.sync_interval {
-            last_sync = Instant::now();
-            do_sync(
-                &cfg.db_path,
-                &cfg.vault_path,
-                &cfg.config_dir,
-                fed_config.as_ref().unwrap(),
-            );
+        if let Some(fc) = fed_config.as_ref() {
+            if last_sync.elapsed() >= cfg.sync_interval {
+                last_sync = Instant::now();
+                do_sync(
+                    &cfg.db_path,
+                    &cfg.vault_path,
+                    &cfg.config_dir,
+                    fc,
+                );
+            }
         }
 
         if last_resync.elapsed() >= RESYNC_INTERVAL {

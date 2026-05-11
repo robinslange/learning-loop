@@ -19,6 +19,7 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 globset = "0.4"
 rand = "0.8"
 rayon = "1.10"
+parking_lot = "0.12"
 base64 = "0.22"
 sha2 = "0.10"
 hex = "0.4"
@@ -34,3 +35,16 @@ nli = []
 
 [dev-dependencies]
 tempfile = "3"
+criterion = { version = "=0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "query_hot_path"
+harness = false
+
+[[bench]]
+name = "embed_throughput"
+harness = false
+
+[[bench]]
+name = "index_reindex"
+harness = false

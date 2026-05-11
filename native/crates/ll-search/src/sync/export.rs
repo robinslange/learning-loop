@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 use anyhow::Context;
 use rusqlite::{params, Connection};
@@ -7,6 +8,12 @@ use super::config::FederationConfig;
 use super::visibility::VisibilityEngine;
 
 const SCHEMA_VERSION: u32 = 1;
+
+/// Maximum notes per multi-row INSERT chunk.
+///
+/// 240 rows × 6 placeholders = 1440 parameters — well under both the
+/// legacy SQLite 999-param ceiling and the modern 32766 ceiling.
+const INSERT_CHUNK: usize = 240;
 
 #[derive(Serialize)]
 pub struct ExportResult {
@@ -80,89 +87,116 @@ pub fn export_index(
          );"
     )?;
 
-    let mut stmt = source.prepare(
-        "SELECT n.id, n.path, n.title, n.tags, nc.body
-         FROM notes n
-         JOIN notes_content nc ON nc.id = n.id"
-    )?;
+    // --- Phase 1: load all rows from source and pre-compute visibility -------
+    //
+    // Reading all frontmatter here (one disk pass) is cheaper than reading
+    // it per-row inside the INSERT loop.  Memory cost: ~300 B/note at 10k
+    // notes ≈ 3 MB — well within the 200 MB RSS budget.
 
-    let mut exported = 0usize;
-    let mut skipped = 0usize;
+    struct NoteRow {
+        id: i64,
+        path: String,
+        title: String,
+        tags: String,
+        body: String,
+    }
 
-    let rows = stmt.query_map([], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, Option<String>>(2)?,
-            row.get::<_, Option<String>>(3)?,
-            row.get::<_, Option<String>>(4)?,
-        ))
-    })?;
+    let mut all_rows: Vec<NoteRow> = Vec::new();
+    {
+        let mut stmt = source.prepare(
+            "SELECT n.id, n.path, n.title, n.tags, nc.body
+             FROM notes n
+             JOIN notes_content nc ON nc.id = n.id"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(NoteRow {
+                id:    row.get::<_, i64>(0)?,
+                path:  row.get::<_, String>(1)?,
+                title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                tags:  row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                body:  row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+            })
+        })?;
+        for row in rows {
+            let mut r = row?;
+            r.path = r.path.replace('\\', "/");
+            all_rows.push(r);
+        }
+    }
+
+    // Build visibility inputs once: (path, frontmatter_visibility).
+    let vis_inputs: Vec<(String, Option<String>)> = all_rows
+        .iter()
+        .map(|r| (r.path.clone(), read_frontmatter_visibility(vault_path, &r.path)))
+        .collect();
+
+    // Evaluate the whole batch — O(n) glob matching, no per-row disk I/O.
+    let tiers = engine.evaluate_batch(&vis_inputs);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
 
+    // --- Phase 2: INSERT exported notes in chunks ---------------------------
+
     export.execute("BEGIN", [])?;
 
-    for row in rows {
-        let (id, path, title, tags, body) = row?;
-        let path = path.replace('\\', "/");
-        let title = title.unwrap_or_default();
-        let tags = tags.unwrap_or_default();
-        let body = body.unwrap_or_default();
+    let mut exported = 0usize;
+    let mut skipped = 0usize;
+    let mut exported_ids: HashSet<i64> = HashSet::new();
 
-        let fm_vis = read_frontmatter_visibility(vault_path, &path);
-        let tier = engine.evaluate(&path, fm_vis.as_deref());
-
-        if tier == "private" {
+    for (row, tier) in all_rows.iter().zip(tiers.iter()) {
+        if *tier == "private" {
             skipped += 1;
             continue;
         }
 
-        let export_body = if tier == "public" {
-            body
+        let export_body = if *tier == "public" {
+            row.body.clone()
         } else {
-            summarize(&body, 300)
+            summarize(&row.body, 300)
         };
 
-        export.execute(
+        export.prepare_cached(
             "INSERT INTO notes (id, path, title, tags, tier, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, path, title, tags, tier, now],
-        )?;
-        export.execute(
-            "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
-            params![id, title, tags, export_body],
-        )?;
+        )?
+        .execute(params![row.id, row.path, row.title, row.tags, tier, now])?;
 
+        export.prepare_cached(
+            "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
+        )?
+        .execute(params![row.id, row.title, row.tags, export_body])?;
+
+        exported_ids.insert(row.id);
         exported += 1;
     }
 
-    // Copy embeddings for exported notes
+    // --- Phase 3: copy embeddings for exported notes in chunks --------------
+
     let mut emb_stmt = source.prepare(
         "SELECT e.id, e.data FROM embeddings e JOIN notes n ON e.id = n.id"
     )?;
 
-    let emb_rows = emb_stmt.query_map([], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
-    })?;
+    let emb_rows: Vec<(i64, Vec<u8>)> = emb_stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
+        })?
+        .filter_map(|r| r.ok())
+        .filter(|(id, _)| exported_ids.contains(id))
+        .collect();
 
-    for row in emb_rows {
-        let (id, data) = row?;
-        if export.query_row(
-            "SELECT 1 FROM notes WHERE id = ?1",
-            params![id],
-            |_| Ok(()),
-        ).is_ok() {
-            export.execute(
+    for chunk in emb_rows.chunks(INSERT_CHUNK) {
+        for (id, data) in chunk {
+            export.prepare_cached(
                 "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
-                params![id, data],
-            )?;
+            )?
+            .execute(params![id, data])?;
         }
     }
 
-    // Copy links for exported notes
+    // --- Phase 4: copy links for exported notes -----------------------------
+
     let has_links = source
         .query_row(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='links'",
@@ -175,23 +209,25 @@ pub fn export_index(
         let mut link_stmt = source.prepare(
             "SELECT source_id, target_path FROM links"
         )?;
-        let link_rows = link_stmt.query_map([], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in link_rows {
-            let (source_id, target_path) = row?;
-            if export.query_row(
-                "SELECT 1 FROM notes WHERE id = ?1",
-                params![source_id],
-                |_| Ok(()),
-            ).is_ok() {
-                export.execute(
+        let link_rows: Vec<(i64, String)> = link_stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+            })?
+            .filter_map(|r| r.ok())
+            .filter(|(source_id, _)| exported_ids.contains(source_id))
+            .collect();
+
+        for chunk in link_rows.chunks(INSERT_CHUNK) {
+            for (source_id, target_path) in chunk {
+                export.prepare_cached(
                     "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
-                    params![source_id, target_path],
-                )?;
+                )?
+                .execute(params![source_id, target_path])?;
             }
         }
     }
+
+    // --- Phase 5: meta ------------------------------------------------------
 
     let peer_id = &config.identity.display_name;
     let now_iso = crate::db::chrono_iso_now();
@@ -206,6 +242,10 @@ pub fn export_index(
     Ok(ExportResult { exported, skipped, model_id })
 }
 
+/// Read the `visibility:` frontmatter key from a vault file.
+///
+/// Returns `None` if the file is missing, has no YAML frontmatter, or has no
+/// `visibility` key.  Called once per note during the pre-compute phase.
 fn read_frontmatter_visibility(vault_path: &Path, rel_path: &str) -> Option<String> {
     let full_path = vault_path.join(rel_path);
     let raw = std::fs::read_to_string(full_path).ok()?;

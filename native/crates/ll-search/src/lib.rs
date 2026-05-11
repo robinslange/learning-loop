@@ -7,3 +7,5 @@ pub mod rerank;
 #[cfg(feature = "nli")]
 pub mod nli;
 pub mod sync;
+pub mod app;
+pub mod config;

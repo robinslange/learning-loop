@@ -37,6 +37,22 @@ impl VisibilityEngine {
         }
         tier
     }
+
+    /// Evaluate visibility for a batch of `(path, frontmatter_visibility)` pairs.
+    ///
+    /// Returns one tier string per input item, in the same order. Avoids
+    /// per-call overhead of calling `evaluate` in a loop by keeping the
+    /// logic together; callers should build the input slice once and
+    /// look up results by index.
+    pub fn evaluate_batch<'a>(
+        &'a self,
+        items: &'a [(String, Option<String>)],
+    ) -> Vec<&'a str> {
+        items
+            .iter()
+            .map(|(p, fm)| self.evaluate(p, fm.as_deref()))
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -86,5 +102,46 @@ mod tests {
         let engine = VisibilityEngine::new("listed", &rules);
         assert_eq!(engine.evaluate("3-permanent/secret-stuff.md", None), "private");
         assert_eq!(engine.evaluate("3-permanent/normal.md", None), "public");
+    }
+
+    #[test]
+    fn evaluate_batch_empty_input() {
+        let engine = VisibilityEngine::new("private", &[]);
+        let result = engine.evaluate_batch(&[]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn evaluate_batch_matches_per_call_output() {
+        let rules = vec![
+            ("3-permanent/**".to_string(), "public".to_string()),
+            ("1-fleeting/**".to_string(), "listed".to_string()),
+        ];
+        let engine = VisibilityEngine::new("private", &rules);
+        let items: Vec<(String, Option<String>)> = vec![
+            ("3-permanent/note.md".to_string(), None),
+            ("1-fleeting/thought.md".to_string(), None),
+            ("0-inbox/raw.md".to_string(), Some("public".to_string())),
+            ("0-inbox/raw.md".to_string(), None),
+        ];
+        let batch = engine.evaluate_batch(&items);
+        let per_call: Vec<&str> = items
+            .iter()
+            .map(|(p, fm)| engine.evaluate(p, fm.as_deref()))
+            .collect();
+        assert_eq!(batch, per_call);
+    }
+
+    #[test]
+    fn evaluate_batch_frontmatter_overrides_in_batch() {
+        let rules = vec![("3-permanent/**".to_string(), "public".to_string())];
+        let engine = VisibilityEngine::new("private", &rules);
+        let items: Vec<(String, Option<String>)> = vec![
+            ("3-permanent/note.md".to_string(), Some("private".to_string())),
+            ("0-inbox/note.md".to_string(), Some("public".to_string())),
+            ("0-inbox/note.md".to_string(), None),
+        ];
+        let result = engine.evaluate_batch(&items);
+        assert_eq!(result, vec!["private", "public", "private"]);
     }
 }

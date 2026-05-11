@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+type PeerData<'a> = Vec<(&'a str, Vec<(i64, String, Vec<f32>)>, HashMap<String, Option<String>>)>;
+
 use rusqlite::Connection;
 use serde::Serialize;
 
@@ -47,7 +49,7 @@ pub fn reflect_scan(
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
             .map(|(path, score)| SearchResult {
-                title: ctx.titles.get(&path).cloned().flatten(),
+                title: ctx.titles.get(path.as_str()).cloned().flatten().map(|a| a.to_string()),
                 mtime: None,
                 path,
                 score,
@@ -84,7 +86,7 @@ pub fn reflect_scan(
             .map(|r| SearchResult {
                 path: r.path.clone(),
                 score: r.score,
-                title: ctx.titles.get(&r.path).cloned().flatten(),
+                title: ctx.titles.get(r.path.as_str()).cloned().flatten().map(|a| a.to_string()),
                 mtime: None,
             })
             .collect();
@@ -129,7 +131,7 @@ pub fn reflect_scan_federated(
     let ctx = SearchContext::build(conn);
     let all_embeddings = ctx.store.all();
 
-    let peer_data: Vec<(&str, Vec<(i64, String, Vec<f32>)>, HashMap<String, Option<String>>)> =
+    let peer_data: PeerData<'_> =
         peers
             .iter()
             .map(|(id, pc)| {
@@ -141,12 +143,22 @@ pub fn reflect_scan_federated(
             })
             .collect();
 
-    let mut merged_titles = (*ctx.titles).clone();
+    // Build a peer-only overlay for title lookups (avoids cloning ctx.titles).
+    let mut peer_titles: HashMap<String, Option<String>> = HashMap::new();
     for (pid, _, pt) in &peer_data {
         for (path, title) in pt {
-            merged_titles.insert(format!("peer:{pid}/{path}"), title.clone());
+            peer_titles.insert(format!("peer:{pid}/{path}"), title.clone());
         }
     }
+
+    // Inline helper: look up local title (from ctx) or peer title (from overlay).
+    let title_for = |p: &str| -> Option<String> {
+        if p.starts_with("peer:") {
+            peer_titles.get(p).cloned().flatten()
+        } else {
+            ctx.titles.get(p).cloned().flatten().map(|a| a.to_string())
+        }
+    };
 
     let mut all_candidate_paths: Vec<String> = Vec::new();
     let mut per_query: Vec<(String, Vec<f32>, Vec<SearchResult>)> = Vec::new();
@@ -171,7 +183,7 @@ pub fn reflect_scan_federated(
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)
             .into_iter()
             .map(|(path, score)| SearchResult {
-                title: merged_titles.get(&path).cloned().flatten(),
+                title: title_for(&path),
                 mtime: None,
                 path,
                 score,
@@ -208,7 +220,7 @@ pub fn reflect_scan_federated(
             .map(|r| SearchResult {
                 path: r.path.clone(),
                 score: r.score,
-                title: merged_titles.get(&r.path).cloned().flatten(),
+                title: title_for(&r.path),
                 mtime: None,
             })
             .collect();

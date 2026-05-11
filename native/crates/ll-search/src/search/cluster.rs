@@ -92,7 +92,7 @@ pub fn cluster_notes(_conn: &Connection, threshold: f32, store: &EmbeddingStore)
         }
     }
 
-    clusters.sort_by(|a, b| b.len().cmp(&a.len()));
+    clusters.sort_by_key(|c| std::cmp::Reverse(c.len()));
     clusters
 }
 

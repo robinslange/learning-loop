@@ -7,8 +7,13 @@ use crate::embed;
 
 use super::index::IndexResult;
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 pub(crate) const DTYPE: &str = "q8";
+
+/// Embedded migration sources, applied in version order.
+const MIGRATIONS: &[(u32, &str, &str)] = &[
+    (1, "indices", include_str!("migrations/0001_indices.sql")),
+];
 
 pub fn open_db(db_path: &str) -> Result<Connection> {
     if let Some(parent) = Path::new(db_path).parent() {
@@ -36,7 +41,78 @@ pub fn open_db(db_path: &str) -> Result<Connection> {
     ensure_embeddings_table(&conn);
     ensure_links_table(&conn);
     ensure_intentions_table(&conn);
+    run_migrations(&conn)?;
     Ok(conn)
+}
+
+fn now_unix_secs() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+        .to_string()
+}
+
+pub(crate) fn run_migrations(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS _migrations (
+            version INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            applied_at TEXT NOT NULL
+        );",
+    )
+    .context("failed to create _migrations table")?;
+
+    let applied: std::collections::HashSet<u32> = {
+        let mut stmt = conn
+            .prepare("SELECT version FROM _migrations")
+            .context("prepare applied versions")?;
+        let rows = stmt
+            .query_map([], |r| r.get::<_, i64>(0))
+            .context("query applied versions")?;
+        let mut set = std::collections::HashSet::new();
+        for v in rows.flatten() {
+            set.insert(v as u32);
+        }
+        set
+    };
+
+    // session_id column may not exist on a fresh DB; add it before the SQL needs it.
+    let has_session_col = conn
+        .prepare("SELECT session_id FROM notes LIMIT 0")
+        .is_ok();
+    if !has_session_col {
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN session_id INTEGER;")
+            .context("add session_id column")?;
+    }
+
+    for (version, name, sql) in MIGRATIONS {
+        if applied.contains(version) {
+            continue;
+        }
+        conn.execute_batch(sql)
+            .with_context(|| format!("apply migration {version} {name}"))?;
+        conn.execute(
+            "INSERT OR IGNORE INTO _migrations (version, name, applied_at) VALUES (?1, ?2, ?3)",
+            params![version, name, now_unix_secs()],
+        )
+        .with_context(|| format!("record migration {version}"))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+            params![version.to_string()],
+        )
+        .ok();
+    }
+
+    // Final pass: ensure meta.schema_version matches SCHEMA_VERSION after all migrations.
+    conn.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+        params![SCHEMA_VERSION.to_string()],
+    )
+    .ok();
+
+    Ok(())
 }
 
 pub(crate) fn create_schema(conn: &Connection) {
