@@ -2,7 +2,7 @@
 // provenance-report.mjs — Reads events + scores, computes 5 core metrics, outputs markdown report
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
 
 const PROVENANCE_DIR = join(getPluginData(), 'provenance');
@@ -61,7 +61,7 @@ const sessions = new Set(sessionStarts.map((e) => e.session_id));
 const noteCreations = vaultWrites.filter((e) =>
   ['fleeting', 'inbox', 'permanent'].includes(e.folder),
 );
-const uniqueNotes = new Set(noteCreations.map((e) => e.target));
+const uniqueNotes = new Set(noteCreations.map((e) => basename(e.target)));
 
 // Verified notes (notes that have at least one score record)
 const scoredNotes = new Set(scores.map((e) => e.target));
@@ -87,7 +87,7 @@ for (const e of sessionStarts) {
 }
 const noteToSession = {};
 for (const e of noteCreations) {
-  noteToSession[e.target] = e.session_id;
+  noteToSession[basename(e.target)] = e.session_id;
 }
 const configStats = {};
 for (const note of uniqueNotes) {
