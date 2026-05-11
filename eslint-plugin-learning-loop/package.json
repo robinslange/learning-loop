@@ -1,0 +1,11 @@
+{
+  "name": "eslint-plugin-learning-loop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "exports": "./index.mjs",
+  "peerDependencies": {
+    "eslint": ">=9"
+  }
+}
