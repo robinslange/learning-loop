@@ -31,7 +31,9 @@ describe('waitForOllama bounded retry', () => {
       throw new Error('ECONNREFUSED');
     });
 
-    const { __test__ } = await import(`../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`);
+    const { __test__ } = await import(
+      `../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
     await assert.rejects(
       () => __test__.waitForOllama({ maxAttempts: 3, intervalMs: 1 }),
       /ollama unreachable/i,
@@ -47,7 +49,9 @@ describe('waitForOllama bounded retry', () => {
       return { ok: true };
     });
 
-    const { __test__ } = await import(`../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`);
+    const { __test__ } = await import(
+      `../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
     await __test__.waitForOllama({ maxAttempts: 5, intervalMs: 1 });
     assert.equal(calls, 2);
   });

@@ -1,0 +1,109 @@
+// scripts/librarian/tools/voice.mjs : voice gate classifier for the librarian.
+//
+// voiceCheck classifies a note title as "claim" or "topic" via structured ollama output.
+// submitVoiceFlag enqueues a voice_flag item in the persistent queue.
+//
+// deps injection pattern (voiceCheck second arg) must be preserved:
+//   tests in voice-gate.test.mjs pass { fetchOverride } to mock fetch.
+
+import { basename } from 'node:path';
+import { appendItem, newItemId, loadState, saveState } from '../queue.mjs';
+import { logError } from '../../lib/log.mjs';
+
+/**
+ * Classify a note title as "claim" or "topic" using ollama structured output.
+ * Enqueues a voice_flag if the model returns "topic".
+ *
+ * @param {string} notePath
+ * @param {{
+ *   ollamaUrl?: string,
+ *   model?: string,
+ *   voicePrompt?: string,
+ *   fetchOverride?: typeof fetch,
+ *   logFn?: (msg: string) => void,
+ * }} [deps]
+ */
+export async function voiceCheck(notePath, deps = {}) {
+  const title = basename(notePath, '.md');
+  const {
+    ollamaUrl = 'http://localhost:11434',
+    model = 'gemma4:e2b',
+    voicePrompt,
+    fetchOverride,
+    logFn,
+  } = deps;
+
+  const VOICE_PROMPT =
+    voicePrompt ||
+    'Classify this Obsidian note title as "claim" (states an assertion that could be true or false) or "topic" (names a domain, concept, or entity without stating a relationship). A claim contains a verb or claim connective; a topic is a noun phrase without one. When in doubt, answer "claim".';
+
+  const fetchFn = fetchOverride || globalThis.fetch;
+  const log = logFn || (() => {});
+
+  let resp;
+  try {
+    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: VOICE_PROMPT },
+          { role: 'user', content: 'Title: ' + title + '\nClassify:' },
+        ],
+        format: {
+          type: 'object',
+          properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
+          required: ['label'],
+        },
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+  } catch (err) {
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    log('voiceCheck ' + kind + ' for ' + notePath + ': ' + err.message + '\n');
+    return;
+  }
+  if (!resp.ok) {
+    log('voiceCheck HTTP ' + resp.status + ' for ' + notePath + '\n');
+    return;
+  }
+  try {
+    const { message } = await resp.json();
+    const { label } = JSON.parse(message.content);
+    if (label === 'topic') {
+      await submitVoiceFlag({
+        target: notePath,
+        current_title: title,
+        reason: 'topic-style title (structured-output classifier)',
+      });
+    }
+  } catch (err) {
+    log('voiceCheck parse error for ' + notePath + ': ' + err.message + '\n');
+  }
+}
+
+/**
+ * Enqueue a voice_flag item.
+ * @param {{ target: string, current_title: string, reason: string }} item
+ * @returns {Promise<string>} queue result message
+ */
+export async function submitVoiceFlag({ target, current_title, reason }) {
+  const item = {
+    id: newItemId(),
+    task: 'voice_flag',
+    target,
+    current_title,
+    reason,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  };
+  appendItem(item);
+
+  let state = loadState();
+  state = { ...state, voice_flags: (state.voice_flags || 0) + 1 };
+  saveState(state);
+
+  return 'Queued voice flag: ' + item.id;
+}
