@@ -53,7 +53,8 @@ function checkDuplicateNote(filePath, title, vaultRoot) {
     );
     const result = JSON.parse(out);
     const q = result.queries && result.queries[0];
-    if (!q || !q.top_match_similarity || q.top_match_similarity < HookConfig.SIMILARITY_THRESHOLD) return null;
+    if (!q || !q.top_match_similarity || q.top_match_similarity < HookConfig.SIMILARITY_THRESHOLD)
+      return null;
     const topResult = q.results && q.results[0];
     if (!topResult) return null;
 

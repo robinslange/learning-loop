@@ -69,7 +69,10 @@ async function peerHasNote(peerId, notePath) {
 
 function loadPeers() {
   const { value: config, error } = safeLoad(CONFIG_PATH, { fallback: null });
-  if (error || !config) { if (error) logError('retraction-notify.loadPeers', error); return []; }
+  if (error || !config) {
+    if (error) logError('retraction-notify.loadPeers', error);
+    return [];
+  }
   return config.peers || [];
 }
 

@@ -24,7 +24,10 @@ function logHookError(moduleName, err) {
   appendJsonlLineSafe(join(pluginData, `hook-errors-${month}.jsonl`), {
     ts: new Date().toISOString(),
     module: moduleName,
-    message: err && err.message ? String(err.message).slice(0, HookConfig.ERROR_MSG_MAX_CHARS) : String(err).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
+    message:
+      err && err.message
+        ? String(err.message).slice(0, HookConfig.ERROR_MSG_MAX_CHARS)
+        : String(err).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
   });
 }
 

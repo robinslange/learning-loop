@@ -238,7 +238,10 @@ function main() {
   }
 
   const { value: pairs, error: pairsError } = safeLoad(pairsPath, { fallback: [] });
-  if (pairsError) { logError('refinement-validate.loadPairs', pairsError); process.exit(1); }
+  if (pairsError) {
+    logError('refinement-validate.loadPairs', pairsError);
+    process.exit(1);
+  }
   const pairById = new Map((Array.isArray(pairs) ? pairs : []).map((p) => [p.id, p]));
 
   const validated = [];

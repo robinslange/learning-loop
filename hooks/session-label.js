@@ -139,7 +139,11 @@ function topN(patterns, textBlocks, n) {
     const text = textBlocks[i].toLowerCase();
     const isCurrentPrompt = i === textBlocks.length - 1;
     const isRecent = i >= textBlocks.length - 4;
-    const weight = isCurrentPrompt ? HookConfig.MSG_WEIGHT_CURRENT : isRecent ? HookConfig.MSG_WEIGHT_RECENT : HookConfig.MSG_WEIGHT_OLDER;
+    const weight = isCurrentPrompt
+      ? HookConfig.MSG_WEIGHT_CURRENT
+      : isRecent
+        ? HookConfig.MSG_WEIGHT_RECENT
+        : HookConfig.MSG_WEIGHT_OLDER;
     for (const [pattern, label] of patterns) {
       if (pattern.test(text)) {
         scores.set(label, (scores.get(label) || 0) + weight);
@@ -250,13 +254,12 @@ function summarizeBackends(results) {
 writeFileSync(labelFile, label);
 
 try {
-  if (env.LEARNING_LOOP_INJECTION_FORCE_ERROR)
-    throw new Error('forced error for test');
+  if (env.LEARNING_LOOP_INJECTION_FORCE_ERROR) throw new Error('forced error for test');
 
   // Mode cascade: env (if set) > config > default 'shadow'.
   const mode = env.LEARNING_LOOP_INJECTION_MODE_SET
     ? env.LEARNING_LOOP_INJECTION_MODE
-    : (resolveConfig().injection_mode || 'shadow');
+    : resolveConfig().injection_mode || 'shadow';
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
@@ -269,7 +272,9 @@ try {
     process.exit(0);
   }
 
-  const priorMsgs = messages.slice(-3, -1).map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
+  const priorMsgs = messages
+    .slice(-3, -1)
+    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
   const query = [(prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS), ...priorMsgs].join(' ');
 
   const vaultRoot = resolveVaultPath();

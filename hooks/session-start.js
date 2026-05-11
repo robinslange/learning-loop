@@ -11,12 +11,7 @@ import { warnOnce } from '../scripts/lib/warn-once.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import {
-  resolvePluginData,
-  resolveVaultPath,
-  findEpisodicBinary,
-  home,
-} from './lib/common.mjs';
+import { resolvePluginData, resolveVaultPath, findEpisodicBinary, home } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
 import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
@@ -33,7 +28,9 @@ const updateCacheFile = pluginData ? join(pluginData, 'update-check.json') : nul
 
 const ctx = {
   pluginDir: PLUGIN_DIR,
-  pluginVersion: safeLoad(`${PLUGIN_DIR}/package.json`, { fallback: { version: '0.0.0' } }).value?.version || '0.0.0',
+  pluginVersion:
+    safeLoad(`${PLUGIN_DIR}/package.json`, { fallback: { version: '0.0.0' } }).value?.version ||
+    '0.0.0',
   pluginData,
   vaultRoot: resolveVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,
