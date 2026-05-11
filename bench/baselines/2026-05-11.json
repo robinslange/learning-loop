@@ -1,0 +1,183 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-11T07:04:12.403Z",
+  "gitSha": "7ab43c81b5912e8978fe6bc71c18c2039f3ce156",
+  "quick": true,
+  "realOnnx": false,
+  "machine": {
+    "os": "26.4.1",
+    "arch": "arm64",
+    "cpu": "Apple M5 Pro",
+    "memGb": 48,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)",
+    "node": "v25.8.1"
+  },
+  "rust": {
+    "query_hot_path": {
+      "cold_first_call": {
+        "mean_ns": 10271729.1875,
+        "stddev_ns": 164832.91839915694,
+        "median_ns": 10271729.1875,
+        "param": "1000"
+      },
+      "warm_reused_context": {
+        "mean_ns": 592438.8046875,
+        "stddev_ns": 1772.3441297026936,
+        "median_ns": 592438.8046875
+      },
+      "warm_with_recency_filter": {
+        "mean_ns": 582113.037109375,
+        "stddev_ns": 4578.242944074087,
+        "median_ns": 582113.037109375
+      }
+    },
+    "embed_throughput": {
+      "preprocess_only": {
+        "mean_ns": 21061.691162109375,
+        "stddev_ns": 0.3859696350742004,
+        "median_ns": 21061.691162109375
+      },
+      "real_onnx": {
+        "skipped": "no criterion directory (variant may be ONNX-gated or skipped)"
+      }
+    },
+    "index_reindex": {
+      "cold_preprocess_only": {
+        "mean_ns": 12241822.875,
+        "stddev_ns": 226907.27436327006,
+        "median_ns": 12241822.875,
+        "param": "1000"
+      },
+      "cold_full_onnx": {
+        "skipped": "no criterion directory (variant may be ONNX-gated or skipped)"
+      },
+      "warm_no_changes": {
+        "skipped": "no criterion directory (variant may be ONNX-gated or skipped)"
+      }
+    }
+  },
+  "plugin": {
+    "machine": {
+      "platform": "darwin",
+      "arch": "arm64",
+      "cpu": "Apple M5 Pro",
+      "memGb": 48,
+      "node": "v25.8.1"
+    },
+    "iterations": 10,
+    "hooks": {
+      "session-start": {
+        "samples": 10,
+        "mean_ms": 270.38477919999997,
+        "p50_ms": 269.609416,
+        "p95_ms": 280.66725,
+        "p99_ms": 280.66725,
+        "min_ms": 263.305334,
+        "max_ms": 280.66725,
+        "stddev_ms": 5.387649704026957
+      },
+      "post-tool": {
+        "samples": 10,
+        "mean_ms": 57.4715626,
+        "p50_ms": 57.551625,
+        "p95_ms": 59.665708,
+        "p99_ms": 59.665708,
+        "min_ms": 55.749292,
+        "max_ms": 59.665708,
+        "stddev_ms": 1.2358780000129623
+      },
+      "pre-write-check": {
+        "samples": 10,
+        "mean_ms": 54.4533251,
+        "p50_ms": 54.77525,
+        "p95_ms": 56.656542,
+        "p99_ms": 56.656542,
+        "min_ms": 51.520208,
+        "max_ms": 56.656542,
+        "stddev_ms": 1.564296921405425
+      },
+      "stop-nudge": {
+        "samples": 10,
+        "mean_ms": 57.0405083,
+        "p50_ms": 57.200708,
+        "p95_ms": 58.479625,
+        "p99_ms": 58.479625,
+        "min_ms": 55.065625,
+        "max_ms": 58.479625,
+        "stddev_ms": 1.0602144792737977
+      },
+      "pre-compact": {
+        "samples": 10,
+        "mean_ms": 47.482471,
+        "p50_ms": 47.669708,
+        "p95_ms": 50.826459,
+        "p99_ms": 50.826459,
+        "min_ms": 45.187708,
+        "max_ms": 50.826459,
+        "stddev_ms": 1.5042425376754243
+      },
+      "session-label": {
+        "samples": 10,
+        "mean_ms": 141.2746584,
+        "p50_ms": 140.021417,
+        "p95_ms": 150.144375,
+        "p99_ms": 150.144375,
+        "min_ms": 137.186125,
+        "max_ms": 150.144375,
+        "stddev_ms": 3.6339147967853678
+      },
+      "post-read-retrieval": {
+        "samples": 10,
+        "mean_ms": 52.9631334,
+        "p50_ms": 53.302417,
+        "p95_ms": 54.335917,
+        "p99_ms": 54.335917,
+        "min_ms": 50.722458,
+        "max_ms": 54.335917,
+        "stddev_ms": 1.0790351449606448
+      },
+      "post-search-tracking": {
+        "samples": 10,
+        "mean_ms": 54.6166041,
+        "p50_ms": 55.079875,
+        "p95_ms": 56.224041,
+        "p99_ms": 56.224041,
+        "min_ms": 51.155041,
+        "max_ms": 56.224041,
+        "stddev_ms": 1.2652710763006836
+      }
+    }
+  },
+  "budgets": {
+    "rust": {
+      "query_hot_path/warm_reused_context": {
+        "p50_ns": 20000000,
+        "p95_ns": 50000000
+      },
+      "query_hot_path/cold_first_call": {
+        "p50_ns": 80000000,
+        "p95_ns": 150000000
+      }
+    },
+    "plugin": {
+      "session-start": {
+        "p50_ms": 200,
+        "p95_ms": 500
+      },
+      "post-tool": {
+        "p50_ms": 50,
+        "p95_ms": 150
+      },
+      "pre-write-check": {
+        "p50_ms": 30,
+        "p95_ms": 80
+      }
+    }
+  },
+  "notes": [
+    "Rust benches: Criterion 0.5, synthetic in-memory DB, pre-computed embeddings.",
+    "embed_throughput/real_onnx and index_reindex/*_onnx require LL_BENCH_REAL_ONNX=1.",
+    "Plugin benches: child_process.spawn per iteration, sandboxed tempdir, no real cache writes.",
+    "All timings are machine-specific. Compare only within same machine profile."
+  ]
+}

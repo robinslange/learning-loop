@@ -5,7 +5,10 @@
   "type": "module",
   "description": "Self-improving learning loop across Claude sessions",
   "scripts": {
-    "test": "node --test tests/*.test.mjs tests/**/*.test.mjs"
+    "test": "node --test tests/*.test.mjs tests/**/*.test.mjs",
+    "bench": "node scripts/bench.mjs",
+    "bench:quick": "node scripts/bench.mjs --quick",
+    "bench:baseline": "node scripts/bench.mjs --save-baseline"
   },
   "devDependencies": {
     "prettier": "3.8.3"

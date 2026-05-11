@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-05-11T00:00:00.000Z",
+  "track": "1F",
+  "notes": "Pre-1F reference measurements captured via bench_pre_1f_insert_reference variant in index_reindex bench. Uses same items/vecs as cold_preprocess_plus_insert but old conn.execute + SELECT id round-trip path.",
+  "machine": {
+    "os": "26.4.1",
+    "arch": "arm64",
+    "cpu": "Apple M5 Pro",
+    "memGb": 48,
+    "rustc": "rustc 1.93.0 (254b59607 2026-01-19)"
+  },
+  "rust": {
+    "index_reindex": {
+      "pre_1f_insert_reference": {
+        "1000": {
+          "median_ns": 35649000,
+          "mean_ns": 35900000,
+          "p95_ns": 36680000,
+          "notes": "1000 notes, 3 bench runs back-to-back"
+        },
+        "10000": {
+          "median_ns": 371320000,
+          "mean_ns": 375000000,
+          "p95_ns": 392000000,
+          "notes": "10000 notes, single collection of 10 samples"
+        }
+      },
+      "cold_preprocess_plus_insert": {
+        "1000": {
+          "median_ns": 17944000,
+          "mean_ns": 17960000,
+          "p95_ns": 18154000,
+          "notes": "1000 notes, 3 back-to-back runs (17.8ms / 17.9ms / 17.8ms). Speedup vs pre_1f: 1.99x"
+        },
+        "10000": {
+          "median_ns": 175070000,
+          "mean_ns": 176000000,
+          "p95_ns": 181710000,
+          "notes": "10000 notes, 3 back-to-back runs (175ms / 175ms / 178ms). Speedup vs pre_1f: 2.12x. Variance: 2.3%"
+        }
+      }
+    }
+  },
+  "speedup_1f": {
+    "cold_preprocess_plus_insert_vs_pre_1f": {
+      "1000_notes": "1.99x",
+      "10000_notes": "2.12x",
+      "target": "2x",
+      "target_met": true
+    }
+  }
+}

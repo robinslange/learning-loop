@@ -14,27 +14,20 @@
  *   node scripts/bench.mjs --plugin-only      # skip Rust bench
  */
 
-import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  readdirSync,
-  statSync,
-} from "node:fs";
-import { join, resolve, dirname } from "node:path";
-import { cpus, totalmem } from "node:os";
-import { fileURLToPath } from "node:url";
-import { env as pluginEnv, spawnEnv } from "./lib/env.mjs";
-import { logError } from "./lib/log.mjs";
-import { safeLoad } from "./lib/safe-load.mjs";
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve, dirname } from 'node:path';
+import { cpus, totalmem } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { env as pluginEnv, spawnEnv } from './lib/env.mjs';
+import { logError } from './lib/log.mjs';
+import { safeLoad } from './lib/safe-load.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..");
-const NATIVE_DIR = join(REPO_ROOT, "native");
-const BENCH_DIR = join(REPO_ROOT, "bench");
-const BASELINES_DIR = join(BENCH_DIR, "baselines");
+const REPO_ROOT = resolve(__dirname, '..');
+const NATIVE_DIR = join(REPO_ROOT, 'native');
+const BENCH_DIR = join(REPO_ROOT, 'bench');
+const BASELINES_DIR = join(BENCH_DIR, 'baselines');
 
 const SCHEMA_VERSION = 1;
 
@@ -43,17 +36,19 @@ const SCHEMA_VERSION = 1;
 // ---------------------------------------------------------------------------
 
 const args = process.argv.slice(2);
-function hasFlag(name) { return args.includes(`--${name}`); }
+function hasFlag(name) {
+  return args.includes(`--${name}`);
+}
 function getArg(name, def) {
   const i = args.indexOf(`--${name}`);
   return i !== -1 ? args[i + 1] : def;
 }
 
-const QUICK = hasFlag("quick");
-const SAVE_BASELINE = hasFlag("save-baseline");
-const COMPARE_PATH = getArg("compare", null);
-const RUST_ONLY = hasFlag("rust-only");
-const PLUGIN_ONLY = hasFlag("plugin-only");
+const QUICK = hasFlag('quick');
+const SAVE_BASELINE = hasFlag('save-baseline');
+const COMPARE_PATH = getArg('compare', null);
+const RUST_ONLY = hasFlag('rust-only');
+const PLUGIN_ONLY = hasFlag('plugin-only');
 const REAL_ONNX = pluginEnv.LL_BENCH_REAL_ONNX;
 
 // ---------------------------------------------------------------------------
@@ -61,23 +56,22 @@ const REAL_ONNX = pluginEnv.LL_BENCH_REAL_ONNX;
 // ---------------------------------------------------------------------------
 
 function runCommand(cmd, args_list, cwd) {
-  const r = spawnSync(cmd, args_list, { encoding: "utf8", cwd: cwd ?? REPO_ROOT, timeout: 5000 });
-  return r.status === 0 ? (r.stdout ?? "").trim() : "unknown";
+  const r = spawnSync(cmd, args_list, { encoding: 'utf8', cwd: cwd ?? REPO_ROOT, timeout: 5000 });
+  return r.status === 0 ? (r.stdout ?? '').trim() : 'unknown';
 }
 
 function machineInfo() {
-  const cpu = cpus()[0]?.model ?? "unknown";
-  const memGb = parseFloat((totalmem() / (1024 ** 3)).toFixed(1));
-  const rustc = runCommand("rustc", ["--version"]);
+  const cpu = cpus()[0]?.model ?? 'unknown';
+  const memGb = parseFloat((totalmem() / 1024 ** 3).toFixed(1));
+  const rustc = runCommand('rustc', ['--version']);
   const node = process.version;
-  const osVersion = process.platform === "darwin"
-    ? runCommand("sw_vers", ["-productVersion"])
-    : process.platform;
+  const osVersion =
+    process.platform === 'darwin' ? runCommand('sw_vers', ['-productVersion']) : process.platform;
   return { os: osVersion, arch: process.arch, cpu, memGb, rustc, node };
 }
 
 function gitSha() {
-  return runCommand("git", ["rev-parse", "HEAD"]);
+  return runCommand('git', ['rev-parse', 'HEAD']);
 }
 
 // ---------------------------------------------------------------------------
@@ -98,7 +92,7 @@ function gitSha() {
  */
 function parseCriterionVariant(variantDir) {
   // Try flat: criterion/{variantDir}/new/estimates.json
-  const flat = join(variantDir, "new", "estimates.json");
+  const flat = join(variantDir, 'new', 'estimates.json');
   if (existsSync(flat)) {
     const { value: raw } = safeLoad(flat);
     if (raw) {
@@ -114,10 +108,11 @@ function parseCriterionVariant(variantDir) {
   // Pick the highest-param subdirectory (most notes = most representative)
   let best = null;
   try {
-    const subs = readdirSync(variantDir)
-      .filter((s) => s !== "report" && statSync(join(variantDir, s)).isDirectory());
+    const subs = readdirSync(variantDir).filter(
+      (s) => s !== 'report' && statSync(join(variantDir, s)).isDirectory(),
+    );
     for (const sub of subs) {
-      const nested = join(variantDir, sub, "new", "estimates.json");
+      const nested = join(variantDir, sub, 'new', 'estimates.json');
       if (existsSync(nested)) {
         const { value: raw } = safeLoad(nested);
         if (raw) {
@@ -127,7 +122,7 @@ function parseCriterionVariant(variantDir) {
             median_ns: raw.median?.point_estimate ?? null,
             param: sub,
           };
-          if (!best || parseFloat(sub) > parseFloat(best.param ?? "0")) {
+          if (!best || parseFloat(sub) > parseFloat(best.param ?? '0')) {
             best = est;
           }
         }
@@ -140,12 +135,12 @@ function parseCriterionVariant(variantDir) {
 }
 
 function criterionResults(_benchName) {
-  const criterionDir = join(NATIVE_DIR, "target", "criterion");
+  const criterionDir = join(NATIVE_DIR, 'target', 'criterion');
   if (!existsSync(criterionDir)) return {};
   const results = {};
   try {
     for (const entry of readdirSync(criterionDir)) {
-      if (entry === "report") continue;
+      if (entry === 'report') continue;
       const entryPath = join(criterionDir, entry);
       if (!statSync(entryPath).isDirectory()) continue;
       const est = parseCriterionVariant(entryPath);
@@ -159,9 +154,9 @@ function criterionResults(_benchName) {
 
 // Variant-to-bench-file mapping (from bench definitions)
 const BENCH_VARIANTS = {
-  query_hot_path: ["cold_first_call", "warm_reused_context", "warm_with_recency_filter"],
-  embed_throughput: ["preprocess_only", "real_onnx"],
-  index_reindex: ["cold_preprocess_only", "cold_full_onnx", "warm_no_changes"],
+  query_hot_path: ['cold_first_call', 'warm_reused_context', 'warm_with_recency_filter'],
+  embed_throughput: ['preprocess_only', 'real_onnx'],
+  index_reindex: ['cold_preprocess_only', 'cold_full_onnx', 'warm_no_changes'],
 };
 
 // ---------------------------------------------------------------------------
@@ -169,33 +164,28 @@ const BENCH_VARIANTS = {
 // ---------------------------------------------------------------------------
 
 function runRustBenches() {
-  if (PLUGIN_ONLY) return { skipped: "plugin-only flag set" };
+  if (PLUGIN_ONLY) return { skipped: 'plugin-only flag set' };
 
   const env = spawnEnv();
-  if (QUICK) env.CARGO_BENCH_QUICK = "1";
+  if (QUICK) env.CARGO_BENCH_QUICK = '1';
 
   const results = {};
 
   for (const bench of Object.keys(BENCH_VARIANTS)) {
-    process.stderr.write(`[rust] Running ${bench}${QUICK ? " (quick)" : ""}...\n`);
+    process.stderr.write(`[rust] Running ${bench}${QUICK ? ' (quick)' : ''}...\n`);
     const r = spawnSync(
-      "cargo",
-      [
-        "bench", "-p", "ll-search",
-        "--bench", bench,
-        "--",
-        ...(QUICK ? ["--quick"] : []),
-      ],
+      'cargo',
+      ['bench', '-p', 'll-search', '--bench', bench, '--', ...(QUICK ? ['--quick'] : [])],
       {
         cwd: NATIVE_DIR,
         env,
         timeout: QUICK ? 300_000 : 1800_000,
-        stdio: ["ignore", "pipe", "pipe"],
-      }
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
     );
 
     if (r.status !== 0) {
-      const stderr = r.stderr?.toString() ?? "";
+      const stderr = r.stderr?.toString() ?? '';
       results[bench] = {
         skipped: `cargo bench failed (exit ${r.status})`,
         stderr: stderr.slice(-500),
@@ -204,16 +194,18 @@ function runRustBenches() {
       // Only read variants belonging to this bench file
       const benched = {};
       for (const variant of BENCH_VARIANTS[bench]) {
-        const variantDir = join(NATIVE_DIR, "target", "criterion", variant);
+        const variantDir = join(NATIVE_DIR, 'target', 'criterion', variant);
         if (existsSync(variantDir)) {
           const est = parseCriterionVariant(variantDir);
           if (est) {
             benched[variant] = est;
           } else {
-            benched[variant] = { skipped: "no estimates.json (variant may be ONNX-gated)" };
+            benched[variant] = { skipped: 'no estimates.json (variant may be ONNX-gated)' };
           }
         } else {
-          benched[variant] = { skipped: "no criterion directory (variant may be ONNX-gated or skipped)" };
+          benched[variant] = {
+            skipped: 'no criterion directory (variant may be ONNX-gated or skipped)',
+          };
         }
       }
       results[bench] = benched;
@@ -228,25 +220,25 @@ function runRustBenches() {
 // ---------------------------------------------------------------------------
 
 function runPluginBenches() {
-  if (RUST_ONLY) return { skipped: "rust-only flag set" };
+  if (RUST_ONLY) return { skipped: 'rust-only flag set' };
 
   const iterations = QUICK ? 10 : 50;
   process.stderr.write(`[plugin] Running hook benches (${iterations} iterations)...\n`);
 
   const r = spawnSync(
     process.execPath,
-    [join(BENCH_DIR, "plugin-hooks.mjs"), "--iterations", String(iterations), "--json"],
+    [join(BENCH_DIR, 'plugin-hooks.mjs'), '--iterations', String(iterations), '--json'],
     {
       cwd: REPO_ROOT,
       timeout: QUICK ? 180_000 : 600_000,
-      stdio: ["ignore", "pipe", "pipe"],
-    }
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
   );
 
   if (r.status !== 0) {
     return {
       skipped: `plugin-hooks failed (exit ${r.status})`,
-      stderr: r.stderr?.toString().slice(-500) ?? "",
+      stderr: r.stderr?.toString().slice(-500) ?? '',
     };
   }
 
@@ -254,7 +246,7 @@ function runPluginBenches() {
     return JSON.parse(r.stdout.toString());
   } catch (err) {
     logError('bench.parseResult', err);
-    return { skipped: "JSON parse error", raw: r.stdout?.toString().slice(-200) };
+    return { skipped: 'JSON parse error', raw: r.stdout?.toString().slice(-200) };
   }
 }
 
@@ -264,13 +256,13 @@ function runPluginBenches() {
 
 const BUDGETS = {
   rust: {
-    "query_hot_path/warm_reused_context": { p50_ns: 20_000_000, p95_ns: 50_000_000 },
-    "query_hot_path/cold_first_call": { p50_ns: 80_000_000, p95_ns: 150_000_000 },
+    'query_hot_path/warm_reused_context': { p50_ns: 20_000_000, p95_ns: 50_000_000 },
+    'query_hot_path/cold_first_call': { p50_ns: 80_000_000, p95_ns: 150_000_000 },
   },
   plugin: {
-    "session-start": { p50_ms: 200, p95_ms: 500 },
-    "post-tool": { p50_ms: 50, p95_ms: 150 },
-    "pre-write-check": { p50_ms: 30, p95_ms: 80 },
+    'session-start': { p50_ms: 200, p95_ms: 500 },
+    'post-tool': { p50_ms: 50, p95_ms: 150 },
+    'pre-write-check': { p50_ms: 30, p95_ms: 80 },
   },
 };
 
@@ -338,10 +330,10 @@ async function main() {
     plugin: pluginResults,
     budgets: BUDGETS,
     notes: [
-      "Rust benches: Criterion 0.5, synthetic in-memory DB, pre-computed embeddings.",
-      "embed_throughput/real_onnx and index_reindex/*_onnx require LL_BENCH_REAL_ONNX=1.",
-      "Plugin benches: child_process.spawn per iteration, sandboxed tempdir, no real cache writes.",
-      "All timings are machine-specific. Compare only within same machine profile.",
+      'Rust benches: Criterion 0.5, synthetic in-memory DB, pre-computed embeddings.',
+      'embed_throughput/real_onnx and index_reindex/*_onnx require LL_BENCH_REAL_ONNX=1.',
+      'Plugin benches: child_process.spawn per iteration, sandboxed tempdir, no real cache writes.',
+      'All timings are machine-specific. Compare only within same machine profile.',
     ],
   };
 
@@ -355,7 +347,7 @@ async function main() {
   }
 
   const json = JSON.stringify(output, null, 2);
-  process.stdout.write(json + "\n");
+  process.stdout.write(json + '\n');
 
   if (SAVE_BASELINE) {
     mkdirSync(BASELINES_DIR, { recursive: true });
