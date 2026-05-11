@@ -420,8 +420,17 @@ fn main() {
                     Some((r.path.clone(), body.clone()))
                 })
                 .collect();
-            let reranked = ll_search::rerank::rerank(&query, &docs, top);
-            out(&reranked);
+            let report = ll_search::rerank::rerank_with_report(&query, &docs, top);
+            if !report.failed.is_empty() {
+                eprintln!(
+                    "rerank (Commands::Rerank): {} of {} documents failed to score (first: path={} reason={})",
+                    report.failed.len(),
+                    report.failed.len() + report.scored.len(),
+                    report.failed[0].path,
+                    report.failed[0].reason,
+                );
+            }
+            out(&report.scored);
         }
         Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, librarian_script } => {
             init_embedding();

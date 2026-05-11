@@ -79,7 +79,17 @@ pub fn reflect_scan(
             })
             .collect();
 
-        let reranked = crate::rerank::rerank(query_text, &docs, top_n);
+        let report = crate::rerank::rerank_with_report(query_text, &docs, top_n);
+        if !report.failed.is_empty() {
+            eprintln!(
+                "rerank (reflect_scan): {} of {} documents failed to score (first: path={} reason={})",
+                report.failed.len(),
+                report.failed.len() + report.scored.len(),
+                report.failed[0].path,
+                report.failed[0].reason,
+            );
+        }
+        let reranked = report.scored;
 
         let results: Vec<SearchResult> = reranked
             .iter()
@@ -213,7 +223,17 @@ pub fn reflect_scan_federated(
             })
             .collect();
 
-        let reranked = crate::rerank::rerank(query_text, &docs, top_n);
+        let report = crate::rerank::rerank_with_report(query_text, &docs, top_n);
+        if !report.failed.is_empty() {
+            eprintln!(
+                "rerank (reflect_scan_federated): {} of {} documents failed to score (first: path={} reason={})",
+                report.failed.len(),
+                report.failed.len() + report.scored.len(),
+                report.failed[0].path,
+                report.failed[0].reason,
+            );
+        }
+        let reranked = report.scored;
 
         let results: Vec<SearchResult> = reranked
             .iter()
