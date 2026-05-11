@@ -2,52 +2,40 @@ use std::path::Path;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{SigningKey, Signer};
-use rand::RngCore;
 use sha2::{Sha256, Digest};
 
+/// Load the signing seed from the legacy plaintext `seed_path`.
+///
+/// Retained for `sync::client::sync_all` call compatibility. Post-2K the body
+/// derives `config_dir` from `seed_path` and delegates to `seed_store::load_or_create`.
+///
+/// Deprecated: prefer `seed_store::load_or_create` directly.
 pub fn load_seed(seed_path: &Path) -> anyhow::Result<SigningKey> {
-    let bytes = std::fs::read(seed_path)?;
-    let seed: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("seed file must be exactly 32 bytes"))?;
-    Ok(SigningKey::from_bytes(&seed))
+    let config_dir = seed_path
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| anyhow::anyhow!("invalid seed_path: missing federation/ ancestor"))?;
+    Ok(super::seed_store::load_or_create(config_dir)?.signing_key)
 }
 
+/// Outcome of a [`load_or_create_seed`] call.
 pub struct LoadOrCreate {
+    /// The Ed25519 signing key.
     pub signing_key: SigningKey,
+    /// True if a new seed was generated on this call.
     pub created: bool,
 }
 
+/// Load or create the signing seed, delegating to `seed_store::load_or_create`.
+///
+/// Retained for compatibility; `seed_path` is used only to derive `config_dir`.
 pub fn load_or_create_seed(seed_path: &Path) -> anyhow::Result<LoadOrCreate> {
-    if seed_path.exists() {
-        return Ok(LoadOrCreate {
-            signing_key: load_seed(seed_path)?,
-            created: false,
-        });
-    }
-
-    if let Some(parent) = seed_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let mut seed = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut seed);
-
-    let tmp_path = seed_path.with_extension("seed.tmp");
-    std::fs::write(&tmp_path, seed)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))?;
-    }
-
-    std::fs::rename(&tmp_path, seed_path)?;
-
-    Ok(LoadOrCreate {
-        signing_key: SigningKey::from_bytes(&seed),
-        created: true,
-    })
+    let config_dir = seed_path
+        .parent()
+        .and_then(|p| p.parent())
+        .ok_or_else(|| anyhow::anyhow!("invalid seed_path: missing federation/ ancestor"))?;
+    let r = super::seed_store::load_or_create(config_dir)?;
+    Ok(LoadOrCreate { signing_key: r.signing_key, created: r.created })
 }
 
 pub fn pubkey_b64(signing_key: &SigningKey) -> String {
