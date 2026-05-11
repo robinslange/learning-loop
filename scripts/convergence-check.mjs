@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { run } from './lib/binary.mjs';
 import { splitSentences, extractEntities } from './lib/sentence-split.mjs';
 import { extractAuthorYearCitations } from './lib/cite-extract.mjs';
+import { getPluginData } from './lib/config.mjs';
 
 const MAX_QUERIES = 12;
 const COSINE_CYCLE_THRESHOLD = 0.83;
@@ -14,7 +15,11 @@ const EMA_ALPHA = 0.3;
 const MVT_BUFFER = 0.5;
 const SENTENCE_NOVELTY_THRESHOLD = 0.7;
 
-const STATE_DIR = join(tmpdir(), 'll-convergence');
+// Session state lives under plugin data, not /tmp. Subagents inherit
+// `Bash(node:*)` permission from the session and the node process writes
+// directly to plugin data — no agent-level Write tool call, no dependency
+// on the user's `additionalDirectories` covering the OS temp dir.
+const STATE_DIR = join(getPluginData() || tmpdir(), 'convergence');
 
 function statePath(sessionId) {
   return join(STATE_DIR, `${sessionId}.json`);
@@ -56,9 +61,14 @@ function initSession(sessionId) {
   console.log(JSON.stringify({ ok: true, session_id: sessionId }, null, 2));
 }
 
+function readResultText(resultFile) {
+  if (resultFile === '-') return readFileSync(0, 'utf-8');
+  return readFileSync(resultFile, 'utf-8');
+}
+
 function checkResult(sessionId, query, resultFile) {
   const state = loadState(sessionId);
-  const resultText = readFileSync(resultFile, 'utf-8');
+  const resultText = readResultText(resultFile);
   const queryLower = query.toLowerCase();
 
   // 1. Query cycle detection
@@ -225,9 +235,13 @@ const HELP_TEXT = `convergence-check.mjs <command> <session-id> [args...]
 
 Commands:
   init <session-id>                            Initialise a new convergence session
-  check <session-id> <query> <result-file>     Check convergence on a query result
+  check <session-id> <query> <result-file>     Check convergence on a query result.
+                                               Pass "-" as <result-file> to read
+                                               the result text from stdin.
   status <session-id>                          Show session state
   reset <session-id>                           Delete session state
+
+State directory: <plugin-data>/convergence
 
 Output: snake_case JSON. See agents/discovery-researcher.md for verdict semantics.
 `;

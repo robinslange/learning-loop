@@ -34,7 +34,7 @@ topic: <topic>
 vault_path: {{VAULT}}/
 ```
 
-The scout handles vault content search (mgrep + Glob + `vault-search.mjs`), episodic memory, and discrimination of confusable pairs. Wait for it to return results.
+The scout handles vault content search (`Grep` + `Glob` + `vault-search.mjs`), episodic memory, and discrimination of confusable pairs. Wait for it to return results.
 
 ### Step 3: Read Top Matches
 

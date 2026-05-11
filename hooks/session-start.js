@@ -410,7 +410,7 @@ if (depsAllSatisfied) {
 } else {
   context += '2. (Skipped — episodic memory plugin not installed. Run /init to set up.)\n';
 }
-context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, mgrep for keyword matches.\n`;
+context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
 context += `4. Check the intention summary above (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
 context += "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
 context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';

@@ -22,7 +22,7 @@ If the episodic memory MCP tools are unavailable (`mcp__plugin_episodic-memory_e
 ## Process
 
 1. **Search the vault** for related notes:
-   - Use `mgrep "<topic keywords>" {{VAULT}}/` for content matches
+   - Use the `Grep` tool with `path: "{{VAULT}}/"` and `pattern: "<topic keywords>"` for content matches
    - Use `Glob` for filename matches: `**/*<keyword>*.md` in vault path
    - Use `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches beyond keyword search
    - Once a strong match is found, use `node PLUGIN/scripts/vault-search.mjs similar "<best-match-note>"` to find semantically related notes

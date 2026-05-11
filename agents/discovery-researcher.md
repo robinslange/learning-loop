@@ -51,22 +51,24 @@ Repeat:
 
 1. **Formulate a query** based on the topic, angle, and what you've found so far.
 
-2. **Search** via `mgrep --web --answer "query"`. For academic topics, also run `node PLUGIN/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
+2. **Search the web** for the query. Use the `WebSearch` tool, then read the top results (via `WebFetch` if you need full content). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node PLUGIN/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
 
-3. **Save the result** to a temp file using the Write tool:
-   Write the search result text to a file at `<tmpdir>/ll-result-SESSION_ID-N.txt` (where tmpdir is the OS temp directory, SESSION_ID is the unique session ID from step 2, and N increments per query). The session ID prefix prevents collisions when multiple researcher agents run in parallel.
+   *Optional shortcut:* if `mgrep` is installed, `mgrep --web --answer "query"` returns a pre-synthesized summary you can use directly. Don't require it.
 
-4. **Check convergence**:
+3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
+
    ```bash
-   node PLUGIN/scripts/convergence-check.mjs check "SESSION_ID" "your query" "<tmpdir>/ll-result-SESSION_ID-N.txt"
+   node PLUGIN/scripts/convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
+   [paste the full search result text here, verbatim — your synthesis or the mgrep output]
+   LL_RESULT_EOF
    ```
 
-5. **Read the verdict**:
+   The `-` as the result-file argument tells the checker to read from stdin. The `'LL_RESULT_EOF'` heredoc delimiter is single-quoted so bash does not expand `$`, backticks, or escapes inside the result text. Convergence state lives under the plugin data directory, not `/tmp` — so this works in subagent sessions without any extra `additionalDirectories` configuration.
+
+4. **Read the verdict**:
    - `stop: false`: continue to next query, adjust angle based on findings
    - `stop: true, reason: "hard_stop:*"`: stop immediately, compile findings
    - `stop: true, reason: "soft_stop:*"`: stop searching, compile findings
-
-6. **Clean up**: Delete the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-result-SESSION_ID-N.txt') } catch(e) {}"`
 
 Do NOT override the convergence checker's verdict. It uses mechanical signals (embedding similarity, entity overlap, cycle detection) that are more reliable than self-assessment.
 

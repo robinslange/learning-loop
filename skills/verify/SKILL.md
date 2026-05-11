@@ -88,7 +88,7 @@ Proceed immediately.
 
 - For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`, Read it
 - For folder-based: `Glob` for `*.md` in the target folder
-- For topic-based: `mgrep "<topic>" {{VAULT}}/` + `Glob` for filenames + `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
+- For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
 Read each note.
 

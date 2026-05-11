@@ -9,6 +9,10 @@ function runCheck(...args) {
   return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf-8' });
 }
 
+function runCheckStdin(args, stdin) {
+  return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf-8', input: stdin });
+}
+
 test('convergence-check init emits snake_case keys', () => {
   const session = `t-${randomBytes(4).toString('hex')}`;
   try {
@@ -16,6 +20,27 @@ test('convergence-check init emits snake_case keys', () => {
     assert.equal(out.ok, true);
     assert.equal(out.session_id, session);
     assert.equal(out.sessionId, undefined, 'sessionId camelCase should be gone');
+  } finally {
+    try {
+      runCheck('reset', session);
+    } catch {}
+  }
+});
+
+test('convergence-check accepts result text on stdin via "-"', () => {
+  const session = `t-${randomBytes(4).toString('hex')}`;
+  try {
+    runCheck('init', session);
+    const out = JSON.parse(
+      runCheckStdin(
+        ['check', session, 'phosphatidylserine cortisol', '-'],
+        'Phosphatidylserine supplementation blunts cortisol after acute stress in healthy adults. Hellhammer 2004 used 400mg/day for three weeks.',
+      ),
+    );
+    assert.equal(out.stop, false);
+    assert.equal(out.query_number, 1);
+    assert.ok(out.signals);
+    assert.equal(typeof out.signals.novelty_rate, 'number');
   } finally {
     try {
       runCheck('reset', session);
