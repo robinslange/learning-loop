@@ -29,6 +29,7 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 | `/health --deep --auto` | deep | yes |
 | `/health --provenance` | provenance | no |
 | `/health --librarian` | librarian | no |
+| `/health --nli-edges` | nli-edges | no |
 
 ## Process
 
@@ -187,6 +188,80 @@ After both phases:
 1. Expire processed/old items: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))"`
 2. Reset librarian state to allow re-investigation: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.resetState())"`
 3. Report summary: "Processed N items: X links applied, Y tags applied, V voice flags acknowledged, D duplicates resolved, Z suspects investigated."
+
+Then stop (do not proceed to Step 1).
+
+### Step 0.7: NLI Edges Mode (`--nli-edges`)
+
+If `--nli-edges` flag is present, skip all vault health checks and run NLI tuning mode only:
+
+**1. Aggregate stats**
+
+Query `edges.db`:
+
+```sql
+SELECT * FROM edges WHERE source_graph='nli' ORDER BY created_at DESC
+```
+
+Report:
+- Total NLI edges (all time)
+- Total NLI edges (last 7 days)
+- Per-day average over last 7 days
+- Breakdown by `edge_type` (should be all `challenges_rebuttal` for v1)
+- Count of `from_path` values that also have a regex-classified `challenges_*` edge to the same `to_path` (overlap: where regex and NLI agreed)
+
+**2. Random sample (10 edges from last 7 days)**
+
+```sql
+SELECT from_path, to_path, edge_type, confidence_score, created_at
+FROM edges
+WHERE source_graph='nli' AND created_at >= date('now', '-7 days')
+ORDER BY RANDOM() LIMIT 10
+```
+
+Render as a table:
+- from (note slug)
+- to (note slug)
+- p(contradict) (confidence_score, to 3 decimal places)
+- created_at
+
+**3. Threshold line**
+
+```
+Current LL_NLI_THRESHOLD: <process.env.LL_NLI_THRESHOLD || '0.90 (default)'>
+Spec sync threshold (frontmatter): 0.95
+```
+
+**4. Confidence-score histogram (10 bins from 0.90 to 1.00):**
+
+Query:
+
+```sql
+SELECT
+  CAST(((confidence_score - 0.90) * 100) AS INTEGER) AS bin,
+  COUNT(*) AS n
+FROM edges
+WHERE source_graph = 'nli' AND confidence_score IS NOT NULL
+GROUP BY bin
+ORDER BY bin;
+```
+
+Render as a horizontal text histogram (one row per bin, block characters scaled to the max count):
+
+```
+0.90-0.91  ████████ 24
+0.91-0.92  ████ 13
+0.92-0.93  ███ 9
+0.93-0.94  ██ 7
+0.94-0.95  ██ 5
+0.95-0.96  ████ 12
+0.96-0.97  ███ 8
+0.97-0.98  ██ 6
+0.98-0.99  ███ 9
+0.99-1.00  ██ 7
+```
+
+Useful for tuning `LL_NLI_THRESHOLD` and the sync threshold (0.95) per spec. Bins above 0.95 propagate to note frontmatter; bins below stay in the db only.
 
 Then stop (do not proceed to Step 1).
 
