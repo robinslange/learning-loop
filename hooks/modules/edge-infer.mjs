@@ -285,6 +285,9 @@ export async function runEdgeInfer(ctx) {
         if (!r || typeof r.contradiction !== 'number') continue;
         if (r.contradiction <= NLI_THRESHOLD) continue;
         const neighbourRel = nliCandidates[i].path;
+        // Skip NLI if regex already emitted a challenges_* edge to this target. A
+        // regex 'supports' / 'evidence_for' edge does NOT block — a note can both
+        // support and rebut the same target (epistemic tension worth surfacing).
         if (edges.some((e) => e.toPath === neighbourRel && e.edgeType.startsWith('challenges_'))) {
           continue;
         }
