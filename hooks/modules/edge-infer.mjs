@@ -13,6 +13,7 @@ import {
   openEdgeDb,
   addEdge,
   removeOutgoingEdges,
+  removeOutgoingNliEdges,
   saveDb,
   acquireLock,
   releaseLock,
@@ -247,21 +248,34 @@ export async function runEdgeInfer(ctx) {
       .split('\n')
       .map((l) => l.trim())
       .find((l) => l.length > 0);
-    if (firstLine) sourceText = firstLine.replace(/\n/g, ' ').slice(0, 300);
+    if (firstLine) sourceText = firstLine.slice(0, 300);
   }
 
-  if (!acquireLock(dbPath)) return;
+  if (!acquireLock(dbPath)) {
+    logError(
+      'edge-infer.acquireLock',
+      new Error(`failed to acquire ${dbPath} after retries; edge work for ${sourceRel} skipped`),
+    );
+    return;
+  }
   const db = await openEdgeDb(dbPath);
   try {
-    removeOutgoingEdges(db, sourceRel);
-    for (const edge of edges) {
-      addEdge(db, {
-        fromPath: edge.fromPath,
-        toPath: edge.toPath,
-        edgeType: edge.edgeType,
-        confidence: edge.confidence,
-        directionFlipped: edge.flip ? 1 : 0,
-      });
+    if (edges.length > 0) {
+      removeOutgoingEdges(db, sourceRel);
+      for (const edge of edges) {
+        addEdge(db, {
+          fromPath: edge.fromPath,
+          toPath: edge.toPath,
+          edgeType: edge.edgeType,
+          confidence: edge.confidence,
+          directionFlipped: edge.flip ? 1 : 0,
+        });
+      }
+    } else if (nliCandidates.length > 0) {
+      // NLI-only path: don't wipe regex-classified edges (preserves frontmatter
+      // consistency when wikilinks were removed). Clear only prior NLI edges
+      // so the new NLI loop re-derives cleanly.
+      removeOutgoingNliEdges(db, sourceRel);
     }
 
     if (nliCandidates.length > 0) {

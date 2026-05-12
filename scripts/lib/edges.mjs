@@ -195,6 +195,10 @@ export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
 }
 
+export function removeOutgoingNliEdges(db, notePath) {
+  db.run("DELETE FROM edges WHERE from_path = ? AND source_graph = 'nli'", [notePath]);
+}
+
 function rowsToObjects(result) {
   if (!result || result.length === 0) return [];
   const { columns, values } = result[0];
