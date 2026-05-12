@@ -98,6 +98,10 @@ test('tagged-notes index persists across db close + reopen (saveDb path)', async
   saveDb(db, dbPath);
 
   await runFrontmatterPhase(db, vaultRoot, { threshold: 0.95, dryRun: false });
+  // LOAD-BEARING: this saveDb is the assertion-under-test. Without it,
+  // the reopen below would not see the tagged-notes mutations made by
+  // runFrontmatterPhase, and this test would silently start passing
+  // after a regression. Don't remove as "redundant" — see commit 220a3b4.
   saveDb(db, dbPath);
   db.close();
 

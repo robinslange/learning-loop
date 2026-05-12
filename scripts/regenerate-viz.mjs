@@ -181,6 +181,10 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
     }
     const changed = syncNoteFrontmatter(abs, []);
     if (changed) counts.cleared++;
+    // Healing: removeTaggedNote runs even when syncNoteFrontmatter reports
+    // no change (file already clean). This reconciles the index to disk in
+    // cases where bootstrap and reality disagreed (e.g., user edited
+    // frontmatter manually outside /viz). Don't gate on `changed`.
     removeTaggedNote(db, rel);
   }
 
@@ -371,6 +375,7 @@ async function main(argv) {
       });
       counts.cyclesFound = r.cycles;
     }
+  } finally {
     if (!flags.dryRun) {
       try {
         saveDb(db, dbPath);
@@ -378,7 +383,6 @@ async function main(argv) {
         console.error('viz: saveDb failed:', err.message);
       }
     }
-  } finally {
     db.close();
   }
 
