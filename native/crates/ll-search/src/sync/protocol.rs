@@ -244,7 +244,7 @@ impl PeerTimestamp {
 /// Decoded view of the JSON `PeerEnvelope` control-plane message.
 ///
 /// The wire form is `serde_json::Value`; this struct provides a structured
-/// projection so callers can compare in-frame [u8;32] hash against the hex
+/// projection so callers can compare in-frame `[u8; 32]` hash against the hex
 /// string field without re-decoding ad-hoc.
 #[derive(Debug)]
 pub struct EnvelopeMeta {
