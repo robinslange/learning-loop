@@ -103,6 +103,14 @@ CREATE TABLE IF NOT EXISTS supersessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_super_pattern ON supersessions(old_pattern_query);
+
+CREATE TABLE IF NOT EXISTS nli_frontmatter_tags (
+  note_path TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS viz_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 `;
 
 export async function openEdgeDb(dbPath) {
@@ -221,6 +229,29 @@ export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
     edgeType,
     confidenceScore,
   }));
+}
+
+export function getTaggedNotes(db) {
+  const res = db.exec('SELECT note_path FROM nli_frontmatter_tags');
+  if (!res[0]) return new Set();
+  return new Set(res[0].values.map((r) => r[0]));
+}
+
+export function replaceTaggedNotes(db, paths) {
+  db.run('DELETE FROM nli_frontmatter_tags');
+  for (const p of paths) {
+    db.run('INSERT INTO nli_frontmatter_tags (note_path) VALUES (?)', [p]);
+  }
+}
+
+export function getMetaFlag(db, key) {
+  const res = db.exec('SELECT value FROM viz_meta WHERE key = ?', [key]);
+  if (!res[0] || !res[0].values[0]) return null;
+  return res[0].values[0][0];
+}
+
+export function setMetaFlag(db, key, value) {
+  db.run('INSERT OR REPLACE INTO viz_meta (key, value) VALUES (?, ?)', [key, value]);
 }
 
 export function getAllNliEdgesForHeatmap(db) {

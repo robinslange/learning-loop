@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, saveDb, getTaggedNotes, getMetaFlag } from '../scripts/lib/edges.mjs';
 import { runFrontmatterPhase } from '../scripts/regenerate-viz.mjs';
 
 function setup() {
@@ -82,6 +82,36 @@ test('dryRun makes no writes', async () => {
   const counts = await runFrontmatterPhase(db, vaultRoot, { threshold: 0.95, dryRun: true });
   assert.equal(counts.updated, 1);
   assert.equal(readFileSync(noteA, 'utf-8'), before);
+  db.close();
+  rmSync(vaultRoot, { recursive: true, force: true });
+});
+
+test('uses tagged-notes index instead of scanning vault on subsequent runs', async () => {
+  const { vaultRoot, dbPath } = setup();
+  const noteA = join(vaultRoot, '3-permanent', 'a.md');
+  const noteB = join(vaultRoot, '3-permanent', 'b.md');
+  writeFileSync(noteA, '# A\n');
+  writeFileSync(noteB, '# B\n');
+
+  const db = await openEdgeDb(dbPath);
+  addEdge(db, { fromPath: '3-permanent/a.md', toPath: '3-permanent/b.md', edgeType: 'challenges_rebuttal', confidence: 'low', sourceGraph: 'nli', directionFlipped: 0, confidenceScore: 0.97 });
+  saveDb(db, dbPath);
+
+  await runFrontmatterPhase(db, vaultRoot, { threshold: 0.95, dryRun: false });
+
+  const tagged1 = getTaggedNotes(db);
+  assert.equal(tagged1.size, 1);
+  assert.ok(tagged1.has('3-permanent/a.md'));
+  assert.equal(getMetaFlag(db, 'nli_frontmatter_index_bootstrapped_v1'), '1');
+
+  db.run("DELETE FROM edges WHERE source_graph='nli'");
+  saveDb(db, dbPath);
+
+  const counts2 = await runFrontmatterPhase(db, vaultRoot, { threshold: 0.95, dryRun: false });
+  assert.equal(counts2.cleared, 1, 'index made stale-clear visible without a full walk');
+  const tagged2 = getTaggedNotes(db);
+  assert.equal(tagged2.size, 0);
+
   db.close();
   rmSync(vaultRoot, { recursive: true, force: true });
 });

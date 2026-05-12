@@ -26,7 +26,7 @@ function walk(root, rel = '') {
   return out;
 }
 
-export async function clearAllNliFrontmatter(vaultRoot) {
+export async function clearAllNliFrontmatter(vaultRoot, db = null) {
   const counts = { cleared: 0 };
   for (const rel of walk(vaultRoot)) {
     const abs = join(vaultRoot, rel);
@@ -40,16 +40,26 @@ export async function clearAllNliFrontmatter(vaultRoot) {
     const changed = syncNoteFrontmatter(abs, []);
     if (changed) counts.cleared++;
   }
+  if (db) {
+    const { replaceTaggedNotes } = await import('./lib/edges.mjs');
+    replaceTaggedNotes(db, []);
+  }
   return counts;
 }
 
 const isDirect = import.meta.url === `file://${process.argv[1]}`;
 if (isDirect) {
-  const { VAULT_PATH } = await import('./lib/constants.mjs');
+  const { VAULT_PATH, PLUGIN_DATA } = await import('./lib/constants.mjs');
   if (!VAULT_PATH) {
     console.error('vault root not resolvable');
     process.exit(1);
   }
-  const counts = await clearAllNliFrontmatter(VAULT_PATH);
+  let db = null;
+  if (PLUGIN_DATA) {
+    const { openEdgeDb } = await import('./lib/edges.mjs');
+    db = await openEdgeDb(join(PLUGIN_DATA, 'edges.db'));
+  }
+  const counts = await clearAllNliFrontmatter(VAULT_PATH, db);
+  if (db) db.close();
   console.log(JSON.stringify(counts, null, 2));
 }

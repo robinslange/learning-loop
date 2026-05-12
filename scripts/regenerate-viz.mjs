@@ -114,18 +114,11 @@ function basenameSlug(p) {
   return basename(p, '.md');
 }
 
-export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dryRun = false } = {}) {
-  const { getNliEdgesForFrontmatter } = await import('./lib/edges.mjs');
-  const rows = getNliEdgesForFrontmatter(db, threshold);
+const BOOTSTRAP_KEY = 'nli_frontmatter_index_bootstrapped_v1';
 
-  const desired = new Map();
-  for (const r of rows) {
-    if (!desired.has(r.fromPath)) desired.set(r.fromPath, []);
-    desired.get(r.fromPath).push(`[[${basenameSlug(r.toPath)}]]`);
-  }
-
+function scanVaultForLegacyTags(vaultRoot) {
   const allNotes = walkVaultNotes(vaultRoot);
-  const currentlyTagged = new Set();
+  const tagged = new Set();
   for (const rel of allNotes) {
     let content;
     try {
@@ -134,11 +127,36 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
       continue;
     }
     if (/^---\n[\s\S]*?nli-contradicts:/m.test(content.slice(0, 4096))) {
-      currentlyTagged.add(rel);
+      tagged.add(rel);
+    }
+  }
+  return tagged;
+}
+
+export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dryRun = false } = {}) {
+  const { getNliEdgesForFrontmatter, getTaggedNotes, replaceTaggedNotes, getMetaFlag, setMetaFlag } =
+    await import('./lib/edges.mjs');
+  const rows = getNliEdgesForFrontmatter(db, threshold);
+
+  const desired = new Map();
+  for (const r of rows) {
+    if (!desired.has(r.fromPath)) desired.set(r.fromPath, []);
+    desired.get(r.fromPath).push(`[[${basenameSlug(r.toPath)}]]`);
+  }
+
+  let currentlyTagged;
+  if (getMetaFlag(db, BOOTSTRAP_KEY) === '1') {
+    currentlyTagged = getTaggedNotes(db);
+  } else {
+    currentlyTagged = scanVaultForLegacyTags(vaultRoot);
+    if (!dryRun) {
+      replaceTaggedNotes(db, [...currentlyTagged]);
+      setMetaFlag(db, BOOTSTRAP_KEY, '1');
     }
   }
 
   const counts = { updated: 0, cleared: 0 };
+  const newTagged = new Set();
 
   for (const [fromPath, wikilinks] of desired.entries()) {
     const top = fromPath.split('/')[0];
@@ -146,10 +164,12 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
     const abs = join(vaultRoot, fromPath);
     if (dryRun) {
       counts.updated++;
+      newTagged.add(fromPath);
       continue;
     }
     const changed = syncNoteFrontmatter(abs, wikilinks);
     if (changed) counts.updated++;
+    newTagged.add(fromPath);
   }
 
   for (const rel of currentlyTagged) {
@@ -163,6 +183,10 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
     }
     const changed = syncNoteFrontmatter(abs, []);
     if (changed) counts.cleared++;
+  }
+
+  if (!dryRun) {
+    replaceTaggedNotes(db, [...newTagged]);
   }
 
   return counts;
