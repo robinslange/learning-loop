@@ -2,9 +2,11 @@
 // Extracted from hooks/post-write-edge-infer.js. Snapshot-backed vault index
 // (no per-call recursive readdir).
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { resolvePluginData, isVaultNote } from '../lib/common.mjs';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { resolvePluginData, isVaultNote, findBinary } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import {
@@ -16,6 +18,7 @@ import {
   releaseLock,
 } from '../../scripts/lib/edges.mjs';
 import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
+import { spawnEnv } from '../../scripts/lib/env.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   evidence_for: 'evidence-for',
@@ -25,6 +28,8 @@ const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   challenges_undercutting: 'undercuts',
   challenges_rebuttal: 'rebuts',
 };
+
+const NLI_THRESHOLD = parseFloat(process.env.LL_NLI_THRESHOLD || '0.90');
 
 function vaultRelPath(filePath, vaultRoot) {
   return filePath.slice(vaultRoot.length + 1);
@@ -148,6 +153,41 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   return true;
 }
 
+function runNliBatch(sourceText, neighbours) {
+  if (!neighbours || neighbours.length === 0) return [];
+  const binary = findBinary();
+  if (!binary) return [];
+
+  let tempDir;
+  try {
+    tempDir = mkdtempSync(join(tmpdir(), 'nli-'));
+    const hypsPath = join(tempDir, 'hyps.txt');
+    const hypotheses = neighbours.map((n) => {
+      const slug = basename(n.path, '.md').replace(/-/g, ' ');
+      return slug;
+    });
+    writeFileSync(hypsPath, hypotheses.join('\n'));
+
+    const out = execFileSync(binary.bin, ['nli-batch', sourceText, hypsPath], {
+      encoding: 'utf-8',
+      timeout: 1500,
+      env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
+    });
+    return JSON.parse(out);
+  } catch (err) {
+    logError('edge-infer.runNliBatch', err);
+    return [];
+  } finally {
+    if (tempDir) {
+      try {
+        rmSync(tempDir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
+    }
+  }
+}
+
 export async function runEdgeInfer(ctx) {
   const { tool, input, response, vaultRoot, snapshot } = ctx;
   if (tool !== 'Write' && tool !== 'Edit') return;
@@ -164,25 +204,27 @@ export async function runEdgeInfer(ctx) {
 
   const dbPath = join(pluginData, 'edges.db');
 
-  let content;
+  let noteContent;
   if (tool === 'Write') {
-    content = input.content || '';
+    noteContent = input.content || '';
   } else {
     try {
-      content = readFileSync(filePath, 'utf-8');
+      noteContent = readFileSync(filePath, 'utf-8');
     } catch (err) {
       logError('edge-infer.readContent', err);
       return;
     }
   }
 
-  if (!content.includes('[[')) return;
-
   const sourceName = basename(filePath, '.md');
   const sourceRel = vaultRelPath(filePath, vaultRoot);
-  const resolver = makeResolver(buildVaultIndexFromSnapshot(snapshot));
-  const classified = classifyNoteEdges(content, sourceName, resolver);
-  if (classified.length === 0) return;
+
+  // Regex classifier: only meaningful if note has wikilinks
+  let classified = [];
+  if (noteContent.includes('[[')) {
+    const resolver = makeResolver(buildVaultIndexFromSnapshot(snapshot));
+    classified = classifyNoteEdges(noteContent, sourceName, resolver);
+  }
 
   const edges = classified.map((e) => ({
     fromPath: sourceRel,
@@ -191,6 +233,22 @@ export async function runEdgeInfer(ctx) {
     confidence: e.confidence,
     flip: e.flip,
   }));
+
+  const nliCandidates = ctx.autolinkCandidates || [];
+
+  // Skip work only if BOTH regex and NLI have nothing to do.
+  if (edges.length === 0 && nliCandidates.length === 0) return;
+
+  // Extract NLI premise: first non-empty line of body, single-line, max 300 chars.
+  let sourceText = sourceName.replace(/-/g, ' ');
+  if (nliCandidates.length > 0) {
+    const fmStripped = noteContent.replace(/^---\n[\s\S]*?\n---\n?/, '');
+    const firstLine = fmStripped
+      .split('\n')
+      .map((l) => l.trim())
+      .find((l) => l.length > 0);
+    if (firstLine) sourceText = firstLine.replace(/\n/g, ' ').slice(0, 300);
+  }
 
   if (!acquireLock(dbPath)) return;
   const db = await openEdgeDb(dbPath);
@@ -205,6 +263,33 @@ export async function runEdgeInfer(ctx) {
         directionFlipped: edge.flip ? 1 : 0,
       });
     }
+
+    if (nliCandidates.length > 0) {
+      const nliResults = runNliBatch(sourceText, nliCandidates);
+      for (let i = 0; i < nliResults.length; i++) {
+        const r = nliResults[i];
+        if (!r || typeof r.contradiction !== 'number') continue;
+        if (r.contradiction <= NLI_THRESHOLD) continue;
+        const neighbourRel = nliCandidates[i].path;
+        if (edges.some((e) => e.toPath === neighbourRel && e.edgeType.startsWith('challenges_'))) {
+          continue;
+        }
+        try {
+          addEdge(db, {
+            fromPath: sourceRel,
+            toPath: neighbourRel,
+            edgeType: 'challenges_rebuttal',
+            confidence: 'low',
+            sourceGraph: 'nli',
+            directionFlipped: 0,
+            confidenceScore: r.contradiction,
+          });
+        } catch (err) {
+          logError('edge-infer.nliAddEdge', err);
+        }
+      }
+    }
+
     saveDb(db, dbPath);
   } finally {
     db.close();

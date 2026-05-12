@@ -141,7 +141,15 @@ export async function openEdgeDb(dbPath) {
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(
   db,
-  { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 },
+  {
+    fromPath,
+    toPath,
+    edgeType,
+    confidence = 'high',
+    sourceGraph = 'local',
+    directionFlipped = 0,
+    confidenceScore = null,
+  },
 ) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);
@@ -152,8 +160,16 @@ export function addEdge(
     );
   }
   db.run(
-    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped) VALUES (?, ?, ?, ?, ?, ?)',
-    [fromPath, toPath, edgeType, confidence, sourceGraph, directionFlipped ? 1 : 0],
+    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      fromPath,
+      toPath,
+      edgeType,
+      confidence,
+      sourceGraph,
+      directionFlipped ? 1 : 0,
+      confidenceScore,
+    ],
   );
   const [row] = db.exec('SELECT last_insert_rowid() as id');
   return row.values[0][0];
