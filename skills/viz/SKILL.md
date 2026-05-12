@@ -90,4 +90,10 @@ With the instruction:
 
 Detect first-run by reading `${VAULT_PATH}/.obsidian/graph.json` as JSON and inspecting `colorGroups`. If any entry has `query === "[has-contradiction:TRUE]"` (exact match, not substring), the user has already pasted the snippet — skip it. Otherwise print the snippet and the instruction.
 
-If the file is missing or malformed JSON, print the snippet (treat as first-run). Do not write to graph.json.
+If the file is missing, print the snippet (treat as first-run).
+
+If the file exists but is malformed JSON, print BOTH the snippet AND a one-line warning:
+
+> WARNING: `.obsidian/graph.json` could not be parsed. Fix the JSON before pasting the snippet, or your Obsidian Graph View settings may break further.
+
+Do not write to graph.json under any circumstance.

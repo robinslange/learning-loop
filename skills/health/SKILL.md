@@ -209,6 +209,13 @@ Report:
 - Per-day average over last 7 days
 - Breakdown by `edge_type` (should be all `challenges_rebuttal` for v1)
 - Count of `from_path` values that also have a regex-classified `challenges_*` edge to the same `to_path` (overlap: where regex and NLI agreed)
+- Below floor: rows where `confidence_score < 0.90` (surfaces when `LL_NLI_THRESHOLD` has been tuned down — these exist in the table but are excluded from the histogram below)
+
+```sql
+SELECT COUNT(*) FROM edges WHERE source_graph='nli' AND confidence_score IS NOT NULL AND confidence_score < 0.90
+```
+
+Show inline as `Below floor: N rows`.
 
 **2. Random sample (10 edges from last 7 days)**
 

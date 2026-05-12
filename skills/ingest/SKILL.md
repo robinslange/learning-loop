@@ -22,7 +22,7 @@ Pulls data from external sources (Linear, repositories, or any content Claude ca
 
 ## Flags
 
-- `--no-viz`: skip the viz regeneration step (Step 5.55) at the end
+- `--no-viz`: skip the viz regeneration step (Step 5.55) at the end (e.g., `/ingest repo ~/foo --no-viz`)
 
 ## Process
 
@@ -178,7 +178,7 @@ Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candida
 Unless the user passed `--no-viz` to `/ingest`, regenerate the NLI viz artifacts (frontmatter sync, heatmap, cycle canvas):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>"${TMPDIR:-/tmp}/ll-viz-regen.log" || echo "viz regen failed (see ${TMPDIR:-/tmp}/ll-viz-regen.log)"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>"${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log" || echo "viz regen failed (see ${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log)"
 ```
 
 Failure must not break the ingest session — the `|| echo` swallows non-zero exit codes and the session continues.
