@@ -53,6 +53,27 @@ For each unique downstream note, `Read` it. You need:
 - How `note_path` is referenced (the wiki-link surrounding text)
 - Whether the dependency is asserted as the *primary* support or one of several
 
+### 2.5. NLI pre-filter (advisory only)
+
+For each downstream note, check whether `edges-cli.mjs list <note_path>` returned a row with `source_graph='nli'`, `edge_type='challenges_rebuttal'`, and `to_path` matching the downstream note.
+
+```
+node PLUGIN/scripts/edges-cli.mjs list <note_path>
+```
+
+The `outgoing` and `incoming` arrays each return full DB row objects (via `rowsToObjects`), so `source_graph` is present in every row. Filter the JSON directly: `r.source_graph === 'nli'`.
+
+If zero NLI edges exist for `note_path`, skip this step entirely.
+
+For each downstream note that DOES have a matching `source_graph='nli'` row:
+- Tentatively mark it as a **rebuttal** candidate.
+- **Still read the note in Step 2.** Do not skip the Read.
+- **Still run Step 3 (LLM classification).** Do not skip the LLM step.
+
+Why: NLI advisory edges have ~86% precision at p>0.90. That is not high enough to gate out LLM verification. Use the NLI signal as a hint that biases your classification, not as a final answer.
+
+Explicit constraint: LLM judgment in Step 3 overrides the NLI hint in every case. If the LLM reads the note and concludes `undercutting` or `untouched` for a pair flagged by NLI, trust the LLM.
+
 ### 3. Classify the attack type
 
 For each affected note, decide which argumentation pattern applies given the `change_type`:
