@@ -15,7 +15,7 @@ const SCHEMA_VERSION: u32 = 1;
 /// legacy SQLite 999-param ceiling and the modern 32766 ceiling.
 const INSERT_CHUNK: usize = 240;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ExportResult {
     pub exported: usize,
     pub skipped: usize,

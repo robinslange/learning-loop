@@ -21,6 +21,25 @@ const META_FILE_VERSION: u32 = 2;
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Test-only override for `RECV_TIMEOUT` via `LL_SYNC_RECV_TIMEOUT_MS` env var.
+/// Production callers ignore this; it exists so integration tests can shorten
+/// the silent-hub timeout from 30s to ~1s without changing source code.
+fn recv_timeout() -> Duration {
+    std::env::var("LL_SYNC_RECV_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(RECV_TIMEOUT)
+}
+
+fn send_timeout() -> Duration {
+    std::env::var("LL_SYNC_SEND_TIMEOUT_MS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(SEND_TIMEOUT)
+}
+
 type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
@@ -31,7 +50,7 @@ fn is_safe_peer_id(id: &str) -> bool {
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct SyncResult {
     pub export: Option<ExportResult>,
     pub uploaded_notes: i64,
@@ -40,7 +59,7 @@ pub struct SyncResult {
     pub skipped: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DownloadedPeer {
     pub peer_id: String,
     pub note_count: i64,
@@ -399,17 +418,19 @@ async fn send_json<T: serde::Serialize>(
     msg: &T,
 ) -> anyhow::Result<()> {
     let text = serde_json::to_string(msg).map_err(SyncError::from)?;
-    tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::text(text)))
+    let to = send_timeout();
+    tokio::time::timeout(to, ws.send(Message::text(text)))
         .await
-        .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+        .map_err(|_| SyncError::SendTimeout { timeout: to })?
         .map_err(SyncError::from)?;
     Ok(())
 }
 
 async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> {
-    tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::binary(payload)))
+    let to = send_timeout();
+    tokio::time::timeout(to, ws.send(Message::binary(payload)))
         .await
-        .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+        .map_err(|_| SyncError::SendTimeout { timeout: to })?
         .map_err(SyncError::from)?;
     Ok(())
 }
@@ -418,17 +439,19 @@ async fn recv_json<T: serde::de::DeserializeOwned>(
     ws: &mut WsStream,
 ) -> anyhow::Result<T> {
     loop {
-        let msg = tokio::time::timeout(RECV_TIMEOUT, ws.next())
+        let recv_to = recv_timeout();
+        let send_to = send_timeout();
+        let msg = tokio::time::timeout(recv_to, ws.next())
             .await
-            .map_err(|_| SyncError::RecvTimeout { timeout: RECV_TIMEOUT })?
+            .map_err(|_| SyncError::RecvTimeout { timeout: recv_to })?
             .ok_or(SyncError::ClosedUnexpected)?
             .map_err(SyncError::from)?;
         match msg {
             Message::Text(text) => return Ok(serde_json::from_str(text.as_str()).map_err(SyncError::from)?),
             Message::Ping(data) => {
-                tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::Pong(data)))
+                tokio::time::timeout(send_to, ws.send(Message::Pong(data)))
                     .await
-                    .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+                    .map_err(|_| SyncError::SendTimeout { timeout: send_to })?
                     .map_err(SyncError::from)?;
             }
             Message::Close(_) => return Err(SyncError::ClosedUnexpected.into()),
@@ -442,9 +465,11 @@ async fn recv_json<T: serde::de::DeserializeOwned>(
 /// so the caller can skip the peer without aborting the loop.
 async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u8>>> {
     loop {
-        let msg = tokio::time::timeout(RECV_TIMEOUT, ws.next())
+        let recv_to = recv_timeout();
+        let send_to = send_timeout();
+        let msg = tokio::time::timeout(recv_to, ws.next())
             .await
-            .map_err(|_| SyncError::RecvTimeout { timeout: RECV_TIMEOUT })?
+            .map_err(|_| SyncError::RecvTimeout { timeout: recv_to })?
             .ok_or(SyncError::ClosedUnexpected)?
             .map_err(SyncError::from)?;
         match msg {
@@ -459,9 +484,9 @@ async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u
                 continue;
             }
             Message::Ping(data) => {
-                tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::Pong(data)))
+                tokio::time::timeout(send_to, ws.send(Message::Pong(data)))
                     .await
-                    .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+                    .map_err(|_| SyncError::SendTimeout { timeout: send_to })?
                     .map_err(SyncError::from)?;
             }
             Message::Close(_) => return Err(SyncError::ClosedUnexpected.into()),
