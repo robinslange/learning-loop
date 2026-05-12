@@ -83,7 +83,7 @@ your-vault/
 
 - [Workflows](guide/workflows.md) -- common patterns, session lifecycle, and chaining skills together
 - [Search](guide/search.md) -- five-signal hybrid search, reranking, retrieval instrumentation
-- [Agents](guide/agents.md) -- 15 specialized agents and 18 shared skills
+- [Agents](guide/agents.md) -- 14 specialized agents and 19 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
 - [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
 - [Resource usage](guide/resource-usage.md) -- token costs, local compute, and what we do to keep it lean

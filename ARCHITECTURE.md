@@ -117,7 +117,7 @@ flowchart LR
   G --> H[merged into peer ranking]
 ```
 
-Sync runs in the `sync/client.rs` background thread. Authentication uses ed25519 signatures; the seed lives in a file today and moves to the OS keyring in track 2K.
+Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from a synchronous thread in v1.19.0). Authentication uses ed25519 signatures; the seed lives in the OS keyring (macOS Keychain, Linux Secret Service) or an encrypted-at-rest file on headless installs, with a plaintext-legacy fallback for un-migrated installs. The wire format negotiates `protocol_version` on `SyncHello`/`SyncReady`: v2 hubs receive length-prefixed envelopes (`u32 size + 32-byte SHA256 + body`) validated before allocation, with a 50 MB hub-side cap on uploads.
 
 ---
 

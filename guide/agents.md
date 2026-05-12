@@ -1,6 +1,6 @@
 # Agents
 
-Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 18 skills that enforce consistent quality standards across all operations.
+Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 19 skills that enforce consistent quality standards across all operations.
 
 ## Why agents, not prompts
 
@@ -24,9 +24,8 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 | ingest-context | Extract insights from pasted text | Haiku |
 | ingest-linear | Pull and extract from Linear tickets | Haiku |
 | ingest-repo | Scan repo surface for architecture insights | Haiku |
-| diagram-rules | Shared Excalidraw generation spec | (reference) |
 
-Fourteen working agents plus the `diagram-rules` shared reference file.
+Fourteen working agents. The `diagram-rules` shared reference (consumed by `discovery-researcher` and `note-writer` for Excalidraw generation) lives under `agents/_skills/` alongside the other shared skills.
 
 ## Vault librarian (local, optional)
 
@@ -60,7 +59,7 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
+Agents share 19 skills in `agents/_skills/` that standardize quality decisions:
 
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs
@@ -80,6 +79,7 @@ Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
 - **source-quality** -- rates source reliability
 - **preview-format** -- standardized output formatting
 - **fleeting-sweep** -- identifies stale fleeting notes for archival
+- **diagram-rules** -- when and how to generate Excalidraw diagrams during research
 
 ## Source verification and overclaim mitigation
 
