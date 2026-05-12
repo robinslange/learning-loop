@@ -171,7 +171,7 @@ Expected output is a JSON summary `{processed, ok, failed, failures}`. Report fa
 Unless the user passed `--no-viz` to `/reflect`, regenerate the NLI viz artifacts (frontmatter sync, heatmap, cycle canvas):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>&1 || echo "viz regen failed: $?"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>"${TMPDIR:-/tmp}/ll-viz-regen.log" || echo "viz regen failed (see ${TMPDIR:-/tmp}/ll-viz-regen.log)"
 ```
 
 Failure must not break the reflect session — the `|| echo` swallows non-zero exit codes and the session continues.
