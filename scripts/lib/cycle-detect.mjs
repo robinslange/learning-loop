@@ -24,35 +24,46 @@ export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
   const seen = new Set();
   const cycles = [];
 
-  // Invariant: pathSet === new Set(path). Mutations to one MUST be mirrored
-  // to the other within the same statement. The Set provides O(1) membership
-  // check; the array preserves traversal order for cycle emission.
-  function dfs(start, current, path, pathSet, edgesInPath) {
-    if (path.length > maxDepth) return;
-    const neighbours = adj.get(current) || [];
-    for (const { to, edge } of neighbours) {
-      if (to === start && path.length >= 2) {
-        const fullEdges = [...edgesInPath, edge];
-        if (!fullEdges.some(isContradictionEdge)) continue;
-        const key = canonicalCycleKey(path);
-        if (seen.has(key)) continue;
-        seen.add(key);
-        cycles.push({ nodes: [...path], edges: fullEdges });
-        continue;
-      }
-      if (pathSet.has(to)) continue;
-      path.push(to);
-      pathSet.add(to);
+  for (const start of adj.keys()) {
+    const path = [start];
+    const pathSet = new Set([start]);
+    const edgesInPath = [];
+
+    // enterNode/leaveNode atomically mutate path + pathSet + edgesInPath.
+    // Add new tracked state here, in one place, not at every call site.
+    function enterNode(node, edge) {
+      path.push(node);
+      pathSet.add(node);
       edgesInPath.push(edge);
-      dfs(start, to, path, pathSet, edgesInPath);
-      path.pop();
-      pathSet.delete(to);
+    }
+    function leaveNode() {
+      const node = path.pop();
+      pathSet.delete(node);
       edgesInPath.pop();
     }
+
+    function dfs(current) {
+      if (path.length > maxDepth) return;
+      const neighbours = adj.get(current) || [];
+      for (const { to, edge } of neighbours) {
+        if (to === start && path.length >= 2) {
+          const fullEdges = [...edgesInPath, edge];
+          if (!fullEdges.some(isContradictionEdge)) continue;
+          const key = canonicalCycleKey(path);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          cycles.push({ nodes: [...path], edges: fullEdges });
+          continue;
+        }
+        if (pathSet.has(to)) continue;
+        enterNode(to, edge);
+        dfs(to);
+        leaveNode();
+      }
+    }
+
+    dfs(start);
   }
 
-  for (const start of adj.keys()) {
-    dfs(start, start, [start], new Set([start]), []);
-  }
   return cycles;
 }
