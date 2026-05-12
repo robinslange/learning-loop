@@ -223,6 +223,25 @@ export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
   }));
 }
 
+export function getAllNliEdgesForHeatmap(db) {
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence_score, source_graph, created_at FROM edges ' +
+      "WHERE source_graph = 'nli' " +
+      'ORDER BY confidence_score DESC NULLS LAST, created_at DESC',
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(
+    ([fromPath, toPath, edgeType, confidenceScore, sourceGraph, createdAt]) => ({
+      fromPath,
+      toPath,
+      edgeType,
+      confidenceScore,
+      sourceGraph,
+      createdAt,
+    }),
+  );
+}
+
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
