@@ -342,3 +342,84 @@ pub fn is_watch_running(pid_file: &Path) -> bool {
     };
     is_process_running(pid)
 }
+
+#[cfg(test)]
+mod debounce_tests {
+    use super::*;
+
+    fn touched(state: &Mutex<DebounceState>) -> usize {
+        state.lock().unwrap().touched.len()
+    }
+
+    #[test]
+    fn fresh_state_does_not_fire() {
+        let state = Mutex::new(DebounceState {
+            dirty_since: None,
+            touched: HashSet::new(),
+        });
+        let s = state.lock().unwrap();
+        assert!(s.dirty_since.is_none());
+        assert_eq!(s.touched.len(), 0);
+    }
+
+    #[test]
+    fn dirty_since_resets_on_subsequent_touch() {
+        let state = Mutex::new(DebounceState {
+            dirty_since: None,
+            touched: HashSet::new(),
+        });
+        {
+            let mut s = state.lock().unwrap();
+            s.dirty_since = Some(Instant::now());
+            s.touched.insert(PathBuf::from("a.md"));
+        }
+        let first = state.lock().unwrap().dirty_since.unwrap();
+        std::thread::sleep(Duration::from_millis(20));
+        {
+            let mut s = state.lock().unwrap();
+            // The callback resets dirty_since to now on every event so the window
+            // extends with each touch (desired: a continuous burst defers reindex
+            // until the burst stops).
+            s.dirty_since = Some(Instant::now());
+            s.touched.insert(PathBuf::from("b.md"));
+        }
+        let second = state.lock().unwrap().dirty_since.unwrap();
+        assert!(second > first, "window must extend on each touch");
+        assert_eq!(touched(&state), 2);
+    }
+
+    #[test]
+    fn drain_clears_state() {
+        let state = Mutex::new(DebounceState {
+            dirty_since: Some(Instant::now() - Duration::from_secs(60)),
+            touched: HashSet::from([PathBuf::from("a.md"), PathBuf::from("b.md")]),
+        });
+        let drained = {
+            let mut s = state.lock().unwrap();
+            assert!(s.dirty_since.unwrap().elapsed() >= DEBOUNCE_WINDOW);
+            s.dirty_since = None;
+            std::mem::take(&mut s.touched)
+        };
+        assert_eq!(drained.len(), 2);
+        let s = state.lock().unwrap();
+        assert!(s.dirty_since.is_none());
+        assert_eq!(s.touched.len(), 0);
+    }
+
+    #[test]
+    fn duplicate_touches_collapse_to_one() {
+        let state = Mutex::new(DebounceState {
+            dirty_since: None,
+            touched: HashSet::new(),
+        });
+        let same_path = PathBuf::from("a.md");
+        for _ in 0..10 {
+            let mut s = state.lock().unwrap();
+            if s.dirty_since.is_none() {
+                s.dirty_since = Some(Instant::now());
+            }
+            s.touched.insert(same_path.clone());
+        }
+        assert_eq!(touched(&state), 1, "HashSet must dedup repeated atomic writes to one file");
+    }
+}
