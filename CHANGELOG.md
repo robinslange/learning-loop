@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **Relicensed to Apache-2.0** from All Rights Reserved. The plugin is now free to use, modify, and redistribute under the [Apache License 2.0](LICENSE). A new [NOTICE](NOTICE) file carries attribution to omit.nz and must be preserved in derivative works per the license terms. `.claude-plugin/plugin.json` `license` is now `Apache-2.0` and `author.url` points to `https://omit.nz`.
+
+### Fixed
+
+- **`scripts/release.sh` no longer bumps `ll-core`** with the plugin version. ll-core tracks its own crates.io semver line (currently `0.1.4`); the previous `for cargo_toml in native/crates/*/Cargo.toml` loop unconditionally bumped every crate, causing the repo Cargo.toml to drift to `1.19.0` while crates.io stayed at `0.1.4`. The loop now skips `ll-core` via a `case` guard. As part of this release, `native/crates/ll-core/Cargo.toml` is reset to `0.1.4` to match crates.io reality. `ll-search` continues to track the plugin version.
+
 ## v1.19.0
 
 ### Added

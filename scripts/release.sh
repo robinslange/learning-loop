@@ -81,7 +81,12 @@ perl -i -pe "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
   .claude-plugin/plugin.json
 
 for cargo_toml in native/crates/*/Cargo.toml; do
-  [ -f "$cargo_toml" ] && perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" "$cargo_toml"
+  [ -f "$cargo_toml" ] || continue
+  # ll-core tracks its own crates.io semver line (0.1.x); never bump with the plugin release.
+  case "$cargo_toml" in
+    */ll-core/*) continue ;;
+  esac
+  perl -i -pe "s/^version = \"[0-9]*\\.[0-9]*\\.[0-9]*\"/version = \"$NEW\"/" "$cargo_toml"
 done
 
 # CHANGELOG: refuse if Unreleased section is empty; otherwise rename and stub.

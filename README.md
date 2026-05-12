@@ -90,6 +90,10 @@ your-vault/
 - [Cross-platform support](guide/cross-platform.md) -- macOS / Linux / Windows status and known caveats
 - [Troubleshooting](guide/troubleshooting.md) -- common issues and fixes
 
+## About
+
+Built by [omit.nz](https://omit.nz). This plugin is what happens when we codify our own knowledge work. We do the same thing for teams.
+
 ## License
 
-Proprietary. Copyright (c) 2026 Robin S. Lange. All rights reserved. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
