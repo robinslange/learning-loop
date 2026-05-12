@@ -244,7 +244,7 @@ pub async fn sync_all_async(
         let peer_dir = peers_base.join(&peer.peer_id);
         let meta_path = peer_dir.join("index.db.meta");
 
-        if peer_is_fresh(&meta_path, &peer.updated_at).await {
+        if peer_is_fresh(&meta_path, &peer.updated_at) {
             eprintln!("Peer {} up to date, skipping", peer.peer_id);
             skipped.push(peer.peer_id.clone());
             continue;
@@ -310,11 +310,9 @@ pub async fn sync_all_async(
         std::fs::create_dir_all(&peer_dir)?;
         let peer_db_path = peer_dir.join("index.db");
         let peer_db_owned = peer_db_path.clone();
-        let data_for_write = data.clone();
-        tokio::task::spawn_blocking(move || std::fs::write(&peer_db_owned, &data_for_write))
+        tokio::task::spawn_blocking(move || std::fs::write(&peer_db_owned, &data))
             .await
             .map_err(|e| anyhow::anyhow!("peer write task panicked: {e}"))??;
-        let _ = data;
         let peer_db_owned = peer_db_path.clone();
         let peer_id_owned = peer.peer_id.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || ensure_peer_fts(&peer_db_owned))
@@ -367,7 +365,7 @@ fn hash_matches(in_frame: &[u8; 32], hex_hash: &str) -> bool {
     }
 }
 
-async fn peer_is_fresh(meta_path: &Path, peer_updated_at: &str) -> bool {
+fn peer_is_fresh(meta_path: &Path, peer_updated_at: &str) -> bool {
     let Ok(meta_text) = std::fs::read_to_string(meta_path) else {
         return false;
     };

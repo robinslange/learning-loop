@@ -8,8 +8,6 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use std::time::Duration;
-
 use common::{spawn_hub, HubBehaviour, looks_framed};
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -117,11 +115,3 @@ fn protocol_version_field_name_pin() {
     }
 }
 
-// Smoke check that we never accidentally bind the recv timeout above the test budget.
-#[tokio::test]
-async fn recv_timeout_default_is_30_seconds_unless_overridden() {
-    // Defensive: this test confirms that without env override, recv timeout is 30s.
-    // It does not run a real network operation; the constant lives in client.rs and is
-    // exercised by sync_recv_timeout.rs separately.
-    let _ = Duration::from_secs(30);
-}

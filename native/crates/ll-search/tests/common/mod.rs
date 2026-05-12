@@ -14,10 +14,12 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Once};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
+
+static FORCE_ENCRYPTED_BACKEND: Once = Once::new();
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::accept_async;
@@ -206,12 +208,18 @@ async fn recv_binary(ws: &mut WsServer) -> Option<Vec<u8>> {
 /// `KEYRING_USER = signing-seed-v1`), so parallel integration tests would otherwise
 /// stomp on the same key and break the seed-migration lib tests that read it back.
 pub fn setup_config_dir(hub_addr: SocketAddr, peer_id: &str) -> tempfile::TempDir {
-    // SAFETY (Rust 2024): set_var requires unsafe because env modification is a global
-    // side effect. Each integration test binary is its own process; the env var here
-    // never leaks into other binaries.
-    unsafe {
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    }
+    // Force the encrypted seed backend exactly once per test process. Without the
+    // `Once` guard, parallel `#[tokio::test]` cases in the same binary all race to
+    // call `set_var`, which on Rust 2024 is `unsafe` precisely because libc
+    // `setenv` is not thread-safe against concurrent `getenv`. The value here is
+    // constant so a single set is sufficient.
+    FORCE_ENCRYPTED_BACKEND.call_once(|| {
+        // SAFETY: serialised via `Once`; this runs exactly once per process before
+        // any test reads LL_SEED_BACKEND.
+        unsafe {
+            std::env::set_var("LL_SEED_BACKEND", "encrypted");
+        }
+    });
 
     let dir = tempfile::tempdir().unwrap();
     let fed = dir.path().join("federation");
