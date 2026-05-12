@@ -24,6 +24,9 @@ export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
   const seen = new Set();
   const cycles = [];
 
+  // Invariant: pathSet === new Set(path). Mutations to one MUST be mirrored
+  // to the other within the same statement. The Set provides O(1) membership
+  // check; the array preserves traversal order for cycle emission.
   function dfs(start, current, path, pathSet, edgesInPath) {
     if (path.length > maxDepth) return;
     const neighbours = adj.get(current) || [];
