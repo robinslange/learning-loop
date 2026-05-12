@@ -24,7 +24,7 @@ export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
   const seen = new Set();
   const cycles = [];
 
-  function dfs(start, current, path, edgesInPath) {
+  function dfs(start, current, path, pathSet, edgesInPath) {
     if (path.length > maxDepth) return;
     const neighbours = adj.get(current) || [];
     for (const { to, edge } of neighbours) {
@@ -37,17 +37,19 @@ export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
         cycles.push({ nodes: [...path], edges: fullEdges });
         continue;
       }
-      if (path.includes(to)) continue;
+      if (pathSet.has(to)) continue;
       path.push(to);
+      pathSet.add(to);
       edgesInPath.push(edge);
-      dfs(start, to, path, edgesInPath);
+      dfs(start, to, path, pathSet, edgesInPath);
       path.pop();
+      pathSet.delete(to);
       edgesInPath.pop();
     }
   }
 
   for (const start of adj.keys()) {
-    dfs(start, start, [start], []);
+    dfs(start, start, [start], new Set([start]), []);
   }
   return cycles;
 }

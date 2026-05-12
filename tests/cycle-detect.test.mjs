@@ -56,3 +56,21 @@ test('deduplicates rotations of the same cycle', () => {
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
   assert.equal(cycles.length, 1);
 });
+
+test('handles hub nodes without combinatorial blowup', () => {
+  // A hub with 50 outgoing challenges_* edges to peripheral nodes,
+  // each peripheral node points back to the hub forming a 2-cycle.
+  // Must complete quickly and find each 2-cycle exactly once (50 cycles total).
+  const HUB = 'hub.md';
+  const edges = [];
+  for (let i = 0; i < 50; i++) {
+    const peripheral = `p${i}.md`;
+    edges.push({ fromPath: HUB, toPath: peripheral, edgeType: 'challenges_rebuttal', sourceGraph: 'nli' });
+    edges.push({ fromPath: peripheral, toPath: HUB, edgeType: 'challenges_rebuttal', sourceGraph: 'nli' });
+  }
+  const start = Date.now();
+  const cycles = findContradictionCycles(edges, { maxDepth: 4 });
+  const elapsed = Date.now() - start;
+  assert.equal(cycles.length, 50, 'each hub<->peripheral pair forms one canonical 2-cycle');
+  assert.ok(elapsed < 200, `hub traversal should complete in <200ms (got ${elapsed}ms)`);
+});
