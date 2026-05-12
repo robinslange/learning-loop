@@ -4,18 +4,25 @@ use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{SigningKey, Signer};
 use sha2::{Sha256, Digest};
 
-/// Load the signing seed from the legacy plaintext `seed_path`.
+/// Load the signing seed for sync/watch.
 ///
-/// Retained for `sync::client::sync_all` call compatibility. Post-2K the body
-/// derives `config_dir` from `seed_path` and delegates to `seed_store::load_or_create`.
-///
-/// Deprecated: prefer `seed_store::load_or_create` directly.
+/// Errors with a clear message if no seed is present — sync and watch must
+/// never silently mint a new identity, because that breaks trust with every
+/// peer that has the old pubkey allowlisted. Use [`load_or_create_seed`] only
+/// from intentional identity-creation paths (federation setup, identity
+/// command, migrate-seed command).
 pub fn load_seed(seed_path: &Path) -> anyhow::Result<SigningKey> {
     let config_dir = seed_path
         .parent()
         .and_then(|p| p.parent())
         .ok_or_else(|| anyhow::anyhow!("invalid seed_path: missing federation/ ancestor"))?;
-    Ok(super::seed_store::load_or_create(config_dir)?.signing_key)
+    match super::seed_store::load_only(config_dir)? {
+        Some(r) => Ok(r.signing_key),
+        None => anyhow::bail!(
+            "no federation seed found at {}; run `/learning-loop:federation` to set up an identity",
+            config_dir.display()
+        ),
+    }
 }
 
 /// Outcome of a [`load_or_create_seed`] call.

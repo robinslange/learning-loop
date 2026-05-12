@@ -71,7 +71,7 @@ pub fn migrate(config_dir: &Path) -> anyhow::Result<MigrateResult> {
         (SeedBackend::Encrypted, res)
     } else {
         // Try keyring first
-        match write_to_keyring(&seed) {
+        match write_to_keyring(config_dir, &seed) {
             Ok(()) => (SeedBackend::Keyring, Ok(())),
             Err(_) => {
                 let res = write_to_encrypted(config_dir, &seed);
@@ -125,7 +125,7 @@ pub fn migrate_rollback(config_dir: &Path) -> anyhow::Result<MigrateResult> {
     }
 
     // Try keyring first, then encrypted
-    let (seed, from_backend) = if let Some(s) = read_keyring()? {
+    let (seed, from_backend) = if let Some(s) = read_keyring(config_dir)? {
         (s, SeedBackend::Keyring)
     } else if let Some(s) = read_encrypted(config_dir)? {
         (s, SeedBackend::Encrypted)
@@ -154,7 +154,7 @@ pub fn migrate_rollback(config_dir: &Path) -> anyhow::Result<MigrateResult> {
     // Remove the secure-backend copy
     match from_backend {
         SeedBackend::Keyring => {
-            let _ = delete_keyring();
+            let _ = delete_keyring(config_dir);
         }
         SeedBackend::Encrypted => {
             let enc = encrypted_seed_path(config_dir);
@@ -178,8 +178,8 @@ pub fn migrate_rollback(config_dir: &Path) -> anyhow::Result<MigrateResult> {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn write_to_keyring(seed: &[u8; 32]) -> anyhow::Result<()> {
-    write_keyring(seed)
+fn write_to_keyring(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
+    write_keyring(config_dir, seed)
 }
 
 fn write_to_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
@@ -188,7 +188,7 @@ fn write_to_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> 
 
 fn verify_roundtrip(config_dir: &Path, original: &[u8; 32], backend: SeedBackend) -> anyhow::Result<()> {
     let read_back = match backend {
-        SeedBackend::Keyring => read_keyring()?
+        SeedBackend::Keyring => read_keyring(config_dir)?
             .ok_or_else(|| anyhow::anyhow!("keyring read-back returned None"))?,
         SeedBackend::Encrypted => read_encrypted(config_dir)?
             .ok_or_else(|| anyhow::anyhow!("encrypted read-back returned None"))?,

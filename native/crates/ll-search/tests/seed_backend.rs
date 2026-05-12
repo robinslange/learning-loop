@@ -1,5 +1,5 @@
 use ll_search::sync::seed_store::{
-    load_or_create, read_encrypted, read_plaintext_legacy, write_encrypted, SeedBackend,
+    load_only, load_or_create, read_encrypted, read_plaintext_legacy, write_encrypted, SeedBackend,
 };
 use ll_search::sync::config::{encrypted_seed_path, seed_path};
 use std::sync::Once;
@@ -103,12 +103,76 @@ fn env_force_encrypted_consistent_key_across_loads() {
 }
 
 #[test]
+fn load_only_returns_none_when_no_seed_exists() {
+    init_test_backend();
+    let tmp = tempdir().unwrap();
+    let result = load_only(tmp.path()).unwrap();
+    assert!(
+        result.is_none(),
+        "load_only must NOT auto-create; an empty config_dir should yield None so sync/watch can fail loudly instead of silently minting a new identity"
+    );
+}
+
+#[test]
+fn load_only_returns_existing_seed_without_creating() {
+    init_test_backend();
+    let tmp = tempdir().unwrap();
+
+    let created = load_or_create(tmp.path()).unwrap();
+    let pk_created = ll_search::sync::auth::pubkey_b64(&created.signing_key);
+
+    let loaded = load_only(tmp.path()).unwrap().expect("seed must be found after load_or_create wrote one");
+    let pk_loaded = ll_search::sync::auth::pubkey_b64(&loaded.signing_key);
+
+    assert_eq!(pk_created, pk_loaded, "load_only must return the same key load_or_create wrote");
+    assert!(!loaded.created, "load_only never sets created=true");
+}
+
+#[test]
+fn auth_load_seed_errors_on_missing_seed() {
+    init_test_backend();
+    let tmp = tempdir().unwrap();
+    let fed = tmp.path().join("federation");
+    std::fs::create_dir_all(&fed).unwrap();
+    let seed_path = fed.join(".seed");
+
+    let result = ll_search::sync::auth::load_seed(&seed_path);
+    let err = result.expect_err("load_seed must error when no seed exists in any backend");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("no federation seed found"),
+        "error must mention missing seed; got: {msg}"
+    );
+}
+
+#[test]
+fn keyring_user_differs_per_config_dir() {
+    use ll_search::sync::config::keyring_user;
+    let a = tempdir().unwrap();
+    let b = tempdir().unwrap();
+    let ua = keyring_user(a.path());
+    let ub = keyring_user(b.path());
+    assert_ne!(
+        ua, ub,
+        "two distinct config_dirs must hash to distinct keyring accounts; \
+         a leaked dev/test invocation with its own config_dir must not be able \
+         to address the production install's keyring entry"
+    );
+    assert!(ua.starts_with("signing-seed-v1-"));
+    assert!(ub.starts_with("signing-seed-v1-"));
+}
+
+#[test]
 #[ignore] // requires real secret-service or Keychain running
 fn keyring_roundtrip_when_available() {
     use ll_search::sync::seed_store::{delete_keyring, read_keyring, write_keyring};
+    // Safe to enable now: write_keyring/read_keyring/delete_keyring are
+    // namespaced by config_dir, so this tempdir gets its own keyring entry
+    // that cannot stomp the production install's seed.
+    let tmp = tempdir().unwrap();
     let seed = [11u8; 32];
-    write_keyring(&seed).unwrap();
-    let read = read_keyring().unwrap().unwrap();
+    write_keyring(tmp.path(), &seed).unwrap();
+    let read = read_keyring(tmp.path()).unwrap().unwrap();
     assert_eq!(read, seed);
-    delete_keyring().unwrap();
+    delete_keyring(tmp.path()).unwrap();
 }

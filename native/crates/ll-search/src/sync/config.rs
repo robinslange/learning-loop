@@ -79,8 +79,29 @@ pub fn encrypted_seed_path(config_dir: &Path) -> PathBuf {
 /// Keyring service name. Stable; bump the `-v1` suffix if the seed format changes.
 pub const KEYRING_SERVICE: &str = "ai.learning-loop.federation";
 
-/// Keyring account name for the signing seed.
-pub const KEYRING_USER: &str = "signing-seed-v1";
+/// Legacy un-namespaced account name. Older installs wrote to this. Reads on
+/// the canonical plugin-data config_dir fall back to it for migration; new
+/// writes always use [`keyring_user`].
+pub const KEYRING_USER_LEGACY: &str = "signing-seed-v1";
+
+/// Compute the per-`config_dir` keyring account name.
+///
+/// Why namespace: `keyring::Entry::new(SERVICE, USER)` is globally scoped per
+/// OS user. A single fixed account name means any process — test fixture,
+/// leaked dev watcher, parallel test thread — that calls `write_keyring`
+/// against the same SERVICE+USER stomps the production install's seed. We've
+/// seen this happen and it silently breaks federation auth.
+///
+/// The namespaced name is `signing-seed-v1-<hex8>` where `<hex8>` is the
+/// first 8 hex chars of `sha256(canonicalized config_dir path)`. Tempdirs
+/// and dev/test config_dirs each get their own entry, isolated from prod.
+pub fn keyring_user(config_dir: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    let canonical = std::fs::canonicalize(config_dir).unwrap_or_else(|_| config_dir.to_path_buf());
+    let hash = Sha256::digest(canonical.as_os_str().as_encoded_bytes());
+    let hex8: String = hash.iter().take(4).map(|b| format!("{b:02x}")).collect();
+    format!("signing-seed-v1-{hex8}")
+}
 
 pub fn data_dir(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("data")

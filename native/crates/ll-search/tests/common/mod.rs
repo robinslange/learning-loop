@@ -225,10 +225,17 @@ pub fn setup_config_dir(hub_addr: SocketAddr, peer_id: &str) -> tempfile::TempDi
     let fed = dir.path().join("federation");
     std::fs::create_dir_all(&fed).unwrap();
 
+    // Generate a fresh seed now so the test's sync path can use the new
+    // load-only contract. Sync/watch deliberately do not auto-create —
+    // a missing seed is a configuration error, not a silent recovery point.
+    let seed_result = ll_search::sync::seed_store::load_or_create(dir.path())
+        .expect("test setup must generate a seed");
+    let pubkey = ll_search::sync::auth::pubkey_b64(&seed_result.signing_key);
+
     let config = serde_json::json!({
         "identity": {
             "displayName": peer_id,
-            "pubkey": "placeholder",
+            "pubkey": format!("ed25519:{pubkey}"),
         },
         "visibility": {
             "default": "private",
@@ -240,7 +247,6 @@ pub fn setup_config_dir(hub_addr: SocketAddr, peer_id: &str) -> tempfile::TempDi
     std::fs::write(fed.join("config.json"), serde_json::to_string_pretty(&config).unwrap())
         .unwrap();
 
-    // Force seed_store to create a fresh seed on first sync.
     dir
 }
 
