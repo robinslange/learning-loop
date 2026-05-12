@@ -86,6 +86,31 @@ test('dryRun makes no writes', async () => {
   rmSync(vaultRoot, { recursive: true, force: true });
 });
 
+test('tagged-notes index persists across db close + reopen (saveDb path)', async () => {
+  const { vaultRoot, dbPath } = setup();
+  const noteA = join(vaultRoot, '3-permanent', 'a.md');
+  const noteB = join(vaultRoot, '3-permanent', 'b.md');
+  writeFileSync(noteA, '# A\n');
+  writeFileSync(noteB, '# B\n');
+
+  let db = await openEdgeDb(dbPath);
+  addEdge(db, { fromPath: '3-permanent/a.md', toPath: '3-permanent/b.md', edgeType: 'challenges_rebuttal', confidence: 'low', sourceGraph: 'nli', directionFlipped: 0, confidenceScore: 0.97 });
+  saveDb(db, dbPath);
+
+  await runFrontmatterPhase(db, vaultRoot, { threshold: 0.95, dryRun: false });
+  saveDb(db, dbPath);
+  db.close();
+
+  db = await openEdgeDb(dbPath);
+  const tagged = getTaggedNotes(db);
+  assert.equal(tagged.size, 1, 'tagged-notes index survived db close/reopen');
+  assert.ok(tagged.has('3-permanent/a.md'));
+  assert.equal(getMetaFlag(db, 'nli_frontmatter_index_bootstrapped_v1'), '1', 'bootstrap sentinel persisted');
+
+  db.close();
+  rmSync(vaultRoot, { recursive: true, force: true });
+});
+
 test('uses tagged-notes index instead of scanning vault on subsequent runs', async () => {
   const { vaultRoot, dbPath } = setup();
   const noteA = join(vaultRoot, '3-permanent', 'a.md');

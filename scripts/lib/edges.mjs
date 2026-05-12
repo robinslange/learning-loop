@@ -248,6 +248,14 @@ export function replaceTaggedNotes(db, paths) {
   }
 }
 
+export function addTaggedNote(db, notePath) {
+  db.run('INSERT OR IGNORE INTO nli_frontmatter_tags (note_path) VALUES (?)', [notePath]);
+}
+
+export function removeTaggedNote(db, notePath) {
+  db.run('DELETE FROM nli_frontmatter_tags WHERE note_path = ?', [notePath]);
+}
+
 export function getMetaFlag(db, key) {
   const res = db.exec('SELECT value FROM viz_meta WHERE key = ?', [key]);
   if (!res[0] || !res[0].values[0]) return null;

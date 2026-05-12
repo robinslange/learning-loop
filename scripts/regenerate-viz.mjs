@@ -134,7 +134,7 @@ function scanVaultForLegacyTags(vaultRoot) {
 }
 
 export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dryRun = false } = {}) {
-  const { getNliEdgesForFrontmatter, getTaggedNotes, replaceTaggedNotes, getMetaFlag, setMetaFlag } =
+  const { getNliEdgesForFrontmatter, getTaggedNotes, replaceTaggedNotes, getMetaFlag, setMetaFlag, addTaggedNote, removeTaggedNote } =
     await import('./lib/edges.mjs');
   const rows = getNliEdgesForFrontmatter(db, threshold);
 
@@ -156,7 +156,6 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
   }
 
   const counts = { updated: 0, cleared: 0 };
-  const newTagged = new Set();
 
   for (const [fromPath, wikilinks] of desired.entries()) {
     const top = fromPath.split('/')[0];
@@ -164,12 +163,11 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
     const abs = join(vaultRoot, fromPath);
     if (dryRun) {
       counts.updated++;
-      newTagged.add(fromPath);
       continue;
     }
     const changed = syncNoteFrontmatter(abs, wikilinks);
     if (changed) counts.updated++;
-    newTagged.add(fromPath);
+    addTaggedNote(db, fromPath);
   }
 
   for (const rel of currentlyTagged) {
@@ -183,10 +181,7 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
     }
     const changed = syncNoteFrontmatter(abs, []);
     if (changed) counts.cleared++;
-  }
-
-  if (!dryRun) {
-    replaceTaggedNotes(db, [...newTagged]);
+    removeTaggedNote(db, rel);
   }
 
   return counts;
@@ -350,7 +345,7 @@ async function main(argv) {
     cyclesFound: 0,
   };
 
-  const { openEdgeDb } = await import('./lib/edges.mjs');
+  const { openEdgeDb, saveDb } = await import('./lib/edges.mjs');
   const db = await openEdgeDb(dbPath);
 
   try {
@@ -375,6 +370,13 @@ async function main(argv) {
         dryRun: flags.dryRun,
       });
       counts.cyclesFound = r.cycles;
+    }
+    if (!flags.dryRun) {
+      try {
+        saveDb(db, dbPath);
+      } catch (err) {
+        console.error('viz: saveDb failed:', err.message);
+      }
     }
   } finally {
     db.close();

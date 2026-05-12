@@ -55,11 +55,21 @@ if (isDirect) {
     process.exit(1);
   }
   let db = null;
+  let dbPath = null;
   if (PLUGIN_DATA) {
     const { openEdgeDb } = await import('./lib/edges.mjs');
-    db = await openEdgeDb(join(PLUGIN_DATA, 'edges.db'));
+    dbPath = join(PLUGIN_DATA, 'edges.db');
+    db = await openEdgeDb(dbPath);
   }
   const counts = await clearAllNliFrontmatter(VAULT_PATH, db);
-  if (db) db.close();
+  if (db) {
+    const { saveDb } = await import('./lib/edges.mjs');
+    try {
+      saveDb(db, dbPath);
+    } catch (err) {
+      console.error('clear-nli: saveDb failed:', err.message);
+    }
+    db.close();
+  }
   console.log(JSON.stringify(counts, null, 2));
 }
