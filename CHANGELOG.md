@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.19.0
+
 ### Added
 
 - **Envelope framing for federation sync.** When negotiated with a sync-hub advertising `protocol_version >= 2`, client-to-hub uploads and hub-to-client peer downloads carry a length-prefixed binary frame: `size (u32 big-endian, 4 bytes) + sha256 (32 bytes) + body`. The receiver validates total length and SHA256 before allocating the body, so a malicious or buggy size declaration cannot trigger a 4 GB `Vec::with_capacity`. Wire format is co-authored with the sync-hub side and lives at `crates/ll-search/src/sync/protocol.rs::Envelope`. Caps: `MAX_ENVELOPE_SIZE = 200 MB` policy ceiling, `HUB_INBOUND_CAP = 50 MB` axum-enforced ceiling on uploads (the smaller wins). Uploads larger than 50 MB now return `SyncError::EnvelopeOversize { cap }` pre-flight without opening the WebSocket.
