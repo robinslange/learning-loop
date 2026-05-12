@@ -121,6 +121,13 @@ export async function openEdgeDb(dbPath) {
   if (!cols.includes('direction_flipped')) {
     db.run('ALTER TABLE edges ADD COLUMN direction_flipped INTEGER NOT NULL DEFAULT 0');
   }
+  try {
+    db.run('ALTER TABLE edges ADD COLUMN confidence_score REAL');
+  } catch (err) {
+    if (!/duplicate column|already exists/i.test(String(err?.message || err))) {
+      throw err;
+    }
+  }
   return db;
 }
 
