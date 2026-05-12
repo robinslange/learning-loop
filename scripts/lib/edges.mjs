@@ -127,6 +127,10 @@ export async function openEdgeDb(dbPath) {
 // source_graph value space:
 //   'local'    — edge inferred from a write/edit on this machine (default)
 //   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
+//   'nli'      — edge inferred by NLI model at write-time; advisory; confidence is always
+//                'low'; excluded from downstream traversal queries by default;
+//                deleted on re-write (removeOutgoingEdges applies — re-derived from
+//                current content each write)
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(
   db,
