@@ -65,7 +65,15 @@ fn migration_meta_file_records_backend_and_timestamp() {
     let txt = std::fs::read_to_string(&meta_path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&txt).unwrap();
     assert_eq!(v["backend"].as_str(), Some("encrypted"), "backend must be recorded");
-    assert!(v["migrated_at"].as_str().is_some(), "migrated_at must be present");
+    let migrated_at = v["migrated_at"].as_str().expect("migrated_at must be present");
+
+    let expected_date = &ll_search::db::chrono_iso_now()[..10];
+    assert_eq!(
+        &migrated_at[..10],
+        expected_date,
+        "migrated_at date must match current UTC date (got {migrated_at}, expected prefix {expected_date}); \
+         a mismatch here means the timestamp formatter drifted (regression: naive 365-day-year math in seed_store)"
+    );
 }
 
 #[test]

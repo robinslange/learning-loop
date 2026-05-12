@@ -402,7 +402,7 @@ pub fn write_seed_meta(
     let mut meta = existing;
     meta["backend"] = serde_json::Value::String(backend_str.to_string());
     if migrated {
-        meta["migrated_at"] = serde_json::Value::String(chrono_iso_now());
+        meta["migrated_at"] = serde_json::Value::String(crate::db::chrono_iso_now());
     }
 
     if let Some(parent) = path.parent() {
@@ -412,25 +412,6 @@ pub fn write_seed_meta(
     let tmp = path.with_extension("json.tmp");
     atomic_write(&tmp, &path, meta.to_string().as_bytes())?;
     Ok(())
-}
-
-fn chrono_iso_now() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    // Produce a simple ISO 8601 UTC string without external deps
-    let s = secs;
-    let min = s / 60 % 60;
-    let hour = s / 3600 % 24;
-    let days_since_epoch = s / 86400;
-    // Simple Gregorian calendar (good enough for a timestamp)
-    let year = 1970 + days_since_epoch / 365;
-    let day_of_year = days_since_epoch % 365 + 1;
-    let month = (day_of_year - 1) / 30 + 1;
-    let day = (day_of_year - 1) % 30 + 1;
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", year, month, day, hour, min, s % 60)
 }
 
 // ---------------------------------------------------------------------------
