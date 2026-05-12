@@ -15,17 +15,23 @@ const TEMPLATE_DIR = join(import.meta.dirname, '..', 'provenance');
 
 function getSessionId() {
   const tmp = tmpdir();
-  try {
-    return readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
-  } catch (err) {
-    logError('provenance.getSessionId.ppid', err);
+  // Try the ppid-suffixed file first, then the unsuffixed legacy fallback.
+  // Both being absent is expected when provenance fires outside of a
+  // Claude Code session (CLI invocation, cron, tests) — don't log ENOENT.
+  // Only surface errors when a file *exists* but can't be read (perms, IO).
+  const candidates = [
+    join(tmp, `learning-loop-session-id-${process.ppid}`),
+    join(tmp, 'learning-loop-session-id'),
+  ];
+  for (const path of candidates) {
+    if (!existsSync(path)) continue;
+    try {
+      return readFileSync(path, 'utf8').trim();
+    } catch (err) {
+      logError('provenance.getSessionId.read', { path, err: err.message });
+    }
   }
-  try {
-    return readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
-  } catch (err) {
-    logError('provenance.getSessionId.legacy', err);
-    return 'unknown';
-  }
+  return 'unknown';
 }
 
 function getCurrentMonthFile() {

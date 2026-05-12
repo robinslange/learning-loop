@@ -50,20 +50,23 @@ if (existsSync(reflectMarker)) {
 const dreamMarker = join(tmp, 'learning-loop-last-dream');
 const projectDir = env.CLAUDE_PROJECT_DIR;
 
-// Resolve session ID: hook input > ppid-keyed file > global file (legacy)
+// Resolve session ID: hook input > ppid-keyed file > global file (legacy).
+// Missing session-id files are expected when this runs outside of a Claude
+// Code session (cron, tests, CLI). Don't log ENOENT; only surface errors
+// when a file *exists* but can't be read (perms, IO).
 let sessionId = hookData.session_id || '';
 if (!sessionId) {
-  try {
-    sessionId = readFileSync(join(tmp, `learning-loop-session-id-${process.ppid}`), 'utf8').trim();
-  } catch (err) {
-    logError('stop-nudge.sessionId.ppid', err);
-  }
-}
-if (!sessionId) {
-  try {
-    sessionId = readFileSync(join(tmp, 'learning-loop-session-id'), 'utf8').trim();
-  } catch (err) {
-    logError('stop-nudge.sessionId.legacy', err);
+  for (const path of [
+    join(tmp, `learning-loop-session-id-${process.ppid}`),
+    join(tmp, 'learning-loop-session-id'),
+  ]) {
+    if (!existsSync(path)) continue;
+    try {
+      sessionId = readFileSync(path, 'utf8').trim();
+      if (sessionId) break;
+    } catch (err) {
+      logError('stop-nudge.sessionId.read', { path, err: err.message });
+    }
   }
 }
 
