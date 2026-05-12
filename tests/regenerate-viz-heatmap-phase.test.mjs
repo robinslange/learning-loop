@@ -58,3 +58,30 @@ test('empty state writes file with 0 contradictions', async () => {
   db.close();
   rmSync(vaultRoot, { recursive: true, force: true });
 });
+
+test('skips write when content semantically identical (no mtime churn)', async () => {
+  const vaultRoot = mkdtempSync(join(tmpdir(), 'll-viz-vault-'));
+  mkdirSync(join(vaultRoot, '_system'), { recursive: true });
+  const dbDir = mkdtempSync(join(tmpdir(), 'll-viz-db-'));
+  const dbPath = join(dbDir, 'edges.db');
+  const db = await openEdgeDb(dbPath);
+  addEdge(db, { fromPath: '3-permanent/a.md', toPath: '3-permanent/b.md', edgeType: 'challenges_rebuttal', confidence: 'low', sourceGraph: 'nli', directionFlipped: 0, confidenceScore: 0.98 });
+  saveDb(db, dbPath);
+
+  await runHeatmapPhase(db, vaultRoot, { syncThreshold: 0.95, dryRun: false });
+
+  const heatmapPath = join(vaultRoot, '_system', 'nli-conflicts.md');
+  const { statSync } = await import('node:fs');
+  const mtime1 = statSync(heatmapPath).mtimeMs;
+
+  // Force a small delay so a real write would produce a different mtime
+  await new Promise((r) => setTimeout(r, 20));
+
+  await runHeatmapPhase(db, vaultRoot, { syncThreshold: 0.95, dryRun: false });
+  const mtime2 = statSync(heatmapPath).mtimeMs;
+
+  assert.equal(mtime1, mtime2, 'second run with identical content should not rewrite the file');
+
+  db.close();
+  rmSync(vaultRoot, { recursive: true, force: true });
+});

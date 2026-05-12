@@ -208,7 +208,17 @@ export async function runHeatmapPhase(db, vaultRoot, { syncThreshold = 0.95, dry
   const heatmapPath = join(vaultRoot, '_system', 'nli-conflicts.md');
   if (!dryRun) {
     mkdirSync(join(vaultRoot, '_system'), { recursive: true });
-    writeFileSync(heatmapPath, lines.join('\n'));
+    const newContent = lines.join('\n');
+    const stripTimestamp = (s) => s.replace(/^generated:.*$/m, 'generated:');
+    let existingStripped = null;
+    try {
+      existingStripped = stripTimestamp(readFileSync(heatmapPath, 'utf-8'));
+    } catch {
+      /* file missing — treat as changed */
+    }
+    if (existingStripped === null || existingStripped !== stripTimestamp(newContent)) {
+      writeFileSync(heatmapPath, newContent);
+    }
   }
   return { rows: rows.length };
 }
