@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct FederationConfig {
     pub identity: Identity,
     pub visibility: VisibilityConfig,
@@ -12,32 +12,32 @@ pub struct FederationConfig {
     pub graph: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Identity {
     #[serde(rename = "displayName")]
     pub display_name: String,
     pub pubkey: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct VisibilityConfig {
     pub default: String,
     #[serde(default)]
     pub rules: Vec<VisibilityRule>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct VisibilityRule {
     pub pattern: String,
     pub tier: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct HubEndpoint {
     pub endpoint: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct PeerConfig {
     pub id: String,
     pub pubkey: String,

@@ -1,19 +1,29 @@
-use std::io::{Read, Write};
-use std::net::TcpStream;
 use std::path::Path;
+use std::time::Duration;
 use anyhow::Context;
+use futures_util::{SinkExt, StreamExt};
 use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Sha256, Digest};
-use tungstenite::{connect, Message, WebSocket};
-use tungstenite::stream::MaybeTlsStream;
+use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
 use super::config::{FederationConfig, seed_path, export_db_path, peers_dir};
+use super::error::SyncError;
 use super::export::{export_index, ExportResult};
-use super::protocol::{ClientMessage, HubMessage};
+use super::protocol::{
+    ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp,
+    ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP, PROTOCOL_VERSION_FRAMED,
+};
 
 const SCHEMA_VERSION: u32 = 1;
+const META_FILE_VERSION: u32 = 2;
+const RECV_TIMEOUT: Duration = Duration::from_secs(30);
+const SEND_TIMEOUT: Duration = Duration::from_secs(60);
+
+type WsStream = tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+>;
 
 fn is_safe_peer_id(id: &str) -> bool {
     !id.is_empty()
@@ -36,14 +46,14 @@ pub struct DownloadedPeer {
     pub note_count: i64,
 }
 
-pub fn sync_all(
+pub async fn sync_all_async(
     source_db: &Path,
     vault_path: &Path,
     config_dir: &Path,
     config: &FederationConfig,
 ) -> anyhow::Result<SyncResult> {
     let export_path = export_db_path(config_dir);
-    let peer_id = &config.identity.display_name;
+    let peer_id = config.identity.display_name.clone();
 
     let fed_dir = config_dir.join("federation");
     std::fs::create_dir_all(&fed_dir)?;
@@ -54,42 +64,62 @@ pub fn sync_all(
         .ok()
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
-    let current_max_mtime = max_md_mtime(vault_path);
+    let vault_owned = vault_path.to_path_buf();
+    let current_max_mtime = tokio::task::spawn_blocking(move || max_md_mtime(&vault_owned))
+        .await
+        .map_err(|e| anyhow::anyhow!("mtime scan task panicked: {e}"))?;
     let vault_changed = current_max_mtime > last_mtime;
 
-    let (export_bytes, export_result, export_hash) = if vault_changed {
+    let need_export = vault_changed || !export_path.exists();
+    let (export_bytes, export_result) = if need_export {
         eprintln!("Exporting local index...");
-        let result = export_index(source_db, vault_path, &export_path, config)?;
+        let source_owned = source_db.to_path_buf();
+        let vault_owned = vault_path.to_path_buf();
+        let export_owned = export_path.clone();
+        let config_owned = config.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            export_index(&source_owned, &vault_owned, &export_owned, &config_owned)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("export task panicked: {e}"))??;
         eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
-        let bytes = std::fs::read(&export_path)?;
-        let hash = hex::encode(Sha256::digest(&bytes));
-        (bytes, Some(result), hash)
-    } else if export_path.exists() {
-        eprintln!("No vault changes since last export");
-        let bytes = std::fs::read(&export_path)?;
-        let hash = hex::encode(Sha256::digest(&bytes));
-        (bytes, None, hash)
+        let export_owned = export_path.clone();
+        let bytes = tokio::task::spawn_blocking(move || std::fs::read(&export_owned))
+            .await
+            .map_err(|e| anyhow::anyhow!("export read task panicked: {e}"))??;
+        (bytes, Some(result))
     } else {
-        eprintln!("Exporting local index...");
-        let result = export_index(source_db, vault_path, &export_path, config)?;
-        eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
-        let bytes = std::fs::read(&export_path)?;
-        let hash = hex::encode(Sha256::digest(&bytes));
-        (bytes, Some(result), hash)
+        eprintln!("No vault changes since last export");
+        let export_owned = export_path.clone();
+        let bytes = tokio::task::spawn_blocking(move || std::fs::read(&export_owned))
+            .await
+            .map_err(|e| anyhow::anyhow!("export read task panicked: {e}"))??;
+        (bytes, None)
     };
+    let export_hash = hex::encode(Sha256::digest(&export_bytes));
 
     let upload_unchanged = std::fs::read_to_string(&hash_path)
         .map(|stored| stored.trim() == export_hash)
         .unwrap_or(false);
 
+    // Pre-flight upload size check (R12). Frame overhead is 36 bytes.
+    if export_bytes.len() + ENVELOPE_HEADER_LEN > HUB_INBOUND_CAP {
+        return Err(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP }.into());
+    }
+
     let model_id = if let Some(ref r) = export_result {
         r.model_id.clone()
     } else {
-        let source = Connection::open_with_flags(
-            source_db,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )?;
-        source.query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))?
+        let source_owned = source_db.to_path_buf();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+            let source = Connection::open_with_flags(
+                &source_owned,
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+            )?;
+            Ok(source.query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))?)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("model_id lookup panicked: {e}"))??
     };
 
     let seed = auth::load_seed(&seed_path(config_dir))?;
@@ -101,7 +131,8 @@ pub fn sync_all(
         format!("{}/ws", hub_url.trim_end_matches('/'))
     };
     eprintln!("Connecting to hub at {connect_url}...");
-    let (mut ws, _response) = connect(&connect_url)
+    let (mut ws, _response) = tokio_tungstenite::connect_async(&connect_url)
+        .await
         .context("failed to connect to hub")?;
 
     send_json(&mut ws, &ClientMessage::SyncHello {
@@ -109,45 +140,57 @@ pub fn sync_all(
         supported_models: vec![model_id.clone()],
         model_id,
         schema_version: SCHEMA_VERSION,
-        protocol_version: Some(crate::sync::protocol::PROTOCOL_VERSION_FRAMED),
-    })?;
+        protocol_version: Some(PROTOCOL_VERSION_FRAMED),
+    }).await?;
 
-    let challenge = recv_json::<HubMessage>(&mut ws)?;
-    match challenge {
+    let challenge = recv_json::<HubMessage>(&mut ws).await?;
+    let negotiated_protocol: u32 = match challenge {
         HubMessage::SyncReject { reason } => anyhow::bail!("hub rejected: {reason}"),
         HubMessage::AuthChallenge { nonce, hub_pubkey } => {
-            let sig = auth::sign_challenge(&seed, &nonce, peer_id, &hub_pubkey)?;
-            send_json(&mut ws, &ClientMessage::AuthResponse { signature: sig })?;
+            let sig = auth::sign_challenge(&seed, &nonce, &peer_id, &hub_pubkey)?;
+            send_json(&mut ws, &ClientMessage::AuthResponse { signature: sig }).await?;
 
-            let ready = recv_json::<HubMessage>(&mut ws)?;
+            let ready = recv_json::<HubMessage>(&mut ws).await?;
             match ready {
-                HubMessage::SyncReady { .. } => eprintln!("Authenticated"),
+                HubMessage::SyncReady { protocol_version, .. } => {
+                    eprintln!("Authenticated (protocol v{protocol_version})");
+                    protocol_version
+                }
                 HubMessage::SyncReject { reason } => anyhow::bail!("auth failed: {reason}"),
                 other => anyhow::bail!("unexpected: {other:?}"),
             }
         }
-        HubMessage::SyncReady { .. } => eprintln!("Hub ready (no auth)"),
+        HubMessage::SyncReady { protocol_version, .. } => {
+            eprintln!("Hub ready (no auth, protocol v{protocol_version})");
+            protocol_version
+        }
         other => anyhow::bail!("unexpected: {other:?}"),
-    }
+    };
+    let framed_path = negotiated_protocol >= PROTOCOL_VERSION_FRAMED;
 
     let (uploaded_notes, skipped_upload) = if upload_unchanged {
         eprintln!("Index unchanged since last sync, skipping upload");
-        send_json(&mut ws, &ClientMessage::SyncSkipUpload)?;
-        let skip_ack = recv_json::<HubMessage>(&mut ws)?;
+        send_json(&mut ws, &ClientMessage::SyncSkipUpload).await?;
+        let skip_ack = recv_json::<HubMessage>(&mut ws).await?;
         match skip_ack {
             HubMessage::SyncSkipAck => eprintln!("Hub acknowledged skip"),
             other => anyhow::bail!("expected sync-skip-ack, got: {other:?}"),
         }
         (0, true)
     } else {
-        let envelope = auth::create_envelope(&seed, &export_bytes, peer_id, config.graph);
-        send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope })?;
+        let envelope = auth::create_envelope(&seed, &export_bytes, &peer_id, config.graph);
+        send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
 
         let export_size_kb = export_bytes.len() / 1024;
-        ws.send(Message::binary(export_bytes))?;
-        eprintln!("Sent local index ({export_size_kb} KB)");
+        let payload = if framed_path {
+            Envelope::from_body(export_bytes)?.encode()
+        } else {
+            export_bytes
+        };
+        send_binary(&mut ws, payload).await?;
+        eprintln!("Sent local index ({export_size_kb} KB, framed={framed_path})");
 
-        let ack = recv_json::<HubMessage>(&mut ws)?;
+        let ack = recv_json::<HubMessage>(&mut ws).await?;
         let notes = match ack {
             HubMessage::SyncAck { note_count } => {
                 eprintln!("Hub acknowledged: {note_count} notes");
@@ -162,8 +205,8 @@ pub fn sync_all(
         (notes, false)
     };
 
-    send_json(&mut ws, &ClientMessage::ListPeers)?;
-    let peer_list = recv_json::<HubMessage>(&mut ws)?;
+    send_json(&mut ws, &ClientMessage::ListPeers).await?;
+    let peer_list = recv_json::<HubMessage>(&mut ws).await?;
     let peers = match peer_list {
         HubMessage::PeerList { peers } => peers,
         other => anyhow::bail!("expected peer-list, got: {other:?}"),
@@ -182,80 +225,111 @@ pub fn sync_all(
         let peer_dir = peers_base.join(&peer.peer_id);
         let meta_path = peer_dir.join("index.db.meta");
 
-        if let Ok(meta_text) = std::fs::read_to_string(&meta_path) {
-            if let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_text) {
-                if meta["updated_at"].as_str() == Some(&peer.updated_at) {
-                    eprintln!("Peer {} up to date, skipping", peer.peer_id);
-                    skipped.push(peer.peer_id.clone());
-                    continue;
-                }
-            }
+        if peer_is_fresh(&meta_path, &peer.updated_at).await {
+            eprintln!("Peer {} up to date, skipping", peer.peer_id);
+            skipped.push(peer.peer_id.clone());
+            continue;
         }
 
-        eprintln!("Fetching index for {}...", peer.peer_id);
+        let peer_framed = framed_path
+            && peer.protocol_version.map(|v| v >= PROTOCOL_VERSION_FRAMED).unwrap_or(true);
+
+        eprintln!("Fetching index for {} (framed={peer_framed})...", peer.peer_id);
 
         send_json(&mut ws, &ClientMessage::GetPeerEnvelope {
             peer_id: peer.peer_id.clone(),
-        })?;
-        let envelope_msg = recv_json::<HubMessage>(&mut ws)?;
-        let expected_hash = match envelope_msg {
+        }).await?;
+        let envelope_msg = recv_json::<HubMessage>(&mut ws).await?;
+        let envelope_meta = match envelope_msg {
             HubMessage::PeerEnvelope { envelope: Some(ref env) } => {
-                env.get("sha256").and_then(|v| v.as_str()).map(String::from)
+                EnvelopeMeta::from_value(env).ok()
             }
             _ => None,
         };
 
         send_json(&mut ws, &ClientMessage::GetPeerIndex {
             peer_id: peer.peer_id.clone(),
-        })?;
+        }).await?;
 
-        let msg = ws.read()?;
-        match msg {
-            Message::Binary(data) => {
-                if data.len() > 100 * 1024 * 1024 {
-                    eprintln!("Peer {} index too large ({}MB), skipping",
-                        peer.peer_id, data.len() / 1024 / 1024);
+        let raw = match recv_binary_or_reject(&mut ws).await? {
+            Some(bytes) => bytes,
+            None => continue,
+        };
+
+        let data = if peer_framed {
+            match Envelope::decode(&raw) {
+                Ok(env) => {
+                    if let Some(ref meta) = envelope_meta {
+                        if !hash_matches(&env.hash, &meta.sha256) {
+                            eprintln!("Peer {} frame-vs-meta hash mismatch, skipping", peer.peer_id);
+                            continue;
+                        }
+                    }
+                    env.body
+                }
+                Err(e) => {
+                    eprintln!("Peer {} frame decode failed: {e}, skipping", peer.peer_id);
                     continue;
                 }
-
-                if let Some(ref expected) = expected_hash {
-                    let actual = hex::encode(Sha256::digest(&data));
-                    if actual != *expected {
-                        eprintln!("Peer {} hash mismatch, skipping", peer.peer_id);
-                        continue;
-                    }
-                }
-
-                std::fs::create_dir_all(&peer_dir)?;
-                std::fs::write(peer_dir.join("index.db"), &data)?;
-                let peer_db_path = peer_dir.join("index.db");
-                if let Err(e) = ensure_peer_fts(&peer_db_path) {
-                    eprintln!("FTS rebuild for {} failed: {e}", peer.peer_id);
-                }
-                if let Err(e) = ensure_peer_embeddings(&peer_db_path, &peer.peer_id) {
-                    eprintln!("Embedding generation for {} failed: {e}", peer.peer_id);
-                }
-                let meta = serde_json::json!({
-                    "updated_at": peer.updated_at,
-                    "note_count": peer.note_count,
-                });
-                std::fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
-                eprintln!("Saved {} ({} notes)", peer.peer_id, peer.note_count);
-                downloaded.push(DownloadedPeer {
-                    peer_id: peer.peer_id.clone(),
-                    note_count: peer.note_count,
-                });
             }
-            Message::Text(text) => {
-                if let Ok(HubMessage::SyncReject { reason }) = serde_json::from_str::<HubMessage>(&text) {
-                    eprintln!("Peer {} rejected: {reason}", peer.peer_id);
+        } else {
+            if raw.len() > 100 * 1024 * 1024 {
+                eprintln!("Peer {} index too large ({}MB), skipping",
+                    peer.peer_id, raw.len() / 1024 / 1024);
+                continue;
+            }
+            if let Some(ref meta) = envelope_meta {
+                let actual = hex::encode(Sha256::digest(&raw));
+                if actual != meta.sha256 {
+                    eprintln!("Peer {} hash mismatch, skipping", peer.peer_id);
+                    continue;
                 }
             }
-            _ => {}
+            raw
+        };
+
+        std::fs::create_dir_all(&peer_dir)?;
+        let peer_db_path = peer_dir.join("index.db");
+        let peer_db_owned = peer_db_path.clone();
+        let data_for_write = data.clone();
+        tokio::task::spawn_blocking(move || std::fs::write(&peer_db_owned, &data_for_write))
+            .await
+            .map_err(|e| anyhow::anyhow!("peer write task panicked: {e}"))??;
+        let _ = data;
+        let peer_db_owned = peer_db_path.clone();
+        let peer_id_owned = peer.peer_id.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || ensure_peer_fts(&peer_db_owned))
+            .await
+            .map_err(|e| anyhow::anyhow!("ensure_peer_fts task panicked: {e}"))?
+        {
+            eprintln!("FTS rebuild for {} failed: {e}", peer.peer_id);
         }
+        let peer_db_owned = peer_db_path.clone();
+        let peer_id_for_embed = peer_id_owned.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || {
+            ensure_peer_embeddings(&peer_db_owned, &peer_id_for_embed)
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("ensure_peer_embeddings task panicked: {e}"))?
+        {
+            eprintln!("Embedding generation for {} failed: {e}", peer.peer_id);
+        }
+        let updated_at_unix = PeerTimestamp::parse(&peer.updated_at).ok().map(|t| t.0);
+        let meta = serde_json::json!({
+            "schema_version": META_FILE_VERSION,
+            "updated_at": peer.updated_at,
+            "updated_at_unix": updated_at_unix,
+            "note_count": peer.note_count,
+        });
+        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+        eprintln!("Saved {} ({} notes)", peer.peer_id, peer.note_count);
+        downloaded.push(DownloadedPeer {
+            peer_id: peer.peer_id.clone(),
+            note_count: peer.note_count,
+        });
     }
 
-    let _ = ws.close(None);
+    let _ = ws.close(None).await;
     eprintln!("Sync complete");
 
     Ok(SyncResult {
@@ -265,6 +339,35 @@ pub fn sync_all(
         downloaded,
         skipped,
     })
+}
+
+fn hash_matches(in_frame: &[u8; 32], hex_hash: &str) -> bool {
+    match hex::decode(hex_hash) {
+        Ok(bytes) if bytes.len() == 32 => bytes[..] == in_frame[..],
+        _ => false,
+    }
+}
+
+async fn peer_is_fresh(meta_path: &Path, peer_updated_at: &str) -> bool {
+    let Ok(meta_text) = std::fs::read_to_string(meta_path) else {
+        return false;
+    };
+    let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_text) else {
+        return false;
+    };
+
+    let schema_version = meta.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(1);
+    let peer_unix = match PeerTimestamp::parse(peer_updated_at) {
+        Ok(t) => t.0,
+        Err(_) => return false,
+    };
+    if schema_version >= 2 {
+        if let Some(stored_unix) = meta.get("updated_at_unix").and_then(|v| v.as_u64()) {
+            return stored_unix == peer_unix;
+        }
+    }
+    let stored_at = meta.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
+    PeerTimestamp::parse(stored_at).ok().map(|t| t.0) == Some(peer_unix)
 }
 
 fn max_md_mtime(dir: &Path) -> u64 {
@@ -291,23 +394,77 @@ fn max_md_mtime(dir: &Path) -> u64 {
     max
 }
 
-fn send_json<S: Read + Write, T: serde::Serialize>(
-    ws: &mut WebSocket<S>,
+async fn send_json<T: serde::Serialize>(
+    ws: &mut WsStream,
     msg: &T,
 ) -> anyhow::Result<()> {
-    let json = serde_json::to_string(msg)?;
-    ws.send(Message::text(json))?;
+    let text = serde_json::to_string(msg).map_err(SyncError::from)?;
+    tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::text(text)))
+        .await
+        .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+        .map_err(SyncError::from)?;
     Ok(())
 }
 
-fn recv_json<T: serde::de::DeserializeOwned>(
-    ws: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> {
+    tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::binary(payload)))
+        .await
+        .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+        .map_err(SyncError::from)?;
+    Ok(())
+}
+
+async fn recv_json<T: serde::de::DeserializeOwned>(
+    ws: &mut WsStream,
 ) -> anyhow::Result<T> {
     loop {
-        match ws.read()? {
-            Message::Text(text) => return Ok(serde_json::from_str(&text)?),
-            Message::Ping(data) => { ws.send(Message::Pong(data))?; }
-            Message::Close(_) => anyhow::bail!("connection closed"),
+        let msg = tokio::time::timeout(RECV_TIMEOUT, ws.next())
+            .await
+            .map_err(|_| SyncError::RecvTimeout { timeout: RECV_TIMEOUT })?
+            .ok_or(SyncError::ClosedUnexpected)?
+            .map_err(SyncError::from)?;
+        match msg {
+            Message::Text(text) => return Ok(serde_json::from_str(text.as_str()).map_err(SyncError::from)?),
+            Message::Ping(data) => {
+                tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::Pong(data)))
+                    .await
+                    .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+                    .map_err(SyncError::from)?;
+            }
+            Message::Close(_) => return Err(SyncError::ClosedUnexpected.into()),
+            _ => continue,
+        }
+    }
+}
+
+/// Read the next binary message from the websocket. If the hub sends a `SyncReject`
+/// text frame in place of binary (peer-not-found etc.), surface that as `Ok(None)`
+/// so the caller can skip the peer without aborting the loop.
+async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u8>>> {
+    loop {
+        let msg = tokio::time::timeout(RECV_TIMEOUT, ws.next())
+            .await
+            .map_err(|_| SyncError::RecvTimeout { timeout: RECV_TIMEOUT })?
+            .ok_or(SyncError::ClosedUnexpected)?
+            .map_err(SyncError::from)?;
+        match msg {
+            Message::Binary(data) => return Ok(Some(data.into())),
+            Message::Text(text) => {
+                if let Ok(HubMessage::SyncReject { reason }) =
+                    serde_json::from_str::<HubMessage>(text.as_str())
+                {
+                    eprintln!("hub rejected: {reason}");
+                    return Ok(None);
+                }
+                continue;
+            }
+            Message::Ping(data) => {
+                tokio::time::timeout(SEND_TIMEOUT, ws.send(Message::Pong(data)))
+                    .await
+                    .map_err(|_| SyncError::SendTimeout { timeout: SEND_TIMEOUT })?
+                    .map_err(SyncError::from)?;
+            }
+            Message::Close(_) => return Err(SyncError::ClosedUnexpected.into()),
             _ => continue,
         }
     }
@@ -424,5 +581,17 @@ mod tests {
     fn is_safe_peer_id_rejects_unicode() {
         assert!(!is_safe_peer_id("peer\u{200B}id"));
         assert!(!is_safe_peer_id("café"));
+    }
+
+    #[test]
+    fn hash_matches_pairs() {
+        let mut h = [0u8; 32];
+        for (i, b) in h.iter_mut().enumerate() {
+            *b = i as u8;
+        }
+        assert!(hash_matches(&h, &hex::encode(h)));
+        assert!(!hash_matches(&h, &hex::encode([0u8; 32])));
+        assert!(!hash_matches(&h, "not_hex"));
+        assert!(!hash_matches(&h, &hex::encode([0u8; 31])));
     }
 }

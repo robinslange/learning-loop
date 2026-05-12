@@ -1,15 +1,21 @@
+use std::collections::HashSet;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use notify::{RecursiveMode, Watcher};
+use tokio::sync::Notify;
+use tokio::sync::watch as watch_chan;
 
 use super::config::FederationConfig;
 
-const DEFAULT_DEBOUNCE: Duration = Duration::from_secs(2);
+const DEBOUNCE_WINDOW: Duration = Duration::from_millis(1500);
+const POLL_TICK: Duration = Duration::from_millis(200);
+const RESYNC_INTERVAL: Duration = Duration::from_secs(300);
+const SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
 
 pub struct WatchConfig {
     pub vault_path: PathBuf,
@@ -81,29 +87,30 @@ impl Drop for PidGuard {
     }
 }
 
-pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
+/// State updated by the (sync) notify callback and drained by the async consumer.
+///
+/// Lock is held only briefly (filter + insert/take), never across an `.await`.
+/// This is exactly the shape `std::sync::Mutex` is the right pick for; using
+/// `tokio::sync::Mutex` would require the callback to spawn into the runtime,
+/// which is the cross-boundary trickiness we are trying to avoid.
+struct DebounceState {
+    dirty_since: Option<Instant>,
+    touched: HashSet<PathBuf>,
+}
+
+pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     let _pid = PidGuard::new(&cfg.pid_file)?;
 
-    let stopped = Arc::new(AtomicBool::new(false));
-    #[cfg(unix)]
-    {
-        signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&stopped))?;
-        signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&stopped))?;
-    }
-    #[cfg(not(unix))]
-    {
-        let stopped_clone = Arc::clone(&stopped);
-        ctrlc::set_handler(move || stopped_clone.store(true, Ordering::Relaxed))
-            .expect("failed to set Ctrl+C handler");
-    }
+    let (shutdown_tx, mut shutdown_rx) = watch_chan::channel(false);
+    spawn_shutdown_signals(shutdown_tx.clone());
 
     eprintln!("Initial reindex...");
-    do_reindex(&cfg.db_path, &cfg.vault_path);
+    do_reindex_blocking(&cfg.db_path, &cfg.vault_path).await;
 
     let fed_config = super::config::load_config(&cfg.config_dir).ok();
     if let Some(ref fc) = fed_config {
         eprintln!("Initial sync...");
-        do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc);
+        do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
     }
 
     let mut librarian_child: Option<std::process::Child> = None;
@@ -124,21 +131,42 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
         }
     }
 
-    let (fs_tx, fs_rx) = mpsc::channel();
+    let debounce = Arc::new(Mutex::new(DebounceState {
+        dirty_since: None,
+        touched: HashSet::new(),
+    }));
+    let notify = Arc::new(Notify::new());
+
     let vault_search_dir = cfg.vault_path.join(".vault-search");
     let db_dir = cfg.db_path.parent().unwrap_or(&cfg.db_path).to_path_buf();
+    let debounce_cb = Arc::clone(&debounce);
+    let notify_cb = Arc::clone(&notify);
     let mut watcher = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
-        if let Ok(event) = res {
-            let dominated_by_md = event.paths.iter().any(|p| {
-                if p.starts_with(&vault_search_dir) || p.starts_with(&db_dir) {
-                    return false;
-                }
-                p.extension().is_some_and(|e| e == "md")
-            });
-            if dominated_by_md {
-                let _ = fs_tx.send(());
+        let Ok(event) = res else { return };
+        let mut touched_paths: Vec<PathBuf> = Vec::new();
+        for p in &event.paths {
+            if p.starts_with(&vault_search_dir) || p.starts_with(&db_dir) {
+                continue;
+            }
+            if p.extension().is_some_and(|e| e == "md") {
+                touched_paths.push(p.clone());
             }
         }
+        if touched_paths.is_empty() {
+            return;
+        }
+        if let Ok(mut state) = debounce_cb.lock() {
+            if state.dirty_since.is_none() {
+                state.dirty_since = Some(Instant::now());
+            } else {
+                // Extend the window: the latest event resets the wait clock.
+                state.dirty_since = Some(Instant::now());
+            }
+            for p in touched_paths {
+                state.touched.insert(p);
+            }
+        }
+        notify_cb.notify_one();
     })?;
     watcher.watch(cfg.vault_path.as_ref(), RecursiveMode::Recursive)?;
 
@@ -149,44 +177,44 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
         std::process::id()
     );
 
-    let mut last_sync = Instant::now();
-    let mut pending_reindex = false;
-    let mut last_change = Instant::now();
+    let mut federation_tick = tokio::time::interval(cfg.sync_interval);
+    federation_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    federation_tick.tick().await; // consume the immediate first tick
 
-    let mut last_resync = Instant::now();
-    const RESYNC_INTERVAL: Duration = Duration::from_secs(300);
+    let mut resync_tick = tokio::time::interval(RESYNC_INTERVAL);
+    resync_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    resync_tick.tick().await;
 
-    while !stopped.load(Ordering::Relaxed) {
-        match fs_rx.recv_timeout(Duration::from_millis(500)) {
-            Ok(()) => {
-                pending_reindex = true;
-                last_change = Instant::now();
-                while fs_rx.try_recv().is_ok() {}
+    loop {
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.changed() => break,
+            _ = notify.notified() => {}
+            _ = tokio::time::sleep(POLL_TICK) => {}
+            _ = federation_tick.tick() => {
+                if let Some(ref fc) = fed_config {
+                    do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
+                }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => {}
-            Err(mpsc::RecvTimeoutError::Disconnected) => break,
-        }
-
-        if pending_reindex && last_change.elapsed() >= DEFAULT_DEBOUNCE {
-            pending_reindex = false;
-            do_reindex(&cfg.db_path, &cfg.vault_path);
-        }
-
-        if let Some(fc) = fed_config.as_ref() {
-            if last_sync.elapsed() >= cfg.sync_interval {
-                last_sync = Instant::now();
-                do_sync(
-                    &cfg.db_path,
-                    &cfg.vault_path,
-                    &cfg.config_dir,
-                    fc,
-                );
+            _ = resync_tick.tick() => {
+                do_reindex_blocking(&cfg.db_path, &cfg.vault_path).await;
             }
         }
 
-        if last_resync.elapsed() >= RESYNC_INTERVAL {
-            last_resync = Instant::now();
-            do_reindex(&cfg.db_path, &cfg.vault_path);
+        let should_fire = {
+            let mut state = debounce.lock().expect("debounce mutex poisoned");
+            match state.dirty_since {
+                Some(since) if since.elapsed() >= DEBOUNCE_WINDOW => {
+                    state.dirty_since = None;
+                    let touched = std::mem::take(&mut state.touched);
+                    Some(touched)
+                }
+                _ => None,
+            }
+        };
+        if let Some(touched) = should_fire {
+            eprintln!("Debounced reindex: {} paths", touched.len());
+            do_reindex_blocking(&cfg.db_path, &cfg.vault_path).await;
         }
     }
 
@@ -196,37 +224,72 @@ pub fn run_watch(cfg: WatchConfig) -> anyhow::Result<()> {
         let _ = child.wait();
     }
 
+    // Allow tasks to drain briefly before returning.
+    let _ = tokio::time::timeout(SHUTDOWN_DRAIN, async {}).await;
     eprintln!("Watch stopped");
     Ok(())
 }
 
-fn do_reindex(db_path: &Path, vault_path: &Path) {
-    let db_str = db_path.to_string_lossy();
-    let vault_str = vault_path.to_string_lossy();
-    let conn = match crate::db::open_db(&db_str) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to open database: {e}");
-            return;
+fn spawn_shutdown_signals(tx: watch_chan::Sender<bool>) {
+    // We do not enable tokio's `signal` feature (per docs/baseline/rust.md). Reuse the
+    // existing `signal_hook` (unix) / `ctrlc` (windows) crates and bridge into a tokio
+    // watch channel so async tasks can observe shutdown via `select!`.
+    let flag = Arc::new(AtomicBool::new(false));
+    #[cfg(unix)]
+    {
+        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&flag)) {
+            eprintln!("SIGINT handler install failed: {e}");
         }
-    };
-    match crate::db::reindex(&conn, &vault_str, false) {
-        Ok(result) => eprintln!(
-            "Reindex: {} embedded, {} deleted, {} total",
-            result.embedded, result.deleted, result.total
-        ),
-        Err(e) => eprintln!("Reindex failed: {e}"),
+        if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&flag)) {
+            eprintln!("SIGTERM handler install failed: {e}");
+        }
     }
-    conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
+    #[cfg(not(unix))]
+    {
+        let flag_clone = Arc::clone(&flag);
+        let _ = ctrlc::set_handler(move || flag_clone.store(true, Ordering::Relaxed));
+    }
+    tokio::spawn(async move {
+        loop {
+            if flag.load(Ordering::Relaxed) {
+                let _ = tx.send(true);
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
 }
 
-fn do_sync(
+async fn do_reindex_blocking(db_path: &Path, vault_path: &Path) {
+    let db = db_path.to_path_buf();
+    let vault = vault_path.to_path_buf();
+    let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let db_str = db.to_string_lossy();
+        let vault_str = vault.to_string_lossy();
+        let conn = crate::db::open_db(&db_str)?;
+        match crate::db::reindex(&conn, &vault_str, false) {
+            Ok(result) => eprintln!(
+                "Reindex: {} embedded, {} deleted, {} total",
+                result.embedded, result.deleted, result.total
+            ),
+            Err(e) => eprintln!("Reindex failed: {e}"),
+        }
+        conn.execute_batch("PRAGMA wal_checkpoint(PASSIVE);").ok();
+        Ok(())
+    })
+    .await;
+    if let Err(e) = result {
+        eprintln!("Reindex task panicked: {e}");
+    }
+}
+
+async fn do_sync(
     db_path: &Path,
     vault_path: &Path,
     config_dir: &Path,
     config: &FederationConfig,
 ) {
-    match super::client::sync_all(db_path, vault_path, config_dir, config) {
+    match super::client::sync_all_async(db_path, vault_path, config_dir, config).await {
         Ok(result) => {
             eprintln!(
                 "Sync: {} uploaded, {} downloaded, {} skipped",
@@ -235,14 +298,15 @@ fn do_sync(
                 result.skipped.len()
             );
             if !result.downloaded.is_empty() {
-                let db_str = db_path.to_string_lossy();
-                match crate::db::open_db(&db_str) {
-                    Ok(conn) => {
-                        crate::db::compute_sessions(&conn);
-                        crate::db::compute_project_phases(&conn);
-                    }
-                    Err(e) => eprintln!("Failed to open database for session compute: {e}"),
-                }
+                let db = db_path.to_path_buf();
+                let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                    let db_str = db.to_string_lossy();
+                    let conn = crate::db::open_db(&db_str)?;
+                    crate::db::compute_sessions(&conn);
+                    crate::db::compute_project_phases(&conn);
+                    Ok(())
+                })
+                .await;
             }
         }
         Err(e) => eprintln!("Sync failed: {e}"),

@@ -218,7 +218,8 @@ fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec
     ll_search::search::discover_peer_dbs(&config_dir, &model_id)
 }
 
-fn main() {
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
     let cli = Cli::parse();
     match cli.command {
         Commands::Version => {
@@ -232,12 +233,12 @@ fn main() {
             if sync {
                 let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
                 if let Ok(config) = ll_search::sync::config::load_config(&config_dir) {
-                    match ll_search::sync::client::sync_all(
+                    match ll_search::sync::client::sync_all_async(
                         std::path::Path::new(&db_path),
                         std::path::Path::new(&vault_path),
                         &config_dir,
                         &config,
-                    ) {
+                    ).await {
                         Ok(sync_result) => eprintln!("Sync: uploaded {} notes, downloaded {} peers",
                             sync_result.uploaded_notes, sync_result.downloaded.len()),
                         Err(e) => eprintln!("Sync failed: {e}"),
@@ -384,12 +385,13 @@ fn main() {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let config = ll_search::sync::config::load_config(&config_dir)
                 .expect("failed to load federation config");
-            let result = ll_search::sync::client::sync_all(
+            let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),
                 &config_dir,
                 &config,
             )
+            .await
             .expect("sync failed");
             out(&result);
         }
@@ -480,7 +482,7 @@ fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
                 librarian_script: librarian_script.map(std::path::PathBuf::from),
             };
-            ll_search::sync::watch::run_watch(cfg).expect("watch failed");
+            ll_search::sync::watch::run_watch_async(cfg).await.expect("watch failed");
         }
         Commands::Migrate { db_path, model, drop_old } => {
             let target = parse_model(&model);
