@@ -207,6 +207,22 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
+export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence_score FROM edges ' +
+      "WHERE source_graph = 'nli' AND confidence_score IS NOT NULL AND confidence_score >= ? " +
+      'ORDER BY from_path, confidence_score DESC',
+    [threshold],
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(([fromPath, toPath, edgeType, confidenceScore]) => ({
+    fromPath,
+    toPath,
+    edgeType,
+    confidenceScore,
+  }));
+}
+
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
