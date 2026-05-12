@@ -109,6 +109,7 @@ pub fn sync_all(
         supported_models: vec![model_id.clone()],
         model_id,
         schema_version: SCHEMA_VERSION,
+        protocol_version: Some(crate::sync::protocol::PROTOCOL_VERSION_FRAMED),
     })?;
 
     let challenge = recv_json::<HubMessage>(&mut ws)?;
