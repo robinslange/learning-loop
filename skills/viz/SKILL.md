@@ -33,6 +33,8 @@ At skill end:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"viz","skill":"viz","action":"session-end","frontmatter_updated":N,"heatmap_rows":N,"cycles":N}'
 ```
 
+Replace the three `N` literals with the integer values from the JSON captured in Step 2: `counts.frontmatterUpdated`, `counts.heatmapRows`, `counts.cyclesFound`.
+
 ## Process
 
 ### Step 1: Parse args
@@ -86,4 +88,6 @@ With the instruction:
 
 > Add this object to the `colorGroups` array in your vault's `.obsidian/graph.json` (one-time setup). Restart Obsidian Graph View. Contradiction-flagged notes render in red.
 
-Detect first-run by reading the file (path: `${VAULT_PATH}/.obsidian/graph.json`) and checking for the substring `has-contradiction:TRUE`. Skip the snippet on subsequent invocations.
+Detect first-run by reading `${VAULT_PATH}/.obsidian/graph.json` as JSON and inspecting `colorGroups`. If any entry has `query === "[has-contradiction:TRUE]"` (exact match, not substring), the user has already pasted the snippet — skip it. Otherwise print the snippet and the instruction.
+
+If the file is missing or malformed JSON, print the snippet (treat as first-run). Do not write to graph.json.
