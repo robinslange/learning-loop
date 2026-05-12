@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.19.1
+
 ### Changed
 
 - **Relicensed to Apache-2.0** from All Rights Reserved. The plugin is now free to use, modify, and redistribute under the [Apache License 2.0](LICENSE). A new [NOTICE](NOTICE) file carries attribution to omit.nz and must be preserved in derivative works per the license terms. `.claude-plugin/plugin.json` `license` is now `Apache-2.0` and `author.url` points to `https://omit.nz`.
