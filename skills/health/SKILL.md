@@ -241,10 +241,12 @@ SELECT
   CAST(((confidence_score - 0.90) * 100) AS INTEGER) AS bin,
   COUNT(*) AS n
 FROM edges
-WHERE source_graph = 'nli' AND confidence_score IS NOT NULL
+WHERE source_graph = 'nli' AND confidence_score IS NOT NULL AND confidence_score >= 0.90
 GROUP BY bin
 ORDER BY bin;
 ```
+
+The `confidence_score >= 0.90` predicate ensures bin math stays in the rendered 0-9 range. If you tune `LL_NLI_THRESHOLD` below 0.90, rows between the tuned threshold and 0.90 are excluded from this histogram (they still exist in the table). Use a separate query to inspect those.
 
 Render as a horizontal text histogram (one row per bin, block characters scaled to the max count):
 
