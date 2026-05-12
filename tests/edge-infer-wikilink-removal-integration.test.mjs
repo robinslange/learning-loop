@@ -16,7 +16,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
@@ -193,5 +193,224 @@ test('runEdgeInfer: wikilink write replaces prior regex edges', async () => {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// NLI-only branch: edges.length === 0 && nliCandidates.length > 0
+//
+// This is the branch where the original wikilink-removal divergence bug lived.
+// When a note has no wikilinks (regex returns []) but autolinkCandidates is
+// non-empty, runEdgeInfer must:
+//   1. Call removeOutgoingNliEdges (NOT removeOutgoingEdges) — prior regex
+//      edges from this note survive.
+//   2. Run the NLI loop against nliCandidates, writing challenges_rebuttal
+//      rows with source_graph='nli' for any candidate above NLI_THRESHOLD.
+//
+// The ll-search binary is stubbed with a shell script. binaryPath() in
+// scripts/lib/binary.mjs caches the resolved path after the first non-null
+// find. To avoid stale-path ENOENT across tests (where each test has its own
+// temp dir), the fake binary lives in a single shared temp dir created at
+// module load time and deleted on process exit. Both NLI tests set
+// CLAUDE_PLUGIN_DATA to their own dir (for edges.db isolation) and rely on
+// the binaryPath() cache already pointing at the shared binary from the first
+// NLI test's run.
+
+// Shell script that mimics: ll-search nli-batch <premise> <hyps-file>
+// Returns one result per hypothesis line with contradiction=0.97.
+// Uses `|| [ -n "$line" ]` to handle hypothesis files without a trailing
+// newline (runNliBatch writes hypotheses.join('\n') which omits the final \n).
+const NLI_STUB_SCRIPT = [
+  '#!/bin/sh',
+  '# Stub: ll-search nli-batch — returns contradiction=0.97 per hypothesis',
+  'hyps_file="$3"',
+  'printf "["',
+  'i=0',
+  'while IFS= read -r line || [ -n "$line" ]; do',
+  '  if [ $i -gt 0 ]; then printf ","; fi',
+  '  printf \'{"contradiction":0.97,"entailment":0.02,"neutral":0.01}\'',
+  '  i=$((i+1))',
+  'done < "$hyps_file"',
+  'printf "]"',
+].join('\n');
+
+// Create the shared binary dir once at module load. This dir is deliberately
+// NOT cleaned up between tests so binaryPath()'s cache stays valid across
+// both NLI tests. Process exit handles cleanup.
+const NLI_BIN_DIR = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-bin-'));
+const NLI_BIN_PATH = join(NLI_BIN_DIR, 'bin', 'll-search');
+mkdirSync(join(NLI_BIN_DIR, 'bin'), { recursive: true });
+writeFileSync(NLI_BIN_PATH, NLI_STUB_SCRIPT);
+chmodSync(NLI_BIN_PATH, 0o755);
+process.on('exit', () => {
+  try {
+    rmSync(NLI_BIN_DIR, { recursive: true, force: true });
+  } catch {
+    /* best effort */
+  }
+});
+
+test('runEdgeInfer NLI-only branch: prior regex edges survive, NLI edge written', async () => {
+  // First NLI test: also primes binaryPath() cache to point at NLI_BIN_DIR.
+  // CLAUDE_PLUGIN_DATA must initially point at the dir containing the binary
+  // so that binaryPath()'s findBinary() check (pluginData/bin/ll-search) hits.
+  // After binaryPath() caches the path, subsequent tests can point
+  // CLAUDE_PLUGIN_DATA elsewhere — the cache bypasses the lookup.
+  const dir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
+  const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+
+  try {
+    mkdirSync(dir, { recursive: true });
+    // Point pluginData at the shared binary dir so binaryPath() resolves it.
+    // edges.db will also land there; that's fine for this test.
+    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
+
+    // Seed a prior regex edge from the source note to neighbour A (sleep.md).
+    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    const db = await openEdgeDb(dbPath);
+    // Clear any leftover rows from a previous run.
+    db.run(`DELETE FROM edges WHERE from_path = '${NOTE_REL}'`);
+    addEdge(db, {
+      fromPath: NOTE_REL,
+      toPath: '3-permanent/sleep.md',
+      edgeType: 'supports',
+      confidence: 'high',
+      sourceGraph: 'local',
+      directionFlipped: 0,
+    });
+    saveDb(db, dbPath);
+    db.close();
+
+    // ctx: no wikilinks (regex returns []), NLI candidate is neighbour B.
+    const ctx = {
+      tool: 'Write',
+      input: {
+        file_path: NOTE_ABS,
+        content: '---\ntags: [test]\n---\n\nSleep disrupts circadian rhythm entrainment.\n',
+      },
+      response: { success: true },
+      vaultRoot: VAULT,
+      snapshot: buildMinimalSnapshot(VAULT),
+      autolinkCandidates: [{ path: '3-permanent/circadian.md', score: 0.7 }],
+    };
+
+    await runEdgeInfer(ctx);
+
+    const db2 = await openEdgeDb(dbPath);
+    try {
+      const result = db2.exec(
+        `SELECT from_path, to_path, edge_type, source_graph, confidence_score FROM edges WHERE from_path = '${NOTE_REL}' ORDER BY source_graph, to_path`,
+      );
+      const rows = result.length > 0 ? result[0].values : [];
+
+      // Prior regex edge to sleep.md must survive (removeOutgoingEdges was NOT called).
+      const regexEdge = rows.find((r) => r[1] === '3-permanent/sleep.md');
+      assert.ok(
+        regexEdge,
+        `prior regex 'supports' edge to sleep.md must survive in NLI-only branch; rows: ${JSON.stringify(rows)}`,
+      );
+      assert.equal(regexEdge[2], 'supports');
+      assert.equal(regexEdge[3], 'local');
+
+      // NLI edge to circadian.md must be written with source_graph='nli'.
+      const nliEdge = rows.find((r) => r[1] === '3-permanent/circadian.md');
+      assert.ok(
+        nliEdge,
+        `NLI challenges_rebuttal edge to circadian.md must be written; rows: ${JSON.stringify(rows)}`,
+      );
+      assert.equal(nliEdge[2], 'challenges_rebuttal');
+      assert.equal(nliEdge[3], 'nli');
+      assert.ok(
+        typeof nliEdge[4] === 'number' && nliEdge[4] > 0.9,
+        `confidence_score must be a number >0.9; got ${nliEdge[4]}`,
+      );
+    } finally {
+      db2.close();
+    }
+  } finally {
+    if (savedPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+    }
+    // dir is unused (edges.db landed in NLI_BIN_DIR); clean it up.
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runEdgeInfer NLI-only branch: re-invocation re-derives NLI edges cleanly', async () => {
+  // Second invocation with same content and candidates: removeOutgoingNliEdges
+  // wipes the stale NLI row from the first call, then the loop re-adds it.
+  // The regex edge (local) must never be touched.
+  //
+  // binaryPath() is already cached from the previous NLI test — no binary
+  // placement needed here.
+  const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+
+  try {
+    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
+
+    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    const db = await openEdgeDb(dbPath);
+    db.run(`DELETE FROM edges WHERE from_path = '${NOTE_REL}'`);
+    addEdge(db, {
+      fromPath: NOTE_REL,
+      toPath: '3-permanent/sleep.md',
+      edgeType: 'supports',
+      confidence: 'high',
+      sourceGraph: 'local',
+      directionFlipped: 0,
+    });
+    saveDb(db, dbPath);
+    db.close();
+
+    const ctx = {
+      tool: 'Write',
+      input: {
+        file_path: NOTE_ABS,
+        content: '---\ntags: [test]\n---\n\nSleep disrupts circadian rhythm entrainment.\n',
+      },
+      response: { success: true },
+      vaultRoot: VAULT,
+      snapshot: buildMinimalSnapshot(VAULT),
+      autolinkCandidates: [{ path: '3-permanent/circadian.md', score: 0.7 }],
+    };
+
+    // First invocation.
+    await runEdgeInfer(ctx);
+
+    // Second invocation: same ctx, same content.
+    await runEdgeInfer(ctx);
+
+    const db2 = await openEdgeDb(dbPath);
+    try {
+      const result = db2.exec(
+        `SELECT from_path, to_path, edge_type, source_graph FROM edges WHERE from_path = '${NOTE_REL}' ORDER BY source_graph, to_path`,
+      );
+      const rows = result.length > 0 ? result[0].values : [];
+
+      // Exactly two edges: one regex, one NLI (no duplicates from re-invocation).
+      assert.equal(
+        rows.length,
+        2,
+        `expected exactly 2 edges after two invocations (1 regex + 1 NLI, no duplicates); rows: ${JSON.stringify(rows)}`,
+      );
+
+      const regexEdge = rows.find((r) => r[3] === 'local');
+      assert.ok(regexEdge, 'regex edge (source_graph=local) must be present after re-invocation');
+      assert.equal(regexEdge[1], '3-permanent/sleep.md');
+
+      const nliEdge = rows.find((r) => r[3] === 'nli');
+      assert.ok(nliEdge, 'NLI edge (source_graph=nli) must be present after re-invocation');
+      assert.equal(nliEdge[1], '3-permanent/circadian.md');
+      assert.equal(nliEdge[2], 'challenges_rebuttal');
+    } finally {
+      db2.close();
+    }
+  } finally {
+    if (savedPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+    }
   }
 });
