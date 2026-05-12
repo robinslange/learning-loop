@@ -1,6 +1,7 @@
 use ll_search::sync::config::{encrypted_seed_path, seed_meta_path, seed_path};
 use ll_search::sync::seed_migrate::{migrate, migrate_rollback};
 use ll_search::sync::seed_store::SeedBackend;
+use std::sync::Once;
 use tempfile::tempdir;
 
 fn write_plaintext_seed(config_dir: &std::path::Path, seed: [u8; 32]) {
@@ -9,20 +10,29 @@ fn write_plaintext_seed(config_dir: &std::path::Path, seed: [u8; 32]) {
     std::fs::write(fed.join(".seed"), seed).unwrap();
 }
 
-/// RAII guard that removes LL_SEED_BACKEND on drop, even if the test panics.
-struct BackendGuard;
-impl Drop for BackendGuard {
-    fn drop(&mut self) {
-        std::env::remove_var("LL_SEED_BACKEND");
-    }
+// Pin LL_SEED_BACKEND=encrypted for the entire test binary so parallel test
+// threads never fall through `load_or_create` to its step-5 "generate + write
+// to production keyring" path. Earlier per-test `set_var` + Drop-guard
+// `remove_var` raced: thread A's guard could unset the var while thread B was
+// mid-`load_or_create`/`migrate`, sending B to the keyring branch and
+// corrupting the developer's real federation seed at
+// `ai.learning-loop.federation`. See
+// `0-inbox/global-namespaced-system-stores-need-test-backend-override.md`.
+static INIT: Once = Once::new();
+fn init_test_backend() {
+    INIT.call_once(|| {
+        // SAFETY (Rust 2024): set_var is unsafe because env mutation is global.
+        // Set once at first invocation and never unset; test threads only ever
+        // observe `encrypted`, never an empty value.
+        unsafe { std::env::set_var("LL_SEED_BACKEND", "encrypted"); }
+    });
 }
 
 #[test]
 fn migration_legacy_to_encrypted_removes_plaintext() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
     write_plaintext_seed(tmp.path(), [3u8; 32]);
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     let result = migrate(tmp.path()).unwrap();
 
@@ -39,10 +49,9 @@ fn migration_legacy_to_encrypted_removes_plaintext() {
 
 #[test]
 fn migration_idempotent_second_run_no_op() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
     write_plaintext_seed(tmp.path(), [4u8; 32]);
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     let r1 = migrate(tmp.path()).unwrap();
     assert!(!r1.already_migrated);
@@ -53,10 +62,9 @@ fn migration_idempotent_second_run_no_op() {
 
 #[test]
 fn migration_meta_file_records_backend_and_timestamp() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
     write_plaintext_seed(tmp.path(), [6u8; 32]);
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     migrate(tmp.path()).unwrap();
 
@@ -78,6 +86,7 @@ fn migration_meta_file_records_backend_and_timestamp() {
 
 #[test]
 fn migration_signing_key_unchanged_across_migration() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
     let original_seed = [5u8; 32];
     write_plaintext_seed(tmp.path(), original_seed);
@@ -86,9 +95,6 @@ fn migration_signing_key_unchanged_across_migration() {
     let original_key = SigningKey::from_bytes(&original_seed);
     let message = b"test-message-for-2K-migration";
     let original_sig = original_key.sign(message);
-
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     migrate(tmp.path()).unwrap();
 
@@ -104,10 +110,9 @@ fn migration_signing_key_unchanged_across_migration() {
 
 #[test]
 fn migration_rollback_restores_plaintext_and_matching_key() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
     write_plaintext_seed(tmp.path(), [8u8; 32]);
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     migrate(tmp.path()).unwrap();
     assert!(!seed_path(tmp.path()).exists(), "plaintext must be gone before rollback");

@@ -2,14 +2,24 @@ use ll_search::sync::seed_store::{
     load_or_create, read_encrypted, read_plaintext_legacy, write_encrypted, SeedBackend,
 };
 use ll_search::sync::config::{encrypted_seed_path, seed_path};
+use std::sync::Once;
 use tempfile::tempdir;
 
-/// RAII guard that removes LL_SEED_BACKEND on drop, even if the test panics.
-struct BackendGuard;
-impl Drop for BackendGuard {
-    fn drop(&mut self) {
-        std::env::remove_var("LL_SEED_BACKEND");
-    }
+// Pin LL_SEED_BACKEND=encrypted for the entire test binary so parallel test
+// threads never fall through `load_or_create` to its step-5 "generate + write
+// to production keyring" path. Earlier per-test `set_var` + Drop-guard
+// `remove_var` raced: thread A's guard could unset the var while thread B was
+// mid-`load_or_create`, sending B to the keyring branch and corrupting the
+// developer's real federation seed at `ai.learning-loop.federation`. See
+// `0-inbox/global-namespaced-system-stores-need-test-backend-override.md`.
+static INIT: Once = Once::new();
+fn init_test_backend() {
+    INIT.call_once(|| {
+        // SAFETY (Rust 2024): set_var is unsafe because env mutation is global.
+        // Set once at first invocation and never unset; test threads only ever
+        // observe `encrypted`, never an empty value.
+        unsafe { std::env::set_var("LL_SEED_BACKEND", "encrypted"); }
+    });
 }
 
 #[test]
@@ -60,19 +70,16 @@ fn legacy_plaintext_read_returns_correct_bytes() {
 
 #[test]
 fn env_force_encrypted_skips_keyring() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
-
     let result = load_or_create(tmp.path()).unwrap();
     assert_eq!(result.backend, SeedBackend::Encrypted);
 }
 
 #[test]
 fn env_force_encrypted_second_load_is_not_created() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     let r1 = load_or_create(tmp.path()).unwrap();
     assert!(r1.created);
@@ -84,9 +91,8 @@ fn env_force_encrypted_second_load_is_not_created() {
 
 #[test]
 fn env_force_encrypted_consistent_key_across_loads() {
+    init_test_backend();
     let tmp = tempdir().unwrap();
-    std::env::set_var("LL_SEED_BACKEND", "encrypted");
-    let _guard = BackendGuard;
 
     let r1 = load_or_create(tmp.path()).unwrap();
     let r2 = load_or_create(tmp.path()).unwrap();

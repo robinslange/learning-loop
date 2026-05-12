@@ -443,13 +443,20 @@ fn atomic_write(tmp: &Path, target: &Path, data: &[u8]) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
     use tempfile::tempdir;
 
-    struct BackendGuard;
-    impl Drop for BackendGuard {
-        fn drop(&mut self) {
-            std::env::remove_var("LL_SEED_BACKEND");
-        }
+    // Pin LL_SEED_BACKEND=encrypted for the entire test binary. Earlier per-test
+    // `set_var` + Drop-guard `remove_var` raced under parallel test threads:
+    // a guard's `remove_var` could land mid-`load_or_create` on another thread,
+    // sending it to the keyring branch and stomping the globally-namespaced
+    // production keyring entry. See
+    // `0-inbox/global-namespaced-system-stores-need-test-backend-override.md`.
+    static INIT: Once = Once::new();
+    fn init_test_backend() {
+        INIT.call_once(|| {
+            std::env::set_var("LL_SEED_BACKEND", "encrypted");
+        });
     }
 
     #[test]
@@ -495,18 +502,16 @@ mod tests {
 
     #[test]
     fn env_force_encrypted_skips_keyring() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
         let result = load_or_create(tmp.path()).unwrap();
         assert_eq!(result.backend, SeedBackend::Encrypted);
     }
 
     #[test]
     fn env_force_encrypted_roundtrips_consistently() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
 
         let r1 = load_or_create(tmp.path()).unwrap();
         assert!(r1.created);
@@ -519,13 +524,10 @@ mod tests {
         assert_eq!(pk1, pk2, "same key must be returned on second load");
     }
 
-    #[test]
-    #[ignore] // requires real secret-service running
-    fn keyring_roundtrip_when_available() {
-        let seed = [11u8; 32];
-        write_keyring(&seed).unwrap();
-        let read = read_keyring().unwrap().unwrap();
-        assert_eq!(read, seed);
-        delete_keyring().unwrap();
-    }
+    // NOTE: `keyring_roundtrip_when_available` removed. It wrote `[11u8; 32]`
+    // to the globally-namespaced production keyring service+account, then
+    // deleted it. `#[ignore]` was insufficient: `cargo test --ignored` or
+    // explicit invocation would silently overwrite the developer's real
+    // federation seed mid-test. Restoring this safely requires namespacing
+    // `KEYRING_SERVICE` by `config_dir`, which is a separate change.
 }

@@ -218,13 +218,22 @@ fn read_meta_backend(meta_path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Once;
     use tempfile::tempdir;
 
-    struct BackendGuard;
-    impl Drop for BackendGuard {
-        fn drop(&mut self) {
-            std::env::remove_var("LL_SEED_BACKEND");
-        }
+    // Pin LL_SEED_BACKEND=encrypted for the entire test binary. Earlier per-test
+    // `set_var` + Drop-guard `remove_var` raced under parallel test threads:
+    // thread A's guard could unset the var mid-call while thread B's `migrate`
+    // had already passed the env-check at the top of `migrate()` but still had
+    // to write the seed. With the var unset, B's `write_to_keyring(&seed)` ran
+    // against the globally-namespaced `ai.learning-loop.federation`
+    // `signing-seed-v1` keyring entry, stomping the developer's real federation
+    // seed. See `0-inbox/global-namespaced-system-stores-need-test-backend-override.md`.
+    static INIT: Once = Once::new();
+    fn init_test_backend() {
+        INIT.call_once(|| {
+            std::env::set_var("LL_SEED_BACKEND", "encrypted");
+        });
     }
 
     fn write_plaintext_seed(config_dir: &Path, seed: [u8; 32]) {
@@ -235,10 +244,9 @@ mod tests {
 
     #[test]
     fn migration_legacy_to_encrypted_removes_plaintext() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
         write_plaintext_seed(tmp.path(), [3u8; 32]);
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
         let result = migrate(tmp.path()).unwrap();
 
         assert!(!result.already_migrated);
@@ -254,10 +262,9 @@ mod tests {
 
     #[test]
     fn migration_idempotent_second_run_no_op() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
         write_plaintext_seed(tmp.path(), [4u8; 32]);
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
 
         let r1 = migrate(tmp.path()).unwrap();
         assert!(!r1.already_migrated);
@@ -268,10 +275,9 @@ mod tests {
 
     #[test]
     fn migration_meta_file_records_backend_and_timestamp() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
         write_plaintext_seed(tmp.path(), [6u8; 32]);
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
         migrate(tmp.path()).unwrap();
 
         let meta_path = seed_meta_path(tmp.path());
@@ -284,6 +290,7 @@ mod tests {
 
     #[test]
     fn migration_signing_key_unchanged_across_migration() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
         let original_seed = [5u8; 32];
         write_plaintext_seed(tmp.path(), original_seed);
@@ -293,8 +300,6 @@ mod tests {
         let message = b"test message for 2K migration";
         let original_sig = original_key.sign(message);
 
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
         migrate(tmp.path()).unwrap();
 
         let result = super::super::seed_store::load_or_create(tmp.path()).unwrap();
@@ -306,10 +311,9 @@ mod tests {
 
     #[test]
     fn migration_rollback_restores_plaintext() {
+        init_test_backend();
         let tmp = tempdir().unwrap();
         write_plaintext_seed(tmp.path(), [8u8; 32]);
-        std::env::set_var("LL_SEED_BACKEND", "encrypted");
-        let _guard = BackendGuard;
         migrate(tmp.path()).unwrap();
 
         assert!(!seed_path(tmp.path()).exists());
@@ -321,14 +325,12 @@ mod tests {
         assert_eq!(bytes, [8u8; 32]);
     }
 
-    #[test]
-    #[ignore] // requires real secret-service running
-    fn migration_legacy_to_keyring_when_available() {
-        let tmp = tempdir().unwrap();
-        write_plaintext_seed(tmp.path(), [7u8; 32]);
-        std::env::remove_var("LL_SEED_BACKEND");
-        let result = migrate(tmp.path()).unwrap();
-        assert_eq!(result.to, SeedBackend::Keyring);
-        assert!(result.plaintext_removed);
-    }
+    // NOTE: `migration_legacy_to_keyring_when_available` removed. Earlier
+    // version unset LL_SEED_BACKEND and called `migrate(tmp.path())`, which
+    // writes to the globally-namespaced production keyring service+account.
+    // `#[ignore]` is insufficient protection — `cargo test --ignored` or
+    // `cargo test migration_legacy_to_keyring` would silently overwrite the
+    // developer's real federation seed. Restoring this test safely requires
+    // namespacing `KEYRING_SERVICE` by `config_dir`, which is a separate
+    // change.
 }
