@@ -92,8 +92,13 @@ Detect first-run by reading `${VAULT_PATH}/.obsidian/graph.json` as JSON and ins
 
 If the file is missing, print the snippet (treat as first-run).
 
-If the file exists but is malformed JSON, print BOTH the snippet AND a one-line warning:
+If the file exists but is malformed JSON, print BOTH the snippet AND a warning:
 
-> WARNING: `.obsidian/graph.json` could not be parsed. Fix the JSON before pasting the snippet, or your Obsidian Graph View settings may break further.
+> WARNING: `.obsidian/graph.json` could not be parsed. Before pasting the snippet:
+>
+> - Run `jq . .obsidian/graph.json` to surface the parse error and locate the bad token, OR
+> - Back up the file (`mv .obsidian/graph.json .obsidian/graph.json.bak`) and let Obsidian regenerate defaults on next graph-view open, then re-apply your previous colorGroups by hand.
+>
+> Do not paste the snippet into an unparseable file or your Graph View settings may corrupt further.
 
 Do not write to graph.json under any circumstance.
