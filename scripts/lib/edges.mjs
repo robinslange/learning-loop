@@ -242,6 +242,24 @@ export function getAllNliEdgesForHeatmap(db) {
   );
 }
 
+export function getEdgesForCycleDetection(db) {
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence, source_graph, confidence_score FROM edges ' +
+      "WHERE source_graph = 'nli' OR edge_type LIKE 'challenges_%'",
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(
+    ([fromPath, toPath, edgeType, confidence, sourceGraph, confidenceScore]) => ({
+      fromPath,
+      toPath,
+      edgeType,
+      confidence,
+      sourceGraph,
+      confidenceScore,
+    }),
+  );
+}
+
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
