@@ -41,27 +41,27 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 
 ## Skills
 
-| Command | What it does |
-|---|---|
-| `/discovery "topic"` | Research with web search and vault context |
-| `/quick "question"` | Fast verified answer with auto-capture |
-| `/quick-note "insight"` | Capture to inbox without breaking flow |
-| `/deepen "note"` | Strengthen a note with research, sources, links |
-| `/literature <URL>` | Capture an external source as a literature note |
-| `/verify` | Check note quality and source integrity |
-| `/gaps "topic"` | Surface thin ice, tensions, and blindspots |
-| `/inbox` | Batch triage inbox notes, promote mature ones |
-| `/reflect` | End-of-session consolidation |
-| `/dream` | Auto-memory consolidation between sessions |
-| `/refresh "topic"` | See what you already know (no web research) |
-| `/rewrite "old" "new"` | Retract a belief across vault, auto-memory, and episodic history |
-| `/health` | Vault health dashboard |
-| `/health --librarian` | Review librarian observations |
-| `/ingest` | Pull from Linear, repos, or any content Claude can read |
-| `/diagram "concept"` | Generate Excalidraw diagram |
-| `/init` | First-time setup: vault path, persona, binary, optional integrations |
-| `/federation` | Set up federation: identity, token redeem, peers, visibility, sync |
-| `/help` | Show all commands with usage details |
+| Command                 | What it does                                                         |
+| ----------------------- | -------------------------------------------------------------------- |
+| `/discovery "topic"`    | Research with web search and vault context                           |
+| `/quick "question"`     | Fast verified answer with auto-capture                               |
+| `/quick-note "insight"` | Capture to inbox without breaking flow                               |
+| `/deepen "note"`        | Strengthen a note with research, sources, links                      |
+| `/literature <URL>`     | Capture an external source as a literature note                      |
+| `/verify`               | Check note quality and source integrity                              |
+| `/gaps "topic"`         | Surface thin ice, tensions, and blindspots                           |
+| `/inbox`                | Batch triage inbox notes, promote mature ones                        |
+| `/reflect`              | End-of-session consolidation                                         |
+| `/dream`                | Auto-memory consolidation between sessions                           |
+| `/refresh "topic"`      | See what you already know (no web research)                          |
+| `/rewrite "old" "new"`  | Retract a belief across vault, auto-memory, and episodic history     |
+| `/health`               | Vault health dashboard                                               |
+| `/health --librarian`   | Review librarian observations                                        |
+| `/ingest`               | Pull from Linear, repos, or any content Claude can read              |
+| `/diagram "concept"`    | Generate Excalidraw diagram                                          |
+| `/init`                 | First-time setup: vault path, persona, binary, optional integrations |
+| `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync   |
+| `/help`                 | Show all commands with usage details                                 |
 
 All commands are prefixed with `/learning-loop:` (e.g., `/learning-loop:discovery "caffeine"`).
 
@@ -76,8 +76,25 @@ your-vault/
   4-projects/       Project index notes
   5-maps/           Synthesis and discovery maps
   _system/          Persona and capture rules
+                    nli-conflicts.md     -- NLI advisory edge heatmap (auto-generated)
+                    viz/cycles.canvas    -- contradiction-cycle visualisation (auto-generated)
   Excalidraw/       Diagrams
 ```
+
+## NLI advisory edges
+
+On every Write/Edit to a vault note, `edge-infer.mjs` runs the autolink top-3 neighbours through an embedded NLI model (`MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` int8 ONNX). Two edge types land in `edges.db` with `source_graph='nli'`:
+
+- `challenges_rebuttal` when `p(contradiction) > LL_NLI_THRESHOLD` (default `0.90`)
+- `nli_supports` when `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default `0.75`)
+
+These edges drive three vault-visible surfaces via `/learning-loop:viz`:
+
+1. **Note frontmatter** (`nli-contradicts:` / `nli-supports:` keys) — Obsidian Graph View can colour the flagged notes
+2. **`_system/nli-conflicts.md`** — markdown heatmap of all NLI edges, sorted by confidence
+3. **`_system/viz/cycles.canvas`** — Obsidian Canvas file showing transitive contradiction cycles
+
+Performance: `ll-search watch` hosts a UDS daemon at `<plugin-data>/nli.sock` that keeps the 233MB model loaded. Hook calls round-trip in ~10ms warm. Without the daemon, the hook falls back to spawning fresh subprocesses (~400ms each). The daemon is unix-only — Windows users always take the subprocess path. See `skills/viz/SKILL.md` for the full tunable surface and `scripts/clear-nli-frontmatter.mjs` for rollback.
 
 ## Go deeper
 

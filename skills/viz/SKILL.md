@@ -115,6 +115,8 @@ Do not write to graph.json under any circumstance.
 
 When `ll-search watch` is running, the edge-infer hook talks to its NLI server over a Unix domain socket at `<plugin-data>/nli.sock` instead of spawning a fresh subprocess every fire. Cold subprocess invocation is ~400ms (reloading the 233MB model); warm UDS round-trip is ~10ms. The hook auto-detects the socket and falls back to subprocess if absent — no user action needed. Run `ll-search watch` (or rely on `/learning-loop:init` to start it) to get the fast path.
 
+**Windows note**: the UDS daemon is unix-only. Windows users always take the subprocess path (~400ms per write). The hook handles this transparently — no manual flag — but the perf gap is real. If you're heavily editing on Windows, consider batching writes (small edits trigger NLI per save).
+
 ## Tunable thresholds
 
 Two environment variables control NLI edge writes:

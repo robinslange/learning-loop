@@ -257,6 +257,7 @@ Grep recent hook logs for these tags:
 - `edge-infer.runNliBatch.schemaMismatch.daemon`
 - `edge-infer.runNliBatch.schemaMismatch.subprocess`
 - `edge-infer.runNliBatch.daemon.timeout`
+- `edge-infer.runNliBatch.daemon.idle-timeout`
 - `edge-infer.runNliBatch.daemon.parse-error`
 - `edge-infer.runNliBatch.subprocess`
 

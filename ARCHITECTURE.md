@@ -3,6 +3,7 @@
 learning-loop is a Claude Code plugin with three runtime layers: a JS plugin surface (hooks + scripts), a Rust search daemon (`ll-search`), and a Rust library crate (`ll-core`). This document maps the repo, shows how data flows at runtime, and lists the invariants that must hold across all layers.
 
 Read the baseline docs before touching code:
+
 - `docs/baseline/rust.md` -- ll-core and ll-search conventions
 - `docs/baseline/plugin.md` -- hook and script conventions
 - `docs/baseline/cross-cutting.md` -- versioning, perf, observability
@@ -123,18 +124,18 @@ Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from
 
 ## module ownership
 
-| Subsystem | Primary files | Convention doc | Inventory artefact |
-|---|---|---|---|
-| ll-core scoring | `native/crates/ll-core/src/scoring.rs` | `docs/baseline/rust.md` | `.planning/inventory/ll-core-api.md` |
-| ll-core embeddings | `native/crates/ll-core/src/embed.rs`, `store.rs` | `docs/baseline/rust.md` | `.planning/inventory/ll-core-api.md` |
-| ll-core graph | `native/crates/ll-core/src/graph.rs` | `docs/baseline/rust.md` | `.planning/inventory/ll-core-api.md` |
-| ll-search query pipeline | `native/crates/ll-search/src/search/` | `docs/baseline/rust.md` | `.planning/inventory/rust-audit.md` |
-| ll-search database | `native/crates/ll-search/src/db/` | `docs/baseline/rust.md` | `.planning/inventory/rust-audit.md` |
-| ll-search daemon lifecycle | `native/crates/ll-search/src/main.rs`, `app/` (track 0G) | `docs/baseline/rust.md` | `.planning/inventory/rust-audit.md` |
-| ll-search sync | `native/crates/ll-search/src/sync/` | `docs/baseline/cross-cutting.md` | `.planning/inventory/rust-audit.md` |
-| Plugin shared primitives | `scripts/lib/` | `docs/baseline/plugin.md` | `.planning/inventory/plugin-patterns.md` |
-| Hooks | `hooks/` | `docs/baseline/plugin.md` | `.planning/inventory/coverage-and-magic.md` |
-| Provenance | `provenance/`, `scripts/provenance*.mjs` | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md` |
+| Subsystem                  | Primary files                                            | Convention doc                   | Inventory artefact                          |
+| -------------------------- | -------------------------------------------------------- | -------------------------------- | ------------------------------------------- |
+| ll-core scoring            | `native/crates/ll-core/src/scoring.rs`                   | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
+| ll-core embeddings         | `native/crates/ll-core/src/embed.rs`, `store.rs`         | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
+| ll-core graph              | `native/crates/ll-core/src/graph.rs`                     | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
+| ll-search query pipeline   | `native/crates/ll-search/src/search/`                    | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
+| ll-search database         | `native/crates/ll-search/src/db/`                        | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
+| ll-search daemon lifecycle | `native/crates/ll-search/src/main.rs`, `app/` (track 0G) | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
+| ll-search sync             | `native/crates/ll-search/src/sync/`                      | `docs/baseline/cross-cutting.md` | `.planning/inventory/rust-audit.md`         |
+| Plugin shared primitives   | `scripts/lib/`                                           | `docs/baseline/plugin.md`        | `.planning/inventory/plugin-patterns.md`    |
+| Hooks                      | `hooks/`                                                 | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md` |
+| Provenance                 | `provenance/`, `scripts/provenance*.mjs`                 | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md`    |
 
 ---
 
@@ -186,18 +187,23 @@ No public enums exist in ll-core at baseline -- only structs, a trait, type alia
 
 A running learning-loop deployment has three long-lived processes and several transient ones:
 
-| Process | Binary / script | Lifecycle |
-|---|---|---|
-| ll-search daemon | `native/crates/ll-search` | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill |
-| librarian daemon | `scripts/librarian.mjs` | Launched by session-start on first session; processes background tasks |
-| Claude Code host | (Claude Code itself) | Manages hook invocations |
+| Process          | Binary / script                                                        | Lifecycle                                                                                                                                                                                                                        |
+| ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
+| librarian daemon | `scripts/librarian.mjs`                                                | Launched by session-start on first session; processes background tasks                                                                                                                                                           |
+| NLI server (UDS) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock`; loads the 233MB NLI model lazily on first request and reuses it. Unix-only. Falls back to subprocess on non-unix or when the socket is absent. |
+| Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
 
 Transient:
+
 - Each hook runs as a short-lived Node process (stdin to stdout, exit).
 - `ll-search index` runs detached after each session (spawned by the Stop hook).
 - `scripts/watch.mjs` can run as an optional background file watcher.
+- `ll-search nli-batch` / `ll-search nli-check` subprocesses fire from `edge-infer.mjs` when the UDS daemon isn't available (~400ms cold-start each; the daemon path is ~10ms warm).
 
 The ll-search daemon communicates with the plugin over stdin/stdout of a child process. Each query is a line-delimited JSON object. The daemon maintains a persistent SQLite connection and (after track 1E) a cached `SearchContext`.
+
+The NLI server uses a separate transport: a Unix domain socket at `<plugin-data>/nli.sock`, line-delimited JSON, one request per connection, wrapped in a `{schema_version: 1, results: [...]}` envelope. See `native/crates/ll-search/src/nli_server.rs` for the wire protocol and `hooks/modules/edge-infer.mjs` for the client.
 
 ---
 
@@ -303,16 +309,16 @@ The plugin does not call these directly. `scripts/vault-search.mjs` is the inter
 
 These are tracked issues, not defects -- the code works, but the structure is not yet at the target.
 
-| Issue | Location | Target track |
-|---|---|---|
+| Issue                                                       | Location                                                  | Target track             |
+| ----------------------------------------------------------- | --------------------------------------------------------- | ------------------------ |
 | `search/` calls `db/` directly instead of via Storage trait | `search/query.rs`, `search/reflect.rs`, `search/store.rs` | 0G (trait) + 1E (rewire) |
-| `AppState` does not exist; context rebuilt per-query | `main.rs` | 0G |
-| 25 `unwrap/expect` sites outside `main.rs` and tests | `embed.rs`, `db/query.rs`, `preprocess.rs` | 1G |
-| 54 undocumented public items in ll-core | all ll-core modules | 0A |
-| 79 bare `catch {}` blocks in plugin | hooks, scripts | 1I |
-| 26 `process.env.X` reads in 23 files | hooks, scripts | 1I (after 0C) |
-| 7 magic `30` top-k constants in Rust | `search/query.rs`, `search/graph.rs`, `scoring.rs` | 0H |
-| 16 timeout magic numbers in plugin | various hooks | 0C (hook-config.mjs) |
+| `AppState` does not exist; context rebuilt per-query        | `main.rs`                                                 | 0G                       |
+| 25 `unwrap/expect` sites outside `main.rs` and tests        | `embed.rs`, `db/query.rs`, `preprocess.rs`                | 1G                       |
+| 54 undocumented public items in ll-core                     | all ll-core modules                                       | 0A                       |
+| 79 bare `catch {}` blocks in plugin                         | hooks, scripts                                            | 1I                       |
+| 26 `process.env.X` reads in 23 files                        | hooks, scripts                                            | 1I (after 0C)            |
+| 7 magic `30` top-k constants in Rust                        | `search/query.rs`, `search/graph.rs`, `scoring.rs`        | 0H                       |
+| 16 timeout magic numbers in plugin                          | various hooks                                             | 0C (hook-config.mjs)     |
 
 ---
 
@@ -343,6 +349,7 @@ A search query runs through five stages:
 5. **RRF fusion** -- Reciprocal Rank Fusion merges all ranked lists into a final score. `finalize_rrf(scores, top_n)` returns the top-n candidates.
 
 Optional stages:
+
 - **Temporal decay** -- exponential decay applied to scores based on note recency. Controlled by `half_life_days` in the search query.
 - **Reranking** -- cross-encoder reranking via the `rerank` function in ll-core (`rerank.rs`). Applied to the top-k after RRF to improve precision on the final set.
 - **Pseudo-relevance feedback (PRF)** -- Rocchio algorithm re-embeds the query using the top results to expand coverage. Controlled by `PrfParams` in ll-core.
@@ -358,7 +365,13 @@ Optional stages:
 Each hook appends one line per invocation to `$CLAUDE_PLUGIN_DATA/provenance/YYYY-MM-DD.jsonl`:
 
 ```json
-{"ts": 1747000000, "hook": "session-start", "event": "fired", "session_id": "abc123", "vault": "/vault/path"}
+{
+  "ts": 1747000000,
+  "hook": "session-start",
+  "event": "fired",
+  "session_id": "abc123",
+  "vault": "/vault/path"
+}
 ```
 
 Lines are newline-terminated. Corruption recovery (track 2N) will add per-line checksums.
@@ -382,7 +395,7 @@ Lines are newline-terminated. Corruption recovery (track 2N) will add per-line c
 `$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-<session_id>.jsonl` -- one line per prompt-submit event:
 
 ```json
-{"ts": 1747000000, "q": "query text", "top_score": 0.43, "would_inject": true, "latency_ms": 35}
+{ "ts": 1747000000, "q": "query text", "top_score": 0.43, "would_inject": true, "latency_ms": 35 }
 ```
 
 Review with `node scripts/review-shadow.mjs` before flipping to live injection mode.
