@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.20.0
+
 ### Added
 
 - **NLI advisory edges.** Every Write/Edit on a vault note runs the autolink top-3 neighbours through an embedded NLI model (`MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` via Xenova int8 ONNX, ~233 MB embedded via `include_bytes!`). Two edge types land in `edges.db` with `source_graph='nli'`, `confidence='low'`: `challenges_rebuttal` when `p(contradiction) > LL_NLI_THRESHOLD` (default `0.90`) and `nli_supports` when `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default `0.75`). Regex `challenges_*` to the same target suppresses the NLI contradiction (regex wins); regex `supports`/`evidence_for` suppresses the NLI entailment. Regex `supports` does NOT block NLI contradiction (intentional — epistemic-tension signal worth surfacing). Spike eval: 86% precision @ p>0.90 on the 180-pair test set vs the previous `Xenova/nli-deberta-v3-small`'s 51%.
