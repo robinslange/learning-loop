@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
 import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
+import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
@@ -207,13 +208,11 @@ test('runEdgeInfer: wikilink write replaces prior regex edges', async () => {
 //      rows with source_graph='nli' for any candidate above NLI_THRESHOLD.
 //
 // The ll-search binary is stubbed with a shell script. binaryPath() in
-// scripts/lib/binary.mjs caches the resolved path after the first non-null
-// find. To avoid stale-path ENOENT across tests (where each test has its own
-// temp dir), the fake binary lives in a single shared temp dir created at
-// module load time and deleted on process exit. Both NLI tests set
-// CLAUDE_PLUGIN_DATA to their own dir (for edges.db isolation) and rely on
-// the binaryPath() cache already pointing at the shared binary from the first
-// NLI test's run.
+// scripts/lib/binary.mjs caches the resolved path on first non-null find. To
+// keep these tests cleanly isolated, each test creates its own temp dir
+// (binary + edges.db), and __resetBinaryCacheForTesting() flushes the cached
+// path before and after each test so the lookup re-runs against the per-test
+// pluginData. No shared module-level state between tests.
 
 // Shell script that mimics: ll-search nli-batch <premise> <hyps-file>
 // Returns one result per hypothesis line with contradiction=0.97 wrapped in
@@ -234,42 +233,31 @@ const NLI_STUB_SCRIPT = [
   'printf "]}"',
 ].join('\n');
 
-// Create the shared binary dir once at module load. This dir is deliberately
-// NOT cleaned up between tests so binaryPath()'s cache stays valid across
-// both NLI tests. Process exit handles cleanup.
-const NLI_BIN_DIR = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-bin-'));
-const NLI_BIN_PATH = join(NLI_BIN_DIR, 'bin', 'll-search');
-mkdirSync(join(NLI_BIN_DIR, 'bin'), { recursive: true });
-writeFileSync(NLI_BIN_PATH, NLI_STUB_SCRIPT);
-chmodSync(NLI_BIN_PATH, 0o755);
-process.on('exit', () => {
-  try {
-    rmSync(NLI_BIN_DIR, { recursive: true, force: true });
-  } catch {
-    /* best effort */
-  }
-});
+// Per-test setup: makes a fresh temp dir, drops the stub binary into bin/,
+// returns the dir path. Caller is responsible for pointing
+// CLAUDE_PLUGIN_DATA at it and calling __resetBinaryCacheForTesting().
+function makeNliTestEnv() {
+  const dir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
+  mkdirSync(join(dir, 'bin'), { recursive: true });
+  const binPath = join(dir, 'bin', 'll-search');
+  writeFileSync(binPath, NLI_STUB_SCRIPT);
+  chmodSync(binPath, 0o755);
+  return dir;
+}
 
 test('runEdgeInfer NLI-only branch: prior regex edges survive, NLI edge written', async () => {
-  // First NLI test: also primes binaryPath() cache to point at NLI_BIN_DIR.
-  // CLAUDE_PLUGIN_DATA must initially point at the dir containing the binary
-  // so that binaryPath()'s findBinary() check (pluginData/bin/ll-search) hits.
-  // After binaryPath() caches the path, subsequent tests can point
-  // CLAUDE_PLUGIN_DATA elsewhere — the cache bypasses the lookup.
-  const dir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
+  const nliDir = makeNliTestEnv();
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
 
   try {
-    mkdirSync(dir, { recursive: true });
-    // Point pluginData at the shared binary dir so binaryPath() resolves it.
-    // edges.db will also land there; that's fine for this test.
-    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
+    process.env.CLAUDE_PLUGIN_DATA = nliDir;
+    // Clear any cached binaryPath() from previous tests / module loads so
+    // findBinary() re-resolves against this test's pluginData.
+    __resetBinaryCacheForTesting();
 
     // Seed a prior regex edge from the source note to neighbour A (sleep.md).
-    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    const dbPath = join(nliDir, 'edges.db');
     const db = await openEdgeDb(dbPath);
-    // Clear any leftover rows from a previous run.
-    db.run(`DELETE FROM edges WHERE from_path = '${NOTE_REL}'`);
     addEdge(db, {
       fromPath: NOTE_REL,
       toPath: '3-permanent/sleep.md',
@@ -333,8 +321,8 @@ test('runEdgeInfer NLI-only branch: prior regex edges survive, NLI edge written'
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
-    // dir is unused (edges.db landed in NLI_BIN_DIR); clean it up.
-    rmSync(dir, { recursive: true, force: true });
+    __resetBinaryCacheForTesting();
+    rmSync(nliDir, { recursive: true, force: true });
   }
 });
 
@@ -343,16 +331,18 @@ test('runEdgeInfer NLI-only branch: re-invocation re-derives NLI edges cleanly',
   // wipes the stale NLI row from the first call, then the loop re-adds it.
   // The regex edge (local) must never be touched.
   //
-  // binaryPath() is already cached from the previous NLI test — no binary
-  // placement needed here.
+  // Fully isolated from the previous NLI test — its own temp dir, its own
+  // stub binary, its own edges.db, and the binaryPath cache flushed both
+  // before and after so neither direction leaks.
+  const nliDir = makeNliTestEnv();
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
 
   try {
-    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
+    process.env.CLAUDE_PLUGIN_DATA = nliDir;
+    __resetBinaryCacheForTesting();
 
-    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    const dbPath = join(nliDir, 'edges.db');
     const db = await openEdgeDb(dbPath);
-    db.run(`DELETE FROM edges WHERE from_path = '${NOTE_REL}'`);
     addEdge(db, {
       fromPath: NOTE_REL,
       toPath: '3-permanent/sleep.md',
@@ -413,5 +403,7 @@ test('runEdgeInfer NLI-only branch: re-invocation re-derives NLI edges cleanly',
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
+    __resetBinaryCacheForTesting();
+    rmSync(nliDir, { recursive: true, force: true });
   }
 });
