@@ -73,6 +73,8 @@ const VALID_TYPES = [
   'challenges_rebuttal',
   'derived_from',
   'associative',
+  // NLI-derived edge types (source_graph='nli' convention):
+  'nli_supports', // entailment p > NLI_ENTAILMENT_THRESHOLD; advisory, filtered out of sole-dependent queries
 ];
 
 const VALID_CONFIDENCE = ['high', 'medium', 'low'];
@@ -103,6 +105,14 @@ CREATE TABLE IF NOT EXISTS supersessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_super_pattern ON supersessions(old_pattern_query);
+
+CREATE TABLE IF NOT EXISTS nli_frontmatter_tags (
+  note_path TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS viz_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT
+);
 `;
 
 export async function openEdgeDb(dbPath) {
@@ -116,10 +126,15 @@ export async function openEdgeDb(dbPath) {
     db = new SQL.Database();
   }
   db.run(SCHEMA);
+  // Schema migrations: detect via PRAGMA table_info rather than catching
+  // SQLite error strings (error wording is engine-version specific).
   const colsResult = db.exec('PRAGMA table_info(edges)');
   const cols = colsResult[0] ? colsResult[0].values.map((r) => r[1]) : [];
   if (!cols.includes('direction_flipped')) {
     db.run('ALTER TABLE edges ADD COLUMN direction_flipped INTEGER NOT NULL DEFAULT 0');
+  }
+  if (!cols.includes('confidence_score')) {
+    db.run('ALTER TABLE edges ADD COLUMN confidence_score REAL');
   }
   return db;
 }
@@ -127,10 +142,22 @@ export async function openEdgeDb(dbPath) {
 // source_graph value space:
 //   'local'    — edge inferred from a write/edit on this machine (default)
 //   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
+//   'nli'      — edge inferred by NLI model at write-time; advisory; confidence is always
+//                'low'; excluded from downstream traversal queries by default;
+//                deleted on re-write (removeOutgoingEdges applies — re-derived from
+//                current content each write)
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(
   db,
-  { fromPath, toPath, edgeType, confidence = 'high', sourceGraph = 'local', directionFlipped = 0 },
+  {
+    fromPath,
+    toPath,
+    edgeType,
+    confidence = 'high',
+    sourceGraph = 'local',
+    directionFlipped = 0,
+    confidenceScore = null,
+  },
 ) {
   if (!VALID_TYPES.includes(edgeType)) {
     throw new Error(`Invalid edge type: ${edgeType}. Must be one of: ${VALID_TYPES.join(', ')}`);
@@ -141,8 +168,16 @@ export function addEdge(
     );
   }
   db.run(
-    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped) VALUES (?, ?, ?, ?, ?, ?)',
-    [fromPath, toPath, edgeType, confidence, sourceGraph, directionFlipped ? 1 : 0],
+    'INSERT INTO edges (from_path, to_path, edge_type, confidence, source_graph, direction_flipped, confidence_score) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [
+      fromPath,
+      toPath,
+      edgeType,
+      confidence,
+      sourceGraph,
+      directionFlipped ? 1 : 0,
+      confidenceScore,
+    ],
   );
   const [row] = db.exec('SELECT last_insert_rowid() as id');
   return row.values[0][0];
@@ -158,6 +193,10 @@ export function removeEdgesByNote(db, notePath) {
 
 export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
+}
+
+export function removeOutgoingNliEdges(db, notePath) {
+  db.run("DELETE FROM edges WHERE from_path = ? AND source_graph = 'nli'", [notePath]);
 }
 
 function rowsToObjects(result) {
@@ -180,16 +219,104 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
+export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence_score FROM edges ' +
+      "WHERE source_graph = 'nli' AND confidence_score IS NOT NULL AND confidence_score >= ? " +
+      'ORDER BY from_path, confidence_score DESC',
+    [threshold],
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(([fromPath, toPath, edgeType, confidenceScore]) => ({
+    fromPath,
+    toPath,
+    edgeType,
+    confidenceScore,
+  }));
+}
+
+export function getTaggedNotes(db) {
+  const res = db.exec('SELECT note_path FROM nli_frontmatter_tags');
+  if (!res[0]) return new Set();
+  return new Set(res[0].values.map((r) => r[0]));
+}
+
+export function replaceTaggedNotes(db, paths) {
+  db.run('DELETE FROM nli_frontmatter_tags');
+  for (const p of paths) {
+    db.run('INSERT INTO nli_frontmatter_tags (note_path) VALUES (?)', [p]);
+  }
+}
+
+export function addTaggedNote(db, notePath) {
+  db.run('INSERT OR IGNORE INTO nli_frontmatter_tags (note_path) VALUES (?)', [notePath]);
+}
+
+export function removeTaggedNote(db, notePath) {
+  db.run('DELETE FROM nli_frontmatter_tags WHERE note_path = ?', [notePath]);
+}
+
+export function getMetaFlag(db, key) {
+  const res = db.exec('SELECT value FROM viz_meta WHERE key = ?', [key]);
+  if (!res[0] || !res[0].values[0]) return null;
+  return res[0].values[0][0];
+}
+
+export function setMetaFlag(db, key, value) {
+  db.run('INSERT OR REPLACE INTO viz_meta (key, value) VALUES (?, ?)', [key, value]);
+}
+
+export function getAllNliEdgesForHeatmap(db) {
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence_score, source_graph, created_at FROM edges ' +
+      "WHERE source_graph = 'nli' " +
+      'ORDER BY confidence_score DESC NULLS LAST, created_at DESC, from_path ASC, to_path ASC',
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(
+    ([fromPath, toPath, edgeType, confidenceScore, sourceGraph, createdAt]) => ({
+      fromPath,
+      toPath,
+      edgeType,
+      confidenceScore,
+      sourceGraph,
+      createdAt,
+    }),
+  );
+}
+
+export function getEdgesForCycleDetection(db) {
+  // ORDER BY id is load-bearing: cycle node IDs in cycles.canvas are assigned
+  // sequentially from the iteration order of these rows. Without a stable
+  // order, identical edge sets produce different canvas files between runs.
+  const res = db.exec(
+    'SELECT from_path, to_path, edge_type, confidence, source_graph, confidence_score FROM edges ' +
+      "WHERE source_graph = 'nli' OR edge_type LIKE 'challenges_%' " +
+      'ORDER BY id',
+  );
+  if (!res[0]) return [];
+  return res[0].values.map(
+    ([fromPath, toPath, edgeType, confidence, sourceGraph, confidenceScore]) => ({
+      fromPath,
+      toPath,
+      edgeType,
+      confidence,
+      sourceGraph,
+      confidenceScore,
+    }),
+  );
+}
+
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
       SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
-      FROM edges WHERE from_path = ? AND source_graph != 'archived'
+      FROM edges WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli')
       UNION
       SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
       FROM edges e
       JOIN downstream d ON e.from_path = d.to_path
-      WHERE d.depth < ? AND e.source_graph != 'archived'
+      WHERE d.depth < ? AND e.source_graph NOT IN ('archived', 'nli')
     )
     SELECT DISTINCT * FROM downstream ORDER BY depth, to_path
   `;
@@ -197,15 +324,21 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 }
 
 export function getSoleJustificationDependents(db, notePath) {
+  // Explicit `source_graph != 'nli'` guard: edge_type IN ('evidence_for',
+  // 'supports') already excludes nli_supports today, but if someone later
+  // renames nli_supports → supports (or adds another nli-flavoured edge type)
+  // this rule alone wouldn't catch it. Defense in depth.
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
           AND other.from_path != ?
       )
   `;
@@ -222,7 +355,7 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
         r.depth + 1
       FROM edges e
       JOIN reachable r ON (e.from_path = r.node OR e.to_path = r.node)
-      WHERE r.depth < ? AND e.source_graph != 'archived'
+      WHERE r.depth < ? AND e.source_graph NOT IN ('archived', 'nli')
     )
     SELECT node, MIN(depth) AS depth
     FROM reachable
@@ -238,27 +371,33 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
 // historical justifications — an archived note may still have sole-dependent
 // relationships worth preserving in the impact map.
 export function getSoleJustificationDependentsSymmetric(db, notePath) {
+  // Same defense-in-depth filter as getSoleJustificationDependents: explicit
+  // source_graph != 'nli' alongside the edge_type whitelist.
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
       )
     UNION
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.to_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
       )
   `;
   return rowsToObjects(db.exec(sql, [notePath, notePath]));

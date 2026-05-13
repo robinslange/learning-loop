@@ -113,6 +113,8 @@ export async function runAutolink(ctx) {
     })
     .slice(0, MAX_AUTO_LINKS);
 
+  ctx.autolinkCandidates = candidates;
+
   if (candidates.length === 0) return;
 
   const autoLinks = candidates.map((r) => `[[${basename(r.path, '.md')}]]`).join('\n');

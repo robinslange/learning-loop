@@ -16,6 +16,10 @@ Structured checkpoint that extracts what was learned in this session and persist
 - When the user explicitly asks to consolidate or reflect
 - After receiving multiple corrections in a session
 
+## Flags
+
+- `--no-viz`: skip the viz regeneration step (Step 4.45) at the end
+
 ## Provenance
 
 This skill emits provenance events for pipeline observability. Run each Bash command silently.
@@ -161,6 +165,22 @@ rm -f "$SWEEP_CANDIDATES"
 ```
 
 Expected output is a JSON summary `{processed, ok, failed, failures}`. Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
+
+### Step 4.45: Regenerate Viz Artifacts
+
+Unless the user passed `--no-viz` to `/reflect`, regenerate the NLI viz artifacts (frontmatter sync, heatmap, cycle canvas):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>"${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log" || echo "viz regen failed (see ${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log)"
+```
+
+Failure must not break the reflect session — the `|| echo` swallows non-zero exit codes and the session continues.
+
+If the script succeeds and any of the three counts (`frontmatterUpdated`, `heatmapRows`, `cyclesFound`) is non-zero, include a one-line summary in the Step 5 report:
+
+> Viz refreshed: <frontmatterUpdated> frontmatter syncs, <heatmapRows> heatmap rows, <cyclesFound> cycles.
+
+If all three counts are zero, omit the line from the report (no NLI edges to project yet — silence preserved).
 
 ### Step 4.5: Intention Extraction
 

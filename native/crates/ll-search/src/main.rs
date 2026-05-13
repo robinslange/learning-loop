@@ -520,7 +520,12 @@ async fn main() {
         Commands::NliBatch { text_a, texts_b_file } => {
             let content = std::fs::read_to_string(&texts_b_file)
                 .expect("failed to read texts_b file");
-            let texts_b: Vec<String> = content.lines().map(String::from).collect();
+            let texts_b: Vec<String> = content
+                .lines()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect();
             let results = ll_search::nli::nli_batch(&text_a, &texts_b);
             out(&results);
         }

@@ -18,7 +18,7 @@ What the interchange service deliberately does *not* do:
 
 - Store your vault content. Public-tier notes live in your own index DB; peers pull them on demand.
 - Decrypt anything. WireGuard terminates on the peers, not on the coordinator.
-- Operate without your key. You can revoke participation by rotating the seed at `PLUGIN_DATA/federation/.seed` and re-running `/learning-loop:federation`.
+- Operate without your key. You can revoke participation by rotating the seed (see [Seed storage](#seed-storage) below) and re-running `/learning-loop:federation`.
 
 The architecture mirrors Signal's sealed-sender or Matrix's federated-room model: a neutral rendezvous, not a content host. The trust boundary is the tailnet; the content boundary is your disk.
 
@@ -45,14 +45,36 @@ Federation is configured during `/learning-loop:federation`. Onboarding is self-
 
 Re-running `/learning-loop:federation` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
 
-## Seed version notice
+## Seed storage
 
-When `/learning-loop:federation` succeeds, init writes `PLUGIN_DATA/federation/.seed-meta.json` alongside the seed. The file records the plugin version and major number at federation creation time:
+Since v1.18.0 the Ed25519 signing seed lives in a secure backend rather than a plaintext file. Backend selection runs at every launch and tries in order:
+
+1. **OS keyring** (`keyring`) -- macOS Keychain via the `keyring` crate, Linux Secret Service when a DBus session is available, Windows Credential Manager. The keyring entry is namespaced by `config_dir` (`signing-seed-v1-<8-hex>` where the hex prefix is sha256 of the canonicalised path), so a leaked tempdir invocation cannot claim a production seed.
+2. **Encrypted-at-rest** (`encrypted`) -- chacha20poly1305 AEAD sealed with a machine-derived key (HKDF-SHA256 over `machine-uid`). Used on headless Linux installs without DBus. Protects against backup leak and laptop theft, not against root-on-host.
+3. **Plaintext-legacy** -- the pre-v1.18.0 `PLUGIN_DATA/federation/.seed` file. Still readable for un-migrated installs.
+
+`ll-search identity` prints the active backend in its JSON output as `"backend": "keyring" | "encrypted" | "plaintext-legacy"`. Override the selection with the `LL_SEED_BACKEND` env var (accepts `keyring`, `encrypted`, or `mock`); production should leave it unset.
+
+### Migrating a plaintext seed
+
+```bash
+ll-search migrate-seed                # move plaintext into the best available backend
+ll-search migrate-seed --rollback     # restore plaintext from the secure backend
+```
+
+The migration is fail-closed: the plaintext file is deleted only after the new backend has been written and round-trip verified. A `.seed-meta.json` sidecar captures the migration timestamp and target backend. Re-running `migrate-seed` against an already-migrated seed is a no-op.
+
+The legacy un-namespaced keyring entry (`signing-seed-v1`) auto-migrates to the namespaced form on first sync after upgrade, but only when the seed it holds derives a pubkey matching this `config_dir`'s `federation/config.json` -- this stops a leaked tempdir from inheriting the production entry.
+
+### Seed version notice
+
+When `/learning-loop:federation` succeeds, init writes `PLUGIN_DATA/federation/.seed-meta.json`. The file records the backend, the plugin version, and the major number at federation creation time:
 
 ```json
 {
+  "backend": "keyring",
   "created_at": "2026-04-26T03:00:00.000Z",
-  "plugin_version": "1.16.9",
+  "plugin_version": "1.18.0",
   "plugin_major": 1
 }
 ```
@@ -60,14 +82,35 @@ When `/learning-loop:federation` succeeds, init writes `PLUGIN_DATA/federation/.
 On every session start, `hooks/session-start.js` compares the recorded `plugin_major` against the current plugin version. If they differ, it prints a one-line notice to stderr:
 
 ```
-learning-loop federation: seed created on plugin v1.16.9 (current: v2.0.0). Run /learning-loop:federation to rotate.
+learning-loop federation: seed created on plugin v1.18.0 (current: v2.0.0). Run /learning-loop:federation to rotate.
 ```
 
 The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same major mismatch does not nag on every session. Rotating via `/learning-loop:federation` removes the marker, so the next major bump fires a fresh notice.
 
 Federations created before this marker existed get a backfill: the hook stamps `.seed-meta.json` with the current version on first run after upgrade, so the notice stays silent until the next major bump.
 
-To rotate manually, re-run `/learning-loop:federation`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version.
+### Rotating
+
+Re-run `/learning-loop:federation`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version. The previous seed entry is removed from the active backend in the same transaction.
+
+## Sync wire format
+
+Federation sync runs over WebSocket on the tailnet. The transport stack migrated from synchronous `tungstenite` to async `tokio_tungstenite` in v1.19.0; sync now runs as a `tokio::select!` loop alongside the watcher debounce, the poll tick, and the resync tick.
+
+The wire format negotiates a `protocol_version` on `SyncHello` / `SyncReady`:
+
+- **v1** (legacy) -- raw JSON / binary frames; the hub omits `protocol_version` from `SyncReady` and clients read it as `1`.
+- **v2** -- length-prefixed envelopes for client uploads and hub-to-client peer downloads: `u32 size (big-endian, 4 bytes) + sha256 (32 bytes) + body`. The receiver validates total length and SHA256 before allocating the body, so a malicious size declaration cannot trigger a 4 GB `Vec::with_capacity`.
+
+Three caps apply on the v2 path:
+
+| Cap | Default | Where |
+|---|---|---|
+| `MAX_ENVELOPE_SIZE` | 200 MB | Policy ceiling for envelope decode |
+| `HUB_INBOUND_CAP` | 50 MB | Axum-enforced ceiling on uploads (smaller wins) |
+| Recv / send timeouts | 30 s / 60 s | `LL_SYNC_RECV_TIMEOUT_MS` / `LL_SYNC_SEND_TIMEOUT_MS` override per process |
+
+Uploads larger than 50 MB return `SyncError::EnvelopeOversize { cap }` pre-flight without opening the WebSocket. Timestamp comparison on peer freshness parses unix seconds (rejects garbage with `SyncError::BadTimestamp`) instead of by-string equality, so trailing `Z`, fractional seconds, and `±HH:MM` offsets all compare correctly.
 
 ## Visibility rules
 

@@ -30,6 +30,13 @@ export function binaryPath() {
   return _binaryPath;
 }
 
+// Test-only: clear the cached path so the next binaryPath() call re-runs
+// findBinary(). Lets tests swap in/out a stub binary without spawning fresh
+// node processes. Do not call from production code.
+export function __resetBinaryCacheForTesting() {
+  _binaryPath = null;
+}
+
 export function hasBinary() {
   return binaryPath() !== null;
 }

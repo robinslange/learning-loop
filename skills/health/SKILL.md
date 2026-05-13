@@ -20,15 +20,16 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 
 ## Argument Parsing
 
-| Input | Mode | Auto-fix |
-|-------|------|----------|
-| `/health` | light | no |
-| `/health --light` | light | no |
-| `/health --deep` | deep | no |
-| `/health --auto` | light | yes |
-| `/health --deep --auto` | deep | yes |
-| `/health --provenance` | provenance | no |
-| `/health --librarian` | librarian | no |
+| Input                   | Mode       | Auto-fix |
+| ----------------------- | ---------- | -------- |
+| `/health`               | light      | no       |
+| `/health --light`       | light      | no       |
+| `/health --deep`        | deep       | no       |
+| `/health --auto`        | light      | yes      |
+| `/health --deep --auto` | deep       | yes      |
+| `/health --provenance`  | provenance | no       |
+| `/health --librarian`   | librarian  | no       |
+| `/health --nli-edges`   | nli-edges  | no       |
 
 ## Process
 
@@ -42,6 +43,7 @@ Run light mode immediately (fast, no prompting needed: it's the default and comp
 **But after presenting results**, if issues were found, mention available modes:
 
 > Found N issues. Options:
+>
 > - `/health --deep`: full analysis with note scoring
 > - `/health --auto`: auto-fix safe issues (ghost dupes, broken links)
 > - `/health --provenance`: pipeline observability (fabrication rates, agent stats)
@@ -62,6 +64,7 @@ Display the output directly.
 If the report includes a **Recommendations** section, present each recommendation and ask:
 
 > Which of these would you like to act on? Options:
+>
 > - "N" to act on recommendation N
 > - "pattern N" to create a learned pattern from recommendation N
 > - "all" to review all recommendations
@@ -113,6 +116,7 @@ Review (N):
 Ask user: "Apply approved links? Enter numbers to approve (e.g., '1,3,5'), 'all-high' for all high-confidence, or 'skip'."
 
 For each approved link suggestion:
+
 1. Read the target (orphan) note
 2. Append `\n\n[[suggested-note-slug]]` to the note body using Edit tool
 3. Update queue item status to `approved`
@@ -132,6 +136,7 @@ Tag suggestions (N):
 Ask user: "Apply tag suggestions? Enter numbers, 'all', or 'skip'."
 
 For each approved tag suggestion:
+
 1. Read the target's frontmatter
 2. Merge `suggested_tags` into the existing `tags:` list (dedupe)
 3. Write the updated frontmatter back via Edit
@@ -174,6 +179,7 @@ Staleness suspects (N):
 Ask: "Investigate staleness suspects? Enter numbers (e.g., '1,2'), 'all', or 'skip'."
 
 For each selected suspect, Claude (the active model) investigates using available tools:
+
 - Read the note content
 - Check if version references are still current (web search if needed)
 - Check if specific claims are still accurate
@@ -184,9 +190,112 @@ After investigation, ask user what to do with each: "update", "dismiss", or "fla
 **Step L4: Cleanup**
 
 After both phases:
+
 1. Expire processed/old items: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))"`
 2. Reset librarian state to allow re-investigation: `node -e "import('./scripts/lib/librarian-queue.mjs').then(m => m.resetState())"`
 3. Report summary: "Processed N items: X links applied, Y tags applied, V voice flags acknowledged, D duplicates resolved, Z suspects investigated."
+
+Then stop (do not proceed to Step 1).
+
+### Step 0.7: NLI Edges Mode (`--nli-edges`)
+
+If `--nli-edges` flag is present, skip all vault health checks and run NLI tuning mode only:
+
+**1. Aggregate stats**
+
+Query `edges.db`:
+
+```sql
+SELECT * FROM edges WHERE source_graph='nli' ORDER BY created_at DESC
+```
+
+Report:
+
+- Total NLI edges (all time)
+- Total NLI edges (last 7 days)
+- Per-day average over last 7 days
+- Breakdown by `edge_type`: two are written today — `challenges_rebuttal` (driven by `p(contradiction) > LL_NLI_THRESHOLD`, default 0.90) and `nli_supports` (driven by `p(entailment) > LL_NLI_ENTAIL_THRESHOLD`, default 0.75). Report counts of each separately.
+- Count of `from_path` values that also have a regex-classified `challenges_*` edge to the same `to_path` (overlap: where regex and NLI contradiction agreed)
+- Below floor: rows where `confidence_score < LL_NLI_THRESHOLD` for `challenges_rebuttal`, or `confidence_score < LL_NLI_ENTAIL_THRESHOLD` for `nli_supports` (surfaces when thresholds were tuned down between writes — these exist in the table but may be excluded from the histogram below depending on the threshold)
+
+```sql
+SELECT COUNT(*) FROM edges WHERE source_graph='nli' AND confidence_score IS NOT NULL AND confidence_score < 0.90
+```
+
+Show inline as `Below floor: N rows`.
+
+**2. Random sample (10 edges from last 7 days)**
+
+```sql
+SELECT from_path, to_path, edge_type, confidence_score, created_at
+FROM edges
+WHERE source_graph='nli' AND created_at >= date('now', '-7 days')
+ORDER BY RANDOM() LIMIT 10
+```
+
+Render as a table:
+
+- from (note slug)
+- to (note slug)
+- p(contradict) (confidence_score, to 3 decimal places)
+- created_at
+
+**3. Threshold line**
+
+```
+Current LL_NLI_THRESHOLD (contradiction): <process.env.LL_NLI_THRESHOLD || '0.90 (default)'>
+Current LL_NLI_ENTAIL_THRESHOLD (entailment): <process.env.LL_NLI_ENTAIL_THRESHOLD || '0.75 (default)'>
+Spec sync threshold (frontmatter): 0.95
+```
+
+**3a. Schema-mismatch / daemon-error count (last 7 days)**
+
+The hook logs structured errors when the NLI binary returns an unexpected envelope shape or the UDS daemon misbehaves. A non-zero count means edge writes are silently being dropped — check the binary version vs the hook's expected schema_version.
+
+Grep recent hook logs for these tags:
+
+- `edge-infer.runNliBatch.schemaMismatch.daemon`
+- `edge-infer.runNliBatch.schemaMismatch.subprocess`
+- `edge-infer.runNliBatch.daemon.timeout`
+- `edge-infer.runNliBatch.daemon.idle-timeout`
+- `edge-infer.runNliBatch.daemon.parse-error`
+- `edge-infer.runNliBatch.subprocess`
+
+Report inline as `NLI errors (7d): N (most recent: <tag> at <timestamp>)`.
+If the count is zero, render `NLI errors (7d): 0 (healthy)`.
+
+**4. Confidence-score histogram (10 bins from 0.90 to 1.00):**
+
+Query:
+
+```sql
+SELECT
+  CAST(((confidence_score - 0.90) * 100) AS INTEGER) AS bin,
+  COUNT(*) AS n
+FROM edges
+WHERE source_graph = 'nli' AND confidence_score IS NOT NULL AND confidence_score >= 0.90
+GROUP BY bin
+ORDER BY bin;
+```
+
+The `confidence_score >= 0.90` predicate ensures bin math stays in the rendered 0-9 range. If you tune `LL_NLI_THRESHOLD` below 0.90, rows between the tuned threshold and 0.90 are excluded from this histogram (they still exist in the table). Use a separate query to inspect those.
+
+Render as a horizontal text histogram (one row per bin, block characters scaled to the max count):
+
+```
+0.90-0.91  ████████ 24
+0.91-0.92  ████ 13
+0.92-0.93  ███ 9
+0.93-0.94  ██ 7
+0.94-0.95  ██ 5
+0.95-0.96  ████ 12
+0.96-0.97  ███ 8
+0.97-0.98  ██ 6
+0.98-0.99  ███ 9
+0.99-1.00  ██ 7
+```
+
+Useful for tuning `LL_NLI_THRESHOLD` and the sync threshold (0.95) per spec. Bins above 0.95 propagate to note frontmatter; bins below stay in the db only.
 
 Then stop (do not proceed to Step 1).
 
@@ -209,6 +318,7 @@ Collect the raw data needed for all checks. Run these in parallel:
 Parse the check-deps output from Step 1.
 
 For each dependency:
+
 - **installed:** Show name, version, status
 - **missing:** Show name, reason, install command
 - **outdated:** Show name, installed version vs required, install command
@@ -265,6 +375,7 @@ Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DAT
 If the queue file doesn't exist or is empty, skip this step silently.
 
 Group pending items by `task` field:
+
 - `link_suggestion`: link suggestions (orphan notes that should be linked)
 - `tag_suggestion`: tag suggestions (under-tagged notes with proposed vocabulary tags)
 - `voice_flag`: voice flags (topic-style titles)
@@ -311,17 +422,20 @@ Vault Health: YYYY-MM-DD
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
 Then output per-category details:
+
 - In light mode: filenames only, grouped by category
 - In deep mode: filenames + analysis + recommendations per note
 
 ### Step 9: Offer Fixes
 
 If `--auto` flag is set:
+
 - **Ghost dupes:** Delete inbox copies silently using `Bash`: `rm {{VAULT}}/0-inbox/<filename>`
 - **Broken links:** Strip the `[[` and `]]` brackets from broken wikilinks using `Edit` tool, leaving the display text as plain text (e.g., `[[missing-note]]` becomes `missing-note`, `[[missing|displayed]]` becomes `displayed`)
 - Report what was fixed
 
 If `--auto` flag is NOT set:
+
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
@@ -363,6 +477,7 @@ Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specif
 **Batching:** One agent per ~10 notes. Parallel for larger sets.
 
 **Output contract:** Each agent returns a list of objects:
+
 ```
 - file: <path>
   tier: shallow | medium | deep
@@ -373,6 +488,7 @@ Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specif
 ```
 
 **Mapping gate pass count to summary labels** (for dashboard display):
+
 - 0-2 pass = weak
 - 3-4 pass = solid
 - 5-6 pass = strong
