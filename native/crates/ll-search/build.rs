@@ -1,5 +1,6 @@
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 // MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli, exported as int8 ONNX by Xenova.
@@ -8,23 +9,72 @@ use std::path::{Path, PathBuf};
 const NLI_MODEL_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/onnx/model_quantized.onnx";
 const NLI_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/tokenizer.json";
 
-// Minimum sizes for the downloaded files. Below these the file is treated as
-// truncated/corrupt and re-downloaded. Values are conservative lower bounds
-// (model is ~233MB; tokenizer is ~8MB).
+// SHA-256 pins of the exact artifacts that are know-good for the current
+// classifier head (label argmax in nli.rs assumes the MoritzLaurer ordering
+// and the spike eval validated 86% precision against these specific bytes).
+//
+// To upgrade the pinned model/tokenizer:
+//   1. download the new file
+//   2. run `shasum -a 256 <file>` and paste the digest here
+//   3. re-run the spike eval (native/crates/ll-search/spikes/nli-eval/) to
+//      confirm precision holds
+//   4. re-run the binary smoke test (Earth/Sun contradiction)
+//
+// Pinning catches: corrupted partial downloads that beat the size floor,
+// CDN tampering, accidental upstream re-quants that change behavior, and
+// stale cached model files in `model/` that no longer match `build.rs`.
+const NLI_MODEL_SHA256: &str = "ab9da76bb06054ea6b921560c1ecf5683a9e4d96f0ea73d78d3b4a8990aea882";
+const NLI_TOKENIZER_SHA256: &str = "a86f883318afa11c8c10466f1bf4efaeb6ded28a52cbe57217a8fa0d0a2a87df";
+
+// Minimum sizes are a cheap pre-hash sanity check — catches truncated files
+// before we pay the cost of hashing 233MB.
 const MIN_MODEL_BYTES: u64 = 200 * 1024 * 1024;
 const MIN_TOKENIZER_BYTES: u64 = 4 * 1024 * 1024;
 
-fn download(url: &str, dest: &Path, min_bytes: u64) {
+fn sha256_hex(path: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
     if let Ok(meta) = fs::metadata(dest) {
         if meta.len() >= min_bytes {
-            return;
+            match sha256_hex(dest) {
+                Ok(actual) if actual == expected_sha256 => return,
+                Ok(actual) => {
+                    eprintln!(
+                        "cargo:warning=re-downloading {}: hash mismatch (have {}, expected {})",
+                        dest.display(),
+                        actual,
+                        expected_sha256
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "cargo:warning=re-downloading {}: failed to hash existing file: {}",
+                        dest.display(),
+                        e
+                    );
+                }
+            }
+        } else {
+            eprintln!(
+                "cargo:warning=re-downloading {}: cached file {} bytes < expected min {}",
+                dest.display(),
+                meta.len(),
+                min_bytes
+            );
         }
-        eprintln!(
-            "cargo:warning=re-downloading {} (cached file {} bytes < expected min {})",
-            dest.display(),
-            meta.len(),
-            min_bytes
-        );
         let _ = fs::remove_file(dest);
     }
 
@@ -57,6 +107,15 @@ fn download(url: &str, dest: &Path, min_bytes: u64) {
         );
     }
 
+    let actual_sha256 = sha256_hex(&tmp).expect("hash downloaded file");
+    if actual_sha256 != expected_sha256 {
+        let _ = fs::remove_file(&tmp);
+        panic!(
+            "downloaded file from {} has SHA-256 {}, expected {} — upstream changed or CDN compromise; refusing to embed",
+            url, actual_sha256, expected_sha256
+        );
+    }
+
     fs::rename(&tmp, dest).expect("atomic rename of downloaded model failed");
 }
 
@@ -69,8 +128,8 @@ fn main() {
         let nli_model_path = model_dir.join("nli_model_quantized.onnx");
         let nli_tokenizer_path = model_dir.join("nli_tokenizer.json");
 
-        download(NLI_MODEL_URL, &nli_model_path, MIN_MODEL_BYTES);
-        download(NLI_TOKENIZER_URL, &nli_tokenizer_path, MIN_TOKENIZER_BYTES);
+        download(NLI_MODEL_URL, &nli_model_path, MIN_MODEL_BYTES, NLI_MODEL_SHA256);
+        download(NLI_TOKENIZER_URL, &nli_tokenizer_path, MIN_TOKENIZER_BYTES, NLI_TOKENIZER_SHA256);
 
         println!("cargo:rerun-if-changed=model/nli_model_quantized.onnx");
         println!("cargo:rerun-if-changed=model/nli_tokenizer.json");

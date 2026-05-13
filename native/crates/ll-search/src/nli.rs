@@ -16,6 +16,13 @@ pub struct NliResult {
     pub neutral: f64,
     pub contradiction: f64,
     pub label: String,
+    /// True when the tokenizer truncated the (premise, hypothesis) pair to
+    /// fit max_length=512. The model still produces a usable prediction but
+    /// the trailing context was discarded; downstream consumers can use this
+    /// to weight confidence or surface a warning. Omitted when false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
+    pub truncated: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
 }
@@ -120,6 +127,7 @@ fn classify_pair(st: &NliState, text_a: &str, text_b: &str) -> NliResult {
             neutral: 0.0,
             contradiction: 0.0,
             label: "error".to_string(),
+            truncated: false,
             error: Some(format!("{e:#}")),
         },
     }
@@ -130,6 +138,7 @@ fn classify_pair_inner(st: &NliState, text_a: &str, text_b: &str) -> Result<NliR
         .tokenizer
         .encode((text_a, text_b), true)
         .map_err(|e| anyhow::anyhow!("tokenize pair: {e}"))?;
+    let truncated = !encoding.get_overflowing().is_empty();
 
     let ids: Vec<i64> = encoding.get_ids().iter().map(|&id| id as i64).collect();
     let mask: Vec<i64> = encoding
@@ -193,6 +202,7 @@ fn classify_pair_inner(st: &NliState, text_a: &str, text_b: &str) -> Result<NliR
         neutral,
         contradiction,
         label: label.to_string(),
+        truncated,
         error: None,
     })
 }
