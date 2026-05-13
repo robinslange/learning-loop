@@ -2,10 +2,11 @@
 // Extracted from hooks/post-write-edge-infer.js. Snapshot-backed vault index
 // (no per-call recursive readdir).
 
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { createConnection } from 'node:net';
 import { resolvePluginData, isVaultNote, findBinary } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
@@ -42,14 +43,16 @@ export function stripMarkdownForNli(text) {
   if (!text) return '';
   return (
     text
+      // Code fences + inline code FIRST so subsequent link/emphasis regexes
+      // don't mangle text inside backticks (e.g. `[text](url)` should keep
+      // its contents as opaque code, not be parsed as a markdown link).
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`([^`]+)`/g, '$1')
       // Wikilinks: [[Target|Display]] -> Display, [[Target]] -> Target
       .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
       .replace(/\[\[([^\]]+)\]\]/g, '$1')
       // Markdown links: [text](url) -> text
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-      // Code fences and inline code
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/`([^`]+)`/g, '$1')
       // ATX headers and setext underlines
       .replace(/^#{1,6}\s+/gm, '')
       .replace(/^[=-]{2,}\s*$/gm, '')
@@ -194,48 +197,106 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   return true;
 }
 
-function runNliBatch(sourceText, neighbours) {
-  if (!neighbours || neighbours.length === 0) return [];
-  const binary = findBinary();
-  if (!binary) return [];
+function validateNliEnvelope(parsed, label) {
+  if (
+    !parsed ||
+    typeof parsed !== 'object' ||
+    Array.isArray(parsed) ||
+    parsed.schema_version !== NLI_SCHEMA_VERSION ||
+    !Array.isArray(parsed.results)
+  ) {
+    logError(
+      `edge-infer.runNliBatch.schemaMismatch.${label}`,
+      new Error(
+        `NLI ${label} schema mismatch — expected {schema_version: ${NLI_SCHEMA_VERSION}, results: [...]}, got ${JSON.stringify(parsed).slice(0, 200)}`,
+      ),
+    );
+    return null;
+  }
+  return parsed.results;
+}
 
+// Try the long-running ll-search watch daemon via Unix socket. Returns null
+// quickly if the socket isn't there or isn't ready — caller falls back to
+// subprocess. Connect timeout deliberately tight (50ms) so absent-daemon
+// detection doesn't add user-visible latency.
+function runNliBatchViaDaemon(socketPath, premise, hypotheses) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (value) => {
+      if (settled) return;
+      settled = true;
+      try {
+        socket.end();
+      } catch {
+        /* ignore */
+      }
+      clearTimeout(timer);
+      resolve(value);
+    };
+
+    const socket = createConnection({ path: socketPath });
+    let buffer = '';
+
+    const timer = setTimeout(() => {
+      settle({ ok: false, reason: 'timeout' });
+    }, 5000);
+
+    socket.setTimeout(50, () => {
+      // 50ms initial connect/no-data timeout. Once data starts flowing the
+      // 5000ms outer timer governs.
+      if (!buffer && !socket.connecting) {
+        settle({ ok: false, reason: 'idle-timeout' });
+      }
+    });
+
+    socket.on('connect', () => {
+      socket.setTimeout(0); // clear the initial connect timeout
+      const request = JSON.stringify({ premise, hypotheses }) + '\n';
+      socket.write(request);
+    });
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf-8');
+      const nl = buffer.indexOf('\n');
+      if (nl !== -1) {
+        const line = buffer.slice(0, nl);
+        try {
+          settle({ ok: true, parsed: JSON.parse(line) });
+        } catch (err) {
+          settle({ ok: false, reason: 'parse-error', err });
+        }
+      }
+    });
+
+    socket.on('error', (err) => {
+      settle({ ok: false, reason: 'socket-error', err });
+    });
+
+    socket.on('close', () => {
+      if (!settled) settle({ ok: false, reason: 'closed-before-response' });
+    });
+  });
+}
+
+function runNliBatchViaSubprocess(binary, premise, hypotheses) {
   let tempDir;
   try {
     tempDir = mkdtempSync(join(tmpdir(), 'nli-'));
     const hypsPath = join(tempDir, 'hyps.txt');
-    const hypotheses = neighbours.map((n) => {
-      const slug = basename(n.path, '.md').replace(/-/g, ' ');
-      return stripMarkdownForNli(slug);
-    });
     writeFileSync(hypsPath, hypotheses.join('\n'));
 
-    const out = execFileSync(binary.bin, ['nli-batch', stripMarkdownForNli(sourceText), hypsPath], {
+    const out = execFileSync(binary.bin, ['nli-batch', premise, hypsPath], {
       encoding: 'utf-8',
       timeout: 1500,
       env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
     });
 
     const parsed = JSON.parse(out);
-    // Schema handshake: binary wraps results in {schema_version, results}.
-    // Old binaries returned a bare array — detect and refuse to interpret.
-    if (
-      !parsed ||
-      typeof parsed !== 'object' ||
-      Array.isArray(parsed) ||
-      parsed.schema_version !== NLI_SCHEMA_VERSION ||
-      !Array.isArray(parsed.results)
-    ) {
-      logError(
-        'edge-infer.runNliBatch.schemaMismatch',
-        new Error(
-          `NLI binary schema mismatch — expected {schema_version: ${NLI_SCHEMA_VERSION}, results: [...]}, got ${JSON.stringify(parsed).slice(0, 200)}`,
-        ),
-      );
-      return [];
-    }
-    return parsed.results;
+    const results = validateNliEnvelope(parsed, 'subprocess');
+    return results || [];
   } catch (err) {
-    logError('edge-infer.runNliBatch', err);
+    logError('edge-infer.runNliBatch.subprocess', err);
     return [];
   } finally {
     if (tempDir) {
@@ -246,6 +307,47 @@ function runNliBatch(sourceText, neighbours) {
       }
     }
   }
+}
+
+async function runNliBatch(sourceText, neighbours) {
+  if (!neighbours || neighbours.length === 0) return [];
+
+  const premise = stripMarkdownForNli(sourceText);
+  // Filenames don't contain markdown — basename-to-slug is sufficient.
+  const hypotheses = neighbours.map((n) => basename(n.path, '.md').replace(/-/g, ' '));
+
+  // Daemon path: try the UDS socket the long-running ll-search watch process
+  // owns. Skips entirely if the socket file is absent (no daemon running) so
+  // the fast-path adds zero overhead in that case.
+  const pluginData = resolvePluginData();
+  if (pluginData) {
+    const socketPath = join(pluginData, 'nli.sock');
+    if (existsSync(socketPath)) {
+      const daemonResult = await runNliBatchViaDaemon(socketPath, premise, hypotheses);
+      if (daemonResult.ok) {
+        const results = validateNliEnvelope(daemonResult.parsed, 'daemon');
+        if (results) return results;
+        // Schema mismatch — already logged. Fall through to subprocess as a
+        // last resort: the user may have an old daemon running against new
+        // hook code.
+      } else if (
+        daemonResult.reason !== 'socket-error' &&
+        daemonResult.reason !== 'closed-before-response'
+      ) {
+        // Real failure modes (timeout, parse-error) get logged; missing-socket
+        // / refused-connection are expected when no daemon is running.
+        logError(
+          `edge-infer.runNliBatch.daemon.${daemonResult.reason}`,
+          daemonResult.err || new Error(daemonResult.reason),
+        );
+      }
+    }
+  }
+
+  // Fallback: spawn a fresh subprocess (loads the 233MB model every time).
+  const binary = findBinary();
+  if (!binary) return [];
+  return runNliBatchViaSubprocess(binary, premise, hypotheses);
 }
 
 export async function runEdgeInfer(ctx) {
@@ -338,7 +440,7 @@ export async function runEdgeInfer(ctx) {
     }
 
     if (nliCandidates.length > 0) {
-      const nliResults = runNliBatch(sourceText, nliCandidates);
+      const nliResults = await runNliBatch(sourceText, nliCandidates);
       for (let i = 0; i < nliResults.length; i++) {
         const r = nliResults[i];
         if (!r || r.error) continue;
