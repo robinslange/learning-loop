@@ -10,8 +10,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = new URL('../hooks/stop-nudge.js', import.meta.url).pathname;
@@ -90,11 +91,18 @@ test('stop-nudge already-nudged: no second block output', () => {
   // without producing a second block. The dedup is the load-bearing assertion;
   // we verify it via the SECOND call's empty stdout, not via tmpKeys on the first
   // (tmpKeys races against sibling-file cleanup under parallel test workers).
-  const transcriptPath = join(HOOK_TMP, `ll-test-transcript-dedup-${Date.now()}.txt`);
+  //
+  // Both invocations share an isolated TMPDIR so the nudge marker (which the hook
+  // writes to its tmpdir()) lives outside /tmp. Without this, sibling test files'
+  // cleanup() — which sweeps /tmp/learning-loop-* files appearing during their
+  // run — can delete our marker between r1 and r2 under concurrent test workers.
+  const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-stop-nudge-iso-'));
+  const transcriptPath = join(isolatedTmp, `transcript-dedup-${Date.now()}.txt`);
   writeTranscript(transcriptPath, 60000);
 
   // First call: should block and write the nudge marker.
   const r1 = runHook(HOOK, {
+    env: { TMPDIR: isolatedTmp },
     stdin: { session_id: 'test-dedup-first', transcript_path: transcriptPath, stop_hook_active: false },
   });
   try {
@@ -104,15 +112,16 @@ test('stop-nudge already-nudged: no second block output', () => {
     assert.equal(JSON.parse(out1).decision, 'block');
   } catch (err) {
     r1.cleanup();
-    rmSync(transcriptPath, { force: true });
+    rmSync(isolatedTmp, { recursive: true, force: true });
     throw err;
   }
-  // Do NOT call r1.cleanup() yet — leave the nudge marker in /tmp.
+  // Do NOT call r1.cleanup() yet — leave the nudge marker in isolatedTmp.
 
   // Second call with the same transcript path: marker exists → no second block.
   // This empty-stdout assertion implicitly proves the marker file was written
   // by r1; if it had not been, r2 would have emitted a second block.
   const r2 = runHook(HOOK, {
+    env: { TMPDIR: isolatedTmp },
     stdin: { session_id: 'test-dedup-second', transcript_path: transcriptPath, stop_hook_active: false },
   });
   try {
@@ -121,7 +130,7 @@ test('stop-nudge already-nudged: no second block output', () => {
   } finally {
     r1.cleanup();
     r2.cleanup();
-    rmSync(transcriptPath, { force: true });
+    rmSync(isolatedTmp, { recursive: true, force: true });
   }
 });
 
