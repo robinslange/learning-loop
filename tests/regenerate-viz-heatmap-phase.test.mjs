@@ -42,6 +42,7 @@ test('writes sorted markdown table to _system/nli-conflicts.md', async () => {
 
   assert.match(content, /^---\n[\s\S]*?\n---\n/);
   assert.match(content, /# NLI advisory edges/);
+  assert.match(content, /aliases: \["NLI advisory edges", "NLI conflicts"\]/);
   assert.match(content, /\| Source \| Target \| Type \| p \| Created \|/);
 
   const idx98 = content.indexOf('0.98');

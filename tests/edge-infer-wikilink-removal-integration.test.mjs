@@ -116,6 +116,92 @@ test('runEdgeInfer: wikilink removal does not wipe prior regex edges', async () 
   }
 });
 
+test('runEdgeInfer: partial wikilink removal keeps surviving wikilink edge, drops removed one', async () => {
+  // Note previously linked to BOTH sleep.md and circadian.md (two prior regex edges).
+  // New content keeps [[sleep]] but drops [[circadian]]. Expected:
+  //   - removeOutgoingEdges wipes both prior edges (regex pass produced edges>0).
+  //   - Regex re-derives the supports edge to sleep.md (still in content).
+  //   - circadian.md is NOT in the new content so no edge is regenerated.
+  const dir = mkdtempSync(join(tmpdir(), 'll-edge-infer-intg-'));
+  const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+
+  try {
+    mkdirSync(dir, { recursive: true });
+    process.env.CLAUDE_PLUGIN_DATA = dir;
+
+    const dbPath = join(dir, 'edges.db');
+    const db = await openEdgeDb(dbPath);
+    addEdge(db, {
+      fromPath: NOTE_REL,
+      toPath: '3-permanent/sleep.md',
+      edgeType: 'supports',
+      confidence: 'high',
+      sourceGraph: 'local',
+      directionFlipped: 0,
+    });
+    addEdge(db, {
+      fromPath: NOTE_REL,
+      toPath: '3-permanent/circadian.md',
+      edgeType: 'supports',
+      confidence: 'high',
+      sourceGraph: 'local',
+      directionFlipped: 0,
+    });
+    saveDb(db, dbPath);
+    db.close();
+
+    const ctx = {
+      tool: 'Write',
+      input: {
+        file_path: NOTE_ABS,
+        content: '---\ntags: [test]\n---\n\nThis reinforces [[sleep]]. Some other text.\n',
+      },
+      response: { success: true },
+      vaultRoot: VAULT,
+      snapshot: buildMinimalSnapshot(VAULT),
+      autolinkCandidates: [],
+    };
+
+    await runEdgeInfer(ctx);
+
+    const db2 = await openEdgeDb(dbPath);
+    try {
+      // Surviving wikilink: edge to sleep.md must be present and classified as supports.
+      const sleepResult = db2.exec(
+        `SELECT to_path, edge_type FROM edges WHERE from_path = '${NOTE_REL}' AND to_path = '3-permanent/sleep.md'`,
+      );
+      const sleepRows = sleepResult.length > 0 ? sleepResult[0].values : [];
+      assert.equal(
+        sleepRows.length,
+        1,
+        `expected surviving 'supports' edge to sleep.md; got: ${JSON.stringify(sleepRows)}`,
+      );
+      assert.equal(sleepRows[0][1], 'supports');
+
+      // Removed wikilink: edge to circadian.md must be gone (wiped by
+      // removeOutgoingEdges and not regenerated because circadian isn't in new content).
+      const circadianResult = db2.exec(
+        `SELECT to_path FROM edges WHERE from_path = '${NOTE_REL}' AND to_path = '3-permanent/circadian.md'`,
+      );
+      const circadianRows = circadianResult.length > 0 ? circadianResult[0].values : [];
+      assert.equal(
+        circadianRows.length,
+        0,
+        `edge to circadian.md must be gone after partial wikilink removal; got: ${JSON.stringify(circadianRows)}`,
+      );
+    } finally {
+      db2.close();
+    }
+  } finally {
+    if (savedPluginData === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+    }
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('runEdgeInfer: wikilink write replaces prior regex edges', async () => {
   // Contrast: when new content HAS wikilinks with a classifiable context,
   // the regex path fires, removeOutgoingEdges runs, and the note's edges are
