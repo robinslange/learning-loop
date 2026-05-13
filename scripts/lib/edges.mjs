@@ -73,6 +73,8 @@ const VALID_TYPES = [
   'challenges_rebuttal',
   'derived_from',
   'associative',
+  // NLI-derived edge types (source_graph='nli' convention):
+  'nli_supports', // entailment p > NLI_ENTAILMENT_THRESHOLD; advisory, filtered out of sole-dependent queries
 ];
 
 const VALID_CONFIDENCE = ['high', 'medium', 'low'];
@@ -286,9 +288,13 @@ export function getAllNliEdgesForHeatmap(db) {
 }
 
 export function getEdgesForCycleDetection(db) {
+  // ORDER BY id is load-bearing: cycle node IDs in cycles.canvas are assigned
+  // sequentially from the iteration order of these rows. Without a stable
+  // order, identical edge sets produce different canvas files between runs.
   const res = db.exec(
     'SELECT from_path, to_path, edge_type, confidence, source_graph, confidence_score FROM edges ' +
-      "WHERE source_graph = 'nli' OR edge_type LIKE 'challenges_%'",
+      "WHERE source_graph = 'nli' OR edge_type LIKE 'challenges_%' " +
+      'ORDER BY id',
   );
   if (!res[0]) return [];
   return res[0].values.map(

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { syncNoteFrontmatter } from './regenerate-viz.mjs';
 
 const EXCLUDED = new Set(['_system', '.obsidian', '.trash', 'node_modules', '.git']);
+
+const BOOTSTRAP_KEY = 'nli_frontmatter_index_bootstrapped_v1';
 
 function walk(root, rel = '') {
   const out = [];
@@ -27,7 +29,7 @@ function walk(root, rel = '') {
 }
 
 export async function clearAllNliFrontmatter(vaultRoot, db = null) {
-  const counts = { cleared: 0 };
+  const counts = { cleared: 0, artifactsRemoved: [] };
   for (const rel of walk(vaultRoot)) {
     const abs = join(vaultRoot, rel);
     let content;
@@ -36,13 +38,37 @@ export async function clearAllNliFrontmatter(vaultRoot, db = null) {
     } catch {
       continue;
     }
-    if (!/nli-contradicts:|has-contradiction:/.test(content.slice(0, 4096))) continue;
-    const changed = syncNoteFrontmatter(abs, []);
+    // Match any NLI frontmatter key (contradicts + supports + flags).
+    if (
+      !/(nli-contradicts|nli-supports|has-contradiction|has-entailment):/.test(
+        content.slice(0, 4096),
+      )
+    ) {
+      continue;
+    }
+    const changed = syncNoteFrontmatter(abs, { contradicts: [], supports: [] });
     if (changed) counts.cleared++;
   }
+
+  // Generated artifacts — delete if present.
+  for (const rel of ['_system/nli-conflicts.md', '_system/viz/cycles.canvas']) {
+    const abs = join(vaultRoot, rel);
+    if (existsSync(abs)) {
+      try {
+        rmSync(abs);
+        counts.artifactsRemoved.push(rel);
+      } catch (err) {
+        console.error(`clear-nli: failed to remove ${rel}:`, err.message);
+      }
+    }
+  }
+
   if (db) {
-    const { replaceTaggedNotes } = await import('./lib/edges.mjs');
+    const { replaceTaggedNotes, setMetaFlag } = await import('./lib/edges.mjs');
     replaceTaggedNotes(db, []);
+    // Reset bootstrap flag so the next /viz run re-scans (matches the
+    // post-rollback state where the vault has no NLI tags).
+    setMetaFlag(db, BOOTSTRAP_KEY, '0');
   }
   return counts;
 }

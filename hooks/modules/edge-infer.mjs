@@ -30,7 +30,47 @@ const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   challenges_rebuttal: 'rebuts',
 };
 
-const NLI_THRESHOLD = parseFloat(process.env.LL_NLI_THRESHOLD || '0.90');
+const NLI_CONTRADICTION_THRESHOLD = parseFloat(process.env.LL_NLI_THRESHOLD || '0.90');
+const NLI_ENTAILMENT_THRESHOLD = parseFloat(process.env.LL_NLI_ENTAIL_THRESHOLD || '0.75');
+const NLI_SCHEMA_VERSION = 1;
+
+// Strip markdown that the NLI tokenizer wasn't trained on: wikilinks, tags,
+// headers, emphasis, code fences. Keeps inner text of wikilinks so claims
+// like "[[sleep]] enhances memory" become "sleep enhances memory" — the model
+// scores prose, not link syntax.
+export function stripMarkdownForNli(text) {
+  if (!text) return '';
+  return (
+    text
+      // Wikilinks: [[Target|Display]] -> Display, [[Target]] -> Target
+      .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2')
+      .replace(/\[\[([^\]]+)\]\]/g, '$1')
+      // Markdown links: [text](url) -> text
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      // Code fences and inline code
+      .replace(/```[\s\S]*?```/g, ' ')
+      .replace(/`([^`]+)`/g, '$1')
+      // ATX headers and setext underlines
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/^[=-]{2,}\s*$/gm, '')
+      // Bold / italic / strikethrough
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/__([^_]+)__/g, '$1')
+      .replace(/(?<!\w)\*([^*\n]+)\*(?!\w)/g, '$1')
+      .replace(/(?<!\w)_([^_\n]+)_(?!\w)/g, '$1')
+      .replace(/~~([^~]+)~~/g, '$1')
+      // Hashtags
+      .replace(/(^|\s)#[\w/-]+/g, '$1')
+      // List markers at line start
+      .replace(/^\s*[-*+]\s+/gm, '')
+      .replace(/^\s*\d+\.\s+/gm, '')
+      // Blockquote markers
+      .replace(/^>\s?/gm, '')
+      // Collapse whitespace
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+}
 
 function vaultRelPath(filePath, vaultRoot) {
   return filePath.slice(vaultRoot.length + 1);
@@ -165,16 +205,35 @@ function runNliBatch(sourceText, neighbours) {
     const hypsPath = join(tempDir, 'hyps.txt');
     const hypotheses = neighbours.map((n) => {
       const slug = basename(n.path, '.md').replace(/-/g, ' ');
-      return slug;
+      return stripMarkdownForNli(slug);
     });
     writeFileSync(hypsPath, hypotheses.join('\n'));
 
-    const out = execFileSync(binary.bin, ['nli-batch', sourceText, hypsPath], {
+    const out = execFileSync(binary.bin, ['nli-batch', stripMarkdownForNli(sourceText), hypsPath], {
       encoding: 'utf-8',
       timeout: 1500,
       env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
     });
-    return JSON.parse(out);
+
+    const parsed = JSON.parse(out);
+    // Schema handshake: binary wraps results in {schema_version, results}.
+    // Old binaries returned a bare array — detect and refuse to interpret.
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      Array.isArray(parsed) ||
+      parsed.schema_version !== NLI_SCHEMA_VERSION ||
+      !Array.isArray(parsed.results)
+    ) {
+      logError(
+        'edge-infer.runNliBatch.schemaMismatch',
+        new Error(
+          `NLI binary schema mismatch — expected {schema_version: ${NLI_SCHEMA_VERSION}, results: [...]}, got ${JSON.stringify(parsed).slice(0, 200)}`,
+        ),
+      );
+      return [];
+    }
+    return parsed.results;
   } catch (err) {
     logError('edge-infer.runNliBatch', err);
     return [];
@@ -282,27 +341,60 @@ export async function runEdgeInfer(ctx) {
       const nliResults = runNliBatch(sourceText, nliCandidates);
       for (let i = 0; i < nliResults.length; i++) {
         const r = nliResults[i];
-        if (!r || typeof r.contradiction !== 'number') continue;
-        if (r.contradiction <= NLI_THRESHOLD) continue;
+        if (!r || r.error) continue;
+        if (typeof r.contradiction !== 'number' || typeof r.entailment !== 'number') continue;
         const neighbourRel = nliCandidates[i].path;
-        // Skip NLI if regex already emitted a challenges_* edge to this target. A
-        // regex 'supports' / 'evidence_for' edge does NOT block — a note can both
-        // support and rebut the same target (epistemic tension worth surfacing).
-        if (edges.some((e) => e.toPath === neighbourRel && e.edgeType.startsWith('challenges_'))) {
-          continue;
+
+        // Contradiction edge: only above NLI_CONTRADICTION_THRESHOLD. Skip if regex
+        // already emitted a challenges_* edge to this target — regex wins on
+        // conflicts. A regex 'supports' / 'evidence_for' edge does NOT block:
+        // a note can both support and rebut the same target (epistemic tension
+        // worth surfacing).
+        if (r.contradiction > NLI_CONTRADICTION_THRESHOLD) {
+          const regexBlocks = edges.some(
+            (e) => e.toPath === neighbourRel && e.edgeType.startsWith('challenges_'),
+          );
+          if (!regexBlocks) {
+            try {
+              addEdge(db, {
+                fromPath: sourceRel,
+                toPath: neighbourRel,
+                edgeType: 'challenges_rebuttal',
+                confidence: 'low',
+                sourceGraph: 'nli',
+                directionFlipped: 0,
+                confidenceScore: r.contradiction,
+              });
+            } catch (err) {
+              logError('edge-infer.nliAddEdge.contradiction', err);
+            }
+          }
         }
-        try {
-          addEdge(db, {
-            fromPath: sourceRel,
-            toPath: neighbourRel,
-            edgeType: 'challenges_rebuttal',
-            confidence: 'low',
-            sourceGraph: 'nli',
-            directionFlipped: 0,
-            confidenceScore: r.contradiction,
-          });
-        } catch (err) {
-          logError('edge-infer.nliAddEdge', err);
+
+        // Entailment edge: only above NLI_ENTAILMENT_THRESHOLD. Skip if regex
+        // already emitted a supports/evidence_for edge to this target — regex
+        // wins on support relations too.
+        if (r.entailment > NLI_ENTAILMENT_THRESHOLD) {
+          const regexBlocks = edges.some(
+            (e) =>
+              e.toPath === neighbourRel &&
+              (e.edgeType === 'supports' || e.edgeType === 'evidence_for'),
+          );
+          if (!regexBlocks) {
+            try {
+              addEdge(db, {
+                fromPath: sourceRel,
+                toPath: neighbourRel,
+                edgeType: 'nli_supports',
+                confidence: 'low',
+                sourceGraph: 'nli',
+                directionFlipped: 0,
+                confidenceScore: r.entailment,
+              });
+            } catch (err) {
+              logError('edge-infer.nliAddEdge.entailment', err);
+            }
+          }
         }
       }
     }

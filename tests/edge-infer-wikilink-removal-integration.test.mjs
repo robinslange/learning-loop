@@ -216,21 +216,22 @@ test('runEdgeInfer: wikilink write replaces prior regex edges', async () => {
 // NLI test's run.
 
 // Shell script that mimics: ll-search nli-batch <premise> <hyps-file>
-// Returns one result per hypothesis line with contradiction=0.97.
+// Returns one result per hypothesis line with contradiction=0.97 wrapped in
+// the schema_version envelope the binary emits ({schema_version:1, results:[...]}).
 // Uses `|| [ -n "$line" ]` to handle hypothesis files without a trailing
 // newline (runNliBatch writes hypotheses.join('\n') which omits the final \n).
 const NLI_STUB_SCRIPT = [
   '#!/bin/sh',
-  '# Stub: ll-search nli-batch — returns contradiction=0.97 per hypothesis',
+  '# Stub: ll-search nli-batch — schema_version=1 wrapped response',
   'hyps_file="$3"',
-  'printf "["',
+  'printf \'{"schema_version":1,"results":[\'',
   'i=0',
   'while IFS= read -r line || [ -n "$line" ]; do',
   '  if [ $i -gt 0 ]; then printf ","; fi',
-  '  printf \'{"contradiction":0.97,"entailment":0.02,"neutral":0.01}\'',
+  '  printf \'{"contradiction":0.97,"entailment":0.02,"neutral":0.01,"label":"contradiction"}\'',
   '  i=$((i+1))',
   'done < "$hyps_file"',
-  'printf "]"',
+  'printf "]}"',
 ].join('\n');
 
 // Create the shared binary dir once at module load. This dir is deliberately

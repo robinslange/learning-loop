@@ -1,17 +1,25 @@
 ---
 name: viz
-description: 'Regenerate the NLI viz artifacts. Usage: /learning-loop:viz [--dry-run] [--no-frontmatter] [--no-heatmap] [--no-cycles]. Writes nli-contradicts: frontmatter on source notes, _system/nli-conflicts.md (heatmap), _system/viz/cycles.canvas (cycle visualisation).'
+description: 'Regenerate the NLI viz artifacts. Usage: /learning-loop:viz [--dry-run] [--no-frontmatter] [--no-heatmap] [--no-cycles]. Writes nli-contradicts: / nli-supports: frontmatter on source notes, _system/nli-conflicts.md (heatmap), _system/viz/cycles.canvas (cycle visualisation).'
 ---
 
 # Viz: NLI artifact regeneration
 
 ## Overview
 
-Regenerates the three NLI vault artifacts from edges.db:
+Regenerates the three NLI vault artifacts from edges.db. NLI edges come in two flavours: `challenges_rebuttal` (contradiction-driven) and `nli_supports` (entailment-driven). Each phase has its own filter — the differences are intentional and documented under "Phase thresholds" below.
 
-1. **Frontmatter sync** — overwrites `nli-contradicts:` and `has-contradiction:` keys on each source note (p>=0.95)
-2. **Heatmap** — overwrites `_system/nli-conflicts.md` with a markdown table sorted by p(contradict)
-3. **Cycle canvas** — overwrites `_system/viz/cycles.canvas` with detected contradiction cycles
+1. **Frontmatter sync** — overwrites `nli-contradicts:`, `has-contradiction:`, `nli-supports:`, `has-entailment:` keys on each source note (only edges with `confidence_score >= 0.95`)
+2. **Heatmap** — overwrites `_system/nli-conflicts.md` with a markdown table of ALL NLI edges (no confidence floor), labelled `contradicts` / `entails`. Rows below the frontmatter sync threshold are marked `(below sync threshold)`
+3. **Cycle canvas** — overwrites `_system/viz/cycles.canvas` with detected contradiction cycles from ALL NLI edges + regex `challenges_*` edges (no confidence floor)
+
+### Phase thresholds — why they differ
+
+- **Frontmatter (`p >= 0.95`)** is what Obsidian Graph View sees. High precision is essential because every flagged note is visually marked — false positives clutter the graph
+- **Heatmap (no floor)** is a triage view for inspecting marginal edges. Showing only ≥0.95 rows would hide the long tail of "almost contradictions" useful for calibrating the threshold
+- **Cycles canvas (no confidence floor)** prioritises topological structure (which notes form contradiction loops) over per-edge precision. One marginal edge inside an otherwise high-confidence cycle is still worth surfacing
+
+A user who sees an edge in the heatmap but not in their note's frontmatter is hitting the `< 0.95` threshold gap — this is by design.
 
 ## When to Use
 
@@ -88,7 +96,7 @@ With the instruction:
 
 > Add this object to the `colorGroups` array in your vault's `.obsidian/graph.json` (one-time setup). Restart Obsidian Graph View. Contradiction-flagged notes render in red.
 
-Detect first-run by reading `${VAULT_PATH}/.obsidian/graph.json` as JSON and inspecting `colorGroups`. If any entry has `query === "[has-contradiction:TRUE]"` (exact match, not substring), the user has already pasted the snippet — skip it. Otherwise print the snippet and the instruction.
+Detect first-run by reading the vault's `.obsidian/graph.json` as JSON and inspecting `colorGroups`. Resolve the vault root via Node (`node -e 'import("./scripts/lib/constants.mjs").then(m => console.log(m.VAULT_PATH))'`) — `VAULT_PATH` is a JS constant in `scripts/lib/constants.mjs`, not a shell environment variable. If any `colorGroups` entry has `query === "[has-contradiction:TRUE]"` (exact match, not substring), the user has already pasted the snippet — skip it. Otherwise print the snippet and the instruction.
 
 If the file is missing, print the snippet (treat as first-run).
 

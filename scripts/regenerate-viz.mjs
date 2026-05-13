@@ -32,13 +32,23 @@ export function parseFlags(argv) {
 
 const EXCLUDED_DIRS = new Set(['_system', '.obsidian', '.trash', 'node_modules', '.git']);
 
-const NLI_KEYS = new Set(['nli-contradicts', 'has-contradiction']);
+export const NLI_KEYS = new Set([
+  'nli-contradicts',
+  'has-contradiction',
+  'nli-supports',
+  'has-entailment',
+]);
 
 function formatInlineArray(items) {
   return '[' + items.map((s) => `"${s}"`).join(', ') + ']';
 }
 
-export function syncNoteFrontmatter(filePath, wikilinks) {
+// links: { contradicts: string[], supports: string[] }
+export function syncNoteFrontmatter(filePath, links) {
+  // Backwards-compatible: old callers passed a flat wikilinks array (contradicts only).
+  const contradicts = Array.isArray(links) ? links : links.contradicts || [];
+  const supports = Array.isArray(links) ? [] : links.supports || [];
+
   let content;
   try {
     content = readFileSync(filePath, 'utf-8');
@@ -70,19 +80,21 @@ export function syncNoteFrontmatter(filePath, wikilinks) {
   }
   lines = filtered;
 
-  if (wikilinks.length > 0) {
-    lines.push(`nli-contradicts: ${formatInlineArray(wikilinks)}`);
+  if (contradicts.length > 0) {
+    lines.push(`nli-contradicts: ${formatInlineArray(contradicts)}`);
     lines.push('has-contradiction: true');
   }
+  if (supports.length > 0) {
+    lines.push(`nli-supports: ${formatInlineArray(supports)}`);
+    lines.push('has-entailment: true');
+  }
 
-  if (lines.length === 0 && !hasFm && wikilinks.length === 0) {
+  if (lines.length === 0 && !hasFm && contradicts.length === 0 && supports.length === 0) {
     return false;
   }
 
   const newFm =
-    lines.length > 0
-      ? '---\n' + lines.join('\n') + '\n---' + (trailingNewline || '\n')
-      : '';
+    lines.length > 0 ? '---\n' + lines.join('\n') + '\n---' + (trailingNewline || '\n') : '';
   const newContent = newFm + afterFm;
   if (newContent === content) return false;
   writeFileSync(filePath, newContent);
@@ -126,22 +138,40 @@ function scanVaultForLegacyTags(vaultRoot) {
     } catch {
       continue;
     }
-    if (/^---\n[\s\S]*?nli-contradicts:/m.test(content.slice(0, 4096))) {
+    const head = content.slice(0, 4096);
+    if (/^---\n[\s\S]*?(nli-contradicts|nli-supports):/m.test(head)) {
       tagged.add(rel);
     }
   }
   return tagged;
 }
 
-export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dryRun = false } = {}) {
-  const { getNliEdgesForFrontmatter, getTaggedNotes, replaceTaggedNotes, getMetaFlag, setMetaFlag, addTaggedNote, removeTaggedNote } =
-    await import('./lib/edges.mjs');
+export async function runFrontmatterPhase(
+  db,
+  vaultRoot,
+  { threshold = 0.95, dryRun = false } = {},
+) {
+  const {
+    getNliEdgesForFrontmatter,
+    getTaggedNotes,
+    replaceTaggedNotes,
+    getMetaFlag,
+    setMetaFlag,
+    addTaggedNote,
+    removeTaggedNote,
+  } = await import('./lib/edges.mjs');
   const rows = getNliEdgesForFrontmatter(db, threshold);
 
+  // desired is keyed by fromPath; value is { contradicts: string[], supports: string[] }.
+  // Splits edges into the two frontmatter surfaces so nli_supports edges write
+  // `nli-supports:` instead of being lumped into `nli-contradicts:`.
   const desired = new Map();
   for (const r of rows) {
-    if (!desired.has(r.fromPath)) desired.set(r.fromPath, []);
-    desired.get(r.fromPath).push(`[[${basenameSlug(r.toPath)}]]`);
+    if (!desired.has(r.fromPath)) {
+      desired.set(r.fromPath, { contradicts: [], supports: [] });
+    }
+    const bucket = r.edgeType === 'nli_supports' ? 'supports' : 'contradicts';
+    desired.get(r.fromPath)[bucket].push(`[[${basenameSlug(r.toPath)}]]`);
   }
 
   let currentlyTagged;
@@ -157,7 +187,7 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
 
   const counts = { updated: 0, cleared: 0 };
 
-  for (const [fromPath, wikilinks] of desired.entries()) {
+  for (const [fromPath, buckets] of desired.entries()) {
     const top = fromPath.split('/')[0];
     if (EXCLUDED_DIRS.has(top)) continue;
     const abs = join(vaultRoot, fromPath);
@@ -165,7 +195,7 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
       counts.updated++;
       continue;
     }
-    const changed = syncNoteFrontmatter(abs, wikilinks);
+    const changed = syncNoteFrontmatter(abs, buckets);
     if (changed) counts.updated++;
     addTaggedNote(db, fromPath);
   }
@@ -179,7 +209,7 @@ export async function runFrontmatterPhase(db, vaultRoot, { threshold = 0.95, dry
       counts.cleared++;
       continue;
     }
-    const changed = syncNoteFrontmatter(abs, []);
+    const changed = syncNoteFrontmatter(abs, { contradicts: [], supports: [] });
     if (changed) counts.cleared++;
     // Healing: removeTaggedNote runs even when syncNoteFrontmatter reports
     // no change (file already clean). This reconciles the index to disk in
@@ -200,10 +230,16 @@ function fmtDate(s) {
   return s.split(' ')[0] || s.slice(0, 10);
 }
 
-export async function runHeatmapPhase(db, vaultRoot, { syncThreshold = 0.95, dryRun = false } = {}) {
+export async function runHeatmapPhase(
+  db,
+  vaultRoot,
+  { syncThreshold = 0.95, dryRun = false } = {},
+) {
   const { getAllNliEdgesForHeatmap } = await import('./lib/edges.mjs');
   const rows = getAllNliEdgesForHeatmap(db);
-  const totalAtSync = rows.filter((r) => r.confidenceScore != null && r.confidenceScore >= syncThreshold).length;
+  const totalAtSync = rows.filter(
+    (r) => r.confidenceScore != null && r.confidenceScore >= syncThreshold,
+  ).length;
 
   const lines = [];
   lines.push('---');
@@ -211,20 +247,35 @@ export async function runHeatmapPhase(db, vaultRoot, { syncThreshold = 0.95, dry
   lines.push(`generated: ${new Date().toISOString()}`);
   lines.push('---');
   lines.push('');
-  lines.push('# NLI conflicts');
+  lines.push('# NLI advisory edges');
   lines.push('');
-  lines.push('Generated by `/learning-loop:viz`. Do not edit by hand — overwritten on every regen.');
+  lines.push(
+    'Generated by `/learning-loop:viz`. Do not edit by hand — overwritten on every regen.',
+  );
   lines.push('');
-  lines.push(`Total contradictions: ${rows.length} (synced to frontmatter at p>=${syncThreshold}: ${totalAtSync})`);
+  const contradicts = rows.filter((r) => r.edgeType !== 'nli_supports').length;
+  const entails = rows.filter((r) => r.edgeType === 'nli_supports').length;
+  lines.push(
+    `Total: ${rows.length} (${contradicts} contradicts, ${entails} entails — synced to frontmatter at p>=${syncThreshold}: ${totalAtSync}).`,
+  );
   lines.push('');
-  lines.push('| Source | Target | p(contradict) | Created |');
-  lines.push('|---|---|---|---|');
+  lines.push(
+    'Phase thresholds: frontmatter sync at `p >= 0.95` (Obsidian Graph View visibility), heatmap includes all NLI edges, cycles canvas includes all NLI + regex `challenges_*` edges regardless of score.',
+  );
+  lines.push('');
+  lines.push('| Source | Target | Type | p | Created |');
+  lines.push('|---|---|---|---|---|');
   for (const r of rows) {
     const fromSlug = r.fromPath.replace(/\.md$/, '').split('/').pop();
     const toSlug = r.toPath.replace(/\.md$/, '').split('/').pop();
-    const belowMark = r.confidenceScore != null && r.confidenceScore < syncThreshold ? ' (below sync threshold)' : '';
-    const peerMark = r.sourceGraph && r.sourceGraph !== 'nli' ? ` [peer: ${r.sourceGraph}]` : '';
-    lines.push(`| [[${fromSlug}]]${peerMark}${belowMark} | [[${toSlug}]] | ${fmtConfidence(r.confidenceScore)} | ${fmtDate(r.createdAt)} |`);
+    const belowMark =
+      r.confidenceScore != null && r.confidenceScore < syncThreshold
+        ? ' (below sync threshold)'
+        : '';
+    const typeLabel = r.edgeType === 'nli_supports' ? 'entails' : 'contradicts';
+    lines.push(
+      `| [[${fromSlug}]]${belowMark} | [[${toSlug}]] | ${typeLabel} | ${fmtConfidence(r.confidenceScore)} | ${fmtDate(r.createdAt)} |`,
+    );
   }
   lines.push('');
 
@@ -247,7 +298,10 @@ export async function runHeatmapPhase(db, vaultRoot, { syncThreshold = 0.95, dry
 }
 
 function isContradictionEdgeShape(e) {
-  return e.sourceGraph === 'nli' || (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_'));
+  return (
+    e.sourceGraph === 'nli' ||
+    (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_'))
+  );
 }
 
 function makeCanvasNode(id, x, y, file) {
@@ -325,7 +379,16 @@ export async function runCyclesPhase(db, vaultRoot, { maxDepth = 4, dryRun = fal
   const canvasPath = join(vaultRoot, '_system', 'viz', 'cycles.canvas');
   if (!dryRun) {
     mkdirSync(join(vaultRoot, '_system', 'viz'), { recursive: true });
-    writeFileSync(canvasPath, JSON.stringify(canvas, null, 2));
+    const newContent = JSON.stringify(canvas, null, 2);
+    let existing = null;
+    try {
+      existing = readFileSync(canvasPath, 'utf-8');
+    } catch {
+      /* file missing — treat as changed */
+    }
+    if (existing !== newContent) {
+      writeFileSync(canvasPath, newContent);
+    }
   }
   return { cycles: cycles.length };
 }
