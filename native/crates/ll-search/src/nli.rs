@@ -103,10 +103,10 @@ fn classify_pair(st: &NliState, text_a: &str, text_b: &str) -> NliResult {
     let logits: Vec<f64> = data.iter().map(|&x| x as f64).collect();
     let probs = softmax(&logits);
 
-    // id2label: 0=contradiction, 1=entailment, 2=neutral
-    let contradiction = probs[0];
-    let entailment = probs[1];
-    let neutral = probs[2];
+    // id2label for MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli: 0=entailment, 1=neutral, 2=contradiction
+    let entailment = probs[0];
+    let neutral = probs[1];
+    let contradiction = probs[2];
 
     let label = if entailment >= contradiction && entailment >= neutral {
         "entailment"

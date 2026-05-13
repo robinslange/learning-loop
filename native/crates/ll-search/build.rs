@@ -2,11 +2,11 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// DeBERTa-v3-small fine-tuned on MNLI/FEVER/ANLI, exported as int8 ONNX by Xenova.
-// Used by the contradiction-check hook (pre-write-check.js -> ll-search nli-batch).
+// MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli, exported as int8 ONNX by Xenova.
+// Used by the contradiction-check hook (edge-infer.mjs -> ll-search nli-batch).
 // Only downloaded when the `nli` cargo feature is enabled.
-const NLI_MODEL_URL: &str = "https://huggingface.co/Xenova/nli-deberta-v3-small/resolve/main/onnx/model_quantized.onnx";
-const NLI_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/nli-deberta-v3-small/resolve/main/tokenizer.json";
+const NLI_MODEL_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/onnx/model_quantized.onnx";
+const NLI_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/tokenizer.json";
 
 fn download(url: &str, dest: &Path) {
     if dest.exists() {
