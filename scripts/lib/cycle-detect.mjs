@@ -1,8 +1,13 @@
+// A cycle counts as "contradiction-bearing" only if it contains at least one
+// edge that actually disputes a claim. nli_supports (entailment) is NOT a
+// dispute — an entailment-only loop is a tautology, interesting graph
+// structure but not what /viz cycles is meant to surface. Without this filter
+// nli_supports cycles would show up red on the canvas alongside real
+// contradictions.
 function isContradictionEdge(e) {
-  return (
-    e.sourceGraph === 'nli' ||
-    (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_'))
-  );
+  if (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_')) return true;
+  if (e.sourceGraph === 'nli' && e.edgeType !== 'nli_supports') return true;
+  return false;
 }
 
 function canonicalCycleKey(nodes) {

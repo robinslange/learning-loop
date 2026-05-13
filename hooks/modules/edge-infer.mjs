@@ -31,8 +31,24 @@ const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   challenges_rebuttal: 'rebuts',
 };
 
-const NLI_CONTRADICTION_THRESHOLD = parseFloat(process.env.LL_NLI_THRESHOLD || '0.90');
-const NLI_ENTAILMENT_THRESHOLD = parseFloat(process.env.LL_NLI_ENTAIL_THRESHOLD || '0.75');
+function parseThresholdEnv(varName, defaultValue) {
+  const raw = process.env[varName];
+  if (raw === undefined || raw === '') return defaultValue;
+  const parsed = parseFloat(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    // Don't go through logError — this is a module-load-time invariant
+    // failure, not a per-call runtime error. Print once to stderr so users
+    // tuning env vars actually see the warning.
+    process.stderr.write(
+      `learning-loop: ${varName}=${JSON.stringify(raw)} is not a finite number in [0, 1]; falling back to ${defaultValue}\n`,
+    );
+    return defaultValue;
+  }
+  return parsed;
+}
+
+const NLI_CONTRADICTION_THRESHOLD = parseThresholdEnv('LL_NLI_THRESHOLD', 0.9);
+const NLI_ENTAILMENT_THRESHOLD = parseThresholdEnv('LL_NLI_ENTAIL_THRESHOLD', 0.75);
 const NLI_SCHEMA_VERSION = 1;
 
 // Strip markdown that the NLI tokenizer wasn't trained on: wikilinks, tags,
@@ -274,7 +290,13 @@ function runNliBatchViaDaemon(socketPath, premise, hypotheses) {
     });
 
     socket.on('close', () => {
-      if (!settled) settle({ ok: false, reason: 'closed-before-response' });
+      if (!settled) {
+        // Distinguish a connection that closed without ever seeing bytes
+        // (normal "no daemon" fallthrough) from one that closed mid-stream
+        // with partial bytes (genuine daemon misbehaviour we want to surface).
+        const reason = buffer.length === 0 ? 'closed-before-response' : 'daemon-closed-mid-stream';
+        settle({ ok: false, reason });
+      }
     });
   });
 }
@@ -309,6 +331,13 @@ function runNliBatchViaSubprocess(binary, premise, hypotheses) {
   }
 }
 
+// Module-level latches so repeated daemon failures don't spam the log on
+// every hook fire. The first failure of each kind logs; subsequent failures
+// of the same kind are silent until the process restarts (typically when a
+// new Claude Code session boots).
+let daemonSchemaMismatchWarned = false;
+let daemonHardFailureWarned = false;
+
 async function runNliBatch(sourceText, neighbours) {
   if (!neighbours || neighbours.length === 0) return [];
 
@@ -327,19 +356,33 @@ async function runNliBatch(sourceText, neighbours) {
       if (daemonResult.ok) {
         const results = validateNliEnvelope(daemonResult.parsed, 'daemon');
         if (results) return results;
-        // Schema mismatch — already logged. Fall through to subprocess as a
-        // last resort: the user may have an old daemon running against new
-        // hook code.
+        // Schema mismatch: the daemon is out of sync with the hook (old daemon
+        // vs new hook code, or vice versa). Falling back to subprocess on every
+        // hook fire would reload the 233MB model and add ~400ms per write —
+        // worse than no NLI at all. Skip NLI for this write and warn ONCE per
+        // process so the user knows to restart `ll-search watch`. The schema
+        // mismatch is already logged inside validateNliEnvelope.
+        if (!daemonSchemaMismatchWarned) {
+          daemonSchemaMismatchWarned = true;
+          process.stderr.write(
+            'learning-loop: NLI daemon returned mismatched schema envelope — restart `ll-search watch` to pick up the new hook contract. NLI edges suppressed for this session.\n',
+          );
+        }
+        return [];
       } else if (
         daemonResult.reason !== 'socket-error' &&
         daemonResult.reason !== 'closed-before-response'
       ) {
-        // Real failure modes (timeout, parse-error) get logged; missing-socket
-        // / refused-connection are expected when no daemon is running.
-        logError(
-          `edge-infer.runNliBatch.daemon.${daemonResult.reason}`,
-          daemonResult.err || new Error(daemonResult.reason),
-        );
+        // Real daemon failure modes (timeout, parse-error, idle-timeout). Log
+        // once per process to avoid alarm fatigue, but still let the call
+        // fall through to subprocess as a slow-path safety net.
+        if (!daemonHardFailureWarned) {
+          daemonHardFailureWarned = true;
+          logError(
+            `edge-infer.runNliBatch.daemon.${daemonResult.reason}`,
+            daemonResult.err || new Error(daemonResult.reason),
+          );
+        }
       }
     }
   }

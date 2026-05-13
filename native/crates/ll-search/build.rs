@@ -111,7 +111,8 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
     if actual_sha256 != expected_sha256 {
         let _ = fs::remove_file(&tmp);
         panic!(
-            "downloaded file from {} has SHA-256 {}, expected {} — upstream changed or CDN compromise; refusing to embed",
+            "downloaded file from {} has SHA-256 {}, expected {} — upstream changed or CDN compromise; refusing to embed.\n\
+             If you intend to upgrade the model, see the comment block above NLI_MODEL_SHA256 / NLI_TOKENIZER_SHA256 in build.rs for the upgrade procedure (re-run the spike eval to verify quality, then paste the new digest).",
             url, actual_sha256, expected_sha256
         );
     }

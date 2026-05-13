@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, renameSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { syncNoteFrontmatter } from './regenerate-viz.mjs';
 
@@ -59,11 +59,11 @@ export async function clearAllNliFrontmatter(vaultRoot, db = null) {
     if (existsSync(abs)) {
       const bak = `${abs}.bak`;
       try {
-        // If a .bak already exists from a prior rollback, overwrite it —
-        // multi-rollback chains shouldn't accumulate stale state.
+        // If a .bak already exists from a prior rollback, remove it first.
+        // renameSync silently overwrites on Unix but throws EEXIST on Windows;
+        // explicit unlink makes the cross-platform behavior identical.
         if (existsSync(bak)) {
-          // Move-then-rename: renameSync silently overwrites on Unix, but
-          // be explicit so the behavior is durable cross-platform.
+          unlinkSync(bak);
         }
         renameSync(abs, bak);
         counts.artifactsRemoved.push(`${rel} → ${rel}.bak`);

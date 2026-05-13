@@ -1,7 +1,8 @@
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 use ort::{ep, session::Session, value::Tensor};
+use parking_lot::Mutex;
 use serde::Serialize;
 use tokenizers::Tokenizer;
 
@@ -160,10 +161,10 @@ fn classify_pair_inner(st: &NliState, text_a: &str, text_b: &str) -> Result<NliR
         "attention_mask" => attention_mask,
     };
 
-    let mut session = st
-        .session
-        .lock()
-        .map_err(|_| anyhow::anyhow!("NLI session lock poisoned"))?;
+    // parking_lot::Mutex has no poison semantics — a panic inside session.run
+    // releases the lock cleanly so subsequent requests recover. (std::sync::Mutex
+    // would poison and force every future call into the error path.)
+    let mut session = st.session.lock();
     let outputs = session
         .run(inputs)
         .map_err(|e| anyhow::anyhow!("NLI inference: {e}"))?;

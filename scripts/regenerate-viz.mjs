@@ -305,10 +305,11 @@ export async function runHeatmapPhase(
 }
 
 function isContradictionEdgeShape(e) {
-  return (
-    e.sourceGraph === 'nli' ||
-    (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_'))
-  );
+  // Mirrors cycle-detect's isContradictionEdge: contradictions get red color
+  // on the canvas, entailment edges (nli_supports) don't.
+  if (typeof e.edgeType === 'string' && e.edgeType.startsWith('challenges_')) return true;
+  if (e.sourceGraph === 'nli' && e.edgeType !== 'nli_supports') return true;
+  return false;
 }
 
 function makeCanvasNode(id, x, y, file) {
@@ -393,9 +394,10 @@ export async function runCyclesPhase(
       }
     }
     if (truncated) {
-      // Place truncation notice in the bottom-right of the canvas grid so it
-      // sits clear of the rendered cycles.
-      const noticeRow = Math.floor(cycles.length / 3) + 1;
+      // Place truncation notice in the row immediately AFTER the last cycle.
+      // ceil() handles the multiple-of-3 case correctly: 48 cycles fill row
+      // 15, notice goes to row 16 (not 17 — which would skip a row).
+      const noticeRow = Math.ceil(cycles.length / 3);
       canvas.nodes.push(
         makeCanvasTextNode(
           `node-${nodeIdCounter++}`,
