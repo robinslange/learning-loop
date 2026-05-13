@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, renameSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { syncNoteFrontmatter } from './regenerate-viz.mjs';
 
@@ -50,15 +50,25 @@ export async function clearAllNliFrontmatter(vaultRoot, db = null) {
     if (changed) counts.cleared++;
   }
 
-  // Generated artifacts — delete if present.
+  // Generated artifacts — rename to .bak rather than rm. The artifact headers
+  // warn against hand-editing, but rollback should still be reversible: if a
+  // user discovers they ran this by accident, the previous artifact survives
+  // alongside the missing-edges state and can be restored.
   for (const rel of ['_system/nli-conflicts.md', '_system/viz/cycles.canvas']) {
     const abs = join(vaultRoot, rel);
     if (existsSync(abs)) {
+      const bak = `${abs}.bak`;
       try {
-        rmSync(abs);
-        counts.artifactsRemoved.push(rel);
+        // If a .bak already exists from a prior rollback, overwrite it —
+        // multi-rollback chains shouldn't accumulate stale state.
+        if (existsSync(bak)) {
+          // Move-then-rename: renameSync silently overwrites on Unix, but
+          // be explicit so the behavior is durable cross-platform.
+        }
+        renameSync(abs, bak);
+        counts.artifactsRemoved.push(`${rel} → ${rel}.bak`);
       } catch (err) {
-        console.error(`clear-nli: failed to remove ${rel}:`, err.message);
+        console.error(`clear-nli: failed to rename ${rel} → ${rel}.bak:`, err.message);
       }
     }
   }

@@ -126,17 +126,15 @@ export async function openEdgeDb(dbPath) {
     db = new SQL.Database();
   }
   db.run(SCHEMA);
+  // Schema migrations: detect via PRAGMA table_info rather than catching
+  // SQLite error strings (error wording is engine-version specific).
   const colsResult = db.exec('PRAGMA table_info(edges)');
   const cols = colsResult[0] ? colsResult[0].values.map((r) => r[1]) : [];
   if (!cols.includes('direction_flipped')) {
     db.run('ALTER TABLE edges ADD COLUMN direction_flipped INTEGER NOT NULL DEFAULT 0');
   }
-  try {
+  if (!cols.includes('confidence_score')) {
     db.run('ALTER TABLE edges ADD COLUMN confidence_score REAL');
-  } catch (err) {
-    if (!/duplicate column|already exists/i.test(String(err?.message || err))) {
-      throw err;
-    }
   }
   return db;
 }
@@ -326,15 +324,21 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 }
 
 export function getSoleJustificationDependents(db, notePath) {
+  // Explicit `source_graph != 'nli'` guard: edge_type IN ('evidence_for',
+  // 'supports') already excludes nli_supports today, but if someone later
+  // renames nli_supports → supports (or adds another nli-flavoured edge type)
+  // this rule alone wouldn't catch it. Defense in depth.
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
           AND other.from_path != ?
       )
   `;
@@ -367,27 +371,33 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
 // historical justifications — an archived note may still have sole-dependent
 // relationships worth preserving in the impact map.
 export function getSoleJustificationDependentsSymmetric(db, notePath) {
+  // Same defense-in-depth filter as getSoleJustificationDependents: explicit
+  // source_graph != 'nli' alongside the edge_type whitelist.
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.from_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
       )
     UNION
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e
     WHERE e.to_path = ?
       AND e.edge_type IN ('evidence_for', 'supports')
+      AND e.source_graph != 'nli'
       AND NOT EXISTS (
         SELECT 1 FROM edges other
         WHERE other.to_path = e.to_path
           AND other.from_path != e.from_path
           AND other.edge_type IN ('evidence_for', 'supports')
+          AND other.source_graph != 'nli'
       )
   `;
   return rowsToObjects(db.exec(sql, [notePath, notePath]));

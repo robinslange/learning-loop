@@ -70,8 +70,11 @@ export function syncNoteFrontmatter(filePath, links) {
     if (m && NLI_KEYS.has(m[1])) {
       const valueAfterColon = lines[i].slice(m[1].length + 1).trim();
       if (valueAfterColon === '') {
+        // Block-form list under the key (e.g. `nli-contradicts:\n- "[[x]]"`).
+        // Require column-0 `- ` so nested list items under a SUBSEQUENT key
+        // (e.g. `tags:\n  - tag1`) aren't accidentally consumed.
         let j = i + 1;
-        while (j < lines.length && /^\s*-\s+/.test(lines[j])) j++;
+        while (j < lines.length && /^- /.test(lines[j])) j++;
         i = j - 1;
       }
       continue;
@@ -244,6 +247,10 @@ export async function runHeatmapPhase(
   const lines = [];
   lines.push('---');
   lines.push('tags: [system, nli, generated]');
+  // Alias lets Obsidian search find this file by either the legacy filename
+  // or the new heading; avoids a disruptive rename when we shifted from
+  // "NLI conflicts" to "NLI advisory edges" after adding entailment edges.
+  lines.push('aliases: ["NLI advisory edges", "NLI conflicts"]');
   lines.push(`generated: ${new Date().toISOString()}`);
   lines.push('---');
   lines.push('');
@@ -336,11 +343,22 @@ function layoutCycle(cycleIdx, cycle) {
   return positions;
 }
 
-export async function runCyclesPhase(db, vaultRoot, { maxDepth = 4, dryRun = false } = {}) {
+export async function runCyclesPhase(
+  db,
+  vaultRoot,
+  { maxDepth = 4, maxCycles = 50, dryRun = false } = {},
+) {
   const { findContradictionCycles } = await import('./lib/cycle-detect.mjs');
   const { getEdgesForCycleDetection } = await import('./lib/edges.mjs');
   const edges = getEdgesForCycleDetection(db);
-  const cycles = findContradictionCycles(edges, { maxDepth });
+  const allCycles = findContradictionCycles(edges, { maxDepth });
+  // Soft cap: dense graphs (every-to-every contradiction patterns, regex
+  // mis-classifications, future bulk-imports) can balloon cycle counts past
+  // what's useful in Obsidian Canvas. Render the first maxCycles and surface
+  // the truncation in a text node so users know to investigate the underlying
+  // edge set rather than wonder why only some cycles appear.
+  const cycles = allCycles.slice(0, maxCycles);
+  const truncated = allCycles.length > maxCycles;
 
   const canvas = { nodes: [], edges: [] };
   let nodeIdCounter = 0;
@@ -373,6 +391,19 @@ export async function runCyclesPhase(db, vaultRoot, { maxDepth = 4, dryRun = fal
         const color = isContradictionEdgeShape(e) ? '1' : undefined;
         canvas.edges.push(makeCanvasEdge(id, from, to, color));
       }
+    }
+    if (truncated) {
+      // Place truncation notice in the bottom-right of the canvas grid so it
+      // sits clear of the rendered cycles.
+      const noticeRow = Math.floor(cycles.length / 3) + 1;
+      canvas.nodes.push(
+        makeCanvasTextNode(
+          `node-${nodeIdCounter++}`,
+          0,
+          noticeRow * 360,
+          `+${allCycles.length - maxCycles} more cycles not rendered (cap=${maxCycles}).\n\nThe full set is in edges.db. Inspect via /health --nli-edges or query challenges_* / source_graph='nli' rows directly.`,
+        ),
+      );
     }
   }
 
