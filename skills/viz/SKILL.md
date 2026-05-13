@@ -110,3 +110,43 @@ If the file exists but is malformed JSON, print BOTH the snippet AND a warning:
 > Do not paste the snippet into an unparseable file or your Graph View settings may corrupt further.
 
 Do not write to graph.json under any circumstance.
+
+## Daemon (UDS) — performance note
+
+When `ll-search watch` is running, the edge-infer hook talks to its NLI server over a Unix domain socket at `<plugin-data>/nli.sock` instead of spawning a fresh subprocess every fire. Cold subprocess invocation is ~400ms (reloading the 233MB model); warm UDS round-trip is ~10ms. The hook auto-detects the socket and falls back to subprocess if absent — no user action needed. Run `ll-search watch` (or rely on `/learning-loop:init` to start it) to get the fast path.
+
+## Tunable thresholds
+
+Two environment variables control NLI edge writes:
+
+- `LL_NLI_THRESHOLD` — `p(contradiction)` floor for writing a `challenges_rebuttal` advisory edge. Default `0.90`. The spike eval validated this on the 180-pair test set (86% precision, 1 FP per 100 vault writes at this threshold).
+- `LL_NLI_ENTAIL_THRESHOLD` — `p(entailment)` floor for writing an `nli_supports` advisory edge. Default `0.75` (Gemini-suggested asymmetric — entailment is less risky than a wrong contradiction in graph noise terms). NOTE: this threshold is unvalidated on the current eval set; revisit calibration before promoting `nli_supports` past advisory.
+
+Both edges land with `source_graph='nli'`, `confidence='low'`. The frontmatter sync (this skill, phase 1) only writes notes where the score additionally clears `>= 0.95`.
+
+## Limitations
+
+- **Manual frontmatter edits are invisible to the incremental index.** If you add `nli-contradicts:` (or any NLI key) by hand on a note that has no current NLI edge in `edges.db`, the next `/viz` run won't catch the stale key for cleanup — the bootstrap-tagged-notes index doesn't know about it. Workaround: use the rollback helper (next section) for a full vault re-scan.
+- **Three different thresholds across phases** (frontmatter `>= 0.95`, heatmap all, cycles all NLI + regex `challenges_*`). Documented earlier; users will see edges in the heatmap that don't appear in their note's frontmatter. This is by design.
+
+## Rollback
+
+To back out all NLI viz output from the vault (e.g., to experiment with different thresholds, validate a recalibration, or simply remove the visual layer):
+
+```bash
+node scripts/clear-nli-frontmatter.mjs
+```
+
+What it does:
+
+- Strips `nli-contradicts:`, `nli-supports:`, `has-contradiction:`, `has-entailment:` keys from every note's frontmatter.
+- Renames `_system/nli-conflicts.md` → `_system/nli-conflicts.md.bak`.
+- Renames `_system/viz/cycles.canvas` → `_system/viz/cycles.canvas.bak`.
+- Clears the bootstrap-tagged-notes index in `edges.db` and resets the BOOTSTRAP_KEY so the next `/viz` re-scans the vault from scratch.
+
+What it does NOT do:
+
+- Touch `edges.db` rows themselves (NLI edges in the database survive — rollback is purely the vault-visible layer).
+- Delete `.bak` files from a previous rollback (they get overwritten if you rollback again).
+
+After rollback, the next hook write that produces NLI edges re-establishes the vault state cleanly; you don't need to re-init anything.
