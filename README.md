@@ -10,8 +10,12 @@ Claude fabricates sources (~43% of PubMed IDs, ~26% of DOIs). Without mechanical
 
 ## Install
 
+Add both marketplaces, then install both plugins:
+
 ```bash
+/plugin marketplace add obra/superpowers-marketplace
 /plugin marketplace add robinslange/learning-loop
+/plugin install episodic-memory@superpowers-marketplace
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
@@ -19,11 +23,7 @@ Restart Claude Code, then run `/learning-loop:init` to configure your vault path
 
 ## Dependencies
 
-- **episodic-memory** (optional, recommended). When installed, learning-loop adds semantic recall over past Claude Code conversations to retrieval, `/discovery`, `/reflect`, and `/refresh`. Without it, vault search and keyword recall keep working; semantic conversation recall is disabled and the plugin logs a one-line notice at session start.
-
-  ```bash
-  claude plugin install episodic-memory@superpowers-marketplace
-  ```
+- **episodic-memory** (required). Provides semantic recall over past Claude Code conversations, which retrieval, `/discovery`, `/reflect`, and `/refresh` depend on. Install via `/plugin install episodic-memory@superpowers-marketplace` (lives in `obra/superpowers-marketplace`).
 
 ## What it looks like
 
