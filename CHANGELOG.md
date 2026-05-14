@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **zstd compression on v3 body uploads.** Both `upload_full` and `upload_patchset` now run their body through `sync::compression::zstd_encode` (level 3) before chunking; the v3 envelope's `body_encoding` flips from `"raw"` to `"zstd"`. Compressing whole-body before splitting preserves the zstd dictionary context across chunks (per-chunk compression would cost 10-15% of the ratio). Observed ratios on the live vault: full export 16.87 MB to 7.59 MB on wire (55% reduction, dropping from 5 chunks to 2), single-file-change patchset 86 KB to 6.6 KB on wire (93% reduction). Stacks on top of the Phase 2 delta path, so a per-change ongoing sync now ships ~6.5 KB versus the 16 MB single-frame baseline before any of this work landed (~2,500x reduction). The hub side reads body_encoding off the envelope and applies the matching decompressor with a 500 MiB cap; rollback is a one-line flip back to `body_encoding="raw"` without touching the hub.
+
+### Fixed
+
+- **Subsequent patchsets falling back to full upload.** SQLite `apply_changeset` produces a row-equivalent but not byte-equivalent DB compared to the client's `local-export.db` (page layout differs, free-list ordering rearranges), so after one successful patchset the client's `base-export.sha256` disagreed with the hub's `index.db.sha256` and the next patchset attempt was always rejected with `patchset base mismatch, send full`. The hub now echoes its post-apply content hash in `SyncAck.stored_sha256`; the client persists that as the next base sha. Falls back to the client's locally-computed export hash when the field is absent (older hub or non-v3 path). Without this fix, Phase 2 delta sync was a one-shot win that degraded back to full uploads on every subsequent sync.
+
 ## v1.20.2
 
 ### Fixed
