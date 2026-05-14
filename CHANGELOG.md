@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **v3 chunked sync protocol for vault uploads.** When negotiated with a sync-hub advertising `protocol_version >= 3`, the client splits the index DB into chunks (default 4 MiB, capped at 8 MiB) and uploads each as a separate `ChunkedFrame` after the JSON envelope. Wire layout is `seq | total | body_size | body_sha256` (44-byte header, big-endian u32s). Per-chunk sha256 is verified on decode; a flat manifest root (`sha256(c0_hash || c1_hash || ... || cN-1_hash)` in seq order) verifies the assembled body matches what the envelope promised. Out-of-order delivery is permitted; the hub reorders by seq. New `auth::create_envelope_v3` builder, `protocol::ChunkedFrame`, `protocol::manifest_root`, plus `PROTOCOL_VERSION_CHUNKED = 3` and `PROTOCOL_VERSION_LATEST = 3` constants. SyncHello now advertises `PROTOCOL_VERSION_LATEST`; the hub negotiates `min(client, server)` so v2 and v1 hubs still get their respective single-frame paths with no code-path regression.
+
+### Fixed
+
+- **Sync failure above 16 MiB vault size.** Single-frame uploads were dying with `Broken pipe (os error 32)` after `Authenticated` because tokio-tungstenite's 16 MiB `max_frame_size` default rejected the body before axum's `WebSocketUpgrade::max_message_size(50 * 1024 * 1024)` could see it. The v1.19.0 envelope framing was correct for the protocol but didn't account for the underlying tungstenite frame ceiling. The v3 chunked path keeps every frame under 8 MiB so the ceiling stops mattering.
+- **`tests/stop-nudge.test.js` isolates `TMPDIR` per-run** so dedup-cache writes from concurrent test runs don't collide. Surfaces under `release.sh`'s test gate on machines with parallel test runners.
+
 ## v1.20.0
 
 ### Added
