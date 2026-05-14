@@ -85,6 +85,12 @@ pub enum HubMessage {
     },
     SyncAck {
         note_count: i64,
+        /// Hex sha256 of the hub's stored index after this upload landed.
+        /// Echoed by v3 hubs so the client can update its `base-export.sha256`
+        /// to match what the hub has, even when SQLite session apply produced
+        /// a row-equivalent-but-not-byte-equivalent DB on the hub side.
+        #[serde(default)]
+        stored_sha256: Option<String>,
     },
     PeerList {
         peers: Vec<PeerInfo>,
@@ -508,7 +514,7 @@ mod tests {
         let json = r#"{"type":"sync-ack","note_count":42}"#;
         let msg: HubMessage = serde_json::from_str(json).expect("deserialize");
         match msg {
-            HubMessage::SyncAck { note_count } => assert_eq!(note_count, 42),
+            HubMessage::SyncAck { note_count, .. } => assert_eq!(note_count, 42),
             other => panic!("unexpected variant: {other:?}"),
         }
     }

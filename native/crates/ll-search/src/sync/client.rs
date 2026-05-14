@@ -203,7 +203,7 @@ pub async fn sync_all_async(
         (0, true)
     } else {
         let payload_size_kb = export_bytes.len() / 1024;
-        let mut patchset_uploaded: Option<i64> = None;
+        let mut patchset_uploaded: Option<(i64, Option<String>)> = None;
 
         // Phase 2: try patchset upload first if v3 + we have a stored base.
         if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
@@ -266,9 +266,9 @@ pub async fn sync_all_async(
 
                         let ack = recv_json::<HubMessage>(&mut ws).await?;
                         match ack {
-                            HubMessage::SyncAck { note_count } => {
+                            HubMessage::SyncAck { note_count, stored_sha256 } => {
                                 eprintln!("Hub acknowledged patchset: {note_count} notes");
-                                patchset_uploaded = Some(note_count);
+                                patchset_uploaded = Some((note_count, stored_sha256));
                             }
                             HubMessage::SyncReject { reason }
                                 if reason.contains("patchset base mismatch") =>
@@ -298,8 +298,8 @@ pub async fn sync_all_async(
             }
         }
 
-        let notes = if let Some(n) = patchset_uploaded {
-            n
+        let (notes, hub_stored_sha) = if let Some((n, sha)) = patchset_uploaded {
+            (n, sha)
         } else {
             // Full upload (v3 chunked or v1/v2 single-frame).
             if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
@@ -363,16 +363,21 @@ pub async fn sync_all_async(
 
             let ack = recv_json::<HubMessage>(&mut ws).await?;
             match ack {
-                HubMessage::SyncAck { note_count } => {
+                HubMessage::SyncAck { note_count, stored_sha256 } => {
                     eprintln!("Hub acknowledged: {note_count} notes");
-                    note_count
+                    (note_count, stored_sha256)
                 }
                 other => anyhow::bail!("expected sync-ack, got: {other:?}"),
             }
         };
 
-        // Rotate the local base when v3 succeeded — the hub now has whatever
-        // we just uploaded as its baseline for the next patchset round-trip.
+        // Rotate the local base when v3 succeeded. SQLite session apply
+        // on the hub side produces a row-equivalent but not byte-equivalent
+        // DB compared to our local-export.db, so the next patchset upload
+        // must advertise the HUB's post-apply sha as base_export_sha256, not
+        // ours. The hub echoes its stored hash in SyncAck.stored_sha256;
+        // fall back to our local export_hash when the field is absent (older
+        // hub or full-upload path).
         if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
             let base_db_path = base_export_db_path(config_dir);
             let base_sha_path = base_export_sha_path(config_dir);
@@ -380,7 +385,8 @@ pub async fn sync_all_async(
                 let _ = std::fs::create_dir_all(parent);
             }
             std::fs::copy(&export_path, &base_db_path)?;
-            std::fs::write(&base_sha_path, &export_hash)?;
+            let base_sha = hub_stored_sha.as_deref().unwrap_or(&export_hash);
+            std::fs::write(&base_sha_path, base_sha)?;
         }
 
         std::fs::write(&hash_path, &export_hash)?;
