@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **`episodic-memory` is now declared a required dependency.** `config.json` flips `required: false` to `true`, matching the gate-mode design the plugin already enforces (no SQLite text-search fallback exists). The README install block adds `obra/superpowers-marketplace` so users can install `episodic-memory` before installing learning-loop. No runtime behaviour change beyond what the session-start hook already did: this commit makes the contract explicit in `config.json` and the README.
+- **`check-deps.mjs` distinguishes required vs optional dependencies.** The output's `required` field used to hold the version constraint string (now renamed `versionConstraint`); `required` is now an explicit boolean derived from `config.json`. The session-start hook renders missing required deps under "Missing Required Dependencies" with blocking urgency and missing optional deps under "Missing Optional Dependencies" with informational framing. `depsAllSatisfied` (which gates the episodic-memory step of the retrieval protocol) only flips to false when a *required* dep is missing or outdated — missing optional deps no longer suppress that step. The `/init` phase 3e and `/health` step 1.5 skill docs also thread the distinction through presentation.
+
 ## v1.20.5
 
 ### Internal
