@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.20.6
+
 ### Changed
 
 - **`episodic-memory` is now declared a required dependency.** `config.json` flips `required: false` to `true`, matching the gate-mode design the plugin already enforces (no SQLite text-search fallback exists). The README install block adds `obra/superpowers-marketplace` so users can install `episodic-memory` before installing learning-loop. No runtime behaviour change beyond what the session-start hook already did: this commit makes the contract explicit in `config.json` and the README.
