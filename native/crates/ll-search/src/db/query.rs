@@ -34,6 +34,18 @@ pub struct TagInfo {
 }
 
 #[derive(Serialize)]
+pub struct IntentionSummary {
+    pub context: String,
+    pub count: i64,
+}
+
+#[derive(Serialize)]
+pub struct IntentionDetail {
+    pub path: String,
+    pub cue: Option<String>,
+}
+
+#[derive(Serialize)]
 pub struct SessionInfo {
     pub session_id: i64,
     pub note_count: usize,
@@ -160,6 +172,43 @@ pub fn list_tags(conn: &Connection, min_count: usize) -> Vec<TagInfo> {
         }
     }
 
+    result
+}
+
+pub fn list_intentions_summary(conn: &Connection) -> Vec<IntentionSummary> {
+    let mut result = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT context, COUNT(*) AS count FROM intentions \
+         GROUP BY context ORDER BY count DESC",
+    ) {
+        if let Ok(rows) = stmt.query_map([], |row| {
+            Ok(IntentionSummary {
+                context: row.get(0)?,
+                count: row.get(1)?,
+            })
+        }) {
+            result = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
+    result
+}
+
+pub fn list_intentions_for_context(conn: &Connection, context: &str) -> Vec<IntentionDetail> {
+    let mut result = Vec::new();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT n.path, i.cue FROM intentions i \
+         JOIN notes n ON i.note_id = n.id \
+         WHERE i.context = ?1 ORDER BY n.path",
+    ) {
+        if let Ok(rows) = stmt.query_map(params![context], |row| {
+            Ok(IntentionDetail {
+                path: row.get(0)?,
+                cue: row.get(1)?,
+            })
+        }) {
+            result = rows.filter_map(|r| r.ok()).collect();
+        }
+    }
     result
 }
 

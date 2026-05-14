@@ -318,43 +318,8 @@ async fn main() {
         Commands::Intentions { db_path, context } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             match context {
-                Some(ctx) => {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT n.path, i.cue FROM intentions i \
-                             JOIN notes n ON i.note_id = n.id \
-                             WHERE i.context = ?1 ORDER BY n.path",
-                        )
-                        .expect("failed to prepare intentions detail query");
-                    let rows = stmt
-                        .query_map(rusqlite::params![ctx], |row| {
-                            Ok(serde_json::json!({
-                                "path": row.get::<_, String>(0)?,
-                                "cue": row.get::<_, Option<String>>(1)?,
-                            }))
-                        })
-                        .expect("failed to execute intentions detail query");
-                    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
-                    out(&items);
-                }
-                None => {
-                    let mut stmt = conn
-                        .prepare(
-                            "SELECT context, COUNT(*) AS count FROM intentions \
-                             GROUP BY context ORDER BY count DESC",
-                        )
-                        .expect("failed to prepare intentions summary query");
-                    let rows = stmt
-                        .query_map([], |row| {
-                            Ok(serde_json::json!({
-                                "context": row.get::<_, String>(0)?,
-                                "count": row.get::<_, i64>(1)?,
-                            }))
-                        })
-                        .expect("failed to execute intentions summary query");
-                    let items: Vec<serde_json::Value> = rows.filter_map(|r| r.ok()).collect();
-                    out(&items);
-                }
+                Some(ctx) => out(&ll_search::db::list_intentions_for_context(&conn, &ctx)),
+                None => out(&ll_search::db::list_intentions_summary(&conn)),
             }
         }
         Commands::Sessions { db_path, min_notes } => {
@@ -432,35 +397,8 @@ async fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir);
-            let candidate_results = if peers.is_empty() {
-                ll_search::search::hybrid_query(&conn, &query, candidates, &ll_search::search::TemporalParams::default(), &store)
-            } else {
-                ll_search::search::hybrid_query_federated(&conn, &query, candidates, &peers, &ll_search::search::TemporalParams::default(), &store)
-            };
-            if candidate_results.is_empty() {
-                out(&Vec::<ll_search::rerank::RerankResult>::new());
-                return;
-            }
-            let paths: Vec<String> = candidate_results.iter().map(|r| r.path.clone()).collect();
-            let bodies = ll_search::search::batch_load_bodies_federated(&conn, &peers, &paths);
-            let docs: Vec<(String, String)> = candidate_results
-                .iter()
-                .filter_map(|r| {
-                    let body = bodies.get(&r.path)?;
-                    Some((r.path.clone(), body.clone()))
-                })
-                .collect();
-            let report = ll_search::rerank::rerank_with_report(&query, &docs, top);
-            if !report.failed.is_empty() {
-                eprintln!(
-                    "rerank (Commands::Rerank): {} of {} documents failed to score (first: path={} reason={})",
-                    report.failed.len(),
-                    report.failed.len() + report.scored.len(),
-                    report.failed[0].path,
-                    report.failed[0].reason,
-                );
-            }
-            out(&report.scored);
+            let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store);
+            out(&scored);
         }
         Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, librarian_script } => {
             init_embedding();

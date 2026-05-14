@@ -9,4 +9,6 @@ pub use query::{
     compute_sessions, compute_project_phases, Status, TagInfo,
     chrono_iso_now, days_to_ymd, list_sessions, SessionInfo,
     link_stats, LinkStats, FolderStats,
+    list_intentions_summary, list_intentions_for_context,
+    IntentionSummary, IntentionDetail,
 };
