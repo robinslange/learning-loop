@@ -361,10 +361,21 @@ async fn try_patchset_upload(
         }
     };
 
+    // Compress before chunking so the zstd dictionary spans the whole
+    // patchset (per-chunk compression would cost 10-15% of the ratio).
+    let raw_patchset_len = patchset.len();
+    let body = super::compression::zstd_encode(&patchset)?;
+    eprintln!(
+        "Compressed patchset {} -> {} bytes ({}%)",
+        raw_patchset_len,
+        body.len(),
+        if raw_patchset_len == 0 { 0 } else { 100 * body.len() / raw_patchset_len }
+    );
+
     let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
-    let total_len = patchset.len();
+    let total_len = body.len();
     let chunk_count = (((total_len + chunk_size_max - 1) / chunk_size_max).max(1)) as u32;
-    let chunk_hashes: Vec<[u8; 32]> = patchset
+    let chunk_hashes: Vec<[u8; 32]> = body
         .chunks(chunk_size_max.max(1))
         .map(|s| Sha256::digest(s).into())
         .collect();
@@ -372,11 +383,11 @@ async fn try_patchset_upload(
 
     let mut envelope = auth::create_envelope_v3(
         seed,
-        &patchset,
+        &body,
         peer_id,
         config.graph,
         "patchset",
-        "raw",
+        "zstd",
         chunk_count,
         &merkle,
         chunk_size_max as u32,
@@ -385,13 +396,13 @@ async fn try_patchset_upload(
     envelope["base_export_id"] = serde_json::json!(base_sha);
     send_json(ws, &ClientMessage::UploadEnvelope { envelope }).await?;
     eprintln!(
-        "Sent patchset ({} bytes, {} chunks @ {} KiB max, vs full {} bytes)",
+        "Sent patchset ({} bytes compressed, {} chunks @ {} KiB max, vs full export {} bytes)",
         total_len,
         chunk_count,
         chunk_size_max / 1024,
         export_bytes.len()
     );
-    for (seq, slice) in patchset.chunks(chunk_size_max.max(1)).enumerate() {
+    for (seq, slice) in body.chunks(chunk_size_max.max(1)).enumerate() {
         let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
         send_binary(ws, frame.encode()).await?;
     }
@@ -423,15 +434,26 @@ async fn upload_full(
     negotiated_protocol: u32,
 ) -> anyhow::Result<(i64, Option<String>)> {
     if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
+        // Compress whole-body before chunking so the zstd dictionary context
+        // spans the entire payload.
+        let raw_len = export_bytes.len();
+        let body = super::compression::zstd_encode(export_bytes)?;
+        eprintln!(
+            "Compressed export {} -> {} bytes ({}%)",
+            raw_len,
+            body.len(),
+            if raw_len == 0 { 0 } else { 100 * body.len() / raw_len }
+        );
+
         let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
-        let total_len = export_bytes.len();
+        let total_len = body.len();
         let chunk_count = if total_len == 0 {
             1
         } else {
             ((total_len + chunk_size_max - 1) / chunk_size_max) as u32
         };
 
-        let chunk_hashes: Vec<[u8; 32]> = export_bytes
+        let chunk_hashes: Vec<[u8; 32]> = body
             .chunks(chunk_size_max.max(1))
             .map(|slice| Sha256::digest(slice).into())
             .collect();
@@ -439,24 +461,24 @@ async fn upload_full(
 
         let envelope = auth::create_envelope_v3(
             seed,
-            export_bytes,
+            &body,
             peer_id,
             config.graph,
             "full",
-            "raw",
+            "zstd",
             chunk_count,
             &merkle,
             chunk_size_max as u32,
         );
         send_json(ws, &ClientMessage::UploadEnvelope { envelope }).await?;
         eprintln!(
-            "Sent envelope ({} bytes, {} chunks @ {} KiB max)",
+            "Sent envelope ({} bytes compressed, {} chunks @ {} KiB max)",
             total_len,
             chunk_count,
             chunk_size_max / 1024
         );
 
-        for (seq, slice) in export_bytes.chunks(chunk_size_max.max(1)).enumerate() {
+        for (seq, slice) in body.chunks(chunk_size_max.max(1)).enumerate() {
             let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
             send_binary(ws, frame.encode()).await?;
             eprintln!(

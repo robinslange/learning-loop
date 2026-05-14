@@ -5,6 +5,7 @@ pub mod visibility;
 pub mod auth;
 pub mod protocol;
 pub mod client;
+pub mod compression;
 pub mod watch;
 pub mod seed_store;
 pub mod seed_migrate;
