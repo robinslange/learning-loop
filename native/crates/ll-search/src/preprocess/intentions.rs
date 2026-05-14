@@ -301,4 +301,126 @@ mod tests {
         let intents = parse_intentions(fm);
         assert!(intents.is_empty());
     }
+
+    #[test]
+    fn test_parse_intentions_inline_unknown_keys_ignored() {
+        let fm = "intentions: [{context: \"keep\", priority: 9, cue: \"hold\"}]\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "keep");
+        assert_eq!(intents[0].cue.as_deref(), Some("hold"));
+    }
+
+    #[test]
+    fn test_parse_intentions_inline_object_missing_context_dropped() {
+        let fm = "intentions: [{cue: \"orphan cue\"}, {context: \"ok\"}]\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1, "objects without context must drop out");
+        assert_eq!(intents[0].context, "ok");
+    }
+
+    #[test]
+    fn test_parse_intentions_inline_empty_cue_becomes_none() {
+        let fm = "intentions: [{context: \"a\", cue: \"\"}]\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert!(intents[0].cue.is_none(), "empty-string cue must collapse to None");
+    }
+
+    #[test]
+    fn test_parse_intentions_inline_non_list_returns_empty() {
+        // Scalar value after `intentions:` (not starting with `[`) returns empty per the
+        // current contract — block form is signalled by an empty trailing value.
+        let fm = "intentions: just a scalar\n";
+        let intents = parse_intentions(fm);
+        assert!(intents.is_empty());
+    }
+
+    #[test]
+    fn test_parse_intentions_block_with_dash_only_then_indented_fields() {
+        let fm = "intentions:\n  -\n    context: hygiene\n    cue: weekly\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "hygiene");
+        assert_eq!(intents[0].cue.as_deref(), Some("weekly"));
+    }
+
+    #[test]
+    fn test_parse_intentions_block_inline_object_after_dash() {
+        let fm = "intentions:\n  - {context: \"focus\", cue: \"morning\"}\n  - {context: \"rest\"}\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 2);
+        assert_eq!(intents[0].context, "focus");
+        assert_eq!(intents[0].cue.as_deref(), Some("morning"));
+        assert_eq!(intents[1].context, "rest");
+        assert!(intents[1].cue.is_none());
+    }
+
+    #[test]
+    fn test_parse_intentions_block_drops_empty_context_entries() {
+        // A bare `- cue: foo` line with no context must not produce a phantom entry.
+        let fm = "intentions:\n  - cue: dangling\n  - context: kept\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1, "context-less entry must be filtered out");
+        assert_eq!(intents[0].context, "kept");
+    }
+
+    #[test]
+    fn test_parse_intentions_block_deindent_stops_collection() {
+        // A column-0 sibling key terminates the intentions block; trailing context
+        // outside the block must not be folded in.
+        let fm = "intentions:\n  - context: inside\n    cue: kept\ndate: 2026-05-14\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "inside");
+        assert_eq!(intents[0].cue.as_deref(), Some("kept"));
+    }
+
+    #[test]
+    fn test_parse_intentions_legacy_flat_no_dash_keeps_full_string_as_context() {
+        let fm = "intentions:\n  - just one phrase no separator\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "just one phrase no separator");
+        assert!(intents[0].cue.is_none());
+    }
+
+    #[test]
+    fn test_parse_intentions_legacy_flat_em_dash_trailing_empty_cue() {
+        let fm = "intentions:\n  - \"context only \u{2014}\"\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "context only");
+        assert!(intents[0].cue.is_none(), "empty post-dash segment must collapse to None");
+    }
+
+    #[test]
+    fn test_parse_intentions_single_quotes_unquote() {
+        let fm = "intentions: [{context: 'single quoted', cue: 'also single'}]\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "single quoted");
+        assert_eq!(intents[0].cue.as_deref(), Some("also single"));
+    }
+
+    #[test]
+    fn test_parse_intentions_inline_quoted_comma_does_not_split() {
+        // Commas inside quoted strings must NOT split items; depth/in_str tracking
+        // is the whole reason split_inline_fields exists.
+        let fm = "intentions: [{context: \"first, with comma\", cue: \"more, commas\"}]\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1, "quoted commas must not split into two items");
+        assert_eq!(intents[0].context, "first, with comma");
+        assert_eq!(intents[0].cue.as_deref(), Some("more, commas"));
+    }
+
+    #[test]
+    fn test_parse_intentions_leading_whitespace_on_key_line_tolerated() {
+        // The frontmatter scanner uses trim_start when locating `intentions:`, so
+        // an indented key must still be recognised.
+        let fm = "  intentions:\n    - context: nested key\n";
+        let intents = parse_intentions(fm);
+        assert_eq!(intents.len(), 1);
+        assert_eq!(intents[0].context, "nested key");
+    }
 }
