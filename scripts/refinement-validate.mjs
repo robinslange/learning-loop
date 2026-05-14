@@ -26,6 +26,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 
@@ -67,7 +68,59 @@ function stripEmDashes(text) {
   return { cleaned, count };
 }
 
-function validateEdit(decision, currentBody) {
+// LCS line mask: returns a boolean per line of `b` indicating whether that
+// line is part of the longest common subsequence with `a`. Preserved lines
+// are bytes the agent kept verbatim from the upstream; the rest are inserts
+// or modifications it owns.
+function lcsLineMask(a, b) {
+  const n = a.length;
+  const m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (a[i - 1] === b[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+      else dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  const preserved = new Array(m).fill(false);
+  let i = n;
+  let j = m;
+  while (i > 0 && j > 0) {
+    if (a[i - 1] === b[j - 1]) {
+      preserved[j - 1] = true;
+      i--;
+      j--;
+    } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+      i--;
+    } else {
+      j--;
+    }
+  }
+  return preserved;
+}
+
+// Strip em-dashes only from lines the agent added or modified. Lines that
+// match the upstream verbatim are passed through untouched — including their
+// em-dashes — so pre-existing prose is not corrupted by the LLM normaliser.
+function stripEmDashesInInserts(upstreamBody, proposedBody) {
+  if (!proposedBody) return { cleaned: proposedBody, count: 0 };
+  const upLines = upstreamBody.split('\n');
+  const propLines = proposedBody.split('\n');
+  const preserved = lcsLineMask(upLines, propLines);
+  let count = 0;
+  const cleaned = propLines
+    .map((line, idx) => {
+      if (preserved[idx]) return line;
+      return line.replace(new RegExp(EM_DASH, 'g'), () => {
+        count++;
+        return EM_DASH_REPLACEMENT;
+      });
+    })
+    .join('\n');
+  return { cleaned, count };
+}
+
+export function validateEdit(decision, currentBody) {
   const flags = [];
 
   // Split proposed_body into frontmatter and body. Em-dash strip applies ONLY
@@ -77,8 +130,16 @@ function validateEdit(decision, currentBody) {
   const proposedFmRaw = extractFrontmatter(proposedRaw);
   const proposedBodyOnly = proposedRaw.slice(proposedFmRaw.length);
 
-  // 1. Em-dash strip (body only)
-  const { cleaned: cleanedBodyOnly, count: emDashCount } = stripEmDashes(proposedBodyOnly);
+  const currentFm = extractFrontmatter(currentBody);
+  const currentBodyOnly = currentBody.slice(currentFm.length);
+
+  // 1. Em-dash strip — only on lines the agent added or modified. Lines that
+  //    came through verbatim from the upstream keep their em-dashes; otherwise
+  //    we corrupt pre-existing prose and fire false em_dash_violation flags.
+  const { cleaned: cleanedBodyOnly, count: emDashCount } = stripEmDashesInInserts(
+    currentBodyOnly,
+    proposedBodyOnly,
+  );
   if (emDashCount > 0) flags.push({ type: 'em_dash_violation', count: emDashCount });
 
   // 2. Frontmatter integrity. The upstream frontmatter must be byte-equal to
@@ -86,7 +147,6 @@ function validateEdit(decision, currentBody) {
   // strip pass that already ran). When applying, the driver always uses the
   // upstream's original frontmatter, never the proposed one — this check is
   // diagnostic, not corrective.
-  const currentFm = extractFrontmatter(currentBody);
   const normalize = (s) => s.replace(new RegExp(EM_DASH, 'g'), EM_DASH_REPLACEMENT);
   if (normalize(currentFm) !== normalize(proposedFmRaw)) {
     flags.push({
@@ -321,4 +381,6 @@ function main() {
   process.stdout.write(JSON.stringify({ summary, decisions: validated }, null, 2) + '\n');
 }
 
-main();
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+  main();
+}
