@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Refinement validator corrupting pre-existing em-dashes.** `stripEmDashes` ran across the entire `proposed_body`, so upstream prose the agent legitimately preserved verbatim (em-dashes included) got rewritten to `, ` with a doubled-space artefact, and `em_dash_violation` fired on text the agent never authored. The validator now runs a line-level LCS between the upstream body and the proposed body and only strips em-dashes from inserted or modified lines; lines that match the upstream verbatim pass through untouched. Contract change: `em_dash_violation` now counts em-dashes the agent *added*, not em-dashes anywhere in the proposed body. Modified lines stay conservative — any edit to a line means the agent owns its em-dashes there.
+
 ## v1.20.3
 
 ### Added
