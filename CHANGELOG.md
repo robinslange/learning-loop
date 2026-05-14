@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.20.5
+
 ### Internal
 
 - **NLI integration tests no longer fork a shell-script stub.** Two test files (`edge-infer-wikilink-removal-integration`, `edge-infer-regex-and-nli-both-fire`) wrote a `/bin/sh` stub to a temp dir and let `runEdgeInfer` fork it through `runNliBatchViaSubprocess`. That call has a 1500ms `execFileSync` timeout; under full-suite parallel load the fork+exec occasionally crept past 1500ms, the timeout fired, the catch block returned `[]`, and the test asserted on a missing NLI row. A flake we caught took 1509ms wallclock — 9ms over the timeout. `edge-infer.mjs` now exposes `__setNliBatchOverrideForTesting(fn)`: when set, `runNliBatch` returns the override's results without touching the daemon or subprocess paths. Production has zero references to it; tests that inject restore `null` in teardown. The four migrated tests dropped from 160–1509ms each to 3–5ms each. The daemon-orchestration test (`edge-infer-nli-daemon`) and the real-binary truncation test (`edge-infer-nli-truncation`) are intentionally untouched — they specifically exercise the fork and binary contract.
