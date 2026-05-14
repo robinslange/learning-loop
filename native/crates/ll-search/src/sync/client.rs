@@ -12,8 +12,9 @@ use super::config::{FederationConfig, seed_path, export_db_path, peers_dir};
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
 use super::protocol::{
-    ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp,
-    ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP, PROTOCOL_VERSION_FRAMED,
+    manifest_root, ChunkedFrame, ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp,
+    CHUNK_MAX_BODY_SIZE, ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP, PROTOCOL_VERSION_CHUNKED,
+    PROTOCOL_VERSION_FRAMED, PROTOCOL_VERSION_LATEST,
 };
 
 const SCHEMA_VERSION: u32 = 1;
@@ -159,7 +160,7 @@ pub async fn sync_all_async(
         supported_models: vec![model_id.clone()],
         model_id,
         schema_version: SCHEMA_VERSION,
-        protocol_version: Some(PROTOCOL_VERSION_FRAMED),
+        protocol_version: Some(PROTOCOL_VERSION_LATEST),
     }).await?;
 
     let challenge = recv_json::<HubMessage>(&mut ws).await?;
@@ -197,17 +198,69 @@ pub async fn sync_all_async(
         }
         (0, true)
     } else {
-        let envelope = auth::create_envelope(&seed, &export_bytes, &peer_id, config.graph);
-        send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+        let payload_size_kb = export_bytes.len() / 1024;
 
-        let export_size_kb = export_bytes.len() / 1024;
-        let payload = if framed_path {
-            Envelope::from_body(export_bytes)?.encode()
+        if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
+            // v3: chunked upload. Default chunk size 4 MiB; cap at CHUNK_MAX_BODY_SIZE (8 MiB).
+            let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
+            let total_len = export_bytes.len();
+            let chunk_count = if total_len == 0 {
+                1
+            } else {
+                ((total_len + chunk_size_max - 1) / chunk_size_max) as u32
+            };
+
+            let chunk_hashes: Vec<[u8; 32]> = export_bytes
+                .chunks(chunk_size_max.max(1))
+                .map(|slice| Sha256::digest(slice).into())
+                .collect();
+            let merkle = manifest_root(&chunk_hashes);
+
+            let envelope = auth::create_envelope_v3(
+                &seed,
+                &export_bytes,
+                &peer_id,
+                config.graph,
+                "full",
+                "raw",
+                chunk_count,
+                &merkle,
+                chunk_size_max as u32,
+            );
+            send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+            eprintln!(
+                "Sent envelope ({} bytes, {} chunks @ {} KiB max)",
+                total_len,
+                chunk_count,
+                chunk_size_max / 1024
+            );
+
+            for (seq, slice) in export_bytes
+                .chunks(chunk_size_max.max(1))
+                .enumerate()
+            {
+                let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
+                send_binary(&mut ws, frame.encode()).await?;
+                eprintln!(
+                    "  chunk {}/{} ({} KiB)",
+                    seq as u32 + 1,
+                    chunk_count,
+                    slice.len() / 1024
+                );
+            }
         } else {
-            export_bytes
-        };
-        send_binary(&mut ws, payload).await?;
-        eprintln!("Sent local index ({export_size_kb} KB, framed={framed_path})");
+            // v1/v2: single envelope + single binary message.
+            let envelope = auth::create_envelope(&seed, &export_bytes, &peer_id, config.graph);
+            send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+
+            let payload = if framed_path {
+                Envelope::from_body(export_bytes)?.encode()
+            } else {
+                export_bytes
+            };
+            send_binary(&mut ws, payload).await?;
+            eprintln!("Sent local index ({payload_size_kb} KB, framed={framed_path})");
+        }
 
         let ack = recv_json::<HubMessage>(&mut ws).await?;
         let notes = match ack {
