@@ -33,6 +33,7 @@ zeroize = { version = "1", features = ["zeroize_derive"] }
 hkdf = "0.12"
 notify = "7"
 ctrlc = "3"
+zstd = "0.13"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
