@@ -17,21 +17,21 @@
 //! environments that cannot run a keyring daemon.
 
 use std::path::Path;
+
 use anyhow::Context as _;
-use chacha20poly1305::{
-    aead::{Aead, KeyInit},
-    ChaCha20Poly1305, Nonce,
-};
 use ed25519_dalek::SigningKey;
-use hkdf::Hkdf;
 use rand::RngCore;
-use sha2::Sha256;
 use zeroize::Zeroizing;
 
-use super::config::{
-    encrypted_seed_path, keyring_user, seed_meta_path, seed_path, KEYRING_SERVICE,
-    KEYRING_USER_LEGACY,
-};
+use super::config::seed_meta_path;
+
+mod encrypted;
+mod keyring;
+mod plaintext;
+
+pub use encrypted::{read_encrypted, write_encrypted};
+pub use keyring::{delete_keyring, probe_keyring, read_keyring, write_keyring};
+pub use plaintext::read_plaintext_legacy;
 
 /// Which backend provided (or will store) the signing seed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,23 +63,6 @@ pub struct LoadResult {
     /// True if a new seed was generated (first install).
     pub created: bool,
 }
-
-/// Encrypted file layout v1:
-///
-/// ```text
-/// offset  bytes  meaning
-/// 0       4      magic = b"LLS1"
-/// 4       12     nonce (random per write)
-/// 16      48     ciphertext (32-byte seed + 16-byte poly1305 tag)
-/// total: 64 bytes
-/// ```
-const ENC_MAGIC: &[u8; 4] = b"LLS1";
-const ENC_NONCE_LEN: usize = 12;
-const ENC_TOTAL_LEN: usize = 64;
-
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
 
 /// Load the seed from any available backend without creating one.
 ///
@@ -164,36 +147,30 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
 
     if let Some(ref f) = force {
         match f.as_str() {
-            "" => {} // empty string: no override, fall through to auto-detect
-            "mock" => return load_or_create_mock(config_dir),
-            "encrypted" => return load_or_create_encrypted(config_dir),
-            "keyring" => return load_or_create_keyring(config_dir),
+            "" => {}
+            "mock" => return encrypted::load_or_create_mock(config_dir),
+            "encrypted" => return encrypted::load_or_create_seed(config_dir),
+            "keyring" => return keyring::load_or_create_seed(config_dir),
             other => {
                 anyhow::bail!("unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock", other);
             }
         }
     }
 
-    // 2. Try keyring
     if let Some(seed) = read_keyring(config_dir)? {
         let key = SigningKey::from_bytes(&seed);
         return Ok(LoadResult { signing_key: key, backend: SeedBackend::Keyring, created: false });
     }
-
-    // 3. Try encrypted
     if let Some(seed) = read_encrypted(config_dir)? {
         let key = SigningKey::from_bytes(&seed);
         return Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: false });
     }
-
-    // 4. Try plaintext-legacy
     if let Some(seed) = read_plaintext_legacy(config_dir)? {
         eprintln!("learning-loop: legacy plaintext seed detected; run `ll-search migrate-seed` to upgrade");
         let key = SigningKey::from_bytes(&seed);
         return Ok(LoadResult { signing_key: key, backend: SeedBackend::PlaintextLegacy, created: false });
     }
 
-    // 5. Generate new seed, probe backends
     let mut raw = Zeroizing::new([0u8; 32]);
     rand::thread_rng().fill_bytes(raw.as_mut());
 
@@ -210,310 +187,6 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
     Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: true })
 }
 
-// ---------------------------------------------------------------------------
-// Forced-backend helpers (used by load_or_create and tests)
-// ---------------------------------------------------------------------------
-
-fn load_or_create_keyring(config_dir: &Path) -> anyhow::Result<LoadResult> {
-    if let Some(seed) = read_keyring(config_dir)? {
-        return Ok(LoadResult {
-            signing_key: SigningKey::from_bytes(&seed),
-            backend: SeedBackend::Keyring,
-            created: false,
-        });
-    }
-    let mut raw = Zeroizing::new([0u8; 32]);
-    rand::thread_rng().fill_bytes(raw.as_mut());
-    write_keyring(config_dir, &raw)?;
-    write_seed_meta(config_dir, SeedBackend::Keyring, false)?;
-    Ok(LoadResult {
-        signing_key: SigningKey::from_bytes(&raw),
-        backend: SeedBackend::Keyring,
-        created: true,
-    })
-}
-
-fn load_or_create_encrypted(config_dir: &Path) -> anyhow::Result<LoadResult> {
-    if let Some(seed) = read_encrypted(config_dir)? {
-        return Ok(LoadResult {
-            signing_key: SigningKey::from_bytes(&seed),
-            backend: SeedBackend::Encrypted,
-            created: false,
-        });
-    }
-    let mut raw = Zeroizing::new([0u8; 32]);
-    rand::thread_rng().fill_bytes(raw.as_mut());
-    write_encrypted(config_dir, &raw)?;
-    write_seed_meta(config_dir, SeedBackend::Encrypted, false)?;
-    Ok(LoadResult {
-        signing_key: SigningKey::from_bytes(&raw),
-        backend: SeedBackend::Encrypted,
-        created: true,
-    })
-}
-
-/// In-process mock store backed by a temp file; only used in tests via `LL_SEED_BACKEND=mock`.
-fn load_or_create_mock(config_dir: &Path) -> anyhow::Result<LoadResult> {
-    // Mock uses the encrypted path but bypasses machine-id derivation with a fixed test key.
-    let path = encrypted_seed_path(config_dir);
-    if path.exists() {
-        if let Some(seed) = read_encrypted(config_dir)? {
-            return Ok(LoadResult {
-                signing_key: SigningKey::from_bytes(&seed),
-                backend: SeedBackend::Encrypted,
-                created: false,
-            });
-        }
-    }
-    let mut raw = Zeroizing::new([0u8; 32]);
-    rand::thread_rng().fill_bytes(raw.as_mut());
-    write_encrypted(config_dir, &raw)?;
-    Ok(LoadResult {
-        signing_key: SigningKey::from_bytes(&raw),
-        backend: SeedBackend::Encrypted,
-        created: true,
-    })
-}
-
-// ---------------------------------------------------------------------------
-// Keyring backend
-// ---------------------------------------------------------------------------
-
-/// Attempt to read the seed from the OS keyring under the per-`config_dir`
-/// namespaced account. Returns `None` if not found.
-///
-/// Legacy-fallback: if the namespaced account is empty but the un-namespaced
-/// `KEYRING_USER_LEGACY` account holds a seed whose derived pubkey matches
-/// `federation/config.json::identity.pubkey` for this `config_dir`, the seed
-/// is auto-migrated (rewritten under the namespaced account, legacy deleted)
-/// and returned. The pubkey check is the safety guard: without it we'd hand
-/// any leaked legacy entry to any config_dir that asks, recreating the
-/// global-namespace stomping problem in reverse.
-pub fn read_keyring(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
-    let user = keyring_user(config_dir);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
-    match entry.get_password() {
-        Ok(hex_str) => return Ok(Some(decode_seed_hex(&hex_str)?)),
-        Err(keyring::Error::NoEntry) => {}
-        Err(e) => {
-            if is_platform_unavailable(&e) {
-                return Ok(None);
-            }
-            return Err(anyhow::anyhow!("keyring read error: {e}"));
-        }
-    }
-
-    if let Some(seed) = try_legacy_migration(config_dir, &user)? {
-        return Ok(Some(seed));
-    }
-    Ok(None)
-}
-
-/// Write the seed to the OS keyring under the per-`config_dir` account.
-pub fn write_keyring(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
-    let user = keyring_user(config_dir);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
-    let hex_str = hex::encode(seed);
-    entry.set_password(&hex_str).context("failed to write seed to keyring")
-}
-
-/// Delete the seed from the OS keyring (used by `--rollback`).
-pub fn delete_keyring(config_dir: &Path) -> anyhow::Result<()> {
-    let user = keyring_user(config_dir);
-    let entry = keyring::Entry::new(KEYRING_SERVICE, &user)
-        .context("failed to create keyring entry")?;
-    entry.delete_credential().context("failed to delete seed from keyring")
-}
-
-fn decode_seed_hex(hex_str: &str) -> anyhow::Result<[u8; 32]> {
-    let bytes = hex::decode(hex_str.trim())
-        .context("keyring seed is not valid hex")?;
-    bytes.try_into()
-        .map_err(|_| anyhow::anyhow!("keyring seed must be exactly 32 bytes"))
-}
-
-/// If a legacy un-namespaced keyring entry exists AND its derived pubkey
-/// matches the federation/config.json pubkey for this config_dir, migrate it
-/// to the namespaced account and return the seed. Otherwise return None.
-///
-/// Without the pubkey match we would hand any legacy entry to any config_dir
-/// that happens to call `read_keyring`, including leaked test/dev watchers —
-/// re-introducing the same global-namespace stomping the migration is meant
-/// to prevent.
-fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Result<Option<[u8; 32]>> {
-    use base64::Engine as _;
-    let legacy = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
-        .context("failed to create legacy keyring entry")?;
-    let hex_str = match legacy.get_password() {
-        Ok(s) => s,
-        Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(e) if is_platform_unavailable(&e) => return Ok(None),
-        Err(e) => return Err(anyhow::anyhow!("legacy keyring read error: {e}")),
-    };
-
-    let seed = decode_seed_hex(&hex_str)?;
-
-    let expected_pubkey = match read_federation_pubkey(config_dir) {
-        Some(pk) => pk,
-        None => return Ok(None),
-    };
-    let derived_pubkey = ed25519_dalek::SigningKey::from_bytes(&seed)
-        .verifying_key()
-        .to_bytes();
-    let expected_bytes = match base64::engine::general_purpose::STANDARD.decode(
-        expected_pubkey.strip_prefix("ed25519:").unwrap_or(&expected_pubkey),
-    ) {
-        Ok(b) => b,
-        Err(_) => return Ok(None),
-    };
-    if derived_pubkey.as_slice() != expected_bytes.as_slice() {
-        return Ok(None);
-    }
-
-    let namespaced = keyring::Entry::new(KEYRING_SERVICE, namespaced_user)
-        .context("failed to create namespaced keyring entry")?;
-    namespaced.set_password(&hex_str).context("failed to write seed to namespaced keyring entry")?;
-    let _ = legacy.delete_credential();
-    eprintln!("learning-loop: migrated keyring entry from legacy un-namespaced account to {namespaced_user}");
-    Ok(Some(seed))
-}
-
-fn read_federation_pubkey(config_dir: &Path) -> Option<String> {
-    let path = config_dir.join("federation").join("config.json");
-    let text = std::fs::read_to_string(&path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
-    v.get("identity")?.get("pubkey")?.as_str().map(|s| s.to_string())
-}
-
-/// Probe keyring support by writing and reading a sentinel value.
-///
-/// Returns `Ok(())` if the keyring is available. Does not persist anything meaningful.
-pub fn probe_keyring() -> anyhow::Result<()> {
-    let sentinel_user = "probe-sentinel-2K";
-    let entry = keyring::Entry::new(KEYRING_SERVICE, sentinel_user)
-        .context("failed to create probe keyring entry")?;
-    entry.set_password("probe").context("keyring probe write failed")?;
-    let _ = entry.get_password();
-    let _ = entry.delete_credential();
-    Ok(())
-}
-
-fn is_platform_unavailable(e: &keyring::Error) -> bool {
-    let msg = e.to_string().to_lowercase();
-    // Common indicators of a missing keyring daemon
-    msg.contains("dbus") || msg.contains("no secret service") || msg.contains("platform")
-        || msg.contains("gnome-keyring") || msg.contains("kwallet")
-}
-
-// ---------------------------------------------------------------------------
-// Encrypted-at-rest backend
-// ---------------------------------------------------------------------------
-
-/// Derive the AEAD key from the machine ID using HKDF-SHA256.
-fn derive_enc_key() -> anyhow::Result<[u8; 32]> {
-    let machine_id = machine_uid::get()
-        .map_err(|e| anyhow::anyhow!("failed to read machine-id: {e}"))?;
-    let hk = Hkdf::<Sha256>::new(Some(b"ll-search-seed-v1"), machine_id.as_bytes());
-    let mut prk = [0u8; 32];
-    hk.expand(b"federation-signing-seed", &mut prk)
-        .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
-    Ok(prk)
-}
-
-/// Read and decrypt the seed from the encrypted-at-rest file. Returns `None` if absent.
-pub fn read_encrypted(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
-    let path = encrypted_seed_path(config_dir);
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let data = std::fs::read(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-
-    if data.len() != ENC_TOTAL_LEN {
-        anyhow::bail!("encrypted seed file has unexpected length {}", data.len());
-    }
-    if &data[..4] != ENC_MAGIC {
-        anyhow::bail!("encrypted seed file has unknown magic bytes");
-    }
-
-    let nonce_bytes = &data[4..4 + ENC_NONCE_LEN];
-    let ciphertext = &data[4 + ENC_NONCE_LEN..];
-
-    let enc_key = derive_enc_key()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&enc_key)
-        .map_err(|e| anyhow::anyhow!("cipher init failed: {e}"))?;
-    let nonce = Nonce::from_slice(nonce_bytes);
-
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| anyhow::anyhow!("encrypted seed decryption failed (corrupt file or wrong machine-id)"))?;
-
-    let seed: [u8; 32] = plaintext
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("decrypted seed must be exactly 32 bytes"))?;
-
-    Ok(Some(seed))
-}
-
-/// Encrypt and write the seed to the encrypted-at-rest file (atomic tmp + rename).
-pub fn write_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
-    let path = encrypted_seed_path(config_dir);
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create directory {}", parent.display()))?;
-    }
-
-    let enc_key = derive_enc_key()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&enc_key)
-        .map_err(|e| anyhow::anyhow!("cipher init failed: {e}"))?;
-
-    let mut nonce_bytes = [0u8; ENC_NONCE_LEN];
-    rand::thread_rng().fill_bytes(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
-
-    let ciphertext = cipher
-        .encrypt(nonce, seed.as_ref())
-        .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
-
-    let mut file_data = Vec::with_capacity(ENC_TOTAL_LEN);
-    file_data.extend_from_slice(ENC_MAGIC);
-    file_data.extend_from_slice(&nonce_bytes);
-    file_data.extend_from_slice(&ciphertext);
-
-    debug_assert_eq!(file_data.len(), ENC_TOTAL_LEN, "encrypted file must be exactly 64 bytes");
-
-    let tmp = path.with_extension("enc.tmp");
-    atomic_write(&tmp, &path, &file_data)?;
-
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Plaintext-legacy backend (read-only; migration source)
-// ---------------------------------------------------------------------------
-
-/// Read the pre-2K plaintext seed file. Returns `None` if absent.
-pub fn read_plaintext_legacy(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
-    let path = seed_path(config_dir);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let bytes = std::fs::read(&path)
-        .with_context(|| format!("failed to read legacy seed at {}", path.display()))?;
-    let seed: [u8; 32] = bytes
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("legacy seed file must be exactly 32 bytes"))?;
-    Ok(Some(seed))
-}
-
-// ---------------------------------------------------------------------------
-// Seed-meta sidecar helpers
-// ---------------------------------------------------------------------------
-
 /// Write a `.seed-meta.json` sidecar recording which backend is active.
 ///
 /// Extends the existing plugin schema additively: the plugin only reads
@@ -525,7 +198,6 @@ pub fn write_seed_meta(
 ) -> anyhow::Result<()> {
     let path = seed_meta_path(config_dir);
 
-    // Read existing meta so we preserve plugin-written fields (plugin_version, plugin_major, etc.)
     let existing: serde_json::Value = if path.exists() {
         let txt = std::fs::read_to_string(&path).unwrap_or_default();
         serde_json::from_str(&txt).unwrap_or(serde_json::json!({}))
@@ -554,13 +226,9 @@ pub fn write_seed_meta(
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Shared utilities
-// ---------------------------------------------------------------------------
-
 /// Atomic write: write to a `.tmp` sibling, then rename over the target.
 /// Sets 0o600 permissions on Unix.
-fn atomic_write(tmp: &Path, target: &Path, data: &[u8]) -> anyhow::Result<()> {
+pub(super) fn atomic_write(tmp: &Path, target: &Path, data: &[u8]) -> anyhow::Result<()> {
     std::fs::write(tmp, data)
         .with_context(|| format!("failed to write tmp file {}", tmp.display()))?;
 
@@ -575,10 +243,6 @@ fn atomic_write(tmp: &Path, target: &Path, data: &[u8]) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-// ---------------------------------------------------------------------------
-// Unit tests
-// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -597,47 +261,6 @@ mod tests {
         INIT.call_once(|| {
             std::env::set_var("LL_SEED_BACKEND", "encrypted");
         });
-    }
-
-    #[test]
-    fn encrypted_roundtrip_returns_same_seed() {
-        let tmp = tempdir().unwrap();
-        let seed = [42u8; 32];
-        write_encrypted(tmp.path(), &seed).unwrap();
-        let read = read_encrypted(tmp.path()).unwrap().unwrap();
-        assert_eq!(read, seed);
-    }
-
-    #[test]
-    fn encrypted_file_layout_v1_magic() {
-        let tmp = tempdir().unwrap();
-        write_encrypted(tmp.path(), &[7u8; 32]).unwrap();
-        let data = std::fs::read(encrypted_seed_path(tmp.path())).unwrap();
-        assert_eq!(data.len(), ENC_TOTAL_LEN, "total file length must be 64 bytes");
-        assert_eq!(&data[..4], ENC_MAGIC, "first 4 bytes must be LLS1 magic");
-    }
-
-    #[test]
-    fn encrypted_tampered_ciphertext_fails_decrypt() {
-        let tmp = tempdir().unwrap();
-        write_encrypted(tmp.path(), &[9u8; 32]).unwrap();
-        let path = encrypted_seed_path(tmp.path());
-        let mut data = std::fs::read(&path).unwrap();
-        data[20] ^= 0xFF; // flip a byte in the ciphertext region
-        std::fs::write(&path, &data).unwrap();
-        assert!(read_encrypted(tmp.path()).is_err(), "tampered ciphertext must fail decryption");
-    }
-
-    #[test]
-    fn legacy_plaintext_read_returns_correct_bytes() {
-        let tmp = tempdir().unwrap();
-        let fed = tmp.path().join("federation");
-        std::fs::create_dir_all(&fed).unwrap();
-        let legacy_path = fed.join(".seed");
-        std::fs::write(&legacy_path, [5u8; 32]).unwrap();
-
-        let result = read_plaintext_legacy(tmp.path()).unwrap().unwrap();
-        assert_eq!(result, [5u8; 32]);
     }
 
     #[test]
