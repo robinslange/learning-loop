@@ -8,7 +8,11 @@ use sha2::{Sha256, Digest};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
-use super::config::{FederationConfig, seed_path, export_db_path, peers_dir};
+use super::config::{
+    base_export_db_path, base_export_sha_path, export_db_path, peers_dir, seed_path,
+    FederationConfig,
+};
+use super::export::compute_patchset;
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
 use super::protocol::{
@@ -199,77 +203,185 @@ pub async fn sync_all_async(
         (0, true)
     } else {
         let payload_size_kb = export_bytes.len() / 1024;
+        let mut patchset_uploaded: Option<i64> = None;
 
+        // Phase 2: try patchset upload first if v3 + we have a stored base.
         if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
-            // v3: chunked upload. Default chunk size 4 MiB; cap at CHUNK_MAX_BODY_SIZE (8 MiB).
-            let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
-            let total_len = export_bytes.len();
-            let chunk_count = if total_len == 0 {
-                1
-            } else {
-                ((total_len + chunk_size_max - 1) / chunk_size_max) as u32
-            };
+            let base_db_path = base_export_db_path(config_dir);
+            let base_sha_path = base_export_sha_path(config_dir);
+            let base_sha = std::fs::read_to_string(&base_sha_path)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty());
+            if base_db_path.exists() && base_sha.is_some() {
+                let base_sha = base_sha.unwrap();
+                let base_owned = base_db_path.clone();
+                let cur_owned = export_path.clone();
+                let patchset_res = tokio::task::spawn_blocking(move || {
+                    compute_patchset(&base_owned, &cur_owned)
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("patchset compute panicked: {e}"))?;
 
-            let chunk_hashes: Vec<[u8; 32]> = export_bytes
-                .chunks(chunk_size_max.max(1))
-                .map(|slice| Sha256::digest(slice).into())
-                .collect();
-            let merkle = manifest_root(&chunk_hashes);
+                match patchset_res {
+                    Ok(ref patchset)
+                        if !patchset.is_empty() && patchset.len() < export_bytes.len() =>
+                    {
+                        let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
+                        let total_len = patchset.len();
+                        let chunk_count =
+                            (((total_len + chunk_size_max - 1) / chunk_size_max).max(1)) as u32;
+                        let chunk_hashes: Vec<[u8; 32]> = patchset
+                            .chunks(chunk_size_max.max(1))
+                            .map(|s| Sha256::digest(s).into())
+                            .collect();
+                        let merkle = manifest_root(&chunk_hashes);
 
-            let envelope = auth::create_envelope_v3(
-                &seed,
-                &export_bytes,
-                &peer_id,
-                config.graph,
-                "full",
-                "raw",
-                chunk_count,
-                &merkle,
-                chunk_size_max as u32,
-            );
-            send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
-            eprintln!(
-                "Sent envelope ({} bytes, {} chunks @ {} KiB max)",
-                total_len,
-                chunk_count,
-                chunk_size_max / 1024
-            );
+                        let mut envelope = auth::create_envelope_v3(
+                            &seed,
+                            patchset,
+                            &peer_id,
+                            config.graph,
+                            "patchset",
+                            "raw",
+                            chunk_count,
+                            &merkle,
+                            chunk_size_max as u32,
+                        );
+                        envelope["base_export_sha256"] = serde_json::json!(base_sha);
+                        envelope["base_export_id"] = serde_json::json!(base_sha);
+                        send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+                        eprintln!(
+                            "Sent patchset ({} bytes, {} chunks @ {} KiB max, vs full {} bytes)",
+                            total_len,
+                            chunk_count,
+                            chunk_size_max / 1024,
+                            export_bytes.len()
+                        );
+                        for (seq, slice) in patchset.chunks(chunk_size_max.max(1)).enumerate() {
+                            let frame =
+                                ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
+                            send_binary(&mut ws, frame.encode()).await?;
+                        }
 
-            for (seq, slice) in export_bytes
-                .chunks(chunk_size_max.max(1))
-                .enumerate()
-            {
-                let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
-                send_binary(&mut ws, frame.encode()).await?;
-                eprintln!(
-                    "  chunk {}/{} ({} KiB)",
-                    seq as u32 + 1,
-                    chunk_count,
-                    slice.len() / 1024
-                );
+                        let ack = recv_json::<HubMessage>(&mut ws).await?;
+                        match ack {
+                            HubMessage::SyncAck { note_count } => {
+                                eprintln!("Hub acknowledged patchset: {note_count} notes");
+                                patchset_uploaded = Some(note_count);
+                            }
+                            HubMessage::SyncReject { reason }
+                                if reason.contains("patchset base mismatch") =>
+                            {
+                                eprintln!(
+                                    "Patchset rejected (base mismatch); falling back to full"
+                                );
+                            }
+                            HubMessage::SyncReject { reason } => {
+                                anyhow::bail!("hub rejected patchset: {reason}");
+                            }
+                            other => anyhow::bail!(
+                                "expected sync-ack after patchset, got: {other:?}"
+                            ),
+                        }
+                    }
+                    Ok(p) if p.is_empty() => {
+                        eprintln!("Patchset empty (no row-level changes); using full");
+                    }
+                    Ok(_) => {
+                        eprintln!("Patchset larger than full body; using full");
+                    }
+                    Err(e) => {
+                        eprintln!("Patchset compute failed ({e}); falling back to full");
+                    }
+                }
             }
-        } else {
-            // v1/v2: single envelope + single binary message.
-            let envelope = auth::create_envelope(&seed, &export_bytes, &peer_id, config.graph);
-            send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
-
-            let payload = if framed_path {
-                Envelope::from_body(export_bytes)?.encode()
-            } else {
-                export_bytes
-            };
-            send_binary(&mut ws, payload).await?;
-            eprintln!("Sent local index ({payload_size_kb} KB, framed={framed_path})");
         }
 
-        let ack = recv_json::<HubMessage>(&mut ws).await?;
-        let notes = match ack {
-            HubMessage::SyncAck { note_count } => {
-                eprintln!("Hub acknowledged: {note_count} notes");
-                note_count
+        let notes = if let Some(n) = patchset_uploaded {
+            n
+        } else {
+            // Full upload (v3 chunked or v1/v2 single-frame).
+            if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
+                let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
+                let total_len = export_bytes.len();
+                let chunk_count = if total_len == 0 {
+                    1
+                } else {
+                    ((total_len + chunk_size_max - 1) / chunk_size_max) as u32
+                };
+
+                let chunk_hashes: Vec<[u8; 32]> = export_bytes
+                    .chunks(chunk_size_max.max(1))
+                    .map(|slice| Sha256::digest(slice).into())
+                    .collect();
+                let merkle = manifest_root(&chunk_hashes);
+
+                let envelope = auth::create_envelope_v3(
+                    &seed,
+                    &export_bytes,
+                    &peer_id,
+                    config.graph,
+                    "full",
+                    "raw",
+                    chunk_count,
+                    &merkle,
+                    chunk_size_max as u32,
+                );
+                send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+                eprintln!(
+                    "Sent envelope ({} bytes, {} chunks @ {} KiB max)",
+                    total_len,
+                    chunk_count,
+                    chunk_size_max / 1024
+                );
+
+                for (seq, slice) in export_bytes.chunks(chunk_size_max.max(1)).enumerate() {
+                    let frame =
+                        ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
+                    send_binary(&mut ws, frame.encode()).await?;
+                    eprintln!(
+                        "  chunk {}/{} ({} KiB)",
+                        seq as u32 + 1,
+                        chunk_count,
+                        slice.len() / 1024
+                    );
+                }
+            } else {
+                // v1/v2: single envelope + single binary message.
+                let envelope = auth::create_envelope(&seed, &export_bytes, &peer_id, config.graph);
+                send_json(&mut ws, &ClientMessage::UploadEnvelope { envelope }).await?;
+
+                let payload = if framed_path {
+                    Envelope::from_body(export_bytes.clone())?.encode()
+                } else {
+                    export_bytes.clone()
+                };
+                send_binary(&mut ws, payload).await?;
+                eprintln!("Sent local index ({payload_size_kb} KB, framed={framed_path})");
             }
-            other => anyhow::bail!("expected sync-ack, got: {other:?}"),
+
+            let ack = recv_json::<HubMessage>(&mut ws).await?;
+            match ack {
+                HubMessage::SyncAck { note_count } => {
+                    eprintln!("Hub acknowledged: {note_count} notes");
+                    note_count
+                }
+                other => anyhow::bail!("expected sync-ack, got: {other:?}"),
+            }
         };
+
+        // Rotate the local base when v3 succeeded — the hub now has whatever
+        // we just uploaded as its baseline for the next patchset round-trip.
+        if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
+            let base_db_path = base_export_db_path(config_dir);
+            let base_sha_path = base_export_sha_path(config_dir);
+            if let Some(parent) = base_db_path.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            std::fs::copy(&export_path, &base_db_path)?;
+            std::fs::write(&base_sha_path, &export_hash)?;
+        }
 
         std::fs::write(&hash_path, &export_hash)?;
         std::fs::write(&mtime_path, current_max_mtime.to_string())?;

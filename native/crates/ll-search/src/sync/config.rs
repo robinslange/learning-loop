@@ -111,6 +111,19 @@ pub fn export_db_path(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("local-export.db")
 }
 
+/// Last successfully-uploaded export, kept as the "base" the hub agreed on.
+/// Used as the diff source for v3 patchset uploads.
+pub fn base_export_db_path(config_dir: &Path) -> PathBuf {
+    data_dir(config_dir).join("base-export.db")
+}
+
+/// Hex sha256 of the bytes the hub has stored under our peer_id, mirroring
+/// the hub-side index.db.sha256 sidecar so patchset uploads can pre-check
+/// the base before serialising a diff.
+pub fn base_export_sha_path(config_dir: &Path) -> PathBuf {
+    data_dir(config_dir).join("base-export.sha256")
+}
+
 pub fn peers_dir(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("peers")
 }
