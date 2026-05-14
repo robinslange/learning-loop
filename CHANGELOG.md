@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.20.2
+
 ### Fixed
 
 - **NLI advisory edges were absent from non-CI builds.** `nli` was a non-default Cargo feature on `ll-search`, so any `cargo build` without `--features nli` produced a binary without the `nli-check` / `nli-batch` subcommands and without the UDS daemon module. The hook's daemon path returned `socket-error` (no socket), the subprocess path returned `unrecognized subcommand`, and `edges.db` accumulated zero `source_graph='nli'` rows — `_system/nli-conflicts.md` rendered "Total: 0" and `_system/viz/cycles.canvas` only carried regex `challenges_*` edges. CI was unaffected (`build-native.yml` already passes `--features nli`), but any developer or platform reaching for a plain `cargo build` got a silently NLI-stripped binary. `default = ["nli"]` now; opt-out is `--no-default-features`.
