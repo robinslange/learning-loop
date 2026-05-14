@@ -12,19 +12,18 @@
 //   2. Regex supports/evidence_for to a target SUPPRESSES the NLI nli_supports
 //      edge to that same target — regex wins on support relations too.
 //
-// The shell-script ll-search stub from
-// tests/edge-infer-wikilink-removal-integration.test.mjs is replicated here.
-// The fake binary lives in one shared tempdir for this file because
-// scripts/lib/binary.mjs caches the resolved binary path on first lookup —
-// per-test rotation would ENOENT after the first call.
+// The NLI signal is injected via __setNliBatchOverrideForTesting — bypasses
+// the daemon/subprocess plumbing entirely. The earlier shell-script stub
+// forked under a 1500ms execFileSync timeout, which became flaky under
+// parallel test load.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
-import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
+import { runEdgeInfer, __setNliBatchOverrideForTesting } from '../hooks/modules/edge-infer.mjs';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
@@ -46,34 +45,29 @@ function buildMinimalSnapshot(vaultRoot) {
   };
 }
 
-// Stub: ll-search nli-batch. The stub returns contradiction=0.97 / entailment=0.97
-// (BOTH above threshold) for every hypothesis, so the suppression branches are
-// the only thing that can prevent NLI edges from being written. Wrapped in the
-// schema_version=1 envelope the binary emits.
-const NLI_STUB_SCRIPT = [
-  '#!/bin/sh',
-  'hyps_file="$3"',
-  'printf \'{"schema_version":1,"results":[\'',
-  'i=0',
-  'while IFS= read -r line || [ -n "$line" ]; do',
-  '  if [ $i -gt 0 ]; then printf ","; fi',
-  '  printf \'{"contradiction":0.97,"entailment":0.97,"neutral":0.01,"label":"contradiction"}\'',
-  '  i=$((i+1))',
-  'done < "$hyps_file"',
-  'printf "]}"',
-].join('\n');
+// Canned NLI result: contradiction AND entailment both above threshold, so the
+// only thing that can prevent NLI edges from being written is the regex
+// suppression branches this file is pinning.
+const BOTH_ABOVE_THRESHOLD = {
+  contradiction: 0.97,
+  entailment: 0.97,
+  neutral: 0.01,
+  label: 'contradiction',
+};
 
-// Shared binary dir for this file. binaryPath() caches the resolved path
-// on first lookup; rotating dirs per test would ENOENT after the first hit.
-// Deleted on process exit.
-const NLI_BIN_DIR = mkdtempSync(join(tmpdir(), 'll-edge-infer-bothfire-bin-'));
-const NLI_BIN_PATH = join(NLI_BIN_DIR, 'bin', 'll-search');
-mkdirSync(join(NLI_BIN_DIR, 'bin'), { recursive: true });
-writeFileSync(NLI_BIN_PATH, NLI_STUB_SCRIPT);
-chmodSync(NLI_BIN_PATH, 0o755);
+function installNliOverride() {
+  __setNliBatchOverrideForTesting(async (_premise, candidates) =>
+    candidates.map(() => ({ ...BOTH_ABOVE_THRESHOLD })),
+  );
+}
+
+// Shared edges.db dir for this file. Each test clears its rows for NOTE_REL
+// before running, so sharing the file across tests is safe and avoids the
+// per-test mkdtemp overhead.
+const PLUGIN_DATA_DIR = mkdtempSync(join(tmpdir(), 'll-edge-infer-bothfire-'));
 process.on('exit', () => {
   try {
-    rmSync(NLI_BIN_DIR, { recursive: true, force: true });
+    rmSync(PLUGIN_DATA_DIR, { recursive: true, force: true });
   } catch {
     /* best effort */
   }
@@ -117,8 +111,9 @@ test('regex challenges_rebuttal to X suppresses NLI challenges_rebuttal to X; NL
   //     entailment side, so the NLI nli_supports edge to sleep IS written.
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
   try {
-    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
-    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    process.env.CLAUDE_PLUGIN_DATA = PLUGIN_DATA_DIR;
+    installNliOverride();
+    const dbPath = join(PLUGIN_DATA_DIR, 'edges.db');
     await clearEdgesFor(dbPath, NOTE_REL);
 
     const ctx = {
@@ -186,6 +181,7 @@ test('regex challenges_rebuttal to X suppresses NLI challenges_rebuttal to X; NL
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
+    __setNliBatchOverrideForTesting(null);
   }
 });
 
@@ -195,8 +191,9 @@ test('regex evidence_for to X also suppresses NLI nli_supports to X', async () =
   // explicitly. 'proves' triggers evidence_for/high in edge-classifier.mjs.
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
   try {
-    process.env.CLAUDE_PLUGIN_DATA = NLI_BIN_DIR;
-    const dbPath = join(NLI_BIN_DIR, 'edges.db');
+    process.env.CLAUDE_PLUGIN_DATA = PLUGIN_DATA_DIR;
+    installNliOverride();
+    const dbPath = join(PLUGIN_DATA_DIR, 'edges.db');
     await clearEdgesFor(dbPath, NOTE_REL);
 
     const ctx = {
@@ -232,5 +229,6 @@ test('regex evidence_for to X also suppresses NLI nli_supports to X', async () =
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
+    __setNliBatchOverrideForTesting(null);
   }
 });

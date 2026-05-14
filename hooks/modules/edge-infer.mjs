@@ -338,8 +338,20 @@ function runNliBatchViaSubprocess(binary, premise, hypotheses) {
 let daemonSchemaMismatchWarned = false;
 let daemonHardFailureWarned = false;
 
+// Test-only injection: lets the test suite skip the daemon/subprocess plumbing
+// (which forks an ll-search stub under a 1500ms execFileSync timeout — fragile
+// under parallel test load). Production paths never see this; tests that
+// inject restore null in their teardown.
+let _nliBatchOverride = null;
+
+export function __setNliBatchOverrideForTesting(fn) {
+  _nliBatchOverride = fn;
+}
+
 async function runNliBatch(sourceText, neighbours) {
   if (!neighbours || neighbours.length === 0) return [];
+
+  if (_nliBatchOverride) return _nliBatchOverride(sourceText, neighbours);
 
   const premise = stripMarkdownForNli(sourceText);
   // Filenames don't contain markdown — basename-to-slug is sufficient.

@@ -16,12 +16,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
-import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
-import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
+import { runEdgeInfer, __setNliBatchOverrideForTesting } from '../hooks/modules/edge-infer.mjs';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
@@ -293,53 +292,35 @@ test('runEdgeInfer: wikilink write replaces prior regex edges', async () => {
 //   2. Run the NLI loop against nliCandidates, writing challenges_rebuttal
 //      rows with source_graph='nli' for any candidate above NLI_THRESHOLD.
 //
-// The ll-search binary is stubbed with a shell script. binaryPath() in
-// scripts/lib/binary.mjs caches the resolved path on first non-null find. To
-// keep these tests cleanly isolated, each test creates its own temp dir
-// (binary + edges.db), and __resetBinaryCacheForTesting() flushes the cached
-// path before and after each test so the lookup re-runs against the per-test
-// pluginData. No shared module-level state between tests.
+// The NLI signal is injected via __setNliBatchOverrideForTesting — bypassing
+// the daemon/subprocess plumbing entirely. The earlier shell-script stub
+// forked under a 1500ms execFileSync timeout, which became flaky under
+// parallel test load (the wallclock crept right up to the timeout boundary
+// when other test files contended on fork+exec). The override has no fork,
+// so timing is deterministic.
 
-// Shell script that mimics: ll-search nli-batch <premise> <hyps-file>
-// Returns one result per hypothesis line with contradiction=0.97 wrapped in
-// the schema_version envelope the binary emits ({schema_version:1, results:[...]}).
-// Uses `|| [ -n "$line" ]` to handle hypothesis files without a trailing
-// newline (runNliBatch writes hypotheses.join('\n') which omits the final \n).
-const NLI_STUB_SCRIPT = [
-  '#!/bin/sh',
-  '# Stub: ll-search nli-batch — schema_version=1 wrapped response',
-  'hyps_file="$3"',
-  'printf \'{"schema_version":1,"results":[\'',
-  'i=0',
-  'while IFS= read -r line || [ -n "$line" ]; do',
-  '  if [ $i -gt 0 ]; then printf ","; fi',
-  '  printf \'{"contradiction":0.97,"entailment":0.02,"neutral":0.01,"label":"contradiction"}\'',
-  '  i=$((i+1))',
-  'done < "$hyps_file"',
-  'printf "]}"',
-].join('\n');
+// Canned NLI result that the production runNliBatch would have computed:
+// contradiction above 0.9 → challenges_rebuttal edge.
+const NLI_CONTRADICTION = {
+  contradiction: 0.97,
+  entailment: 0.02,
+  neutral: 0.01,
+  label: 'contradiction',
+};
 
-// Per-test setup: makes a fresh temp dir, drops the stub binary into bin/,
-// returns the dir path. Caller is responsible for pointing
-// CLAUDE_PLUGIN_DATA at it and calling __resetBinaryCacheForTesting().
-function makeNliTestEnv() {
-  const dir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
-  mkdirSync(join(dir, 'bin'), { recursive: true });
-  const binPath = join(dir, 'bin', 'll-search');
-  writeFileSync(binPath, NLI_STUB_SCRIPT);
-  chmodSync(binPath, 0o755);
-  return dir;
+function installNliOverride() {
+  __setNliBatchOverrideForTesting(async (_premise, candidates) =>
+    candidates.map(() => ({ ...NLI_CONTRADICTION })),
+  );
 }
 
 test('runEdgeInfer NLI-only branch: prior regex edges survive, NLI edge written', async () => {
-  const nliDir = makeNliTestEnv();
+  const nliDir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
 
   try {
     process.env.CLAUDE_PLUGIN_DATA = nliDir;
-    // Clear any cached binaryPath() from previous tests / module loads so
-    // findBinary() re-resolves against this test's pluginData.
-    __resetBinaryCacheForTesting();
+    installNliOverride();
 
     // Seed a prior regex edge from the source note to neighbour A (sleep.md).
     const dbPath = join(nliDir, 'edges.db');
@@ -407,7 +388,7 @@ test('runEdgeInfer NLI-only branch: prior regex edges survive, NLI edge written'
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
-    __resetBinaryCacheForTesting();
+    __setNliBatchOverrideForTesting(null);
     rmSync(nliDir, { recursive: true, force: true });
   }
 });
@@ -418,14 +399,14 @@ test('runEdgeInfer NLI-only branch: re-invocation re-derives NLI edges cleanly',
   // The regex edge (local) must never be touched.
   //
   // Fully isolated from the previous NLI test — its own temp dir, its own
-  // stub binary, its own edges.db, and the binaryPath cache flushed both
-  // before and after so neither direction leaks.
-  const nliDir = makeNliTestEnv();
+  // edges.db, and the override is reset both before and after so neither
+  // direction leaks.
+  const nliDir = mkdtempSync(join(tmpdir(), 'll-edge-infer-nli-'));
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
 
   try {
     process.env.CLAUDE_PLUGIN_DATA = nliDir;
-    __resetBinaryCacheForTesting();
+    installNliOverride();
 
     const dbPath = join(nliDir, 'edges.db');
     const db = await openEdgeDb(dbPath);
@@ -489,7 +470,7 @@ test('runEdgeInfer NLI-only branch: re-invocation re-derives NLI edges cleanly',
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
     }
-    __resetBinaryCacheForTesting();
+    __setNliBatchOverrideForTesting(null);
     rmSync(nliDir, { recursive: true, force: true });
   }
 });
