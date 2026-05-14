@@ -56,10 +56,20 @@ Both shims survive plugin updates because they resolve their targets at runtime.
 
 ## 3e: Plugin Dependencies
 
-Run `node PLUGIN/scripts/check-deps.mjs`. For each missing dependency, present it and ask to install:
+Run `node PLUGIN/scripts/check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
+
+For required deps (`required: true`) — block until the user confirms or explicitly declines:
 
 ```
-Missing dependency: episodic-memory
-Required for: Cross-session conversation search
+Required dependency missing: episodic-memory
+Reason: Cross-session conversation search for retrieval, /discovery, /reflect, /refresh
 Install: claude plugin install episodic-memory@superpowers-marketplace
+```
+
+For optional deps (`required: false`) — present once, accept "skip" without further prompting:
+
+```
+Optional dependency missing: <name>
+Reason: <reason>
+Install (optional): claude plugin install <name>@<marketplace>
 ```

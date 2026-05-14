@@ -315,13 +315,15 @@ Collect the raw data needed for all checks. Run these in parallel:
 
 ### Step 1.5: Check: Plugin Dependencies
 
-Parse the check-deps output from Step 1.
+Parse the check-deps output from Step 1. Each entry has a `required` boolean — partition into required vs optional, render separately, and use it to set urgency.
 
 For each dependency:
 
 - **installed:** Show name, version, status
-- **missing:** Show name, reason, install command
-- **outdated:** Show name, installed version vs required, install command
+- **missing (required):** Flag prominently with name, reason, install command — these gate functionality
+- **missing (optional):** List under a quieter "Optional" heading with name, reason, install command
+- **outdated (required):** Flag with installed version vs `versionConstraint`, install command
+- **outdated (optional):** List under "Optional" with installed version vs `versionConstraint`, install command
 
 This check runs in both light and deep modes -- there's no deeper analysis needed.
 
