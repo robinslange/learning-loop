@@ -94,6 +94,38 @@ pub fn create_envelope(
     })
 }
 
+/// v3 envelope: v2 fields plus chunking + body-kind metadata.
+///
+/// The signature in the underlying v2 envelope is over `sha256(body)`, which
+/// does not change when v3 fields are added. The hub verifies only the sha256
+/// at upload time (signature verification happens at challenge-response), so
+/// no re-signing is needed when adding chunk metadata.
+#[allow(clippy::too_many_arguments)]
+pub fn create_envelope_v3(
+    signing_key: &SigningKey,
+    index_bytes: &[u8],
+    peer_id: &str,
+    graph: bool,
+    body_kind: &str,
+    body_encoding: &str,
+    chunk_count: u32,
+    merkle_root: &[u8; 32],
+    chunk_size_max: u32,
+) -> serde_json::Value {
+    let mut env = create_envelope(signing_key, index_bytes, peer_id, graph);
+    let obj = env.as_object_mut().expect("create_envelope returns object");
+    obj.insert("size".into(), serde_json::json!(index_bytes.len()));
+    obj.insert("body_kind".into(), serde_json::json!(body_kind));
+    obj.insert("body_encoding".into(), serde_json::json!(body_encoding));
+    obj.insert("chunk_count".into(), serde_json::json!(chunk_count));
+    obj.insert(
+        "merkle_root".into(),
+        serde_json::json!(hex::encode(merkle_root)),
+    );
+    obj.insert("chunk_size_max".into(), serde_json::json!(chunk_size_max));
+    env
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +251,44 @@ mod tests {
         let s1 = sign_download(&key, "peer-1", 1000);
         let s2 = sign_download(&key, "peer-1", 1001);
         assert_ne!(s1, s2, "different timestamps produce different signatures");
+    }
+
+    #[test]
+    fn create_envelope_v3_includes_chunk_fields() {
+        use sha2::{Digest, Sha256};
+        let key = fixed_key();
+        let body = b"hello world";
+        let chunk_hash: [u8; 32] = Sha256::digest(body).into();
+        let merkle_root: [u8; 32] = Sha256::digest(chunk_hash).into();
+
+        let env = create_envelope_v3(
+            &key,
+            body,
+            "peer-a",
+            true,
+            "full",
+            "raw",
+            1,
+            &merkle_root,
+            8 * 1024 * 1024,
+        );
+
+        assert_eq!(env["peer_id"].as_str(), Some("peer-a"));
+        assert_eq!(env["graph"].as_bool(), Some(true));
+        assert_eq!(env["size"].as_u64(), Some(body.len() as u64));
+        assert_eq!(env["body_kind"].as_str(), Some("full"));
+        assert_eq!(env["body_encoding"].as_str(), Some("raw"));
+        assert_eq!(env["chunk_count"].as_u64(), Some(1));
+        assert_eq!(env["chunk_size_max"].as_u64(), Some(8 * 1024 * 1024));
+        let mr = env["merkle_root"].as_str().expect("merkle_root present");
+        assert_eq!(mr, hex::encode(merkle_root));
+        // The v2 signature on sha256(body) should still verify — adding new
+        // fields doesn't touch the body, so re-signing isn't required.
+        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
+        let hash = Sha256::digest(body);
+        key.verifying_key()
+            .verify(&hash, &sig)
+            .expect("envelope signature still verifies in v3");
     }
 }
