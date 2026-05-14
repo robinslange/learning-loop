@@ -23,13 +23,26 @@ export async function run(ctx) {
         return;
       }
       const issues = Object.entries(deps).filter(([, v]) => v.status !== 'installed');
-      if (issues.length > 0) {
+      const required = issues.filter(([, v]) => v.required);
+      const optional = issues.filter(([, v]) => !v.required);
+
+      const renderLine = ([name, info]) =>
+        `- **${name}** (${info.status}): \`claude plugin install ${name}@${info.marketplace}\`\n` +
+        (info.reason ? `  Reason: ${info.reason}\n` : '');
+
+      if (required.length > 0) {
         ctx.depsAllSatisfied = false;
-        ctx.depsMissing += '\n## Missing Dependencies\n';
-        for (const [name, info] of issues) {
-          ctx.depsMissing += `- **${name}** (${info.status}): \`claude plugin install ${name}@${info.marketplace}\`\n`;
-          if (info.reason) ctx.depsMissing += `  Required for: ${info.reason}\n`;
-        }
+        ctx.depsMissing += '\n## Missing Required Dependencies\n';
+        ctx.depsMissing +=
+          'Learning-loop cannot function correctly without these. Install before continuing.\n\n';
+        for (const issue of required) ctx.depsMissing += renderLine(issue);
+      }
+      if (optional.length > 0) {
+        ctx.depsMissing += '\n## Missing Optional Dependencies\n';
+        ctx.depsMissing += 'Recommended but not required.\n\n';
+        for (const issue of optional) ctx.depsMissing += renderLine(issue);
+      }
+      if (issues.length > 0) {
         ctx.depsMissing += '\nRun `/init` to set up all dependencies.\n';
       }
     }

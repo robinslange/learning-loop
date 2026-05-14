@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Checks plugin dependencies declared in config.json against installed_plugins.json.
-// Returns JSON: { "plugin-name": { status, installed, required, marketplace, reason } }
+// Returns JSON: { "plugin-name": { status, installed, versionConstraint, marketplace, reason, required, tools } }
 
 import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -48,16 +48,16 @@ const result = {};
 for (const dep of deps) {
   const key = `${dep.name}@${dep.marketplace}`;
   const entries = installed[key];
+  const base = {
+    versionConstraint: dep.version || null,
+    marketplace: dep.marketplace,
+    reason: dep.reason || null,
+    required: !!dep.required,
+    tools: dep.tools || [],
+  };
 
   if (!entries || entries.length === 0) {
-    result[dep.name] = {
-      status: 'missing',
-      installed: null,
-      required: dep.version || null,
-      marketplace: dep.marketplace,
-      reason: dep.reason || null,
-      tools: dep.tools || [],
-    };
+    result[dep.name] = { status: 'missing', installed: null, ...base };
     continue;
   }
 
@@ -65,25 +65,11 @@ for (const dep of deps) {
   const version = entry.version || 'unknown';
 
   if (!satisfiesVersion(version, dep.version)) {
-    result[dep.name] = {
-      status: 'outdated',
-      installed: version,
-      required: dep.version,
-      marketplace: dep.marketplace,
-      reason: dep.reason || null,
-      tools: dep.tools || [],
-    };
+    result[dep.name] = { status: 'outdated', installed: version, ...base };
     continue;
   }
 
-  result[dep.name] = {
-    status: 'installed',
-    installed: version,
-    required: dep.version || null,
-    marketplace: dep.marketplace,
-    reason: dep.reason || null,
-    tools: dep.tools || [],
-  };
+  result[dep.name] = { status: 'installed', installed: version, ...base };
 }
 
 process.stdout.write(JSON.stringify(result));
