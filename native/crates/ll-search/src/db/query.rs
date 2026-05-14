@@ -587,4 +587,100 @@ mod tests {
         let orphans = stats.orphans.as_ref().unwrap();
         assert_eq!(orphans, &["3-permanent/c.md"], "only unlinked note should be orphan");
     }
+
+    /// Seed a tempdb with notes + intentions matching the production schema
+    /// shape that list_intentions_* queries against.
+    fn setup_intentions_db(rows: &[(&str, &str, Option<&str>)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL);
+             CREATE TABLE intentions (
+                 note_id INTEGER NOT NULL,
+                 context TEXT NOT NULL,
+                 cue TEXT,
+                 PRIMARY KEY (note_id, context)
+             );",
+        )
+        .unwrap();
+        for (path, context, cue) in rows {
+            let note_id: i64 = conn
+                .query_row(
+                    "INSERT INTO notes (path) VALUES (?1)
+                     ON CONFLICT(path) DO UPDATE SET path = excluded.path
+                     RETURNING id",
+                    [path],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            conn.execute(
+                "INSERT INTO intentions (note_id, context, cue) VALUES (?1, ?2, ?3)",
+                params![note_id, context, cue],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn list_intentions_summary_returns_empty_when_no_rows() {
+        let conn = setup_intentions_db(&[]);
+        assert!(list_intentions_summary(&conn).is_empty());
+    }
+
+    #[test]
+    fn list_intentions_summary_groups_by_context_ordered_desc() {
+        let conn = setup_intentions_db(&[
+            ("a.md", "vault hygiene", Some("review weekly")),
+            ("b.md", "vault hygiene", None),
+            ("c.md", "vault hygiene", Some("triage inbox")),
+            ("d.md", "focus time", None),
+            ("e.md", "deep work", Some("morning block")),
+            ("f.md", "deep work", None),
+        ]);
+        let summary = list_intentions_summary(&conn);
+        assert_eq!(summary.len(), 3);
+        assert_eq!(summary[0].context, "vault hygiene");
+        assert_eq!(summary[0].count, 3);
+        assert_eq!(summary[1].context, "deep work");
+        assert_eq!(summary[1].count, 2);
+        assert_eq!(summary[2].context, "focus time");
+        assert_eq!(summary[2].count, 1);
+    }
+
+    #[test]
+    fn list_intentions_for_context_returns_rows_ordered_by_path() {
+        let conn = setup_intentions_db(&[
+            ("zebra.md", "deep work", Some("morning block")),
+            ("alpha.md", "deep work", None),
+            ("mike.md", "deep work", Some("afternoon block")),
+            ("unrelated.md", "vault hygiene", Some("review weekly")),
+        ]);
+        let detail = list_intentions_for_context(&conn, "deep work");
+        assert_eq!(detail.len(), 3, "must not include vault-hygiene row");
+        assert_eq!(detail[0].path, "alpha.md");
+        assert_eq!(detail[1].path, "mike.md");
+        assert_eq!(detail[2].path, "zebra.md");
+    }
+
+    #[test]
+    fn list_intentions_for_context_preserves_cue_optionality() {
+        let conn = setup_intentions_db(&[
+            ("with-cue.md", "ctx", Some("a cue")),
+            ("no-cue.md", "ctx", None),
+        ]);
+        let detail = list_intentions_for_context(&conn, "ctx");
+        assert_eq!(detail.len(), 2);
+        let by_path: std::collections::HashMap<&str, &Option<String>> =
+            detail.iter().map(|d| (d.path.as_str(), &d.cue)).collect();
+        assert_eq!(by_path["with-cue.md"].as_deref(), Some("a cue"));
+        assert!(by_path["no-cue.md"].is_none());
+    }
+
+    #[test]
+    fn list_intentions_for_context_returns_empty_when_unknown() {
+        let conn = setup_intentions_db(&[
+            ("a.md", "known context", None),
+        ]);
+        assert!(list_intentions_for_context(&conn, "no such context").is_empty());
+    }
 }
