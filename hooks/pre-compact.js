@@ -1,15 +1,50 @@
 #!/usr/bin/env node
-// Learning Loop — PreCompact hook
-// Nudges capture before context compression.
+// Learning Loop — PreCompact hook (spike).
+//
+// PreCompact cannot inject context into Claude's conversation (the universal
+// hook schema rejects `hookSpecificOutput` for this event). Instead, this
+// hook spawns a detached worker that reads the pre-compaction transcript and
+// extracts atomic notes to 0-inbox/ before detail is lost. The hook itself
+// returns immediately so compaction is not blocked on the LLM call.
+//
+// Opt-in: set LEARNING_LOOP_PRECOMPACT_SPIKE=1 in the environment.
 
+import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 import { emitJson } from './lib/io.mjs';
+import { logError } from '../scripts/lib/log.mjs';
 
-const output = {
-  hookSpecificOutput: {
-    hookEventName: 'PreCompact',
-    additionalContext:
-      'LEARNING LOOP — CONTEXT COMPRESSION IMMINENT: This session has enough context that compression is needed. Before it happens: (1) Save any uncaptured corrections to auto-memory. (2) Use /learning-loop:quick-note to capture any insights worth keeping. (3) If the session was substantial, suggest /reflect to the user. Do not skip this — compressed context loses the detail that makes good notes.',
-  },
-};
+async function readStdin() {
+  return new Promise((res) => {
+    let raw = '';
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (c) => (raw += c));
+    process.stdin.on('end', () => res(raw));
+    process.stdin.on('error', () => res(raw));
+    setTimeout(() => res(raw), 1000);
+  });
+}
 
-emitJson(output);
+try {
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
+  if (process.env.LEARNING_LOOP_PRECOMPACT_SPIKE === '1') {
+    const raw = await readStdin();
+    const payload = raw ? JSON.parse(raw) : {};
+    const transcriptPath = payload.transcript_path;
+    const sessionId = payload.session_id || 'unknown';
+    const trigger = payload.trigger || 'unknown';
+
+    if (transcriptPath) {
+      const worker = resolve(import.meta.dirname, 'pre-compact-worker.mjs');
+      const child = spawn(process.execPath, [worker, transcriptPath, sessionId, trigger], {
+        detached: true,
+        stdio: 'ignore',
+      });
+      child.unref();
+    }
+  }
+} catch (err) {
+  logError('hooks/pre-compact', err);
+}
+
+emitJson({});

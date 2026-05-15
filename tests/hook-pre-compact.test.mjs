@@ -19,18 +19,21 @@ function parseOutput(stdout) {
 
 // -- tests --
 
-test('pre-compact golden: emits PreCompact banner with capture cues', () => {
+test('pre-compact golden: returns empty JSON, no hookSpecificOutput', () => {
+  // PreCompact does not accept hookSpecificOutput in the universal schema, so
+  // the hook must emit a valid no-op payload. Capture work happens in a
+  // detached worker (gated by LEARNING_LOOP_PRECOMPACT_SPIKE) and never
+  // surfaces in the hook's stdout.
   const r = runHook(HOOK, { stdin: '' });
   try {
     assert.equal(r.exitCode, 0, `unexpected exit code: ${r.exitCode}`);
     const out = parseOutput(r.stdout);
-    assert.ok(out.hookSpecificOutput, 'missing hookSpecificOutput');
-    assert.equal(out.hookSpecificOutput.hookEventName, 'PreCompact');
-    const ctx = out.hookSpecificOutput.additionalContext;
-    assert.ok(typeof ctx === 'string' && ctx.length > 0, 'additionalContext must be a non-empty string');
-    assert.match(ctx, /CONTEXT COMPRESSION/i, 'should mention context compression');
-    assert.match(ctx, /quick-note/i, 'should mention quick-note');
-    assert.match(ctx, /reflect/i, 'should mention reflect');
+    assert.equal(
+      out.hookSpecificOutput,
+      undefined,
+      'PreCompact must not emit hookSpecificOutput (rejected by schema)',
+    );
+    assert.deepEqual(out, {}, 'hook stdout must be an empty JSON object');
   } finally {
     r.cleanup();
   }
