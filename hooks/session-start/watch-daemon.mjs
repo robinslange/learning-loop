@@ -1,8 +1,8 @@
 // hooks/session-start/watch-daemon.mjs : ll-search watch daemon lifecycle.
 // Guards spawn with a PID-file lock acquired via O_EXCL writeFileSync.
-// Checks running version; SIGTERMs outdated daemons.
+// SIGTERMs daemons spawned from a different binary file (detected by mtime).
 
-import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
@@ -10,7 +10,7 @@ import { spawnEnv } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 
 export async function run(ctx) {
-  const { pluginDir, pluginData, pluginVersion, vaultRoot } = ctx;
+  const { pluginDir, pluginData, vaultRoot } = ctx;
 
   const { findBinary: findBinaryShared } = await import('../lib/common.mjs');
   const binary = findBinaryShared();
@@ -23,7 +23,7 @@ export async function run(ctx) {
   // vault must share one daemon, not spawn one each.
   const lockDir = join(vaultRoot, '.vault-search');
   const pidPath = join(lockDir, 'watch.pid');
-  const versionPath = join(lockDir, 'watch.version');
+  const fingerprintPath = join(lockDir, 'watch.fingerprint');
   const lockPath = pidPath + '.lock';
 
   // One-shot migration: older builds wrote watch.pid into <plugin-data>/.
@@ -50,6 +50,20 @@ export async function run(ctx) {
     rmSync(legacyVersionPath, { force: true });
   } catch (err) {
     logError('session-start.watch-daemon.legacyRm', err);
+  }
+
+  // Identify the binary by its mtime, not by a version string. The Rust crate
+  // version (written by the daemon into watch.version) and the npm plugin
+  // version drift independently across releases, so comparing them caused a
+  // SIGTERM-and-respawn on every SessionStart. The binary file's mtime
+  // changes only when the install changes, which is exactly when we want to
+  // restart the daemon.
+  let currentFingerprint;
+  try {
+    currentFingerprint = String(statSync(binary.bin).mtimeMs);
+  } catch (err) {
+    logError('session-start.watch-daemon.fingerprint', err);
+    return;
   }
 
   function checkAlive() {
@@ -83,13 +97,13 @@ export async function run(ctx) {
 
   let shouldSpawn = true;
   if (probe.state === 'alive') {
-    let runningVersion = '';
+    let runningFingerprint = '';
     try {
-      runningVersion = readFileSync(versionPath, 'utf8').trim();
+      runningFingerprint = readFileSync(fingerprintPath, 'utf8').trim();
     } catch (err) {
-      logError('session-start.watch-daemon.readVersion', err);
+      logError('session-start.watch-daemon.readFingerprint', err);
     }
-    if (runningVersion === pluginVersion) {
+    if (runningFingerprint === currentFingerprint) {
       shouldSpawn = false;
     } else {
       try {
@@ -122,6 +136,11 @@ export async function run(ctx) {
     }
 
     if (lockAcquired) {
+      try {
+        writeFileSync(fingerprintPath, currentFingerprint);
+      } catch (err) {
+        logError('session-start.watch-daemon.writeFingerprint', err);
+      }
       try {
         const watchArgs = [
           'watch',
