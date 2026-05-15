@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Watch daemon lock now keyed on the vault, not the plugin install.** Pidfile, fingerprint, and lockfile moved from `<plugin-data>/watch.pid` to `<vault>/.vault-search/watch.pid`. The previous layout let two installations (e.g. a real install plus a test sandbox) each spawn their own daemon against the same SQLite index, with no shared mutual exclusion. Includes a one-shot migration that SIGTERMs and removes any daemon still running off the legacy `<plugin-data>/watch.pid` path before checking the new location.
+- **Watch daemon no longer restarts on every SessionStart.** The "should we restart this daemon?" check compared the Rust crate version (written into `watch.version` via `env!("CARGO_PKG_VERSION")`) against the npm plugin version (from `package.json`). These drift independently across releases, so every SessionStart saw a mismatch, SIGTERMed the daemon, and restarted the librarian child along with it. Replaced with a binary mtime fingerprint stored in `<vault>/.vault-search/watch.fingerprint`. The mtime changes only when the binary file changes, which is exactly when a restart is warranted.
+- **`PreCompact` hook output now validates against Claude Code's hook schema.** `PreCompact` does not accept `hookSpecificOutput.additionalContext` (the universal schema only allows that field on `UserPromptSubmit`, `PostToolUse`, and `PostToolBatch`), so the prior hook silently produced a JSON validation error every time it fired. The hook now emits `{}` and delegates capture work to a detached worker that reads the pre-compaction transcript and asks the librarian's already-warm `gemma4:e2b` (via the existing ollama-client) to extract atomic notes into `0-inbox/`. Opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`.
+
+### Internal
+
+- **Test harness reaps watch daemons on cleanup.** `tests/helpers/hook-runner.mjs` `cleanup()` now reads pidfiles from both legacy and new locations, SIGTERMs each pid (with a 200ms grace and SIGKILL fallback), then rms the sandbox. Detached daemons spawned during hook tests are no longer left as zombies.
+- **Rust binary no longer writes `watch.version`.** With the JS side now identifying the running daemon by binary mtime fingerprint, the version file is unused. Removed the write from `PidGuard::new`, the matching `Drop` cleanup, and the `version_path` field.
+
 ## v1.21.0
 
 ### Added

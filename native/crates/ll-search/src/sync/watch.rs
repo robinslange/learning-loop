@@ -28,7 +28,6 @@ pub struct WatchConfig {
 
 struct PidGuard {
     path: PathBuf,
-    version_path: PathBuf,
 }
 
 impl PidGuard {
@@ -43,11 +42,8 @@ impl PidGuard {
             {
                 Ok(mut f) => {
                     write!(f, "{}", std::process::id())?;
-                    let version_path = path.with_file_name("watch.version");
-                    std::fs::write(&version_path, env!("CARGO_PKG_VERSION")).ok();
                     return Ok(PidGuard {
                         path: path.to_path_buf(),
-                        version_path,
                     });
                 }
                 Err(e) if e.kind() == ErrorKind::AlreadyExists => {
@@ -83,7 +79,6 @@ impl PidGuard {
 impl Drop for PidGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
-        let _ = std::fs::remove_file(&self.version_path);
     }
 }
 
