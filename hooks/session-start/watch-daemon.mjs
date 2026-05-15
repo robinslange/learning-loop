@@ -18,9 +18,39 @@ export async function run(ctx) {
   const DB_PATH = join(vaultRoot, '.vault-search', 'vault-index.db');
   if (!binary || !existsSync(DB_PATH) || !pluginData) return;
 
-  const pidPath = join(pluginData, 'watch.pid');
-  const versionPath = join(pluginData, 'watch.version');
+  // Lock lives next to the vault index it protects, not next to the plugin
+  // install. Two installations (e.g. real + test sandbox) pointing at the same
+  // vault must share one daemon, not spawn one each.
+  const lockDir = join(vaultRoot, '.vault-search');
+  const pidPath = join(lockDir, 'watch.pid');
+  const versionPath = join(lockDir, 'watch.version');
   const lockPath = pidPath + '.lock';
+
+  // One-shot migration: older builds wrote watch.pid into <plugin-data>/.
+  // Any daemon still running off the legacy pidfile must be SIGTERMed or it
+  // will coexist with the new per-vault daemon and double-write the index.
+  const legacyPidPath = join(pluginData, 'watch.pid');
+  const legacyVersionPath = join(pluginData, 'watch.version');
+  try {
+    const raw = readFileSync(legacyPidPath, 'utf8').trim();
+    const pid = parseInt(raw, 10);
+    if (Number.isFinite(pid)) {
+      try {
+        process.kill(pid, 0);
+        process.kill(pid, 'SIGTERM');
+      } catch (err) {
+        logError('session-start.watch-daemon.legacyReap', err);
+      }
+    }
+  } catch {
+    // No legacy pidfile, nothing to migrate.
+  }
+  try {
+    rmSync(legacyPidPath, { force: true });
+    rmSync(legacyVersionPath, { force: true });
+  } catch (err) {
+    logError('session-start.watch-daemon.legacyRm', err);
+  }
 
   function checkAlive() {
     let raw;

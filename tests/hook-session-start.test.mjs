@@ -190,9 +190,12 @@ test(
     try {
       assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}`);
 
-      // watch.pid must not exist in plugin-data if daemon was not spawned.
-      const pidPath = join(r.pluginDataDir, 'watch.pid');
-      assert.ok(!existsSync(pidPath), 'watch.pid must not exist when daemon not spawned');
+      // watch.pid must not exist in either the legacy (plugin-data) or
+      // current (vault/.vault-search) location when daemon was not spawned.
+      const legacyPidPath = join(r.pluginDataDir, 'watch.pid');
+      assert.ok(!existsSync(legacyPidPath), 'legacy watch.pid must not exist when daemon not spawned');
+      const vaultPidPath = join(VAULT, '.vault-search', 'watch.pid');
+      assert.ok(!existsSync(vaultPidPath), 'vault watch.pid must not exist when daemon not spawned');
     } finally {
       r.cleanup();
     }

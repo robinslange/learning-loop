@@ -3,9 +3,50 @@
 // Each invocation gets a fresh temp sandbox for HOME and plugin-data.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+
+/**
+ * Reap a watch daemon by reading a pidfile, SIGTERM-ing the pid, briefly
+ * waiting, then SIGKILL if still alive. Removes the pidfile last. Safe to
+ * call on a non-existent pidfile or a pidfile naming a dead pid.
+ *
+ * @param {string} pidPath
+ */
+function reapPidfile(pidPath) {
+  let pid = null;
+  try {
+    const raw = readFileSync(pidPath, 'utf8').trim();
+    const parsed = parseInt(raw, 10);
+    if (Number.isFinite(parsed)) {
+      try {
+        process.kill(parsed, 0);
+        pid = parsed;
+      } catch {
+        // Already dead.
+      }
+    }
+  } catch {
+    // No pidfile.
+  }
+  if (pid !== null) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {}
+    // Sync wait up to ~200ms for graceful exit.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Exited cleanly.
+    }
+  }
+  try {
+    rmSync(pidPath, { force: true });
+  } catch {}
+}
 
 /**
  * Run a hook script in a hermetic sandbox.
@@ -96,6 +137,16 @@ export function runHook(hookPath, opts = {}) {
   const tmpKeys = [...afterKeys].filter((k) => !beforeKeys.has(k));
 
   function cleanup() {
+    // Reap any watch daemons this test caused to spawn. Two locations:
+    // (1) the sandbox's plugin-data (legacy pidfile location);
+    // (2) the vault's .vault-search/ if a VAULT_PATH was supplied (current
+    //     pidfile location). Without this, detached daemons survive the test
+    //     and accumulate as zombies.
+    reapPidfile(join(pluginDataDir, 'watch.pid'));
+    const vaultPath = env.VAULT_PATH;
+    if (vaultPath) {
+      reapPidfile(join(vaultPath, '.vault-search', 'watch.pid'));
+    }
     // Remove sandbox.
     rmSync(sandboxRoot, { recursive: true, force: true });
     // Remove any learning-loop-* tmp files this run created (check both dirs).
