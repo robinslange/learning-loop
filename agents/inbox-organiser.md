@@ -91,12 +91,30 @@ For each note, assign one action:
 
 | Promote-gate result | Action |
 |---|---|
-| All 6 pass + skip-rewrite | `mv` to `3-permanent/` (no rewrite needed) |
-| All 6 pass, voice fails | Rewrite via note-writer → `3-permanent/` |
+| All 6 pass + skip-rewrite + verify-note PASS | `mv` to `3-permanent/` (no rewrite needed) |
+| All 6 pass + skip-rewrite + verify-note FAIL (high severity) | `mv` to `1-fleeting/` (verification gate held) |
+| All 6 pass, voice fails, verify-note PASS | Rewrite via note-writer → `3-permanent/` |
+| All 6 pass, voice fails, verify-note FAIL | Rewrite via note-writer → `1-fleeting/` |
 | 3-4 pass | `mv` to `1-fleeting/` |
 | ≤ 2 pass | Keep in `0-inbox/` |
 | Duplicate of another inbox note | Merge (gated) |
 | Ghost duplicate | Delete (gated) |
+
+### Verification Gate
+
+Before any `mv` to `3-permanent/`, run:
+
+```bash
+node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
+```
+
+The resolver returns structured issues with severity. If any issue has `severity: high` (wrong author, wrong year, dead URL on cited source), the note routes to `1-fleeting/` instead of `3-permanent/`. Synthesis notes (`source: synthesis` in frontmatter) skip this gate — they have no external source to verify.
+
+Then emit a `verify` provenance event so the same flow appears in /health --provenance:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
+```
 
 Counter-arguments get promoted like any other note (quality determines folder) but also get bidirectional links added per the counter-argument-linking skill.
 

@@ -115,4 +115,19 @@ These inline markers are set by the note-writer's API verification step. All age
 - `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. `/verify` should check the full text when possible.
 - `[not in source]` -- a specific number in the note does not appear in the fetched source page (for non-academic URLs: docs, blogs, vendor pages). Check the source manually; if absent, soften the figure or remove it.
 
-These markers are informational, not errors. They signal where human or deeper automated review should focus.
+**These markers are load-bearing.** Any marker present in a note's body blocks promotion to `3-permanent/`. The promote-gate routes marker-bearing notes to `1-fleeting/` regardless of other criteria. Markers inside fenced code blocks are ignored (the gate strips fenced blocks before scanning). This is what closes the loop between write-time honesty and downstream trust: an `[unresolved]` source on a deep, well-linked note is still a gap, and the vault treats it as one.
+
+## Finding-Type Discriminator: source-missing vs logical-gap
+
+Two finding types in the verify taxonomy are easily confused. Use this rule to discriminate:
+
+- **`source-missing`**: a claim cites a source (URL, paper title, author+year, "the docs say") but the source either does not exist, does not contain the claim, or cannot be resolved. The note *attempted* sourcing and failed.
+- **`logical-gap`**: a claim makes a factual assertion that should have a source but does not cite one. The note *did not attempt* sourcing.
+
+Trigger phrase: "Did the writer attempt to attribute this claim?"
+- Yes (and the attribution failed) → `source-missing`
+- No (the claim stands bare) → `logical-gap`
+
+Synthesis notes (`source: synthesis`) are exempt from both: their claims are author inference, not external assertions.
+
+This boundary was previously ambiguous (~33% of findings in each type marked `ambiguous`). Apply the trigger phrase deterministically when emitting provenance.
