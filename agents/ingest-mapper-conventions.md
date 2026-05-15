@@ -63,7 +63,7 @@ Write to `{vault_root}/_ingested-repos/{repo_slug}/CONVENTIONS.md`:
 
 ## Import Organization
 
-```typescript
+```ts
 // Show actual pattern from codebase
 ```
 
