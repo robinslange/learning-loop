@@ -183,6 +183,8 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 6. Collect 5 ack JSONs. Validate each: `focus`, `status` required; the 4 durable mappers also require `doc_path`.
 
+6.5. Write partial `METADATA.json` (mapper_acks filled, synthesizer status="pending") so the post-fanout audit's expectation of `METADATA.json` in the staging dir is satisfied. Step 12 below overwrites it with the synthesizer outcome.
+
 7. Run post-fanout audit:
    ```bash
    SUCCESSFUL_FOCUSES_JSON='["stack","arch","conventions","domain"]'  # filter to status=ok
