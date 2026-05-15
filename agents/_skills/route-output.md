@@ -34,7 +34,7 @@ Write confirmed insights to their destinations: auto-memory and/or vault.
 For each `durable-insight`, first check if it is a **project artefact** rather than an atomic insight:
 
 ```bash
-node -e "import('./scripts/route-project-artefact.mjs').then(async m => { const vault = await m.readVaultProjectIndex(process.env.VAULT_PATH); const r = m.routeArtefact(process.argv[1], vault); console.log(JSON.stringify(r)); })" "<proposed-filename>.md"
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/route-project-artefact.mjs').then(async m => { const vault = await m.readVaultProjectIndex(process.env.VAULT_PATH); const r = m.routeArtefact(process.argv[1], vault); console.log(JSON.stringify(r)); })" "<proposed-filename>.md"
 ```
 
 If the result has a non-null `slug`, this insight is a project artefact (interview prep, client brief, evidence bundle, etc.) — its filename matches an existing project's slug in `4-projects/`. Route it to that subfolder instead of `0-inbox/`. Project artefacts are not atomic insights; they are working documents for a specific project.

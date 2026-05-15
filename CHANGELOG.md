@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **check-deps:** detect native-module ABI drift in installed plugins. `scripts/check-deps.mjs` exports a new `detectAbiDrift()` function and surfaces drift on the JSON output as `_abi_drift`. Currently watches `episodic-memory@1.0.15`'s `better-sqlite3` binding — a future Node bump will surface a fix command in `/health` instead of silently breaking `/reflect` and episodic search.
+- **promotion-gate:** new `scripts/promotion-gate.mjs` exports `canPromote(note)` (pure) and `promoteWithVerification(note, { verifier })` (async wrapper). Verification markers (`[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`) anywhere in a note's body now block promotion to `3-permanent/` and route to `1-fleeting/`. Markers inside fenced code blocks are ignored.
+- **route-project-artefact:** new `scripts/route-project-artefact.mjs` exports `extractProjectSlug()`, `routeArtefact()`, and `readVaultProjectIndex()`. Notes whose filename matches a slug in `4-projects/` (file or directory) auto-route to that subfolder instead of `0-inbox/`. Closes the recurring papercut where interview-prep, client-brief, and evidence-bundle artefacts landed in the atomic-insights inbox.
+- **inbox-organiser:** verification gate wired into the promotion path. Before any `mv` to `3-permanent/`, the gate calls `promoteWithVerification()` which invokes `source-resolver.mjs verify-note` for non-synthesis notes; high-severity issues demote to `1-fleeting/`.
+- **note-verifier:** now emits `verify` (per-note summary) and `score` (per-finding) provenance events with the `skill: "verify"` field. Closes the v1.19+v1.20 observability gap where `/verify` ran but didn't emit structured events.
+- **capture-rules:** Finding-Type Discriminator section disambiguates `source-missing` (cited source failed) from `logical-gap` (no citation attempted). Both finding types previously ran ~33% ambiguous in provenance.
+- **tests:** 25 new unit tests (`check-deps-abi`, `promotion-gate`, `route-project-artefact`, `episodic-memory-binding`).
+
+### Changed
+
+- **capture-rules:** verification markers are load-bearing (was: informational). The promote-gate honours markers; an `[unresolved]` source on a deep, well-linked note blocks promotion to permanent.
+- **promote-gate:** routing table prepended with a marker-blocks row + reference to the new programmatic gate (`canPromote()`).
+
+### Fixed
+
+- **ingest-profile:** `tests/ingest-profile.test.mjs` and `scripts/ingest-profile.mjs:gitInfo()` now strip `GIT_*` env vars before shelling out to git. Without this, the inner `git commit` (in the test) and the origin-lookup (in the script) inherited `GIT_DIR`/`GIT_WORK_TREE` from a parent pre-commit hook, landing commits in the wrong repo and returning the wrong origin URL. The recursive-lefthook flake that created phantom `init` commits in worktrees is closed.
+
 ## v1.21.0
 
 ### Added

@@ -102,13 +102,24 @@ For each note, assign one action:
 
 ### Verification Gate
 
-Before any `mv` to `3-permanent/`, run:
+Before any `mv` to `3-permanent/`, run the programmatic gate that wraps both the 6-criterion check and the source-resolver verify-note pass:
 
 ```bash
-node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/promotion-gate.mjs').then(async m => { \
+  const note = { /* path, body, frontmatter, gateCriteria from this batch */ }; \
+  const verifier = async (n) => { \
+    const { execFileSync } = await import('node:child_process'); \
+    const out = execFileSync('node', ['${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs', 'verify-note', n.path], { encoding: 'utf-8' }); \
+    const parsed = JSON.parse(out); \
+    const high = (parsed.issues || []).filter(i => i.severity === 'high'); \
+    return { highSeverityIssues: high.length, warnings: high.map(i => i.detail) }; \
+  }; \
+  const r = await m.promoteWithVerification(note, { verifier }); \
+  console.log(JSON.stringify(r)); \
+})"
 ```
 
-The resolver returns structured issues with severity. If any issue has `severity: high` (wrong author, wrong year, dead URL on cited source), the note routes to `1-fleeting/` instead of `3-permanent/`. Synthesis notes (`source: synthesis` in frontmatter) skip this gate — they have no external source to verify.
+The wrapper short-circuits when promote-gate already routes to fleeting/inbox, and skips the verifier entirely for synthesis notes (`source: synthesis`). When the verifier returns `highSeverityIssues > 0`, the wrapper demotes to `1-fleeting/` with the warnings attached to `result.reason`.
 
 Then emit a `verify` provenance event so the same flow appears in /health --provenance:
 
