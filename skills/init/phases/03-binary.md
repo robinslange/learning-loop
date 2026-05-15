@@ -54,6 +54,48 @@ Writes two stable shims to `~/.local/bin/`:
 
 Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node PLUGIN/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
 
+## 3e.5: Optional - ygrep (local indexed code search)
+
+Used by `/learning-loop:ingest repo` deep mappers when scanning large repos. Skip if the user does not plan to ingest codebases.
+
+Detect: `command -v ygrep >/dev/null 2>&1`. If present, skip this step entirely (no prompt).
+
+If absent, ask once via `AskUserQuestion`:
+
+> Install ygrep (~34 MB local indexed code search)? Used by `/learning-loop:ingest repo` deep mappers. Skip if you don't plan to ingest codebases.
+
+If the user declines, do not prompt again on subsequent `/init` runs (the absence of ygrep is not an error, just a degraded mode for ingest).
+
+If approved:
+
+```bash
+PLATFORM=$(uname -sm | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+case "$PLATFORM" in
+  darwin-arm64)  ASSET_PATTERN="darwin-arm64" ;;
+  darwin-x86_64) ASSET_PATTERN="darwin-x86_64" ;;
+  linux-x86_64)  ASSET_PATTERN="linux-x86_64" ;;
+  *) echo "ygrep not available for $PLATFORM"; exit 0 ;;
+esac
+
+URL=$(curl -s https://api.github.com/repos/yetidevworks/ygrep/releases/latest \
+  | grep "browser_download_url.*$ASSET_PATTERN" \
+  | head -1 \
+  | sed 's/.*: "//;s/".*//')
+
+if [ -z "$URL" ]; then
+  echo "Could not resolve ygrep release URL for $PLATFORM"
+  exit 0
+fi
+
+mkdir -p "$HOME/.local/bin"
+curl -sL "$URL" | tar xz -C /tmp
+mv /tmp/ygrep "$HOME/.local/bin/ygrep"
+chmod +x "$HOME/.local/bin/ygrep"
+ygrep --version
+```
+
+Idempotent: re-running when `ygrep` is already on PATH is a no-op (the `command -v` short-circuits before the prompt).
+
 ## 3e: Plugin Dependencies
 
 Run `node PLUGIN/scripts/check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
