@@ -74,15 +74,19 @@ function secondLevelForSubsystemDirs(repo) {
 }
 
 function gitInfo(repo) {
+  let origin = null;
+  let head = null;
   try {
-    const origin = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'origin'], {
+    origin = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'origin'], {
       encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    const head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {
+  } catch {}
+  try {
+    head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {
       encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-    return { origin, head };
-  } catch { return { origin: null, head: null }; }
+  } catch {}
+  return { origin, head };
 }
 
 export function generateProfile(repoPath) {
