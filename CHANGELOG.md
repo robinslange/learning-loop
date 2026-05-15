@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format is based on 
 - **inbox-organiser:** verification gate wired into the promotion path. Before any `mv` to `3-permanent/`, the gate calls `promoteWithVerification()` which invokes `source-resolver.mjs verify-note` for non-synthesis notes; high-severity issues demote to `1-fleeting/`.
 - **note-verifier:** now emits `verify` (per-note summary) and `score` (per-finding) provenance events with the `skill: "verify"` field. Closes the v1.19+v1.20 observability gap where `/verify` ran but didn't emit structured events.
 - **capture-rules:** Finding-Type Discriminator section disambiguates `source-missing` (cited source failed) from `logical-gap` (no citation attempted). Both finding types previously ran ~33% ambiguous in provenance.
-- **tests:** 25 new unit tests (`check-deps-abi`, `promotion-gate`, `route-project-artefact`, `episodic-memory-binding`).
+- **tests:** 22 new unit tests (`check-deps-abi` × 4, `promotion-gate` × 9, `route-project-artefact` × 8, `episodic-memory-binding` × 1).
 
 ### Changed
 
