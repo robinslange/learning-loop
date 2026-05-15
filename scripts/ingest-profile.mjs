@@ -122,19 +122,34 @@ function secondLevelForSubsystemDirs(repo) {
   return result;
 }
 
+// Build an env without GIT_* vars. When this script runs from a pre-commit hook,
+// the parent's GIT_DIR/GIT_WORK_TREE leak in and `git -C <repo>` reads the parent's
+// config instead of <repo>'s. Without stripping, gitInfo returns the calling repo's
+// origin and HEAD instead of the target repo's.
+function isolatedEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (!k.startsWith('GIT_')) env[k] = v;
+  }
+  return env;
+}
+
 function gitInfo(repo) {
   let origin = null;
   let head = null;
+  const env = isolatedEnv();
   try {
     origin = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'origin'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      env,
     }).trim();
   } catch {}
   try {
     head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      env,
     }).trim();
   } catch {}
   return { origin, head };
