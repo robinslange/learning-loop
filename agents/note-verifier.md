@@ -164,11 +164,29 @@ Use these levels in the Claim Checks table below instead of binary supported/uns
 
 ## Emit Provenance
 
-After verification, emit a result event:
+Before returning the verification report to the caller, emit one summary event per note plus one finding event per issue. Run all emit calls in a single chained Bash command so they stay together in the log.
+
+### Per-note summary (always emit)
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-verifier","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-verifier","skill":"verify","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
 ```
+
+### Per-finding score event (emit one per issue)
+
+For each finding identified during verification, also emit:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","finding_detail":"<one-line>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}'
+```
+
+Where:
+- `finding_type` is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents/_skills/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
+- `trigger` is `verify-auto` when this agent runs the mechanical resolver. Use `verify-manual` only when a Claude-led review found the issue separately.
+- `confidence` is `clear` when the classification is unambiguous; `ambiguous` when another `finding_type` could plausibly apply.
+- `ambiguous_alt` names the alternative type when `confidence` is `ambiguous`; empty string otherwise.
+
+Emit before returning the report. If emission fails (script not found, plugin root missing), continue silently — provenance is observability, not correctness.
 
 ## WebFetch Discipline
 

@@ -58,6 +58,7 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 | Passes | Destination | Rewrite? |
 |--------|-------------|----------|
+| Verification marker present (`[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`) | `1-fleeting/` | No — **markers always block permanent** |
 | All applicable criteria pass | `3-permanent/` | No — write as-is |
 | All but voice pass | `3-permanent/` | Yes — rewrite in persona voice |
 | Source integrity fails (non-synthesis notes only) | `1-fleeting/` | No — **cannot promote with unverified sources** |
@@ -67,6 +68,8 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 For `[synthesis]`-tagged notes, "all applicable" = 4 criteria (Sourcing and Source Integrity exempt). For all other notes, "all applicable" = 6.
 
 **Hard block:** Source Integrity failure always blocks promotion to `3-permanent/` for non-synthesis notes. A beautifully written, well-linked, deep note with a fabricated citation is worse than a shallow inbox note — it looks authoritative while being wrong.
+
+**Programmatic gate:** Agents that need a yes/no answer can call `canPromote()` exported from `scripts/promotion-gate.mjs`. The function applies the marker check, the source-integrity check, and the criteria-count check, returning `{ allowed, destination, reason }`.
 
 ## Scoring Mode
 

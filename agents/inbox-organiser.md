@@ -91,12 +91,41 @@ For each note, assign one action:
 
 | Promote-gate result | Action |
 |---|---|
-| All 6 pass + skip-rewrite | `mv` to `3-permanent/` (no rewrite needed) |
-| All 6 pass, voice fails | Rewrite via note-writer → `3-permanent/` |
+| All 6 pass + skip-rewrite + verify-note PASS | `mv` to `3-permanent/` (no rewrite needed) |
+| All 6 pass + skip-rewrite + verify-note FAIL (high severity) | `mv` to `1-fleeting/` (verification gate held) |
+| All 6 pass, voice fails, verify-note PASS | Rewrite via note-writer → `3-permanent/` |
+| All 6 pass, voice fails, verify-note FAIL | Rewrite via note-writer → `1-fleeting/` |
 | 3-4 pass | `mv` to `1-fleeting/` |
 | ≤ 2 pass | Keep in `0-inbox/` |
 | Duplicate of another inbox note | Merge (gated) |
 | Ghost duplicate | Delete (gated) |
+
+### Verification Gate
+
+Before any `mv` to `3-permanent/`, run the programmatic gate that wraps both the 6-criterion check and the source-resolver verify-note pass:
+
+```bash
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/promotion-gate.mjs').then(async m => { \
+  const note = { /* path, body, frontmatter, gateCriteria from this batch */ }; \
+  const verifier = async (n) => { \
+    const { execFileSync } = await import('node:child_process'); \
+    const out = execFileSync('node', ['${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs', 'verify-note', n.path], { encoding: 'utf-8' }); \
+    const parsed = JSON.parse(out); \
+    const high = (parsed.issues || []).filter(i => i.severity === 'high'); \
+    return { highSeverityIssues: high.length, warnings: high.map(i => i.detail) }; \
+  }; \
+  const r = await m.promoteWithVerification(note, { verifier }); \
+  console.log(JSON.stringify(r)); \
+})"
+```
+
+The wrapper short-circuits when promote-gate already routes to fleeting/inbox, and skips the verifier entirely for synthesis notes (`source: synthesis`). When the verifier returns `highSeverityIssues > 0`, the wrapper demotes to `1-fleeting/` with the warnings attached to `result.reason`.
+
+Then emit a `verify` provenance event so the same flow appears in /health --provenance:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
+```
 
 Counter-arguments get promoted like any other note (quality determines folder) but also get bidirectional links added per the counter-argument-linking skill.
 

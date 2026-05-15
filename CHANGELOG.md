@@ -4,11 +4,27 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **check-deps:** detect native-module ABI drift in installed plugins. `scripts/check-deps.mjs` exports a new `detectAbiDrift()` function and surfaces drift on the JSON output as `_abi_drift`. Currently watches `episodic-memory@1.0.15`'s `better-sqlite3` binding — a future Node bump will surface a fix command in `/health` instead of silently breaking `/reflect` and episodic search.
+- **promotion-gate:** new `scripts/promotion-gate.mjs` exports `canPromote(note)` (pure) and `promoteWithVerification(note, { verifier })` (async wrapper). Verification markers (`[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`) anywhere in a note's body now block promotion to `3-permanent/` and route to `1-fleeting/`. Markers inside fenced code blocks are ignored.
+- **route-project-artefact:** new `scripts/route-project-artefact.mjs` exports `extractProjectSlug()`, `routeArtefact()`, and `readVaultProjectIndex()`. Notes whose filename matches a slug in `4-projects/` (file or directory) auto-route to that subfolder instead of `0-inbox/`. Closes the recurring papercut where interview-prep, client-brief, and evidence-bundle artefacts landed in the atomic-insights inbox.
+- **inbox-organiser:** verification gate wired into the promotion path. Before any `mv` to `3-permanent/`, the gate calls `promoteWithVerification()` which invokes `source-resolver.mjs verify-note` for non-synthesis notes; high-severity issues demote to `1-fleeting/`.
+- **note-verifier:** now emits `verify` (per-note summary) and `score` (per-finding) provenance events with the `skill: "verify"` field. Closes the v1.19+v1.20 observability gap where `/verify` ran but didn't emit structured events.
+- **capture-rules:** Finding-Type Discriminator section disambiguates `source-missing` (cited source failed) from `logical-gap` (no citation attempted). Both finding types previously ran ~33% ambiguous in provenance.
+- **tests:** 22 new unit tests (`check-deps-abi` × 4, `promotion-gate` × 9, `route-project-artefact` × 8, `episodic-memory-binding` × 1).
+
+### Changed
+
+- **capture-rules:** verification markers are load-bearing (was: informational). The promote-gate honours markers; an `[unresolved]` source on a deep, well-linked note blocks promotion to permanent.
+- **promote-gate:** routing table prepended with a marker-blocks row + reference to the new programmatic gate (`canPromote()`).
+
 ### Fixed
 
 - **Watch daemon lock now keyed on the vault, not the plugin install.** Pidfile, fingerprint, and lockfile moved from `<plugin-data>/watch.pid` to `<vault>/.vault-search/watch.pid`. The previous layout let two installations (e.g. a real install plus a test sandbox) each spawn their own daemon against the same SQLite index, with no shared mutual exclusion. Includes a one-shot migration that SIGTERMs and removes any daemon still running off the legacy `<plugin-data>/watch.pid` path before checking the new location.
 - **Watch daemon no longer restarts on every SessionStart.** The "should we restart this daemon?" check compared the Rust crate version (written into `watch.version` via `env!("CARGO_PKG_VERSION")`) against the npm plugin version (from `package.json`). These drift independently across releases, so every SessionStart saw a mismatch, SIGTERMed the daemon, and restarted the librarian child along with it. Replaced with a binary mtime fingerprint stored in `<vault>/.vault-search/watch.fingerprint`. The mtime changes only when the binary file changes, which is exactly when a restart is warranted.
 - **`PreCompact` hook output now validates against Claude Code's hook schema.** `PreCompact` does not accept `hookSpecificOutput.additionalContext` (the universal schema only allows that field on `UserPromptSubmit`, `PostToolUse`, and `PostToolBatch`), so the prior hook silently produced a JSON validation error every time it fired. The hook now emits `{}` and delegates capture work to a detached worker that reads the pre-compaction transcript and asks the librarian's already-warm `gemma4:e2b` (via the existing ollama-client) to extract atomic notes into `0-inbox/`. Opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`.
+- **ingest-profile:** `tests/ingest-profile.test.mjs` and `scripts/ingest-profile.mjs:gitInfo()` now strip `GIT_*` env vars before shelling out to git. Without this, the inner `git commit` (in the test) and the origin-lookup (in the script) inherited `GIT_DIR`/`GIT_WORK_TREE` from a parent pre-commit hook, landing commits in the wrong repo and returning the wrong origin URL. The recursive-lefthook flake that created phantom `init` commits in worktrees is closed.
 
 ### Internal
 

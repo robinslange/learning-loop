@@ -115,7 +115,7 @@ These inline markers are set by the note-writer's API verification step. All age
 - `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. `/verify` should check the full text when possible.
 - `[not in source]` -- a specific number in the note does not appear in the fetched source page (for non-academic URLs: docs, blogs, vendor pages). Check the source manually; if absent, soften the figure or remove it.
 
-These markers are informational, not errors. They signal where human or deeper automated review should focus.
+**These markers are load-bearing.** Any marker present in a note's body blocks promotion to `3-permanent/`. The promote-gate routes marker-bearing notes to `1-fleeting/` regardless of other criteria. Markers inside fenced code blocks are ignored (the gate strips fenced blocks before scanning). This is what closes the loop between write-time honesty and downstream trust: an `[unresolved]` source on a deep, well-linked note is still a gap, and the vault treats it as one.
 
 ## Finding-Type Discriminator: source-missing vs logical-gap
 
