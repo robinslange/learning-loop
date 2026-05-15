@@ -130,6 +130,31 @@ A note does **not** need rewriting if:
 
 When skip-rewrite is true, the triage/promotion step can simply `mv` the file instead of spawning a note-writer agent. This is the primary throughput improvement for batch processing.
 
+## NLI Contradiction Check (Bundle 2)
+
+Before promoting a note from `0-inbox/` to a higher folder, query NLI contradiction edges for the note. This complements (does not replace) the Source Integrity check and runs alongside it.
+
+### Process
+
+1. Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`).
+2. Call `getNliEdgesForNote(db, candidatePath, NLI_TENSION_THRESHOLD)`.
+3. Filter to `edge_type === 'challenges_rebuttal'`.
+4. Bucket each remaining edge:
+   - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Caller surfaces the supersede / qualify / keep-both / skip prompt; user resolves before the move.
+   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75-0.95) → **soft bucket**: promote, then stamp `nli_tension: true` + `nli_tension_partners: [...]` on the destination note's frontmatter.
+
+### Escape hatches
+
+- Frontmatter `nli_resolved: deliberate` on the candidate → skip the gate entirely (the user has already declared this is a deliberate disagreement, typically on retraction notes).
+- CLI flag `--skip-nli` on `/inbox` or `/verify` → skip the gate for the whole run.
+- DB unavailable or `getNliEdgesForNote` throws → log via hook-error pattern and proceed. Hint-mode rule: classifier biases the LLM, never silent-gates.
+
+### Interaction with other criteria
+
+- NLI is independent of the 6-criterion assessment. A note can pass all 6 criteria AND still be blocked by a hard NLI contradiction.
+- NLI is independent of counter-argument-linking. The two systems detect different signals (NLI on semantic content, counter-argument-linking on regex `challenges_*` body markers) and can coexist on the same pair.
+- NLI is independent of Source Integrity. A note can have verified sources AND still contradict an existing belief; that's the case the gate exists for.
+
 ## Source Integrity Check (before promotion to 3-permanent/)
 
 Before any note reaches `3-permanent/`, run:

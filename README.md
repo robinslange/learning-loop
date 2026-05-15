@@ -76,8 +76,6 @@ your-vault/
   4-projects/       Project index notes
   5-maps/           Synthesis and discovery maps
   _system/          Persona and capture rules
-                    nli-conflicts.md     -- NLI advisory edge heatmap (auto-generated)
-                    viz/cycles.canvas    -- contradiction-cycle visualisation (auto-generated)
   Excalidraw/       Diagrams
 ```
 
@@ -88,13 +86,9 @@ On every Write/Edit to a vault note, `edge-infer.mjs` runs the autolink top-3 ne
 - `challenges_rebuttal` when `p(contradiction) > LL_NLI_THRESHOLD` (default `0.90`)
 - `nli_supports` when `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default `0.75`)
 
-These edges drive three vault-visible surfaces via `/learning-loop:viz`:
+These edges are advisory signals consumed by `inbox-organiser` (promotion gate), `refinement-proposer` (pair hint), and `/verify` (consistency detection). They live in `edges.db` and are queried via `getNliEdgesForNote` in `scripts/lib/edges.mjs`. The earlier viz layer (frontmatter sync, heatmap, cycle canvas) was removed in favour of agent-moment affordances — the data isn't displayed for humans, it's queried by skills at the moments where it changes a decision.
 
-1. **Note frontmatter** (`nli-contradicts:` / `nli-supports:` keys) — Obsidian Graph View can colour the flagged notes
-2. **`_system/nli-conflicts.md`** — markdown heatmap of all NLI edges, sorted by confidence
-3. **`_system/viz/cycles.canvas`** — Obsidian Canvas file showing transitive contradiction cycles
-
-Performance: `ll-search watch` hosts a UDS daemon at `<plugin-data>/nli.sock` that keeps the 233MB model loaded. Hook calls round-trip in ~10ms warm. Without the daemon, the hook falls back to spawning fresh subprocesses (~400ms each). The daemon is unix-only — Windows users always take the subprocess path. See `skills/viz/SKILL.md` for the full tunable surface and `scripts/clear-nli-frontmatter.mjs` for rollback.
+Performance: `ll-search watch` hosts a UDS daemon at `<plugin-data>/nli.sock` that keeps the 233MB model loaded. Hook calls round-trip in ~10ms warm. Without the daemon, the hook falls back to spawning fresh subprocesses (~400ms each). The daemon is unix-only — Windows users always take the subprocess path.
 
 ## Go deeper
 

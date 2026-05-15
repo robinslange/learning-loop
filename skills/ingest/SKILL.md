@@ -20,10 +20,6 @@ Pulls data from external sources (Linear, repositories, or any content Claude ca
 - `/ingest`: ask which source type
 - `--refine`: append to any source mode (e.g., `/ingest context --refine`) to enable Step 5.6 upstream refinement after ingest. Off by default; will move to default-on after a few validation runs.
 
-## Flags
-
-- `--no-viz`: skip the viz regeneration step (Step 5.55) at the end (e.g., `/ingest repo ~/foo --no-viz`)
-
 ## Process
 
 ### Step 0: Parameter Resolution
@@ -322,22 +318,6 @@ rm -f "$SWEEP_CANDIDATES"
 ```
 
 Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch (ingest typically produces few subagent-written notes that the routing step hasn't already linked via its prompt).
-
-### Step 5.55: Regenerate Viz Artifacts
-
-Unless the user passed `--no-viz` to `/ingest`, regenerate the NLI viz artifacts (frontmatter sync, heatmap, cycle canvas):
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/regenerate-viz.mjs" 2>"${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log" || echo "viz regen failed (see ${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-viz-regen.log)"
-```
-
-Failure must not break the ingest session — the `|| echo` swallows non-zero exit codes and the session continues.
-
-If the script succeeds and any of the three counts (`frontmatterUpdated`, `heatmapRows`, `cyclesFound`) is non-zero, include a one-line summary in the Step 6 summary:
-
-> Viz refreshed: <frontmatterUpdated> frontmatter syncs, <heatmapRows> heatmap rows, <cyclesFound> cycles.
-
-If all three counts are zero, omit the line from the summary.
 
 ### Step 5.6: Upstream Refinement
 

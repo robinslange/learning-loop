@@ -105,14 +105,6 @@ CREATE TABLE IF NOT EXISTS supersessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_super_pattern ON supersessions(old_pattern_query);
-
-CREATE TABLE IF NOT EXISTS nli_frontmatter_tags (
-  note_path TEXT PRIMARY KEY
-);
-CREATE TABLE IF NOT EXISTS viz_meta (
-  key TEXT PRIMARY KEY,
-  value TEXT
-);
 `;
 
 export async function openEdgeDb(dbPath) {
@@ -219,12 +211,18 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
-export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
+// Returns NLI edges where notePath is either endpoint, with confidence_score
+// in [minConfidence, 1]. Consumers: inbox-organiser promote-gate (Bundle 2),
+// refinement-proposer pair hint, /verify consistency detection. Uses literal
+// source_graph='nli' to deliberately exclude peer NLI edges; federation
+// authority handling is a future bundle.
+export function getNliEdgesForNote(db, notePath, minConfidence = 0.75) {
   const res = db.exec(
     'SELECT from_path, to_path, edge_type, confidence_score FROM edges ' +
-      "WHERE source_graph = 'nli' AND confidence_score IS NOT NULL AND confidence_score >= ? " +
-      'ORDER BY from_path, confidence_score DESC',
-    [threshold],
+      "WHERE source_graph = 'nli' AND confidence_score IS NOT NULL " +
+      'AND confidence_score >= ? AND (from_path = ? OR to_path = ?) ' +
+      'ORDER BY confidence_score DESC',
+    [minConfidence, notePath, notePath],
   );
   if (!res[0]) return [];
   return res[0].values.map(([fromPath, toPath, edgeType, confidenceScore]) => ({
@@ -232,79 +230,8 @@ export function getNliEdgesForFrontmatter(db, threshold = 0.95) {
     toPath,
     edgeType,
     confidenceScore,
+    partner: fromPath === notePath ? toPath : fromPath,
   }));
-}
-
-export function getTaggedNotes(db) {
-  const res = db.exec('SELECT note_path FROM nli_frontmatter_tags');
-  if (!res[0]) return new Set();
-  return new Set(res[0].values.map((r) => r[0]));
-}
-
-export function replaceTaggedNotes(db, paths) {
-  db.run('DELETE FROM nli_frontmatter_tags');
-  for (const p of paths) {
-    db.run('INSERT INTO nli_frontmatter_tags (note_path) VALUES (?)', [p]);
-  }
-}
-
-export function addTaggedNote(db, notePath) {
-  db.run('INSERT OR IGNORE INTO nli_frontmatter_tags (note_path) VALUES (?)', [notePath]);
-}
-
-export function removeTaggedNote(db, notePath) {
-  db.run('DELETE FROM nli_frontmatter_tags WHERE note_path = ?', [notePath]);
-}
-
-export function getMetaFlag(db, key) {
-  const res = db.exec('SELECT value FROM viz_meta WHERE key = ?', [key]);
-  if (!res[0] || !res[0].values[0]) return null;
-  return res[0].values[0][0];
-}
-
-export function setMetaFlag(db, key, value) {
-  db.run('INSERT OR REPLACE INTO viz_meta (key, value) VALUES (?, ?)', [key, value]);
-}
-
-export function getAllNliEdgesForHeatmap(db) {
-  const res = db.exec(
-    'SELECT from_path, to_path, edge_type, confidence_score, source_graph, created_at FROM edges ' +
-      "WHERE source_graph = 'nli' " +
-      'ORDER BY confidence_score DESC NULLS LAST, created_at DESC, from_path ASC, to_path ASC',
-  );
-  if (!res[0]) return [];
-  return res[0].values.map(
-    ([fromPath, toPath, edgeType, confidenceScore, sourceGraph, createdAt]) => ({
-      fromPath,
-      toPath,
-      edgeType,
-      confidenceScore,
-      sourceGraph,
-      createdAt,
-    }),
-  );
-}
-
-export function getEdgesForCycleDetection(db) {
-  // ORDER BY id is load-bearing: cycle node IDs in cycles.canvas are assigned
-  // sequentially from the iteration order of these rows. Without a stable
-  // order, identical edge sets produce different canvas files between runs.
-  const res = db.exec(
-    'SELECT from_path, to_path, edge_type, confidence, source_graph, confidence_score FROM edges ' +
-      "WHERE source_graph = 'nli' OR edge_type LIKE 'challenges_%' " +
-      'ORDER BY id',
-  );
-  if (!res[0]) return [];
-  return res[0].values.map(
-    ([fromPath, toPath, edgeType, confidence, sourceGraph, confidenceScore]) => ({
-      fromPath,
-      toPath,
-      edgeType,
-      confidence,
-      sourceGraph,
-      confidenceScore,
-    }),
-  );
 }
 
 export function getDownstream(db, notePath, maxDepth = 10) {

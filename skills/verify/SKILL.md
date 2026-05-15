@@ -117,19 +117,20 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 ### Step 4: Consistency Detection
 
-Check for cross-note issues using Smart Connections embeddings:
+Two-source check: embeddings find topical similarity; NLI finds logical relation. NLI is the stronger signal when present; embeddings are the fallback.
 
-1. For each assessed note, run: `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5`
-2. Read the top similar notes (score > 0.7)
-3. Flag two types of issues:
+1. **NLI edges (high-confidence first).** Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`). For each assessed note, call `getNliEdgesForNote(db, notePath, 0.75)`. Filter to `edge_type === 'challenges_rebuttal'`. Bucket:
+   - `confidence_score >= NLI_HARD_THRESHOLD` (default 0.95) → **high-confidence contradiction**
+   - `NLI_TENSION_THRESHOLD <= confidence_score < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **advisory tension**
+   - `edge_type === 'nli_supports'` → silent (entailment is not a /verify concern)
 
-**Near-duplicates** (similarity > 0.85):
-- Notes covering the same insight with different wording
-- Recommend: merge candidate: flag for user
+2. **Embedding similarity (fallback).** For each note, run `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
+   - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
+   - **Potential contradiction** (similarity 0.7–0.85, conflicting claims, no NLI edge): notes that look related but opposed. Recommend review.
 
-**Contradictions** (similarity > 0.7, conflicting claims):
-- Notes that are semantically related but make opposing claims
-- Recommend: review and reconcile
+3. **Deduplicate.** If a pair surfaces from both sources, present the NLI verdict and append the cosine for context: `(NLI p=0.97, cosine 0.84)`. NLI hits sort above cosine-only hits because the signal is stronger.
+
+If `getNliEdgesForNote` throws or returns nothing (DB locked, fresh vault, daemon offline), log via the existing hook-error pattern and proceed with embedding-only. Graceful degrade. Note the absence in the report so the user knows nothing was checked.
 
 ### Step 5: Source Verification (Parallel Subagents)
 
@@ -160,8 +161,10 @@ Merge outputs from all agents into a single report:
 | [[note]] | shallow | 2/6 (missing: sourcing, voice, source integrity, depth) | 0 | 0 | no sources, topic-as-title |
 
 ### Consistency
-- [[note-A]] ↔ [[note-B]] (0.91 similarity): near-duplicate, merge candidate
-- [[note-C]] ↔ [[note-D]] (0.78 similarity): potential contradiction: [specific conflict]
+- [[note-A]] ↔ [[note-B]] (NLI contradiction p=0.97, cosine 0.84): high-confidence conflict, run /rewrite or mark as deliberate
+- [[note-C]] ↔ [[note-D]] (NLI tension p=0.81): advisory, may be worth reading together
+- [[note-E]] ↔ [[note-F]] (cosine 0.91): near-duplicate, merge candidate
+- [[note-G]] ↔ [[note-H]] (cosine 0.78): potential contradiction (embedding-only): [specific conflict]
 
 ### Source Issues
 #### [[note-name]]: N issues
@@ -181,8 +184,8 @@ Notes with `wrong_author` or fabricated sources should be flagged in the top sec
 
 Prioritize notes by combined quality + source issues:
 
-1. High priority: fabricated references, dead URLs, unsupported claims
-2. Medium priority: shallow notes with potential, missing citations
+1. High priority: fabricated references, dead URLs, unsupported claims, NLI hard contradictions (p ≥ 0.95)
+2. Medium priority: shallow notes with potential, missing citations, NLI advisory tensions (0.75 ≤ p < 0.95)
 3. Low priority: minor voice issues, weak links
 
 ```

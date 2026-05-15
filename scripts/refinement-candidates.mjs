@@ -27,6 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnEnv } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
+import { openEdgeDb, getNliEdgesForNote } from './lib/edges.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +65,28 @@ function resolveBinary() {
   const dev = resolve(__dirname, '..', 'native/target/release/ll-search');
   if (existsSync(dev)) return dev;
   throw new Error('ll-search binary not found');
+}
+
+function resolveEdgesDbPath() {
+  const pluginData = resolve(
+    homedir(),
+    '.claude/plugins/data/learning-loop-learning-loop-marketplace',
+  );
+  return resolve(pluginData, 'edges.db');
+}
+
+// Open edges.db for NLI hint lookup. Returns null on any failure; hint mode
+// rule says NLI biases the LLM but never silent-gates — absence of NLI signal
+// degrades gracefully to text-only refinement evaluation.
+async function openEdgesDbSafely() {
+  const path = resolveEdgesDbPath();
+  if (!existsSync(path)) return null;
+  try {
+    return await openEdgeDb(path);
+  } catch (err) {
+    logError('refinement-candidates.openEdgesDb', err);
+    return null;
+  }
 }
 
 function scoreToCosine(score) {
@@ -105,10 +128,14 @@ function querySimilar(bin, dbPath, vaultRoot, noteRel) {
   }
 }
 
-function buildCandidates(newNotePaths, opts = {}) {
+async function buildCandidates(newNotePaths, opts = {}) {
   const vaultRoot = opts.vaultRoot || resolveVaultPath();
   const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
   const bin = resolveBinary();
+  // Bundle 2: open edges.db for NLI hint lookup per pair. Lower threshold
+  // (0.5) than the inbox-organiser gate floor (0.75) because the proposer
+  // can act on weaker hints; the gate threshold is for user-blocking surfaces.
+  const edgesDb = await openEdgesDbSafely();
 
   const newSet = new Set(newNotePaths.map((p) => vaultRel(resolve(p), vaultRoot)));
   const allPairs = [];
@@ -155,20 +182,41 @@ function buildCandidates(newNotePaths, opts = {}) {
     surviving.sort((a, b) => b.cosine - a.cosine);
     const capped = surviving.slice(0, PER_NOTE_CAP);
 
+    // NLI hint lookup is per new_note (one query covers all candidates).
+    let nliEdges = [];
+    if (edgesDb) {
+      try {
+        nliEdges = getNliEdgesForNote(edgesDb, newRel, 0.5);
+      } catch (err) {
+        logError('refinement-candidates.getNliEdgesForNote', err);
+        nliEdges = [];
+      }
+    }
+
     for (const s of capped) {
+      let nliContradiction = null;
+      let nliEntailment = null;
+      const match = nliEdges.find((e) => e.partner === s.candidate);
+      if (match) {
+        if (match.edgeType === 'challenges_rebuttal') nliContradiction = match.confidenceScore;
+        if (match.edgeType === 'nli_supports') nliEntailment = match.confidenceScore;
+      }
       allPairs.push({
         id: nextId++,
         new_note: resolve(vaultRoot, newRel),
         candidate: resolve(vaultRoot, s.candidate),
         cosine: Number(s.cosine.toFixed(4)),
+        nli_contradiction: nliContradiction,
+        nli_entailment: nliEntailment,
       });
     }
   }
 
+  if (edgesDb) edgesDb.close();
   return allPairs;
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
 
   let pairsOutPath = null;
@@ -190,10 +238,10 @@ function main() {
     return;
   }
 
-  const pairs = buildCandidates(paths);
+  const pairs = await buildCandidates(paths);
   const json = JSON.stringify(pairs, null, 2);
   process.stdout.write(json + '\n');
   if (pairsOutPath) writeFileSync(pairsOutPath, json);
 }
 
-main();
+await main();

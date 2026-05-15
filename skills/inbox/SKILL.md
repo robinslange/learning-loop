@@ -66,7 +66,9 @@ These are informational: the user decides whether to act on them during triage. 
 
 ### Step 2: Handle Gated Actions
 
-When the agent returns, it will list any actions needing approval (merges, deletes). Present these to the user and wait for confirmation. Execute approved actions.
+When the agent returns, it will list any actions needing approval (merges, deletes, and Bundle 2 NLI contradictions). Present all three categories in one block; one user response handles all of them. NLI contradictions accept per-item replies in the form `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both) or batched `all:3`. Execute approved actions in the order: deletes → merges → NLI resolutions → autonomous promotions.
+
+**`--skip-nli` flag**: if the user invokes `/learning-loop:inbox --skip-nli`, pass the flag through to the inbox-organiser agent prompt as additional context. The agent will skip Step 3a.5 (NLI contradiction check) entirely and surface a note in the report: `note: --skip-nli set; promotions ran without NLI contradiction checks`. Useful when calibrating thresholds or after a known-noisy NLI run.
 
 ### Step 3: Report
 

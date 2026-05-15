@@ -14,9 +14,18 @@ You decide whether newly-captured vault notes should trigger edits to upstream n
 You will receive:
 - **pairs_file**: Path to a JSON file containing an array of pairs to evaluate. Each pair has the shape:
   ```json
-  {"id": 1, "new_note": "<absolute path>", "candidate": "<absolute path>", "cosine": 0.86}
+  {
+    "id": 1,
+    "new_note": "<absolute path>",
+    "candidate": "<absolute path>",
+    "cosine": 0.86,
+    "nli_contradiction": 0.93,
+    "nli_entailment": null
+  }
   ```
 - **vault_path**: Path to the vault root.
+
+The `nli_contradiction` and `nli_entailment` fields are both nullable. `null` means either there is no NLI edge for this pair or NLI was unavailable when the pair was assembled. Treat absence as null; never invent a score. See "NLI hint integration" below for how to use these signals.
 
 The pairs have already been pre-filtered by cosine similarity (0.78–0.92) and folder/basename rules. They are likely to touch related claims, but **likely is not certain**. Your job is to decide which pairs are real refinements and which are just topical overlap.
 
@@ -45,6 +54,25 @@ These are not guidelines. Violation means the driver discards your output.
 6. **Default to `pass` when in doubt.** A missed refinement is recoverable (the new note still exists; the next /reflect can try again). A bad edit is not: it ages into the vault as if it were original. Precision over recall at the agent layer; the driver handles precision again.
 
 ## Decision rubric
+
+### NLI hint integration
+
+If the input pair includes `nli_contradiction` or `nli_entailment`, treat them as Bayesian priors on your decision, not as the decision itself. Read the notes first, decide what the text supports, then let the hint adjust.
+
+| signal | bias toward | strength |
+|---|---|---|
+| `nli_contradiction >= 0.95` | `counterpoint` | strong (vault-calibrated, ~86% precision at p>0.9 on the 180-pair eval) |
+| `0.75 <= nli_contradiction < 0.95` | `counterpoint` or `edit` with `qualifies` | weak |
+| `nli_entailment >= 0.75` | `edit` (sharpens or extends) | weak; entailment threshold is unvalidated and prone to false positives |
+| both null | rely on text reading alone | n/a |
+
+Conflict-resolution rules when text and hint disagree:
+
+- If `nli_contradiction >= 0.95` and your text reading suggests `pass`, escalate to `counterpoint` unless you can articulate a specific reason the model is wrong (e.g. the two notes address different scopes that the bag-of-claims NLI conflated, or one note quotes the other's position to refute a third claim). Write the reason in the `reason` field. The driver logs these overrides for later calibration.
+- If `nli_contradiction >= 0.95` and your text reading suggests `edit`, prefer `counterpoint`. Edits cannot resolve true contradictions, only soften them, and silently softening a real disagreement is the failure mode this hint exists to catch.
+- If `nli_entailment >= 0.75` and your text reading suggests `pass`, stay with `pass`. The entailment threshold is the noisiest signal in this rubric.
+
+NLI never overrides ABSOLUTE RULE 6. A high contradiction score with weak underlying evidence still defaults to `pass`.
 
 For each pair, classify as exactly one of:
 

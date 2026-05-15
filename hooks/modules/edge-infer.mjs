@@ -49,6 +49,26 @@ function parseThresholdEnv(varName, defaultValue) {
 
 const NLI_CONTRADICTION_THRESHOLD = parseThresholdEnv('LL_NLI_THRESHOLD', 0.9);
 const NLI_ENTAILMENT_THRESHOLD = parseThresholdEnv('LL_NLI_ENTAIL_THRESHOLD', 0.75);
+// Bundle 2 promotion-gate thresholds. HARD is the surface-and-confirm cutoff
+// in inbox-organiser (matches the existing frontmatter-sync default at
+// edges.mjs:222). TENSION is the advisory-flag floor (matches the entailment
+// threshold for symmetry, deliberately UNVALIDATED for contradiction precision
+// in this range; see OUTCOME.md). Both used by getNliEdgesForNote consumers.
+export const NLI_HARD_THRESHOLD = parseThresholdEnv('LL_NLI_HARD_THRESHOLD', 0.95);
+export const NLI_TENSION_THRESHOLD = parseThresholdEnv('LL_NLI_TENSION_THRESHOLD', 0.75);
+// Ordering invariant: TENSION <= contradiction-write <= HARD. A misconfigured
+// env would silently break the surface tiers; fail loudly at load.
+if (
+  !(NLI_TENSION_THRESHOLD <= NLI_CONTRADICTION_THRESHOLD &&
+    NLI_CONTRADICTION_THRESHOLD <= NLI_HARD_THRESHOLD)
+) {
+  throw new Error(
+    `learning-loop: NLI threshold ordering violated. Expected ` +
+      `LL_NLI_TENSION_THRESHOLD (${NLI_TENSION_THRESHOLD}) <= ` +
+      `LL_NLI_THRESHOLD (${NLI_CONTRADICTION_THRESHOLD}) <= ` +
+      `LL_NLI_HARD_THRESHOLD (${NLI_HARD_THRESHOLD}).`,
+  );
+}
 const NLI_SCHEMA_VERSION = 1;
 
 // Strip markdown that the NLI tokenizer wasn't trained on: wikilinks, tags,

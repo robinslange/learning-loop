@@ -77,7 +77,18 @@ For each cluster, process all its inbox notes together:
 
 **a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four. This is faster than spawning note-scorer agents for obvious cases.
 
-**b) Detect counter-arguments** using the counter-argument-linking skill. Within a cluster, check if any note challenges another note in the same cluster or in the promoted folders (1-fleeting, 3-permanent).
+**a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `PLUGIN/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
+
+- `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Surface in step 5 gated-action block under a new "NLI contradictions" header with the supersede / qualify / keep-both / skip prompt.
+- `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **soft bucket**: promote with annotation. Stamp `nli_tension: true` and `nli_tension_partners: [partner-path, ...]` on the new note's frontmatter at promotion time. Mention inline in the cluster table.
+
+Frontmatter escape: if the candidate already has `nli_resolved: deliberate` in its frontmatter (set at capture time for retraction notes), skip the gate entirely and promote.
+
+If `getNliEdgesForNote` throws (DB locked, missing, schema mismatch), log via the existing hook-error pattern and continue with no NLI gate this run. NLI is advisory; absence does not block promotion. This is the hint-mode rule: classifier biases the LLM, never silent-gates.
+
+Cap: surface at most 3 hard-bucket partners per note (drop lowest-confidence first). Soft bucket uncapped.
+
+**b) Detect counter-arguments** using the counter-argument-linking skill. Within a cluster, check if any note challenges another note in the same cluster or in the promoted folders (1-fleeting, 3-permanent). NLI rebuttal edges and regex `challenges_*` edges can coexist on the same pair; step b operates on the regex signal and is independent of step a.5.
 
 **c) Detect duplicates.** Within the cluster, if two inbox notes cover the same idea:
 - Keep the more mature version (higher promote-gate score)
@@ -144,13 +155,32 @@ Output one table per cluster:
 | duplicate-title |: | merge into #1 |: |
 ```
 
-After the table, list any gated actions needing approval:
+After the table, list any gated actions needing approval. The block has three visually-distinct sections for the three gate categories. One user response handles all of them.
 
 ```
 Needs approval:
-- MERGE: "note-a" into "note-b": same idea, b is more developed
-- DELETE: "note-c": ghost duplicate of 3-permanent/note-c
+
+merges (1):
+- "duplicate-of-foo" into "foo-deeper": same idea, second is more developed
+
+deletes (0): none
+
+NLI contradictions (3), pick supersede / qualify / keep-both / skip per item:
+- [a] new: <path-a> vs existing: <path-b>  (p=0.97)
+- [b] new: <path-c> vs existing: <path-d>  (p=0.96)
+- [c] new: <path-e> vs existing: <path-f>  (p=0.95)
 ```
+
+Acceptable reply formats for the NLI contradictions:
+- per-item: `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both, skip=leave in inbox)
+- batched: `all:3` keep-both for everything
+
+Execution order on confirm: deletes → merges → NLI resolutions → autonomous promotions of any held-back inbox notes. NLI resolution mechanics:
+
+- **supersede**: call existing `/rewrite` flow on the existing note (rewrite to match the new one); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; new note promotes to its routed destination.
+- **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; new note promotes.
+- **keep-both**: stamp `nli_resolved: deliberate` on BOTH notes' frontmatter so future inbox runs skip this gate; both notes stay; new note promotes.
+- **skip**: leave the new note in `0-inbox/`; do not promote.
 
 ### 5.5. Limbo Triage (Top 5)
 
@@ -211,9 +241,18 @@ This cleanup is mandatory for every promotion. It closes the gap that lets body-
 Inbox processed: [N] notes across [C] clusters.
 Promoted: [X] → 3-permanent/ ([S] skipped rewrite), [Y] → 1-fleeting/
 Counter-arguments linked: [L]
+NLI tensions flagged: [T]                       (soft tier, auto-stamped)
+NLI contradictions resolved: [R_resolved]       (hard tier, user-confirmed; supersede/qualify/keep-both)
+NLI contradictions held in inbox: [R_skipped]   (hard tier, user chose "skip")
 Merged: [Z] notes into [M] (after approval)
 Deleted: [D] ghost duplicates
 Remaining: [R] in inbox
+```
+
+If NLI was unavailable this run (daemon offline, DB missing, etc), add one line:
+
+```
+note: NLI daemon unreachable this session. promotions ran without contradiction checks.
 ```
 
 ### 8. Fleeting Sweep
@@ -232,7 +271,7 @@ Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"counter_arguments":N,"merges":N,"deletes":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N}'
+node "PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"counter_arguments":N,"merges":N,"deletes":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced,"nli_resolutions":{"supersede":N,"qualify":N,"keep_both":N,"skip":N}}'
 ```
 
 ## Rules
