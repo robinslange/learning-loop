@@ -63,7 +63,7 @@ Parse remaining args as source-specific parameters.
 
 ### Step 2: Launch Source Agent
 
-Spawn the appropriate agent in the foreground:
+Spawn the appropriate agent in the foreground.
 
 **Linear:** Spawn a `general-purpose` agent with prompt:
 
@@ -74,14 +74,6 @@ Scope: {scope}
 State filter: {state_filter or "none"}
 ```
 
-**Repo:** Spawn a `general-purpose` agent with prompt:
-
-```
-Read the agent definition at PLUGIN/agents/ingest-repo.md and follow it exactly.
-
-Repo path: {repo_path}
-```
-
 **Context:** Spawn a `general-purpose` agent with prompt:
 
 ```
@@ -90,6 +82,162 @@ Read the agent definition at PLUGIN/agents/ingest-context.md and follow it exact
 Source label: {source_label or "pasted text"}
 Text:
 {pasted_text}
+```
+
+**Repo:** Coordinator-driven flow (Steps 2.1-2.4 below). Single-pass behaviour from earlier ships moves under Step 2.4a; deep fan-out is Step 2.4b.
+
+#### Step 2.1: Profile (no LLM call)
+
+Generate a structured profile of the repo via cheap Bash. The output drives the depth gate in Step 2.3.
+
+```bash
+PROFILE_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-profile.mjs" "{repo_path}")
+PROFILE_PATH="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-profile.json"
+echo "$PROFILE_JSON" > "$PROFILE_PATH"
+```
+
+#### Step 2.2: ygrep index (best-effort)
+
+```bash
+if command -v ygrep >/dev/null 2>&1; then
+  ygrep index "{repo_path}" >/dev/null 2>&1 || true
+  SMOKE=$(ygrep "function" -C "{repo_path}" --json --limit 1 2>/dev/null | head -c 50)
+  if [ -z "$SMOKE" ]; then
+    rm -rf "$HOME/Library/Application Support/ygrep/indexes/"* 2>/dev/null || true
+    ygrep index "{repo_path}" >/dev/null 2>&1 || true
+  fi
+  YGREP_AVAILABLE=true
+else
+  YGREP_AVAILABLE=false
+fi
+```
+
+Failure is non-fatal. Mappers fall back to `Grep`+`Glob`.
+
+#### Step 2.3: Depth gate
+
+If `--deep` flag was passed: skip the gate, set `TIER=parallel`, `REASON="--deep override"`.
+
+Else: spawn a `general-purpose` Task subagent with the gate prompt:
+
+```bash
+GATE_PROMPT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-depth-gate.mjs" build-prompt "$PROFILE_JSON")
+```
+
+Pass the prompt verbatim, instruct the agent to use Haiku-class reasoning and return only the JSON. Then parse:
+
+```bash
+GATE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-depth-gate.mjs" parse-response "<agent text>")
+TIER=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin)['tier'])")
+REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin)['reason'])")
+```
+
+#### Step 2.4a: tier=single → existing single-pass flow
+
+Spawn a `general-purpose` agent with prompt:
+
+```
+Read the agent definition at PLUGIN/agents/ingest-repo.md and follow it exactly.
+
+Repo path: {repo_path}
+```
+
+The agent returns `confirmed_insights` JSON. Skip to Step 3.
+
+#### Step 2.4b: tier=parallel → fan-out
+
+1. Compute slug:
+   ```bash
+   ORIGIN_URL=$(git -C "{repo_path}" remote get-url origin 2>/dev/null || echo "")
+   SLUG=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-slug.mjs" "{repo_path}" "$ORIGIN_URL")
+   ```
+
+2. Resolve vault root and create staging directory:
+   ```bash
+   VAULT_ROOT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
+   mkdir -p "${VAULT_ROOT}/_ingested-repos/${SLUG}"
+   ```
+
+3. Write defense-in-depth policy file (no-op if hooks don't fire on subagents - see plan probe outcome 2026-05-15):
+   ```bash
+   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.writePolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID, { vault_root: '${VAULT_ROOT}', ingested_repo_slug: '${SLUG}', allowed_bash_prefixes: ['ygrep ', 'ygrep index ', 'git log', 'git rev-parse', 'git status', 'ls ', 'find ', 'grep ', 'wc ', 'cat '], allowed_write_dir_prefix: '_ingested-repos/${SLUG}/', expires_at_seconds: 1800 }))"
+   ```
+
+4. Snapshot vault git status (post-fanout audit baseline):
+   ```bash
+   GIT_BASELINE=$(cd "${VAULT_ROOT}" && git status --porcelain | sort)
+   ```
+
+5. Spawn 5 mapper agents in ONE assistant message (single message, 5 concurrent Task tool calls). Each gets `subagent_type` equal to the agent's frontmatter name. Per-mapper prompt template:
+
+   ```
+   You are the {focus} mapper for ingest run. Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-mapper-{focus}.md and follow it exactly.
+
+   Inputs:
+   - repo_path: {repo_path}
+   - repo_slug: {SLUG}
+   - vault_root: {VAULT_ROOT}
+   ```
+
+   The 5 `subagent_type` values: `learning-loop:ingest-mapper-stack`, `learning-loop:ingest-mapper-arch`, `learning-loop:ingest-mapper-conventions`, `learning-loop:ingest-mapper-domain`, `learning-loop:ingest-mapper-state`.
+
+6. Collect 5 ack JSONs. Validate each: `focus`, `status` required; the 4 durable mappers also require `doc_path`.
+
+7. Run post-fanout audit:
+   ```bash
+   SUCCESSFUL_FOCUSES_JSON='["stack","arch","conventions","domain"]'  # filter to status=ok
+   AUDIT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-postfanout-audit.mjs').then(m => console.log(JSON.stringify(m.auditPostFanout('${VAULT_ROOT}', '${SLUG}', $SUCCESSFUL_FOCUSES_JSON))))")
+   ```
+   Parse `AUDIT.ok`. If false: surface to user, log to provenance.
+
+8. Capture git status diff:
+   ```bash
+   GIT_AFTER=$(cd "${VAULT_ROOT}" && git status --porcelain | sort)
+   GIT_DIFF_OUTSIDE=$(diff <(echo "$GIT_BASELINE") <(echo "$GIT_AFTER") | grep -v "_ingested-repos/${SLUG}/" || true)
+   ```
+   Files modified outside `_ingested-repos/${SLUG}/` are logged to provenance.
+
+9. Branch on successful-focus count:
+   - count=4: spawn synthesizer with all 4 docs, `missing_axes: []`
+   - count=3: spawn synthesizer with 3 docs + `missing_axes: ["<focus>"]`
+   - count≤2: abort fan-out. Use `AskUserQuestion`: "Only N of 4 mappers succeeded. (a) retry failed mappers, (b) fall through to single-pass with existing surface profile, (c) cancel"
+
+10. Spawn `learning-loop:ingest-synthesizer` (subagent_type matches the agent's frontmatter name):
+
+    ```
+    Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-synthesizer.md and follow it.
+
+    Inputs:
+    - vault_root: {VAULT_ROOT}
+    - repo_slug: {SLUG}
+    - stack_doc_path: {VAULT_ROOT}/_ingested-repos/{SLUG}/STACK.md
+    - arch_doc_path: {VAULT_ROOT}/_ingested-repos/{SLUG}/ARCH.md
+    - conventions_doc_path: {VAULT_ROOT}/_ingested-repos/{SLUG}/CONVENTIONS.md
+    - domain_doc_path: {VAULT_ROOT}/_ingested-repos/{SLUG}/DOMAIN.md
+    - state_json: {STATE_SIDECAR_JSON}
+    - missing_axes: {ARRAY}
+
+    Return the confirmed_insights JSON.
+    ```
+
+11. Parse synthesizer JSON. If `durable_insights.length === 0`:
+    > Use `AskUserQuestion`: "Synthesizer produced 0 durable insights from this repo. Reason given: '{synthesizer_note}'. Proceed with project-state only (auto-memory write) or abort?"
+
+12. Write `${VAULT_ROOT}/_ingested-repos/${SLUG}/METADATA.json` with all collected acks + synthesizer outcome (see spec Section "METADATA.json" for shape).
+
+13. Clear policy file:
+    ```bash
+    node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID))"
+    ```
+
+14. Pass synthesizer's `confirmed_insights` JSON to Step 3 (existing preview flow).
+
+#### Provenance log
+
+Append a run entry at the end of Step 5 (route-output) success or any abort path:
+
+```bash
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
 ```
 
 ### Step 3: Preview
