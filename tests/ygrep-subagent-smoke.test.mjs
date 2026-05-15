@@ -2,8 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// ygrep's walker excludes paths under /tmp by default, which is os.tmpdir()
+// on Linux. Anchor fixtures under $HOME so the test works on every platform.
+const fixtureRoot = process.platform === 'linux' ? homedir() : tmpdir();
 
 test('ygrep is callable from spawned process with parent PATH', () => {
   const out = execFileSync('ygrep', ['--version'], { encoding: 'utf-8' });
@@ -11,7 +15,7 @@ test('ygrep is callable from spawned process with parent PATH', () => {
 });
 
 test('ygrep index + search round-trip works on a tiny repo', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ygrep-smoke-'));
+  const dir = mkdtempSync(join(fixtureRoot, 'ygrep-smoke-'));
   try {
     writeFileSync(join(dir, 'a.ts'), 'export function sendCampaign() {}\n');
     execFileSync('ygrep', ['index', dir], { encoding: 'utf-8' });
