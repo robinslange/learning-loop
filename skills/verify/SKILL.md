@@ -38,7 +38,7 @@ node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","ac
 ```
 
 Where:
-- **finding_type** is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`
+- **finding_type** is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents/_skills/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
 - **trigger** is one of: `verify-auto` (URL/source check), `verify-manual` (human review), `cross-note` (pattern across notes), `retrieval` (found during search), `stale-scan` (date check)
 - **confidence** is `clear` (obvious classification) or `ambiguous` (could be another type)
 - **ambiguous_alt** is the alternative type considered when confidence is `ambiguous`, empty string when `clear`
