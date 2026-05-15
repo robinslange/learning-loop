@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.21.0
+
 ### Added
 
 - **`/learning-loop:ingest repo` gains a deep fan-out path.** Beyond a Haiku-gated threshold (or when `--deep` is passed), the coordinator spawns 4 parallel deep-mapper subagents (`ingest-mapper-stack`, `ingest-mapper-arch`, `ingest-mapper-conventions`, `ingest-mapper-domain`) plus 1 ephemeral state sidecar (`ingest-mapper-state`). Each durable mapper writes a structured doc with file:line citations to `<vault>/_ingested-repos/<slug>/`; the state sidecar returns inline JSON. A synthesizer agent (`ingest-synthesizer`, Opus) merges the four docs into `confirmed_insights` JSON consumed by the existing route-output pipeline. Coordinator post-fanout audit (`scripts/ingest-postfanout-audit.mjs`) verifies docs land at expected paths regardless of hook firing. `/learning-loop:ingest repo <path>` continues to use the existing single-pass agent for thin repos; `--deep` overrides the gate.
