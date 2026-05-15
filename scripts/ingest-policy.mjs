@@ -1,3 +1,10 @@
+// Ingest fan-out policy file. Currently a no-op shim: no hook reads it (Phase 5
+// of the ingest-coordinator plan was skipped after the 2026-05-15 PreToolUse-on-
+// subagent probe came back indeterminate). The file is still written so that if
+// pre-bash-check.js / pre-write-check.js learn to enforce policy in a future
+// version, the wiring is already in place. Treat the perimeter as Layer 1
+// (frontmatter `tools:` allowlist) + post-fanout audit (scripts/ingest-postfanout-audit.mjs).
+
 import { readFileSync, writeFileSync, unlinkSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 

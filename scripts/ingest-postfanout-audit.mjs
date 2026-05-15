@@ -9,7 +9,6 @@ const FOCUS_TO_FILE = {
 };
 
 const ALWAYS_EXPECTED = ['METADATA.json'];
-const ALL_KNOWN_DOC_FILES = Object.values(FOCUS_TO_FILE);
 
 export function auditPostFanout(vaultRoot, slug, successfulFocuses) {
   const dir = join(vaultRoot, '_ingested-repos', slug);
@@ -22,11 +21,7 @@ export function auditPostFanout(vaultRoot, slug, successfulFocuses) {
   ]);
   const present = new Set(readdirSync(dir));
   const missing = [...expected].filter(f => !present.has(f));
-  const unexpected = [...present].filter(f =>
-    !expected.has(f) &&
-    !ALWAYS_EXPECTED.includes(f) &&
-    !ALL_KNOWN_DOC_FILES.includes(f)
-  );
+  const unexpected = [...present].filter(f => !expected.has(f));
 
   return {
     ok: missing.length === 0 && unexpected.length === 0,

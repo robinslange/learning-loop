@@ -181,7 +181,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
    The 5 `subagent_type` values: `learning-loop:ingest-mapper-stack`, `learning-loop:ingest-mapper-arch`, `learning-loop:ingest-mapper-conventions`, `learning-loop:ingest-mapper-domain`, `learning-loop:ingest-mapper-state`.
 
-6. Collect 5 ack JSONs. Validate each: `focus`, `status` required; the 4 durable mappers also require `doc_path`.
+6. Collect 5 ack JSONs. Validate each: `focus`, `status` required; the 4 durable mappers also require `doc_path`. The state sidecar's ack IS the inline JSON to pass to synthesizer in step 10 - capture the full sidecar response into `STATE_SIDECAR_JSON` (or set to `null` if status="failed").
 
 6.5. Write partial `METADATA.json` (mapper_acks filled, synthesizer status="pending") so the post-fanout audit's expectation of `METADATA.json` in the staging dir is satisfied. Step 12 below overwrites it with the synthesizer outcome.
 

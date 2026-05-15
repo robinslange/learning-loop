@@ -137,10 +137,13 @@ Phase 1 presents link suggestions, tag suggestions, voice flags, and duplicate f
 /learning-loop:ingest linear                    # my assigned tickets
 /learning-loop:ingest linear "AI Assistant"     # tickets from a specific project
 /learning-loop:ingest repo ~/dev/kinso/monorepo # scan a repo
+/learning-loop:ingest repo ~/dev/foo --deep     # force the parallel deep fan-out
 /learning-loop:ingest context                   # paste text to extract
 ```
 
 It fetches the data, extracts atomic insights, previews them for your confirmation, then routes project-state to auto-memory and durable insights to `0-inbox/`. Run it when starting a new project, onboarding to a codebase, or pulling in work context from Linear.
+
+For `repo`, a Haiku gate decides between a single-pass scan and a 5-wide parallel fan-out (4 deep mappers covering stack/architecture/conventions/domain + 1 state sidecar) that stages structured docs at `<vault>/_ingested-repos/<slug>/` and synthesizes them into atomic notes. Pass `--deep` to skip the gate and force the parallel path.
 
 ### The natural flow
 
@@ -186,7 +189,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:inbox` | Batch triage inbox notes |
 | `/learning-loop:refresh "topic"` | Surface what you already know: no research |
 | `/learning-loop:gaps "topic"` | Challenge vault knowledge: find tensions, thin ice, and missing perspectives |
-| `/learning-loop:ingest [linear\|repo\|context]` | Pull external context into vault + auto-memory |
+| `/learning-loop:ingest [linear\|repo\|context] [--deep]` | Pull external context into vault + auto-memory; `--deep` forces parallel deep mappers on `repo` |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard: ghost dupes, orphans, stale notes, broken links |
 | `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |

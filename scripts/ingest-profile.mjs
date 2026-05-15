@@ -26,6 +26,8 @@ function detectFrameworks(deps) {
   );
 }
 
+const FILE_WALK_CAP = 50_000;
+
 function* walkFiles(dir, depth = 0, maxDepth = 8) {
   if (depth > maxDepth) return;
   let entries;
@@ -41,14 +43,16 @@ function* walkFiles(dir, depth = 0, maxDepth = 8) {
 function countByExtension(repo) {
   const counts = {};
   let total = 0;
+  let truncated = false;
   for (const f of walkFiles(repo)) {
+    if (total >= FILE_WALK_CAP) { truncated = true; break; }
     total++;
     const ext = extname(f).replace(/^\./, '');
     if (!ext) continue;
     counts[ext] = (counts[ext] || 0) + 1;
   }
   const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  return { languages: Object.fromEntries(sorted), file_count: total };
+  return { languages: Object.fromEntries(sorted), file_count: total, file_count_truncated: truncated };
 }
 
 function listTopDirs(repo) {
@@ -91,7 +95,7 @@ function gitInfo(repo) {
 
 export function generateProfile(repoPath) {
   const pkg = readPackage(repoPath);
-  const { languages, file_count } = countByExtension(repoPath);
+  const { languages, file_count, file_count_truncated } = countByExtension(repoPath);
   const top_dirs = listTopDirs(repoPath);
   const second_level_dirs = secondLevelForSubsystemDirs(repoPath);
   const deps = pkg?.dependencies || {};
@@ -104,6 +108,7 @@ export function generateProfile(repoPath) {
     version: pkg?.version || null,
     languages,
     file_count,
+    file_count_truncated,
     top_dirs,
     second_level_dirs,
     dependencies_count: Object.keys(deps).length,
