@@ -16,12 +16,12 @@ export function auditPostFanout(vaultRoot, slug, successfulFocuses) {
     return { ok: false, missing: [`${slug}/ (directory absent)`], unexpected: [] };
   }
   const expected = new Set([
-    ...successfulFocuses.map(f => FOCUS_TO_FILE[f]).filter(Boolean),
+    ...successfulFocuses.map((f) => FOCUS_TO_FILE[f]).filter(Boolean),
     ...ALWAYS_EXPECTED,
   ]);
   const present = new Set(readdirSync(dir));
-  const missing = [...expected].filter(f => !present.has(f));
-  const unexpected = [...present].filter(f => !expected.has(f));
+  const missing = [...expected].filter((f) => !present.has(f));
+  const unexpected = [...present].filter((f) => !expected.has(f));
 
   return {
     ok: missing.length === 0 && unexpected.length === 0,

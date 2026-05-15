@@ -3,15 +3,43 @@ import { join, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const KNOWN_FRAMEWORKS = [
-  'next', 'react', 'vue', 'svelte', 'express', 'fastify', 'koa', 'nest',
-  'axum', 'actix-web', 'rocket', 'django', 'flask', 'fastapi', 'rails',
-  'phoenix', 'gin', 'echo',
+  'next',
+  'react',
+  'vue',
+  'svelte',
+  'express',
+  'fastify',
+  'koa',
+  'nest',
+  'axum',
+  'actix-web',
+  'rocket',
+  'django',
+  'flask',
+  'fastapi',
+  'rails',
+  'phoenix',
+  'gin',
+  'echo',
 ];
 
-const SKIP_DIRS = new Set(['.git', 'node_modules', 'target', 'dist', '__pycache__', '.next', 'build', '.cache']);
+const SKIP_DIRS = new Set([
+  '.git',
+  'node_modules',
+  'target',
+  'dist',
+  '__pycache__',
+  '.next',
+  'build',
+  '.cache',
+]);
 
 function safeJson(path) {
-  try { return JSON.parse(readFileSync(path, 'utf-8')); } catch { return null; }
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 function readPackage(repo) {
@@ -21,8 +49,8 @@ function readPackage(repo) {
 function detectFrameworks(deps) {
   if (!deps) return [];
   const names = Object.keys(deps);
-  return KNOWN_FRAMEWORKS.filter(fw =>
-    names.some(n => n === fw || n.startsWith(`${fw}/`) || n.startsWith(`@${fw}/`))
+  return KNOWN_FRAMEWORKS.filter((fw) =>
+    names.some((n) => n === fw || n.startsWith(`${fw}/`) || n.startsWith(`@${fw}/`)),
   );
 }
 
@@ -31,7 +59,11 @@ const FILE_WALK_CAP = 50_000;
 function* walkFiles(dir, depth = 0, maxDepth = 8) {
   if (depth > maxDepth) return;
   let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const e of entries) {
     if (SKIP_DIRS.has(e.name)) continue;
     const full = join(dir, e.name);
@@ -45,23 +77,34 @@ function countByExtension(repo) {
   let total = 0;
   let truncated = false;
   for (const f of walkFiles(repo)) {
-    if (total >= FILE_WALK_CAP) { truncated = true; break; }
+    if (total >= FILE_WALK_CAP) {
+      truncated = true;
+      break;
+    }
     total++;
     const ext = extname(f).replace(/^\./, '');
     if (!ext) continue;
     counts[ext] = (counts[ext] || 0) + 1;
   }
-  const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
-  return { languages: Object.fromEntries(sorted), file_count: total, file_count_truncated: truncated };
+  const sorted = Object.entries(counts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10);
+  return {
+    languages: Object.fromEntries(sorted),
+    file_count: total,
+    file_count_truncated: truncated,
+  };
 }
 
 function listTopDirs(repo) {
   try {
     return readdirSync(repo, { withFileTypes: true })
-      .filter(e => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
-      .map(e => e.name)
+      .filter((e) => e.isDirectory() && !e.name.startsWith('.') && e.name !== 'node_modules')
+      .map((e) => e.name)
       .slice(0, 20);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function secondLevelForSubsystemDirs(repo) {
@@ -71,7 +114,9 @@ function secondLevelForSubsystemDirs(repo) {
     if (!existsSync(p)) continue;
     try {
       result[sub] = readdirSync(p, { withFileTypes: true })
-        .filter(e => e.isDirectory()).map(e => e.name).slice(0, 20);
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name)
+        .slice(0, 20);
     } catch {}
   }
   return result;
@@ -82,12 +127,14 @@ function gitInfo(repo) {
   let head = null;
   try {
     origin = execFileSync('git', ['-C', repo, 'remote', 'get-url', 'origin'], {
-      encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {}
   try {
     head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {
-      encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {}
   return { origin, head };
@@ -126,6 +173,9 @@ export function generateProfile(repoPath) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const repo = process.argv[2];
-  if (!repo) { console.error('Usage: ingest-profile.mjs <repo-path>'); process.exit(2); }
+  if (!repo) {
+    console.error('Usage: ingest-profile.mjs <repo-path>');
+    process.exit(2);
+  }
   console.log(JSON.stringify(generateProfile(repo), null, 2));
 }

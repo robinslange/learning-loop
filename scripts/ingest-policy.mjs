@@ -32,13 +32,19 @@ export function writePolicy(pluginData, sessionId, opts) {
 export function readPolicy(pluginData, sessionId) {
   const p = policyPath(pluginData, sessionId);
   if (!existsSync(p)) return null;
-  try { return JSON.parse(readFileSync(p, 'utf-8')); }
-  catch { return null; }
+  try {
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch {
+    return null;
+  }
 }
 
 export function clearPolicy(pluginData, sessionId) {
   const p = policyPath(pluginData, sessionId);
-  if (existsSync(p)) try { unlinkSync(p); } catch {}
+  if (existsSync(p))
+    try {
+      unlinkSync(p);
+    } catch {}
 }
 
 export function isActive(policy) {

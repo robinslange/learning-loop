@@ -46,7 +46,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     const text = process.argv[3] || '';
     console.log(JSON.stringify(parseGateResponse(text)));
   } else {
-    console.error('Usage: ingest-depth-gate.mjs build-prompt <profile-json> | parse-response <text>');
+    console.error(
+      'Usage: ingest-depth-gate.mjs build-prompt <profile-json> | parse-response <text>',
+    );
     process.exit(2);
   }
 }
