@@ -26,6 +26,10 @@ pub struct RerankResult {
 struct RerankState {
     session: Mutex<Session>,
     tokenizer: Tokenizer,
+    /// Whether the loaded ONNX graph expects a `token_type_ids` input.
+    /// BERT-family cross-encoders (MiniLM, BGE) do; some others (Jina v1 turbo,
+    /// RoBERTa-derived rerankers) don't. Introspected at session load.
+    wants_token_type_ids: bool,
 }
 
 static STATE: OnceLock<RerankState> = OnceLock::new();
@@ -38,6 +42,11 @@ fn state() -> &'static RerankState {
             .expect("CPU EP")
             .commit_from_memory(RERANKER_MODEL)
             .expect("load reranker model");
+
+        let wants_token_type_ids = session
+            .inputs()
+            .iter()
+            .any(|o| o.name() == "token_type_ids");
 
         let mut tokenizer =
             Tokenizer::from_bytes(RERANKER_TOKENIZER).expect("load reranker tokenizer");
@@ -52,6 +61,7 @@ fn state() -> &'static RerankState {
         RerankState {
             session: Mutex::new(session),
             tokenizer,
+            wants_token_type_ids,
         }
     })
 }
@@ -139,11 +149,6 @@ fn score_pair_typed(st: &RerankState, query: &str, document: &str) -> Result<f64
         .iter()
         .map(|&m| m as i64)
         .collect();
-    let type_ids: Vec<i64> = encoding
-        .get_type_ids()
-        .iter()
-        .map(|&t| t as i64)
-        .collect();
 
     let len = ids.len() as i64;
     let shape = vec![1i64, len];
@@ -152,22 +157,37 @@ fn score_pair_typed(st: &RerankState, query: &str, document: &str) -> Result<f64
         .map_err(|e| format!("tensor build failed: {e}"))?;
     let attention_mask = Tensor::from_array((shape.clone(), mask.into_boxed_slice()))
         .map_err(|e| format!("tensor build failed: {e}"))?;
-    let token_type_ids = Tensor::from_array((shape, type_ids.into_boxed_slice()))
-        .map_err(|e| format!("tensor build failed: {e}"))?;
-
-    let inputs = ort::inputs! {
-        "input_ids" => input_ids,
-        "attention_mask" => attention_mask,
-        "token_type_ids" => token_type_ids,
-    };
 
     let mut session = st
         .session
         .lock()
         .map_err(|_| "reranker session mutex poisoned".to_string())?;
-    let outputs = session
-        .run(inputs)
-        .map_err(|e| format!("inference failed: {e}"))?;
+
+    let outputs = if st.wants_token_type_ids {
+        let type_ids: Vec<i64> = encoding
+            .get_type_ids()
+            .iter()
+            .map(|&t| t as i64)
+            .collect();
+        let token_type_ids = Tensor::from_array((shape, type_ids.into_boxed_slice()))
+            .map_err(|e| format!("tensor build failed: {e}"))?;
+        let inputs = ort::inputs! {
+            "input_ids" => input_ids,
+            "attention_mask" => attention_mask,
+            "token_type_ids" => token_type_ids,
+        };
+        session
+            .run(inputs)
+            .map_err(|e| format!("inference failed: {e}"))?
+    } else {
+        let inputs = ort::inputs! {
+            "input_ids" => input_ids,
+            "attention_mask" => attention_mask,
+        };
+        session
+            .run(inputs)
+            .map_err(|e| format!("inference failed: {e}"))?
+    };
     let (_, data) = outputs[0]
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("output extract failed: {e}"))?;
