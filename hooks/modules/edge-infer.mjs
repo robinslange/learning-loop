@@ -59,8 +59,10 @@ export const NLI_TENSION_THRESHOLD = parseThresholdEnv('LL_NLI_TENSION_THRESHOLD
 // Ordering invariant: TENSION <= contradiction-write <= HARD. A misconfigured
 // env would silently break the surface tiers; fail loudly at load.
 if (
-  !(NLI_TENSION_THRESHOLD <= NLI_CONTRADICTION_THRESHOLD &&
-    NLI_CONTRADICTION_THRESHOLD <= NLI_HARD_THRESHOLD)
+  !(
+    NLI_TENSION_THRESHOLD <= NLI_CONTRADICTION_THRESHOLD &&
+    NLI_CONTRADICTION_THRESHOLD <= NLI_HARD_THRESHOLD
+  )
 ) {
   throw new Error(
     `learning-loop: NLI threshold ordering violated. Expected ` +

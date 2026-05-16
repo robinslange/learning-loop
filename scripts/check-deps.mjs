@@ -23,15 +23,11 @@ export function detectAbiDrift({ nativeModulePath, currentAbi, fakeLoadError } =
   }
   if (err === null) return { status: 'ok' };
   const msg = err.message || '';
-  const match = msg.match(
-    /NODE_MODULE_VERSION (\d+)[\s\S]*?NODE_MODULE_VERSION (\d+)/,
-  );
+  const match = msg.match(/NODE_MODULE_VERSION (\d+)[\s\S]*?NODE_MODULE_VERSION (\d+)/);
   if (match) {
     const expectedAbi = match[1];
     const actualAbi = currentAbi || match[2];
-    const dir = nativeModulePath
-      ? nativeModulePath.replace(/\/node_modules\/.*/u, '/')
-      : '';
+    const dir = nativeModulePath ? nativeModulePath.replace(/\/node_modules\/.*/u, '/') : '';
     return {
       status: 'abi-mismatch',
       expectedAbi,
