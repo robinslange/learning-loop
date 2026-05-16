@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.21.2
+
 ### Added
 
 - **eval-funnel:** new `ll-search eval-funnel <db>` CLI command runs a six-config cumulative ablation over the retrieval stack (vec / vec+bm25 / vec+bm25+ppr / vec+bm25+ppr+tag / +prf / +rerank) on the same wikilink-grounded query set as `eval_prf`. Emits R@5, R@10, NDCG@10, MRR, and Hits@1 per stage. `--limit N` caps the query count for fast turnaround. Useful for measuring per-stage contribution before introducing new signals or swapping the embedding/rerank model.
