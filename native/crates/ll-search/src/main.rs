@@ -167,6 +167,13 @@ enum Commands {
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    EvalFunnel {
+        db_path: String,
+        #[arg(long, default_value_t = 2)]
+        min_links: usize,
+        #[arg(long, help = "Cap the number of queries (random sample)")]
+        limit: Option<usize>,
+    },
     #[cfg(feature = "nli")]
     NliCheck {
         text_a: String,
@@ -440,6 +447,13 @@ async fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_prf(&conn, &store, min_links);
+            out(&result);
+        }
+        Commands::EvalFunnel { db_path, min_links, limit } => {
+            init_embedding();
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let store = ll_search::search::store::load_store(&conn);
+            let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
             out(&result);
         }
         Commands::TunePrf { db_path, queries } => {

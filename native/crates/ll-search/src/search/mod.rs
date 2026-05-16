@@ -17,5 +17,5 @@ pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes,
 pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_scan_federated};
 pub use store::{EmbeddingStore, load_store};
 pub use tune::tune_prf;
-pub use eval::eval_prf;
+pub use eval::{eval_prf, eval_funnel};
 pub use context::SearchContext;

@@ -81,6 +81,34 @@ pub(crate) struct Signals {
     pub tag_results: Vec<(String, f64)>,
 }
 
+/// Per-stage on/off flags for ablation runs.
+///
+/// Production code uses `StageFlags::default()` which leaves the four signal
+/// stages and PRF on, rerank off. Eval harnesses override individual flags to
+/// measure each stage's contribution.
+#[derive(Debug, Clone, Copy)]
+pub struct StageFlags {
+    pub vec_search: bool,
+    pub bm25: bool,
+    pub ppr: bool,
+    pub tag_expand: bool,
+    pub prf: bool,
+    pub rerank: bool,
+}
+
+impl Default for StageFlags {
+    fn default() -> Self {
+        Self {
+            vec_search: true,
+            bm25: true,
+            ppr: true,
+            tag_expand: true,
+            prf: true,
+            rerank: false,
+        }
+    }
+}
+
 impl SearchContext {
     /// Build a fresh `SearchContext` from the given connection.
     pub fn build(conn: &Connection) -> Self {
@@ -164,11 +192,29 @@ impl SearchContext {
         signals: &Signals,
         extra: Option<&[(String, f64)]>,
     ) -> HashMap<String, f64> {
+        self.rrf_from_signals_gated(signals, &StageFlags::default(), extra)
+    }
+
+    /// RRF fusion that skips disabled stages. Used by eval harnesses.
+    pub(crate) fn rrf_from_signals_gated(
+        &self,
+        signals: &Signals,
+        flags: &StageFlags,
+        extra: Option<&[(String, f64)]>,
+    ) -> HashMap<String, f64> {
         let mut rrf: HashMap<String, f64> = HashMap::new();
-        add_ranked_rrf(&mut rrf, signals.vec_scored.iter().map(|(p, _)| p.as_str()));
-        add_ranked_rrf(&mut rrf, signals.fts_results.iter().map(|(_, p, _)| p.as_str()));
-        add_ranked_rrf(&mut rrf, signals.ppr_results.iter().map(|(p, _)| p.as_str()));
-        add_ranked_rrf(&mut rrf, signals.tag_results.iter().map(|(p, _)| p.as_str()));
+        if flags.vec_search {
+            add_ranked_rrf(&mut rrf, signals.vec_scored.iter().map(|(p, _)| p.as_str()));
+        }
+        if flags.bm25 {
+            add_ranked_rrf(&mut rrf, signals.fts_results.iter().map(|(_, p, _)| p.as_str()));
+        }
+        if flags.ppr {
+            add_ranked_rrf(&mut rrf, signals.ppr_results.iter().map(|(p, _)| p.as_str()));
+        }
+        if flags.tag_expand {
+            add_ranked_rrf(&mut rrf, signals.tag_results.iter().map(|(p, _)| p.as_str()));
+        }
         if let Some(extra) = extra {
             add_ranked_rrf(&mut rrf, extra.iter().map(|(p, _)| p.as_str()));
         }

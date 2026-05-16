@@ -3,11 +3,14 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 use serde::Serialize;
 
+use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K, TOP_K_INITIAL};
 use crate::embed::embed_query;
+use crate::rerank::rerank_with_report;
 
 use super::scoring::{finalize_rrf, rocchio_prf_with, PrfParams, add_ranked_rrf};
 use super::store::EmbeddingStore;
-use super::context::SearchContext;
+use super::context::{SearchContext, StageFlags};
+use super::federation::batch_load_bodies_federated;
 
 #[derive(Debug, Serialize)]
 pub struct EvalResult {
@@ -21,6 +24,7 @@ pub struct EvalConfig {
     pub label: String,
     pub recall_at_5: f64,
     pub recall_at_10: f64,
+    pub ndcg_at_10: f64,
     pub mrr: f64,
     pub hits_at_1: f64,
 }
@@ -117,13 +121,25 @@ fn eval_ranking(
     finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect()
 }
 
-fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &str) -> (f64, f64, f64, f64) {
+fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &str) -> (f64, f64, f64, f64, f64) {
     let filtered: Vec<&String> = results.iter().filter(|p| *p != source_path).collect();
 
     let recall_5 = filtered.iter().take(5).filter(|p| relevant.contains(p.as_str())).count() as f64
         / relevant.len().max(1) as f64;
     let recall_10 = filtered.iter().take(10).filter(|p| relevant.contains(p.as_str())).count() as f64
         / relevant.len().max(1) as f64;
+
+    let dcg_10: f64 = filtered.iter().take(10).enumerate()
+        .map(|(i, p)| if relevant.contains(p.as_str()) {
+            1.0 / ((i + 2) as f64).log2()
+        } else {
+            0.0
+        })
+        .sum();
+    let idcg_10: f64 = (0..relevant.len().min(10))
+        .map(|i| 1.0 / ((i + 2) as f64).log2())
+        .sum();
+    let ndcg_10 = if idcg_10 > 0.0 { dcg_10 / idcg_10 } else { 0.0 };
 
     let mrr = filtered.iter().enumerate()
         .find(|(_, p)| relevant.contains(p.as_str()))
@@ -132,7 +148,7 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
 
     let hit_1 = if filtered.first().map(|p| relevant.contains(p.as_str())).unwrap_or(false) { 1.0 } else { 0.0 };
 
-    (recall_5, recall_10, mrr, hit_1)
+    (recall_5, recall_10, ndcg_10, mrr, hit_1)
 }
 
 pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) -> EvalResult {
@@ -159,6 +175,7 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
     for (label, params) in &param_grid {
         let mut total_r5 = 0.0;
         let mut total_r10 = 0.0;
+        let mut total_ndcg = 0.0;
         let mut total_mrr = 0.0;
         let mut total_h1 = 0.0;
         let n = queries.len() as f64;
@@ -166,9 +183,10 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
         for q in &queries {
             let qvec = embed_query(&q.title);
             let results = eval_ranking(&ctx, conn, &qvec, &q.title, params.as_ref());
-            let (r5, r10, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
+            let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
             total_r5 += r5;
             total_r10 += r10;
+            total_ndcg += ndcg;
             total_mrr += mrr;
             total_h1 += h1;
         }
@@ -177,6 +195,7 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
             label: label.to_string(),
             recall_at_5: total_r5 / n,
             recall_at_10: total_r10 / n,
+            ndcg_at_10: total_ndcg / n,
             mrr: total_mrr / n,
             hits_at_1: total_h1 / n,
         });
@@ -188,5 +207,114 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
         num_queries: queries.len(),
         min_links,
         configs,
+    }
+}
+
+/// Run the funnel-ablation eval: each stage added cumulatively, scored on the
+/// same wikilink-grounded query set as `eval_prf`. Produces a table showing
+/// the marginal contribution of vec, BM25, PPR, tag-expand, PRF, and rerank.
+pub fn eval_funnel(
+    conn: &Connection,
+    _store: &EmbeddingStore,
+    min_links: usize,
+    limit: Option<usize>,
+) -> EvalResult {
+    let mut queries = build_eval_set(conn, min_links);
+    if let Some(cap) = limit {
+        if queries.len() > cap {
+            let stride = queries.len() / cap;
+            queries = queries.into_iter().step_by(stride.max(1)).take(cap).collect();
+        }
+    }
+    let ctx = SearchContext::build(conn);
+
+    eprintln!("Funnel eval: {} queries with {}+ resolved links", queries.len(), min_links);
+
+    let cascade: Vec<(&str, StageFlags)> = vec![
+        ("vec",                  StageFlags { vec_search: true, bm25: false, ppr: false, tag_expand: false, prf: false, rerank: false }),
+        ("vec+bm25",             StageFlags { vec_search: true, bm25: true,  ppr: false, tag_expand: false, prf: false, rerank: false }),
+        ("vec+bm25+ppr",         StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: false, prf: false, rerank: false }),
+        ("vec+bm25+ppr+tag",     StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: false, rerank: false }),
+        ("+prf",                 StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: true,  rerank: false }),
+        ("+rerank",              StageFlags { vec_search: true, bm25: true,  ppr: true,  tag_expand: true,  prf: true,  rerank: true  }),
+    ];
+
+    let n = queries.len() as f64;
+    let no_peers: Vec<(String, Connection)> = Vec::new();
+    let mut totals: Vec<[f64; 5]> = vec![[0.0; 5]; cascade.len()];
+
+    for (qi, q) in queries.iter().enumerate() {
+        let qvec = embed_query(&q.title);
+        let signals = ctx.compute_signals(conn, &qvec, &q.title);
+
+        for (ci, (_, flags)) in cascade.iter().enumerate() {
+            let results = funnel_with_signals(&ctx, conn, &no_peers, &signals, &qvec, &q.title, flags);
+            let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
+            let t = &mut totals[ci];
+            t[0] += r5; t[1] += r10; t[2] += ndcg; t[3] += mrr; t[4] += h1;
+        }
+
+        if (qi + 1) % 50 == 0 || qi + 1 == queries.len() {
+            eprintln!("  {}/{} queries", qi + 1, queries.len());
+        }
+    }
+
+    let configs: Vec<EvalConfig> = cascade.iter().enumerate().map(|(i, (label, _))| {
+        let t = &totals[i];
+        EvalConfig {
+            label: label.to_string(),
+            recall_at_5: t[0] / n,
+            recall_at_10: t[1] / n,
+            ndcg_at_10: t[2] / n,
+            mrr: t[3] / n,
+            hits_at_1: t[4] / n,
+        }
+    }).collect();
+
+    EvalResult {
+        num_queries: queries.len(),
+        min_links,
+        configs,
+    }
+}
+
+fn funnel_with_signals(
+    ctx: &SearchContext,
+    conn: &Connection,
+    peers: &[(String, Connection)],
+    signals: &super::context::Signals,
+    query_vec: &[f32],
+    query_text: &str,
+    flags: &StageFlags,
+) -> Vec<String> {
+    let all_embeddings = ctx.store.all();
+
+    let mut rrf = ctx.rrf_from_signals_gated(signals, flags, None);
+
+    if flags.prf {
+        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
+        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        initial.truncate(TOP_K_INITIAL);
+        let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
+        let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
+        add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+    }
+
+    let fused = finalize_rrf(rrf, 20);
+
+    if flags.rerank {
+        let paths: Vec<String> = fused.iter().map(|(p, _)| p.clone()).collect();
+        let bodies = batch_load_bodies_federated(conn, peers, &paths);
+        let docs: Vec<(String, String)> = fused
+            .iter()
+            .filter_map(|(p, _)| bodies.get(p).map(|b| (p.clone(), b.clone())))
+            .collect();
+        if docs.is_empty() {
+            return fused.into_iter().take(10).map(|(p, _)| p).collect();
+        }
+        let report = rerank_with_report(query_text, &docs, 10);
+        report.scored.into_iter().map(|r| r.path).collect()
+    } else {
+        fused.into_iter().take(10).map(|(p, _)| p).collect()
     }
 }
