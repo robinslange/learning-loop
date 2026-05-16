@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.21.1
+
 ### Added
 
 - **check-deps:** detect native-module ABI drift in installed plugins. `scripts/check-deps.mjs` exports a new `detectAbiDrift()` function and surfaces drift on the JSON output as `_abi_drift`. Currently watches `episodic-memory@1.0.15`'s `better-sqlite3` binding — a future Node bump will surface a fix command in `/health` instead of silently breaking `/reflect` and episodic search.
