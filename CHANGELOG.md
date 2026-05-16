@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **eval-funnel:** new `ll-search eval-funnel <db>` CLI command runs a six-config cumulative ablation over the retrieval stack (vec / vec+bm25 / vec+bm25+ppr / vec+bm25+ppr+tag / +prf / +rerank) on the same wikilink-grounded query set as `eval_prf`. Emits R@5, R@10, NDCG@10, MRR, and Hits@1 per stage. `--limit N` caps the query count for fast turnaround. Useful for measuring per-stage contribution before introducing new signals or swapping the embedding/rerank model.
+- **`StageFlags`** (in `ll-search::search::context`) gates each retrieval stage. Production callers stay on the default (all on); eval harnesses override individual flags. Pairs with the new `rrf_from_signals_gated` method that skips disabled stages without recomputing signals.
+- **NDCG@10** added to `EvalConfig`. The existing `eval_prf` output now surfaces it alongside R@5/R@10/MRR/Hits@1.
+
+### Changed
+
+- **`eval_funnel` reuses a single `compute_signals` call per query** across all cascade configs. The rerank stage reuses the same signals and pays only the cross-encoder body-load + score cost.
+
 ## v1.21.1
 
 ### Added
