@@ -20,6 +20,7 @@ import { run as runDepsCheck } from './session-start/deps-check.mjs';
 import { run as runVaultSnapshot } from './session-start/vault-snapshot.mjs';
 import { run as runContextAssembly } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
+import { run as runDreamTrigger } from './session-start/dream-trigger.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
@@ -57,6 +58,7 @@ await runDepsCheck(ctx);
 await runVaultSnapshot(ctx);
 await runWatchDaemon(ctx);
 await runContextAssembly(ctx);
+await runDreamTrigger(ctx);
 
 // Episodic pre-warm — kept inline: three lines, no cross-submodule dep.
 try {

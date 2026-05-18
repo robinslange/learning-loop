@@ -39,6 +39,8 @@ export const HookConfig = Object.freeze({
   // --- Cooldowns (seconds) ---
   REFLECT_COOLDOWN_SECS: 300,
   DREAM_COOLDOWN_SECS: 300,
+  DREAM_AGE_THRESHOLD_SECS: 86_400, // 24 hours since last consolidation
+  DREAM_SESSION_THRESHOLD: 5, // SessionStart events since last dream
   VERSION_CHECK_TTL_SECS: 3600,
 
   // --- Size & length thresholds (chars / bytes) ---

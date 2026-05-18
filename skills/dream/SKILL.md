@@ -9,7 +9,7 @@ Seven operators, each defined in `operators/`. This file orchestrates the four-p
 
 ## When to Use
 
-- Runs automatically via SessionStart hook when conditions are met (24hr + 5 sessions)
+- SessionStart hook nudges (via additionalContext) when conditions are met (24hr + 5 SessionStart events). Nudge only — never auto-runs.
 - Stop hook nudges after heavy sessions (3+ new memory files)
 - Manual: `/dream` runs immediately, ignores gates
 
