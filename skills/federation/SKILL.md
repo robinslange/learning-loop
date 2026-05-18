@@ -119,8 +119,8 @@ The federation config is **not yet on disk**. Run the sync test against the in-m
 
 ```js
 const { spawn } = await import('node:child_process');
-const child = spawn(LL_SEARCH, ['sync', dbPath, vaultPath], {
-  env: { ...process.env, LL_HUB_ENDPOINT: hubEndpoint },
+const child = spawn(LL_SEARCH, ['sync', dbPath, vaultPath, '--hub-endpoint', hubEndpoint, '--peer-id', peerId], {
+  env: { ...process.env },
 });
 const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
 // await close, clearTimeout(timer) on exit

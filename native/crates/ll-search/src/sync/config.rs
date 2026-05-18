@@ -50,6 +50,56 @@ pub fn load_config(config_dir: &Path) -> anyhow::Result<FederationConfig> {
     Ok(serde_json::from_str(&text)?)
 }
 
+/// Load federation config, optionally overriding the hub endpoint and peer_id.
+///
+/// Resolution order:
+/// 1. If `hub_endpoint_override` is `Some`, use it and synthesise a minimal
+///    config without reading from disk. Identity comes from the seed store.
+///    `peer_id_override` MUST also be `Some` in this case — passing `None`
+///    is a usage error (would silently send `"self"` as the peer_id in the
+///    handshake, causing the hub to reject the signed challenge).
+/// 2. Otherwise, read `federation/config.json` as [`load_config`] does.
+///
+/// Use case: atomic onboarding flow in skills/federation. The skill calls
+/// `ll-search sync --hub-endpoint <url> --peer-id <id>` before writing config;
+/// only on success does it write the file.
+pub fn load_config_with_override(
+    config_dir: &Path,
+    hub_endpoint_override: Option<&str>,
+    peer_id_override: Option<&str>,
+) -> anyhow::Result<FederationConfig> {
+    if hub_endpoint_override.is_none() && peer_id_override.is_some() {
+        eprintln!(
+            "warning: --peer-id / LL_PEER_ID was provided without --hub-endpoint / \
+             LL_HUB_ENDPOINT; the override is ignored when reading config from disk"
+        );
+    }
+    if let Some(endpoint) = hub_endpoint_override {
+        let seed = super::seed_store::load_or_create(config_dir)?;
+        let pubkey = super::auth::pubkey_b64(&seed.signing_key);
+        let display_name = peer_id_override
+            .map(String::from)
+            .ok_or_else(|| anyhow::anyhow!(
+                "load_config_with_override: --hub-endpoint provided without --peer-id; \
+                 skills must pass both when bypassing federation/config.json"
+            ))?;
+        return Ok(FederationConfig {
+            identity: Identity {
+                display_name,
+                pubkey,
+            },
+            visibility: VisibilityConfig {
+                default: String::from("private"),
+                rules: vec![],
+            },
+            hub: HubEndpoint { endpoint: endpoint.to_string() },
+            peers: vec![],
+            graph: false,
+        });
+    }
+    load_config(config_dir)
+}
+
 pub fn resolve_config_dir_opt(opt: Option<String>) -> PathBuf {
     opt.map(PathBuf::from).unwrap_or_else(resolve_config_dir)
 }
