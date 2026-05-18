@@ -70,7 +70,7 @@ if (!existsSync(bin)) {
 }
 
 const db = join(vault, '.vault-search', 'vault-index.db');
-const pidFile = join(pluginData, 'watch.pid');
+const pidFile = join(vault, '.vault-search', 'watch.pid');
 const librarianScript = join(pluginRoot, 'scripts', 'librarian.mjs');
 
 // ── stop: kill running watcher ──
