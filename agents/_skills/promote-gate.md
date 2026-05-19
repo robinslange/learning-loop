@@ -130,6 +130,19 @@ A note does **not** need rewriting if:
 
 When skip-rewrite is true, the triage/promotion step can simply `mv` the file instead of spawning a note-writer agent. This is the primary throughput improvement for batch processing.
 
+## NLI threshold zoo
+
+Four constants live in `hooks/modules/edge-infer.mjs`, each gating a different decision. They share names that look like duplicates but are NOT:
+
+- **Write-time gates** decide *whether to write an edge to `edges.db`* during PostToolUse on a vault note:
+  - `LL_NLI_THRESHOLD` (default 0.90) — `p(contradiction)` floor for `challenges_rebuttal`. Validated by the 180-pair spike eval (86% precision).
+  - `LL_NLI_ENTAIL_THRESHOLD` (default 0.75) — `p(entailment)` floor for `nli_supports`. Threshold currently unvalidated on the spike eval set — see `spikes/nli-eval/OUTCOME.md`.
+- **Read-time promotion gates** decide *what to do with an edge that already exists* when promoting a note:
+  - `LL_NLI_HARD_THRESHOLD` (default 0.95) — `confidenceScore` floor for hard-blocking autonomous promotion (surface supersede/qualify/keep-both/skip prompt).
+  - `LL_NLI_TENSION_THRESHOLD` (default 0.75) — `confidenceScore` floor for soft-annotating (`nli_tension: true` on the promoted note's frontmatter).
+
+Ordering invariant (enforced at module load): `TENSION ≤ contradiction-write ≤ HARD`. Tuning one threshold below another throws on hook load rather than silently breaking surface tiers.
+
 ## NLI Contradiction Check (Bundle 2)
 
 Before promoting a note from `0-inbox/` to a higher folder, query NLI contradiction edges for the note. This complements (does not replace) the Source Integrity check and runs alongside it.

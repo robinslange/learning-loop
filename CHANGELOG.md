@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **`ll-search sync --hub-endpoint <URL>` and `--peer-id <ID>` flags.** Enable atomic federation onboarding: the federation skill spawns `ll-search sync` before writing `federation/config.json`, so a failed sync leaves no half-written state. When `--hub-endpoint` is provided, the binary builds a minimal `FederationConfig` in-memory from the seed store instead of reading config from disk. `--peer-id` is required in that mode because the sync handshake uses `identity.display_name` as the peer_id and the hub binds peer_id server-side at redeem time. Falls back to `LL_HUB_ENDPOINT` / `LL_PEER_ID` env vars when flags are absent.
+
+### Fixed
+
+- **`ll-watch stop` could not stop a SessionStart-spawned watcher.** `scripts/watch.mjs` wrote the pidfile to `<pluginData>/watch.pid`; `hooks/session-start/watch-daemon.mjs` writes to `<vault>/.vault-search/watch.pid` and unlinks the legacy path. Aligned `scripts/watch.mjs` to the per-vault path so `ll-watch stop` finds and terminates the daemon.
+- **Rerank ONNX inputs introspected at session load.** `token_type_ids` is now derived from ONNX initializers rather than assumed present, fixing rerank failures against models that omit the field.
+
 ## v1.21.2
 
 ### Added
@@ -95,6 +104,10 @@ All notable changes to this project are documented here. The format is based on 
 - **Subsequent patchsets falling back to full upload.** SQLite `apply_changeset` produces a row-equivalent but not byte-equivalent DB compared to the client's `local-export.db` (page layout differs, free-list ordering rearranges), so after one successful patchset the client's `base-export.sha256` disagreed with the hub's `index.db.sha256` and the next patchset attempt was always rejected with `patchset base mismatch, send full`. The hub now echoes its post-apply content hash in `SyncAck.stored_sha256`; the client persists that as the next base sha. Falls back to the client's locally-computed export hash when the field is absent (older hub or non-v3 path). Without this fix, Phase 2 delta sync was a one-shot win that degraded back to full uploads on every subsequent sync.
 
 ## v1.20.2
+
+### Added
+
+- **Patchset upload format.** Sync now diffs the local export against the hub's last-known snapshot and uploads only changed rows when the bases match, falling back to a full upload otherwise. This is the "Phase 2 delta path" that v1.20.3 builds on with zstd compression.
 
 ### Fixed
 
@@ -343,11 +356,17 @@ No user action required. Federation users who previously ran `/learning-loop:ini
 
 - **Overclaim mitigation, Tracks A+B.** Verify finding "overclaim" was 44% of all flags but the existing `check-claims` script only fired for PMID/DOI/arXiv sources — silent on the ~90% of vault notes that cite docs/blogs/vendor pages. Two-track fix: (a) `agents/_skills/capture-rules.md` adds a "Claim Shapes Requiring Verbatim Anchoring" section enumerating four write-time-checkable shapes (numerical figures, universal claims, named attributions, strengthened hedges) with per-shape rules, and a new `[not in source]` inline marker; `agents/note-writer.md` Pass 1 verification now walks the note for each shape before emit. (b) `scripts/source-resolver.mjs check-claims` extends to non-academic URLs by fetching and stripping page HTML (`fetchPageText`), with a `WEB_FETCH_BLOCKLIST` for paywalled/PDF domains (sciencedirect, springer, doi.org, etc). Output now includes `source_kind: "abstract" | "page"` and the source `url`. `agents/_skills/source-verification.md` updated to reflect both source kinds and the new marker. Track C (regex shape audit) deferred pending next provenance report.
 
+## v1.16.8
+
+### Added
+
+- **Phase 2 delta path: incremental sync.** Sync now uploads only changed notes since the last successful sync, using a base-export-db diff. Full uploads remain as the fallback when the bases diverge.
+
 ## v1.16.7
 
 ### Added
 
-- **`ll-watch` CLI** -- a single command to start, stop, and check the vault watcher. Replaces the multi-argument `ll-search watch` invocation. Installed automatically on first session start or via `node scripts/watch.mjs --install`. The shim resolves the latest plugin cache version at runtime, so it survives plugin updates.
+- **`ll-watch` CLI** -- a single command to start, stop, and check the vault watcher. Replaces the multi-argument `ll-search watch` invocation. Install via `node scripts/watch.mjs --install`. The shim resolves the latest plugin cache version at runtime, so it survives plugin updates.
 
 ### Fixed
 

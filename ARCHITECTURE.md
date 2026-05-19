@@ -80,7 +80,7 @@ flowchart LR
   I --> J[Claude Code model]
 ```
 
-`vault-search.mjs` launches the `ll-search` daemon on first use and keeps it running as a persistent process. Queries go over stdin/stdout as line-delimited JSON. The daemon scores candidates via Reciprocal Rank Fusion (RRF) over vector similarity, BM25, graph PageRank, and temporal decay.
+`vault-search.mjs` is a Node wrapper that resolves db/vault paths and invokes `ll-search <subcommand>` per call via `execFileSync`. There is no persistent JSON protocol between the plugin and `ll-search`. The search pipeline scores candidates via Reciprocal Rank Fusion (RRF) over vector similarity, BM25, graph PageRank, and temporal decay.
 
 ### write path
 
@@ -90,7 +90,7 @@ A vault note write triggers `pre-write-check.js` before the write and several po
 flowchart LR
   A[PreToolUse Write] --> B[pre-write-check.js]
   B --> C[ll-search query near-duplicate check]
-  C --> D[block or allow write]
+  C --> D[warn or allow write]
   D --> E[fs write completes]
   E --> F[post-write-autolink.js]
   E --> G[post-write-edge-infer.js]
@@ -98,10 +98,9 @@ flowchart LR
   F --> I[backlinks and semantic links added]
   G --> J[graph edges stored in SQLite]
   H --> K[provenance JSONL appended]
-  K --> L[Stop hook: ll-search index spawned detached]
 ```
 
-The `Stop` hook spawns a detached `ll-search index` after each session. This keeps the vector index fresh for the next session's read path without blocking the current session.
+Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart and supervises it via the per-vault pidfile at `<vault>/.vault-search/watch.pid`. The watcher is a long-running process that incrementally reindexes notes as they change (fs-watch-driven). It also hosts the NLI daemon over a unix domain socket for hook callers. On binary upgrade, mtime changes trigger SIGTERM + respawn. A one-shot migration on first run after an upgrade reaps any legacy daemon still holding the old `$CLAUDE_PLUGIN_DATA/watch.pid` path. The Stop hook (`hooks/stop-nudge.js`) does not reindex; it only emits reflect/dream nudges based on transcript size and memory-file delta.
 
 ### sync path
 
@@ -169,7 +168,7 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The 11 hooks are in `hooks/`. Each has a `HOOK_BUDGET_MS` constant and a `Promise.race` timeout. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The untested hooks (session-start, post-tool, stop-nudge, pre-compact) are targeted by track 0D; their characterisation tests will lock down current behaviour before any structural changes.
+**Hook surface.** The eight hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The untested hooks (session-start, post-tool, stop-nudge, pre-compact) are targeted by track 0D; their characterisation tests will lock down current behaviour before any structural changes.
 
 The most complex hook is `session-start.js` at 556 LOC -- a 0D characterisation test is the prerequisite before the phase 1I split into submodules.
 
@@ -197,11 +196,13 @@ A running learning-loop deployment has three long-lived processes and several tr
 Transient:
 
 - Each hook runs as a short-lived Node process (stdin to stdout, exit).
-- `ll-search index` runs detached after each session (spawned by the Stop hook).
-- `scripts/watch.mjs` can run as an optional background file watcher.
+- `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes incrementally as notes change.
+- `scripts/watch.mjs` can run as an optional background file watcher (user-invoked via `ll-watch`).
 - `ll-search nli-batch` / `ll-search nli-check` subprocesses fire from `edge-infer.mjs` when the UDS daemon isn't available (~400ms cold-start each; the daemon path is ~10ms warm).
 
-The ll-search daemon communicates with the plugin over stdin/stdout of a child process. Each query is a line-delimited JSON object. The daemon maintains a persistent SQLite connection and (after track 1E) a cached `SearchContext`.
+`vault-search.mjs` invokes `ll-search` per call via `execFileSync`. Each call is a fresh subprocess invocation with positional args and flags; there is no persistent channel between the plugin and the binary.
+
+The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts the NLI daemon over a Unix domain socket for hook callers.
 
 The NLI server uses a separate transport: a Unix domain socket at `<plugin-data>/nli.sock`, line-delimited JSON, one request per connection, wrapped in a `{schema_version: 1, results: [...]}` envelope. See `native/crates/ll-search/src/nli_server.rs` for the wire protocol and `hooks/modules/edge-infer.mjs` for the client.
 
@@ -218,11 +219,16 @@ Claude Code
   |     |
   |     +-- scripts/vault-search.mjs
   |           |
-  |           +-- [stdin/stdout] ll-search daemon
+  |           +-- [execFileSync] ll-search <subcommand> (per-call subprocess)
   |                   |
   |                   +-- native/crates/ll-core  (scoring, graph, embeddings)
   |                   +-- SQLite (notes, embeddings, links)
   |                   +-- ONNX runtime (BGE-small model)
+  |
+  +-- ll-search watch     (long-running; spawned at SessionStart by watch-daemon.mjs)
+  |     |
+  |     +-- fs-watch reindexing (incremental, event-driven)
+  |     +-- NLI Unix domain socket daemon (nli.sock)
   |
   +-- scripts/*.mjs       (CLI utilities; also use scripts/lib/ and ll-search)
 ```
@@ -245,9 +251,9 @@ SQLite bundles into the binary (`rusqlite` with `bundled` feature), requires no 
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why 11 hooks?**
+**Why eight hook handlers across six event types?**
 
-Each hook corresponds to a distinct Claude Code lifecycle event. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer hooks would require combining unrelated logic; more hooks would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 
@@ -267,15 +273,15 @@ On session open, hooks fire in this order:
    - After: `post-write-autolink.js`, `post-write-edge-infer.js`, `post-tool-provenance.js`
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
-7. On session close: `stop-nudge.js` -- reflection prompt, background reindex
+7. On session close: `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
-Each hook has a `HOOK_BUDGET_MS` ceiling. If the budget is exceeded, the hook exits without completing its work. Context injection (`session-label.js`) uses a race cap: both vault search and episodic memory are started concurrently, and the hook emits results for whichever finishes within the cap.
+Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races both vault search and episodic memory against `HookConfig.INJECTION_RACE_CAP_MS` and emits results for whichever finishes within the cap.
 
 ---
 
 ## process management
 
-The ll-search daemon is managed via a PID file at `$CLAUDE_PLUGIN_DATA/watch.pid`. Session-start writes the PID on daemon spawn and reads it on subsequent sessions to check if the process is still alive. If the PID is stale, the daemon is relaunched.
+The ll-search daemon is managed via a PID file at `<vault>/.vault-search/watch.pid`. Both `scripts/watch.mjs` (user-invoked via `ll-watch`) and `hooks/session-start/watch-daemon.mjs` (auto-spawned at SessionStart) share this per-vault path. On first run after an upgrade, `watch-daemon.mjs` performs a one-shot migration that reaps any daemon still holding the legacy `$CLAUDE_PLUGIN_DATA/watch.pid` file and removes it. Session-start writes the PID on daemon spawn and reads it on subsequent sessions to check if the process is still alive. If the PID is stale, the daemon is relaunched.
 
 The librarian daemon uses a similar pattern at `$CLAUDE_PLUGIN_DATA/librarian.pid`.
 
@@ -287,21 +293,52 @@ Both daemons check for an existing live process before spawning. If `kill -0 <pi
 
 ## ll-search CLI interface
 
-The daemon accepts line-delimited JSON on stdin. Each request has a `cmd` field:
+`ll-search` is a `clap` CLI binary. `scripts/vault-search.mjs` resolves db/vault paths and invokes it per call via `execFileSync`. Each invocation is a fresh subprocess; there is no persistent JSON protocol.
 
-```json
-{"cmd": "search", "q": "memory consolidation", "vault": "/path/to/vault"}
-{"cmd": "index", "vault": "/path/to/vault"}
-{"cmd": "reindex", "vault": "/path/to/vault"}
-{"cmd": "similar", "path": "note.md", "vault": "/path/to/vault"}
-{"cmd": "intentions", "vault": "/path/to/vault"}
-{"cmd": "validate", "vault": "/path/to/vault"}
-{"cmd": "export-schema"}
+The subcommand surface (from `native/crates/ll-search/src/main.rs`):
+
+**Query/search**
+```
+ll-search query   <db> <text> [--top N] [--recency DAYS] [--threshold F] [--project TAG]
+ll-search similar <db> <note_path> [--top N]
+ll-search cluster <db> [--threshold F]
+ll-search discriminate <db> [--threshold F] <paths...>
+ll-search rerank  <db> <query> [--top N] [--candidates N]
+ll-search reflect-scan <db> <queries...> [--top N] [--candidates N] [--threshold F]
 ```
 
-Each response is a single line of compact JSON. The `--pretty` flag (planned for track 2L) switches to multi-line for debugging.
+**Index management**
+```
+ll-search index  <vault> <db> [--force] [--sync]
+ll-search status <db> <vault>
+ll-search embed  <text>
+ll-search link-stats <db> [--folder DIR] [--orphans]
+```
 
-The plugin does not call these directly. `scripts/vault-search.mjs` is the intermediary: it manages the daemon process lifetime, handles startup, and serializes concurrent queries.
+**Introspection**
+```
+ll-search tags       <db> [--min-count N]
+ll-search intentions <db> [context]
+ll-search sessions   <db> [--min-notes N]
+ll-search export     <db> <output> <vault>
+```
+
+**Federation**
+```
+ll-search sync          <db> <vault> [--hub-endpoint URL] [--peer-id ID]
+ll-search identity      [--config-dir DIR]
+ll-search migrate-seed  [--config-dir DIR] [--rollback]
+ll-search version
+```
+
+**Long-running (spawned once at SessionStart)**
+```
+ll-search watch <vault> <db> [--sync-interval SECS] [--pid-file PATH]
+```
+
+`ll-search watch` is the only process that runs continuously. It is spawned and supervised by `hooks/session-start/watch-daemon.mjs`. It incrementally reindexes notes on fs-watch events and hosts the NLI Unix-domain-socket daemon alongside the watcher loop.
+
+Each subcommand writes compact JSON to stdout. The `--pretty` flag (planned for track 2L) switches to multi-line for debugging.
 
 ---
 
@@ -332,9 +369,9 @@ A complete session runs like this. The total wall time for session-start (target
 
 2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
-3. **Writes** -- `pre-write-check.js` fires before each write and blocks near-duplicate notes (similarity ≥0.85 against existing notes). After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
+3. **Writes** -- `pre-write-check.js` fires before each write and warns on near-duplicate similarity (≥0.85 against existing notes); it only hard-blocks on duplicate frontmatter tags. After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
 
-4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. Then the Stop hook spawns a detached `ll-search index` to reindex any changed notes.
+4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
 
 ---
 
@@ -362,40 +399,63 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per invocation to `$CLAUDE_PLUGIN_DATA/provenance/YYYY-MM-DD.jsonl`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is defined in `hooks/lib/common.mjs:178-186`:
 
 ```json
 {
-  "ts": 1747000000,
-  "hook": "session-start",
-  "event": "fired",
+  "ts": "2026-05-18T04:00:00.000Z",
   "session_id": "abc123",
-  "vault": "/vault/path"
+  "source": "hook",
+  "action": "vault-write",
+  "target": "0-inbox/note.md",
+  "folder": "0-inbox",
+  "tags": ["topic/memory"]
 }
 ```
 
-Lines are newline-terminated. Corruption recovery (track 2N) will add per-line checksums.
+The `action` / `target` / `folder` / `tags` fields are per-action shape from `hooks/modules/provenance.mjs:18-29`. Lines are newline-terminated. Corruption recovery (track 2N) will add per-line checksums.
 
 ### vault snapshot
 
-`hooks/lib/snapshot.mjs` writes vault state to `$CLAUDE_PLUGIN_DATA/snapshot-<session_id>.json`. Format:
+`hooks/lib/snapshot.mjs` writes vault state to a single shared file `$CLAUDE_PLUGIN_DATA/vault-snapshot.json` (not per-session). It carries a 30 s TTL (`TTL_MS = 30_000` at `snapshot.mjs:16`). Format (`snapshot.mjs:130-139`):
 
 ```json
 {
-  "ts": 1747000000,
-  "session_id": "abc123",
-  "note_count": 1183,
-  "recent_paths": ["path/to/note.md"],
-  "intentions": ["research caffeine tolerance"]
+  "version": 1,
+  "vault_root": "/path/to/vault",
+  "built_at": "2026-05-18T04:00:00.000Z",
+  "expires_at": "2026-05-18T04:00:30.000Z",
+  "notes": [
+    { "folder": "0-inbox", "basename": "note-title", "rel_path": "0-inbox/note-title.md" }
+  ]
 }
 ```
 
 ### shadow injection log
 
-`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-<session_id>.jsonl` -- one line per prompt-submit event:
+`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). Shape from `hooks/session-label.js:223-249`:
 
 ```json
-{ "ts": 1747000000, "q": "query text", "top_score": 0.43, "would_inject": true, "latency_ms": 35 }
+{
+  "ts": "2026-05-18T04:00:00.000Z",
+  "session_id": "abc123",
+  "session_label": "memory consolidation design",
+  "prompt": "how should I...",
+  "prompt_length": 142,
+  "vault": {
+    "latency_ms": 32,
+    "hits": 3,
+    "top_path": "3-permanent/note.md",
+    "error": null,
+    "raced_out": false
+  },
+  "episodic": {
+    "latency_ms": 45,
+    "hits": 1,
+    "error": null,
+    "raced_out": false
+  }
+}
 ```
 
 Review with `node scripts/review-shadow.mjs` before flipping to live injection mode.

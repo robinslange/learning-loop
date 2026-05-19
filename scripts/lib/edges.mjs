@@ -211,6 +211,12 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
+// NOTE: this helper hand-maps to camelCase ({fromPath, toPath, edgeType,
+// confidenceScore, partner}). Other helpers in this file (rowsToObjects,
+// getEdgesFrom, getEdgesTo) preserve raw DB column names (snake_case).
+// `edges-cli list` uses rowsToObjects so its JSON output is snake_case.
+// Skills consuming this helper directly should expect camelCase keys.
+//
 // Returns NLI edges where notePath is either endpoint, with confidence_score
 // in [minConfidence, 1]. Consumers: inbox-organiser promote-gate (Bundle 2),
 // refinement-proposer pair hint, /verify consistency detection. Uses literal

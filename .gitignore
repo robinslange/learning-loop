@@ -57,3 +57,10 @@ coverage/
 calibration/
 native/docs/
 native/crates/ll-search/src/sync/test_write.txt
+
+# Audit scratch (subagent fallback write dirs when /tmp is sandboxed)
+.audit-tmp/
+.tmp-audit/
+
+# Local Claude Code state (worktrees, agents, settings)
+.claude/

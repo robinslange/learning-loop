@@ -9,9 +9,9 @@ Seven operators, each defined in `operators/`. This file orchestrates the four-p
 
 ## When to Use
 
-- Runs automatically via SessionStart hook when conditions are met (24hr + 5 sessions)
-- Stop hook nudges after heavy sessions (3+ new memory files)
-- Manual: `/dream` runs immediately, ignores gates
+- SessionStart hook nudges via `hooks/lib/dream-gate.js` when 24+ hours have passed since the last dream AND 5+ memory files have been modified since then. Nudge only — never auto-runs.
+- Stop hook nudges after heavy sessions (3+ new memory files in current session).
+- Manual: `/dream` runs immediately, ignores gates.
 
 ## Provenance
 

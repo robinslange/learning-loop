@@ -81,7 +81,7 @@ Then for each source where the resolver returned an abstract:
 
 ### 2c. Cross-Vault Consistency
 
-Check `PLUGIN/data/citation-index.json` for any PMID that appears in multiple notes. If the same PMID has different authors in different notes, flag it: at least one note is wrong.
+Check `${CLAUDE_PLUGIN_DATA}/data/citation-index.json` for any PMID that appears in multiple notes. If the same PMID has different authors in different notes, flag it: at least one note is wrong.
 
 ### 3. Check Claims Against Sources
 

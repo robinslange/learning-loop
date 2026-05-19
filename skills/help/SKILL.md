@@ -101,6 +101,16 @@ Notes land in `0-inbox/` as rough captures. Two commands move them forward:
 
 Focused mode analyses a topic. No-argument mode auto-picks your densest unchallenged knowledge cluster. Sweep mode runs across the entire vault. Depth scales to note maturity: permanent notes get deep scrutiny. Counterpoint notes land in your inbox like any other knowledge, tagged `#counterpoint` and linked back to the challenged note.
 
+**`/learning-loop:rewrite`** is cross-store correction. When a belief turns out to be wrong, the old version sits in three places: vault notes, auto-memory, and episodic history. This skill edits all three coherently. Vault and auto-memory are rewritten or archived; episodic history is annotated via a supersession record so future retrievals carry the correction inline.
+
+```
+/learning-loop:rewrite "old pattern" "new pattern"
+/learning-loop:rewrite "old pattern" "new pattern" "explicit reason"
+/learning-loop:rewrite
+```
+
+No args: infers the change from recent conversation context. With args: searches for every note, preference, and past conversation that encodes the old pattern, presents an impact map for triage, then executes the approved changes and records a supersession.
+
 ### Keeping things tidy
 
 **`/learning-loop:inbox`** is batch triage. It reads every note in your inbox, clusters them by topic, and recommends actions: promote, merge, deepen, or delete. Promotions happen automatically. Merges and deletes wait for your approval.
@@ -160,6 +170,7 @@ cleanup    → /learning-loop:inbox      → promote, merge, or deepen
 recall     → /learning-loop:refresh    → see what you know
 quality    → /learning-loop:verify     → score quality + check sources → /learning-loop:deepen
 challenge  → /learning-loop:gaps       → counterpoints + rewrites + /deepen queue
+correction → /learning-loop:rewrite    → vault + auto-memory + episodic supersession
 hygiene    → /learning-loop:health     → diagnose → route to /inbox, /verify, /deepen
 librarian  → /learning-loop:health --librarian → approve links + tags, review duplicates and staleness
 ```
@@ -189,6 +200,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:inbox` | Batch triage inbox notes |
 | `/learning-loop:refresh "topic"` | Surface what you already know: no research |
 | `/learning-loop:gaps "topic"` | Challenge vault knowledge: find tensions, thin ice, and missing perspectives |
+| `/learning-loop:rewrite "old" "new" [reason]` | Cross-store correction: vault + auto-memory + episodic supersession |
 | `/learning-loop:ingest [linear\|repo\|context] [--deep]` | Pull external context into vault + auto-memory; `--deep` forces parallel deep mappers on `repo` |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard: ghost dupes, orphans, stale notes, broken links |
 | `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |

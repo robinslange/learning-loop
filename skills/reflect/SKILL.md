@@ -16,9 +16,6 @@ Structured checkpoint that extracts what was learned in this session and persist
 - When the user explicitly asks to consolidate or reflect
 - After receiving multiple corrections in a session
 
-## Flags
-
-
 ## Provenance
 
 This skill emits provenance events for pipeline observability. Run each Bash command silently.

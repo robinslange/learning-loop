@@ -54,7 +54,7 @@ Generate the section using the detected vault path and current template version.
 ```markdown
 ## Learning Loop
 
-<!-- learning-loop vX.Y -->
+<!-- learning-loop vN -->
 
 Three stores, three purposes:
 
@@ -91,7 +91,7 @@ Captures go to 0-inbox/ as atomic notes. Tag with source project. Link to the pr
 Follow the rules in _system/capture-rules.md. Read _system/persona.md for voice and tone.
 ```
 
-**Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vX.Y` with the template version from `PLUGIN/templates/claudemd-section.version`.
+**Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vN` with the integer template version from `PLUGIN/templates/claudemd-section.version`.
 
 **Conditional lines:** Before generating, check which system files and folders exist:
 

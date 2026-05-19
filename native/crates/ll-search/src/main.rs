@@ -119,6 +119,19 @@ enum Commands {
         vault_path: String,
         #[arg(long)]
         config_dir: Option<String>,
+        /// Override the hub endpoint URL. When provided, sync skips reading
+        /// federation/config.json from disk. Falls back to LL_HUB_ENDPOINT env
+        /// var if the flag is absent. Skills calling this during onboarding
+        /// (before config is written) MUST provide one of the two.
+        #[arg(long)]
+        hub_endpoint: Option<String>,
+        /// Override the peer_id. When provided together with --hub-endpoint,
+        /// sync uses this identity instead of reading federation/config.json.
+        /// Skills calling this during onboarding (before config is written)
+        /// pass the peer_id returned by the redeem response. Falls back to
+        /// LL_PEER_ID env var if the flag is absent.
+        #[arg(long)]
+        peer_id: Option<String>,
     },
     Identity {
         #[arg(long)]
@@ -352,11 +365,19 @@ async fn main() {
             .expect("export failed");
             out(&result);
         }
-        Commands::Sync { db_path, vault_path, config_dir } => {
+        Commands::Sync { db_path, vault_path, config_dir, hub_endpoint, peer_id } => {
             init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let config = ll_search::sync::config::load_config(&config_dir)
-                .expect("failed to load federation config");
+            let hub_override = hub_endpoint
+                .or_else(|| std::env::var("LL_HUB_ENDPOINT").ok());
+            let peer_id_override = peer_id
+                .or_else(|| std::env::var("LL_PEER_ID").ok());
+            let config = ll_search::sync::config::load_config_with_override(
+                &config_dir,
+                hub_override.as_deref(),
+                peer_id_override.as_deref(),
+            )
+            .expect("failed to load federation config");
             let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),

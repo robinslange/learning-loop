@@ -88,7 +88,7 @@ Generate a structured profile of the repo via cheap Bash. The output drives the 
 
 ```bash
 PROFILE_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-profile.mjs" "{repo_path}")
-PROFILE_PATH="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-profile.json"
+PROFILE_PATH="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-profile.json"
 echo "$PROFILE_JSON" > "$PROFILE_PATH"
 ```
 
@@ -156,7 +156,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 3. Write defense-in-depth policy file (no-op if hooks don't fire on subagents - see plan probe outcome 2026-05-15):
    ```bash
-   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.writePolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID, { vault_root: '${VAULT_ROOT}', ingested_repo_slug: '${SLUG}', allowed_bash_prefixes: ['ygrep ', 'ygrep index ', 'git log', 'git rev-parse', 'git status', 'ls ', 'find ', 'grep ', 'wc ', 'cat '], allowed_write_dir_prefix: '_ingested-repos/${SLUG}/', expires_at_seconds: 1800 }))"
+   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.writePolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_SESSION_ID, { vault_root: '${VAULT_ROOT}', ingested_repo_slug: '${SLUG}', allowed_bash_prefixes: ['ygrep ', 'ygrep index ', 'git log', 'git rev-parse', 'git status', 'ls ', 'find ', 'grep ', 'wc ', 'cat '], allowed_write_dir_prefix: '_ingested-repos/${SLUG}/', expires_at_seconds: 1800 }))"
    ```
 
 4. Snapshot vault git status (post-fanout audit baseline):
@@ -225,7 +225,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 13. Clear policy file:
     ```bash
-    node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID))"
+    node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_SESSION_ID))"
     ```
 
 14. Pass synthesizer's `confirmed_insights` JSON to Step 3 (existing preview flow).

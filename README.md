@@ -6,7 +6,7 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 ## Why
 
-Claude fabricates sources (~43% of PubMed IDs, ~26% of DOIs). Without mechanical verification, these contaminate your notes and propagate through every session that retrieves them. Learning-loop makes this structurally impossible: eleven lifecycle hooks enforce verification at write time, quality gates block promotion of half-sourced notes, and persona rules keep your vault in your voice.
+Claude fabricates sources (~43% of PubMed IDs, ~26% of DOIs). Without mechanical verification, these contaminate your notes and propagate through every session that retrieves them. Learning-loop makes this structurally impossible: eight lifecycle hook handlers across six Claude Code event types enforce verification at write time, quality gates block promotion of half-sourced notes, and persona rules keep your vault in your voice.
 
 ## Install
 
@@ -94,7 +94,7 @@ Performance: `ll-search watch` hosts a UDS daemon at `<plugin-data>/nli.sock` th
 
 - [Workflows](guide/workflows.md) -- common patterns, session lifecycle, and chaining skills together
 - [Search](guide/search.md) -- five-signal hybrid search, reranking, retrieval instrumentation
-- [Agents](guide/agents.md) -- 14 specialized agents and 19 shared skills
+- [Agents](guide/agents.md) -- 20 specialized agents and 18 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
 - [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
 - [Resource usage](guide/resource-usage.md) -- token costs, local compute, and what we do to keep it lean

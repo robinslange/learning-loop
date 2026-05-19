@@ -20,7 +20,7 @@ If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB activ
 - Recent captures capped at the last 5 notes
 - Intention summaries use compact format
 - Provenance, backlinks, and session labels write to disk, not into context
-- Pre-compact hook captures insights before Claude compresses context
+- Pre-compact hook captures insights before Claude compresses context (opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`; zero overhead unless enabled)
 - Search batches multiple queries into a single process
 
 ## Measuring cache impact
