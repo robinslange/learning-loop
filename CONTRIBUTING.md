@@ -32,9 +32,10 @@ If a test fails on your branch but passes on `main`, rebuild the native binary (
 
 1. **node** -- `npm test`. Runs `node --test` over `tests/*.test.mjs`.
 2. **cargo** -- `cargo test --workspace` inside `native/`, with `~/.cargo` and `native/target` cached by `Cargo.lock` hash.
-3. **lint** -- two checks:
+3. **lint** -- three checks:
    - **Resolved-paths grep.** No file under `agents/` or `skills/` may contain `$HOME/brain/learning-loop`, `~/brain/learning-loop`, `$HOME/brain/brain`, or `~/brain/brain`. These paths are Robin's local layout. Use `${CLAUDE_PLUGIN_ROOT}`, `$PLUGIN`, or `{{VAULT}}` tokens instead.
    - **Prettier check.** `npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'` must pass with no diff. Vendored code under `scripts/lib/vendor/` and `vendor/` is excluded.
+   - **Code-fence tag check.** No markdown file under `skills/`, `agents/`, `docs/`, `guide/`, `hooks/`, `scripts/` (plus `CHANGELOG.md` and `README.md`) may use non-canonical code-fence tags. Use `bash`, `js`, or `ts` only.
 
 ## Commit style
 
@@ -49,7 +50,7 @@ Tick what applies. Items map to a rule in `docs/baseline/`.
 - [ ] No new `process.env.X` outside `scripts/lib/env.mjs`
 - [ ] No `JSON.parse(fs.readFileSync(...))` outside `scripts/lib/safe-load.mjs`
 - [ ] No raw `.lock` file creation outside `scripts/lib/file-lock.mjs`
-- [ ] New hook declares `HOOK_BUDGET_MS` at the top
+- [ ] New hook has a `timeout` declared in `hooks/hooks.json` and uses `HookConfig.*_TIMEOUT_MS` (from `scripts/lib/hook-config.mjs`) for any inner per-operation deadlines
 - [ ] New Rust public item has `///` doc comment
 - [ ] No `.clone()` introduced in `search/{query,context,federation,graph,reflect}.rs` hot paths
 - [ ] Tests added for new module or hook
