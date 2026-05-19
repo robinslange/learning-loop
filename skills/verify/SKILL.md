@@ -119,10 +119,10 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 Two-source check: embeddings find topical similarity; NLI finds logical relation. NLI is the stronger signal when present; embeddings are the fallback.
 
-1. **NLI edges (high-confidence first).** Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`). For each assessed note, call `getNliEdgesForNote(db, notePath, 0.75)`. Filter to `edge_type === 'challenges_rebuttal'`. Bucket:
-   - `confidence_score >= NLI_HARD_THRESHOLD` (default 0.95) → **high-confidence contradiction**
-   - `NLI_TENSION_THRESHOLD <= confidence_score < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **advisory tension**
-   - `edge_type === 'nli_supports'` → silent (entailment is not a /verify concern)
+1. **NLI edges (high-confidence first).** Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`). For each assessed note, call `getNliEdgesForNote(db, notePath, 0.75)`. Filter to `edgeType === 'challenges_rebuttal'`. Bucket:
+   - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **high-confidence contradiction**
+   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **advisory tension**
+   - `edgeType === 'nli_supports'` → silent (entailment is not a /verify concern)
 
 2. **Embedding similarity (fallback).** For each note, run `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
    - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
