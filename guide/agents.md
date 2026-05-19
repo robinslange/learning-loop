@@ -1,6 +1,6 @@
 # Agents
 
-Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 19 skills that enforce consistent quality standards across all operations.
+Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 18 shared skills that enforce consistent quality standards across all operations.
 
 ## Why agents, not prompts
 
@@ -24,8 +24,14 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 | ingest-context | Extract insights from pasted text | Haiku |
 | ingest-linear | Pull and extract from Linear tickets | Haiku |
 | ingest-repo | Scan repo surface for architecture insights | Haiku |
+| ingest-mapper-arch | Map architectural layers, data flow, abstractions, and entry points during repo ingest | Sonnet |
+| ingest-mapper-conventions | Map coding conventions, naming patterns, import organization, and testing patterns during repo ingest | Sonnet |
+| ingest-mapper-domain | Map the problem space, core assumptions, mental model, and anti-goals during repo ingest | Sonnet |
+| ingest-mapper-stack | Map tech stack, dependencies, integrations, and runtime config during repo ingest | Sonnet |
+| ingest-mapper-state | Capture ephemeral project state (branch, commits, in-flight work) during repo ingest | Haiku |
+| ingest-synthesizer | Merge mapper docs into confirmed_insights JSON for the route-output pipeline | Opus |
 
-Fourteen working agents. The `diagram-rules` shared reference (consumed by `discovery-researcher` and `note-writer` for Excalidraw generation) lives under `agents/_skills/` alongside the other shared skills.
+Twenty working agents. The `diagram-rules` shared reference (consumed by `discovery-researcher` and `note-writer` for Excalidraw generation) lives under `agents/_skills/` alongside the other shared skills.
 
 ## Vault librarian (local, optional)
 
@@ -59,7 +65,7 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 19 skills in `agents/_skills/` that standardize quality decisions:
+Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
 
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs

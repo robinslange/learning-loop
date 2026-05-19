@@ -90,7 +90,7 @@ A vault note write triggers `pre-write-check.js` before the write and several po
 flowchart LR
   A[PreToolUse Write] --> B[pre-write-check.js]
   B --> C[ll-search query near-duplicate check]
-  C --> D[block or allow write]
+  C --> D[warn or allow write]
   D --> E[fs write completes]
   E --> F[post-write-autolink.js]
   E --> G[post-write-edge-infer.js]
@@ -169,7 +169,7 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The 11 hooks are in `hooks/`. Each has a `HOOK_BUDGET_MS` constant and a `Promise.race` timeout. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The untested hooks (session-start, post-tool, stop-nudge, pre-compact) are targeted by track 0D; their characterisation tests will lock down current behaviour before any structural changes.
+**Hook surface.** The eight hook handlers across six Claude Code event types are in `hooks/`. Each has a `HOOK_BUDGET_MS` constant and a `Promise.race` timeout. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The untested hooks (session-start, post-tool, stop-nudge, pre-compact) are targeted by track 0D; their characterisation tests will lock down current behaviour before any structural changes.
 
 The most complex hook is `session-start.js` at 556 LOC -- a 0D characterisation test is the prerequisite before the phase 1I split into submodules.
 
@@ -245,9 +245,9 @@ SQLite bundles into the binary (`rusqlite` with `bundled` feature), requires no 
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why 11 hooks?**
+**Why eight hook handlers across six event types?**
 
-Each hook corresponds to a distinct Claude Code lifecycle event. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer hooks would require combining unrelated logic; more hooks would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 
@@ -275,7 +275,7 @@ Each hook has a `HOOK_BUDGET_MS` ceiling. If the budget is exceeded, the hook ex
 
 ## process management
 
-The ll-search daemon is managed via a PID file at `$CLAUDE_PLUGIN_DATA/watch.pid`. Session-start writes the PID on daemon spawn and reads it on subsequent sessions to check if the process is still alive. If the PID is stale, the daemon is relaunched.
+The ll-search daemon is managed via a PID file at `<vault>/.vault-search/watch.pid`. Both `scripts/watch.mjs` (user-invoked via `ll-watch`) and `hooks/session-start/watch-daemon.mjs` (auto-spawned at SessionStart) share this per-vault path. On first run after an upgrade, `watch-daemon.mjs` performs a one-shot migration that reaps any daemon still holding the legacy `$CLAUDE_PLUGIN_DATA/watch.pid` file and removes it. Session-start writes the PID on daemon spawn and reads it on subsequent sessions to check if the process is still alive. If the PID is stale, the daemon is relaunched.
 
 The librarian daemon uses a similar pattern at `$CLAUDE_PLUGIN_DATA/librarian.pid`.
 
@@ -332,7 +332,7 @@ A complete session runs like this. The total wall time for session-start (target
 
 2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
-3. **Writes** -- `pre-write-check.js` fires before each write and blocks near-duplicate notes (similarity ≥0.85 against existing notes). After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
+3. **Writes** -- `pre-write-check.js` fires before each write and warns on near-duplicate similarity (≥0.85 against existing notes); it only hard-blocks on duplicate frontmatter tags. After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
 
 4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. Then the Stop hook spawns a detached `ll-search index` to reindex any changed notes.
 

@@ -24,7 +24,7 @@ Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows 
 
 ## Hooks
 
-Eleven hooks enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
+Eight hook handlers across six Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
 | Event | Hook | What it enforces |
 |---|---|---|
@@ -32,13 +32,13 @@ Eleven hooks enforce process discipline at the lifecycle level. They run regardl
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | Stop | post-stop-reindex.js | Spawns a detached `ll-search index` so the vector index is fresh for the next turn. Returns immediately. Cross-platform lockfile (`os.tmpdir()/learning-loop-reindex.lock`) prevents overlapping runs. |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
-| PreToolUse (Write) | pre-write-check.js | Blocks near-duplicate notes before they land |
+| PreToolUse (Write) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85); blocks duplicate frontmatter tags |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
 | PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links after vault writes |
 | PostToolUse (Write\|Edit) | post-write-edge-infer.js | Classifies and stores semantic edges between notes on write |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
-| PostToolUse (episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
-| PreCompact | pre-compact.js | Captures context insights before compression |
+| PostToolUse (mcp__plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
+| PreCompact | pre-compact.js | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable) |
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
@@ -63,6 +63,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (decimal cosine, e.g. `0.4`) |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
 | `LL_REINDEX_DEBUG` | Set to `1` to emit `[reindex]` traces from `post-stop-reindex.js` to stderr |
+| `LEARNING_LOOP_PRECOMPACT_SPIKE` | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant. |
 
 ## Vault librarian
 

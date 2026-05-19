@@ -55,6 +55,8 @@ Run `ll-search identity --config-dir $PLUGIN_DATA` to load or create the Ed25519
 { "pubkey_b64": "0JuQ...r5o=", "seed_path": "...", "created": false }
 ```
 
+The binary's `pubkey_b64` becomes `pubkey` in config.json (written in step G).
+
 The `pubkey_b64` value is the raw 32-byte public key as base64, ready to send to `/api/redeem` as-is. The command is idempotent: if `.seed` already exists it reuses it (`created: false`), otherwise it creates one with mode `0o600` (`created: true`). Existing seeds created by prior runs continue to work.
 
 ## D: Redeem
