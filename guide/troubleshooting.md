@@ -6,7 +6,7 @@ The `ll-search` binary is ~77MB (includes embedding and reranker models). On slo
 
 ## Search returns no results
 
-Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. The Stop hook spawns a detached incremental reindex after each turn, so the index normally stays current without manual intervention.
+Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. Under normal operation the index stays current via the `ll-search watch` daemon spawned at SessionStart — check that the daemon is alive with `kill -0 "$(cat <vault>/.vault-search/watch.pid)"`. If the pidfile is missing or stale, start a new session or run `node scripts/watch.mjs start`.
 
 ## Shadow injection log shows 0 passes
 

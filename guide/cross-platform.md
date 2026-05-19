@@ -21,7 +21,6 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 - `os.tmpdir()` is used everywhere — never `/tmp`, since macOS resolves to `/var/folders/...` and Windows resolves to `%TEMP%`
 - `resolveConfig` strips UTF-8 BOM before parsing (since v1.15.9) — Notepad-saved JSON parses correctly
 - `download-binary.mjs` extracts `.zip` via tar → PowerShell `Expand-Archive` → `unzip` fallback chain (since v1.15.9)
-- `post-stop-reindex.js` uses `stdio: 'ignore'` with `detached: true` — required on Windows since inherited file descriptors keep the parent event loop open
 - All `hooks.json` commands invoke `node` directly with quoted `${CLAUDE_PLUGIN_ROOT}` paths — no shell pipes, heredocs, or bash-only syntax
 
 ## Known caveats per platform
@@ -34,7 +33,7 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 - **`fs.rename()` can throw EXDEV** when temp and destination are on different volumes, or when a cloud sync filter (Dropbox, OneDrive) intercepts the rename. learning-loop does not use rename-after-write atomic patterns; this affects Claude Code itself more than this plugin (see anthropics/claude-code issues #25476, #42119).
 - **MAX_PATH (260 chars)** can bite very deep vault hierarchies. Enable long path support in Group Policy + application manifest if you hit it.
 - **Native Rust build from source requires curl.exe** (Windows 10 1803+ ships it) — only relevant if you build with the `nli` cargo feature locally. Pre-built binaries from CI do not need it on the install machine.
-- **Detached child + `stdio: 'ignore'` is required.** Setting stdio to inherited file descriptors keeps the parent event loop blocked even after `child.unref()`. The post-stop-reindex hook is built to this constraint.
+- **Detached child + `stdio: 'ignore'` is required for long-running child processes.** Setting stdio to inherited file descriptors keeps the parent event loop blocked even after `child.unref()`. `watch-daemon.mjs` spawns `ll-search watch` with `detached: true, stdio: 'ignore'` to satisfy this constraint.
 - **Federation seed uses Windows Credential Manager.** The `keyring` crate maps to `wincred` on Windows; no additional system deps. End-to-end federation flows on Windows are not maintainer-verified — please report issues.
 
 ### Linux
@@ -58,14 +57,16 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 Run the cross-platform smoke test against your install:
 
 ```bash
-# Hook layer self-test (no network required)
-node hooks/post-stop-reindex.js < /dev/null  # exits silently — no input
+# Confirm the watch daemon started and wrote its pidfile
+VAULT_PIDFILE="$(node -e "const c=require(process.env.CLAUDE_PLUGIN_DATA+'/config.json'); console.log(c.vault_path+'/.vault-search/watch.pid')")"
+cat "$VAULT_PIDFILE"                         # prints a numeric PID
+kill -0 "$(cat "$VAULT_PIDFILE")" && echo "watcher alive" || echo "watcher not running"
 
-# Verbose trace
-LL_REINDEX_DEBUG=1 echo '{"stop_hook_active": false}' | node hooks/post-stop-reindex.js
+# Query the daemon directly to confirm it can serve results
+node scripts/vault-search.mjs query "test" --limit 1
 ```
 
-The debug trace prints every gate decision and the spawned child PID. The lockfile is written to `os.tmpdir()/learning-loop-reindex.lock` — inspect with `cat "$(node -e 'console.log(require("os").tmpdir())')/learning-loop-reindex.lock"`.
+The watch daemon is spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`. If the pidfile is missing or the process is gone, start a new session or run `node scripts/watch.mjs start` to relaunch it manually.
 
 ## Reporting issues
 
@@ -74,6 +75,6 @@ If you hit a platform-specific problem, please include:
 - OS + version (`sw_vers` / `lsb_release -a` / `winver`)
 - Node version (`node --version`)
 - learning-loop version (`cat $CLAUDE_PLUGIN_DATA/bin/.version`)
-- The failing hook or skill, plus stderr output from `LL_REINDEX_DEBUG=1` if relevant
+- The failing hook or skill, plus any stderr output captured from it
 
 File at https://github.com/robinslange/learning-loop/issues.

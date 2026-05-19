@@ -98,10 +98,9 @@ flowchart LR
   F --> I[backlinks and semantic links added]
   G --> J[graph edges stored in SQLite]
   H --> K[provenance JSONL appended]
-  K --> L[Stop hook: ll-search index spawned detached]
 ```
 
-The `Stop` hook spawns a detached `ll-search index` after each session. This keeps the vector index fresh for the next session's read path without blocking the current session.
+Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart and supervises it via the per-vault pidfile at `<vault>/.vault-search/watch.pid`. The watcher is a long-running process that incrementally reindexes notes as they change (fs-watch-driven). It also hosts the NLI daemon over a unix domain socket for hook callers. On binary upgrade, mtime changes trigger SIGTERM + respawn. A one-shot migration on first run after an upgrade reaps any legacy daemon still holding the old `$CLAUDE_PLUGIN_DATA/watch.pid` path. The Stop hook (`hooks/stop-nudge.js`) does not reindex; it only emits reflect/dream nudges based on transcript size and memory-file delta.
 
 ### sync path
 
@@ -197,8 +196,8 @@ A running learning-loop deployment has three long-lived processes and several tr
 Transient:
 
 - Each hook runs as a short-lived Node process (stdin to stdout, exit).
-- `ll-search index` runs detached after each session (spawned by the Stop hook).
-- `scripts/watch.mjs` can run as an optional background file watcher.
+- `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes incrementally as notes change.
+- `scripts/watch.mjs` can run as an optional background file watcher (user-invoked via `ll-watch`).
 - `ll-search nli-batch` / `ll-search nli-check` subprocesses fire from `edge-infer.mjs` when the UDS daemon isn't available (~400ms cold-start each; the daemon path is ~10ms warm).
 
 The ll-search daemon communicates with the plugin over stdin/stdout of a child process. Each query is a line-delimited JSON object. The daemon maintains a persistent SQLite connection and (after track 1E) a cached `SearchContext`.
@@ -267,7 +266,7 @@ On session open, hooks fire in this order:
    - After: `post-write-autolink.js`, `post-write-edge-infer.js`, `post-tool-provenance.js`
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
-7. On session close: `stop-nudge.js` -- reflection prompt, background reindex
+7. On session close: `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
 Each hook has a `HOOK_BUDGET_MS` ceiling. If the budget is exceeded, the hook exits without completing its work. Context injection (`session-label.js`) uses a race cap: both vault search and episodic memory are started concurrently, and the hook emits results for whichever finishes within the cap.
 
@@ -334,7 +333,7 @@ A complete session runs like this. The total wall time for session-start (target
 
 3. **Writes** -- `pre-write-check.js` fires before each write and warns on near-duplicate similarity (≥0.85 against existing notes); it only hard-blocks on duplicate frontmatter tags. After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
 
-4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. Then the Stop hook spawns a detached `ll-search index` to reindex any changed notes.
+4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
 
 ---
 

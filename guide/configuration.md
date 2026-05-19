@@ -30,7 +30,6 @@ Eight hook handlers across six Claude Code event types enforce process disciplin
 |---|---|---|
 | SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate nudge (via `lib/dream-gate.js`) |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
-| Stop | post-stop-reindex.js | Spawns a detached `ll-search index` so the vector index is fresh for the next turn. Returns immediately. Cross-platform lockfile (`os.tmpdir()/learning-loop-reindex.lock`) prevents overlapping runs. |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
 | PreToolUse (Write) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85); blocks duplicate frontmatter tags |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
@@ -51,7 +50,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 - flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes
 - gate threshold: `injection_threshold` in `config.json` (default `0.35`) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
-- background reindex: the Stop hook spawns a detached `ll-search index` after each turn so the vector index stays fresh for the next prompt's retrieval, without blocking the current turn
+- continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
 ## Environment variables
 
@@ -62,7 +61,6 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `LEARNING_LOOP_INJECTION_MODE` | Per-session override of `injection_mode` (`shadow`, `live`, `off`) |
 | `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (decimal cosine, e.g. `0.4`) |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
-| `LL_REINDEX_DEBUG` | Set to `1` to emit `[reindex]` traces from `post-stop-reindex.js` to stderr |
 | `LEARNING_LOOP_PRECOMPACT_SPIKE` | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant. |
 
 ## Vault librarian
