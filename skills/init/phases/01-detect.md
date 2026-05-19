@@ -9,7 +9,7 @@ Run all checks silently before asking anything. Use Node.js APIs throughout.
 5. **System files:** Check `_system/persona.md` and `_system/capture-rules.md` exist
 6. **Binary:** Check `PLUGIN_DATA/bin/ll-search` exists; if so, run `ll-search version`
 7. **Dependencies:** Run `node PLUGIN/scripts/check-deps.mjs`
-8. **Search index:** If binary present, run `ll-search status`
+8. **Search index:** If binary present, run `node PLUGIN/scripts/vault-search.mjs status`
 9. **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
 10. **Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
 11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
