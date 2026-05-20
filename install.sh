@@ -297,6 +297,43 @@ EOF
   step_done "added to $shell_rc"
 }
 
+ensure_claude_code() {
+  step_start "Checking Claude Code"
+  if command -v claude >/dev/null 2>&1; then
+    local installed
+    installed=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    if [ -n "$installed" ] && version_ge "$installed" "$MIN_CLAUDE_VERSION"; then
+      step_done "claude $installed"
+      return 0
+    fi
+    echo
+    echo "  ${C_YELLOW}Claude Code $installed is older than required ($MIN_CLAUDE_VERSION).${C_RESET}"
+    echo "  ${C_DIM}Upgrade now? [Y/n]${C_RESET}"
+    read -r ans
+    case "${ans:-y}" in
+      y|Y|"") ;;
+      *) step_fail "Claude Code $MIN_CLAUDE_VERSION+ required"; exit 1 ;;
+    esac
+  fi
+
+  install_claude_code
+}
+
+install_claude_code() {
+  run_logged 'curl -fsSL https://claude.ai/install.sh | bash'
+
+  if ! command -v claude >/dev/null 2>&1; then
+    step_fail "Claude Code install completed but 'claude' is not on PATH"
+    echo "  Manual recovery: see https://docs.anthropic.com/en/docs/claude-code for install instructions"
+    exit 1
+  fi
+  step_done "claude $(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+}
+
+version_ge() {
+  printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
 main() {
   preamble
   detect_platform
