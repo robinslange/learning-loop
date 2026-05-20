@@ -350,6 +350,33 @@ add_marketplaces() {
   step_done "2 marketplaces ready"
 }
 
+install_plugins() {
+  step_start "Installing plugins"
+  local p name
+  local installed_versions=()
+  for p in "episodic-memory@superpowers-marketplace" "learning-loop@learning-loop-marketplace"; do
+    name="${p%%@*}"
+    if run_logged "claude plugin install $p"; then
+      local v
+      v=$(claude plugin list 2>/dev/null | awk -v n="${p}" '$0 ~ n {f=1; next} /Version:/ && f {print $2; f=0; exit}')
+      installed_versions+=("${name} ${v:-?}")
+    else
+      local rc=$?
+      if grep -qE "already installed" "$LOG_FILE" 2>/dev/null; then
+        installed_versions+=("${name} (already installed)")
+      else
+        step_fail "failed to install $p (exit $rc)"
+        if [ "$name" = "episodic-memory" ]; then
+          echo "  episodic-memory is a hard dependency; /init will not work without it."
+        fi
+        echo "  See $LOG_FILE for details."
+        exit 1
+      fi
+    fi
+  done
+  step_done "$(IFS=', '; echo "${installed_versions[*]}")"
+}
+
 version_ge() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
