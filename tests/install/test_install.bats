@@ -49,3 +49,53 @@ setup() {
   SHELL="$orig_shell"
   [ ! -f "$fake_home/.zshrc" ]
 }
+
+@test "manager detection — nvm only" {
+  local fake_home
+  fake_home=$(mktemp -d)
+  mkdir -p "$fake_home/.nvm"
+  echo "echo '0.39.0'" >"$fake_home/.nvm/nvm.sh"
+  chmod +x "$fake_home/.nvm/nvm.sh"
+  local managers=()
+  HOME="$fake_home"
+  [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
+  [ "${managers[*]}" = "nvm" ]
+}
+
+@test "manager detection — fnm only via PATH" {
+  local fake_bin
+  fake_bin=$(mktemp -d)
+  cat >"$fake_bin/fnm" <<'EOF'
+#!/usr/bin/env bash
+echo "fnm 1.38.0"
+EOF
+  chmod +x "$fake_bin/fnm"
+  local managers=()
+  PATH="$fake_bin:$PATH" HOME="$(mktemp -d)"
+  command -v fnm >/dev/null 2>&1 && managers+=("fnm")
+  [ "${managers[*]}" = "fnm" ]
+}
+
+@test "manager detection — multi-manager populates array in priority order" {
+  local fake_home fake_bin
+  fake_home=$(mktemp -d)
+  fake_bin=$(mktemp -d)
+  mkdir -p "$fake_home/.nvm"
+  echo "true" >"$fake_home/.nvm/nvm.sh"
+  for tool in fnm volta; do
+    cat >"$fake_bin/$tool" <<EOF
+#!/usr/bin/env bash
+echo "$tool fake"
+EOF
+    chmod +x "$fake_bin/$tool"
+  done
+  local managers=()
+  HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin"
+  [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
+  command -v fnm >/dev/null 2>&1 && managers+=("fnm")
+  command -v volta >/dev/null 2>&1 && managers+=("volta")
+  [ "${managers[0]}" = "nvm" ]
+  [ "${managers[1]}" = "fnm" ]
+  [ "${managers[2]}" = "volta" ]
+  [ "${#managers[@]}" -eq 3 ]
+}
