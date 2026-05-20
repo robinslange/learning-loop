@@ -18,25 +18,32 @@
 
 set -euo pipefail
 
-readonly INSTALL_VERSION="1"
-readonly LOG_FILE="$HOME/.cache/learning-loop-install.log"
-readonly MIN_NODE_MAJOR=22
-readonly MIN_CLAUDE_VERSION="2.1.144"
-readonly CLAUDE_SESSION_VAR="CLAUDECODE"
-readonly MARKER_TAG="learning-loop-install: PATH v${INSTALL_VERSION}"
+if [ -z "${INSTALL_VERSION:-}" ]; then
+  readonly INSTALL_VERSION="1"
+  readonly LOG_FILE="$HOME/.cache/learning-loop-install.log"
+  readonly MIN_NODE_MAJOR=22
+  readonly MIN_CLAUDE_VERSION="2.1.144"
+  readonly CLAUDE_SESSION_VAR="CLAUDECODE"
+  readonly MARKER_TAG="learning-loop-install: PATH v${INSTALL_VERSION}"
 
-readonly C_DIM="$(printf '\033[2m')"
-readonly C_GREEN="$(printf '\033[32m')"
-readonly C_YELLOW="$(printf '\033[33m')"
-readonly C_RED="$(printf '\033[31m')"
-readonly C_RESET="$(printf '\033[0m')"
+  readonly C_DIM="$(printf '\033[2m')"
+  readonly C_GREEN="$(printf '\033[32m')"
+  readonly C_YELLOW="$(printf '\033[33m')"
+  readonly C_RED="$(printf '\033[31m')"
+  readonly C_RESET="$(printf '\033[0m')"
+fi
 
-mkdir -p "$(dirname "$LOG_FILE")"
-: >"$LOG_FILE"
+START_TIME=${START_TIME:-}
+STEPS_RUN=${STEPS_RUN:-0}
+STEPS_SKIPPED=${STEPS_SKIPPED:-0}
 
-START_TIME=$(date +%s)
-STEPS_RUN=0
-STEPS_SKIPPED=0
+init_log_state() {
+  mkdir -p "$(dirname "$LOG_FILE")"
+  : >"$LOG_FILE"
+  START_TIME=$(date +%s)
+  STEPS_RUN=0
+  STEPS_SKIPPED=0
+}
 
 on_interrupt() {
   echo
@@ -404,18 +411,6 @@ print_next_steps() {
   fi
 }
 
-main() {
-  preamble
-  detect_platform
-  detect_proxy
-  ensure_node
-  ensure_local_bin_path
-  ensure_claude_code
-  add_marketplaces
-  install_plugins
-  print_next_steps
-}
-
 preamble() {
   cat <<'EOF'
 learning-loop bootstrap
@@ -433,4 +428,19 @@ EOF
   echo
 }
 
-main "$@"
+main() {
+  init_log_state
+  preamble
+  detect_platform
+  detect_proxy
+  ensure_node
+  ensure_local_bin_path
+  ensure_claude_code
+  add_marketplaces
+  install_plugins
+  print_next_steps
+}
+
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi
