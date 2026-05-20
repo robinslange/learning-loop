@@ -80,6 +80,15 @@ step_fail() {
   printf "\r${C_RED}✗${C_RESET} %s — %s\n" "$STEP_NAME" "$1"
 }
 
+run_logged() {
+  echo ">>> $*" >>"$LOG_FILE"
+  bash -c "$*" >>"$LOG_FILE" 2>&1
+}
+
+run_capture() {
+  bash -c "$*" 2>>"$LOG_FILE"
+}
+
 detect_platform() {
   step_start "Detecting platform"
   local kernel arch
@@ -172,8 +181,53 @@ install_node_via_manager() {
 }
 
 install_via_manager() {
-  step_fail "manager install handler for $1 not yet implemented"
-  exit 1
+  local manager="$1"
+  step_start "Installing Node ${MIN_NODE_MAJOR} via ${manager}"
+  case "$manager" in
+    nvm)
+      run_logged ". $HOME/.nvm/nvm.sh && nvm install ${MIN_NODE_MAJOR} && nvm alias default ${MIN_NODE_MAJOR}"
+      export PATH="$HOME/.nvm/versions/node/$(. "$HOME/.nvm/nvm.sh" && nvm version default)/bin:$PATH"
+      ;;
+    fnm)
+      run_logged "fnm install ${MIN_NODE_MAJOR} && fnm default ${MIN_NODE_MAJOR}"
+      eval "$(fnm env)"
+      ;;
+    volta)
+      run_logged "volta install node@${MIN_NODE_MAJOR}"
+      ;;
+    asdf)
+      local latest
+      latest=$(run_capture "asdf list-all nodejs | grep '^${MIN_NODE_MAJOR}\\.' | tail -1")
+      run_logged "asdf install nodejs ${latest} && asdf global nodejs ${latest}"
+      ;;
+    mise)
+      run_logged "mise use -g node@${MIN_NODE_MAJOR}"
+      ;;
+    n)
+      run_logged "n ${MIN_NODE_MAJOR}"
+      ;;
+    brew)
+      run_logged "brew install node@${MIN_NODE_MAJOR} && brew link --overwrite node@${MIN_NODE_MAJOR}"
+      ;;
+    fnm-new)
+      run_logged "curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell"
+      export PATH="$HOME/.local/share/fnm:$PATH"
+      eval "$(fnm env)" 2>/dev/null || true
+      run_logged "fnm install ${MIN_NODE_MAJOR} && fnm default ${MIN_NODE_MAJOR}"
+      eval "$(fnm env)"
+      ;;
+    *)
+      step_fail "unknown manager: $manager"
+      exit 1
+      ;;
+  esac
+
+  if ! command -v node >/dev/null 2>&1 || ! node -v | grep -qE "^v${MIN_NODE_MAJOR}\\."; then
+    step_fail "Node ${MIN_NODE_MAJOR} install failed; node -v reports: $(node -v 2>/dev/null || echo none)"
+    echo "  Manual recovery: install Node ${MIN_NODE_MAJOR}+ via your preferred method and re-run this script."
+    exit 1
+  fi
+  step_done "node $(node -v)"
 }
 
 main() {
