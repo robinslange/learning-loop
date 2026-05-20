@@ -330,6 +330,26 @@ install_claude_code() {
   step_done "claude $(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 }
 
+add_marketplaces() {
+  step_start "Adding marketplaces"
+  local mp
+  for mp in "obra/superpowers-marketplace" "robinslange/learning-loop"; do
+    if run_logged "claude plugin marketplace add $mp"; then
+      :
+    else
+      local rc=$?
+      if grep -qE "(already added|already exists)" "$LOG_FILE" 2>/dev/null; then
+        : # idempotent: already added is fine
+      else
+        step_fail "failed to add marketplace $mp (exit $rc)"
+        echo "  See $LOG_FILE for details."
+        exit 1
+      fi
+    fi
+  done
+  step_done "2 marketplaces ready"
+}
+
 version_ge() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
