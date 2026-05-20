@@ -112,7 +112,7 @@ detect_platform() {
 detect_proxy() {
   step_start "Checking proxy"
   if [ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}${https_proxy:-}${http_proxy:-}" ]; then
-    step_done "using ${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy}}}}"
+    step_done "using ${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
   else
     step_skip "none set"
   fi
@@ -137,6 +137,7 @@ ensure_node() {
 
 install_node_via_manager() {
   local managers=()
+  local chosen_manager=""
   [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
   command -v fnm >/dev/null 2>&1 && managers+=("fnm")
   command -v volta >/dev/null 2>&1 && managers+=("volta")
@@ -194,6 +195,7 @@ install_via_manager() {
       ;;
     volta)
       run_logged "volta install node@${MIN_NODE_MAJOR}"
+      export PATH="$HOME/.volta/bin:$PATH"
       ;;
     asdf)
       local latest
@@ -249,9 +251,11 @@ ensure_local_bin_path() {
     fish) shell_rc="$HOME/.config/fish/config.fish" ;;
     nu)   shell_rc="$HOME/.config/nushell/env.nu" ;;
     *)
-      step_fail "unknown shell $(basename "$SHELL"); add this to your shell rc manually:"
+      echo
+      echo "  ${C_YELLOW}⚠${C_RESET} unknown shell $(basename "$SHELL"); add this to your shell rc manually:"
       echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
       export PATH="$local_bin:$PATH"
+      step_skip "unknown shell — added to current session only"
       return 0
       ;;
   esac
