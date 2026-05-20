@@ -127,7 +127,52 @@ ensure_node() {
 }
 
 install_node_via_manager() {
-  step_fail "Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}); manager install not yet implemented"
+  local managers=()
+  [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
+  command -v fnm >/dev/null 2>&1 && managers+=("fnm")
+  command -v volta >/dev/null 2>&1 && managers+=("volta")
+  if command -v asdf >/dev/null 2>&1 && asdf plugin list 2>/dev/null | grep -q '^nodejs$'; then
+    managers+=("asdf")
+  fi
+  command -v mise >/dev/null 2>&1 && managers+=("mise")
+  command -v n >/dev/null 2>&1 && managers+=("n")
+  if [[ "$PLATFORM" == darwin-* ]] && command -v brew >/dev/null 2>&1; then
+    managers+=("brew")
+  fi
+
+  if [ ${#managers[@]} -eq 0 ]; then
+    chosen_manager="fnm-new"
+    echo
+    echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
+    echo "  ${C_DIM}No version manager detected. Install Node ${MIN_NODE_MAJOR} via fnm? [Y/n]${C_RESET}"
+    read -r ans
+    case "${ans:-y}" in
+      y|Y|"") ;;
+      *) step_fail "declined; install Node ${MIN_NODE_MAJOR}+ manually and re-run"; exit 1 ;;
+    esac
+  elif [ ${#managers[@]} -eq 1 ]; then
+    chosen_manager="${managers[0]}"
+    echo
+    echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
+    echo "  ${C_DIM}Found ${chosen_manager}. Install Node ${MIN_NODE_MAJOR} with it? [Y/n]${C_RESET}"
+    read -r ans
+    case "${ans:-y}" in
+      y|Y|"") ;;
+      *) chosen_manager="fnm-new" ;;
+    esac
+  else
+    echo
+    echo "  ${C_DIM}Multiple Node managers found: ${managers[*]}${C_RESET}"
+    echo "  ${C_DIM}Which should install Node ${MIN_NODE_MAJOR}? (default: ${managers[0]})${C_RESET}"
+    read -r ans
+    chosen_manager="${ans:-${managers[0]}}"
+  fi
+
+  install_via_manager "$chosen_manager"
+}
+
+install_via_manager() {
+  step_fail "manager install handler for $1 not yet implemented"
   exit 1
 }
 
