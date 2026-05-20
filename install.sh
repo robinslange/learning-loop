@@ -109,6 +109,28 @@ detect_proxy() {
   fi
 }
 
+ensure_node() {
+  step_start "Checking Node.js"
+  if command -v node >/dev/null 2>&1; then
+    local v
+    v=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
+    if [ -n "$v" ] && [ "$v" -ge "$MIN_NODE_MAJOR" ] 2>/dev/null; then
+      step_done "node v$(node -v | sed 's/^v//')"
+      return 0
+    fi
+    OLD_NODE_VERSION=$(node -v 2>/dev/null || echo "unknown")
+  else
+    OLD_NODE_VERSION=""
+  fi
+
+  install_node_via_manager
+}
+
+install_node_via_manager() {
+  step_fail "Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}); manager install not yet implemented"
+  exit 1
+}
+
 main() {
   preamble
   detect_platform
