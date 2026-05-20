@@ -6,8 +6,8 @@
 # This script takes a fresh macOS or Linux machine to a state where
 # /learning-loop:init can be run inside Claude Code.
 #
-# Inspect first: curl -fsSL <url> | less
-# Then run:      curl -fsSL <url> | bash
+# Inspect first: curl -fsSL https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh | less
+# Then run:      curl -fsSL https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh | bash
 #
 # Resolved constants (pinned 2026-05-20):
 #   MIN_NODE_MAJOR=22
@@ -20,6 +20,7 @@ set -euo pipefail
 
 if [ -z "${INSTALL_VERSION:-}" ]; then
   readonly INSTALL_VERSION="1"
+  readonly SELF_URL="https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh"
   readonly LOG_FILE="$HOME/.cache/learning-loop-install.log"
   readonly MIN_NODE_MAJOR=22
   readonly MIN_CLAUDE_VERSION="2.1.144"
@@ -48,7 +49,7 @@ init_log_state() {
 on_interrupt() {
   echo
   echo "${C_YELLOW}Interrupted.${C_RESET} Log saved to $LOG_FILE"
-  echo "Re-run when ready: curl -fsSL <url> | bash"
+  echo "Re-run when ready: curl -fsSL $SELF_URL | bash"
   exit 130
 }
 trap on_interrupt INT TERM
@@ -89,7 +90,17 @@ step_fail() {
 
 run_logged() {
   echo ">>> $*" >>"$LOG_FILE"
-  bash -c "$*" >>"$LOG_FILE" 2>&1
+  bash -c "$*" >>"$LOG_FILE" 2>&1 &
+  local pid=$!
+  local spinner='|/-\'
+  local i=0
+  while kill -0 "$pid" 2>/dev/null; do
+    printf "\r→ %s... ${spinner:$((i % 4)):1}" "$STEP_NAME"
+    i=$((i + 1))
+    sleep 0.1
+  done
+  wait "$pid"
+  return $?
 }
 
 run_capture() {
@@ -131,7 +142,7 @@ ensure_node() {
     local v
     v=$(node -v 2>/dev/null | sed 's/^v//' | cut -d. -f1)
     if [ -n "$v" ] && [ "$v" -ge "$MIN_NODE_MAJOR" ] 2>/dev/null; then
-      step_done "node v$(node -v | sed 's/^v//')"
+      step_skip "node v$(node -v | sed 's/^v//') already installed"
       return 0
     fi
     OLD_NODE_VERSION=$(node -v 2>/dev/null || echo "unknown")
@@ -310,7 +321,7 @@ ensure_claude_code() {
     local installed
     installed=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
     if [ -n "$installed" ] && version_ge "$installed" "$MIN_CLAUDE_VERSION"; then
-      step_done "claude $installed"
+      step_skip "claude $installed already installed"
       return 0
     fi
     echo
@@ -327,6 +338,7 @@ ensure_claude_code() {
 }
 
 install_claude_code() {
+  step_start "Installing Claude Code"
   run_logged 'curl -fsSL https://claude.ai/install.sh | bash'
 
   if ! command -v claude >/dev/null 2>&1; then
@@ -339,49 +351,66 @@ install_claude_code() {
 
 add_marketplaces() {
   step_start "Adding marketplaces"
-  local mp
+  local mp added=0
   for mp in "obra/superpowers-marketplace" "robinslange/learning-loop"; do
+    local log_size_before
+    log_size_before=$(wc -c <"$LOG_FILE" 2>/dev/null || echo 0)
     if run_logged "claude plugin marketplace add $mp"; then
-      :
+      local new_output
+      new_output=$(tail -c "+$((log_size_before + 1))" "$LOG_FILE" 2>/dev/null || echo "")
+      if echo "$new_output" | grep -qE "already on disk|already added|already exists"; then
+        :
+      else
+        added=$((added + 1))
+      fi
     else
       local rc=$?
-      if grep -qE "(already added|already exists)" "$LOG_FILE" 2>/dev/null; then
-        : # idempotent: already added is fine
-      else
-        step_fail "failed to add marketplace $mp (exit $rc)"
-        echo "  See $LOG_FILE for details."
-        exit 1
-      fi
+      step_fail "failed to add marketplace $mp (exit $rc)"
+      echo "  See $LOG_FILE for details."
+      exit 1
     fi
   done
-  step_done "2 marketplaces ready"
+  if [ "$added" -eq 0 ]; then
+    step_skip "2 marketplaces already on disk"
+  else
+    step_done "$added new, $((2 - added)) already on disk"
+  fi
 }
 
 install_plugins() {
   step_start "Installing plugins"
-  local p name
+  local p name added=0
   local installed_versions=()
   for p in "episodic-memory@superpowers-marketplace" "learning-loop@learning-loop-marketplace"; do
     name="${p%%@*}"
+    local log_size_before
+    log_size_before=$(wc -c <"$LOG_FILE" 2>/dev/null || echo 0)
     if run_logged "claude plugin install $p"; then
+      local new_output
+      new_output=$(tail -c "+$((log_size_before + 1))" "$LOG_FILE" 2>/dev/null || echo "")
       local v
       v=$(claude plugin list 2>/dev/null | awk -v n="${p}" '$0 ~ n {f=1; next} /Version:/ && f {print $2; f=0; exit}')
-      installed_versions+=("${name} ${v:-?}")
+      if echo "$new_output" | grep -qE "already installed"; then
+        installed_versions+=("${name} ${v:-?} already")
+      else
+        added=$((added + 1))
+        installed_versions+=("${name} ${v:-?}")
+      fi
     else
       local rc=$?
-      if grep -qE "already installed" "$LOG_FILE" 2>/dev/null; then
-        installed_versions+=("${name} (already installed)")
-      else
-        step_fail "failed to install $p (exit $rc)"
-        if [ "$name" = "episodic-memory" ]; then
-          echo "  episodic-memory is a hard dependency; /init will not work without it."
-        fi
-        echo "  See $LOG_FILE for details."
-        exit 1
+      step_fail "failed to install $p (exit $rc)"
+      if [ "$name" = "episodic-memory" ]; then
+        echo "  episodic-memory is a hard dependency; /init will not work without it."
       fi
+      echo "  See $LOG_FILE for details."
+      exit 1
     fi
   done
-  step_done "$(IFS=', '; echo "${installed_versions[*]}")"
+  if [ "$added" -eq 0 ]; then
+    step_skip "$(IFS=', '; echo "${installed_versions[*]}")"
+  else
+    step_done "$(IFS=', '; echo "${installed_versions[*]}")"
+  fi
 }
 
 version_ge() {
@@ -394,7 +423,7 @@ print_next_steps() {
   local s=$((elapsed % 60))
 
   echo
-  if [ "$STEPS_RUN" -eq 0 ]; then
+  if [ "$STEPS_RUN" -le 1 ]; then
     echo "${C_GREEN}✓ Already set up${C_RESET} (${STEPS_SKIPPED} steps skipped, ${s}s elapsed)."
     return 0
   fi
@@ -441,6 +470,8 @@ main() {
   print_next_steps
 }
 
-if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+# Run main if executed directly or piped via stdin (curl ... | bash).
+# Skip only when explicitly sourced (e.g. by bats tests).
+if [[ -z "${BASH_SOURCE[0]:-}" ]] || [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   main "$@"
 fi

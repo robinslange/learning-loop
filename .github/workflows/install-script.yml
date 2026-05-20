@@ -16,6 +16,7 @@ on:
     paths:
       - 'install.sh'
       - 'tests/install/**'
+      - '.github/workflows/install-script.yml'
 
 jobs:
   unit:
