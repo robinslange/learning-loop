@@ -381,6 +381,29 @@ version_ge() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
 
+print_next_steps() {
+  local elapsed=$(($(date +%s) - START_TIME))
+  local m=$((elapsed / 60))
+  local s=$((elapsed % 60))
+
+  echo
+  if [ "$STEPS_RUN" -eq 0 ]; then
+    echo "${C_GREEN}✓ Already set up${C_RESET} (${STEPS_SKIPPED} steps skipped, ${s}s elapsed)."
+    return 0
+  fi
+
+  echo "${C_GREEN}✓ Done.${C_RESET} ${m}m ${s}s elapsed (${STEPS_RUN} steps ran, ${STEPS_SKIPPED} skipped)."
+  echo
+
+  if [ -n "${!CLAUDE_SESSION_VAR:-}" ]; then
+    echo "Next: ${C_DIM}Restart Claude Code${C_RESET} (the new plugin won't activate in this session)"
+    echo "      and run ${C_GREEN}/learning-loop:init${C_RESET}"
+  else
+    echo "Next: Open Claude Code and run ${C_GREEN}/learning-loop:init${C_RESET}"
+    echo "      This will configure your vault, persona voice, and download the ll-search binary."
+  fi
+}
+
 main() {
   preamble
   detect_platform
