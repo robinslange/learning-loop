@@ -1,0 +1,31 @@
+name: install.sh
+
+# Runs bats unit tests for install.sh.
+# End-to-end install matrix (clean Ubuntu/macOS, idempotency re-runs) is
+# intentionally NOT in CI: claude plugin install requires an authenticated
+# Anthropic API session that runners don't have. End-to-end is validated
+# manually before each release.
+
+on:
+  push:
+    paths:
+      - 'install.sh'
+      - 'tests/install/**'
+      - '.github/workflows/install-script.yml'
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'tests/install/**'
+
+jobs:
+  unit:
+    name: bats unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install bats
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bats
+      - name: Run bats
+        run: bats tests/install/test_install.bats
