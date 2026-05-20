@@ -100,6 +100,15 @@ detect_platform() {
   step_done "${PLATFORM}"
 }
 
+detect_proxy() {
+  step_start "Checking proxy"
+  if [ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}${https_proxy:-}${http_proxy:-}" ]; then
+    step_done "using ${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy}}}}"
+  else
+    step_skip "none set"
+  fi
+}
+
 main() {
   preamble
   detect_platform
