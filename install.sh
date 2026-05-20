@@ -230,6 +230,69 @@ install_via_manager() {
   step_done "node $(node -v)"
 }
 
+ensure_local_bin_path() {
+  step_start "Ensuring ~/.local/bin on PATH"
+  local local_bin="$HOME/.local/bin"
+  mkdir -p "$local_bin"
+
+  case ":$PATH:" in
+    *":$local_bin:"*)
+      step_skip "already on PATH"
+      return 0
+      ;;
+  esac
+
+  local shell_rc=""
+  case "$(basename "${SHELL:-/bin/bash}")" in
+    bash) shell_rc="$HOME/.bashrc" ;;
+    zsh)  shell_rc="$HOME/.zshrc" ;;
+    fish) shell_rc="$HOME/.config/fish/config.fish" ;;
+    nu)   shell_rc="$HOME/.config/nushell/env.nu" ;;
+    *)
+      step_fail "unknown shell $(basename "$SHELL"); add this to your shell rc manually:"
+      echo "    export PATH=\"\$HOME/.local/bin:\$PATH\""
+      export PATH="$local_bin:$PATH"
+      return 0
+      ;;
+  esac
+
+  mkdir -p "$(dirname "$shell_rc")"
+  touch "$shell_rc"
+
+  if grep -qF "$MARKER_TAG" "$shell_rc" 2>/dev/null; then
+    step_skip "marker already present in $shell_rc"
+    export PATH="$local_bin:$PATH"
+    return 0
+  fi
+
+  case "$(basename "${SHELL:-/bin/bash}")" in
+    fish)
+      cat >>"$shell_rc" <<EOF
+
+# ${MARKER_TAG}
+set -gx PATH \$HOME/.local/bin \$PATH
+EOF
+      ;;
+    nu)
+      cat >>"$shell_rc" <<EOF
+
+# ${MARKER_TAG}
+\$env.PATH = (\$env.PATH | prepend (\$nu.home-path | path join ".local/bin"))
+EOF
+      ;;
+    *)
+      cat >>"$shell_rc" <<EOF
+
+# ${MARKER_TAG}
+export PATH="\$HOME/.local/bin:\$PATH"
+EOF
+      ;;
+  esac
+
+  export PATH="$local_bin:$PATH"
+  step_done "added to $shell_rc"
+}
+
 main() {
   preamble
   detect_platform
