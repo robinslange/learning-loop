@@ -55,6 +55,51 @@ on_exit() {
 }
 trap on_exit EXIT
 
+step_start() {
+  STEP_NAME="$1"
+  STEP_T0=$(date +%s)
+  printf "→ %s..." "$STEP_NAME"
+}
+
+step_done() {
+  local elapsed=$(($(date +%s) - STEP_T0))
+  STEPS_RUN=$((STEPS_RUN + 1))
+  if [ $# -gt 0 ]; then
+    printf "\r${C_GREEN}✓${C_RESET} %s ${C_DIM}(%ds) — %s${C_RESET}\n" "$STEP_NAME" "$elapsed" "$1"
+  else
+    printf "\r${C_GREEN}✓${C_RESET} %s ${C_DIM}(%ds)${C_RESET}\n" "$STEP_NAME" "$elapsed"
+  fi
+}
+
+step_skip() {
+  STEPS_SKIPPED=$((STEPS_SKIPPED + 1))
+  printf "\r${C_DIM}↷ %s — %s${C_RESET}\n" "$STEP_NAME" "$1"
+}
+
+step_fail() {
+  printf "\r${C_RED}✗${C_RESET} %s — %s\n" "$STEP_NAME" "$1"
+}
+
+detect_platform() {
+  step_start "Detecting platform"
+  local kernel arch
+  kernel=$(uname -s | tr '[:upper:]' '[:lower:]')
+  arch=$(uname -m)
+  case "${kernel}-${arch}" in
+    darwin-arm64)        PLATFORM="darwin-arm64" ;;
+    darwin-x86_64)       PLATFORM="darwin-x86_64" ;;
+    linux-x86_64)        PLATFORM="linux-x86_64" ;;
+    linux-aarch64)       PLATFORM="linux-aarch64" ;;
+    *)
+      step_fail "Unsupported platform: ${kernel}-${arch}"
+      echo "Supported: macOS (arm64/x86_64), Linux (x86_64/aarch64), WSL."
+      echo "If you're on native Windows, use WSL: https://learn.microsoft.com/en-us/windows/wsl/install"
+      exit 1
+      ;;
+  esac
+  step_done "${PLATFORM}"
+}
+
 main() {
   preamble
   detect_platform
