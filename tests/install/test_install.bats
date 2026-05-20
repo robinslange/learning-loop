@@ -50,33 +50,44 @@ setup() {
   [ ! -f "$fake_home/.zshrc" ]
 }
 
-@test "manager detection — nvm only" {
-  local fake_home
+@test "install_node_via_manager — picks nvm when only nvm present" {
+  local fake_home fake_bin
   fake_home=$(mktemp -d)
+  fake_bin=$(mktemp -d)
   mkdir -p "$fake_home/.nvm"
-  echo "echo '0.39.0'" >"$fake_home/.nvm/nvm.sh"
-  chmod +x "$fake_home/.nvm/nvm.sh"
-  local managers=()
-  HOME="$fake_home"
-  [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
-  [ "${managers[*]}" = "nvm" ]
+  echo "true" >"$fake_home/.nvm/nvm.sh"
+  run bash -c "
+    trap - EXIT INT TERM
+    source '${BATS_TEST_DIRNAME}/../../install.sh'
+    trap - EXIT INT TERM
+    install_via_manager() { echo \"PICKED:\$1\"; exit 0; }
+    HOME='$fake_home' PATH='$fake_bin:/usr/bin:/bin' PLATFORM='linux-x86_64' OLD_NODE_VERSION='v18.0.0' \
+      install_node_via_manager <<< ''
+  "
+  [[ "$output" == *"PICKED:nvm"* ]]
 }
 
-@test "manager detection — fnm only via PATH" {
-  local fake_bin
+@test "install_node_via_manager — picks fnm when only fnm present" {
+  local fake_home fake_bin
+  fake_home=$(mktemp -d)
   fake_bin=$(mktemp -d)
   cat >"$fake_bin/fnm" <<'EOF'
 #!/usr/bin/env bash
 echo "fnm 1.38.0"
 EOF
   chmod +x "$fake_bin/fnm"
-  local managers=()
-  PATH="$fake_bin:$PATH" HOME="$(mktemp -d)"
-  command -v fnm >/dev/null 2>&1 && managers+=("fnm")
-  [ "${managers[*]}" = "fnm" ]
+  run bash -c "
+    trap - EXIT INT TERM
+    source '${BATS_TEST_DIRNAME}/../../install.sh'
+    trap - EXIT INT TERM
+    install_via_manager() { echo \"PICKED:\$1\"; exit 0; }
+    HOME='$fake_home' PATH='$fake_bin:/usr/bin:/bin' PLATFORM='linux-x86_64' OLD_NODE_VERSION='v18.0.0' \
+      install_node_via_manager <<< ''
+  "
+  [[ "$output" == *"PICKED:fnm"* ]]
 }
 
-@test "manager detection — multi-manager populates array in priority order" {
+@test "install_node_via_manager — picks nvm first when multiple managers present" {
   local fake_home fake_bin
   fake_home=$(mktemp -d)
   fake_bin=$(mktemp -d)
@@ -89,13 +100,13 @@ echo "$tool fake"
 EOF
     chmod +x "$fake_bin/$tool"
   done
-  local managers=()
-  HOME="$fake_home" PATH="$fake_bin:/usr/bin:/bin"
-  [ -s "$HOME/.nvm/nvm.sh" ] && managers+=("nvm")
-  command -v fnm >/dev/null 2>&1 && managers+=("fnm")
-  command -v volta >/dev/null 2>&1 && managers+=("volta")
-  [ "${managers[0]}" = "nvm" ]
-  [ "${managers[1]}" = "fnm" ]
-  [ "${managers[2]}" = "volta" ]
-  [ "${#managers[@]}" -eq 3 ]
+  run bash -c "
+    trap - EXIT INT TERM
+    source '${BATS_TEST_DIRNAME}/../../install.sh'
+    trap - EXIT INT TERM
+    install_via_manager() { echo \"PICKED:\$1\"; exit 0; }
+    HOME='$fake_home' PATH='$fake_bin:/usr/bin:/bin' PLATFORM='linux-x86_64' OLD_NODE_VERSION='v18.0.0' \
+      install_node_via_manager <<< ''
+  "
+  [[ "$output" == *"PICKED:nvm"* ]]
 }
