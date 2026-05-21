@@ -27,6 +27,12 @@ import {
   checkBinaryRuns,
   checkWatchDaemon,
 } from '../scripts/lib/health-checks/full.mjs';
+import {
+  readHealthCache,
+  writeHealthCache,
+  isCacheStale,
+  CACHE_TTL_MS,
+} from '../scripts/lib/health-checks/cache.mjs';
 
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
   const quick = [
@@ -423,4 +429,50 @@ test('checkWatchDaemon: warn when stale pidfile', () => {
   const result = checkWatchDaemon({ pidfileExists: true, pidIsAlive: false, pid: 9999 });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
+});
+
+test('CACHE_TTL_MS is 12 hours', () => {
+  assert.equal(CACHE_TTL_MS, 12 * 60 * 60 * 1000);
+});
+
+test('readHealthCache returns null when file missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-cache-1-'));
+  const result = readHealthCache({ pluginData: dir });
+  assert.equal(result, null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('writeHealthCache + readHealthCache round-trip', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-cache-2-'));
+  const payload = {
+    ts: '2026-05-21T01:30:00.000Z',
+    ran: 'full',
+    checks: [{ id: 'vault-path', status: 'ok', severity: 'fail', detail: '/v', fix: null }],
+  };
+  writeHealthCache({ pluginData: dir, result: payload });
+  const back = readHealthCache({ pluginData: dir });
+  assert.deepEqual(back, payload);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('isCacheStale: false when ts is recent', () => {
+  const recent = new Date(Date.now() - 60 * 1000).toISOString();
+  assert.equal(isCacheStale({ ts: recent }), false);
+});
+
+test('isCacheStale: true when ts > 12h old', () => {
+  const old = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString();
+  assert.equal(isCacheStale({ ts: old }), true);
+});
+
+test('isCacheStale: true when cache is null', () => {
+  assert.equal(isCacheStale(null), true);
+});
+
+test('readHealthCache returns null on corrupt JSON', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-cache-3-'));
+  writeFileSync(join(dir, 'last-health.json'), '{not json');
+  const result = readHealthCache({ pluginData: dir });
+  assert.equal(result, null);
+  rmSync(dir, { recursive: true, force: true });
 });
