@@ -113,7 +113,9 @@ export async function runFullChecks(ctx = {}) {
   if (binaryPath && existsSync(binaryPath)) {
     try {
       binaryVersionOutput = execFileSync(binaryPath, ['version'], {
-        encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        timeout: 3000,
       }).trim();
       binaryExitCode = 0;
     } catch (err) {
@@ -129,7 +131,12 @@ export async function runFullChecks(ctx = {}) {
     try {
       pid = parseInt(readFileSync(pidfilePath, 'utf-8').trim(), 10);
       if (Number.isFinite(pid)) {
-        try { process.kill(pid, 0); pidIsAlive = true; } catch { pidIsAlive = false; }
+        try {
+          process.kill(pid, 0);
+          pidIsAlive = true;
+        } catch {
+          pidIsAlive = false;
+        }
       }
     } catch {}
   }

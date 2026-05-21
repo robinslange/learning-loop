@@ -8,10 +8,7 @@ import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { env } from './lib/env.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
-import {
-  buildAbiDrift,
-  satisfiesVersion,
-} from './check-deps-impl.mjs';
+import { buildAbiDrift, satisfiesVersion } from './check-deps-impl.mjs';
 
 export { detectAbiDrift } from './check-deps-impl.mjs';
 
