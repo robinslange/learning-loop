@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **`/learning-loop:doctor` skill.** Diagnoses your learning-loop install: runs 20 health checks (file presence, plugin state, binary executability, watch-daemon status, NLI socket, ABI drift, version comparison, etc.), presents the result, offers per-fix remediation (auto-runnable fixes execute on consent; manual ones print the command), and re-runs each check after the fix to confirm. Safe to run anytime, makes no changes without approval.
+- **Session-start health detector.** A new `hooks/session-start/health-detector.mjs` replaces `deps-check.mjs`. Reads a 12h-TTL cache at `<plugin-data>/last-health.json`; when stale, runs the quick-check subset (~50ms, no shell-outs) and refreshes the cache. Emits a single line above the prompt when any failure-severity checks are unhealthy: `⚠ learning-loop: N issues — run /learning-loop:doctor`. Quiet otherwise. Honors `LL_DISABLE_DETECTOR=1`.
+- **`scripts/health-check.mjs` library.** Pure check library: `quickChecks()` (file-existence, version reads — ~50ms), `fullChecks()` (CLI invocations — ~500ms), `formatMissingDeps()` (preserves the markdown context-assembly previously got from deps-check). One source of truth shared by `/init` Phase 1, `/doctor`, and the session-start detector.
+
+### Changed
+
+- **`/init` Phase 1 detection delegates to the library.** The dashboard's data now comes from `scripts/health-check.mjs` instead of inline `fs.readdirSync`/`execSync` calls. Federation, hub-sync, librarian, and model-notes rows remain inline (init-specific concerns, not general health).
+- **`scripts/check-deps.mjs` thinned to a wrapper.** Logic moved to `scripts/check-deps-impl.mjs` so other modules can import `detectAbiDrift` without spawning a subprocess. The CLI's JSON output shape is preserved.
+
+### Removed
+
+- **`hooks/session-start/deps-check.mjs`.** Subsumed by the health detector. `ctx.depsAllSatisfied` and `ctx.depsMissing` (read by `context-assembly.mjs`) are populated by the new detector with the same semantics.
+
 ## v1.22.1
 
 ### Fixed
