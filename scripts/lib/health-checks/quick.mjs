@@ -410,3 +410,224 @@ export function checkClaudemdSectionCurrent({ home, templateVersion } = {}) {
     });
   }
 }
+
+export function checkInstalledPluginsReadable({ home } = {}) {
+  if (!home) {
+    return makeCheck({
+      id: CHECK_IDS['installed-plugins-readable'],
+      name: 'Plugin registry',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: 'HOME not set',
+      fix: 'Set $HOME',
+    });
+  }
+  const p = join(home, '.claude/plugins/installed_plugins.json');
+  if (!existsSync(p)) {
+    return makeCheck({
+      id: CHECK_IDS['installed-plugins-readable'],
+      name: 'Plugin registry',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: 'installed_plugins.json not found',
+      fix: 'Claude Code may not have run yet; launch Claude Code once and try again',
+    });
+  }
+  try {
+    JSON.parse(readFileSync(p, 'utf-8'));
+    return makeCheck({
+      id: CHECK_IDS['installed-plugins-readable'],
+      name: 'Plugin registry',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.fail,
+      detail: p,
+      fix: null,
+    });
+  } catch (err) {
+    return makeCheck({
+      id: CHECK_IDS['installed-plugins-readable'],
+      name: 'Plugin registry',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: `parse error: ${err.message}`,
+      fix: 'Inspect ~/.claude/plugins/installed_plugins.json for corruption',
+    });
+  }
+}
+
+export function checkPluginCacheVersionPresent({ home, installedVersion } = {}) {
+  if (!home || !installedVersion) {
+    return makeCheck({
+      id: CHECK_IDS['plugin-cache-version-present'],
+      name: 'Plugin cache directory',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: 'missing inputs',
+      fix: 'Internal: caller should pass installedVersion',
+    });
+  }
+  const verDir = join(
+    home,
+    '.claude/plugins/cache/learning-loop-marketplace/learning-loop',
+    installedVersion,
+  );
+  if (!existsSync(verDir)) {
+    return makeCheck({
+      id: CHECK_IDS['plugin-cache-version-present'],
+      name: 'Plugin cache directory',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: `missing: ${verDir}`,
+      fix: `Run: claude plugin install learning-loop@learning-loop-marketplace`,
+    });
+  }
+  return makeCheck({
+    id: CHECK_IDS['plugin-cache-version-present'],
+    name: 'Plugin cache directory',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.fail,
+    detail: verDir,
+    fix: null,
+  });
+}
+
+export function checkSearchIndexExists({ vaultRoot } = {}) {
+  if (!vaultRoot) {
+    return makeCheck({
+      id: CHECK_IDS['search-index-exists'],
+      name: 'Search index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: 'vault path not available',
+      fix: 'Fix vault-path first',
+    });
+  }
+  const p = join(vaultRoot, '.vault-search/vault-index.db');
+  if (!existsSync(p)) {
+    return makeCheck({
+      id: CHECK_IDS['search-index-exists'],
+      name: 'Search index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: 'no index — run ll-search index to build',
+      fix: 'Run: ll-search index',
+    });
+  }
+  try {
+    const stat = statSync(p);
+    if (stat.size === 0) {
+      return makeCheck({
+        id: CHECK_IDS['search-index-exists'],
+        name: 'Search index',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.warn,
+        detail: 'index file is empty',
+        fix: 'Run: ll-search index',
+      });
+    }
+    return makeCheck({
+      id: CHECK_IDS['search-index-exists'],
+      name: 'Search index',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: `${Math.round(stat.size / 1024)} KB`,
+      fix: null,
+    });
+  } catch (err) {
+    return makeCheck({
+      id: CHECK_IDS['search-index-exists'],
+      name: 'Search index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `stat error: ${err.message}`,
+      fix: 'Run: ll-search index',
+    });
+  }
+}
+
+export function checkNliSocketFresh({ pluginData } = {}) {
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['nli-socket-fresh'],
+      name: 'NLI socket',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available — skipped',
+      fix: null,
+    });
+  }
+  const p = join(pluginData, 'nli.sock');
+  if (!existsSync(p)) {
+    return makeCheck({
+      id: CHECK_IDS['nli-socket-fresh'],
+      name: 'NLI socket',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'not running (no socket file)',
+      fix: null,
+    });
+  }
+  try {
+    const stat = statSync(p);
+    if (!stat.isSocket()) {
+      return makeCheck({
+        id: CHECK_IDS['nli-socket-fresh'],
+        name: 'NLI socket',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.warn,
+        detail: 'stale (file at socket path is not a socket)',
+        fix: `rm ${p} and restart ll-watch`,
+      });
+    }
+    return makeCheck({
+      id: CHECK_IDS['nli-socket-fresh'],
+      name: 'NLI socket',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: p,
+      fix: null,
+    });
+  } catch (err) {
+    return makeCheck({
+      id: CHECK_IDS['nli-socket-fresh'],
+      name: 'NLI socket',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `stat error: ${err.message}`,
+      fix: `Inspect ${p}`,
+    });
+  }
+}
+
+export function checkAbiDrift({ abiDriftResult } = {}) {
+  // The caller is responsible for invoking detectAbiDrift from check-deps-impl.mjs.
+  // This check accepts the result so it stays in the quick library (no native module loads).
+  if (!abiDriftResult || abiDriftResult.status === 'ok') {
+    return makeCheck({
+      id: CHECK_IDS['abi-drift'],
+      name: 'Native ABI',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.fail,
+      detail: 'no drift',
+      fix: null,
+    });
+  }
+  if (abiDriftResult.status === 'abi-mismatch') {
+    return makeCheck({
+      id: CHECK_IDS['abi-drift'],
+      name: 'Native ABI',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail: `expected NODE_MODULE_VERSION ${abiDriftResult.expectedAbi}, got ${abiDriftResult.actualAbi}`,
+      fix: abiDriftResult.fix || 'Run npm rebuild in the affected plugin',
+    });
+  }
+  return makeCheck({
+    id: CHECK_IDS['abi-drift'],
+    name: 'Native ABI',
+    status: SEVERITIES.fail,
+    severity: SEVERITIES.fail,
+    detail: abiDriftResult.message || 'unknown error',
+    fix: 'Inspect native plugin modules; consider reinstall',
+  });
+}

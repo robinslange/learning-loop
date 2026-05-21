@@ -14,6 +14,11 @@ import {
   checkLocalBinOnPath,
   checkClaudemdSectionPresent,
   checkClaudemdSectionCurrent,
+  checkInstalledPluginsReadable,
+  checkPluginCacheVersionPresent,
+  checkSearchIndexExists,
+  checkNliSocketFresh,
+  checkAbiDrift,
 } from '../scripts/lib/health-checks/quick.mjs';
 
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
@@ -251,4 +256,86 @@ test('checkClaudemdSectionCurrent: warn when installed older than template', () 
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
   rmSync(home, { recursive: true, force: true });
+});
+
+test('checkInstalledPluginsReadable: ok when JSON parses', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-installed-'));
+  mkdirSync(join(home, '.claude/plugins'), { recursive: true });
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), '{"plugins": {}}');
+  const result = checkInstalledPluginsReadable({ home });
+  assert.equal(result.status, 'ok');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkInstalledPluginsReadable: fail on bad JSON', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-installed-bad-'));
+  mkdirSync(join(home, '.claude/plugins'), { recursive: true });
+  writeFileSync(join(home, '.claude/plugins/installed_plugins.json'), 'not json');
+  const result = checkInstalledPluginsReadable({ home });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /parse/i);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkPluginCacheVersionPresent: ok when version dir exists', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-cache-'));
+  const verDir = join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop/1.22.0');
+  mkdirSync(verDir, { recursive: true });
+  const result = checkPluginCacheVersionPresent({ home, installedVersion: '1.22.0' });
+  assert.equal(result.status, 'ok');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkPluginCacheVersionPresent: fail when version dir missing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-cache-miss-'));
+  const result = checkPluginCacheVersionPresent({ home, installedVersion: '1.22.0' });
+  assert.equal(result.status, 'fail');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkSearchIndexExists: warn when missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-search-'));
+  const result = checkSearchIndexExists({ vaultRoot: dir });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkSearchIndexExists: ok when index non-empty', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-search-ok-'));
+  mkdirSync(join(dir, '.vault-search'));
+  writeFileSync(join(dir, '.vault-search/vault-index.db'), 'SQLite stub bytes...');
+  const result = checkSearchIndexExists({ vaultRoot: dir });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkNliSocketFresh: ok when socket missing (NLI just not running)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-nli-'));
+  const result = checkNliSocketFresh({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkNliSocketFresh: warn when path exists but is not a socket', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-nli-stale-'));
+  writeFileSync(join(dir, 'nli.sock'), 'not a socket');
+  const result = checkNliSocketFresh({ pluginData: dir });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkAbiDrift: ok when detectAbiDrift reports ok', () => {
+  const result = checkAbiDrift({ abiDriftResult: { status: 'ok' } });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkAbiDrift: fail on abi-mismatch', () => {
+  const result = checkAbiDrift({
+    abiDriftResult: { status: 'abi-mismatch', expectedAbi: '127', actualAbi: '141', fix: 'npm rebuild' },
+  });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /127.*141/);
+  assert.equal(result.fix, 'npm rebuild');
 });
