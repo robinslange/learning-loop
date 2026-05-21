@@ -366,12 +366,22 @@ async fn main() {
             out(&result);
         }
         Commands::Sync { db_path, vault_path, config_dir, hub_endpoint, peer_id } => {
-            init_embedding();
-            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let hub_override = hub_endpoint
                 .or_else(|| std::env::var("LL_HUB_ENDPOINT").ok());
             let peer_id_override = peer_id
                 .or_else(|| std::env::var("LL_PEER_ID").ok());
+            // Validate before touching the embedding model — a misconfigured
+            // invocation should fail fast with a clear error, not after a
+            // network round-trip to huggingface.
+            if hub_override.is_some() && peer_id_override.is_none() {
+                eprintln!(
+                    "--hub-endpoint provided without --peer-id; pass --peer-id <id> \
+                     (or set LL_PEER_ID) when bypassing federation/config.json"
+                );
+                std::process::exit(2);
+            }
+            init_embedding();
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let config = ll_search::sync::config::load_config_with_override(
                 &config_dir,
                 hub_override.as_deref(),

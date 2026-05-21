@@ -1567,7 +1567,7 @@ dependencies = [
 
 [[package]]
 name = "ll-search"
-version = "1.21.2"
+version = "1.23.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
