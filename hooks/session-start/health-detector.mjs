@@ -1,0 +1,82 @@
+// hooks/session-start/health-detector.mjs — session-start health detector.
+// Reads cache or runs quickChecks; emits a single line to ctx.context when
+// any fail-severity check is failing. Populates ctx.depsAllSatisfied +
+// ctx.depsMissing for context-assembly downstream.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { logError } from '../../scripts/lib/log.mjs';
+import { home } from '../lib/common.mjs';
+import { runQuickChecks, formatMissingDeps } from '../../scripts/health-check.mjs';
+import {
+  readHealthCache,
+  writeHealthCache,
+  isCacheStale,
+} from '../../scripts/lib/health-checks/cache.mjs';
+import { detectAbiDrift } from '../../scripts/check-deps-impl.mjs';
+
+const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
+
+function readTemplateVersion(pluginDir) {
+  try {
+    return readFileSync(join(pluginDir, TEMPLATE_VERSION_PATH), 'utf-8').trim();
+  } catch {
+    return '1';
+  }
+}
+
+function readInstalledVersion(homeDir) {
+  try {
+    const p = join(homeDir, '.claude/plugins/installed_plugins.json');
+    if (!existsSync(p)) return '0.0.0';
+    const data = JSON.parse(readFileSync(p, 'utf-8'));
+    const plugins = data?.plugins || data || {};
+    const entries = plugins['learning-loop@learning-loop-marketplace'];
+    return entries?.[0]?.version || '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+export async function run(ctx) {
+  if (process.env.LL_DISABLE_DETECTOR === '1') return;
+
+  try {
+    let result;
+
+    // Try cache first
+    const cache = readHealthCache({ pluginData: ctx.pluginData });
+    if (cache && !isCacheStale(cache)) {
+      result = cache;
+    } else {
+      // Run quickChecks and write cache
+      const homeDir = home();
+      const checkCtx = {
+        pluginData: ctx.pluginData,
+        vaultRoot: ctx.vaultRoot,
+        home: homeDir,
+        pathEnv: process.env.PATH || '',
+        installedVersion: readInstalledVersion(homeDir),
+        templateVersion: readTemplateVersion(ctx.pluginDir),
+        abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
+      };
+      result = await runQuickChecks(checkCtx);
+      writeHealthCache({ pluginData: ctx.pluginData, result });
+    }
+
+    // Count fail-severity failures
+    const fails = result.checks.filter((c) => c.status === 'fail' && c.severity === 'fail');
+
+    // Detector line: exactly one line on fails > 0
+    if (fails.length > 0) {
+      ctx.context += `⚠ learning-loop: ${fails.length} issue${fails.length === 1 ? '' : 's'} — run /learning-loop:doctor\n`;
+    }
+
+    // Preserve context-assembly contract (replaces deps-check.mjs output)
+    if (fails.length > 0) ctx.depsAllSatisfied = false;
+    const md = formatMissingDeps(result);
+    if (md) ctx.depsMissing += md;
+  } catch (err) {
+    logError('session-start.health-detector', err);
+  }
+}

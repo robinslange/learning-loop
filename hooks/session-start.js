@@ -16,7 +16,7 @@ import { emitJson } from './lib/io.mjs';
 
 import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
 import { run as runUpdateCheck } from './session-start/update-check.mjs';
-import { run as runDepsCheck } from './session-start/deps-check.mjs';
+import { run as runHealthDetector } from './session-start/health-detector.mjs';
 import { run as runVaultSnapshot } from './session-start/vault-snapshot.mjs';
 import { run as runContextAssembly } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
@@ -53,7 +53,7 @@ if (!ctx.vaultRoot) {
   process.exit(0);
 }
 
-await runDepsCheck(ctx);
+await runHealthDetector(ctx);
 await runVaultSnapshot(ctx);
 await runWatchDaemon(ctx);
 await runContextAssembly(ctx);
