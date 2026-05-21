@@ -476,3 +476,70 @@ test('readHealthCache returns null on corrupt JSON', () => {
   assert.equal(result, null);
   rmSync(dir, { recursive: true, force: true });
 });
+
+import { runQuickChecks, formatMissingDeps } from '../scripts/health-check.mjs';
+
+test('runQuickChecks: returns ran=quick + non-empty checks array', async () => {
+  const result = await runQuickChecks({
+    pluginData: '/nonexistent',
+    vaultRoot: null,
+    home: '/nonexistent',
+    pathEnv: '',
+    installedVersion: '0.0.0',
+    templateVersion: '1',
+    abiDriftResult: { status: 'ok' },
+  });
+  assert.equal(result.ran, 'quick');
+  assert.ok(Array.isArray(result.checks));
+  assert.ok(result.checks.length >= 10);
+  assert.ok(result.checks.every((c) => typeof c.id === 'string'));
+});
+
+test('runQuickChecks: includes ts in ISO-8601 format', async () => {
+  const result = await runQuickChecks({
+    pluginData: '/x', vaultRoot: null, home: '/x',
+    pathEnv: '', installedVersion: '0.0.0', templateVersion: '1',
+    abiDriftResult: { status: 'ok' },
+  });
+  assert.match(result.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+});
+
+test('formatMissingDeps: empty input returns empty string', () => {
+  assert.equal(formatMissingDeps({ checks: [] }), '');
+});
+
+test('formatMissingDeps: required failures render with required heading', () => {
+  const result = {
+    checks: [
+      {
+        id: 'episodic-memory-installed',
+        name: 'episodic-memory plugin',
+        status: 'fail',
+        severity: 'fail',
+        detail: 'not installed',
+        fix: 'claude plugin install episodic-memory@superpowers-marketplace',
+      },
+    ],
+  };
+  const md = formatMissingDeps(result);
+  assert.match(md, /Missing Required Dependencies/);
+  assert.match(md, /episodic-memory/);
+  assert.match(md, /claude plugin install/);
+});
+
+test('formatMissingDeps: warn-severity issues go under optional heading', () => {
+  const result = {
+    checks: [
+      {
+        id: 'local-bin-on-path',
+        name: '~/.local/bin on PATH',
+        status: 'fail',
+        severity: 'warn',
+        detail: 'not on PATH',
+        fix: 'add to your shell rc',
+      },
+    ],
+  };
+  const md = formatMissingDeps(result);
+  assert.match(md, /Missing Optional Dependencies/);
+});
