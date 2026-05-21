@@ -10,16 +10,39 @@ Claude fabricates sources (~43% of PubMed IDs, ~26% of DOIs). Without mechanical
 
 ## Install
 
-Add both marketplaces, then install both plugins:
+One command:
 
 ```bash
-/plugin marketplace add obra/superpowers-marketplace
-/plugin marketplace add robinslange/learning-loop
-/plugin install episodic-memory@superpowers-marketplace
-/plugin install learning-loop@learning-loop-marketplace
+curl -fsSL https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh | bash
 ```
 
-Restart Claude Code, then run `/learning-loop:init` to configure your vault path and persona voice. Init installs the `ll-watch` CLI for running the vault watcher.
+This takes ~3 minutes. It will:
+
+1. Check your platform (macOS / Linux / WSL)
+2. Ensure Node.js 22+ is available, using your existing version manager if present (nvm, fnm, volta, asdf, mise, n, brew). If none, offers fnm.
+3. Add `~/.local/bin` to PATH (with a versioned marker in your shell rc, so it's safe to re-run)
+4. Install Claude Code if missing
+5. Add the [superpowers-marketplace](https://github.com/obra/superpowers-marketplace) and [learning-loop marketplace](https://github.com/robinslange/learning-loop)
+6. Install both `episodic-memory` and `learning-loop` plugins
+
+To inspect first: `curl -fsSL https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh | less`
+
+After it finishes, open Claude Code and run `/learning-loop:init` to configure your vault.
+
+### Manual install
+
+If you'd rather do it yourself or you're on a platform the script doesn't support:
+
+```bash
+# 1. Install Claude Code: https://docs.anthropic.com/en/docs/claude-code
+# 2. Add marketplaces:
+claude plugin marketplace add obra/superpowers-marketplace
+claude plugin marketplace add robinslange/learning-loop
+# 3. Install plugins:
+claude plugin install episodic-memory@superpowers-marketplace
+claude plugin install learning-loop@learning-loop-marketplace
+# 4. Restart Claude Code, then run /learning-loop:init
+```
 
 ## Dependencies
 
