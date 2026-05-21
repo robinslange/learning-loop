@@ -6,12 +6,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- **`install.sh` bootstrap script + curl|bash one-liner install.** Takes a fresh macOS/Linux/WSL machine to a state where `/learning-loop:init` can be run in ~3 minutes with continuous feedback. Detects existing Node version managers (nvm, fnm, volta, asdf, mise, n, brew) and uses the user's preferred tool; offers fnm only when none is found. Installs Claude Code via `curl -fsSL https://claude.ai/install.sh | bash` if missing. Adds both marketplaces and installs both plugins. Idempotent: re-running on a fully-set-up machine reports "Already set up". Never silently sudo. Spinner + log tee during long-running steps so users see progress. Reads interactive prompts from `/dev/tty` so the script survives both `./install.sh` and `curl ... | bash` invocations. Logfile at `~/.cache/learning-loop-install.log`. Install one-liner now in the README.
 - **`ll-search sync --hub-endpoint <URL>` and `--peer-id <ID>` flags.** Enable atomic federation onboarding: the federation skill spawns `ll-search sync` before writing `federation/config.json`, so a failed sync leaves no half-written state. When `--hub-endpoint` is provided, the binary builds a minimal `FederationConfig` in-memory from the seed store instead of reading config from disk. `--peer-id` is required in that mode because the sync handshake uses `identity.display_name` as the peer_id and the hub binds peer_id server-side at redeem time. Falls back to `LL_HUB_ENDPOINT` / `LL_PEER_ID` env vars when flags are absent.
 
 ### Fixed
 
 - **`ll-watch stop` could not stop a SessionStart-spawned watcher.** `scripts/watch.mjs` wrote the pidfile to `<pluginData>/watch.pid`; `hooks/session-start/watch-daemon.mjs` writes to `<vault>/.vault-search/watch.pid` and unlinks the legacy path. Aligned `scripts/watch.mjs` to the per-vault path so `ll-watch stop` finds and terminates the daemon.
 - **Rerank ONNX inputs introspected at session load.** `token_type_ids` is now derived from ONNX initializers rather than assumed present, fixing rerank failures against models that omit the field.
+
+### Tests / CI
+
+- 29 bats unit tests for `install.sh` covering version comparison, PATH marker idempotency, shell-rc detection (bash/zsh/fish/nu/unknown), platform detection (darwin/linux/unsupported), proxy env-var detection, step helpers under `set -u`, `run_logged` exit-code propagation, manager-detection priorities, and the curl|bash EOF-stdin regression.
+- New GitHub Actions workflow `install-script.yml` runs the bats suite on PRs touching `install.sh`, the test file, or the workflow itself. End-to-end install matrix is intentionally out of CI (would require an authenticated Anthropic session on the runner).
 
 ## v1.21.2
 
