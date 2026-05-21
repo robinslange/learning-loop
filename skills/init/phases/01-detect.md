@@ -1,22 +1,54 @@
 # Phase 1: Detect and Summarize
 
-Run all checks silently before asking anything. Use Node.js APIs throughout.
+Run the health-check library, which is the single source of truth used by `/learning-loop:doctor` and the session-start detector:
 
-1. **Platform:** `process.platform`, `process.arch`
-2. **Config:** Read `PLUGIN_DATA/config.json` (fallback `PLUGIN/config.json`)
-3. **Vault:** Read `vault_path` from config, verify directory exists via `fs.existsSync`, count `.md` files with `fs.readdirSync` (recursive)
-4. **Folders:** Check for `0-inbox`, `1-fleeting`, `2-literature`, `3-permanent`, `4-projects`, `5-maps`, `_system`
-5. **System files:** Check `_system/persona.md` and `_system/capture-rules.md` exist
-6. **Binary:** Check `PLUGIN_DATA/bin/ll-search` exists; if so, run `ll-search version`
-7. **Dependencies:** Run `node PLUGIN/scripts/check-deps.mjs`
-8. **Search index:** If binary present, run `node PLUGIN/scripts/vault-search.mjs status`
-9. **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
-10. **Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
-11. **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
-12. **CLAUDE.md:** Check if `~/.claude/CLAUDE.md` exists. If it does, check whether it contains a `## Learning Loop` section (search for `<!-- learning-loop v` version comment). Read the template version from `PLUGIN/templates/claudemd-section.version` (a single-line file containing the template version, e.g. `1`). Compare against the version in the user's comment tag. Note: present/missing/outdated (version mismatch).
-13. **Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
-14. **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
-15. **CLI shims:** Run `node PLUGIN/scripts/install-shims.mjs --check` to see whether `~/.local/bin/ll-watch` and `~/.local/bin/ll-search` exist. If `ll-watch` exists, run `ll-watch status` to check if the watcher is running.
+```bash
+node PLUGIN/scripts/health-check.mjs --full --json
+```
+
+Parse the JSON. Each result has `id`, `name`, `status`, `severity`, `detail`, `fix`.
+
+Also write the result as the shared cache for future session-start detector runs:
+
+```bash
+node PLUGIN/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
+```
+
+Now render the dashboard, mapping each check id to its dashboard row. Use these mappings:
+
+| Dashboard row | Check id |
+|---|---|
+| Platform | (compute from `process.platform`, `process.arch` — not in library) |
+| Vault | `vault-path` (path) + `vault-folders` (count) |
+| Folders | `vault-folders` |
+| System files | `vault-system-files` |
+| Binary | `binary-exists` + `binary-runs` |
+| Dependencies | `episodic-memory-installed` + `learning-loop-installed` |
+| Search index | `search-index-exists` |
+| Federation | (computed inline — see below) |
+| Hub sync | (computed inline — see below) |
+| CLAUDE.md | `claudemd-section-present` + `claudemd-section-current` |
+| Librarian | (computed inline — see below) |
+| Shims | `shims-exist` + `local-bin-on-path` |
+| Model notes | (computed inline — see below) |
+
+For rows marked "computed inline" below, the federation/hub-sync/librarian/model-notes detection is init-specific and remains in this phase. Do NOT add those to the health library — they're init-time decisions, not runtime health.
+
+### Inline detection (init-specific only)
+
+The following items stay inline in this phase (NOT delegated to the health library):
+
+**Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
+
+**Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
+
+**Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
+
+**Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
+
+**Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
+
+**Watch daemon status (init view):** If `ll-watch` shim exists, run `ll-watch status` to check if the watcher is running (this complements the library's `watch-daemon-status` check by surfacing the user-facing status output).
 
 Present a dashboard:
 
