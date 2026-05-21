@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
-import { detectAbiDrift } from './check-deps.mjs';
+import { detectAbiDrift } from './check-deps-impl.mjs';
 import { resolvePluginData } from './lib/config.mjs';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
