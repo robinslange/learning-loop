@@ -79,7 +79,7 @@ export function checkVaultFolders({ vaultRoot } = {}) {
 }
 
 export function checkVaultSystemFiles({ vaultRoot } = {}) {
-  if (!vaultRoot) {
+  if (!vaultRoot || !existsSync(vaultRoot)) {
     return makeCheck({
       id: CHECK_IDS['vault-system-files'],
       name: 'Vault system files',

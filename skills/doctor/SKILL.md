@@ -77,11 +77,11 @@ For each check with `status === "fail"`:
    - Option A': `Run the suggested command and tell me when done` — when the fix is manual
    - Option B: `Skip — I'll handle this later`
    - Option C: `Stop the doctor session` — exits cleanly
-3. On choice A: execute the corresponding fix command via Bash. After it finishes, re-run that specific check (call the appropriate function in `scripts/lib/health-checks/quick.mjs` or `full.mjs`) and report:
+3. On choice A: execute the corresponding fix command via Bash. After it finishes, re-run `node PLUGIN/scripts/health-check.mjs --full --json` and find the same check by its `id` field. Report:
    - `✓ Fixed (new state: <detail>)` if the check now returns ok
    - `⚠ Still warning: <new detail>` if it improved to warn
    - `✗ Still failing: <new detail>` if it didn't help (don't loop — move on)
-4. On choice A' (manual): print the command, then ask `Done? [Y]es / [N]o`. On Yes, re-run the check and report as above.
+4. On choice A' (manual): print the command, then ask `Done? [Y]es / [N]o`. On Yes, re-run `node PLUGIN/scripts/health-check.mjs --full --json` and find the same check by its `id` field, then report as above.
 5. On choice B: track as skipped and move to next.
 6. On choice C: print summary and exit.
 

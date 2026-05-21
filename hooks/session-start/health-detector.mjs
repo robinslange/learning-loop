@@ -13,7 +13,8 @@ import {
   writeHealthCache,
   isCacheStale,
 } from '../../scripts/lib/health-checks/cache.mjs';
-import { detectAbiDrift } from '../../scripts/check-deps-impl.mjs';
+import { buildAbiDrift } from '../../scripts/check-deps-impl.mjs';
+import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 
 const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
 
@@ -49,7 +50,7 @@ export async function run(ctx) {
     if (cache && !isCacheStale(cache)) {
       result = cache;
     } else {
-      // Run quickChecks and write cache
+      // Run quickChecks and write cache, bounded by DETECTOR_TIMEOUT_MS
       const homeDir = home();
       const checkCtx = {
         pluginData: ctx.pluginData,
@@ -58,9 +59,26 @@ export async function run(ctx) {
         pathEnv: process.env.PATH || '',
         installedVersion: readInstalledVersion(homeDir),
         templateVersion: readTemplateVersion(ctx.pluginDir),
-        abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
+        abiDriftResult: (() => {
+          const entries = buildAbiDrift();
+          return entries.length > 0 ? entries[0] : { status: 'ok' };
+        })(),
       };
-      result = await runQuickChecks(checkCtx);
+
+      const TIMEOUT_SENTINEL = Symbol('timeout');
+      const timeoutPromise = new Promise((resolve) =>
+        setTimeout(() => resolve(TIMEOUT_SENTINEL), HookConfig.DETECTOR_TIMEOUT_MS),
+      );
+      const raced = await Promise.race([runQuickChecks(checkCtx), timeoutPromise]);
+
+      if (raced === TIMEOUT_SENTINEL) {
+        logError(
+          'session-start.health-detector',
+          new Error(`quickChecks exceeded ${HookConfig.DETECTOR_TIMEOUT_MS}ms`),
+        );
+        return;
+      }
+      result = raced;
       writeHealthCache({ pluginData: ctx.pluginData, result });
     }
 
