@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.22.0
+
 ### Added
 
 - **`install.sh` bootstrap script + curl|bash one-liner install.** Takes a fresh macOS/Linux/WSL machine to a state where `/learning-loop:init` can be run in ~3 minutes with continuous feedback. Detects existing Node version managers (nvm, fnm, volta, asdf, mise, n, brew) and uses the user's preferred tool; offers fnm only when none is found. Installs Claude Code via `curl -fsSL https://claude.ai/install.sh | bash` if missing. Adds both marketplaces and installs both plugins. Idempotent: re-running on a fully-set-up machine reports "Already set up". Never silently sudo. Spinner + log tee during long-running steps so users see progress. Reads interactive prompts from `/dev/tty` so the script survives both `./install.sh` and `curl ... | bash` invocations. Logfile at `~/.cache/learning-loop-install.log`. Install one-liner now in the README.
