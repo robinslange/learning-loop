@@ -37,6 +37,10 @@ fi
 START_TIME=${START_TIME:-}
 STEPS_RUN=${STEPS_RUN:-0}
 STEPS_SKIPPED=${STEPS_SKIPPED:-0}
+: "${STEP_NAME:=}"
+: "${STEP_T0:=0}"
+: "${PLATFORM:=}"
+: "${OLD_NODE_VERSION:=}"
 
 init_log_state() {
   mkdir -p "$(dirname "$LOG_FILE")"
@@ -56,7 +60,7 @@ trap on_interrupt INT TERM
 
 on_exit() {
   local code=$?
-  if [ "$code" -ne 0 ] && [ "$code" -ne 130 ]; then
+  if [ "$code" -ne 0 ] && [ "$code" -ne 130 ] && [ -z "${LL_INSTALL_NO_TRAP:-}" ]; then
     echo
     echo "${C_RED}Failed.${C_RESET} See $LOG_FILE for details."
   fi
@@ -130,7 +134,7 @@ detect_platform() {
 detect_proxy() {
   step_start "Checking proxy"
   if [ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}${https_proxy:-}${http_proxy:-}" ]; then
-    step_done "using ${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
+    step_skip "using ${HTTPS_PROXY:-${https_proxy:-${HTTP_PROXY:-${http_proxy:-}}}}"
   else
     step_skip "none set"
   fi
@@ -173,7 +177,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
     echo "  ${C_DIM}No version manager detected. Install Node ${MIN_NODE_MAJOR} via fnm? [Y/n]${C_RESET}"
-    read -r ans
+    read -r ans </dev/tty 2>/dev/null || ans=""
     case "${ans:-y}" in
       y|Y|"") ;;
       *) step_fail "declined; install Node ${MIN_NODE_MAJOR}+ manually and re-run"; exit 1 ;;
@@ -183,7 +187,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
     echo "  ${C_DIM}Found ${chosen_manager}. Install Node ${MIN_NODE_MAJOR} with it? [Y/n]${C_RESET}"
-    read -r ans
+    read -r ans </dev/tty 2>/dev/null || ans=""
     case "${ans:-y}" in
       y|Y|"") ;;
       *) chosen_manager="fnm-new" ;;
@@ -192,7 +196,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Multiple Node managers found: ${managers[*]}${C_RESET}"
     echo "  ${C_DIM}Which should install Node ${MIN_NODE_MAJOR}? (default: ${managers[0]})${C_RESET}"
-    read -r ans
+    read -r ans </dev/tty 2>/dev/null || ans=""
     chosen_manager="${ans:-${managers[0]}}"
   fi
 
@@ -319,7 +323,7 @@ ensure_claude_code() {
   step_start "Checking Claude Code"
   if command -v claude >/dev/null 2>&1; then
     local installed
-    installed=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+    installed=$(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
     if [ -n "$installed" ] && version_ge "$installed" "$MIN_CLAUDE_VERSION"; then
       step_skip "claude $installed already installed"
       return 0
@@ -327,7 +331,7 @@ ensure_claude_code() {
     echo
     echo "  ${C_YELLOW}Claude Code $installed is older than required ($MIN_CLAUDE_VERSION).${C_RESET}"
     echo "  ${C_DIM}Upgrade now? [Y/n]${C_RESET}"
-    read -r ans
+    read -r ans </dev/tty 2>/dev/null || ans=""
     case "${ans:-y}" in
       y|Y|"") ;;
       *) step_fail "Claude Code $MIN_CLAUDE_VERSION+ required"; exit 1 ;;
@@ -346,7 +350,7 @@ install_claude_code() {
     echo "  Manual recovery: see https://docs.anthropic.com/en/docs/claude-code for install instructions"
     exit 1
   fi
-  step_done "claude $(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+  step_done "claude $(claude --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
 }
 
 add_marketplaces() {
@@ -389,7 +393,7 @@ install_plugins() {
       local new_output
       new_output=$(tail -c "+$((log_size_before + 1))" "$LOG_FILE" 2>/dev/null || echo "")
       local v
-      v=$(claude plugin list 2>/dev/null | awk -v n="${p}" '$0 ~ n {f=1; next} /Version:/ && f {print $2; f=0; exit}')
+      v=$(claude plugin list 2>/dev/null | awk -v n="${p}" '$0 ~ n {f=1; next} /Version:/ && f {print $2; f=0; exit}' || true)
       if echo "$new_output" | grep -qE "already installed"; then
         installed_versions+=("${name} ${v:-?} already")
       else
