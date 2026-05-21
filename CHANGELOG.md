@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.23.0
+
 ### Added
 
 - **`/learning-loop:doctor` skill.** Diagnoses your learning-loop install: runs 20 health checks (file presence, plugin state, binary executability, watch-daemon status, NLI socket, ABI drift, version comparison, etc.), presents the result, offers per-fix remediation (auto-runnable fixes execute on consent; manual ones print the command), and re-runs each check after the fix to confirm. Safe to run anytime, makes no changes without approval.
