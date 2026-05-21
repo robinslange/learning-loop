@@ -17,7 +17,7 @@ You will receive:
 - **verified_sources**: Table of URLs verified by the researcher (optional). When present, use these URLs verbatim in the `source:` frontmatter field. **NEVER generate a URL that isn't in this table.** If no verified source matches the note's topic, set `source: unverified`. If this field is absent (e.g., quick captures without research), you may include a URL only if you fetched the page yourself in this session.
 - **existing_note**: Current note content if this is a rewrite/deepen (optional)
 - **related_notes**: Vault notes to link to (optional)
-- **destination**: Suggested folder: `0-inbox/`, `1-fleeting/`, `2-literature/`, or `3-permanent/`. The promote-gate skill may override this based on note quality.
+- **destination**: Suggested folder: `0-inbox/`, `1-fleeting/`, `2-literature/`, `3-permanent/`, or `5-maps/`. The promote-gate skill may override this based on note quality. `2-literature/` and `5-maps/` are caller-respected — the gate will not override them. Hub-shaped synthesis notes (`source: synthesis`/`discovery` + `synthesis` tag + ≥10 wikilinks) are auto-routed to `5-maps/` even when caller asks for `0-inbox/` or `3-permanent/`.
 
 ### Source provenance rule
 
@@ -30,7 +30,7 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Skills
 
-- `PLUGIN/agents/_skills/promote-gate.md`: assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead).
+- `PLUGIN/agents/_skills/promote-gate.md`: assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead). Hub-shaped synthesis notes route to `5-maps/`. Caller destinations of `2-literature/` and `5-maps/` are respected (no override).
 - `PLUGIN/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
 - `PLUGIN/agents/_skills/source-verification.md`: post-write source and claim verification against public APIs
 - `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files

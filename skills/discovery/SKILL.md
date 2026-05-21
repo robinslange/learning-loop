@@ -137,12 +137,17 @@ Repeat until the user says "done", "wrap up", or similar:
 
 **Full capture mode:**
 - Individual inbox notes were written during the loop
-- Write a synthesis note to `0-inbox/` that:
+- Write a synthesis note that:
   - Title captures the overarching insight from the journey
   - Links to all trail notes created during the session
   - Summarizes what was learned in 5-10 lines, persona voice
-  - Tags with topic domain, max 3 tags
+  - Tags with topic domain plus `synthesis`, max 3 tags
+  - Sets `source: discovery` in frontmatter
   - Lists sources found
+- **Destination:**
+  - If the synthesis links to ≥10 trail/vault notes, write directly to `5-maps/` — this is a hub note.
+  - Otherwise write to `0-inbox/` and let the promote-gate decide on the next pass. (Hub-detection still applies if it later grows link density.)
+  - The promote-gate's `5-maps/` rule will catch borderline cases — synthesis-tagged + link-dense + criteria-pass → `5-maps/`, even from `0-inbox/`.
 
 **Surf mode:**
 - No notes were written during the loop
@@ -164,7 +169,7 @@ Sources worth capturing (run /literature):
 Discovery: "[topic]"
 Style: guided | Rounds: N
 Captured: N notes → 0-inbox/
-Synthesis: "Synthesis Note Title" → 0-inbox/
+Synthesis: "Synthesis Note Title" → 5-maps/ (hub, ≥10 links) | 0-inbox/ (thin)
 Sources found: N (run /literature to capture)
 ```
 

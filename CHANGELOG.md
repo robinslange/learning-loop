@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.22.1
+
+### Fixed
+
+- **Synthesis hub notes routed to `5-maps/` automatically.** Before this fix the promote-gate had no path to `5-maps/` at all: hub-shaped synthesis notes (discovery synthesis, MOC indices, round-N positioning notes) all landed in `3-permanent/`, polluting the atomic-claim surface. `scripts/promotion-gate.mjs` now routes notes to `5-maps/` when all three conditions hold: (1) all applicable criteria pass, (2) frontmatter signals synthesis via `source: synthesis`, `source: discovery`, or `synthesis` in `tags`, and (3) the body contains ≥10 wikilinks outside fenced code blocks (`MAP_LINK_THRESHOLD`). Borderline synthesis-tagged notes below the link-density threshold stay in `3-permanent/` (they're atomic claims that happen to be about synthesis, not hubs).
+- **`promoteWithVerification()` respects caller destinations for `2-literature/` and `5-maps/`.** Previously the gate would override any caller destination and re-run the criteria check, which silently demoted hand-placed maps and literature notes. Now both folders are treated as caller-only destinations: when set via `note.callerDestination`, the verifier is skipped and the destination passes through unchanged.
+- **`skills/discovery/SKILL.md` writes synthesis hubs to `5-maps/` directly.** The wrap-up step now routes synthesis notes with ≥10 trail-note wikilinks straight to `5-maps/` instead of `0-inbox/`. Thin-link sessions still land in inbox where the promote-gate's hub-detection rule will catch them if they grow link density via later `/deepen` or `/inbox` passes.
+- **`agents/_skills/promote-gate.md` documents the `5-maps/` routing row, the synthesis-hub trigger, and the override rules for `2-literature/` and `5-maps/`.** The routing table previously terminated at `3-permanent/`; the override rules made no mention of `5-maps/` and the only `2-literature/` rule was a single sentence.
+- **`agents/note-writer.md` documents `5-maps/` as a valid destination.** The destination field previously listed only `0-inbox/`, `1-fleeting/`, `2-literature/`, and `3-permanent/`, even though `5-maps/` was declared in `vault-io.md` as the home for synthesis maps and MOCs.
+
+### Tests
+
+- 10 new tests in `tests/promotion-gate.test.mjs` covering the synthesis-hub routing rule, link-density threshold edge cases, marker precedence over synthesis-hub routing, caller-only `2-literature/` and `5-maps/` semantics, and `source: discovery` triggering the hub rule. Full suite: 531 pass / 0 fail / 2 skipped.
+
 ## v1.22.0
 
 ### Added

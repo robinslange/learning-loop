@@ -59,6 +59,7 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 | Passes | Destination | Rewrite? |
 |--------|-------------|----------|
 | Verification marker present (`[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`) | `1-fleeting/` | No — **markers always block permanent** |
+| All applicable criteria pass + synthesis-tagged + ≥10 wikilinks (hub note) | `5-maps/` | No — write as-is |
 | All applicable criteria pass | `3-permanent/` | No — write as-is |
 | All but voice pass | `3-permanent/` | Yes — rewrite in persona voice |
 | Source integrity fails (non-synthesis notes only) | `1-fleeting/` | No — **cannot promote with unverified sources** |
@@ -67,9 +68,27 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 For `[synthesis]`-tagged notes, "all applicable" = 4 criteria (Sourcing and Source Integrity exempt). For all other notes, "all applicable" = 6.
 
+### `5-maps/` routing — synthesis hub detection
+
+A note routes to `5-maps/` instead of `3-permanent/` when all three conditions hold:
+
+1. All applicable criteria pass (would have gone to `3-permanent/` anyway)
+2. Frontmatter signals synthesis: `source: synthesis`, `source: discovery`, OR `synthesis` in `tags`
+3. Body contains ≥ `MAP_LINK_THRESHOLD` wikilinks (default 10), counting only links outside fenced code blocks
+
+This separates **hub notes** (synthesis indices that earn their value from link density across child notes) from **atomic claims that happen to contain "synthesis" in their title or topic** (e.g. `essential-amino-acids-are-the-rate-limiter-for-protein-synthesis` — no synthesis tag, low link count, stays in `3-permanent/`).
+
+The threshold is intentionally conservative. Borderline notes stay in `3-permanent/` until they grow link density through later `/deepen` or `/inbox` passes.
+
+### Caller-only destinations: `2-literature/` and `5-maps/`
+
+`canPromote()` never auto-routes to `2-literature/` — literature notes are written by the literature-capturer skill which hardcodes that destination based on the source being external. `5-maps/` is auto-routable via the hub-detection rule above OR via an explicit caller intent.
+
+`promoteWithVerification()` respects `note.callerDestination` when it is one of `{'2-literature/', '5-maps/'}` — the verifier is skipped and the destination passes through. Use this for hand-placed maps and literature notes where the caller already knows the destination.
+
 **Hard block:** Source Integrity failure always blocks promotion to `3-permanent/` for non-synthesis notes. A beautifully written, well-linked, deep note with a fabricated citation is worse than a shallow inbox note — it looks authoritative while being wrong.
 
-**Programmatic gate:** Agents that need a yes/no answer can call `canPromote()` exported from `scripts/promotion-gate.mjs`. The function applies the marker check, the source-integrity check, and the criteria-count check, returning `{ allowed, destination, reason }`.
+**Programmatic gate:** Agents that need a yes/no answer can call `canPromote()` exported from `scripts/promotion-gate.mjs`. The function applies the marker check, the source-integrity check, and the criteria-count check, returning `{ allowed, destination, reason }`. For caller-respect semantics, use `promoteWithVerification(note, { verifier })` and set `note.callerDestination`.
 
 ## Scoring Mode
 
@@ -117,8 +136,9 @@ Use the highest applicable score across claims for each dimension. These fields 
 ## Override Rules
 
 - If the caller specifies `2-literature/`, do not override. Literature notes have different criteria.
+- If the caller specifies `5-maps/`, do not override. Hub-placement is a caller decision that the gate must respect.
 - If the caller specifies `3-permanent/` and the note only passes 2 criteria, demote to `0-inbox/` with a warning. Don't let bad notes into permanent.
-- If the caller specifies `0-inbox/` and the note passes all 6, promote to `3-permanent/`. Don't bury ready notes.
+- If the caller specifies `0-inbox/` and the note passes all 6, promote to `3-permanent/` — UNLESS it satisfies the synthesis-hub conditions (synthesis-tagged + ≥10 wikilinks), in which case route to `5-maps/`. Don't bury ready notes; don't pollute permanent with hubs.
 
 ## Skip-Rewrite Detection
 
