@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../scripts/lib/health-checks/types.mjs';
@@ -8,6 +8,12 @@ import {
   checkVaultPath,
   checkVaultFolders,
   checkVaultSystemFiles,
+  checkBinaryExists,
+  checkBinaryVersionFile,
+  checkShimsExist,
+  checkLocalBinOnPath,
+  checkClaudemdSectionPresent,
+  checkClaudemdSectionCurrent,
 } from '../scripts/lib/health-checks/quick.mjs';
 
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
@@ -142,4 +148,107 @@ test('checkVaultSystemFiles: warn when persona.md missing', () => {
   assert.equal(result.severity, 'warn');
   assert.match(result.detail, /persona\.md/);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryExists: ok when binary present and executable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/ll-search'), '#!/usr/bin/env bash\n');
+  chmodSync(join(dir, 'bin/ll-search'), 0o755);
+  const result = checkBinaryExists({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryExists: fail when binary missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-missing-'));
+  const result = checkBinaryExists({ pluginData: dir });
+  assert.equal(result.status, 'fail');
+  assert.match(result.fix, /init/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryVersionFile: warn when .version is missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-binver-'));
+  mkdirSync(join(dir, 'bin'));
+  const result = checkBinaryVersionFile({ pluginData: dir });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkShimsExist: ok when both shims present and executable', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const s of ['ll-watch', 'll-search']) {
+    writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
+    chmodSync(join(home, '.local/bin', s), 0o755);
+  }
+  const result = checkShimsExist({ home });
+  assert.equal(result.status, 'ok');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkShimsExist: fail when one shim missing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-half-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  writeFileSync(join(home, '.local/bin/ll-search'), '#!/usr/bin/env bash\n');
+  chmodSync(join(home, '.local/bin/ll-search'), 0o755);
+  const result = checkShimsExist({ home });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /ll-watch/);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
+  const result = checkLocalBinOnPath({
+    home: '/home/test',
+    pathEnv: '/usr/bin:/home/test/.local/bin:/bin',
+  });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkLocalBinOnPath: warn when missing', () => {
+  const result = checkLocalBinOnPath({
+    home: '/home/test',
+    pathEnv: '/usr/bin:/bin',
+  });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+});
+
+test('checkClaudemdSectionPresent: warn when ~/.claude/CLAUDE.md missing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-claudemd-1-'));
+  const result = checkClaudemdSectionPresent({ home });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkClaudemdSectionPresent: ok when marker present', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-claudemd-2-'));
+  mkdirSync(join(home, '.claude'));
+  writeFileSync(join(home, '.claude/CLAUDE.md'), 'other content\n<!-- learning-loop v1 -->\nbody\n<!-- /learning-loop -->\n');
+  const result = checkClaudemdSectionPresent({ home });
+  assert.equal(result.status, 'ok');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkClaudemdSectionCurrent: ok when versions match', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-claudemd-3-'));
+  mkdirSync(join(home, '.claude'));
+  writeFileSync(join(home, '.claude/CLAUDE.md'), '<!-- learning-loop v2 -->\n');
+  const result = checkClaudemdSectionCurrent({ home, templateVersion: '2' });
+  assert.equal(result.status, 'ok');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkClaudemdSectionCurrent: warn when installed older than template', () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-claudemd-4-'));
+  mkdirSync(join(home, '.claude'));
+  writeFileSync(join(home, '.claude/CLAUDE.md'), '<!-- learning-loop v1 -->\n');
+  const result = checkClaudemdSectionCurrent({ home, templateVersion: '2' });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  rmSync(home, { recursive: true, force: true });
 });
