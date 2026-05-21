@@ -20,6 +20,13 @@ import {
   checkNliSocketFresh,
   checkAbiDrift,
 } from '../scripts/lib/health-checks/quick.mjs';
+import {
+  checkNodeVersion,
+  checkClaudeVersion,
+  checkPluginInstalled,
+  checkBinaryRuns,
+  checkWatchDaemon,
+} from '../scripts/lib/health-checks/full.mjs';
 
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
   const quick = [
@@ -338,4 +345,82 @@ test('checkAbiDrift: fail on abi-mismatch', () => {
   assert.equal(result.status, 'fail');
   assert.match(result.detail, /127.*141/);
   assert.equal(result.fix, 'npm rebuild');
+});
+
+test('checkNodeVersion: ok when major >= 22', () => {
+  const result = checkNodeVersion({ nodeVersionOutput: 'v25.9.0', minMajor: 22 });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkNodeVersion: fail when major < 22', () => {
+  const result = checkNodeVersion({ nodeVersionOutput: 'v18.0.0', minMajor: 22 });
+  assert.equal(result.status, 'fail');
+  assert.match(result.fix, /22/);
+});
+
+test('checkNodeVersion: fail when node not found', () => {
+  const result = checkNodeVersion({ nodeVersionOutput: null, minMajor: 22 });
+  assert.equal(result.status, 'fail');
+});
+
+test('checkClaudeVersion: ok when version >= min', () => {
+  const result = checkClaudeVersion({ claudeVersionOutput: '2.1.145 (Claude Code)', minVersion: '2.1.144' });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkClaudeVersion: fail when too old', () => {
+  const result = checkClaudeVersion({ claudeVersionOutput: '2.0.0', minVersion: '2.1.144' });
+  assert.equal(result.status, 'fail');
+});
+
+test('checkPluginInstalled: ok when present in registry', () => {
+  const result = checkPluginInstalled({
+    pluginName: 'episodic-memory',
+    marketplace: 'superpowers-marketplace',
+    installedPlugins: {
+      'episodic-memory@superpowers-marketplace': [{ version: '1.0.15' }],
+    },
+    severity: 'fail',
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.detail, '1.0.15');
+});
+
+test('checkPluginInstalled: fail when missing', () => {
+  const result = checkPluginInstalled({
+    pluginName: 'episodic-memory',
+    marketplace: 'superpowers-marketplace',
+    installedPlugins: {},
+    severity: 'fail',
+  });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'fail');
+  assert.match(result.fix, /plugin install/);
+});
+
+test('checkBinaryRuns: ok when version output looks valid', () => {
+  const result = checkBinaryRuns({ binaryVersionOutput: 'll-search 1.4.0', exitCode: 0 });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkBinaryRuns: fail when binary errors', () => {
+  const result = checkBinaryRuns({ binaryVersionOutput: null, exitCode: 127 });
+  assert.equal(result.status, 'fail');
+});
+
+test('checkWatchDaemon: ok when pidfile absent', () => {
+  const result = checkWatchDaemon({ pidfileExists: false });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /not running/i);
+});
+
+test('checkWatchDaemon: ok when pid alive', () => {
+  const result = checkWatchDaemon({ pidfileExists: true, pidIsAlive: true, pid: 1234 });
+  assert.equal(result.status, 'ok');
+});
+
+test('checkWatchDaemon: warn when stale pidfile', () => {
+  const result = checkWatchDaemon({ pidfileExists: true, pidIsAlive: false, pid: 9999 });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
 });
