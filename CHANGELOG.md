@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`ll-search sync --hub-endpoint <url>` without `--peer-id` now fails fast.** The validation was running inside `load_config_with_override`, after `init_embedding()` had already loaded the ONNX model. On CI runners that triggered a fresh huggingface download, the rename-into-place step could fail with `ENOENT` before the user-facing error message could fire. Validation now runs at the top of the `Sync` branch in `main.rs`, before the embedding model is touched.
+
 ## v1.23.0
 
 ### Added
