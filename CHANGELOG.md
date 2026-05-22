@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.24.0
+
 ### Felt-quality uplift
 
 A focused release that touches the hot path of every session: session-start, MEMORY.md injection, persona consistency, and write-time hygiene. Bench: session-start p50 dropped ~270ms → ~200ms (-26%) once the three blocking subprocesses are no longer in series.
