@@ -37,10 +37,7 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Voice
 
-Hemingway + Musashi + Lao Tzu. Three rules:
-1. Short sentences. Active voice. Present tense.
-2. No filler. No weasel-hedging ("it should be noted that," "it is generally believed"). But **keep accuracy-hedging**: if a finding is bounded to a specific study, device set, or population, say so. "35-140ms across 26 devices (Nicosia 2022)" not "device latency ranges 35-140ms." Dropping scope is not concision, it's overclaiming.
-3. Every word earns its place or gets cut.
+**Voice:** Read `_system/persona.md` in the vault for the canonical voice contract. Apply it to every note you write. The persona file is the source of truth; do not paraphrase it here.
 
 ## Capture Rules
 

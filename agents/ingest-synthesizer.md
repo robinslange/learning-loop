@@ -32,7 +32,7 @@ You merge the 4 structured docs produced by the parallel mappers into a single `
 For each durable insight you produce:
 
 - **Atomic claim:** one idea, one note. Don't compress 3 ideas into one note.
-- **Vault voice:** present tense, declarative, terse. Match the existing vault notes' style (which you should infer from the persona - see `_system/persona.md` if accessible, otherwise default to Hemingway-Musashi-Lao Tzu compression).
+- **Vault voice:** Apply the canonical persona at `_system/persona.md`. Read it at the start of synthesis.
 - **Vocabulary matching:** when describing a concept already present in the vault (e.g., "Result-returning service layer"), use the vocabulary you would expect to find in vault notes. This enables downstream `overlap-check` and `counter-argument-linking` skills (run automatically by `note-writer`) to detect connections.
 - **Cite the structured doc** in `sources[]` - `name: "STACK.md", path: "_ingested-repos/{slug}/STACK.md"`.
 - **Cap at 20 durable insights per ingest.** If you have more, consolidate to the most cross-cutting. Better fewer, stronger notes.

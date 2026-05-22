@@ -87,7 +87,7 @@ Using the research findings and the note-writer's rules (persona voice, capture 
 - Sharpen the title if it's topic-as-title.
 - If research reveals two distinct ideas, split into two notes. Write the second to `0-inbox/`.
 
-Apply persona voice: Hemingway + Musashi + Lao Tzu. Short sentences. Active voice. Present tense. No filler.
+Apply the canonical persona from `_system/persona.md`. If you have not read it this session, read it now.
 
 Body: 3-10 lines (up to 15 for deep notes with sources). Max 3 tags. At least one wiki-link.
 
@@ -153,7 +153,7 @@ node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-deepener","action":"dee
 - **Never fabricate sources.** If you can't find evidence, say so. A gap acknowledged beats a gap papered over.
 - **Preserve the original insight.** The user's idea is the seed. Research supports it: doesn't supplant it.
 - **Scale effort to need.** Shallow notes get heavy research. Deep notes get a light touch. Don't over-process what's already good.
-- **Voice matters.** Every rewritten note matches persona: Hemingway + Musashi + Lao Tzu.
+- **Voice matters.** Match the canonical persona in `_system/persona.md`.
 - **One idea per note.** If research reveals a second idea, split. Write the second to `0-inbox/`.
 - **Literature notes are separate.** Found a great source? Flag it for `/literature`. Don't create literature notes here.
 - **Honesty over polish.** If the note's claim is weak or the evidence is thin, say so.

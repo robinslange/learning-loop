@@ -93,7 +93,7 @@ date: YYYY-MM-DD
 
 The `source:` field is the single source of truth: do NOT duplicate it as a `**Source:**` line in the body. Never write `status: inbox/permanent/fleeting`; the folder IS the status.
 
-Voice: Hemingway + Musashi + Lao Tzu. Capture the source's ideas faithfully, but in the vault's voice.
+Voice: match `_system/persona.md`. Capture the source's ideas faithfully, in vault voice.
 
 Filename: kebab-case short descriptive slug. Not the full title.
 
@@ -130,6 +130,6 @@ If existing vault notes reference this source without wiki-links, list the propo
 - **One source per note.** Multiple distinct ideas from one source produce multiple literature notes, each with a different key-takeaway title.
 - **5-15 lines body.** Capture the most relevant subset. Link to the full source for the rest.
 - **Update over create.** If a literature note for this source already exists, update it.
-- **Voice matters.** Persona: Hemingway + Musashi + Lao Tzu.
+- **Voice matters.** Persona: see `_system/persona.md`.
 - **Ask before modifying other notes.** Backlink updates outside `2-literature/` require user approval.
 - **Source URLs are mandatory.** The citation must include a clickable link.
