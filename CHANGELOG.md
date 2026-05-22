@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Felt-quality uplift
+
+A focused release that touches the hot path of every session: session-start, MEMORY.md injection, persona consistency, and write-time hygiene. Bench: session-start p50 dropped ~270ms → ~200ms (-26%) once the three blocking subprocesses are no longer in series.
+
+### Added
+
+- **`scripts/lib/marker-cache.mjs`** — single source of truth for session-start cache file paths. Exports `MARKER_PATHS` (canonical path constructors for `intentions` and `dreamGate`), `MARKER_TTL_MS` (25h), `readMarker`, `writeMarker`. Hook (reader) and worker (writer) both resolve paths via the same function — drift is impossible by construction.
+- **`LEARNING_LOOP_ALWAYS_INJECT_MEMORY=1`** env override. Forces MEMORY.md injection regardless of mtime. Default behaviour (off) gates injection on 7-day freshness.
+
+### Changed
+
+- **session-start: three blocking subprocesses detached.** `vault-search intentions`, `dream-gate`, and `provenance.mjs` no longer run via `execFileSync` on the SessionStart hot path. Each now fires as a detached `spawn`, returning immediately. `intentions` and `dreamGate` write their output to marker files; the next session reads what's there. Tradeoff: weekly-cadence signals (dream nudge, intention summary) are one-session-stale. p50 measured at 200ms post-change vs 270ms baseline.
+- **dream-gate: marker-write on every exit path.** Five early-exit gates (already-running, <24h, never-dreamed, no-project-dir, no-memory-dir) plus the nudge-emit path all write the cache marker when `--session-start-refresh` is set. Prior real nudges are preserved through a crashed refresh (read-before-null-write); TTL caps stickiness at 25h.
+- **MEMORY.md injection gated on 7-day mtime.** Project + global memory indices only inject when modified within the last week. ~4-6KB context savings per session during deep-focus weeks. Override via `LEARNING_LOOP_ALWAYS_INJECT_MEMORY=1`.
+- **Writing agents route through `_system/persona.md`.** `note-writer`, `note-deepener`, `literature-capturer`, `ingest-synthesizer` no longer hardcode "Hemingway + Musashi + Lao Tzu." Persona file is the source of truth; edits propagate automatically. `ingest-synthesizer`'s "if accessible, otherwise default to..." hedge removed.
+- **`pre-write-check` warns on body-source leak.** When a vault note has both a frontmatter `source:` field AND a `Source:`/`Sources:` line in the body, the hook emits a warning citing capture-rules. Warning-only (does not block the write).
+
+### Internal
+
+- **`scripts/lib/env.mjs`** picks up `LEARNING_LOOP_ALWAYS_INJECT_MEMORY` as a frozen `isTruthy` snapshot. Direct `process.env` access remains forbidden outside `env.mjs`.
+- 11 new integration + unit tests across marker-cache, hook-session-start, dream-gate, pre-write-check. Test count: 567 → 578.
+
 ## v1.23.1
 
 ### Fixed
