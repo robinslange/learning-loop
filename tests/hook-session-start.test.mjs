@@ -205,6 +205,45 @@ test(
 // ---------------------------------------------------------------------------
 // Test 6: Cached intentions marker — hook emits the intentions context block.
 // ---------------------------------------------------------------------------
+// (Test 6 is below; new Test 7 for dream-gate is appended at end of file.)
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Test 7: Cached dream-gate marker — hook emits the dream consolidation block.
+// ---------------------------------------------------------------------------
+test(
+  'session-start reads cached dream-gate marker and emits Dream Consolidation Due block',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'dream-gate-cache-session' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        // Write a pre-populated dream-gate marker at the canonical path.
+        // MARKER_PATHS.dreamGate(pluginData) = pluginData/session-start-cache/dream-gate.json
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(
+          join(cacheDir, 'dream-gate.json'),
+          JSON.stringify({ nudge: 'test-dream-nudge' }),
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const hso = parseOutput(r.stdout, 'dream-gate-cache');
+      assert.match(hso.additionalContext, /## Dream Consolidation Due/);
+      assert.match(hso.additionalContext, /test-dream-nudge/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// (original Test 6 below)
+// ---------------------------------------------------------------------------
 test(
   'session-start reads cached intentions marker and emits context block',
   { timeout: 12000 },

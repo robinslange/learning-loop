@@ -135,22 +135,23 @@ export async function run(ctx) {
   ctx.context += '7. After substantial work, suggest /reflect to consolidate learnings.\n';
   ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
 
-  // 7. Dream gate check.
-  try {
-    const dreamNudge = execFileSync(
-      'node',
-      [join(import.meta.dirname, '..', 'lib', 'dream-gate.js')],
-      {
-        encoding: 'utf8',
-        timeout: HookConfig.REINDEX_TIMEOUT_MS,
-        stdio: ['pipe', 'pipe', 'ignore'],
-      },
-    ).trim();
-    if (dreamNudge) {
-      ctx.context += `\n## Dream Consolidation Due\n${dreamNudge}\n`;
+  // 7. Dream gate check — read cached marker; refresh in background.
+  if (pluginData) {
+    try {
+      const cached = readMarker(MARKER_PATHS.dreamGate(pluginData));
+      if (cached?.nudge) {
+        ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
+      }
+      const child = spawn(
+        'node',
+        [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
+        { detached: true, stdio: 'ignore' },
+      );
+      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+      child.unref();
+    } catch (err) {
+      logError('session-start.context-assembly.dreamGate', err);
     }
-  } catch (err) {
-    logError('session-start.context-assembly.dreamGate', err);
   }
 
   // 7.5. Learned patterns.
