@@ -305,7 +305,13 @@ try {
     }
 
     case 'intentions': {
-      out(intentions(args[1] || null));
+      const data = intentions(args[1] || null);
+      if (process.argv.includes('--session-start-refresh')) {
+        const { writeMarker, MARKER_PATHS } = await import('./lib/marker-cache.mjs');
+        writeMarker(MARKER_PATHS.intentions(PLUGIN_DATA), data);
+      } else {
+        out(data);
+      }
       break;
     }
 

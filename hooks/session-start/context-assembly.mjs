@@ -3,8 +3,9 @@
 // learned patterns, and federation status. Mutates ctx.context.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { join, basename, resolve } from 'node:path';
+import { readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
@@ -87,33 +88,22 @@ export async function run(ctx) {
   ctx.context += '\n## Recent vault captures\n';
   ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
-  // 5. Intention summary.
+  // 5. Intention summary — read cached marker; refresh in background.
   try {
-    const intentionOutput = execFileSync(
-      'node',
-      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions'],
-      {
-        encoding: 'utf8',
-        timeout: HookConfig.REINDEX_TIMEOUT_MS,
-        stdio: ['pipe', 'pipe', 'ignore'],
-      },
-    ).trim();
-
-    if (intentionOutput && intentionOutput !== '[]') {
-      let data;
-      try {
-        data = JSON.parse(intentionOutput);
-      } catch (err) {
-        logError('session-start.context-assembly.parseIntentions', err);
+    const cached = readMarker(MARKER_PATHS.intentions(pluginData || pluginDir));
+    if (Array.isArray(cached) && cached.length > 0) {
+      ctx.context += '\n## Notes with active intentions:\n';
+      for (const item of cached) {
+        ctx.context += `- ${item.context} (${item.count} notes)\n`;
       }
-      if (Array.isArray(data) && data.length > 0) {
-        ctx.context += '\n## Notes with active intentions:\n';
-        for (const item of data) {
-          ctx.context += `- ${item.context} (${item.count} notes)\n`;
-        }
-        ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
-      }
+      ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
     }
+    // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
+    spawn(
+      'node',
+      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
+      { detached: true, stdio: 'ignore' },
+    ).unref();
   } catch (err) {
     logError('session-start.context-assembly.intentions', err);
   }
