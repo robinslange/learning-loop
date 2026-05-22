@@ -36,6 +36,13 @@ export function readMarker(path) {
   }
 }
 
+// Note: writeMarker is typically called from a detached subprocess. If the
+// write fails, logError emits to stderr — but a detached child's stderr is
+// not attached to anything observable. Errors are effectively silent in
+// production. This is acceptable because (a) the worst case is a stale
+// marker on the next session-start, and (b) the next worker run will
+// retry. If you ever need observable write failures, consider setting
+// process.exitCode and inspecting it from the parent.
 export function writeMarker(path, value) {
   try {
     mkdirSync(dirname(path), { recursive: true });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readMarker, MARKER_TTL_MS } from '../scripts/lib/marker-cache.mjs';
+import { readMarker, writeMarker, MARKER_TTL_MS } from '../scripts/lib/marker-cache.mjs';
 
 test('readMarker returns null when marker is absent', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
@@ -44,6 +44,45 @@ test('readMarker returns null on parse error rather than throwing', () => {
     const path = join(dir, 'corrupt.json');
     writeFileSync(path, 'not-json{');
     assert.equal(readMarker(path), null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeMarker creates intermediate directories', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  try {
+    const path = join(dir, 'nested', 'deep', 'marker.json');
+    writeMarker(path, { hello: 'world' });
+    assert.deepEqual(readMarker(path), { hello: 'world' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeMarker overwrites existing markers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  try {
+    const path = join(dir, 'overwrite.json');
+    writeMarker(path, { v: 1 });
+    writeMarker(path, { v: 2 });
+    assert.deepEqual(readMarker(path), { v: 2 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('writeMarker swallows errors when target is unwritable', () => {
+  // Use a path under a non-existent unwritable parent: trying to mkdir inside
+  // a file (not a directory) will throw ENOTDIR.
+  const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  try {
+    const blocker = join(dir, 'is-a-file');
+    writeFileSync(blocker, 'content');
+    // writeMarker tries to mkdir(dirname(badPath)) where dirname is `is-a-file` — fails.
+    const badPath = join(blocker, 'cannot-create.json');
+    // Must not throw.
+    assert.doesNotThrow(() => writeMarker(badPath, { x: 1 }));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
