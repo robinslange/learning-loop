@@ -35,6 +35,13 @@ function noteExistsInIndex(name, noteIndex) {
   return noteIndex.has(`${name}.md`);
 }
 
+function checkBodySourceLeak(fm, body) {
+  if (!fm.source) return null;
+  const match = body.match(/^Sources?:/im);
+  if (!match) return null;
+  return `Body has \`${match[0]}\` line while frontmatter already declares \`source:\`. Capture-rules: sources go in frontmatter, not body. Remove the body line, or remove the frontmatter \`source:\` if the body citation is the authoritative one.`;
+}
+
 function checkDuplicateNote(filePath, title, vaultRoot) {
   try {
     const binary = findBinaryShared();
@@ -109,6 +116,9 @@ runHook(({ tool, input }) => {
   }
 
   const warnings = [];
+
+  const bodySourceWarning = checkBodySourceLeak(fm, fmBody);
+  if (bodySourceWarning) warnings.push(bodySourceWarning);
 
   const links = extractWikilinks(fmBody);
   const noteIndex = buildNoteIndex(vaultRoot);
