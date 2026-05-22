@@ -3,7 +3,7 @@
 // learned patterns, and federation status. Mutates ctx.context.
 
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { join, basename, resolve } from 'node:path';
 import { readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
@@ -189,9 +189,9 @@ export async function run(ctx) {
     }
   }
 
-  // 10. Emit session-start provenance event.
+  // 10. Emit session-start provenance event — fire and forget.
   try {
-    execFileSync(
+    const child = spawn(
       'node',
       [
         join(pluginDir, 'scripts', 'provenance.mjs'),
@@ -201,8 +201,10 @@ export async function run(ctx) {
           source: 'hook',
         }),
       ],
-      { timeout: HookConfig.PROVENANCE_TIMEOUT_MS, stdio: 'ignore' },
+      { detached: true, stdio: 'ignore' },
     );
+    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+    child.unref();
   } catch (err) {
     logError('session-start.context-assembly.provenance', err);
   }
