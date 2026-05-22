@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { home, resolvePluginData } from './common.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { writeMarker, readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 
 const tmp = tmpdir();
 const pluginData = resolvePluginData();
@@ -26,12 +27,18 @@ function now() {
   return Math.floor(Date.now() / 1000);
 }
 
-async function writeMarkerIfNeeded(nudge) {
+function writeMarkerIfNeeded(nudge) {
   if (!isSessionStartRefresh) return;
-  const { writeMarker, MARKER_PATHS } = await import('../../scripts/lib/marker-cache.mjs');
-  const pd = resolvePluginData();
-  if (pd) {
-    writeMarker(MARKER_PATHS.dreamGate(pd), { nudge: nudge || null });
+  if (!pluginData) return;
+  const markerPath = MARKER_PATHS.dreamGate(pluginData);
+  if (nudge == null) {
+    // Don't overwrite a prior real nudge with null. The prior nudge stays
+    // visible until the next real nudge computation succeeds.
+    const existing = readMarker(markerPath);
+    if (existing?.nudge) return;
+    writeMarker(markerPath, { nudge: null });
+  } else {
+    writeMarker(markerPath, { nudge });
   }
 }
 
@@ -40,7 +47,7 @@ let nudge = null;
 
 // Gate 1: Abort if a dream is already running.
 if (existsSync(DREAM_RUNNING_MARKER)) {
-  await writeMarkerIfNeeded(null);
+  writeMarkerIfNeeded(null);
   process.exit(0);
 }
 
@@ -48,20 +55,22 @@ if (existsSync(DREAM_RUNNING_MARKER)) {
 if (existsSync(DREAM_MARKER)) {
   const lastDream = parseInt(readFileSync(DREAM_MARKER, 'utf8').trim(), 10);
   if (now() - lastDream < 86400) {
-    await writeMarkerIfNeeded(null);
+    writeMarkerIfNeeded(null);
     process.exit(0);
   }
 } else {
-  // No dream marker = never dreamed. Set one and skip this session.
+  // First-ever run. If two session-starts race here, both will write the
+  // timestamp (last writer wins, may be off by ms). Both will then write
+  // { nudge: null } to the cache marker — idempotent. Risk: accepted.
   writeFileSync(DREAM_MARKER, String(now()));
-  await writeMarkerIfNeeded(null);
+  writeMarkerIfNeeded(null);
   process.exit(0);
 }
 
 // Gate 3: Need CLAUDE_PROJECT_DIR to find memory dir.
 const projectDir = env.CLAUDE_PROJECT_DIR;
 if (!projectDir) {
-  await writeMarkerIfNeeded(null);
+  writeMarkerIfNeeded(null);
   process.exit(0);
 }
 
@@ -73,7 +82,7 @@ try {
   statSync(memoryDir);
 } catch (err) {
   logError('dream-gate.statMemoryDir', err);
-  await writeMarkerIfNeeded(null);
+  writeMarkerIfNeeded(null);
   process.exit(0);
 }
 
@@ -98,7 +107,7 @@ if (modifiedCount >= 5) {
 }
 
 // Write marker (if --session-start-refresh) then emit nudge to stdout.
-await writeMarkerIfNeeded(nudge);
+writeMarkerIfNeeded(nudge);
 if (nudge) {
   process.stdout.write(nudge);
 }
