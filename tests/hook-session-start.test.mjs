@@ -201,3 +201,37 @@ test(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Test 6: Cached intentions marker — hook emits the intentions context block.
+// ---------------------------------------------------------------------------
+test(
+  'session-start reads cached intentions marker and emits context block',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'intentions-cache-session' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        // Write a pre-populated intentions marker at the canonical path.
+        // pluginData resolves to sandboxRoot/plugin-data; the hook reads from
+        // MARKER_PATHS.intentions(pluginData) = pluginData/session-start-cache/intentions.json
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(
+          join(cacheDir, 'intentions.json'),
+          JSON.stringify([{ context: 'test-ctx', count: 3 }]),
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const hso = parseOutput(r.stdout, 'intentions-cache');
+      assert.match(hso.additionalContext, /## Notes with active intentions:/);
+      assert.match(hso.additionalContext, /- test-ctx \(3 notes\)/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);

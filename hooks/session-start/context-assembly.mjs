@@ -89,23 +89,30 @@ export async function run(ctx) {
   ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
   // 5. Intention summary — read cached marker; refresh in background.
-  try {
-    const cached = readMarker(MARKER_PATHS.intentions(pluginData || pluginDir));
-    if (Array.isArray(cached) && cached.length > 0) {
-      ctx.context += '\n## Notes with active intentions:\n';
-      for (const item of cached) {
-        ctx.context += `- ${item.context} (${item.count} notes)\n`;
+  // pluginData required: the worker resolves PLUGIN_DATA from the same source
+  // (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
+  // produce a different path than the worker writes to.
+  if (pluginData) {
+    try {
+      const cached = readMarker(MARKER_PATHS.intentions(pluginData));
+      if (Array.isArray(cached) && cached.length > 0) {
+        ctx.context += '\n## Notes with active intentions:\n';
+        for (const item of cached) {
+          ctx.context += `- ${item.context} (${item.count} notes)\n`;
+        }
+        ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
       }
-      ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
+      // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
+      const child = spawn(
+        'node',
+        [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
+        { detached: true, stdio: 'ignore' },
+      );
+      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+      child.unref();
+    } catch (err) {
+      logError('session-start.context-assembly.intentions', err);
     }
-    // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
-    spawn(
-      'node',
-      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
-      { detached: true, stdio: 'ignore' },
-    ).unref();
-  } catch (err) {
-    logError('session-start.context-assembly.intentions', err);
   }
 
   // 6. Retrieval protocol footer.
