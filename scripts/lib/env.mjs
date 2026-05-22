@@ -60,6 +60,9 @@ export const env = Object.freeze({
   // --- Diagnostics ---
   LL_HOOK_DEBUG: isTruthy(process.env.LL_HOOK_DEBUG),
 
+  // --- Memory injection ---
+  LEARNING_LOOP_ALWAYS_INJECT_MEMORY: isTruthy(process.env.LEARNING_LOOP_ALWAYS_INJECT_MEMORY),
+
   // --- Injection feature flags ---
   LEARNING_LOOP_INJECTION_FORCE_ERROR: isTruthy(process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR),
   LEARNING_LOOP_INJECTION_MODE: pick('LEARNING_LOOP_INJECTION_MODE', null),

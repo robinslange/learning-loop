@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { runHook } from './helpers/hook-runner.mjs';
 
@@ -269,6 +269,110 @@ test(
       const hso = parseOutput(r.stdout, 'intentions-cache');
       assert.match(hso.additionalContext, /## Notes with active intentions:/);
       assert.match(hso.additionalContext, /- test-ctx \(3 notes\)/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Tests: MEMORY.md recency gate (Task 2.1)
+// ---------------------------------------------------------------------------
+
+test(
+  'session-start memory: skips MEMORY.md when mtime older than 7 days',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'stale-mem' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-stale' },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        const encoded = '/tmp/test-project-stale'.replace(/[/\\]/g, '-');
+        const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        const memPath = join(memDir, 'MEMORY.md');
+        writeFileSync(memPath, '- [test.md](test.md) — old entry\n');
+        const old = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
+        utimesSync(memPath, old, old);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0);
+      const hso = parseOutput(r.stdout, 'stale-mem');
+      assert.ok(
+        !hso.additionalContext.includes('## Auto-memory index'),
+        'stale MEMORY.md should not be injected',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'session-start memory: injects MEMORY.md when mtime within 7 days',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'fresh-mem' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-fresh' },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        const encoded = '/tmp/test-project-fresh'.replace(/[/\\]/g, '-');
+        const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        const memPath = join(memDir, 'MEMORY.md');
+        writeFileSync(memPath, '- [test.md](test.md) — fresh entry\n');
+        // Default mtime is now, no utimesSync needed.
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0);
+      const hso = parseOutput(r.stdout, 'fresh-mem');
+      assert.ok(
+        hso.additionalContext.includes('## Auto-memory index'),
+        'fresh MEMORY.md should be injected',
+      );
+      assert.ok(
+        hso.additionalContext.includes('fresh entry'),
+        'memory content should be in context',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'session-start memory: env override forces injection of stale MEMORY.md',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'override-mem' },
+      env: {
+        VAULT_PATH: VAULT,
+        CLAUDE_PROJECT_DIR: '/tmp/test-project-override',
+        LEARNING_LOOP_ALWAYS_INJECT_MEMORY: '1',
+      },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        const encoded = '/tmp/test-project-override'.replace(/[/\\]/g, '-');
+        const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        const memPath = join(memDir, 'MEMORY.md');
+        writeFileSync(memPath, '- [override.md](override.md) — forced inject\n');
+        const old = (Date.now() - 30 * 24 * 60 * 60 * 1000) / 1000;
+        utimesSync(memPath, old, old);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0);
+      const hso = parseOutput(r.stdout, 'override-mem');
+      assert.ok(
+        hso.additionalContext.includes('forced inject'),
+        'env override should inject even very stale MEMORY.md',
+      );
     } finally {
       r.cleanup();
     }

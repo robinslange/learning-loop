@@ -2,13 +2,25 @@
 // Reads update-check cache, memory indices, intention summary, dream gate,
 // learned patterns, and federation status. Mutates ctx.context.
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, basename, resolve } from 'node:path';
 import { readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { env } from '../../scripts/lib/env.mjs';
+
+const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
+
+function memoryIsFresh(path) {
+  if (env.LEARNING_LOOP_ALWAYS_INJECT_MEMORY) return true;
+  try {
+    return Date.now() - statSync(path).mtimeMs <= MEMORY_RECENCY_MS;
+  } catch {
+    return false;
+  }
+}
 
 export async function run(ctx) {
   const {
@@ -57,7 +69,7 @@ export async function run(ctx) {
   if (projectDir) {
     const encodedPath = projectDir.replace(/[/\\]/g, '-');
     const memoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
-    if (existsSync(memoryIndex)) {
+    if (existsSync(memoryIndex) && memoryIsFresh(memoryIndex)) {
       try {
         const index = readFileSync(memoryIndex, 'utf8').trim();
         if (index) {
@@ -73,7 +85,7 @@ export async function run(ctx) {
   const vaultParent = resolve(vaultRoot, '..');
   const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
   const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
-  if (existsSync(globalMemory)) {
+  if (existsSync(globalMemory) && memoryIsFresh(globalMemory)) {
     try {
       const globalIndex = readFileSync(globalMemory, 'utf8').trim();
       if (globalIndex) {
