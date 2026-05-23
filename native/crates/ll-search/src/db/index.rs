@@ -412,7 +412,7 @@ fn walk_dir(root: &Path, dir: &Path, entries: &mut Vec<WalkEntry>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::schema::open_db;
+    use crate::db::schema::open_or_create_db;
     use tempfile::TempDir;
 
     fn make_item(path: &str, title: &str, body: &str) -> EmbedItem {
@@ -432,7 +432,7 @@ mod tests {
     fn open_temp_db() -> (TempDir, Connection) {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("test.db").to_str().unwrap().to_string();
-        let conn = open_db(&path).unwrap();
+        let conn = open_or_create_db(&path).unwrap();
         (dir, conn)
     }
 

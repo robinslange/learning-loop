@@ -277,7 +277,7 @@ async fn do_reindex_blocking(db_path: &Path, vault_path: &Path) {
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
         let db_str = db.to_string_lossy();
         let vault_str = vault.to_string_lossy();
-        let conn = crate::db::open_db(&db_str)?;
+        let conn = crate::db::open_or_create_db(&db_str)?;
         match crate::db::reindex(&conn, &vault_str, false) {
             Ok(result) => eprintln!(
                 "Reindex: {} embedded, {} deleted, {} total",

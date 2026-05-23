@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **ll-search no longer leaks empty SQLite files on wrong-shaped invocations.** Read-side subcommands (`query`, `status`, `tags`, `intentions`, `sessions`, `link-stats`, `similar`, `cluster`, `discriminate`, `reflect-scan`, `rerank`) now error fast when the db file is missing instead of silently creating one. Root cause: clap's positional `db_path: String` accepted query strings as paths, and `db::open_db`'s unconditional `Connection::open` + `create_dir_all` materialised a fresh schema file at whatever path drifted in. Internally split into `open_db` (read; requires existence) and `open_or_create_db` (write; only `index` and `watch` use this). New regression test: `tests/no_silent_db_create.rs`.
+
 ## v1.24.0
 
 ### Felt-quality uplift

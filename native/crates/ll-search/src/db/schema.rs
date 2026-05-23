@@ -15,7 +15,29 @@ const MIGRATIONS: &[(u32, &str, &str)] = &[
     (1, "indices", include_str!("migrations/0001_indices.sql")),
 ];
 
+/// Open the database at `db_path`, requiring that the file already exists.
+///
+/// Use this for read-side subcommands (`query`, `status`, `tags`, etc.). A
+/// missing file is an error, not a silent create. This prevents stray empty
+/// SQLite files when callers (or users) pass a wrong-shaped CLI invocation:
+/// without this guard, clap's positional `db_path: String` happily accepts a
+/// query string as a path and rusqlite's default `OPEN_CREATE` flag spawns a
+/// fresh schema there.
 pub fn open_db(db_path: &str) -> Result<Connection> {
+    if !Path::new(db_path).exists() {
+        anyhow::bail!(
+            "database file does not exist: {db_path}\n\
+             (read-side commands require an existing index — \
+             run `ll-search index <vault> <db>` first)"
+        );
+    }
+    open_or_create_db(db_path)
+}
+
+/// Open the database at `db_path`, creating the file and parent directory if
+/// they don't exist. Use this only for `index` and `watch`, which legitimately
+/// create the index on first run. All other call sites should use `open_db`.
+pub fn open_or_create_db(db_path: &str) -> Result<Connection> {
     if let Some(parent) = Path::new(db_path).parent() {
         fs::create_dir_all(parent).ok();
     }

@@ -253,7 +253,7 @@ pub fn setup_config_dir(hub_addr: SocketAddr, peer_id: &str) -> tempfile::TempDi
 /// Build a minimal source_db with the right migrations applied and a model_id row.
 pub fn setup_source_db(dir: &Path) -> std::path::PathBuf {
     let db_path = dir.join("source.db");
-    let conn = ll_search::db::open_db(&db_path.to_string_lossy()).expect("open_db");
+    let conn = ll_search::db::open_or_create_db(&db_path.to_string_lossy()).expect("open_or_create_db");
     conn.execute(
         "INSERT OR REPLACE INTO meta (key, value) VALUES ('model_id', ?1)",
         ["Xenova/bge-small-en-v1.5"],

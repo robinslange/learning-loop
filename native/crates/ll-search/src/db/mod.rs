@@ -2,7 +2,7 @@ pub mod schema;
 pub mod index;
 pub mod query;
 
-pub use schema::{open_db, check_model_mismatch, migrate_embeddings, drop_old_embeddings};
+pub use schema::{open_db, open_or_create_db, check_model_mismatch, migrate_embeddings, drop_old_embeddings};
 pub use index::{reindex, walk_vault, WalkEntry, IndexResult, EmbedItem, insert_embedded};
 pub use query::{
     load_embedding, load_all_embeddings, get_status, list_tags,
