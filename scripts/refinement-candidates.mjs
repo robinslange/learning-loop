@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnEnv } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
-import { safeLoad } from './lib/safe-load.mjs';
+import { getVaultPath } from './lib/config.mjs';
 import { openEdgeDb, getNliEdgesForNote } from './lib/edges.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -42,19 +42,6 @@ const COSINE_MAX = 0.92;
 const TOP_K = 10;
 const PER_NOTE_CAP = 5;
 const EXCLUDE_FOLDERS = ['Excalidraw', '4-projects', '6-writing'];
-
-function resolveVaultPath() {
-  const cfgPath = resolve(__dirname, '..', 'config.json');
-  const { value: cfg1 } = safeLoad(cfgPath);
-  if (cfg1?.vault_path) return resolve(cfg1.vault_path.replace(/^~/, homedir()));
-  const pluginDataCfg = resolve(
-    homedir(),
-    '.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json',
-  );
-  const { value: cfg2 } = safeLoad(pluginDataCfg);
-  if (cfg2?.vault_path) return resolve(cfg2.vault_path.replace(/^~/, homedir()));
-  return resolve(homedir(), 'brain/brain');
-}
 
 function resolveBinary() {
   const installed = resolve(
@@ -129,7 +116,13 @@ function querySimilar(bin, dbPath, vaultRoot, noteRel) {
 }
 
 async function buildCandidates(newNotePaths, opts = {}) {
-  const vaultRoot = opts.vaultRoot || resolveVaultPath();
+  const vaultRoot = opts.vaultRoot || getVaultPath();
+  if (!vaultRoot) {
+    process.stderr.write(
+      '[refinement-candidates] VAULT_PATH not configured. Set VAULT_PATH env or vault_path in config.json.\n',
+    );
+    process.exit(2);
+  }
   const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
   const bin = resolveBinary();
   // Bundle 2: open edges.db for NLI hint lookup per pair. Lower threshold
