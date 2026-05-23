@@ -6,7 +6,7 @@
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve, sep, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { resolvePluginData } from '../../scripts/lib/config.mjs';
+import { resolvePluginData, getVaultPath } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
@@ -15,6 +15,7 @@ import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 
 export { resolvePluginData, getSessionId };
+export const resolveVaultPath = getVaultPath;
 
 export function home() {
   return env.HOME || env.USERPROFILE || homedir();
@@ -41,14 +42,6 @@ export function resolveConfig() {
     logError('common.resolveConfig.fallback', err);
   }
   return {};
-}
-
-export function resolveVaultPath() {
-  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
-  if (process.env.VAULT_PATH) return resolve(process.env.VAULT_PATH);
-  const cfg = resolveConfig();
-  if (cfg.vault_path) return resolve(cfg.vault_path.replace(/^~/, home()));
-  return null;
 }
 
 export function binaryName() {
