@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { tryRemoveIfStale } from '../scripts/lib/file-lock.mjs';
+import { tryRemoveIfStale, releaseLock } from '../scripts/lib/file-lock.mjs';
 
 function withStderrCapture(fn) {
   const chunks = [];
@@ -98,6 +98,92 @@ test('tryRemoveIfStale: ENOENT in mtime fallback is silent (expected race)', () 
   } finally {
     rmSync(sb, { recursive: true, force: true });
   }
+});
+
+test('releaseLock: surfaces non-ENOENT unlink failures via logError', () => {
+  // The unlinkSync catch used to swallow every code. EACCES/EBUSY/EPERM/EROFS
+  // here mean the lockfile leaked — the next acquirer will spin for staleMs
+  // (60s) before recovering. Phase 3's narrowing surfaces these.
+  const handle = { lockPath: '/tmp/never-touched.lock', fd: -1 };
+
+  const unlinkFn = () => {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  };
+  // closeFn is a no-op so we isolate the unlink path.
+  const closeFn = () => {};
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = releaseLock(handle, { closeFn, unlinkFn });
+  });
+
+  assert.equal(result, true, 'releaseLock must still report success (idempotent contract)');
+  assert.match(
+    stderr,
+    /file-lock\.releaseLock\.unlink/,
+    `expected logError scope on stderr; got: ${stderr.slice(0, 200)}`,
+  );
+  assert.match(
+    stderr,
+    /EACCES/,
+    `expected the underlying error code on stderr; got: ${stderr.slice(0, 200)}`,
+  );
+});
+
+test('releaseLock: ENOENT on unlink is silent (expected race with stale-lock recovery)', () => {
+  const handle = { lockPath: '/tmp/never-touched.lock', fd: -1 };
+  const unlinkFn = () => {
+    const err = new Error('ENOENT: no such file or directory');
+    err.code = 'ENOENT';
+    throw err;
+  };
+  const closeFn = () => {};
+
+  const stderr = withStderrCapture(() => {
+    releaseLock(handle, { closeFn, unlinkFn });
+  });
+
+  assert.doesNotMatch(
+    stderr,
+    /file-lock\.releaseLock\.unlink/,
+    `ENOENT on unlink must be silent; got stderr: ${stderr.slice(0, 200)}`,
+  );
+});
+
+test('releaseLock: EBADF on close is silent; other codes surface', () => {
+  const handle = { lockPath: '/tmp/never-touched.lock', fd: -1 };
+
+  // EBADF: expected when releaseLock is called twice. Must be silent.
+  const ebadf = () => {
+    const err = new Error('EBADF: bad file descriptor');
+    err.code = 'EBADF';
+    throw err;
+  };
+  const silentStderr = withStderrCapture(() => {
+    releaseLock(handle, { closeFn: ebadf, unlinkFn: () => {} });
+  });
+  assert.doesNotMatch(
+    silentStderr,
+    /file-lock\.releaseLock\.close/,
+    `EBADF on close must be silent; got stderr: ${silentStderr.slice(0, 200)}`,
+  );
+
+  // EIO: NFS yank, USB pull mid-fsync. Worth surfacing.
+  const eio = () => {
+    const err = new Error('EIO: input/output error');
+    err.code = 'EIO';
+    throw err;
+  };
+  const loudStderr = withStderrCapture(() => {
+    releaseLock(handle, { closeFn: eio, unlinkFn: () => {} });
+  });
+  assert.match(
+    loudStderr,
+    /file-lock\.releaseLock\.close/,
+    `EIO on close must surface; got stderr: ${loudStderr.slice(0, 200)}`,
+  );
 });
 
 test('tryRemoveIfStale: default statFn is fs.statSync (no behaviour change for real callers)', () => {

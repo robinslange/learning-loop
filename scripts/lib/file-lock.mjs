@@ -144,22 +144,28 @@ export function acquireLock(path, opts = {}) {
  * @param {{ lockPath: string, fd: number } | null | undefined} handle
  * @returns {boolean} true if a lock was present and released.
  */
-export function releaseLock(handle) {
+export function releaseLock(handle, { closeFn = closeSync, unlinkFn = unlinkSync } = {}) {
   if (!handle || handle.fd === undefined) return false;
   try {
-    closeSync(handle.fd);
-    // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {
-    // Intentional silent catch: idempotent release. closeSync may throw
-    // EBADF if release was called twice; harmless, the fd is already gone.
+    closeFn(handle.fd);
+  } catch (err) {
+    // EBADF is the expected harmless case: release was called twice and the
+    // fd is already gone. Anything else (EIO on NFS yank, etc.) leaks the fd
+    // until process exit — worth surfacing so it can be diagnosed.
+    if (err.code !== 'EBADF')
+      logError('file-lock.releaseLock.close', err, { lockPath: handle.lockPath });
   }
   try {
-    unlinkSync(handle.lockPath);
-    // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {
-    // Intentional silent catch: idempotent release. unlinkSync may throw
-    // ENOENT if another process already cleaned up the lockfile (stale-lock
-    // recovery in tryRemoveIfStale). Either way the lock is now released.
+    unlinkFn(handle.lockPath);
+  } catch (err) {
+    // ENOENT means another process (stale-lock recovery in tryRemoveIfStale)
+    // already cleaned up — expected race. Anything else (EACCES, EBUSY on
+    // Windows when another handle is still open, EPERM, EROFS) means the
+    // lockfile *leaked*, and the next acquirer will spin for staleMs (60s)
+    // before recovering. That's the exact silent-failure shape Phase 3 set
+    // out to surface.
+    if (err.code !== 'ENOENT')
+      logError('file-lock.releaseLock.unlink', err, { lockPath: handle.lockPath });
   }
   return true;
 }
