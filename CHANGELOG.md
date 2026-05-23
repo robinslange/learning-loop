@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **`scripts/lib/session.mjs`: single source of truth for session-id resolution.** Three call sites (`hooks/lib/common.mjs`, `scripts/provenance.mjs`, `scripts/vault-search.mjs`) each carried their own copy. The vault-search copy was the broken outlier — it read only `learning-loop-session-id` (unsuffixed), missing every ppid-bound session, so retrieval-ledger entries silently logged against the wrong session_id. Now all three import from `lib/session.mjs`. Retrieval ledger and hook provenance correlate again.
+
 ### Fixed
 
 - **ll-search no longer leaks empty SQLite files on wrong-shaped invocations.** Read-side subcommands (`query`, `status`, `tags`, `intentions`, `sessions`, `link-stats`, `similar`, `cluster`, `discriminate`, `reflect-scan`, `rerank`) now error fast when the db file is missing instead of silently creating one. Root cause: clap's positional `db_path: String` accepted query strings as paths, and `db::open_db`'s unconditional `Connection::open` + `create_dir_all` materialised a fresh schema file at whatever path drifted in. Internally split into `open_db` (read; requires existence) and `open_or_create_db` (write; only `index` and `watch` use this). New regression test: `tests/no_silent_db_create.rs`.

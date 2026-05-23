@@ -5,15 +5,16 @@
 
 import { mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { join, resolve, sep, dirname } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { getSessionId } from '../../scripts/lib/session.mjs';
 
-export { resolvePluginData };
+export { resolvePluginData, getSessionId };
 
 export function home() {
   return env.HOME || env.USERPROFILE || homedir();
@@ -78,27 +79,6 @@ export function findEpisodicBinary() {
     logError('common.findEpisodicBinary', err);
   }
   return null;
-}
-
-export function getSessionId() {
-  const tmp = tmpdir();
-  // Try the ppid-suffixed file first, then the unsuffixed legacy fallback.
-  // Both being absent is expected when this runs outside of a Claude Code
-  // session (CLI invocation, cron, tests) — don't log ENOENT. Only surface
-  // errors when a file *exists* but can't be read (perms, IO).
-  const candidates = [
-    join(tmp, `learning-loop-session-id-${process.ppid}`),
-    join(tmp, 'learning-loop-session-id'),
-  ];
-  for (const path of candidates) {
-    if (!existsSync(path)) continue;
-    try {
-      return readFileSync(path, 'utf8').trim();
-    } catch (err) {
-      logError('common.getSessionId.read', { path, err: err.message });
-    }
-  }
-  return 'unknown';
 }
 
 export function vaultRelPath(filePath, vaultPath) {
