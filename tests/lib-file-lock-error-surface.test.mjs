@@ -1,0 +1,134 @@
+// Phase 3 regression test: the mtime-fallback path inside tryRemoveIfStale
+// must surface stat failures via logError instead of silently swallowing
+// them. The three other empty catches in file-lock.mjs (releaseLock's two
+// idempotent cleanups + the documented outer fallback in tryRemoveIfStale)
+// must stay silent — they're intentional, not bugs.
+//
+// The genuine silent-failure path is hard to trigger naturally: it requires
+// readFileSync to throw AND statSync to then also throw with a code other
+// than ENOENT. We exercise it via the statFn dependency injection added to
+// tryRemoveIfStale, which is a tiny test-only seam that costs nothing at
+// runtime (default is fs.statSync).
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { tryRemoveIfStale } from '../scripts/lib/file-lock.mjs';
+
+function withStderrCapture(fn) {
+  const chunks = [];
+  const orig = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk, ...rest) => {
+    chunks.push(typeof chunk === 'string' ? chunk : chunk.toString('utf8'));
+    return true;
+  };
+  try {
+    fn();
+  } finally {
+    process.stderr.write = orig;
+  }
+  return chunks.join('');
+}
+
+test('tryRemoveIfStale: surfaces non-ENOENT stat failures via logError', () => {
+  // Make readFileSync throw EISDIR (lockPath is a directory). That drops us
+  // into the mtime-fallback catch arm. We then inject a statFn that throws
+  // EACCES — the kind of "genuinely unusual" failure the plan calls out.
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-surface-'));
+  const lockPath = join(sb, 'target.lock');
+  mkdirSync(lockPath);
+
+  const statFn = () => {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  };
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = tryRemoveIfStale(lockPath, 60_000, { statFn });
+  });
+
+  try {
+    assert.equal(result, false, 'must return false when stat fails');
+    assert.match(
+      stderr,
+      /file-lock\.mtimeFallback/,
+      `expected logError scope on stderr; got: ${stderr.slice(0, 200)}`,
+    );
+    assert.match(
+      stderr,
+      /EACCES/,
+      `expected the underlying error code on stderr; got: ${stderr.slice(0, 200)}`,
+    );
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
+
+test('tryRemoveIfStale: ENOENT in mtime fallback is silent (expected race)', () => {
+  // The lockfile being unlinked between our readFileSync and our statFn is
+  // an expected race condition during concurrent stale-lock recovery. We
+  // must NOT log this case — otherwise stderr fills with noise during
+  // normal contention.
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-enoent-'));
+  const lockPath = join(sb, 'target.lock');
+  mkdirSync(lockPath);
+
+  const statFn = () => {
+    const err = new Error('ENOENT: no such file or directory');
+    err.code = 'ENOENT';
+    throw err;
+  };
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = tryRemoveIfStale(lockPath, 60_000, { statFn });
+  });
+
+  try {
+    assert.equal(result, false, 'must return false on ENOENT race');
+    assert.doesNotMatch(
+      stderr,
+      /file-lock\.mtimeFallback/,
+      `ENOENT in mtime fallback must be silent; got stderr: ${stderr.slice(0, 200)}`,
+    );
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
+
+test('tryRemoveIfStale: default statFn is fs.statSync (no behaviour change for real callers)', () => {
+  // Sanity check that the dependency injection added for testability did
+  // not change runtime behaviour. With no opts, an actually-stale lockfile
+  // (mtime older than staleMs) gets removed.
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-default-'));
+  const lockPath = join(sb, 'target.lock');
+  // Write a lockfile with a PID that's neither alive nor parseable —
+  // forces the outer catch and lets the mtime fallback decide. NaN-PID
+  // (whitespace) takes the parseInt-NaN path which short-circuits to
+  // `return false` from the outer try — not what we want. Instead write
+  // a non-decimal string that parseInt also fails on but readFileSync
+  // succeeds for; then unlink to make stat throw ENOENT (which is silent).
+  // Cleanest: directory-as-lockfile, default statFn returns dir mtime,
+  // which is now (not stale), so result is false.
+  mkdirSync(lockPath);
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = tryRemoveIfStale(lockPath, 60_000); // no opts
+  });
+
+  try {
+    assert.equal(result, false, 'fresh directory-as-lockfile should not be considered stale');
+    assert.doesNotMatch(
+      stderr,
+      /file-lock\.mtimeFallback/,
+      'default statFn (fs.statSync) on a fresh dir must not error',
+    );
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});

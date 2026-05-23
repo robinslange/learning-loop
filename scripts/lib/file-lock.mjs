@@ -24,6 +24,7 @@ import {
   statSync,
   constants as fsConstants,
 } from 'node:fs';
+import { logError } from './log.mjs';
 
 const DEFAULT_RETRIES = 5;
 const DEFAULT_DELAY_MS = 20;
@@ -59,11 +60,16 @@ function isProcessAlive(pid) {
 /**
  * Attempts to remove a lockfile if its recorded PID is no longer alive.
  * Falls back to mtime-based staleness when the PID is unreadable.
+ *
  * @param {string} lockPath
  * @param {number} staleMs
+ * @param {{ statFn?: (path: string) => { mtimeMs: number } }} [deps]
+ *   Optional dependency injection — defaults to fs.statSync. Tests pass a
+ *   stub to exercise the mtime-fallback failure path without engineering
+ *   a filesystem race between readFileSync and statSync.
  * @returns {boolean} true if the lock was removed and the caller may retry.
  */
-function tryRemoveIfStale(lockPath, staleMs) {
+export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync } = {}) {
   try {
     const raw = readFileSync(lockPath, 'utf8').trim();
     const pid = parseInt(raw, 10);
@@ -73,17 +79,25 @@ function tryRemoveIfStale(lockPath, staleMs) {
     }
     // PID is alive — do not remove.
     return false;
+    // eslint-disable-next-line learning-loop/no-empty-catch
   } catch {
-    // Lockfile vanished mid-read or contains an unreadable PID.
-    // Try mtime-based staleness as a backstop.
+    // Intentional silent catch: documented fallback path. readFileSync may
+    // throw because the lockfile vanished mid-read or contains an unreadable
+    // PID; either way the staleness check below decides what to do.
     try {
-      const { mtimeMs } = statSync(lockPath);
+      const { mtimeMs } = statFn(lockPath);
       if (Date.now() - mtimeMs > staleMs) {
         unlinkSync(lockPath);
         return true;
       }
-      // eslint-disable-next-line learning-loop/no-empty-catch
-    } catch {}
+    } catch (err) {
+      // ENOENT here means the lockfile was unlinked between our readFileSync
+      // (which threw) and our statFn (which then threw because the file
+      // vanished). Expected race, not a failure. Anything else is genuinely
+      // unusual — a race after a readFileSync failure that stat *also* can't
+      // recover from — and worth surfacing.
+      if (err.code !== 'ENOENT') logError('file-lock.mtimeFallback', err, { lockPath });
+    }
     return false;
   }
 }
@@ -135,11 +149,18 @@ export function releaseLock(handle) {
   try {
     closeSync(handle.fd);
     // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {}
+  } catch {
+    // Intentional silent catch: idempotent release. closeSync may throw
+    // EBADF if release was called twice; harmless, the fd is already gone.
+  }
   try {
     unlinkSync(handle.lockPath);
     // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {}
+  } catch {
+    // Intentional silent catch: idempotent release. unlinkSync may throw
+    // ENOENT if another process already cleaned up the lockfile (stale-lock
+    // recovery in tryRemoveIfStale). Either way the lock is now released.
+  }
   return true;
 }
 
