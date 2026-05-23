@@ -152,6 +152,30 @@ test('releaseLock: ENOENT on unlink is silent (expected race with stale-lock rec
   );
 });
 
+test('releaseLock: partial handle (missing lockPath) returns false without calling fs ops', () => {
+  // Defensive contract: acquireLock always returns {lockPath, fd} together,
+  // but a hand-constructed handle missing lockPath would crash unlinkFn(undefined)
+  // with TypeError and emit a noisy logError with lockPath: undefined. The guard
+  // rejects such handles up-front.
+  let closeCalled = false;
+  let unlinkCalled = false;
+  const closeFn = () => {
+    closeCalled = true;
+  };
+  const unlinkFn = () => {
+    unlinkCalled = true;
+  };
+
+  const stderr = withStderrCapture(() => {
+    const result = releaseLock({ fd: 5 }, { closeFn, unlinkFn });
+    assert.equal(result, false, 'must return false for handle without lockPath');
+  });
+
+  assert.equal(closeCalled, false, 'closeFn must not be called on invalid handle');
+  assert.equal(unlinkCalled, false, 'unlinkFn must not be called on invalid handle');
+  assert.equal(stderr, '', `must not log anything; got: ${stderr.slice(0, 200)}`);
+});
+
 test('releaseLock: EBADF on close is silent; other codes surface', () => {
   const handle = { lockPath: '/tmp/never-touched.lock', fd: -1 };
 

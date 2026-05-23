@@ -145,7 +145,10 @@ export function acquireLock(path, opts = {}) {
  * @returns {boolean} true if a lock was present and released.
  */
 export function releaseLock(handle, { closeFn = closeSync, unlinkFn = unlinkSync } = {}) {
-  if (!handle || handle.fd === undefined) return false;
+  // Both fields are required. acquireLock always returns them together, but a
+  // hand-constructed handle missing lockPath would crash unlinkFn(undefined)
+  // with TypeError and emit a logError noisy with lockPath: undefined.
+  if (!handle || handle.fd === undefined || !handle.lockPath) return false;
   try {
     closeFn(handle.fd);
   } catch (err) {
