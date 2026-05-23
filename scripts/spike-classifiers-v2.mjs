@@ -11,13 +11,19 @@
 
 import { readFileSync, existsSync } from 'fs';
 import { join, basename } from 'path';
-import { getPluginData } from './lib/config.mjs';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { openReadonly } from './lib/sqljs.mjs';
 import { run } from './lib/binary.mjs';
 import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 
-const VAULT_PATH = env.VAULT_PATH || join(env.HOME, 'brain', 'brain');
+const VAULT_PATH = getVaultPath();
+if (!VAULT_PATH) {
+  process.stderr.write(
+    '[spike-classifiers-v2] VAULT_PATH not configured. Set VAULT_PATH env or vault_path in config.json.\n',
+  );
+  process.exit(2);
+}
 const PLUGIN_DATA = getPluginData();
 const DB_PATH = join(PLUGIN_DATA, 'search.db');
 const OLLAMA_URL = env.OLLAMA_URL;
