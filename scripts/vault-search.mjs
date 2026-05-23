@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { readFileSync, existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
@@ -8,6 +8,7 @@ import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/
 import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
+import { getSessionId } from './lib/session.mjs';
 
 const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
 
@@ -92,12 +93,7 @@ function logRetrieval(command, query, results) {
     mkdirSync(dir, { recursive: true });
     const now = new Date();
     const file = join(dir, `queries-${now.toISOString().slice(0, 7)}.jsonl`);
-    let sessionId = '';
-    try {
-      sessionId = readFileSync(join(tmpdir(), 'learning-loop-session-id'), 'utf-8').trim();
-    } catch (err) {
-      logError('vault-search.getSessionId', err);
-    }
+    const sessionId = getSessionId();
     const federated = existsSync(FEDERATION_CONFIG);
     const topPaths = Array.isArray(results)
       ? results.slice(0, 10).map((r) => r.path || r.note_a || '')
