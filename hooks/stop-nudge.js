@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from '
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { home, resolvePluginData, readStdin } from './lib/common.mjs';
+import { home, resolvePluginData, readStdin, getSessionId } from './lib/common.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -50,25 +50,11 @@ if (existsSync(reflectMarker)) {
 const dreamMarker = join(tmp, 'learning-loop-last-dream');
 const projectDir = env.CLAUDE_PROJECT_DIR;
 
-// Resolve session ID: hook input > ppid-keyed file > global file (legacy).
-// Missing session-id files are expected when this runs outside of a Claude
-// Code session (cron, tests, CLI). Don't log ENOENT; only surface errors
-// when a file *exists* but can't be read (perms, IO).
-let sessionId = hookData.session_id || '';
-if (!sessionId) {
-  for (const path of [
-    join(tmp, `learning-loop-session-id-${process.ppid}`),
-    join(tmp, 'learning-loop-session-id'),
-  ]) {
-    if (!existsSync(path)) continue;
-    try {
-      sessionId = readFileSync(path, 'utf8').trim();
-      if (sessionId) break;
-    } catch (err) {
-      logError('stop-nudge.sessionId.read', { path, err: err.message });
-    }
-  }
-}
+// Prefer the hook-supplied session_id; fall back to the canonical marker
+// resolver. getSessionId() returns 'unknown' when no marker is usable; the
+// snapshot-path selection below treats that as "no session" (falsy).
+let sessionId = hookData.session_id || getSessionId();
+if (sessionId === 'unknown') sessionId = '';
 
 const snapshotFile = sessionId
   ? join(tmp, `learning-loop-memory-snapshot-${sessionId}`)

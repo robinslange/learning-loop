@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, rmSync } from 'node:fs';
+import { writeFileSync, rmSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getSessionId } from '../scripts/lib/session.mjs';
@@ -44,5 +44,50 @@ test('getSessionId trims trailing whitespace from file contents', () => {
     assert.equal(getSessionId(), 'session-with-newline');
   } finally {
     rmSync(path, { force: true });
+  }
+});
+
+test('getSessionId skips empty ppid file and falls through to legacy', () => {
+  const ppid = process.ppid;
+  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
+  const fallback = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(suffixed, '');
+  writeFileSync(fallback, 'session-from-legacy');
+  try {
+    assert.equal(getSessionId(), 'session-from-legacy');
+  } finally {
+    rmSync(suffixed, { force: true });
+    rmSync(fallback, { force: true });
+  }
+});
+
+test('getSessionId returns "unknown" when both candidates are whitespace-only', () => {
+  const ppid = process.ppid;
+  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
+  const fallback = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(suffixed, '   \n');
+  writeFileSync(fallback, '\t\t');
+  try {
+    assert.equal(getSessionId(), 'unknown');
+  } finally {
+    rmSync(suffixed, { force: true });
+    rmSync(fallback, { force: true });
+  }
+});
+
+test('getSessionId surfaces unreadable file via logError, then falls through', { skip: process.platform === 'win32' }, () => {
+  if (process.getuid && process.getuid() === 0) return;
+  const ppid = process.ppid;
+  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
+  const fallback = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(suffixed, 'unreadable');
+  chmodSync(suffixed, 0o000);
+  writeFileSync(fallback, 'recovered');
+  try {
+    assert.equal(getSessionId(), 'recovered');
+  } finally {
+    try { chmodSync(suffixed, 0o600); } catch {}
+    rmSync(suffixed, { force: true });
+    rmSync(fallback, { force: true });
   }
 });
