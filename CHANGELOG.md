@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.2
+
 ### Fixed
 
 - **Binary auto-update on session start: closes the "plugin update bumps marketplace files but native binary lags" shipping gap.** `hooks/session-start/cache-cleanup.mjs` now compares the installed `ll-search` version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. Fire-and-forget: the current session keeps using whatever binary is on disk, the next session boots with the fresh one. One-session lag, no blocking. Failure mode this fixes: Robin's machine sat on `v1.20.2` for five releases until the v1.25 `reflect-scan` path tripped the pre-fix `open_db` leak shape and surfaced the gap. Version comparison is `v`-prefix tolerant. Four regression tests cover matching/lagging/missing/v-prefix cases.
