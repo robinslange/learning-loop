@@ -28,16 +28,21 @@ Eight hook handlers across six Claude Code event types enforce process disciplin
 
 | Event | Hook | What it enforces |
 |---|---|---|
-| SessionStart | session-start.js | Injects vault context: memory index, recent captures, intention summary, dream gate nudge (via `lib/dream-gate.js`) |
+| SessionStart | session-start.js | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
-| PreToolUse (Write) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85); blocks duplicate frontmatter tags |
-| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool-provenance.js | Tracks every vault read/write for provenance |
-| PostToolUse (Write\|Edit) | post-write-autolink.js | Adds backlinks and semantic links after vault writes |
-| PostToolUse (Write\|Edit) | post-write-edge-infer.js | Classifies and stores semantic edges between notes on write |
+| PreToolUse (Write) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85); blocks duplicate frontmatter tags; warns on frontmatter/body source-line leak |
+| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool.js | Coalesced dispatcher. Loads one vault snapshot, then runs the autolink, edge-infer, provenance, and reflect-track modules in fixed order with per-module timeout isolation. Non-write tool events only run provenance |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
 | PostToolUse (mcp__plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
 | PreCompact | pre-compact.js | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable) |
+
+The post-tool modules live under `hooks/modules/`:
+
+- **autolink** — adds backlinks and semantic links after vault writes
+- **edge-infer** — runs NLI inference on top-3 neighbours, writes `challenges_rebuttal` and `nli_supports` edges to `edges.db`
+- **provenance** — records every vault read/write for the provenance log
+- **reflect-track** — appends each new vault Write/Edit to the `/reflect` new-notes marker while the marker exists (added v1.25.3)
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
@@ -155,6 +160,8 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 ```
 
 Restart Claude Code. The session-start hook auto-applies config changes on first run after update. It also re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
+
+Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed.
 
 ## CLI shims
 

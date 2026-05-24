@@ -1,6 +1,6 @@
 # Agents
 
-Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 18 shared skills that enforce consistent quality standards across all operations.
+Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 19 shared skills that enforce consistent quality standards across all operations.
 
 ## Why agents, not prompts
 
@@ -31,7 +31,7 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 | ingest-mapper-state | Capture ephemeral project state (branch, commits, in-flight work) during repo ingest | Haiku |
 | ingest-synthesizer | Merge mapper docs into confirmed_insights JSON for the route-output pipeline | Opus |
 
-Twenty working agents. The `diagram-rules` shared reference (consumed by `discovery-researcher` and `note-writer` for Excalidraw generation) lives under `agents/_skills/` alongside the other shared skills.
+Twenty working agents.
 
 ## Vault librarian (local, optional)
 
@@ -65,7 +65,7 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 18 skills in `agents/_skills/` that standardize quality decisions:
+Agents share 19 skills in `agents/_skills/` that standardize quality decisions:
 
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs
@@ -113,8 +113,8 @@ See `agents/_skills/capture-rules.md` for the full shape rules and `agents/note-
 
 ## Subagent writes and hook replay
 
-PostToolUse hooks (`post-write-autolink.js`, `post-write-edge-infer.js`) do not fire on Write or Edit calls made inside a subagent. Notes written by `note-writer`, `literature-capturer`, `note-deepener`, and the other write-capable agents bypass the structural backlink and typed-edge passes by default.
+PostToolUse hooks do not fire on Write or Edit calls made inside a subagent. Notes written by `note-writer`, `literature-capturer`, `note-deepener`, and the other write-capable agents bypass the structural backlink and typed-edge passes by default. The coalesced `hooks/post-tool.js` dispatcher fans the autolink, edge-infer, provenance, and reflect-track modules out in a fixed order with per-module timeout isolation, but only when the parent session triggers it.
 
-Skills that dispatch write-capable subagents replay the hook chain explicitly via `scripts/sweep-hook-replay.mjs`. The script accepts vault paths on stdin or as positional args, runs both PostToolUse hooks against each, and emits a JSON summary. Hooks are idempotent, so replaying on already-hooked notes is safe.
+Skills that dispatch write-capable subagents replay the hook chain explicitly via `scripts/sweep-hook-replay.mjs`. The script accepts vault paths on stdin or as positional args, runs the post-tool module chain against each, and emits a JSON summary. Modules are idempotent, so replaying on already-hooked notes is safe.
 
 The canonical patterns (an unlinked-body filter for end-of-skill sweeps and a targeted variant for known paths) live in `skills/_shared/hook-replay.md`. Skills like `/reflect`, `/ingest`, `/quick`, and `/literature` reference that snippet rather than reimplementing it.

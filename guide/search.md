@@ -62,7 +62,14 @@ The `reflect-scan` command batches multiple queries into a single process, shari
 
 ## Retrieval instrumentation
 
-Every search query is logged to `PLUGIN_DATA/retrieval/queries-YYYY-MM.jsonl` with timestamp, session ID, command, query text, result count, peer hit count, and top-10 result paths. Run `node scripts/retrieval-report.mjs` to see query patterns, repeated queries, most-surfaced notes, and federation hit rates.
+Every search query and vault read logs to `PLUGIN_DATA/retrieval/` in one of four prefixed files:
+
+- `queries-YYYY-MM.jsonl` — vault search invocations
+- `reads-YYYY-MM.jsonl` — vault file reads tracked by `post-read-retrieval`
+- `episodic-queries-YYYY-MM.jsonl` — episodic-memory MCP searches
+- `shadow-injection-YYYY-MM.jsonl` — just-in-time injection pipeline events (shadow + live)
+
+Since v1.25.0 all writers go through the canonical `scripts/lib/retrieval.mjs:writeRetrieval` helper, so every record carries the same shape: `{ts, session_id, command, query, result_count, peer_results, top_paths, ...}`. Run `node scripts/retrieval-report.mjs` to see query patterns, repeated queries, most-surfaced notes, and federation hit rates.
 
 ## Index
 

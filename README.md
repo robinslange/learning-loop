@@ -6,7 +6,9 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 ## Why
 
-Claude fabricates sources (~43% of PubMed IDs, ~26% of DOIs). Without mechanical verification, these contaminate your notes and propagate through every session that retrieves them. Learning-loop makes this structurally impossible: eight lifecycle hook handlers across six Claude Code event types enforce verification at write time, quality gates block promotion of half-sourced notes, and persona rules keep your vault in your voice.
+Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it.
+
+The outcome is a vault that gets sharper, not heavier. Eight lifecycle hook handlers across six Claude Code event types wire the discipline into the runtime — retrieval fires before you ask, gates fire before promotion, verification catches fabricated sources at write time, and corrections propagate when beliefs change.
 
 ## Install
 
