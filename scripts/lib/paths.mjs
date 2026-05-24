@@ -48,6 +48,7 @@ export const DATA_PATHS = {
   librarian: (pd) => join(pd, 'librarian'),
   librarianQueue: (pd) => join(pd, 'librarian', 'queue.jsonl'),
   retrieval: (pd) => join(pd, 'retrieval'),
+  retrievalSessionDedupe: (pd) => join(pd, 'retrieval', 'session-dedupe'),
   provenance: (pd) => join(pd, 'provenance'),
   federation: (pd) => join(pd, 'federation'),
   sessionStartCache: (pd) => join(pd, 'session-start-cache'),

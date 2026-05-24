@@ -11,7 +11,7 @@
 
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { getConfig, getPluginData } from '../lib/config.mjs';
+import { getConfig, getPluginData, resetConfigCache } from '../lib/config.mjs';
 import { env } from '../lib/env.mjs';
 import { logError } from '../lib/log.mjs';
 
@@ -38,6 +38,11 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
       const st = statSync(cfgPath);
       const key = `${st.mtimeMs}-${st.ino}`;
       if (_cache && _cacheKey === key) return _cache;
+      // Key changed: invalidate the underlying getConfig() cache too. Without
+      // this, getConfig() would return its first-read object forever and the
+      // mtime+inode bust here would only invalidate our librarian-cache layer,
+      // making the upstream refresh a no-op.
+      if (_cacheKey) resetConfigCache();
       _cacheKey = key;
     } catch (e) {
       logError('librarian-config', e);
@@ -67,10 +72,13 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
   return result;
 }
 
-/** Reset the in-process cache — call in tests for isolation. */
+/** Reset the in-process cache — call in tests for isolation. Also resets the
+ *  upstream getConfig() cache so tests that mutate config.json between calls
+ *  see fresh state without remembering to invalidate both layers. */
 export function __test_resetCache() {
   _cache = null;
   _cacheKey = '';
+  resetConfigCache();
 }
 
 // Expose for tests without a named export collision

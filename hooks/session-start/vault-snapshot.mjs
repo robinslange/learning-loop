@@ -101,7 +101,7 @@ export async function run(ctx) {
   // TTL sweep for session-dedupe files older than SESSION_DEDUPE_TTL_MS.
   if (ctx.pluginData) {
     try {
-      const dedupeDir = join(DATA_PATHS.retrieval(ctx.pluginData), 'session-dedupe');
+      const dedupeDir = DATA_PATHS.retrievalSessionDedupe(ctx.pluginData);
       if (existsSync(dedupeDir)) {
         const cutoff = Date.now() - HookConfig.SESSION_DEDUPE_TTL_MS;
         for (const f of readdirSync(dedupeDir)) {

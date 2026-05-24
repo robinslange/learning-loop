@@ -21,6 +21,7 @@ import {
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
 import { env } from '../scripts/lib/env.mjs';
+import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
@@ -185,7 +186,7 @@ if (label.length > HookConfig.LABEL_MAX_LENGTH) {
 function dedupeStatePath(sid) {
   const pd = resolvePluginData();
   if (!pd) return null;
-  const dir = join(pd, 'retrieval', 'session-dedupe');
+  const dir = DATA_PATHS.retrievalSessionDedupe(pd);
   mkdirSync(dir, { recursive: true });
   return join(dir, `${sid}.json`);
 }
@@ -268,7 +269,7 @@ try {
     /^(ok|yes|no|thanks|try\s+again|continue|go|sure|done)$/i.test(trimmed) ||
     trimmed.startsWith('<')
   ) {
-    logShadow({ gate: { passed: false, fast_path_skip: true } });
+    logShadow({ type: 'gate-fail-fast-path', gate: { passed: false, fast_path_skip: true } });
     process.exit(0);
   }
 
@@ -279,7 +280,7 @@ try {
 
   const vaultRoot = resolveVaultPath();
   if (!vaultRoot) {
-    logShadow({ gate: { passed: false, error: 'no_vault_path' } });
+    logShadow({ type: 'gate-fail-no-vault', gate: { passed: false, error: 'no_vault_path' } });
     process.exit(0);
   }
   const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
@@ -296,6 +297,7 @@ try {
     : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
   if (vaultTop < gateThreshold && episodicTop < gateThreshold) {
     logShadow({
+      type: 'gate-fail-below-threshold',
       gate: {
         passed: false,
         vault_top_score: vaultTop,
@@ -332,6 +334,7 @@ try {
 
   if (!injection) {
     logShadow({
+      type: 'gate-pass-no-payload',
       gate: { passed: true },
       backends: summarizeBackends(results),
       payload: null,
@@ -342,6 +345,7 @@ try {
 
   if (mode === 'shadow') {
     logShadow({
+      type: 'gate-pass-payload',
       gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
       backends: summarizeBackends(results),
       payload: {

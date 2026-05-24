@@ -111,6 +111,20 @@ export function getConfig() {
   return _config;
 }
 
+/**
+ * Drop the cached config so the next getConfig() call re-reads from disk.
+ *
+ * Two legitimate uses:
+ * 1. Tests that mutate the config file between assertions.
+ * 2. Callers that detect a config-file change via their own mtime/inode tracking
+ *    (e.g. scripts/librarian/config.mjs) and need the underlying getConfig
+ *    cache to follow. Without this, that caller's own cache invalidates but
+ *    the canonical cache returns the stale object forever.
+ */
+export function resetConfigCache() {
+  _config = null;
+}
+
 function migrateConfig(from, to) {
   mkdirSync(dirname(to), { recursive: true });
   copyFileSync(from, to);

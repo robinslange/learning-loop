@@ -12,6 +12,7 @@ test('DATA_PATHS resolves PLUGIN_DATA subdirectories', () => {
   assert.equal(DATA_PATHS.librarian(pd), join(pd, 'librarian'));
   assert.equal(DATA_PATHS.librarianQueue(pd), join(pd, 'librarian', 'queue.jsonl'));
   assert.equal(DATA_PATHS.retrieval(pd), join(pd, 'retrieval'));
+  assert.equal(DATA_PATHS.retrievalSessionDedupe(pd), join(pd, 'retrieval', 'session-dedupe'));
   assert.equal(DATA_PATHS.provenance(pd), join(pd, 'provenance'));
   assert.equal(DATA_PATHS.federation(pd), join(pd, 'federation'));
   assert.equal(DATA_PATHS.sessionStartCache(pd), join(pd, 'session-start-cache'));
