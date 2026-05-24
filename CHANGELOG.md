@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.0
+
 ### Changed
 
 - **`lib/paths`: spatial-knowledge consolidation.** Added `DATA_PATHS`, `FEDERATION_PATHS`, `DATA_FILES` to `scripts/lib/paths.mjs` as the single source of truth for PLUGIN_DATA subdirectory and file paths. 25+ inline `join(pluginData, 'librarian'|'retrieval'|'provenance'|'federation'|'session-start-cache'|'edges.db'|'nli.sock'|'bin/.version')` constructions collapsed to named-constant calls across `scripts/` and `hooks/`. Refactoring a folder name now requires changing exactly one line. Internal helpers like `lib/marker-cache.MARKER_PATHS` and `lib/retrieval.writeRetrieval` use these constants too, so the canonical layer extends down to the leaf writers. `scripts/refinement-candidates.mjs` also drops a hardcoded `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/edges.db` fallback while it's there.
