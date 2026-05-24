@@ -11,6 +11,7 @@ import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
+import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
@@ -60,7 +61,9 @@ if (isWriteEdit && ctx.vaultRoot) {
   ctx.snapshot = loadVaultSnapshot(ctx.vaultRoot);
 }
 
-const modules = isWriteEdit ? [runAutolink, runEdgeInfer, runProvenance] : [runProvenance];
+const modules = isWriteEdit
+  ? [runAutolink, runEdgeInfer, runProvenance, runReflectTrack]
+  : [runProvenance];
 
 for (const mod of modules) {
   try {

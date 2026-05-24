@@ -30,7 +30,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","ski
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
 ```
 
-Per-note tracking is handled automatically by the PostToolUse hook.
+The PostToolUse hook handles both provenance emission and the per-write tracking that Step 4.6 (Upstream Refinement) consumes. Step 4 only needs to create the new-notes marker once; the hook appends every vault Write/Edit to it until Step 4.6.g removes the marker.
 
 ## Process
 
@@ -110,15 +110,18 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **After each vault note Write, append its absolute path to the session-keyed reflect new-notes file** (one per line). Step 4.6 (Upstream Refinement) reads this file. If you write zero vault notes in this step, leave the file empty or absent. The path is `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-reflect-new-notes.txt`; use the same env-keyed expansion in every block that touches it so parallel `/reflect` invocations don't race.
+- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer, which is what prevents the bundled-fence regression documented in `tests/reflect-new-notes-track.test.mjs`. The path is `${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-reflect-new-notes.txt`; every block that reads or deletes it uses the same env-keyed expansion so parallel `/reflect` invocations don't race.
 
 ```bash
-# Initialize at the start of Step 4 (truncates any stale file from a prior reflect in this session):
+# Step 4 init: truncate the new-notes file (the hook handshake marker).
+# Run this ONCE, before any vault Writes in this step. Do not re-run per
+# Write — the post-tool hook does the per-write appends automatically while
+# this file exists. Step 4.6.g removes it to end the tracking window.
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
-# After each vault Write:
-echo "<absolute-path-to-just-written-note>" >> "${LL_TMP_PREFIX}-new-notes.txt"
 ```
+
+If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly — Step 4.4's sweep replays the hook chain via `sweep-hook-replay.mjs`, which re-runs `reflect-track.mjs` and back-fills those paths. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it.
 
 ### Step 4.4: Post-Batch Sweep
 
