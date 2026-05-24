@@ -3,10 +3,10 @@
 // scripts/lib/config.mjs as the single source of truth; this module re-exports
 // `resolvePluginData` for backward compatibility with hook callers.
 
-import { mkdirSync, readFileSync, existsSync } from 'node:fs';
-import { join, resolve, sep, dirname } from 'node:path';
+import { mkdirSync, existsSync } from 'node:fs';
+import { join, sep, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { resolvePluginData, getVaultPath } from '../../scripts/lib/config.mjs';
+import { resolvePluginData, getVaultPath, getConfig } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
@@ -16,32 +16,10 @@ import { getSessionId } from '../../scripts/lib/session.mjs';
 
 export { resolvePluginData, getSessionId };
 export const resolveVaultPath = getVaultPath;
+export const resolveConfig = getConfig;
 
 export function home() {
   return env.HOME || env.USERPROFILE || homedir();
-}
-
-function readJsonStripBom(path) {
-  let raw = readFileSync(path, 'utf-8');
-  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
-  return JSON.parse(raw);
-}
-
-export function resolveConfig() {
-  const pluginData = resolvePluginData();
-  if (pluginData) {
-    try {
-      return readJsonStripBom(join(pluginData, 'config.json'));
-    } catch (err) {
-      logError('common.resolveConfig.pluginData', err);
-    }
-  }
-  try {
-    return readJsonStripBom(join(resolve(import.meta.dirname, '..', '..'), 'config.json'));
-  } catch (err) {
-    logError('common.resolveConfig.fallback', err);
-  }
-  return {};
 }
 
 export function binaryName() {
