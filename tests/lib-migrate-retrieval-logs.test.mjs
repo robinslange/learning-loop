@@ -62,3 +62,47 @@ test('migrate is a silent no-op when pluginData is null', () => {
   assert.equal(result.skipped, true);
   assert.equal(result.reason, 'no-plugin-data');
 });
+
+test('migrate preserves third-party retrieval jsonl files (cache-health, future plugins)', () => {
+  // Regression test for Phase 4 code review: blanket .jsonl deletion would
+  // wipe cache-health-YYYY-MM.jsonl (written by plugins/omc-cache-health,
+  // read by scripts/cache-health-report.mjs). Only files matching the four
+  // pre-canonical prefixes (queries-, reads-, episodic-queries-,
+  // shadow-injection-) should be removed.
+  const pd = mkdtempSync(join(tmpdir(), 'll-pd-'));
+  const rdir = join(pd, 'retrieval');
+  mkdirSync(rdir, { recursive: true });
+  // Pre-canonical (should be removed):
+  writeFileSync(join(rdir, 'queries-2026-04.jsonl'), '{"old":true}\n');
+  writeFileSync(join(rdir, 'reads-2026-04.jsonl'), '{"old":true}\n');
+  writeFileSync(join(rdir, 'episodic-queries-2026-04.jsonl'), '{"old":true}\n');
+  writeFileSync(join(rdir, 'shadow-injection-2026-04.jsonl'), '{"old":true}\n');
+  // Third-party / future plugins (must survive):
+  writeFileSync(join(rdir, 'cache-health-2026-04.jsonl'), '{"keep":true}\n');
+  writeFileSync(join(rdir, 'cache-health-2026-05.jsonl'), '{"keep":true}\n');
+  writeFileSync(join(rdir, 'future-plugin-2026-04.jsonl'), '{"keep":true}\n');
+  try {
+    const result = migrateRetrievalLogsIfNeeded(pd);
+    assert.equal(result.skipped, false);
+    assert.equal(result.removed, 4, 'should remove exactly the 4 pre-canonical files');
+    // Pre-canonical gone:
+    for (const stale of [
+      'queries-2026-04.jsonl',
+      'reads-2026-04.jsonl',
+      'episodic-queries-2026-04.jsonl',
+      'shadow-injection-2026-04.jsonl',
+    ]) {
+      assert.ok(!existsSync(join(rdir, stale)), `${stale} should be removed`);
+    }
+    // Third-party survived:
+    for (const kept of [
+      'cache-health-2026-04.jsonl',
+      'cache-health-2026-05.jsonl',
+      'future-plugin-2026-04.jsonl',
+    ]) {
+      assert.ok(existsSync(join(rdir, kept)), `${kept} must NOT be deleted`);
+    }
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});

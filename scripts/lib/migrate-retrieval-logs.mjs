@@ -6,16 +6,37 @@
 // hooks/lib/common.emitRetrieval passthrough) used incompatible shapes;
 // mixing them with the canonical shape would muddy downstream analytics.
 //
+// CRITICAL: only delete files matching the four pre-canonical prefixes the
+// canonical writer is replacing. Other plugins write their own .jsonl files
+// into PLUGIN_DATA/retrieval/ — specifically plugins/omc-cache-health writes
+// cache-health-YYYY-MM.jsonl (read by scripts/cache-health-report.mjs).
+// Blanket .jsonl deletion would wipe Robin's accumulated cache-health history
+// on every install. Always extend this list when a new canonical-shape prefix
+// is introduced; never widen to a glob.
+//
 // Idempotent. Marked complete by writing `<pluginData>/.retrieval-migrated-v2`.
 // Subsequent runs skip with reason 'already-migrated'.
-//
-// Non-jsonl files in the retrieval directory are preserved (no glob delete).
 
 import { existsSync, rmSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from './log.mjs';
 
 const MARKER = '.retrieval-migrated-v2';
+
+// Pre-canonical prefixes the canonical writer now owns. Files matching
+// `<prefix>-YYYY-MM.jsonl` for any of these are safe to delete because the
+// new writer will recreate them in the canonical shape.
+const PRE_CANONICAL_PREFIXES = [
+  'queries-', // vault-search.logRetrieval
+  'reads-', // post-read-retrieval.js (memory-read)
+  'episodic-queries-', // post-search-tracking.js (episodic-search)
+  'shadow-injection-', // session-label.js (shadow injection)
+];
+
+function isPreCanonicalLog(filename) {
+  if (!filename.endsWith('.jsonl')) return false;
+  return PRE_CANONICAL_PREFIXES.some((prefix) => filename.startsWith(prefix));
+}
 
 /**
  * Run the one-shot cleanup if it hasn't run for this pluginData yet.
@@ -32,12 +53,15 @@ export function migrateRetrievalLogsIfNeeded(pluginData) {
   try {
     if (existsSync(retrievalDir)) {
       for (const entry of readdirSync(retrievalDir)) {
-        if (entry.endsWith('.jsonl')) {
+        if (isPreCanonicalLog(entry)) {
           rmSync(join(retrievalDir, entry), { force: true });
           removed += 1;
         }
       }
     } else {
+      // Ensure the dir exists so post-install inspection tools that look at
+      // <plugin-data>/retrieval/ find a directory rather than ENOENT.
+      // The canonical writer will create it on first write anyway.
       mkdirSync(retrievalDir, { recursive: true });
     }
     writeFileSync(marker, new Date().toISOString());
