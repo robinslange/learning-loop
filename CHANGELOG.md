@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`tests/no_silent_db_create::index_into_missing_path_DOES_create_file`** spawned `ll-search index` and asserted the parent dir was created post-run. Worked locally (cached embedding model) but failed in CI because `init_embedding` panics before reaching `open_or_create_db` when the ONNX runtime + model download isn't available. Replaced with a direct unit test of `ll_search::db::open_or_create_db` — no subprocess, no embedding-model dependency. Strengthened assertion: now checks both the parent dir AND the file get created. No shipped behaviour change; test-only fix.
+
 ## v1.25.0
 
 ### Changed
