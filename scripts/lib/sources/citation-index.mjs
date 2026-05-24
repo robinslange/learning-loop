@@ -1,18 +1,10 @@
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  renameSync,
-  openSync,
-  closeSync,
-  unlinkSync,
-  constants as fsConstants,
-} from 'fs';
+import { writeFileSync, mkdirSync, renameSync } from 'fs';
 import { join, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { getPluginData } from '../config.mjs';
 import { safeLoad } from '../safe-load.mjs';
+import { withLock } from '../file-lock.mjs';
+import { logError } from '../log.mjs';
 
 const PLUGIN_DATA = getPluginData();
 const PLUGIN_DIR = resolve(fileURLToPath(import.meta.url), '../../../../..');
@@ -20,56 +12,6 @@ const DATA_DIR = PLUGIN_DATA ? join(PLUGIN_DATA, 'data') : join(PLUGIN_DIR, 'dat
 mkdirSync(DATA_DIR, { recursive: true });
 
 const INDEX_PATH = join(DATA_DIR, 'citation-index.json');
-
-let lockFd = null;
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const lockSleepBuf = new Int32Array(new SharedArrayBuffer(4));
-function acquireLock(retries = 5, delayMs = 30) {
-  const lockPath = INDEX_PATH + '.lock';
-  if (lockFd !== null) return false;
-  for (let i = 0; i < retries; i++) {
-    try {
-      lockFd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY);
-      writeFileSync(lockFd, String(process.pid));
-      return true;
-    } catch {
-      try {
-        const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
-        if (pid && !isProcessAlive(pid)) {
-          unlinkSync(lockPath);
-          continue;
-        }
-        // eslint-disable-next-line learning-loop/no-empty-catch
-      } catch {}
-      if (i < retries - 1) Atomics.wait(lockSleepBuf, 0, 0, delayMs);
-    }
-  }
-  return false;
-}
-
-function releaseLock() {
-  const lockPath = INDEX_PATH + '.lock';
-  if (lockFd !== null) {
-    try {
-      closeSync(lockFd);
-      // eslint-disable-next-line learning-loop/no-empty-catch
-    } catch {}
-    lockFd = null;
-  }
-  try {
-    unlinkSync(lockPath);
-    // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {}
-}
 
 export function loadCitationIndex() {
   const { value } = safeLoad(INDEX_PATH, { fallback: {} });
@@ -92,23 +34,31 @@ export function updateCitationIndex(pmid, metadata, noteFilename) {
 }
 
 function _doUpdate(pmid, metadata, noteFilename) {
-  const acquired = acquireLock();
   try {
-    const index = loadCitationIndex();
-    const key = `pmid:${pmid}`;
-    if (!index[key]) {
-      index[key] = {
-        authors: metadata.authors || [],
-        title: metadata.title || '',
-        year: metadata.year || null,
-        cited_in: [],
-      };
+    withLock(INDEX_PATH, { retries: 5, retryDelayMs: 30 }, () => {
+      const index = loadCitationIndex();
+      const key = `pmid:${pmid}`;
+      if (!index[key]) {
+        index[key] = {
+          authors: metadata.authors || [],
+          title: metadata.title || '',
+          year: metadata.year || null,
+          cited_in: [],
+        };
+      }
+      if (!index[key].cited_in.includes(noteFilename)) {
+        index[key].cited_in.push(noteFilename);
+      }
+      saveCitationIndex(index);
+    });
+  } catch (err) {
+    // ELOCK_TIMEOUT here means every retry was contended. The previous
+    // implementation silently no-op'd this case (citation update lost).
+    // Surface it so lost updates are debuggable.
+    if (err.code === 'ELOCK_TIMEOUT') {
+      logError('citation-index.updateCitationIndex.lockTimeout', err, { pmid, noteFilename });
+    } else {
+      throw err;
     }
-    if (!index[key].cited_in.includes(noteFilename)) {
-      index[key].cited_in.push(noteFilename);
-    }
-    saveCitationIndex(index);
-  } finally {
-    if (acquired) releaseLock();
   }
 }

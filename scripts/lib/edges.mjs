@@ -1,68 +1,33 @@
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  closeSync,
-  unlinkSync,
-  constants as fsConstants,
-} from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
+import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
 
-let lockFd = null;
+// Path-keyed lock wrapper. Preserves the existing acquireLock(dbPath) /
+// releaseLock(dbPath) public contract used by edge-infer.mjs and edges-cli.mjs
+// while delegating the actual O_EXCL + stale-recovery machinery to lib/file-lock.
+// Module-scoped handle keeps both calls path-keyed (callers don't pass handles
+// around). Single-holder by design: re-acquire while held returns false.
+let _heldHandle = null;
+let _heldPath = null;
 
 export function acquireLock(dbPath, retries = 3, delayMs = 50) {
-  const lockPath = dbPath + '.lock';
-  if (lockFd !== null) return false;
-
-  for (let i = 0; i < retries; i++) {
-    try {
-      lockFd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY);
-      writeFileSync(lockFd, String(process.pid));
-      return true;
-    } catch {
-      // Check for stale lock (process no longer alive)
-      try {
-        const pid = parseInt(readFileSync(lockPath, 'utf8').trim(), 10);
-        if (pid && !isProcessAlive(pid)) {
-          unlinkSync(lockPath);
-          continue;
-        }
-        // eslint-disable-next-line learning-loop/no-empty-catch
-      } catch {}
-      if (i < retries - 1) {
-        const start = Date.now();
-        while (Date.now() - start < delayMs) {}
-      }
-    }
-  }
-  return false;
-}
-
-function isProcessAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  if (_heldHandle !== null) return false;
+  const handle = _acquireFileLock(dbPath, { retries, retryDelayMs: delayMs });
+  if (!handle) return false;
+  _heldHandle = handle;
+  _heldPath = dbPath;
+  return true;
 }
 
 export function releaseLock(dbPath) {
-  const lockPath = dbPath + '.lock';
-  if (lockFd !== null) {
-    try {
-      closeSync(lockFd);
-      // eslint-disable-next-line learning-loop/no-empty-catch
-    } catch {}
-    lockFd = null;
-  }
-  try {
-    unlinkSync(lockPath);
-    // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {}
+  if (_heldHandle === null) return;
+  // Defensive: caller passed a different path than the one we hold. Don't
+  // silently release someone else's lock.
+  if (dbPath !== _heldPath) return;
+  _releaseFileLock(_heldHandle);
+  _heldHandle = null;
+  _heldPath = null;
 }
 
 const VALID_TYPES = [
