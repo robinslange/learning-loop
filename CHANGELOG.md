@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.4
+
+### Fixed
+
+- **Session-id env var rename: skills and the `reflect-track` hook helper now read `CLAUDE_CODE_SESSION_ID` instead of the unset `CLAUDE_SESSION_ID`.** Claude Code exposes the canonical session id as `CLAUDE_CODE_SESSION_ID` (with the `CODE_` prefix); the unprefixed variant has never been populated, so every session-keyed tmp path in `/reflect`, `/ingest`, `/gaps`, and `/deepen` silently collapsed to the literal fallback `ll-session-*`. Effect: parallel skill invocations across two windows wrote to the same tmp files, racing on new-notes lists and refinement candidate batches — caught when a `/reflect` in one window picked up unrelated inbox notes from another. The plugin's internal `getSessionId()` in `scripts/lib/session.mjs` is unchanged; it has always read the ppid-keyed marker file written by session-start hooks and was never affected. Renamed across all 5 SKILL.md files, `skills/_shared/hook-replay.md`, `hooks/modules/reflect-track.mjs`, and the matching `tests/reflect-new-notes-track.test.mjs`.
+
 ## v1.25.3
 
 ### Fixed
