@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync } from 'fs';
-import { appendJsonlLine } from './lib/jsonl.mjs';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'node:os';
 import { VAULT_PATH, DB_PATH, PLUGIN_DATA, DISCRIMINATE_THRESHOLD } from './lib/constants.mjs';
 import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
-import { getSessionId } from './lib/session.mjs';
+import { writeRetrieval } from './lib/retrieval.mjs';
 
 const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
 
@@ -88,31 +87,14 @@ function out(data) {
 }
 
 function logRetrieval(command, query, results) {
-  try {
-    const dir = join(PLUGIN_DATA, 'retrieval');
-    mkdirSync(dir, { recursive: true });
-    const now = new Date();
-    const file = join(dir, `queries-${now.toISOString().slice(0, 7)}.jsonl`);
-    const sessionId = getSessionId();
-    const federated = existsSync(FEDERATION_CONFIG);
-    const topPaths = Array.isArray(results)
-      ? results.slice(0, 10).map((r) => r.path || r.note_a || '')
-      : [];
-    const peerCount = topPaths.filter((p) => p.startsWith('peer:')).length;
-    const entry = {
-      ts: now.toISOString(),
-      session_id: sessionId,
-      command,
-      query,
-      federated,
-      result_count: Array.isArray(results) ? results.length : 0,
-      peer_results: peerCount,
-      top_paths: topPaths,
-    };
-    appendJsonlLine(file, entry);
-  } catch (err) {
-    logError('vault-search.logQuery', err);
-  }
+  writeRetrieval({
+    pluginData: PLUGIN_DATA,
+    prefix: 'queries',
+    command,
+    query,
+    results,
+    meta: { federated: existsSync(FEDERATION_CONFIG) },
+  });
 }
 
 function intentions(context) {
