@@ -103,30 +103,31 @@ fn query_with_query_string_only_does_not_create_file() {
 }
 
 #[test]
-fn index_into_missing_path_DOES_create_file() {
-    // Sanity check: `index` is the legitimate writeable entry point. It must
-    // still create the db when missing, otherwise the first index would be
-    // impossible. This guards against an over-eager fix that locks everything
-    // down.
+fn open_or_create_db_creates_parent_dir_and_file() {
+    // Sanity check: open_or_create_db is the legitimate writeable entry point.
+    // It must still mkdir the parent + create the db when missing — otherwise
+    // the first `ll-search index` would be impossible. This guards against an
+    // over-eager fix that locks everything down.
+    //
+    // Tests the helper directly rather than spawning `ll-search index`, which
+    // requires the ONNX runtime and embedding model — both unavailable in
+    // sandboxed CI envs. The contract we care about lives one layer below the
+    // subcommand: any caller of open_or_create_db gets a usable connection.
     let tmp = tempfile::tempdir().expect("tempdir");
-    let vault = tmp.path().join("vault");
-    std::fs::create_dir_all(&vault).unwrap();
-    let fresh_db = tmp.path().join("nested").join("vault-index.db");
+    let fresh_db = tmp.path().join("nested").join("more-nested").join("vault-index.db");
 
-    let _out = Command::new(ll_search_bin())
-        .args([
-            "index",
-            vault.to_str().unwrap(),
-            fresh_db.to_str().unwrap(),
-        ])
-        .output()
-        .expect("spawn ll-search");
+    assert!(!fresh_db.parent().unwrap().exists(), "parent must not pre-exist");
 
-    // Don't assert success — index needs the embedding model and may fail in
-    // sandboxed test envs. The point of this test is the file-creation
-    // behavior: `index` is allowed to mkdir + create.
+    let conn = ll_search::db::open_or_create_db(fresh_db.to_str().unwrap())
+        .expect("open_or_create_db should succeed on missing path");
+
     assert!(
         fresh_db.parent().unwrap().exists(),
-        "index should have created parent dir for db path"
+        "open_or_create_db must create the parent dir"
     );
+    assert!(
+        fresh_db.exists(),
+        "open_or_create_db must create the db file"
+    );
+    drop(conn);
 }
