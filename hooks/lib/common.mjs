@@ -14,6 +14,7 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
+import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
 
 export { resolvePluginData, getSessionId };
 export const resolveVaultPath = getVaultPath;
@@ -127,7 +128,7 @@ export function emitProvenance(event) {
   provenanceDedupeKeys.add(key);
   const pd = resolvePluginData();
   if (!pd) return;
-  const dir = join(pd, 'provenance');
+  const dir = DATA_PATHS.provenance(pd);
   mkdirSync(dir, { recursive: true });
   const record = {
     ts: new Date().toISOString(),

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { appendJsonlLine } from './jsonl.mjs';
 import { getSessionId } from './session.mjs';
 import { logError } from './log.mjs';
+import { DATA_PATHS } from './paths.mjs';
 
 function monthStr() {
   const now = new Date();
@@ -48,7 +49,7 @@ export function writeRetrieval(opts) {
   try {
     const { pluginData, prefix, command, query, results, meta = {} } = opts;
     if (!pluginData) return;
-    const dir = join(pluginData, 'retrieval');
+    const dir = DATA_PATHS.retrieval(pluginData);
     mkdirSync(dir, { recursive: true });
     const topPaths = Array.isArray(results)
       ? results.slice(0, 10).map((r) => r.path || r.note_a || '')

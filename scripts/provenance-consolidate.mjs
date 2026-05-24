@@ -4,8 +4,9 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 
 import { join } from 'path';
 import { getPluginData } from './lib/config.mjs';
 import { logError } from './lib/log.mjs';
+import { DATA_PATHS } from './lib/paths.mjs';
 
-const PROVENANCE_DIR = join(getPluginData(), 'provenance');
+const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
 
 function readEventLogs() {
   const events = [];
@@ -82,7 +83,7 @@ if (events.length === 0) {
   const output = { summaries, event_count: events.length };
 
   const pluginData = getPluginData();
-  const outDir = join(pluginData, 'federation');
+  const outDir = DATA_PATHS.federation(pluginData);
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'provenance-local.json'), JSON.stringify(output, null, 2) + '\n');
 

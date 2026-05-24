@@ -4,6 +4,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
+import { DATA_FILES } from '../paths.mjs';
 
 const VAULT_FOLDERS = [
   '0-inbox',
@@ -178,7 +179,7 @@ export function checkBinaryVersionFile({ pluginData } = {}) {
       fix: 'Fix plugin-data resolution first',
     });
   }
-  const verPath = join(pluginData, 'bin', '.version');
+  const verPath = DATA_FILES.binVersion(pluginData);
   if (!existsSync(verPath)) {
     return makeCheck({
       id: CHECK_IDS['binary-version-file'],
@@ -556,7 +557,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
       fix: null,
     });
   }
-  const p = join(pluginData, 'nli.sock');
+  const p = DATA_FILES.nliSocket(pluginData);
   if (!existsSync(p)) {
     return makeCheck({
       id: CHECK_IDS['nli-socket-fresh'],

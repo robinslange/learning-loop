@@ -2,17 +2,17 @@
 // post-search-tracking.js — Track episodic memory search queries
 // and annotate results when the query matches a superseded pattern.
 
-import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
 import { openEdgeDb, findMatchingSupersessions } from '../scripts/lib/edges.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
+import { DATA_FILES } from '../scripts/lib/paths.mjs';
 
 async function checkSupersessions(query) {
   const pluginData = resolvePluginData();
   if (!pluginData) return null;
-  const dbPath = join(pluginData, 'edges.db');
+  const dbPath = DATA_FILES.edgesDb(pluginData);
   if (!existsSync(dbPath)) return null;
 
   let db;

@@ -28,11 +28,12 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
+import { DATA_PATHS } from './lib/paths.mjs';
 
 const pluginData =
   env.CLAUDE_PLUGIN_DATA ||
   join(homedir(), '.claude', 'plugins', 'data', 'learning-loop-learning-loop-marketplace');
-const queuePath = join(pluginData, 'librarian', 'queue.jsonl');
+const queuePath = DATA_PATHS.librarianQueue(pluginData);
 
 if (!existsSync(queuePath)) {
   console.error(`No queue at ${queuePath}`);

@@ -13,9 +13,10 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
+import { DATA_FILES } from './lib/paths.mjs';
 import { openEdgeDb } from './lib/edges.mjs';
 
-const DB_FILE = join(PLUGIN_DATA, 'edges.db');
+const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
 const args = process.argv.slice(2);
 const cmd = args[0];
 

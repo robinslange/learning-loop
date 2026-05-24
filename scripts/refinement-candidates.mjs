@@ -26,7 +26,8 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnEnv } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
-import { getVaultPath } from './lib/config.mjs';
+import { getVaultPath, getPluginData } from './lib/config.mjs';
+import { DATA_FILES } from './lib/paths.mjs';
 import { openEdgeDb, getNliEdgesForNote } from './lib/edges.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -55,11 +56,9 @@ function resolveBinary() {
 }
 
 function resolveEdgesDbPath() {
-  const pluginData = resolve(
-    homedir(),
-    '.claude/plugins/data/learning-loop-learning-loop-marketplace',
-  );
-  return resolve(pluginData, 'edges.db');
+  const pluginData = getPluginData();
+  if (!pluginData) return null;
+  return DATA_FILES.edgesDb(pluginData);
 }
 
 // Open edges.db for NLI hint lookup. Returns null on any failure; hint mode
@@ -67,7 +66,7 @@ function resolveEdgesDbPath() {
 // degrades gracefully to text-only refinement evaluation.
 async function openEdgesDbSafely() {
   const path = resolveEdgesDbPath();
-  if (!existsSync(path)) return null;
+  if (!path || !existsSync(path)) return null;
   try {
     return await openEdgeDb(path);
   } catch (err) {

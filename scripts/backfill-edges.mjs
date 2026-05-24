@@ -16,6 +16,7 @@ import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename, sep } from 'path';
 import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
+import { DATA_FILES } from './lib/paths.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -27,7 +28,7 @@ import {
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
-const DB_FILE = join(PLUGIN_DATA, 'edges.db');
+const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
 
 const args = process.argv.slice(2);
 

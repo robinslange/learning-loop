@@ -8,8 +8,9 @@ import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
+import { DATA_PATHS } from './lib/paths.mjs';
 
-const PROVENANCE_DIR = join(getPluginData(), 'provenance');
+const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
 const TEMPLATE_DIR = join(import.meta.dirname, '..', 'provenance');
 
 function getCurrentMonthFile() {

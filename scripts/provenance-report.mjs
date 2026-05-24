@@ -6,8 +6,9 @@ import { basename, join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
+import { DATA_PATHS } from './lib/paths.mjs';
 
-const PROVENANCE_DIR = join(getPluginData(), 'provenance');
+const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
 const SUMMARIES_DIR = join(PROVENANCE_DIR, 'summaries');
 
 function readAllEvents() {

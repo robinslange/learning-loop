@@ -15,11 +15,12 @@ import { initSQL } from './lib/sqljs.mjs';
 import { PLUGIN_DATA } from './lib/constants.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { logError } from './lib/log.mjs';
+import { FEDERATION_PATHS } from './lib/paths.mjs';
 
-const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
-const OUTBOX_DIR = join(FEDERATION_DIR, 'outbox');
-const PEERS_DIR = join(FEDERATION_DIR, 'data', 'peers');
-const CONFIG_PATH = join(FEDERATION_DIR, 'config.json');
+const FEDERATION_DIR = FEDERATION_PATHS.root(PLUGIN_DATA);
+const OUTBOX_DIR = FEDERATION_PATHS.outbox(PLUGIN_DATA);
+const PEERS_DIR = FEDERATION_PATHS.peersDir(PLUGIN_DATA);
+const CONFIG_PATH = FEDERATION_PATHS.config(PLUGIN_DATA);
 
 const args = process.argv.slice(2);
 
@@ -49,7 +50,7 @@ const replacement = parseFlag('--replacement', null);
 const sourceGraph = parseFlag('--source-graph', 'local');
 
 async function peerHasNote(peerId, notePath) {
-  const dbPath = join(PEERS_DIR, peerId, 'index.db');
+  const dbPath = FEDERATION_PATHS.peerDb(PLUGIN_DATA, peerId);
   if (!existsSync(dbPath)) return false;
   try {
     const SQL = await initSQL();

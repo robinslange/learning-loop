@@ -8,14 +8,15 @@ import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
 
 export async function run(ctx) {
   // Federation seed-meta backfill (one-shot for existing federations).
   if (ctx.pluginData) {
     try {
-      const seedConfigPath = join(ctx.pluginData, 'federation', 'config.json');
-      const seedMetaPath = join(ctx.pluginData, 'federation', '.seed-meta.json');
-      const noticePath = join(ctx.pluginData, 'federation', '.seed-notice-shown');
+      const seedConfigPath = FEDERATION_PATHS.config(ctx.pluginData);
+      const seedMetaPath = FEDERATION_PATHS.seedMeta(ctx.pluginData);
+      const noticePath = FEDERATION_PATHS.seedNoticeShown(ctx.pluginData);
 
       if (existsSync(seedConfigPath) && !existsSync(seedMetaPath)) {
         writeFileSync(
@@ -72,7 +73,7 @@ export async function run(ctx) {
         JSON.stringify(files),
       );
       if (ctx.pluginData) {
-        const retrievalDir = join(ctx.pluginData, 'retrieval');
+        const retrievalDir = DATA_PATHS.retrieval(ctx.pluginData);
         mkdirSync(retrievalDir, { recursive: true });
         const entry = {
           ts: new Date().toISOString(),
@@ -100,7 +101,7 @@ export async function run(ctx) {
   // TTL sweep for session-dedupe files older than SESSION_DEDUPE_TTL_MS.
   if (ctx.pluginData) {
     try {
-      const dedupeDir = join(ctx.pluginData, 'retrieval', 'session-dedupe');
+      const dedupeDir = join(DATA_PATHS.retrieval(ctx.pluginData), 'session-dedupe');
       if (existsSync(dedupeDir)) {
         const cutoff = Date.now() - HookConfig.SESSION_DEDUPE_TTL_MS;
         for (const f of readdirSync(dedupeDir)) {

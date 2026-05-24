@@ -26,15 +26,18 @@ import { getPluginData } from '../lib/config.mjs';
 import { safeLoad } from '../lib/safe-load.mjs';
 import { withLock } from '../lib/file-lock.mjs';
 import { logError } from '../lib/log.mjs';
+import { DATA_PATHS } from '../lib/paths.mjs';
 
 function librarianDir() {
   const pd = getPluginData();
   if (!pd) throw new Error('PLUGIN_DATA not available');
-  return join(pd, 'librarian');
+  return DATA_PATHS.librarian(pd);
 }
 
 function queuePath() {
-  return join(librarianDir(), 'queue.jsonl');
+  const pd = getPluginData();
+  if (!pd) throw new Error('PLUGIN_DATA not available');
+  return DATA_PATHS.librarianQueue(pd);
 }
 
 function statePath() {

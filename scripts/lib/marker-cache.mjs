@@ -9,15 +9,18 @@
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logError } from './log.mjs';
+import { DATA_PATHS } from './paths.mjs';
 
 // 25 hours: ensures at least one session per day refreshes, even on weekly cadence.
 export const MARKER_TTL_MS = 25 * 60 * 60 * 1000;
 
 // Canonical marker paths. Hook and worker both call these — never construct
-// the path inline. Add a new marker by adding a new entry here.
+// the path inline. Add a new marker by adding a new entry here. The parent
+// directory comes from DATA_PATHS.sessionStartCache so a future rename of
+// session-start-cache/ requires changing exactly one line.
 export const MARKER_PATHS = {
-  intentions: (pluginData) => join(pluginData, 'session-start-cache', 'intentions.json'),
-  dreamGate: (pluginData) => join(pluginData, 'session-start-cache', 'dream-gate.json'),
+  intentions: (pluginData) => join(DATA_PATHS.sessionStartCache(pluginData), 'intentions.json'),
+  dreamGate: (pluginData) => join(DATA_PATHS.sessionStartCache(pluginData), 'dream-gate.json'),
 };
 
 export function readMarker(path) {

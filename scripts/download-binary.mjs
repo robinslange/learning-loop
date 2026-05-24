@@ -16,6 +16,7 @@ import { getPluginData } from './lib/config.mjs';
 import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
+import { DATA_FILES } from './lib/paths.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -120,12 +121,13 @@ async function main() {
 
   const version = getVersion();
   const repo = getRepo();
-  const binDir = join(getPluginData(), 'bin');
+  const pluginData = getPluginData();
+  const binDir = join(pluginData, 'bin');
   const binaryName = platform() === 'win32' ? 'll-search.exe' : 'll-search';
   const binaryPath = join(binDir, binaryName);
 
   // Check if already installed at this version
-  const versionFile = join(binDir, '.version');
+  const versionFile = DATA_FILES.binVersion(pluginData);
   if (existsSync(versionFile) && existsSync(binaryPath)) {
     const installed = readFileSync(versionFile, 'utf-8').trim();
     if (installed === version) {

@@ -12,11 +12,12 @@ import { home, resolvePluginData } from './common.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { writeMarker, readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
+import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
 
 const tmp = tmpdir();
 const pluginData = resolvePluginData();
 const DREAM_MARKER = pluginData
-  ? join(pluginData, 'retrieval', 'last-dream')
+  ? join(DATA_PATHS.retrieval(pluginData), 'last-dream')
   : join(tmp, 'learning-loop-last-dream');
 // DREAM_RUNNING_MARKER is a presence signal (not a lock) — checked via existsSync only.
 const DREAM_RUNNING_MARKER = join(tmp, 'learning-loop-dream-lock');

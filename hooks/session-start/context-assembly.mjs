@@ -10,6 +10,7 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
+import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -168,7 +169,7 @@ export async function run(ctx) {
 
   // 7.5. Learned patterns.
   if (pluginData) {
-    const patternsFile = join(pluginData, 'provenance', 'learned-patterns.md');
+    const patternsFile = join(DATA_PATHS.provenance(pluginData), 'learned-patterns.md');
     if (existsSync(patternsFile)) {
       try {
         const patternsContent = readFileSync(patternsFile, 'utf8');
@@ -183,9 +184,9 @@ export async function run(ctx) {
 
     // 7.6. Federation status.
     try {
-      const fedConfigPath = join(pluginData, 'federation', 'config.json');
+      const fedConfigPath = FEDERATION_PATHS.config(pluginData);
       if (existsSync(fedConfigPath)) {
-        const peersDir = join(pluginData, 'federation', 'data', 'peers');
+        const peersDir = FEDERATION_PATHS.peersDir(pluginData);
         if (existsSync(peersDir)) {
           const peerNames = readdirSync(peersDir, { withFileTypes: true })
             .filter((e) => e.isDirectory())

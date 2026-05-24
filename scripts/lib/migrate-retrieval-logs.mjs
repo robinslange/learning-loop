@@ -20,6 +20,7 @@
 import { existsSync, rmSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from './log.mjs';
+import { DATA_PATHS } from './paths.mjs';
 
 const MARKER = '.retrieval-migrated-v2';
 
@@ -48,7 +49,7 @@ export function migrateRetrievalLogsIfNeeded(pluginData) {
   if (!pluginData) return { skipped: true, reason: 'no-plugin-data' };
   const marker = join(pluginData, MARKER);
   if (existsSync(marker)) return { skipped: true, reason: 'already-migrated' };
-  const retrievalDir = join(pluginData, 'retrieval');
+  const retrievalDir = DATA_PATHS.retrieval(pluginData);
   let removed = 0;
   try {
     if (existsSync(retrievalDir)) {

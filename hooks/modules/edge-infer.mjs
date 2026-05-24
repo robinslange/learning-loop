@@ -21,6 +21,7 @@ import {
 } from '../../scripts/lib/edges.mjs';
 import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
 import { spawnEnv } from '../../scripts/lib/env.mjs';
+import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   evidence_for: 'evidence-for',
@@ -384,7 +385,7 @@ async function runNliBatch(sourceText, neighbours) {
   // the fast-path adds zero overhead in that case.
   const pluginData = resolvePluginData();
   if (pluginData) {
-    const socketPath = join(pluginData, 'nli.sock');
+    const socketPath = DATA_FILES.nliSocket(pluginData);
     if (existsSync(socketPath)) {
       const daemonResult = await runNliBatchViaDaemon(socketPath, premise, hypotheses);
       if (daemonResult.ok) {
@@ -441,7 +442,7 @@ export async function runEdgeInfer(ctx) {
   const pluginData = resolvePluginData();
   if (!pluginData) return;
 
-  const dbPath = join(pluginData, 'edges.db');
+  const dbPath = DATA_FILES.edgesDb(pluginData);
 
   let noteContent;
   if (tool === 'Write') {

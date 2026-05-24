@@ -8,8 +8,9 @@ import { hasBinary, run } from './lib/binary.mjs';
 import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
+import { FEDERATION_PATHS } from './lib/paths.mjs';
 
-const FEDERATION_CONFIG = join(PLUGIN_DATA, 'federation', 'config.json');
+const FEDERATION_CONFIG = FEDERATION_PATHS.config(PLUGIN_DATA);
 
 function federationArgs() {
   if (!existsSync(FEDERATION_CONFIG)) return [];
