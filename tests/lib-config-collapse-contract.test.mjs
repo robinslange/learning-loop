@@ -1,12 +1,14 @@
-// Contract test for Phases 2 + 3b: hooks-side resolveVaultPath / resolveConfig
-// are now thin re-exports of the canonical getVaultPath / getConfig.
-// This test pins that contract so a future divergence (someone reintroducing
-// the local function) fails fast with a referenced-identity check.
+// Contract test for Phases 1 + 2 + 3b: hooks-side resolveVaultPath /
+// resolveConfig / getSessionId are now thin re-exports of canonical helpers
+// in scripts/lib/. This test pins that contract so a future divergence
+// (someone reintroducing the local function or shadowing the export with a
+// local impl) fails fast with a referenced-identity check.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as hooksCommon from '../hooks/lib/common.mjs';
 import * as libConfig from '../scripts/lib/config.mjs';
+import * as libSession from '../scripts/lib/session.mjs';
 
 test('hooks/lib/common.resolveVaultPath === scripts/lib/config.getVaultPath', () => {
   assert.equal(
@@ -29,5 +31,13 @@ test('hooks/lib/common.resolvePluginData === scripts/lib/config.resolvePluginDat
     hooksCommon.resolvePluginData,
     libConfig.resolvePluginData,
     'resolvePluginData has always been a re-export; pinning the contract for consistency with the Phase 2/3b aliases',
+  );
+});
+
+test('hooks/lib/common.getSessionId === scripts/lib/session.getSessionId', () => {
+  assert.equal(
+    hooksCommon.getSessionId,
+    libSession.getSessionId,
+    'getSessionId must be a direct re-export of canonical scripts/lib/session.getSessionId; shadowing it with a local impl re-creates the Phase 1 drift',
   );
 });

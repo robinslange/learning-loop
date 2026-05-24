@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
 import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
+import { logError } from './log.mjs';
 
 // Path-keyed lock wrapper. Preserves the existing acquireLock(dbPath) /
 // releaseLock(dbPath) public contract used by edge-infer.mjs and edges-cli.mjs
@@ -22,9 +23,17 @@ export function acquireLock(dbPath, retries = 3, delayMs = 50) {
 
 export function releaseLock(dbPath) {
   if (_heldHandle === null) return;
-  // Defensive: caller passed a different path than the one we hold. Don't
-  // silently release someone else's lock.
-  if (dbPath !== _heldPath) return;
+  if (dbPath !== _heldPath) {
+    // Caller bug: tried to release a lock we don't hold. Surface it
+    // instead of silently swallowing — exactly the silent-failure shape
+    // Phase 3 set out to fix. We still don't release the held lock,
+    // because doing so could free a lock the caller doesn't know exists.
+    logError('edges.releaseLock.pathMismatch', new Error('path mismatch'), {
+      requested: dbPath,
+      held: _heldPath,
+    });
+    return;
+  }
   _releaseFileLock(_heldHandle);
   _heldHandle = null;
   _heldPath = null;
