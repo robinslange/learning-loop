@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { spawnEnv } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { isProcessAlive } from '../../scripts/lib/file-lock.mjs';
 
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
@@ -34,11 +35,13 @@ export async function run(ctx) {
   try {
     const raw = readFileSync(legacyPidPath, 'utf8').trim();
     const pid = parseInt(raw, 10);
-    if (Number.isFinite(pid)) {
+    if (Number.isFinite(pid) && isProcessAlive(pid)) {
       try {
-        process.kill(pid, 0);
         process.kill(pid, 'SIGTERM');
       } catch (err) {
+        // SIGTERM can still fail with EPERM (not our process) or ESRCH
+        // (process died between liveness check and signal). Either way the
+        // daemon is no longer holding the legacy pidfile we care about.
         logError('session-start.watch-daemon.legacyReap', err);
       }
     }
@@ -76,12 +79,7 @@ export async function run(ctx) {
     if (raw === '') return { state: 'writer-in-progress' };
     const pid = parseInt(raw, 10);
     if (!Number.isFinite(pid)) return { state: 'corrupt' };
-    try {
-      process.kill(pid, 0);
-      return { state: 'alive', pid };
-    } catch {
-      return { state: 'dead', pid };
-    }
+    return isProcessAlive(pid) ? { state: 'alive', pid } : { state: 'dead', pid };
   }
 
   const sleepBuf = new Int32Array(new SharedArrayBuffer(4));

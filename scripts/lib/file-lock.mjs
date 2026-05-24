@@ -43,11 +43,19 @@ function syncSleep(ms) {
 
 /**
  * Returns true if the given PID corresponds to a live process.
- * EPERM means the process exists but is owned by another user — still alive.
+ * EPERM means the process exists but is owned by another user — still alive
+ * (matches POSIX semantics; on Windows, kill(pid, 0) returns EPERM for a
+ * live process owned by SYSTEM, so the EPERM-means-alive rule is correct
+ * cross-platform).
+ *
+ * Exported so other liveness probes (watch.mjs, health-check.mjs,
+ * watch-daemon.mjs) can share the same EPERM-means-alive contract instead
+ * of hand-rolling their own try/catch around process.kill(pid, 0).
+ *
  * @param {number} pid
  * @returns {boolean}
  */
-function isProcessAlive(pid) {
+export function isProcessAlive(pid) {
   if (!Number.isFinite(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);

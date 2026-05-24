@@ -17,7 +17,8 @@ import { homedir } from 'node:os';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { detectAbiDrift } from './check-deps-impl.mjs';
-import { resolvePluginData } from './lib/config.mjs';
+import { resolvePluginData, getVaultPath } from './lib/config.mjs';
+import { isProcessAlive } from './lib/file-lock.mjs';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
 
@@ -43,18 +44,10 @@ function readJsonSafe(path) {
   }
 }
 
-function readVaultRoot() {
-  const pluginData = resolvePluginData();
-  if (pluginData) {
-    const cfg = readJsonSafe(join(pluginData, 'config.json'));
-    if (cfg?.vault_path) {
-      return cfg.vault_path.replace(/^~/, process.env.HOME || homedir());
-    }
-  }
-  const cfg = readJsonSafe(join(PLUGIN_DIR, 'config.json'));
-  if (cfg?.vault_path) return cfg.vault_path.replace(/^~/, process.env.HOME || homedir());
-  return null;
-}
+// Delegates to canonical getVaultPath: consults VAULT_PATH env first (the
+// inline implementation here never did), then cfg.vault_path. Returns null
+// when unconfigured.
+const readVaultRoot = getVaultPath;
 
 function readInstalledPluginVersion(home) {
   const p = join(home, '.claude/plugins/installed_plugins.json');
@@ -130,15 +123,13 @@ export async function runFullChecks(ctx = {}) {
   if (pidfileExists) {
     try {
       pid = parseInt(readFileSync(pidfilePath, 'utf-8').trim(), 10);
-      if (Number.isFinite(pid)) {
-        try {
-          process.kill(pid, 0);
-          pidIsAlive = true;
-        } catch {
-          pidIsAlive = false;
-        }
-      }
-    } catch {}
+      if (Number.isFinite(pid)) pidIsAlive = isProcessAlive(pid);
+      // eslint-disable-next-line learning-loop/no-empty-catch
+    } catch {
+      // Documented fallback: readFileSync may throw if the pidfile vanishes
+      // between existsSync and read; treat as "no daemon" (pidIsAlive stays
+      // false). Empty catch on purpose.
+    }
   }
 
   const quickResult = await runQuickChecks(ctx);

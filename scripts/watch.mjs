@@ -16,6 +16,7 @@ import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 import { spawnEnv } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
+import { isProcessAlive } from './lib/file-lock.mjs';
 
 const USAGE = `Usage:
   ll-watch                 — start watcher in background
@@ -102,32 +103,24 @@ if (command === 'status') {
     process.exit(1);
   }
   const pid = parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
-  try {
-    process.kill(pid, 0);
+  if (isProcessAlive(pid)) {
     console.log(`Running (pid ${pid})`);
     process.exit(0);
-  } catch (err) {
-    logError('watch.status.kill0', err);
-    console.log(`Not running (stale pid ${pid})`);
-    process.exit(1);
   }
+  console.log(`Not running (stale pid ${pid})`);
+  process.exit(1);
 }
 
 // ── start: refuse if a watcher is already alive, then spawn the binary ──
 
 if (existsSync(pidFile)) {
   const existingPid = parseInt(readFileSync(pidFile, 'utf8').trim(), 10);
-  if (Number.isFinite(existingPid)) {
-    try {
-      process.kill(existingPid, 0);
-      console.error(`Watcher already running (pid ${existingPid})`);
-      console.error(`Run 'll-watch stop' first, or 'll-watch status' to verify.`);
-      process.exit(1);
-    } catch (err) {
-      logError('watch.start.existingPidCheck', err);
-      // stale pid file — fall through; the binary will overwrite it
-    }
+  if (Number.isFinite(existingPid) && isProcessAlive(existingPid)) {
+    console.error(`Watcher already running (pid ${existingPid})`);
+    console.error(`Run 'll-watch stop' first, or 'll-watch status' to verify.`);
+    process.exit(1);
   }
+  // stale pid file — fall through; the binary will overwrite it
 }
 
 const args = ['watch', vault, db, '--config-dir', pluginData, '--pid-file', pidFile];
@@ -157,10 +150,7 @@ if (foreground) {
   // success. The Rust side fails fast on pid-file conflict and on missing
   // ORT shared libraries — both happen well within 300ms.
   await delay(300);
-  try {
-    process.kill(child.pid, 0);
-  } catch (err) {
-    logError('watch.start.confirmAlive', err);
+  if (!isProcessAlive(child.pid)) {
     let tail = '(no output)';
     try {
       const lines = readFileSync(logPath, 'utf8').trim().split('\n');
