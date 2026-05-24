@@ -71,6 +71,8 @@ Run a single retrieval call for all learnings identified in Step 2. Pass each le
 node PLUGIN/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
 ```
 
+**MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; calling the raw binary forces you to pass them yourself, and a missing DB arg silently corrupts results — clap consumes the first query string as the db path and the binary returns hits from an empty schema-only DB plus any federation peers.
+
 Parse the JSON result. For each query:
 - `top_match_similarity > 0.90`: likely duplicate. Read the existing note and update it instead of creating a new one.
 - `top_match_similarity 0.70-0.90`: related note exists. Consider linking rather than duplicating.
