@@ -22,8 +22,9 @@
 import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
-import { getPluginRoot } from './lib/config.mjs';
+import { getPluginRoot, getPluginData } from './lib/config.mjs';
 import { env } from './lib/env.mjs';
+import { migrateRetrievalLogsIfNeeded } from './lib/migrate-retrieval-logs.mjs';
 
 const isWindows = process.platform === 'win32';
 const command = process.argv[2] || '--install';
@@ -233,6 +234,19 @@ exec env ORT_DYLIB_PATH="\$BIN_DIR" ORT_LIB_LOCATION="\$BIN_DIR" "\$BIN" "\$@"
   console.log(`Wrote ${llWatchPath}`);
   console.log(`Wrote ${llSearchPath}`);
   console.log(`Both shims resolve their targets at runtime — survive plugin updates.`);
+
+  // One-shot cleanup of pre-canonical retrieval logs. Mixing the old
+  // passthrough/inline shapes with the new canonical shape would muddy
+  // downstream analytics. Marked complete by a sentinel file in plugin-data.
+  const pd = getPluginData();
+  if (pd) {
+    const result = migrateRetrievalLogsIfNeeded(pd);
+    if (!result.skipped) {
+      console.log(
+        `Migrated retrieval logs: removed ${result.removed} pre-canonical .jsonl file(s)`,
+      );
+    }
+  }
 
   const pathDirs = (env.PATH || '').split(':');
   if (!pathDirs.includes(binDir)) {
