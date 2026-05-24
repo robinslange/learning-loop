@@ -13,6 +13,7 @@ import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
+import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 
 export { resolvePluginData, getSessionId };
 export const resolveVaultPath = getVaultPath;
@@ -138,14 +139,18 @@ export function emitProvenance(event) {
 }
 
 export function emitRetrieval(prefix, event) {
-  const pd = resolvePluginData();
-  if (!pd) return;
-  const dir = join(pd, 'retrieval');
-  mkdirSync(dir, { recursive: true });
-  const record = {
-    ts: new Date().toISOString(),
-    session_id: getSessionId(),
-    ...event,
-  };
-  appendJsonlLine(join(dir, `${prefix}-${monthStr()}.jsonl`), record);
+  // Thin adapter: delegate the canonical record shape to lib/retrieval.
+  // event.type was the old "what kind of event" field — map it to the
+  // canonical `command`. event.file (for memory-read events) is treated
+  // as the `query` slot when no real query is present. event itself
+  // becomes meta so any caller-specific fields (tool, session_label,
+  // prompt, etc.) survive on the record.
+  writeRetrieval({
+    pluginData: resolvePluginData(),
+    prefix,
+    command: event.type || event.command || prefix,
+    query: event.query || event.file || '',
+    results: event.results || null,
+    meta: event,
+  });
 }
