@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.3
+
 ### Fixed
 
 - **`/reflect` Step 4 new-notes tracking: moved per-write append into the post-tool hook.** Old contract had Step 4 instruct the agent to `echo "$PATH" >> "${LL_TMP_PREFIX}-new-notes.txt"` after each vault Write, with the init `: > ...` and per-write `echo ... >>` lines living in the same fenced bash block separated only by an inline `# After each vault Write:` comment. Agents reading "after each Write, run this block" naturally re-ran the whole block per Write, re-truncating each time. Step 4.6 then built refinement pairs against only the last vault note in the session. New contract: Step 4 creates an empty marker file once; new `hooks/modules/reflect-track.mjs` wires into the post-tool chain and appends every vault Write/Edit path while the marker exists; Step 4.6.g `rm -f` ends the tracking window. Sub-agent Writes still flow through Step 4.4's `sweep-hook-replay.mjs` replay, which re-fires the new module. `tests/reflect-new-notes-track.test.mjs` (10 tests) pins both halves of the handshake — the SKILL no longer carrying a per-write echo fence, and the hook appending one-line-per-Write under the marker.
