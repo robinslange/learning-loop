@@ -19,7 +19,7 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
 # Session-keyed temp path so parallel skill invocations don't race.
-SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
+SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-$$}-sweep-candidates.txt"
 
 # Detect unlinked candidates (exclude 4-projects — free-form indexes)
 LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"

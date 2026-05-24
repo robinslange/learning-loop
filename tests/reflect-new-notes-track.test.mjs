@@ -71,10 +71,10 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     fakeVaultRoot = mkdtempSync(join(tmpdir(), 'll-reflect-newnotes-vault-'));
 
     savedTmpdir = process.env.TMPDIR;
-    savedSessionId = process.env.CLAUDE_SESSION_ID;
+    savedSessionId = process.env.CLAUDE_CODE_SESSION_ID;
     savedVault = process.env.LL_VAULT_PATH;
     process.env.TMPDIR = tmpRoot;
-    process.env.CLAUDE_SESSION_ID = 'reflect-test';
+    process.env.CLAUDE_CODE_SESSION_ID = 'reflect-test';
   });
 
   after(() => {
@@ -82,8 +82,8 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     rmSync(fakeVaultRoot, { recursive: true, force: true });
     if (savedTmpdir !== undefined) process.env.TMPDIR = savedTmpdir;
     else delete process.env.TMPDIR;
-    if (savedSessionId !== undefined) process.env.CLAUDE_SESSION_ID = savedSessionId;
-    else delete process.env.CLAUDE_SESSION_ID;
+    if (savedSessionId !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedSessionId;
+    else delete process.env.CLAUDE_CODE_SESSION_ID;
     if (savedVault !== undefined) process.env.LL_VAULT_PATH = savedVault;
     else delete process.env.LL_VAULT_PATH;
   });
@@ -121,8 +121,8 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     it('uses session-keyed path expansion consistently', () => {
       // Step 4.6 reads, Step 4.6.g deletes, the hook appends — all three
       // must hit the same path or the handshake breaks silently.
-      const expected = '${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-reflect';
-      const occurrences = (skill.match(/\$\{TMPDIR:-\/tmp\}\/ll-\$\{CLAUDE_SESSION_ID:-[^}]+\}-reflect/g) || []);
+      const expected = '${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-reflect';
+      const occurrences = (skill.match(/\$\{TMPDIR:-\/tmp\}\/ll-\$\{CLAUDE_CODE_SESSION_ID:-[^}]+\}-reflect/g) || []);
       assert.ok(
         occurrences.length >= 3,
         `expected at least 3 references to the session-keyed reflect prefix (init, refinement, cleanup); ` +

@@ -2,7 +2,7 @@
 //
 // Handshake with skills/reflect/SKILL.md Step 4:
 //   - Step 4 init creates an empty marker file at the session-keyed path
-//     ${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-session}-reflect-new-notes.txt.
+//     ${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-reflect-new-notes.txt.
 //   - For every vault Write/Edit that fires during the marker's lifetime,
 //     this module appends the absolute file path + newline.
 //   - Step 4.6.g `rm -f` deletes the marker, ending the tracking window.
@@ -28,11 +28,11 @@ import { vaultRelPath } from '../lib/common.mjs';
 // Any drift here silently breaks the handshake: the hook would write to
 // one path and the skill would read another. We read process.env directly
 // (rather than the frozen `env` snapshot from scripts/lib/env.mjs) because
-// TMPDIR and CLAUDE_SESSION_ID can vary per session and per test — the
+// TMPDIR and CLAUDE_CODE_SESSION_ID can vary per session and per test — the
 // snapshot would lock us to whatever the test runner saw at import time.
 export function reflectNewNotesPath() {
   const tmp = process.env.TMPDIR || tmpdir();
-  const sid = process.env.CLAUDE_SESSION_ID || 'session';
+  const sid = process.env.CLAUDE_CODE_SESSION_ID || 'session';
   return join(tmp, `ll-${sid}-reflect-new-notes.txt`);
 }
 

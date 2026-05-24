@@ -190,7 +190,7 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
-SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_SESSION_ID:-$$}-sweep-candidates.txt"
+SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-$$}-sweep-candidates.txt"
 
 LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
