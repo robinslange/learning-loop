@@ -24,7 +24,7 @@ export const VAULT_DIRS = [
   '5-maps',
 ];
 
-export const TITLE_INDEX_EXTRA_DIRS = ['Excalidraw'];
+export const TITLE_INDEX_EXTRA_DIRS = ['Excalidraw', '6-writing'];
 
 // Edge-classifier resolution priority: permanent wins over literature wins
 // over inbox, etc. Mirrors scripts/lib/edge-classifier.mjs:VAULT_DIRS order.

@@ -28,18 +28,24 @@ function findDuplicateTags(tags) {
 
 function buildNoteIndex(vaultRoot) {
   const snap = loadVaultSnapshot(vaultRoot);
-  return new Set((snap?.notes ?? []).map((n) => `${n.basename}.md`));
+  const notes = snap?.notes ?? [];
+  const basenames = new Set();
+  const relPaths = new Set();
+  for (const n of notes) {
+    basenames.add(`${n.basename}.md`);
+    if (n.rel_path) {
+      relPaths.add(n.rel_path);
+      relPaths.add(n.rel_path.replace(/\.md$/, ''));
+    }
+  }
+  return { basenames, relPaths };
 }
 
 function noteExistsInIndex(name, noteIndex) {
-  return noteIndex.has(`${name}.md`);
-}
-
-function checkBodySourceLeak(fm, body) {
-  if (!fm.source) return null;
-  const match = body.match(/^Sources?:/im);
-  if (!match) return null;
-  return `Body has \`${match[0]}\` line while frontmatter already declares \`source:\`. Capture-rules: sources go in frontmatter, not body. Remove the body line, or remove the frontmatter \`source:\` if the body citation is the authoritative one.`;
+  if (noteIndex.basenames.has(`${name}.md`)) return true;
+  if (noteIndex.relPaths.has(name)) return true;
+  if (noteIndex.relPaths.has(`${name}.md`)) return true;
+  return false;
 }
 
 function checkDuplicateNote(filePath, title, vaultRoot) {
@@ -116,9 +122,6 @@ runHook(({ tool, input }) => {
   }
 
   const warnings = [];
-
-  const bodySourceWarning = checkBodySourceLeak(fm, fmBody);
-  if (bodySourceWarning) warnings.push(bodySourceWarning);
 
   const links = extractWikilinks(fmBody);
   const noteIndex = buildNoteIndex(vaultRoot);

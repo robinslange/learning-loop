@@ -29,8 +29,10 @@ describe('pre-write-check', () => {
   before(() => {
     mkdirSync(join(VAULT, '0-inbox'), { recursive: true });
     mkdirSync(join(VAULT, '3-permanent'), { recursive: true });
+    mkdirSync(join(VAULT, '6-writing'), { recursive: true });
     mkdirSync(join(VAULT, '_system'), { recursive: true });
     writeFileSync(join(VAULT, '3-permanent', 'existing-note.md'), '---\ntitle: existing note\n---\n');
+    writeFileSync(join(VAULT, '6-writing', 'the-loud-room.md'), '---\ntitle: the loud room\n---\n');
   });
 
   after(() => {
@@ -93,5 +95,29 @@ describe('pre-write-check', () => {
     assert.ok(result.hookSpecificOutput.additionalContext);
     assert.match(result.hookSpecificOutput.additionalContext, /nonexistent-note/);
     assert.match(result.hookSpecificOutput.additionalContext, /also-missing/);
+  });
+
+  it('resolves bare-basename wikilinks to notes living in 6-writing/', () => {
+    const content = '---\ntags: [sleep]\n---\nSee [[the-loud-room]].';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    if (result?.hookSpecificOutput?.additionalContext) {
+      assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /the-loud-room/);
+    }
+  });
+
+  it('resolves subdir-prefixed wikilinks like [[6-writing/the-loud-room]]', () => {
+    const content = '---\ntags: [sleep]\n---\nSee [[6-writing/the-loud-room]].';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    if (result?.hookSpecificOutput?.additionalContext) {
+      assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /the-loud-room/);
+    }
+  });
+
+  it('resolves subdir-prefixed wikilinks like [[3-permanent/existing-note]]', () => {
+    const content = '---\ntags: [sleep]\n---\nSee [[3-permanent/existing-note]].';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    if (result?.hookSpecificOutput?.additionalContext) {
+      assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /existing-note/);
+    }
   });
 });

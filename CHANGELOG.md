@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`pre-write-check` false positives: removed body-`Source:` warning, taught broken-wikilink check about `6-writing/` and subdir-prefixed targets.** Two false positives were firing on roughly every vault write. (1) `checkBodySourceLeak` warned whenever a note had both a frontmatter `source:` field and a body `Source:`/`Sources:` line — but the established vault convention is that frontmatter `source:` records the capture-pipeline origin (reflect/discovery/ingest) while body `Source:` lines are citation URLs, and ~165 notes use both together. Removed the check entirely; the rule it enforced doesn't match how the vault actually uses the two fields. (2) The wikilink validator built its lookup set from `basename.md` only, and the vault snapshot deliberately omits `6-writing/` (it's in the edge-classifier's `EXCLUDE_FOLDERS`). Result: bare wikilinks like `[[the-loud-room]]` to notes living in `6-writing/`, and subdir-prefixed wikilinks like `[[3-permanent/foo]]` or `[[6-writing/foo]]`, all reported "not found in vault" even when the file existed. Fix in `hooks/lib/snapshot.mjs`: added `6-writing` to `TITLE_INDEX_EXTRA_DIRS` so its files get indexed for title lookup without shifting edge-classifier priority. Fix in `hooks/pre-write-check.js`: `buildNoteIndex` now returns `{basenames, relPaths}` and `noteExistsInIndex` consults both, so `[[3-permanent/foo]]`-style targets resolve against the snapshot's `rel_path`. True broken links still warn as before. Tests in `tests/pre-write-check.test.mjs` (3 new cases for 6-writing/subdir-prefixed resolution) and `tests/hook-pre-write-check.test.mjs` (body-source-leak case inverted to assert silence) pin both halves.
+
 ## v1.25.4
 
 ### Fixed

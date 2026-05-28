@@ -5,7 +5,7 @@ import { runHook } from './helpers/hook-runner.mjs';
 const HOOK = new URL('../hooks/pre-write-check.js', import.meta.url).pathname;
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
-test('pre-write-check: warns when body has Source: line and frontmatter has source:', () => {
+test('pre-write-check: silent when body has Source: line alongside frontmatter source: (vault convention, not a leak)', () => {
   const noteContent = `---
 tags: [test]
 source: https://example.com/paper
@@ -30,9 +30,12 @@ Sources: pulled from example.com after second reading.
   });
   try {
     assert.equal(r.exitCode, 0);
-    const parsed = JSON.parse(r.stdout.trim());
-    const ctx = parsed.hookSpecificOutput?.additionalContext || '';
-    assert.match(ctx, /source.*body/i, `expected body-source-leak warning, got: ${ctx}`);
+    const out = r.stdout.trim();
+    if (out) {
+      const parsed = JSON.parse(out);
+      const ctx = parsed.hookSpecificOutput?.additionalContext || '';
+      assert.doesNotMatch(ctx, /source.*body/i, `body Source: alongside frontmatter source: must not warn (frontmatter source is origin-tag, body Source is citation), got: ${ctx}`);
+    }
   } finally {
     r.cleanup();
   }
