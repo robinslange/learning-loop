@@ -103,6 +103,59 @@ fn query_with_query_string_only_does_not_create_file() {
 }
 
 #[test]
+fn embedding_commands_check_db_before_loading_model() {
+    // Regression for v1.25.6: read-side commands that use embeddings
+    // (similar/cluster/discriminate/reflect-scan/rerank/eval-prf/eval-funnel/
+    // tune-prf) used to call init_embedding() before open_db(). On a missing
+    // db, that meant the embedding-model download path ran first; the
+    // "database file does not exist" diagnostic was only reachable after the
+    // model load finished. In CI (cold HuggingFace cache) the download could
+    // crash mid-flight, masking the real error completely.
+    //
+    // Contract pinned here: every embedding-using read-side command must emit
+    // the missing-db diagnostic on stderr and exit non-zero, without first
+    // touching the embedding model. Asserting on the diagnostic catches a
+    // regression where init_embedding() moves back ahead of open_db().
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bogus_db = tmp.path().join("missing.db");
+    let bogus_db_str = bogus_db.to_str().unwrap();
+
+    // Each entry: (args slice) — first arg is the subcommand, remaining are
+    // placeholders chosen to satisfy clap's positional parsing.
+    let cases: &[&[&str]] = &[
+        &["similar", bogus_db_str, "some/note.md"],
+        &["cluster", bogus_db_str],
+        &["discriminate", bogus_db_str, "a.md", "b.md"],
+        &["reflect-scan", bogus_db_str, "a query"],
+        &["rerank", bogus_db_str, "a query"],
+        &["eval-prf", bogus_db_str],
+        &["eval-funnel", bogus_db_str],
+        &["tune-prf", bogus_db_str, "a query"],
+    ];
+
+    for args in cases {
+        let out = Command::new(ll_search_bin())
+            .args(*args)
+            .output()
+            .expect("spawn ll-search");
+
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            !out.status.success(),
+            "{} should exit non-zero on missing db; stderr: {stderr}",
+            args[0],
+        );
+        assert!(
+            stderr.contains("database file does not exist"),
+            "{} should emit missing-db diagnostic before any model load; \
+             got stderr: {stderr}",
+            args[0],
+        );
+        assert_no_file_created(&bogus_db);
+    }
+}
+
+#[test]
 fn open_or_create_db_creates_parent_dir_and_file() {
     // Sanity check: open_or_create_db is the legitimate writeable entry point.
     // It must still mkdir the parent + create the db when missing — otherwise

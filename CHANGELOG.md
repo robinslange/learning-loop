@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`ll-search` read-side commands: missing-DB diagnostic now fires before any embedding-model load.** `query`, `similar`, `cluster`, `discriminate`, `reflect-scan`, `rerank`, `eval-prf`, `eval-funnel`, and `tune-prf` all called `init_embedding()` before `open_db()`. On a cold HuggingFace cache, the model download would start first; the "database file does not exist" diagnostic was only reachable after the model had loaded. If the download itself crashed mid-flight (e.g. CI environments with constrained `$HOME` permissions, where the model move-into-place fails with `ENOENT`), the real error was masked entirely and the user saw a panic about file moves. This was the failure mode that broke CI on commits 2355597 and 66d4111 — `query_with_missing_db_does_not_create_file` panicked on a download-step error before reaching the "database file does not exist" assertion, even though the bug is genuine and predates v1.25.5 (locally invisible because Robin's HF cache is warm). Fix: every read-side command in `native/crates/ll-search/src/main.rs` now calls `open_db()` first; `init_embedding()` only runs once the DB existence check has passed. Sibling-command coverage added to `tests/no_silent_db_create.rs` (`embedding_commands_check_db_before_loading_model`) — pins the contract for all eight commands so any future reordering regression catches in cargo test, not only when CI's model cache misses.
+
 ## v1.25.5
 
 ### Fixed

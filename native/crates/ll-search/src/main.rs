@@ -267,9 +267,9 @@ async fn main() {
             }
         }
         Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project, threshold } => {
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             init_embedding();
             let app = build_app_state(&db_path, config_dir.clone());
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let ctx = app.ensure_search_context(&conn);
             let temporal = ll_search::search::TemporalParams {
                 recency_days: recency,
@@ -288,29 +288,29 @@ async fn main() {
             out(&response);
         }
         Commands::Similar { db_path, note_path, top } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::similar_notes(&conn, &note_path, top, &store);
             out(&results);
         }
         Commands::Cluster { db_path, threshold } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::cluster_notes(&conn, threshold, &store);
             out(&results);
         }
         Commands::Discriminate { db_path, threshold, paths } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold, &store);
             out(&results);
         }
         Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir);
             let result = if peers.is_empty() {
@@ -431,8 +431,8 @@ async fn main() {
             }
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let peers = resolve_peers(&conn, config_dir);
             let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store);
@@ -474,22 +474,22 @@ async fn main() {
             }
         }
         Commands::EvalPrf { db_path, min_links } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_prf(&conn, &store, min_links);
             out(&result);
         }
         Commands::EvalFunnel { db_path, min_links, limit } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
             out(&result);
         }
         Commands::TunePrf { db_path, queries } => {
-            init_embedding();
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
             out(&result);
