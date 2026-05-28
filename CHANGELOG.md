@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`ll-search migrate`: missing-DB diagnostic now fires before any model load.** Follow-up to v1.25.6 covering the one command that was out of scope last release. `Commands::Migrate` called `parse_model()` + `load_provider()` before `open_db()`, so the same cold-cache failure mode (model download crashes mid-flight, masking the real "database file does not exist" error) applied to `migrate` too. Fix: open the DB first; defer `load_provider()` to the non-`--drop-old` branch where the provider is actually used (the `--drop-old` path doesn't touch the provider at all, so the prior code was loading the model for nothing on that branch). Regression-test coverage extended in `tests/no_silent_db_create.rs::embedding_commands_check_db_before_loading_model` — `migrate` is now case 9 in the parametric set.
+
 ## v1.25.6
 
 ### Fixed

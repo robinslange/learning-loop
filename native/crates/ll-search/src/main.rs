@@ -461,14 +461,14 @@ async fn main() {
             ll_search::sync::watch::run_watch_async(cfg).await.expect("watch failed");
         }
         Commands::Migrate { db_path, model, drop_old } => {
-            let target = parse_model(&model);
-            let provider = ll_search::model::loader::load_provider(&target)
-                .expect("failed to load model");
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             if drop_old {
                 ll_search::db::drop_old_embeddings(&conn);
                 eprintln!("Dropped old embeddings table.");
             } else {
+                let target = parse_model(&model);
+                let provider = ll_search::model::loader::load_provider(&target)
+                    .expect("failed to load model");
                 let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
                 out(&result);
             }

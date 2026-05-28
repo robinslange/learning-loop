@@ -104,18 +104,18 @@ fn query_with_query_string_only_does_not_create_file() {
 
 #[test]
 fn embedding_commands_check_db_before_loading_model() {
-    // Regression for v1.25.6: read-side commands that use embeddings
-    // (similar/cluster/discriminate/reflect-scan/rerank/eval-prf/eval-funnel/
-    // tune-prf) used to call init_embedding() before open_db(). On a missing
-    // db, that meant the embedding-model download path ran first; the
-    // "database file does not exist" diagnostic was only reachable after the
-    // model load finished. In CI (cold HuggingFace cache) the download could
-    // crash mid-flight, masking the real error completely.
+    // Regression for v1.25.6 + v1.25.7: commands that use embeddings (similar/
+    // cluster/discriminate/reflect-scan/rerank/eval-prf/eval-funnel/tune-prf/
+    // migrate) used to call init_embedding() / load_provider() before open_db().
+    // On a missing db, that meant the embedding-model download path ran first;
+    // the "database file does not exist" diagnostic was only reachable after
+    // the model load finished. In CI (cold HuggingFace cache) the download
+    // could crash mid-flight, masking the real error completely.
     //
-    // Contract pinned here: every embedding-using read-side command must emit
-    // the missing-db diagnostic on stderr and exit non-zero, without first
+    // Contract pinned here: every embedding-using command must emit the
+    // missing-db diagnostic on stderr and exit non-zero, without first
     // touching the embedding model. Asserting on the diagnostic catches a
-    // regression where init_embedding() moves back ahead of open_db().
+    // regression where the model load moves back ahead of open_db().
     let tmp = tempfile::tempdir().expect("tempdir");
     let bogus_db = tmp.path().join("missing.db");
     let bogus_db_str = bogus_db.to_str().unwrap();
@@ -131,6 +131,7 @@ fn embedding_commands_check_db_before_loading_model() {
         &["eval-prf", bogus_db_str],
         &["eval-funnel", bogus_db_str],
         &["tune-prf", bogus_db_str, "a query"],
+        &["migrate", bogus_db_str, "--model", "bge"],
     ];
 
     for args in cases {
