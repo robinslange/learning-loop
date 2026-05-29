@@ -26,6 +26,24 @@ function findDuplicateTags(tags) {
   return [...dupes];
 }
 
+const DASH_RE = /[—–]/;
+
+// Em/en-dashes are a voice violation in body prose (persona.md: "No em dashes,
+// no en dashes."). They are legitimate structural annotation on Source:/Related:
+// lines, which separate a reference from its gloss, so those lines are exempt.
+function findEmDashLines(body) {
+  const offending = [];
+  const lines = body.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^(Sources?:|Related:)/.test(line.trimStart())) continue;
+    if (DASH_RE.test(line)) {
+      offending.push({ line: i + 1, text: line.trim() });
+    }
+  }
+  return offending;
+}
+
 function buildNoteIndex(vaultRoot) {
   const snap = loadVaultSnapshot(vaultRoot);
   const notes = snap?.notes ?? [];
@@ -119,6 +137,17 @@ runHook(({ tool, input }) => {
       deny(`Duplicate tags found: [${dupes.join(', ')}]. Remove duplicates before writing.`);
       return;
     }
+  }
+
+  const emDashLines = findEmDashLines(fmBody);
+  if (emDashLines.length > 0) {
+    const list = emDashLines.map((l) => `  line ${l.line}: ${l.text}`).join('\n');
+    deny(
+      `Em/en-dashes in body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
+        `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
+        `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
+    );
+    return;
   }
 
   const warnings = [];

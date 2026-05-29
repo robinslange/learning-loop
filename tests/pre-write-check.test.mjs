@@ -120,4 +120,50 @@ describe('pre-write-check', () => {
       assert.doesNotMatch(result.hookSpecificOutput.additionalContext, /existing-note/);
     }
   });
+
+  it('denies an em-dash in body prose, naming the line', () => {
+    const content = '---\ntags: [sleep]\n---\nThe rule is policy — or it is aspiration.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    assert.ok(result);
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /em.?dash|en.?dash|dash/i);
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /aspiration/);
+  });
+
+  it('denies an en-dash in body prose', () => {
+    const content = '---\ntags: [sleep]\n---\nThe range is 3–5 notes per day.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    assert.ok(result);
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+  });
+
+  it('allows an em-dash on a Source: line', () => {
+    const content = '---\ntags: [sleep]\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    if (result?.hookSpecificOutput?.permissionDecision) {
+      assert.notEqual(result.hookSpecificOutput.permissionDecision, 'deny');
+    }
+  });
+
+  it('allows an em-dash on a Related: line', () => {
+    const content = '---\ntags: [sleep]\n---\nClean body.\n\nRelated: [[existing-note]] — the same shape at the data layer.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    if (result?.hookSpecificOutput?.permissionDecision) {
+      assert.notEqual(result.hookSpecificOutput.permissionDecision, 'deny');
+    }
+  });
+
+  it('allows an em-dash inside frontmatter only', () => {
+    const content = '---\ntags: [sleep]\nsource: 2026-05-29 vault sweep — span bug caught in preview\n---\nClean body with no dashes.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    assert.equal(result, null);
+  });
+
+  it('denies on duplicate tags before checking em-dashes (tags win)', () => {
+    const content = '---\ntags: [sleep, sleep]\n---\nBody with an em-dash — here.';
+    const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    assert.ok(result);
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /sleep/);
+  });
 });
