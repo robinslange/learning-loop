@@ -27,6 +27,13 @@ import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
 import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
 import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
 
+// Most tests here fork the real stub and only need it to spawn (stubs return
+// immediately); under a saturating parallel suite the production 1500ms
+// execFileSync budget can be exhausted by the fork alone, flaking them. Raise
+// it file-wide. The one test that genuinely asserts a subprocess *timeout*
+// (sleep-past-budget) sets its own tight budget locally — see that test.
+process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '15000';
+
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 const NOTE_REL = '0-inbox/rebuttal-note.md';
 const NOTE_ABS = join(VAULT, NOTE_REL);
@@ -122,11 +129,15 @@ function regexAndNliCtx() {
 
 test('runEdgeInfer NLI subprocess: timeout does not crash, regex edges survive', async () => {
   const savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  const savedTimeout = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS;
   try {
     process.env.CLAUDE_PLUGIN_DATA = STUB_BIN_DIR;
-    // Stub sleeps 2.5s, well past the 1500ms execFileSync timeout in
-    // runNliBatch. execFileSync raises ETIMEDOUT, caught by the try/catch.
-    writeStub(['#!/bin/sh', 'sleep 2.5', 'echo "should not get here"'].join('\n'));
+    // This test genuinely asserts the subprocess timeout path. Override the
+    // file-wide generous budget with a tight one and a stub that sleeps past
+    // it; execFileSync raises ETIMEDOUT, caught by the try/catch. (Short sleep
+    // keeps the test fast and the margin over the budget unambiguous.)
+    process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = '500';
+    writeStub(['#!/bin/sh', 'sleep 1', 'echo "should not get here"'].join('\n'));
     __resetBinaryCacheForTesting();
 
     const dbPath = await seedPriorRegexEdge();
@@ -161,6 +172,8 @@ test('runEdgeInfer NLI subprocess: timeout does not crash, regex edges survive',
   } finally {
     if (savedPluginData === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+    if (savedTimeout === undefined) delete process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS;
+    else process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = savedTimeout;
   }
 });
 

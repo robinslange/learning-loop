@@ -333,7 +333,11 @@ function runNliBatchViaSubprocess(binary, premise, hypotheses) {
 
     const out = execFileSync(binary.bin, ['nli-batch', premise, hypsPath], {
       encoding: 'utf-8',
-      timeout: 1500,
+      // Production default 1500ms. Tests that exercise the real fork override
+      // this via LL_NLI_SUBPROCESS_TIMEOUT_MS: under a saturating parallel
+      // suite the stub spawn can exceed 1500ms and flake (the timing path the
+      // override does not let them bypass — they're testing the fork itself).
+      timeout: Number(process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS) || 1500,
       env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
     });
 

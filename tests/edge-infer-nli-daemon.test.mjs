@@ -37,6 +37,12 @@ import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
 import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
 import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
 
+// These tests fork the real ll-search stub to exercise the daemon->subprocess
+// fallback. The production 1500ms execFileSync budget is too tight under a
+// saturating parallel suite (the stub spawn itself can exceed it), so the test
+// raises it. Production is unaffected — it never sets this var.
+process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '15000';
+
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 const NOTE_REL = '0-inbox/rebuttal-note.md';
 const NOTE_ABS = join(VAULT, NOTE_REL);
