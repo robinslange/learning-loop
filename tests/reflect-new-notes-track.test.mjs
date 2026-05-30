@@ -255,4 +255,66 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       assert.equal(readFileSync(marker, 'utf8'), '');
     });
   });
+
+  // Regression (observed 2026-05-30): the PostToolUse hook subprocess does NOT
+  // reliably inherit $CLAUDE_CODE_SESSION_ID, while the skill's bash (Bash tool)
+  // does. The old code resolved the hook's session id from process.env only, so
+  // when the env var was absent it fell back to 'session', wrote to a path the
+  // skill never created, and the handshake broke silently. The harness passes
+  // the real id as `session_id` in the hook stdin payload; post-tool.js threads
+  // it through as ctx.sessionId. These tests pin that the payload id wins and
+  // matches the path the skill's bash (env-var) side builds.
+  describe('session-id resolution when the hook env var is absent', () => {
+    let runReflectTrack;
+    let reflectNewNotesPath;
+    let savedSid;
+
+    before(async () => {
+      savedSid = process.env.CLAUDE_CODE_SESSION_ID;
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+      const mod = await import('../hooks/modules/reflect-track.mjs?bust=noenv' + Date.now());
+      runReflectTrack = mod.runReflectTrack;
+      reflectNewNotesPath = mod.reflectNewNotesPath;
+    });
+
+    after(() => {
+      if (savedSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedSid;
+      else delete process.env.CLAUDE_CODE_SESSION_ID;
+    });
+
+    it('uses the payload session id over the (absent) env var', () => {
+      const realSid = 'f7ad287f-2e93-473c-8c83-dd8e0380fc2c';
+      // What the skill's bash builds: ${TMPDIR}/ll-${CLAUDE_CODE_SESSION_ID}-...
+      const skillMarker = join(tmpRoot, `ll-${realSid}-reflect-new-notes.txt`);
+      assert.equal(reflectNewNotesPath(realSid), skillMarker);
+    });
+
+    it('falls back to the literal "session" only when no id is available anywhere', () => {
+      assert.equal(reflectNewNotesPath(), join(tmpRoot, 'll-session-reflect-new-notes.txt'));
+    });
+
+    it('appends to the skill-created marker when the hook only has the payload id', async () => {
+      const realSid = 'f7ad287f-2e93-473c-8c83-dd8e0380fc2c';
+      // The skill (which HAS the env var) creates the marker at the real-id path.
+      const skillMarker = join(tmpRoot, `ll-${realSid}-reflect-new-notes.txt`);
+      writeFileSync(skillMarker, '');
+
+      // The hook fires with no env var but the harness payload's session_id.
+      const fp = join(fakeVaultRoot, '0-inbox', 'real-note.md');
+      await runReflectTrack({
+        tool: 'Write',
+        input: { file_path: fp },
+        vaultRoot: fakeVaultRoot,
+        sessionId: realSid,
+      });
+
+      assert.equal(
+        readFileSync(skillMarker, 'utf8'),
+        fp + '\n',
+        'hook must append to the path the skill built from $CLAUDE_CODE_SESSION_ID, ' +
+          'not to a literal-"session" path',
+      );
+      rmSync(skillMarker);
+    });
+  });
 });

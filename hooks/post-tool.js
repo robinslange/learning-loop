@@ -52,6 +52,7 @@ const ctx = {
   input: raw.tool_input || {},
   response: raw.tool_response,
   raw,
+  sessionId: raw.session_id || null,
   vaultRoot: resolveVaultPath(),
   snapshot: null,
 };
