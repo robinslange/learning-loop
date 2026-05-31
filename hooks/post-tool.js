@@ -52,7 +52,13 @@ const ctx = {
   input: raw.tool_input || {},
   response: raw.tool_response,
   raw,
-  sessionId: raw.session_id || null,
+  // Intentionally NOT raw.session_id: the reflect-track handshake keys the
+  // marker on the plugin's own id (the unsuffixed learning-loop-session-id
+  // file), which the skill's bash also reads. raw.session_id is the harness
+  // UUID — a different id system — so threading it here would re-split the two
+  // sides and silently break the marker. Leaving sessionId null lets
+  // reflectNewNotesPath() resolve from the shared file.
+  sessionId: null,
   vaultRoot: resolveVaultPath(),
   snapshot: null,
 };

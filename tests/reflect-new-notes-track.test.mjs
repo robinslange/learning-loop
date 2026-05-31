@@ -74,7 +74,13 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     savedSessionId = process.env.CLAUDE_CODE_SESSION_ID;
     savedVault = process.env.LL_VAULT_PATH;
     process.env.TMPDIR = tmpRoot;
-    process.env.CLAUDE_CODE_SESSION_ID = 'reflect-test';
+    // Both sides of the handshake key the marker on the plugin's own session id,
+    // written once at SessionStart to the unsuffixed learning-loop-session-id
+    // file. Seed it the way session-start would so reflectNewNotesPath() and the
+    // skill's bash `cat` resolve the same id. The env var is deliberately left
+    // unset for most tests — it must NOT influence the path anymore.
+    writeFileSync(join(tmpRoot, 'learning-loop-session-id'), 'reflect-test');
+    delete process.env.CLAUDE_CODE_SESSION_ID;
   });
 
   after(() => {
@@ -118,11 +124,14 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
-    it('uses session-keyed path expansion consistently', () => {
-      // Step 4.6 reads, Step 4.6.g deletes, the hook appends — all three
-      // must hit the same path or the handshake breaks silently.
-      const expected = '${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-reflect';
-      const occurrences = (skill.match(/\$\{TMPDIR:-\/tmp\}\/ll-\$\{CLAUDE_CODE_SESSION_ID:-[^}]+\}-reflect/g) || []);
+    it('uses file-keyed path expansion consistently', () => {
+      // Step 4.6 reads, Step 4.6.g deletes, the hook appends — all three must
+      // hit the same path or the handshake breaks silently. The session id is
+      // read from the shared learning-loop-session-id file (NOT the harness env
+      // var, which is a different id system), so every reflect-prefix reference
+      // must expand from ${LL_SID:-session}, never ${CLAUDE_CODE_SESSION_ID:-...}.
+      const expected = '${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect';
+      const occurrences = (skill.match(/\$\{TMPDIR:-\/tmp\}\/ll-\$\{[A-Z_]+:-[^}]+\}-reflect/g) || []);
       assert.ok(
         occurrences.length >= 3,
         `expected at least 3 references to the session-keyed reflect prefix (init, refinement, cleanup); ` +
@@ -132,10 +141,31 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         assert.equal(
           occ,
           expected,
-          `every reference must use the literal "session" fallback to match the hook's expansion; ` +
-            `found "${occ}"`,
+          `every reference must read the session id from the shared file via LL_SID, ` +
+            `not the harness env var; found "${occ}"`,
         );
       }
+    });
+
+    it('resolves LL_SID from the learning-loop-session-id file wherever the prefix is built', () => {
+      // Each bash block that builds a reflect path must first read LL_SID from
+      // the plugin's session-id file — that is the source the hook also reads.
+      // Pin the exact snippet so a future edit can't quietly drop it and
+      // re-split the two sides of the handshake.
+      const snippet =
+        'LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)';
+      const snippetCount = skill.split(snippet).length - 1;
+      assert.ok(
+        snippetCount >= 4,
+        `expected the LL_SID resolution snippet in every reflect/sweep bash block ` +
+          `(init, sweep, 4.6.a, 4.6.c, 4.6.g); found ${snippetCount}`,
+      );
+      // And the env var must not survive in any operative expansion.
+      assert.doesNotMatch(
+        skill,
+        /\$\{TMPDIR:-\/tmp\}\/ll-\$\{CLAUDE_CODE_SESSION_ID/,
+        'no reflect path may key off $CLAUDE_CODE_SESSION_ID — it diverges from the hook',
+      );
     });
   });
 
@@ -256,63 +286,81 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     });
   });
 
-  // Regression (observed 2026-05-30): the PostToolUse hook subprocess does NOT
-  // reliably inherit $CLAUDE_CODE_SESSION_ID, while the skill's bash (Bash tool)
-  // does. The old code resolved the hook's session id from process.env only, so
-  // when the env var was absent it fell back to 'session', wrote to a path the
-  // skill never created, and the handshake broke silently. The harness passes
-  // the real id as `session_id` in the hook stdin payload; post-tool.js threads
-  // it through as ctx.sessionId. These tests pin that the payload id wins and
-  // matches the path the skill's bash (env-var) side builds.
-  describe('session-id resolution when the hook env var is absent', () => {
+  // Regression (root-caused 2026-05-30): the marker handshake straddled two
+  // different id systems. The skill's bash keyed the path on the harness
+  // $CLAUDE_CODE_SESSION_ID (a UUID), the hook keyed it on the stdin payload's
+  // session_id, and the plugin's OWN session id (written to
+  // learning-loop-session-id at SessionStart) was a third, short-hex value. The
+  // env var also isn't reliably present in the hook subprocess. When any two
+  // disagreed the hook wrote one path and the skill read another → empty marker,
+  // refinement step silently skipped, no error. Fix: both sides read the plugin's
+  // own learning-loop-session-id file. These tests pin that the file is the
+  // source, the env var is ignored, an explicit arg still overrides, and the
+  // 'session' last resort only fires when the file is absent.
+  describe('session-id resolution from the shared learning-loop-session-id file', () => {
     let runReflectTrack;
     let reflectNewNotesPath;
     let savedSid;
+    let sidFile;
 
     before(async () => {
+      // tmpRoot is only set in the outer before(), so resolve the path here.
+      sidFile = join(tmpRoot, 'learning-loop-session-id');
+      // Pin a distinct env-var value so any test that wrongly reads it fails loudly.
       savedSid = process.env.CLAUDE_CODE_SESSION_ID;
-      delete process.env.CLAUDE_CODE_SESSION_ID;
-      const mod = await import('../hooks/modules/reflect-track.mjs?bust=noenv' + Date.now());
+      process.env.CLAUDE_CODE_SESSION_ID = 'env-var-must-be-ignored';
+      const mod = await import('../hooks/modules/reflect-track.mjs?bust=file' + Date.now());
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
+      // Restore the file the outer suite seeded (a sub-test below removes it).
+      writeFileSync(sidFile, 'reflect-test');
     });
 
     after(() => {
       if (savedSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedSid;
       else delete process.env.CLAUDE_CODE_SESSION_ID;
+      writeFileSync(sidFile, 'reflect-test');
     });
 
-    it('uses the payload session id over the (absent) env var', () => {
+    it('reads the id from the file, never from $CLAUDE_CODE_SESSION_ID', () => {
+      writeFileSync(sidFile, 'file-sid-abc123');
+      const expected = join(tmpRoot, 'll-file-sid-abc123-reflect-new-notes.txt');
+      assert.equal(reflectNewNotesPath(), expected);
+    });
+
+    it('honors an explicit sessionId argument over the file', () => {
+      writeFileSync(sidFile, 'file-sid-abc123');
       const realSid = 'f7ad287f-2e93-473c-8c83-dd8e0380fc2c';
-      // What the skill's bash builds: ${TMPDIR}/ll-${CLAUDE_CODE_SESSION_ID}-...
-      const skillMarker = join(tmpRoot, `ll-${realSid}-reflect-new-notes.txt`);
-      assert.equal(reflectNewNotesPath(realSid), skillMarker);
+      assert.equal(
+        reflectNewNotesPath(realSid),
+        join(tmpRoot, `ll-${realSid}-reflect-new-notes.txt`),
+      );
     });
 
-    it('falls back to the literal "session" only when no id is available anywhere', () => {
+    it('falls back to the literal "session" only when the file is absent', () => {
+      rmSync(sidFile, { force: true });
       assert.equal(reflectNewNotesPath(), join(tmpRoot, 'll-session-reflect-new-notes.txt'));
     });
 
-    it('appends to the skill-created marker when the hook only has the payload id', async () => {
-      const realSid = 'f7ad287f-2e93-473c-8c83-dd8e0380fc2c';
-      // The skill (which HAS the env var) creates the marker at the real-id path.
-      const skillMarker = join(tmpRoot, `ll-${realSid}-reflect-new-notes.txt`);
+    it('appends to the skill-created marker when both sides read the same file', async () => {
+      // Mirror production: post-tool.js passes sessionId:null, so the hook
+      // resolves the path purely from the file the skill's bash also read.
+      writeFileSync(sidFile, 'shared-sid-xyz');
+      const skillMarker = join(tmpRoot, 'll-shared-sid-xyz-reflect-new-notes.txt');
       writeFileSync(skillMarker, '');
 
-      // The hook fires with no env var but the harness payload's session_id.
       const fp = join(fakeVaultRoot, '0-inbox', 'real-note.md');
       await runReflectTrack({
         tool: 'Write',
         input: { file_path: fp },
         vaultRoot: fakeVaultRoot,
-        sessionId: realSid,
+        sessionId: null,
       });
 
       assert.equal(
         readFileSync(skillMarker, 'utf8'),
         fp + '\n',
-        'hook must append to the path the skill built from $CLAUDE_CODE_SESSION_ID, ' +
-          'not to a literal-"session" path',
+        'hook must append to the path the skill built from the shared session-id file',
       );
       rmSync(skillMarker);
     });

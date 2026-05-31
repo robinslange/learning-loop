@@ -2,11 +2,12 @@
 //
 // Handshake with skills/reflect/SKILL.md Step 4:
 //   - Step 4 init creates an empty marker file at the session-keyed path
-//     ${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-reflect-new-notes.txt.
-//     The skill's bash resolves the session id from $CLAUDE_CODE_SESSION_ID;
-//     this hook resolves it from the stdin payload's `session_id` (see
-//     reflectNewNotesPath below) so the two sides agree even when the hook
-//     subprocess doesn't inherit the env var.
+//     ${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-new-notes.txt, where LL_SID
+//     is read from the plugin's own ${TMPDIR:-/tmp}/learning-loop-session-id
+//     file (written once at SessionStart). The skill's bash reads that file via
+//     `cat`; this hook reads the same file (see reflectNewNotesPath below) so
+//     the two sides resolve the identical path regardless of which harness env
+//     vars a given subprocess happens to inherit.
 //   - For every vault Write/Edit that fires during the marker's lifetime,
 //     this module appends the absolute file path + newline.
 //   - Step 4.6.g `rm -f` deletes the marker, ending the tracking window.
@@ -23,7 +24,7 @@
 // only the last entry. Moving the work into the hook removes the
 // footgun entirely (see tests/reflect-new-notes-track.test.mjs).
 
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { vaultRelPath } from '../lib/common.mjs';
@@ -32,20 +33,38 @@ import { vaultRelPath } from '../lib/common.mjs';
 // Any drift here silently breaks the handshake: the hook would write to
 // one path and the skill would read another.
 //
-// Session id: the skill's bash runs in the Bash tool, which reliably has
-// $CLAUDE_CODE_SESSION_ID. This hook runs in a PostToolUse subprocess, which
-// does NOT reliably inherit that env var — when it's absent the old code fell
-// back to the literal 'session', wrote to a path the skill never read, and the
-// handshake broke silently (empty marker, no error). The harness DOES pass the
-// real id as `session_id` in the hook's stdin payload, so we prefer that
-// (threaded in as the `sessionId` argument). Env var stays as a fallback for
-// direct/legacy callers; 'session' is the last resort. TMPDIR is read from
-// process.env directly (not the frozen env snapshot) so it tracks per-session
-// and per-test overrides.
+// Session id: the marker is keyed on the plugin's own session id, written
+// once at SessionStart to the unsuffixed `learning-loop-session-id` file
+// (hooks/session-start/vault-snapshot.mjs). Both sides of the handshake read
+// THAT file: the skill's bash via `cat`, this hook via readSessionIdFile()
+// below. They must agree on the same harness-independent source — an earlier
+// design split them (skill on $CLAUDE_CODE_SESSION_ID, hook on the stdin
+// payload's session_id), but those are harness UUIDs, NOT the plugin's own id,
+// and the sweep-replay payload carries no session_id at all — so the marker
+// paths diverged and the handshake broke silently (empty marker, no error).
+// An explicit `sessionId` arg still wins for tests/direct callers; 'session'
+// is the last resort when the file is missing (CLI/cron/tests). TMPDIR is read
+// from process.env directly (not the frozen env snapshot) so it tracks
+// per-session and per-test overrides.
+function tmpDir() {
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
+  return process.env.TMPDIR || tmpdir();
+}
+
+function readSessionIdFile() {
+  const path = join(tmpDir(), 'learning-loop-session-id');
+  if (!existsSync(path)) return null;
+  try {
+    const value = readFileSync(path, 'utf8').trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
 export function reflectNewNotesPath(sessionId) {
-  const tmp = process.env.TMPDIR || tmpdir();
-  const sid = sessionId || process.env.CLAUDE_CODE_SESSION_ID || 'session';
-  return join(tmp, `ll-${sid}-reflect-new-notes.txt`);
+  const sid = sessionId || readSessionIdFile() || 'session';
+  return join(tmpDir(), `ll-${sid}-reflect-new-notes.txt`);
 }
 
 export function runReflectTrack(ctx) {
@@ -57,6 +76,9 @@ export function runReflectTrack(ctx) {
   const rel = vaultRelPath(input.file_path, vaultRoot);
   if (!rel) return;
 
+  // sessionId is honored only as an explicit override (tests/direct callers);
+  // in production it is undefined here so the path resolves from the shared
+  // learning-loop-session-id file — the same source the skill's bash reads.
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
 

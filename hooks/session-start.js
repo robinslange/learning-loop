@@ -35,7 +35,15 @@ const ctx = {
   vaultRoot: resolveVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,
   memoryDir: `${home()}/.claude/projects`,
-  tmp: tmpdir(),
+  // Resolve tmp the SAME way the readers do (reflect-track.mjs:
+  // process.env.TMPDIR || tmpdir()). vault-snapshot.mjs writes the
+  // learning-loop-session-id file under ctx.tmp; if a SessionStart subprocess
+  // resolves a different dir than a PostToolUse hook subprocess (only one
+  // inherits $TMPDIR), the id file lands where the reader never looks and the
+  // /reflect marker handshake silently breaks (seen live: file at /tmp,
+  // reader at /tmp/claude-501).
+  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
+  tmp: process.env.TMPDIR || tmpdir(),
   context: '',
   depsAllSatisfied: true,
   depsMissing: '',
