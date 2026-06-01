@@ -110,15 +110,17 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer, which is what prevents the bundled-fence regression documented in `tests/reflect-new-notes-track.test.mjs`. The session id comes from the plugin's own `${TMPDIR:-/tmp}/learning-loop-session-id` file (written once at SessionStart) — read it the same way in every block via the `LL_SID` snippet below, so the path matches what the hook builds. The hook resolves the id from that same file, NOT from `$CLAUDE_CODE_SESSION_ID` (a different id system that diverges silently). Using the shared file keeps both sides in lockstep and lets parallel `/reflect` invocations key off one stable id.
+- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer, which is what prevents the bundled-fence regression documented in `tests/reflect-new-notes-track.test.mjs`. Both sides must resolve the marker path the same way across a process boundary. Read the session id via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID` (the `LL_SID` snippet below, which runs the canonical `getSessionId()`), and the marker DIR via `resolve-paths.mjs REFLECT_SCRATCH` (`LL_SCRATCH` below) — the hook (`reflect-track.mjs`) builds its path from the identical `reflectScratchDir()` + `getSessionId()`. The dir is anchored in **plugin-data**, NOT tmp: `os.tmpdir()` honors `$TMPDIR`, and a hook subprocess doesn't inherit the interactive shell's `$TMPDIR`, so a tmp anchor put the hook (writer) and this skill's bash (reader) in different dirs and the handshake broke silently. Do NOT `cat` the id file out of a temp directory or build the path under one. Running the one canonical resolver on both sides keeps them in lockstep and lets parallel `/reflect` invocations key off one stable id.
 
 ```bash
 # Step 4 init: truncate the new-notes file (the hook handshake marker).
 # Run this ONCE, before any vault Writes in this step. Do not re-run per
 # Write — the post-tool hook does the per-write appends automatically while
 # this file exists. Step 4.6.g removes it to end the tracking window.
-LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)
-LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect"
+LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
+LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
+mkdir -p "$LL_SCRATCH"
+LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
@@ -141,8 +143,10 @@ LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[
 # Incremental by default; only embeds notes that are new or mtime-changed.
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
-LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)
-SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${LL_SID:-session}-sweep-candidates.txt"
+LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
+LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
+mkdir -p "$LL_SCRATCH"
+SWEEP_CANDIDATES="${LL_SCRATCH}/ll-${LL_SID}-sweep-candidates.txt"
 
 # Detect unlinked candidates (exclude 4-projects: free-form indexes)
 LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
@@ -189,13 +193,14 @@ This ensures new notes with intentions appear in the next session's intention su
 
 When a new vault note touches a claim already in the vault, the existing claim should be refined to incorporate the new evidence. This step finds those pairs, asks the `refinement-proposer` agent to draft edits, validates them, presents the batch for confirmation, and applies via `Write`. Contradictions route to inline counter-argument linking instead of editing the upstream body.
 
-Skip this entire step if the reflect new-notes file (`${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-new-notes.txt`, where `LL_SID` is read from `${TMPDIR:-/tmp}/learning-loop-session-id` as in the blocks below) does not exist or is empty (the session wrote no vault notes).
+Skip this entire step if the reflect new-notes file (`${LL_SCRATCH}/ll-${LL_SID}-reflect-new-notes.txt`, where `LL_SCRATCH` comes from `resolve-paths.mjs REFLECT_SCRATCH` and `LL_SID` from `resolve-paths.mjs SESSION_ID` as in the blocks below) does not exist or is empty (the session wrote no vault notes).
 
 #### 4.6.a: Build candidate pairs
 
 ```bash
-LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)
-LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect"
+LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
+LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
+LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
@@ -203,7 +208,7 @@ If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates
 
 #### 4.6.b: Dispatch refinement-proposer agent
 
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-refinement-pairs.json` after expansion, with `LL_SID` read from `${TMPDIR:-/tmp}/learning-loop-session-id`):
+Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-pairs.json`):
 
 ```
 Read the agent definition at PLUGIN/agents/refinement-proposer.md and follow it exactly.
@@ -214,13 +219,14 @@ vault_path: {{VAULT}}/
 Return the JSON response only, no commentary, no markdown fences.
 ```
 
-Capture the agent's stdout response. Write it to `${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-refinement-agent-output.json` (resolve `LL_SID` from `${TMPDIR:-/tmp}/learning-loop-session-id` before writing).
+Capture the agent's stdout response. Write it to `${LL_TMP_PREFIX}-refinement-agent-output.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-agent-output.json`, resolving `LL_SCRATCH`/`LL_SID` via `resolve-paths.mjs` as in the blocks above).
 
 #### 4.6.c: Validate
 
 ```bash
-LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)
-LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect"
+LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
+LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
+LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
@@ -228,7 +234,7 @@ The validator strips em-dashes, computes sentence delta, and tags each decision 
 
 #### 4.6.d: Present batch for confirmation
 
-Read the validated JSON at `${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-refinement-validated.json` (`LL_SID` from `${TMPDIR:-/tmp}/learning-loop-session-id`). Build a preview-format table from the `decisions` array:
+Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-validated.json`). Build a preview-format table from the `decisions` array:
 
 ```markdown
 ## Refinement Proposals (N total)
@@ -281,8 +287,9 @@ For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `
 #### 4.6.g: Cleanup
 
 ```bash
-LL_SID=$(cat "${TMPDIR:-/tmp}/learning-loop-session-id" 2>/dev/null || echo session)
-LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect"
+LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
+LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
+LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 

@@ -90,7 +90,22 @@ export async function run(ctx) {
     }
   }
 
-  // Session ID legacy files.
+  // Session ID — primary stamp in plugin-data (env-independent: getSessionId()
+  // reads it the same from any subprocess regardless of $TMPDIR). Both the
+  // ppid-keyed file (per-session) and the unsuffixed file (cross-process bridge,
+  // since a reader's ppid differs from this writer's) are written.
+  if (ctx.pluginData) {
+    try {
+      const sessionDir = DATA_PATHS.session(ctx.pluginData);
+      mkdirSync(sessionDir, { recursive: true });
+      writeFileSync(join(sessionDir, `id-${ppid}`), sessionId);
+      writeFileSync(join(sessionDir, 'id'), sessionId);
+    } catch (err) {
+      logError('session-start.vault-snapshot.writeSessionIdPluginData', err);
+    }
+  }
+
+  // Session ID legacy tmp files (fallback for the resolver; retained for compat).
   try {
     writeFileSync(join(ctx.tmp, `learning-loop-session-id-${ppid}`), sessionId);
     writeFileSync(join(ctx.tmp, 'learning-loop-session-id'), sessionId);

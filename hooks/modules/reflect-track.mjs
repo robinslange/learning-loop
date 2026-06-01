@@ -24,47 +24,39 @@
 // only the last entry. Moving the work into the hook removes the
 // footgun entirely (see tests/reflect-new-notes-track.test.mjs).
 
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { vaultRelPath } from '../lib/common.mjs';
+import { getSessionId, resolvePluginData, vaultRelPath } from '../lib/common.mjs';
+import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
 
 // Mirror the exact path expansion used by skills/reflect/SKILL.md Step 4.
 // Any drift here silently breaks the handshake: the hook would write to
 // one path and the skill would read another.
 //
-// Session id: the marker is keyed on the plugin's own session id, written
-// once at SessionStart to the unsuffixed `learning-loop-session-id` file
-// (hooks/session-start/vault-snapshot.mjs). Both sides of the handshake read
-// THAT file: the skill's bash via `cat`, this hook via readSessionIdFile()
-// below. They must agree on the same harness-independent source — an earlier
-// design split them (skill on $CLAUDE_CODE_SESSION_ID, hook on the stdin
-// payload's session_id), but those are harness UUIDs, NOT the plugin's own id,
-// and the sweep-replay payload carries no session_id at all — so the marker
-// paths diverged and the handshake broke silently (empty marker, no error).
-// An explicit `sessionId` arg still wins for tests/direct callers; 'session'
-// is the last resort when the file is missing (CLI/cron/tests). TMPDIR is read
-// from process.env directly (not the frozen env snapshot) so it tracks
-// per-session and per-test overrides.
-function tmpDir() {
-  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
-  return process.env.TMPDIR || tmpdir();
-}
-
-function readSessionIdFile() {
-  const path = join(tmpDir(), 'learning-loop-session-id');
-  if (!existsSync(path)) return null;
-  try {
-    const value = readFileSync(path, 'utf8').trim();
-    return value || null;
-  } catch {
-    return null;
-  }
+// Anchor: the marker dir is plugin-data/reflect-scratch — NOT tmp. os.tmpdir()
+// honors $TMPDIR, and a hook subprocess does NOT inherit the interactive shell's
+// $TMPDIR, so a tmp anchor put the writer (hook, $TMPDIR unset → /tmp) and the
+// reader (skill bash, $TMPDIR=/tmp/claude-501) in different dirs → empty marker,
+// refinement silently skipped, no error. plugin-data resolves identically in
+// both processes (getPluginData() reads $CLAUDE_PLUGIN_DATA or its persisted
+// marker file), so both sides meet. Only when plugin-data can't be resolved
+// (bare CLI/test) do we fall back to tmpdir() — acceptable since the skill isn't
+// running there. Both sides resolve the dir the same way: this hook via
+// reflectScratchDir(), the skill's bash via resolve-paths.mjs PLUGIN_DATA.
+//
+// Session id keys the file within that dir, via the canonical getSessionId()
+// (the same resolver the skill runs through resolve-paths.mjs SESSION_ID). An
+// explicit `sessionId` arg still wins for tests/direct callers; getSessionId()
+// returns the 'unknown' sentinel outside a Claude Code session.
+export function reflectScratchDir() {
+  const pd = resolvePluginData();
+  return pd ? DATA_PATHS.reflectScratch(pd) : tmpdir();
 }
 
 export function reflectNewNotesPath(sessionId) {
-  const sid = sessionId || readSessionIdFile() || 'session';
-  return join(tmpDir(), `ll-${sid}-reflect-new-notes.txt`);
+  const sid = sessionId || getSessionId();
+  return join(reflectScratchDir(), `ll-${sid}-reflect-new-notes.txt`);
 }
 
 export function runReflectTrack(ctx) {
@@ -77,8 +69,8 @@ export function runReflectTrack(ctx) {
   if (!rel) return;
 
   // sessionId is honored only as an explicit override (tests/direct callers);
-  // in production it is undefined here so the path resolves from the shared
-  // learning-loop-session-id file — the same source the skill's bash reads.
+  // in production it is undefined here so the path resolves from getSessionId()
+  // — the same resolver the skill's bash runs via resolve-paths.mjs SESSION_ID.
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
 

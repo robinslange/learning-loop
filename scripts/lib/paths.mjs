@@ -51,6 +51,20 @@ export const DATA_PATHS = {
   librarianQueue: (pd) => join(pd, 'librarian', 'queue.jsonl'),
   retrieval: (pd) => join(pd, 'retrieval'),
   retrievalSessionDedupe: (pd) => join(pd, 'retrieval', 'session-dedupe'),
+  // /reflect Step 4 session-keyed scratch markers (new-notes list, refinement
+  // pair/agent/validated JSON, sweep candidates). Anchored in plugin-data — NOT
+  // tmp — so the hook subprocess and the skill's bash resolve the SAME dir
+  // regardless of whether each inherits $TMPDIR (os.tmpdir() honors $TMPDIR, so
+  // a tmp anchor diverges between a hook subprocess and the interactive shell).
+  reflectScratch: (pd) => join(pd, 'reflect-scratch'),
+  // Env-independent session-id anchor. getSessionId() previously read only the
+  // tmp `learning-loop-session-id[-<ppid>]` files, but os.tmpdir() honors
+  // $TMPDIR — which a hook subprocess doesn't inherit but the interactive shell
+  // does — so the SAME session resolved different ids (or 'unknown') depending
+  // on which process asked. plugin-data doesn't depend on $TMPDIR, so SessionStart
+  // also stamps the id here and getSessionId() prefers it.
+  session: (pd) => join(pd, 'session'),
+  sessionId: (pd, ppid) => join(pd, 'session', `id-${ppid}`),
   provenance: (pd) => join(pd, 'provenance'),
   federation: (pd) => join(pd, 'federation'),
   sessionStartCache: (pd) => join(pd, 'session-start-cache'),
