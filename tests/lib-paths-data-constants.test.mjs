@@ -9,6 +9,8 @@ import { DATA_PATHS, FEDERATION_PATHS, DATA_FILES } from '../scripts/lib/paths.m
 
 test('DATA_PATHS resolves PLUGIN_DATA subdirectories', () => {
   const pd = '/tmp/test-pd';
+  assert.equal(DATA_PATHS.bin(pd), join(pd, 'bin'));
+  assert.equal(DATA_PATHS.convergence(pd), join(pd, 'convergence'));
   assert.equal(DATA_PATHS.librarian(pd), join(pd, 'librarian'));
   assert.equal(DATA_PATHS.librarianQueue(pd), join(pd, 'librarian', 'queue.jsonl'));
   assert.equal(DATA_PATHS.retrieval(pd), join(pd, 'retrieval'));
