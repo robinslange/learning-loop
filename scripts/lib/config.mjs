@@ -46,14 +46,19 @@ export function getPluginData() {
     return fromEnv;
   }
 
-  try {
-    const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
-    if (saved && existsSync(saved)) return saved;
-  } catch (err) {
-    logError('config.getPluginData', err);
+  // A missing marker is the expected no-plugin-data case (CLI, cron, tests) —
+  // not an error. getSessionId() now calls this on a hot path, so only log/warn
+  // when the marker EXISTS but can't be read (perms, IO); stay silent otherwise.
+  if (existsSync(DATA_PATH_MARKER)) {
+    try {
+      const saved = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
+      if (saved && existsSync(saved)) return saved;
+    } catch (err) {
+      logError('config.getPluginData', err);
+    }
+    process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
   }
 
-  process.stderr.write('[learning-loop] CLAUDE_PLUGIN_DATA not set and no saved path found\n');
   return null;
 }
 
