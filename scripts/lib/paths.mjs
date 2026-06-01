@@ -45,6 +45,8 @@ export function tmpFile(name) {
 // (no shared parent dir we want to name).
 
 export const DATA_PATHS = {
+  bin: (pd) => join(pd, 'bin'),
+  convergence: (pd) => join(pd, 'convergence'),
   librarian: (pd) => join(pd, 'librarian'),
   librarianQueue: (pd) => join(pd, 'librarian', 'queue.jsonl'),
   retrieval: (pd) => join(pd, 'retrieval'),

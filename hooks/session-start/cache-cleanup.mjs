@@ -6,14 +6,22 @@
 // package.json version (plugin auto-update bumps the marketplace files but the
 // native binary lags otherwise).
 
-import { readdirSync, readFileSync, rmSync, mkdirSync, existsSync } from 'node:fs';
+import {
+  readdirSync,
+  readFileSync,
+  rmSync,
+  mkdirSync,
+  existsSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
-import { logError } from '../../scripts/lib/log.mjs';
+import { logError, debug } from '../../scripts/lib/log.mjs';
 import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home } from '../lib/common.mjs';
-import { DATA_FILES } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, DATA_PATHS } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 
 function stripV(s) {
@@ -50,6 +58,51 @@ export async function run(ctx) {
     }
   } catch (err) {
     logError('session-start.shim-installer', err);
+  }
+
+  // Stale-artifact sweep in the live plugin-data dir. Two leftovers accumulate
+  // here that the version-prune above never reaches (they live in the *current*
+  // version's data, not an old version dir):
+  //   1. bin/ll-search.*-bak — orphaned binary backups (~290M each) from the
+  //      old delta-patch updater. That code path is gone, but installs that
+  //      passed through it still carry the backups; nothing ever removed them.
+  //   2. convergence/*.json older than the TTL — regenerable discovery/verify
+  //      session telemetry. The knowledge it produced already lives in the vault.
+  // Best-effort: any failure is logged and skipped, never blocks session-start.
+  try {
+    const pluginData = resolvePluginData();
+    if (pluginData) {
+      const binDir = DATA_PATHS.bin(pluginData);
+      try {
+        for (const name of readdirSync(binDir)) {
+          if (/^ll-search\..*-bak$/.test(name)) {
+            unlinkSync(join(binDir, name));
+          }
+        }
+      } catch (err) {
+        debug('session-start.stale-artifact-sweep', 'bin sweep skipped', { err: err?.code });
+      }
+
+      const convergenceDir = DATA_PATHS.convergence(pluginData);
+      const cutoff = Date.now() - HookConfig.CONVERGENCE_TTL_MS;
+      try {
+        for (const name of readdirSync(convergenceDir)) {
+          const fp = join(convergenceDir, name);
+          try {
+            const st = statSync(fp);
+            if (st.isFile() && st.mtimeMs < cutoff) unlinkSync(fp);
+          } catch (err) {
+            debug('session-start.stale-artifact-sweep', 'entry skipped', { err: err?.code });
+          }
+        }
+      } catch (err) {
+        debug('session-start.stale-artifact-sweep', 'convergence sweep skipped', {
+          err: err?.code,
+        });
+      }
+    }
+  } catch (err) {
+    logError('session-start.stale-artifact-sweep', err);
   }
 
   // Binary auto-update: when the installed ll-search version lags the running

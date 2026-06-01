@@ -38,6 +38,7 @@ test('required keys are all present (regression guard)', () => {
     'INJECTION_RACE_CAP_MS',
     'DEDUPE_WINDOW_MS',
     'SESSION_DEDUPE_TTL_MS',
+    'CONVERGENCE_TTL_MS',
     'INJECTION_THRESHOLD',
     'SIMILARITY_THRESHOLD',
     'HOOK_STDOUT_MAX_BYTES',
@@ -64,6 +65,10 @@ test('cooldown constants match known source values', () => {
 
 test('SESSION_DEDUPE_TTL_MS is exactly 7 days in milliseconds', () => {
   assert.equal(HookConfig.SESSION_DEDUPE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
+});
+
+test('CONVERGENCE_TTL_MS is exactly 7 days in milliseconds', () => {
+  assert.equal(HookConfig.CONVERGENCE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
 });
 
 test('DEDUPE_WINDOW_MS is exactly 3 minutes in milliseconds', () => {

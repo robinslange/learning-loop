@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Session-start now sweeps orphaned `ll-search.*-bak` binaries and stale `convergence/` telemetry from the live plugin-data dir.** Two artifacts accumulated in the _current_ version's data, where the existing stale-version prune (which only removes whole version dirs older than the running one) never reached them. First, `bin/ll-search.*-bak` (~290M each): leftovers from the old delta-patch updater. That update path is gone — the current `download-binary.mjs` does an atomic tmp-file-plus-rename with no `.bak` — but any install that passed through the delta-patch era still carries 1–3 of these backups, and nothing ever deleted them (observed live: 621M across three `.preDelta*-bak` files on a single machine). Second, `convergence/*.json` discovery/verify session telemetry, which is regenerable and whose distilled knowledge already lives in the vault; files older than the new `CONVERGENCE_TTL_MS` (7 days, matching `SESSION_DEDUPE_TTL_MS`) are pruned. The sweep runs in `hooks/session-start/cache-cleanup.mjs` after the version-prune and before the binary-update block, is fully best-effort (missing dirs and vanished entries are swallowed via gated `debug()`, never `logError`), and never blocks session-start. New `bin`/`convergence` helpers added to `DATA_PATHS`. Covered by `tests/hook-session-start-stale-sweep.test.mjs` (deletes backups, preserves the live binary and `.version`, respects the TTL cutoff, no-ops cleanly when the dirs are absent).
+
 ## v1.25.9
 
 ### Fixed
