@@ -110,6 +110,7 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
+- **Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note you write this session** (where `LL_SID` is resolved as in the Step 4 init block below). This is the durable, concurrency-safe attribution the Step 4.4 sweep uses to recover notes written by sub-agents: PostToolUse hooks don't fire on sub-agent writes, so those notes never hit the marker directly, and there is no other on-disk record that says *which* `/reflect` run produced a given note when several run at once. `reflect_sid` is a transient capture-time field; the Step 4.6.g cleanup strips it from the notes it lists once tracking is done.
 - **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer, which is what prevents the bundled-fence regression documented in `tests/reflect-new-notes-track.test.mjs`. Both sides must resolve the marker path the same way across a process boundary. Read the session id via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID` (the `LL_SID` snippet below, which runs the canonical `getSessionId()`), and the marker DIR via `resolve-paths.mjs REFLECT_SCRATCH` (`LL_SCRATCH` below) — the hook (`reflect-track.mjs`) builds its path from the identical `reflectScratchDir()` + `getSessionId()`. The dir is anchored in **plugin-data**, NOT tmp: `os.tmpdir()` honors `$TMPDIR`, and a hook subprocess doesn't inherit the interactive shell's `$TMPDIR`, so a tmp anchor put the hook (writer) and this skill's bash (reader) in different dirs and the handshake broke silently. Do NOT `cat` the id file out of a temp directory or build the path under one. Running the one canonical resolver on both sides keeps them in lockstep and lets parallel `/reflect` invocations key off one stable id.
 
 ```bash
@@ -124,13 +125,13 @@ LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
-If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly — Step 4.4's sweep replays the hook chain via `sweep-hook-replay.mjs`, which re-runs `reflect-track.mjs` and back-fills those paths. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it.
+If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly, so its path never reaches the marker through the live hook. Step 4.4's sweep recovers those notes: it finds every note carrying this session's `reflect_sid`, then replays the hook chain via `sweep-hook-replay.mjs` with `LL_REFLECT_SID=$LL_SID` set. That env var flows into the replayed `reflect-track.mjs` as the explicit session override (see `hooks/post-tool.js`), so each replayed Write appends to *this* session's marker even when another `/reflect` is running concurrently. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it. (Historically the sweep only replayed notes that lacked `[[links]]` — an autolink-backfill filter — which silently dropped every well-formed sub-agent note, since capture-rules requires a link. That left the marker empty and made Step 4.6 skip. The `reflect_sid` selection below fixes it.)
 
 ### Step 4.4: Post-Batch Sweep
 
-Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed `post-write-autolink.js` and `post-write-edge-infer.js` entirely: ending up without suggested backlinks or typed edges.
+Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed `post-write-autolink.js` and `post-write-edge-infer.js` entirely (no suggested backlinks or typed edges), **and** never reached the reflect new-notes marker (so Step 4.6 refinement would skip them).
 
-Replay the hook chain on any vault notes missing structural backlinks. Idempotent: safe to run on already-hooked notes.
+Replay the hook chain on two candidate sets, unioned: (1) notes missing structural backlinks (autolink/edge-infer backfill), and (2) every note carrying *this session's* `reflect_sid` (the marker backfill — these are the sub-agent notes whose paths the live hook never captured). The replay runs with `LL_REFLECT_SID=$LL_SID`, which routes each replayed Write to this session's marker even under concurrent `/reflect` runs. Idempotent: safe to run on already-hooked notes (autolink checks for existing links; reflect-track de-dups paths on read in Step 4.6.a).
 
 ```bash
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
@@ -148,25 +149,40 @@ LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRA
 mkdir -p "$LL_SCRATCH"
 SWEEP_CANDIDATES="${LL_SCRATCH}/ll-${LL_SID}-sweep-candidates.txt"
 
-# Detect unlinked candidates (exclude 4-projects: free-form indexes)
-LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
+# Candidate union (exclude 4-projects: free-form indexes):
+#   (1) notes with no [[links]] in the body  -> autolink/edge-infer backfill
+#   (2) notes whose frontmatter reflect_sid == this session's LL_SID
+#         -> marker backfill for sub-agent writes the live hook missed
+# A note matching either set is emitted once (dedup via a set).
+LL_VAULT="$LL_VAULT" LL_SID="$LL_SID" python3 - <<'PY' > "$SWEEP_CANDIDATES"
 import os, re
 root = os.environ["LL_VAULT"]
+sid = os.environ["LL_SID"]
+seen = set()
 for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
     for dirpath, _, files in os.walk(os.path.join(root, d)):
         for f in files:
             if not f.endswith(".md"): continue
             p = os.path.join(dirpath, f)
+            if p in seen: continue
             try:
-                body = open(p).read()
-                body = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.DOTALL)
-                if not re.search(r"\[\[[^\]]+\]\]", body):
-                    print(p)
-            except: pass
+                text = open(p).read()
+            except Exception:
+                continue
+            m = re.match(r"^---\n(.*?)\n---\n", text, flags=re.DOTALL)
+            fm = m.group(1) if m else ""
+            body = text[m.end():] if m else text
+            unlinked = not re.search(r"\[\[[^\]]+\]\]", body)
+            mine = bool(sid) and re.search(
+                r"^reflect_sid:\s*[\"']?" + re.escape(sid) + r"[\"']?\s*$", fm, flags=re.MULTILINE
+            )
+            if unlinked or mine:
+                seen.add(p)
+                print(p)
 PY
 
 if [ -s "$SWEEP_CANDIDATES" ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
+  LL_REFLECT_SID="$LL_SID" node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
 fi
 rm -f "$SWEEP_CANDIDATES"
 ```
@@ -290,6 +306,25 @@ For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `
 LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
 LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
 LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
+
+# Strip the transient reflect_sid stamp from every note this session tracked
+# (the marker holds their absolute paths). Removing it here keeps the field
+# from leaking into the permanent vault while still having served its Step 4.4
+# attribution purpose. Idempotent: notes without the line are left untouched.
+if [ -f "${LL_TMP_PREFIX}-new-notes.txt" ]; then
+  while IFS= read -r note; do
+    [ -f "$note" ] || continue
+    LL_NOTE="$note" python3 - <<'PY'
+import os, re
+p = os.environ["LL_NOTE"]
+text = open(p).read()
+new = re.sub(r"^reflect_sid:[^\n]*\n", "", text, count=1, flags=re.MULTILINE)
+if new != text:
+    open(p, "w").write(new)
+PY
+  done < "${LL_TMP_PREFIX}-new-notes.txt"
+fi
+
 rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 

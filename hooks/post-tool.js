@@ -52,13 +52,20 @@ const ctx = {
   input: raw.tool_input || {},
   response: raw.tool_response,
   raw,
-  // Intentionally NOT raw.session_id: the reflect-track handshake keys the
-  // marker on the canonical getSessionId() — the same resolver the skill's bash
-  // runs via resolve-paths.mjs SESSION_ID. raw.session_id is the harness UUID,
-  // a different id system, so threading it here would re-split the two sides and
-  // silently break the marker. Leaving sessionId null lets reflectNewNotesPath()
-  // resolve from getSessionId().
-  sessionId: null,
+  // Session id for the reflect-track marker. Two cases:
+  //   - Normal main-thread Write hook: null here, so reflectNewNotesPath()
+  //     resolves from the canonical getSessionId() — the same resolver the
+  //     skill's bash runs via resolve-paths.mjs SESSION_ID. We must NOT use
+  //     raw.session_id (the harness UUID, a different id system) or the two
+  //     sides re-split and the marker silently breaks.
+  //   - Replay path (sweep-hook-replay.mjs, invoked by /reflect Step 4.4 for
+  //     subagent-written notes): LL_REFLECT_SID carries the CALLING reflect
+  //     session's id explicitly, because getSessionId() can't attribute a write
+  //     to the right session when multiple /reflect runs overlap (the unsuffixed
+  //     plugin-data `id` is last-writer-wins). The skill sets it; the replay
+  //     forwards it; we honor it here as the explicit override reflect-track.mjs
+  //     already supports.
+  sessionId: env.LL_REFLECT_SID || null,
   vaultRoot: resolveVaultPath(),
   snapshot: null,
 };

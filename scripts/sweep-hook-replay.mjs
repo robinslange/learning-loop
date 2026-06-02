@@ -50,10 +50,18 @@ function replayOne(absPath) {
     tool_response: { success: true },
   });
 
+  // Forward LL_REFLECT_SID explicitly so the replayed post-tool.js appends to
+  // the CALLING reflect session's new-notes marker. spawnSync inherits env by
+  // default, but we pass it deliberately to document the handshake: /reflect
+  // Step 4.4 sets LL_REFLECT_SID=$LL_SID before invoking this script, and the
+  // replayed reflect-track.mjs uses it as the explicit session override. This is
+  // what makes subagent-written notes reach the marker, and what keeps that
+  // attribution correct when multiple /reflect runs overlap.
   const result = spawnSync('node', [HOOK_PATH], {
     input: stdin,
     encoding: 'utf-8',
     timeout: PER_FILE_TIMEOUT_MS,
+    env: process.env,
   });
   if (result.status !== 0) {
     return {

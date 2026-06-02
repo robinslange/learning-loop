@@ -60,6 +60,15 @@ export const env = Object.freeze({
   // --- Diagnostics ---
   LL_HOOK_DEBUG: isTruthy(process.env.LL_HOOK_DEBUG),
 
+  // --- Reflect new-notes handshake ---
+  // Explicit session id for the /reflect new-notes marker. Set by the reflect
+  // skill (and sweep-hook-replay, which forwards it) so a replayed Write appends
+  // to the CALLING session's marker rather than whatever getSessionId() resolves
+  // — the only attribution that survives concurrent /reflect runs, where the
+  // unsuffixed plugin-data session `id` is last-writer-wins. Empty/unset in the
+  // normal main-thread hook path, where getSessionId() is correct.
+  LL_REFLECT_SID: pick('LL_REFLECT_SID', null),
+
   // --- Memory injection ---
   LEARNING_LOOP_ALWAYS_INJECT_MEMORY: isTruthy(process.env.LEARNING_LOOP_ALWAYS_INJECT_MEMORY),
 

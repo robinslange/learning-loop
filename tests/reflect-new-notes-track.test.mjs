@@ -208,6 +208,37 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
+    it('runs the Step 4.4 sweep replay with LL_REFLECT_SID set to LL_SID', () => {
+      // The subagent-backfill fix: the replay must carry the calling session's
+      // id so reflect-track appends to THIS marker (concurrency-safe). If a
+      // future edit drops the env var, sub-agent notes silently stop reaching
+      // the marker again and Step 4.6 refinement goes quiet.
+      assert.match(
+        skill,
+        /LL_REFLECT_SID="\$LL_SID"\s+node\s+"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/sweep-hook-replay\.mjs"/,
+        'Step 4.4 must invoke sweep-hook-replay.mjs with LL_REFLECT_SID="$LL_SID" so ' +
+          'replayed sub-agent writes append to the calling session marker.',
+      );
+    });
+
+    it("selects sweep candidates by this session's reflect_sid, not just link-less notes", () => {
+      // The candidate union must include notes carrying reflect_sid == LL_SID.
+      // Pinning this prevents a regression back to the link-less-only filter
+      // that dropped every well-formed (linked) sub-agent note.
+      assert.match(
+        skill,
+        /reflect_sid:\\s\*\[\\"'\]\?"\s*\+\s*re\.escape\(sid\)/,
+        'the Step 4.4 candidate scan must match frontmatter reflect_sid against the ' +
+          'session id, so sub-agent notes that already have [[links]] are still swept.',
+      );
+      // And the skill must instruct stamping reflect_sid on written notes.
+      assert.match(
+        skill,
+        /Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note/,
+        'Step 4 must tell the agent to stamp reflect_sid on every note it writes.',
+      );
+    });
+
     it('resolves LL_SID via the canonical getSessionId() resolver, not a cat of the id file', () => {
       // Both sides must run the SAME resolver. The skill shells to
       // resolve-paths.mjs SESSION_ID (which calls getSessionId()); the hook
@@ -525,6 +556,123 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         'hook must append to the path the skill built from the canonical resolver',
       );
       rmSync(skillMarker);
+    });
+  });
+
+  // Regression (root-caused 2026-06-02): subagent-written notes (note-writer,
+  // discovery-researcher, literature-capturer) never reached the marker, so
+  // Step 4.6 upstream-refinement silently skipped on every research-heavy
+  // /reflect. PostToolUse hooks don't fire on subagent tool calls; the only
+  // backfill was Step 4.4's sweep, whose candidate filter selected ONLY
+  // notes with no [[links]] (it exists for autolink backfill). capture-rules
+  // requires at least one link and note-writer always emits one, so every
+  // well-formed note was filtered out → never replayed → marker stayed empty.
+  //
+  // Fix: the replay (sweep-hook-replay.mjs) forwards LL_REFLECT_SID, which
+  // post-tool.js reads into ctx.sessionId, which reflect-track.mjs honors as
+  // the explicit session override. The skill sets LL_REFLECT_SID=$LL_SID and
+  // feeds ALL session notes (not just link-less ones) to the replay. The
+  // explicit id is also what makes attribution correct under concurrent
+  // /reflect runs, where getSessionId()'s unsuffixed plugin-data id is
+  // last-writer-wins and would misattribute the write to the other session.
+  describe('subagent-write backfill via LL_REFLECT_SID (Step 4.4 sweep)', () => {
+    let runReflectTrack;
+    let reflectNewNotesPath;
+    let savedReflectSid;
+
+    before(async () => {
+      savedReflectSid = process.env.LL_REFLECT_SID;
+      // Seed getSessionId() to resolve a DIFFERENT id than the reflect session —
+      // simulating a concurrent session that started later (last-writer-wins on
+      // the unsuffixed plugin-data id). The fix must ignore this and key off
+      // LL_REFLECT_SID instead.
+      writeFileSync(sidFilePpid, 'other-concurrent-session');
+      writeFileSync(sidFileBare, 'other-concurrent-session');
+      const mod = await import('../hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now());
+      runReflectTrack = mod.runReflectTrack;
+      reflectNewNotesPath = mod.reflectNewNotesPath;
+    });
+
+    after(() => {
+      if (savedReflectSid !== undefined) process.env.LL_REFLECT_SID = savedReflectSid;
+      else delete process.env.LL_REFLECT_SID;
+      writeFileSync(sidFilePpid, SID);
+      writeFileSync(sidFileBare, SID);
+    });
+
+    it('appends a subagent (linked) note to the CALLING session marker, not the concurrent one', async () => {
+      // The reflect session's own marker, keyed on ITS id.
+      const reflectSid = 'my-reflect-session';
+      const myMarker = join(scratchDir, `ll-${reflectSid}-reflect-new-notes.txt`);
+      mkdirSync(scratchDir, { recursive: true });
+      writeFileSync(myMarker, '');
+
+      // A note exactly like note-writer produces: it HAS a [[link]] (so the old
+      // link-less sweep filter would have skipped it). Path is what matters here.
+      const fp = join(fakeVaultRoot, '0-inbox', 'linked-subagent-note.md');
+
+      // Replay path: post-tool.js would pass ctx.sessionId = env.LL_REFLECT_SID.
+      // Drive reflect-track directly with that explicit override (the unit under
+      // test) — the value the skill set and the replay forwarded.
+      await runReflectTrack({
+        tool: 'Write',
+        input: { file_path: fp },
+        vaultRoot: fakeVaultRoot,
+        sessionId: reflectSid,
+      });
+
+      assert.equal(
+        readFileSync(myMarker, 'utf8'),
+        fp + '\n',
+        'explicit sessionId override must route the append to the reflect session marker',
+      );
+
+      // And it must NOT have leaked into the concurrent session's marker.
+      const otherMarker = join(scratchDir, 'll-other-concurrent-session-reflect-new-notes.txt');
+      assert.equal(
+        existsSync(otherMarker),
+        false,
+        "the write must not land in the concurrent session's marker (getSessionId() target)",
+      );
+      rmSync(myMarker);
+    });
+
+    it('end-to-end: sweep-hook-replay.mjs with LL_REFLECT_SID set populates the marker', () => {
+      // The real integration: spawn sweep-hook-replay.mjs exactly as Step 4.4
+      // does, with LL_REFLECT_SID in the env, and assert the marker gets the
+      // replayed note path. This proves the full env → post-tool.js → reflect-
+      // track.mjs plumbing, not just the module override.
+      const reflectSid = 'e2e-reflect-sid';
+      const marker = join(scratchDir, `ll-${reflectSid}-reflect-new-notes.txt`);
+      mkdirSync(scratchDir, { recursive: true });
+      writeFileSync(marker, '');
+
+      // A real on-disk note inside the fake vault (replay reads file content).
+      const inbox = join(fakeVaultRoot, '0-inbox');
+      mkdirSync(inbox, { recursive: true });
+      const notePath = join(inbox, 'e2e-linked-note.md');
+      writeFileSync(
+        notePath,
+        '---\ntags: [test]\n---\n\nBody with a [[wikilink]] so the old filter would skip it.\n',
+      );
+
+      const replay = join(__dirname, '..', 'scripts', 'sweep-hook-replay.mjs');
+      // The replay's child post-tool.js resolves the vault from config; point it
+      // at the fake vault via VAULT_PATH (getVaultPath() reads it first).
+      const childEnv = {
+        ...process.env,
+        LL_REFLECT_SID: reflectSid,
+        VAULT_PATH: fakeVaultRoot,
+        CLAUDE_PLUGIN_DATA: pluginData,
+      };
+      execFileSync('node', [replay, notePath], { encoding: 'utf8', env: childEnv });
+
+      const contents = readFileSync(marker, 'utf8');
+      assert.ok(
+        contents.includes(notePath),
+        `marker must contain the replayed note path via LL_REFLECT_SID; got: ${JSON.stringify(contents)}`,
+      );
+      rmSync(marker);
     });
   });
 });
