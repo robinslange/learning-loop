@@ -49,11 +49,14 @@ jobs:
             native/target
           key: ${{ matrix.target }}-cargo-${{ hashFiles('native/Cargo.lock') }}
 
+      # Keyed on a manual version tag, NOT build.rs's hash: editing build.rs
+      # (e.g. adding download retry) must not bust the cache and force a fresh
+      # HuggingFace fetch. Bump `v5` only when the pinned model/SHA changes.
       - name: Cache models
         uses: actions/cache@v4
         with:
           path: native/crates/ll-search/model
-          key: native-model-v4-${{ hashFiles('native/crates/ll-search/build.rs') }}
+          key: native-model-v5
 
       - name: Build
         run: cargo build --release -p ll-search --features nli --target ${{ matrix.target }}

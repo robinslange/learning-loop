@@ -2,6 +2,12 @@ use std::env;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::thread::sleep;
+use std::time::Duration;
+
+// HuggingFace rate-limits (HTTP 429) under concurrent CI builds; a single curl
+// attempt makes the release build flaky. Retry with exponential backoff.
+const MAX_ATTEMPTS: u32 = 5;
 
 // MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli, exported as int8 ONNX by Xenova.
 // Used by the contradiction-check hook (edge-infer.mjs -> ll-search nli-batch).
@@ -81,20 +87,36 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
     let tmp = dest.with_extension("download.tmp");
     let _ = fs::remove_file(&tmp);
 
-    eprintln!("Downloading {} ...", url);
-    let output = std::process::Command::new("curl")
-        .args(["-fsSL", "-o"])
-        .arg(&tmp)
-        .arg(url)
-        .output()
-        .expect("curl spawn failed (is `curl` on PATH?)");
-    if !output.status.success() {
-        let _ = fs::remove_file(&tmp);
-        panic!(
-            "curl failed to download {} (exit {:?}): {}",
-            url,
+    let mut last_err = String::new();
+    let mut downloaded = false;
+    for attempt in 1..=MAX_ATTEMPTS {
+        eprintln!("Downloading {} (attempt {}/{}) ...", url, attempt, MAX_ATTEMPTS);
+        let output = std::process::Command::new("curl")
+            .args(["-fsSL", "-o"])
+            .arg(&tmp)
+            .arg(url)
+            .output()
+            .expect("curl spawn failed (is `curl` on PATH?)");
+        if output.status.success() {
+            downloaded = true;
+            break;
+        }
+        last_err = format!(
+            "exit {:?}: {}",
             output.status.code(),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        let _ = fs::remove_file(&tmp);
+        if attempt < MAX_ATTEMPTS {
+            let backoff = Duration::from_secs(2u64.pow(attempt));
+            eprintln!("  curl failed ({}); retrying in {:?}", last_err, backoff);
+            sleep(backoff);
+        }
+    }
+    if !downloaded {
+        panic!(
+            "curl failed to download {} after {} attempts (last error {}; likely HTTP 429 / network)",
+            url, MAX_ATTEMPTS, last_err
         );
     }
 

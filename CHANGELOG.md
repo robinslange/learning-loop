@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Release build resilience, part two: the NLI model download now retries too, and the model cache survives `build.rs` edits.** v1.25.14 added retry/backoff to `ll-core/build.rs`, but the v1.25.14 release build still failed: there is a *second* compile-time HuggingFace fetch in `ll-search/build.rs` (the DeBERTa NLI model, behind the `nli` feature) that still used a single `curl` and panicked on the first 429 — before `ll-core` even got to retry. That second downloader now retries up to 5 times with the same exponential backoff (2s/4s/8s/16s), preserving its SHA-256 pin and size-floor validation on the final bytes. Separately, the `Cache models` step in `build-native.yml` was keyed on `hashFiles('native/crates/ll-search/build.rs')`, so *editing build.rs to add the retry* changed the key and guaranteed a cold HuggingFace fetch on the very release that needed the cache most. The key is now a manual `native-model-v5` tag, bumped only when the pinned model/SHA actually changes, so build.rs edits no longer bust it. (v1.25.14 was tagged but its build failed, so no GitHub Release was cut for it; this is shipped as v1.25.15.)
+
 ## v1.25.14
 
 ### Fixed
