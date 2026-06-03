@@ -12,53 +12,44 @@ import { getSessionId } from '../scripts/lib/session.mjs';
 // covers the plugin-data-precedence path.)
 let pdRoot;
 let savedPluginData;
+let savedHarnessSid;
 
 before(() => {
   savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  savedHarnessSid = process.env.CLAUDE_CODE_SESSION_ID;
   pdRoot = mkdtempSync(join(tmpdir(), 'll-session-test-pd-'));
   process.env.CLAUDE_PLUGIN_DATA = pdRoot;
+  // The harness session id is the canonical key; clear it for the file-based
+  // tests below so they exercise the on-disk fallbacks, and set it explicitly
+  // in the tests that assert the env-first behavior.
+  delete process.env.CLAUDE_CODE_SESSION_ID;
 });
 
 after(() => {
   rmSync(pdRoot, { recursive: true, force: true });
   if (savedPluginData !== undefined) process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
   else delete process.env.CLAUDE_PLUGIN_DATA;
+  if (savedHarnessSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedHarnessSid;
+  else delete process.env.CLAUDE_CODE_SESSION_ID;
 });
 
-test('getSessionId returns ppid-suffixed when present', () => {
-  const ppid = process.ppid;
-  const path = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  writeFileSync(path, 'session-from-ppid');
+test('getSessionId reads the unsuffixed tmp file', () => {
+  const path = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(path, 'session-from-tmp');
   try {
-    assert.equal(getSessionId(), 'session-from-ppid');
+    assert.equal(getSessionId(), 'session-from-tmp');
   } finally {
     rmSync(path, { force: true });
   }
 });
 
-test('getSessionId falls back to unsuffixed when ppid-suffixed absent', () => {
-  const ppid = process.ppid;
-  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  rmSync(suffixed, { force: true });
-  const fallback = join(tmpdir(), 'learning-loop-session-id');
-  writeFileSync(fallback, 'session-unsuffixed');
-  try {
-    assert.equal(getSessionId(), 'session-unsuffixed');
-  } finally {
-    rmSync(fallback, { force: true });
-  }
-});
-
-test('getSessionId returns "unknown" when both files absent', () => {
-  const ppid = process.ppid;
-  rmSync(join(tmpdir(), `learning-loop-session-id-${ppid}`), { force: true });
+test('getSessionId returns "unknown" when no file is present', () => {
   rmSync(join(tmpdir(), 'learning-loop-session-id'), { force: true });
   assert.equal(getSessionId(), 'unknown');
 });
 
 test('getSessionId trims trailing whitespace from file contents', () => {
-  const ppid = process.ppid;
-  const path = join(tmpdir(), `learning-loop-session-id-${ppid}`);
+  const path = join(tmpdir(), 'learning-loop-session-id');
   writeFileSync(path, 'session-with-newline\n');
   try {
     assert.equal(getSessionId(), 'session-with-newline');
@@ -67,52 +58,35 @@ test('getSessionId trims trailing whitespace from file contents', () => {
   }
 });
 
-test('getSessionId skips empty ppid file and falls through to legacy', () => {
-  const ppid = process.ppid;
-  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  const fallback = join(tmpdir(), 'learning-loop-session-id');
-  writeFileSync(suffixed, '');
-  writeFileSync(fallback, 'session-from-legacy');
-  try {
-    assert.equal(getSessionId(), 'session-from-legacy');
-  } finally {
-    rmSync(suffixed, { force: true });
-    rmSync(fallback, { force: true });
-  }
-});
-
-test('getSessionId returns "unknown" when both candidates are whitespace-only', () => {
-  const ppid = process.ppid;
-  const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  const fallback = join(tmpdir(), 'learning-loop-session-id');
-  writeFileSync(suffixed, '   \n');
-  writeFileSync(fallback, '\t\t');
+test('getSessionId returns "unknown" when the tmp file is whitespace-only', () => {
+  const path = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(path, '   \n');
   try {
     assert.equal(getSessionId(), 'unknown');
   } finally {
-    rmSync(suffixed, { force: true });
-    rmSync(fallback, { force: true });
+    rmSync(path, { force: true });
   }
 });
 
 test(
-  'getSessionId surfaces unreadable file via logError, then falls through',
+  'getSessionId surfaces an unreadable plugin-data id via logError, then falls through to tmp',
   { skip: process.platform === 'win32' },
   () => {
     if (process.getuid && process.getuid() === 0) return;
-    const ppid = process.ppid;
-    const suffixed = join(tmpdir(), `learning-loop-session-id-${ppid}`);
+    const sessionDir = join(pdRoot, 'session');
+    mkdirSync(sessionDir, { recursive: true });
+    const pdId = join(sessionDir, 'id');
     const fallback = join(tmpdir(), 'learning-loop-session-id');
-    writeFileSync(suffixed, 'unreadable');
-    chmodSync(suffixed, 0o000);
+    writeFileSync(pdId, 'unreadable');
+    chmodSync(pdId, 0o000);
     writeFileSync(fallback, 'recovered');
     try {
       assert.equal(getSessionId(), 'recovered');
     } finally {
       try {
-        chmodSync(suffixed, 0o600);
+        chmodSync(pdId, 0o600);
       } catch {}
-      rmSync(suffixed, { force: true });
+      rmSync(sessionDir, { recursive: true, force: true });
       rmSync(fallback, { force: true });
     }
   },
@@ -122,41 +96,73 @@ test(
 // handshake. plugin-data/session/id[-<ppid>] must win over the tmp files,
 // because os.tmpdir() honors $TMPDIR (a hook subprocess and the interactive
 // shell disagree) while plugin-data does not.
-test('getSessionId prefers plugin-data/session/id-<ppid> over the tmp files', () => {
-  const ppid = process.ppid;
-  const tmpPpid = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  writeFileSync(tmpPpid, 'tmp-loses');
+test('getSessionId prefers plugin-data/session/id over the tmp file', () => {
+  const tmpFile = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(tmpFile, 'tmp-loses');
   const sessionDir = join(pdRoot, 'session');
   mkdirSync(sessionDir, { recursive: true });
-  writeFileSync(join(sessionDir, `id-${ppid}`), 'plugin-data-wins');
+  writeFileSync(join(sessionDir, 'id'), 'plugin-data-wins');
   try {
     assert.equal(getSessionId(), 'plugin-data-wins');
   } finally {
-    rmSync(tmpPpid, { force: true });
-    rmSync(sessionDir, { recursive: true, force: true });
-  }
-});
-
-test('getSessionId uses plugin-data/session/id (unsuffixed) when the ppid file is absent', () => {
-  // The cross-process bridge: a reader's ppid differs from the SessionStart
-  // writer's, so the unsuffixed file is what actually meets across processes.
-  const sessionDir = join(pdRoot, 'session');
-  mkdirSync(sessionDir, { recursive: true });
-  writeFileSync(join(sessionDir, 'id'), 'bridge-id');
-  try {
-    assert.equal(getSessionId(), 'bridge-id');
-  } finally {
+    rmSync(tmpFile, { force: true });
     rmSync(sessionDir, { recursive: true, force: true });
   }
 });
 
 test('getSessionId falls through to tmp when plugin-data has no session id', () => {
-  const ppid = process.ppid;
-  const tmpPpid = join(tmpdir(), `learning-loop-session-id-${ppid}`);
-  writeFileSync(tmpPpid, 'tmp-fallback');
+  const tmpFile = join(tmpdir(), 'learning-loop-session-id');
+  writeFileSync(tmpFile, 'tmp-fallback');
   try {
     assert.equal(getSessionId(), 'tmp-fallback');
   } finally {
-    rmSync(tmpPpid, { force: true });
+    rmSync(tmpFile, { force: true });
+  }
+});
+
+// --- Harness session id is the canonical key ---------------------------------
+// CLAUDE_CODE_SESSION_ID is the only id that is identical across every process
+// in a session (SessionStart hook, post-tool hook, the skill's bash-spawned
+// node, and sub-agents) AND independent of $TMPDIR and process.ppid. It must win
+// so the /reflect Step-4 marker handshake meets across the hook/shell boundary.
+test('getSessionId returns CLAUDE_CODE_SESSION_ID when set', () => {
+  process.env.CLAUDE_CODE_SESSION_ID = 'harness-uuid';
+  try {
+    assert.equal(getSessionId(), 'harness-uuid');
+  } finally {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+  }
+});
+
+// The original bug: a stale plugin-data/session/id-<ppid> from a dead session
+// shadowed the real id because ppid is not a session key and is reused. The
+// harness id must override any on-disk file so a stale ppid file can never
+// re-split the handshake.
+test('getSessionId prefers CLAUDE_CODE_SESSION_ID over a stale on-disk session id', () => {
+  const sessionDir = join(pdRoot, 'session');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, `id-${process.ppid}`), 'stale-ppid-id');
+  writeFileSync(join(sessionDir, 'id'), 'stale-unsuffixed-id');
+  process.env.CLAUDE_CODE_SESSION_ID = 'live-harness-uuid';
+  try {
+    assert.equal(getSessionId(), 'live-harness-uuid');
+  } finally {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+    rmSync(sessionDir, { recursive: true, force: true });
+  }
+});
+
+// An empty/whitespace env value is treated as absent (a defensive guard for a
+// harness that exports the var but leaves it blank), falling through to disk.
+test('getSessionId ignores a blank CLAUDE_CODE_SESSION_ID and falls through', () => {
+  const sessionDir = join(pdRoot, 'session');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'id'), 'disk-id');
+  process.env.CLAUDE_CODE_SESSION_ID = '   ';
+  try {
+    assert.equal(getSessionId(), 'disk-id');
+  } finally {
+    delete process.env.CLAUDE_CODE_SESSION_ID;
+    rmSync(sessionDir, { recursive: true, force: true });
   }
 });

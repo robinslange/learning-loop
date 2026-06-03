@@ -42,25 +42,25 @@ describe('getSessionId fallback chain', () => {
   // log — provenance-emit was spewing ENOENT lines to stderr because every
   // fallback step ran through a `try { read } catch { logError }` block
   // even when "file absent" was the entirely expected branch.
-  const ppidPath = join(tmpdir(), `learning-loop-session-id-${process.ppid}`);
   const legacyPath = join(tmpdir(), 'learning-loop-session-id');
-  // Save original contents so we can restore the developer's real session
-  // ids when the test suite finishes.
-  let savedPpid = null;
+  // Save original contents so we restore the developer's real session id and
+  // env var when the suite finishes. Clear the env var so these tests exercise
+  // the file fallback rung (getSessionId() prefers $CLAUDE_CODE_SESSION_ID).
   let savedLegacy = null;
+  let savedEnvSid;
   before(() => {
-    if (existsSync(ppidPath)) savedPpid = readFileSync(ppidPath, 'utf8');
     if (existsSync(legacyPath)) savedLegacy = readFileSync(legacyPath, 'utf8');
+    savedEnvSid = process.env.CLAUDE_CODE_SESSION_ID;
+    delete process.env.CLAUDE_CODE_SESSION_ID;
   });
   after(() => {
-    if (savedPpid !== null) writeFileSync(ppidPath, savedPpid);
-    else if (existsSync(ppidPath)) unlinkSync(ppidPath);
     if (savedLegacy !== null) writeFileSync(legacyPath, savedLegacy);
     else if (existsSync(legacyPath)) unlinkSync(legacyPath);
+    if (savedEnvSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedEnvSid;
+    else delete process.env.CLAUDE_CODE_SESSION_ID;
   });
 
   it('returns "unknown" silently when no session-id files exist', async () => {
-    if (existsSync(ppidPath)) unlinkSync(ppidPath);
     if (existsSync(legacyPath)) unlinkSync(legacyPath);
 
     const mod = await import('../hooks/lib/common.mjs?bust=2');
@@ -81,15 +81,18 @@ describe('getSessionId fallback chain', () => {
     );
   });
 
-  it('prefers the ppid-suffixed file', async () => {
-    writeFileSync(ppidPath, 'ppid-session');
+  it('prefers $CLAUDE_CODE_SESSION_ID over the legacy file', async () => {
     writeFileSync(legacyPath, 'legacy-session');
-    const mod = await import('../hooks/lib/common.mjs?bust=3');
-    assert.equal(mod.getSessionId(), 'ppid-session');
+    process.env.CLAUDE_CODE_SESSION_ID = 'harness-session';
+    try {
+      const mod = await import('../hooks/lib/common.mjs?bust=3');
+      assert.equal(mod.getSessionId(), 'harness-session');
+    } finally {
+      delete process.env.CLAUDE_CODE_SESSION_ID;
+    }
   });
 
-  it('falls back to the legacy file when ppid file is missing', async () => {
-    if (existsSync(ppidPath)) unlinkSync(ppidPath);
+  it('falls back to the legacy file when the env var is absent', async () => {
     writeFileSync(legacyPath, 'legacy-only');
     const mod = await import('../hooks/lib/common.mjs?bust=4');
     assert.equal(mod.getSessionId(), 'legacy-only');

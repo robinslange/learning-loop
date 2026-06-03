@@ -1,24 +1,32 @@
 // scripts/lib/session.mjs — single source of truth for session-id resolution.
 //
 // Resolution order, first non-empty wins:
-//   1. plugin-data/session/id-<ppid>   (env-independent, ppid-keyed)
-//   2. plugin-data/session/id          (env-independent, last-writer-wins)
-//   3. <tmpdir>/learning-loop-session-id-<ppid>   (legacy tmp, ppid-keyed)
-//   4. <tmpdir>/learning-loop-session-id          (legacy tmp, unsuffixed)
+//   0. $CLAUDE_CODE_SESSION_ID   (the harness session id — canonical)
+//   1. plugin-data/session/id    (env-independent, persisted at SessionStart)
+//   2. <tmpdir>/learning-loop-session-id   (legacy tmp, unsuffixed)
 //
-// The plugin-data candidates come FIRST because they are env-INdependent:
-// os.tmpdir() honors $TMPDIR, which a hook subprocess does NOT inherit but the
-// interactive shell DOES, so the legacy tmp files made the SAME session resolve
-// different ids (or 'unknown') depending on which process asked — breaking any
-// handshake that straddled the hook/shell boundary (e.g. /reflect Step 4).
-// plugin-data resolves identically in every subprocess. The tmp candidates are
-// retained as a fallback for sessions started before this change (or when
-// plugin-data can't be resolved).
+// The harness id comes FIRST and is the real key. It is the ONLY id that is
+// identical across every process in a session — the SessionStart hook, the
+// post-tool hook, the skill's bash-spawned node, and sub-agents all inherit the
+// same $CLAUDE_CODE_SESSION_ID — and it is independent of both $TMPDIR and
+// process.ppid. The reflect Step-4 marker handshake straddles the hook/shell
+// boundary, so it needs an id that both sides compute identically; this is it.
 //
-// An empty marker (zero bytes, or whitespace only) is treated as absent and
-// skipped. Returns 'unknown' when nothing usable is found — expected outside a
-// Claude Code session (CLI, cron, tests). Only logs when a file *exists* but
-// cannot be read (perms, IO).
+// History — why NOT ppid: an earlier revision keyed candidates on process.ppid
+// (plugin-data/session/id-<ppid>, tmp/...-<ppid>) "for per-session isolation".
+// But ppid is the IMMEDIATE parent and differs per process (a hook's parent is
+// the harness; the skill's node's parent is its bash), so the writer and reader
+// never shared a ppid file — they only met by falling through to the unsuffixed
+// `id`. Worse, id-<ppid> files accumulated forever (ppids are reused across
+// sessions) and a stale one shadowed the real id, re-splitting the handshake.
+// The harness id removes ppid from the equation entirely; the ppid candidates
+// are gone. plugin-data/session/id (last-writer-wins) and the legacy tmp file
+// remain only as fallbacks for environments where the harness var is unset.
+//
+// An empty value (zero bytes, or whitespace only — including a blank env var) is
+// treated as absent and skipped. Returns 'unknown' when nothing usable is found
+// — expected outside a Claude Code session (CLI, cron, tests). Only logs when a
+// file *exists* but cannot be read (perms, IO).
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -28,17 +36,14 @@ import { resolvePluginData } from './config.mjs';
 import { DATA_PATHS } from './paths.mjs';
 
 export function getSessionId() {
-  const tmp = tmpdir();
+  const harness = (process.env.CLAUDE_CODE_SESSION_ID || '').trim();
+  if (harness) return harness;
+
   const candidates = [];
   const pd = resolvePluginData();
-  if (pd) {
-    const sessionDir = DATA_PATHS.session(pd);
-    candidates.push(join(sessionDir, `id-${process.ppid}`), join(sessionDir, 'id'));
-  }
-  candidates.push(
-    join(tmp, `learning-loop-session-id-${process.ppid}`),
-    join(tmp, 'learning-loop-session-id'),
-  );
+  if (pd) candidates.push(join(DATA_PATHS.session(pd), 'id'));
+  candidates.push(join(tmpdir(), 'learning-loop-session-id'));
+
   for (const path of candidates) {
     if (!existsSync(path)) continue;
     try {

@@ -378,3 +378,67 @@ test(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Session-id stamping (writer side of the /reflect Step-4 handshake).
+//
+// The writer must stamp the canonical id into plugin-data/session/id (the
+// single env-independent file both the post-tool hook and the skill's bash read
+// back via getSessionId()). It must NOT create per-ppid files: ppid is not a
+// session key, differs per process, and stale id-<ppid> files accumulate and
+// shadow the real id — the root cause of the recurring handshake breakage.
+// ---------------------------------------------------------------------------
+test(
+  'session-start stamps CLAUDE_CODE_SESSION_ID into plugin-data/session/id and writes no ppid file',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'ignored-stdin-id' },
+      env: {
+        VAULT_PATH: VAULT,
+        CLAUDE_PROJECT_DIR: '/tmp/test-project-sid',
+        CLAUDE_CODE_SESSION_ID: 'harness-uuid-xyz',
+      },
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const sessionDir = join(r.pluginDataDir, 'session');
+      const idFile = join(sessionDir, 'id');
+      assert.ok(existsSync(idFile), 'plugin-data/session/id must exist');
+      assert.equal(
+        readFileSync(idFile, 'utf8').trim(),
+        'harness-uuid-xyz',
+        'session/id must hold the harness session id',
+      );
+      const ppidFiles = readdirSync(sessionDir).filter((n) => /^id-\d+$/.test(n));
+      assert.deepEqual(ppidFiles, [], `no id-<ppid> files expected, found: ${ppidFiles}`);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'session-start falls back to a generated id when CLAUDE_CODE_SESSION_ID is absent',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'ignored' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-sid2' },
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const idFile = join(r.pluginDataDir, 'session', 'id');
+      assert.ok(existsSync(idFile), 'plugin-data/session/id must exist');
+      assert.match(
+        readFileSync(idFile, 'utf8').trim(),
+        /^[0-9a-f]{8}$/,
+        'fallback id should be an 8-hex-char token',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);

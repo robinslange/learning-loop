@@ -50,10 +50,17 @@ export async function run(ctx) {
     }
   }
 
-  // Session ID stamping.
-  const sessionId = randomBytes(4).toString('hex');
+  // Session ID stamping. Prefer the harness session id ($CLAUDE_CODE_SESSION_ID)
+  // — it is identical across every process in the session (this hook, the
+  // post-tool hook, the skill's bash, sub-agents) and independent of $TMPDIR and
+  // process.ppid, so getSessionId() resolves the same value on both sides of the
+  // /reflect Step-4 marker handshake. randomBytes is only a fallback for hosts
+  // that don't export the var (bare CLI/test). We write a single unsuffixed file
+  // per location — NO id-<ppid>: ppid is not a session key, differs per process,
+  // and stale per-ppid files accumulate and shadow the real id.
+  const harnessSid = (process.env.CLAUDE_CODE_SESSION_ID || '').trim();
+  const sessionId = harnessSid || randomBytes(4).toString('hex');
   ctx.sessionId = sessionId;
-  const ppid = process.ppid;
   try {
     writeFileSync(
       join(ctx.tmp, `learning-loop-session-start-${sessionId}`),
@@ -90,24 +97,26 @@ export async function run(ctx) {
     }
   }
 
-  // Session ID — primary stamp in plugin-data (env-independent: getSessionId()
-  // reads it the same from any subprocess regardless of $TMPDIR). Both the
-  // ppid-keyed file (per-session) and the unsuffixed file (cross-process bridge,
-  // since a reader's ppid differs from this writer's) are written.
+  // Session ID — single env-independent stamp in plugin-data. getSessionId()
+  // reads the unsuffixed `id` (after the harness var) from any subprocess. We
+  // also one-shot sweep any stale id-<ppid> files left by older versions: those
+  // accumulated forever and a stale one shadowed the real id, re-splitting the
+  // /reflect handshake. Removing them lets existing installs self-heal.
   if (ctx.pluginData) {
     try {
       const sessionDir = DATA_PATHS.session(ctx.pluginData);
       mkdirSync(sessionDir, { recursive: true });
-      writeFileSync(join(sessionDir, `id-${ppid}`), sessionId);
       writeFileSync(join(sessionDir, 'id'), sessionId);
+      for (const name of readdirSync(sessionDir)) {
+        if (/^id-\d+$/.test(name)) rmSync(join(sessionDir, name), { force: true });
+      }
     } catch (err) {
       logError('session-start.vault-snapshot.writeSessionIdPluginData', err);
     }
   }
 
-  // Session ID legacy tmp files (fallback for the resolver; retained for compat).
+  // Session ID legacy tmp file (fallback for the resolver; retained for compat).
   try {
-    writeFileSync(join(ctx.tmp, `learning-loop-session-id-${ppid}`), sessionId);
     writeFileSync(join(ctx.tmp, 'learning-loop-session-id'), sessionId);
   } catch (err) {
     logError('session-start.vault-snapshot.writeSessionId', err);

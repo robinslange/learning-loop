@@ -57,14 +57,13 @@ export const DATA_PATHS = {
   // regardless of whether each inherits $TMPDIR (os.tmpdir() honors $TMPDIR, so
   // a tmp anchor diverges between a hook subprocess and the interactive shell).
   reflectScratch: (pd) => join(pd, 'reflect-scratch'),
-  // Env-independent session-id anchor. getSessionId() previously read only the
-  // tmp `learning-loop-session-id[-<ppid>]` files, but os.tmpdir() honors
-  // $TMPDIR — which a hook subprocess doesn't inherit but the interactive shell
-  // does — so the SAME session resolved different ids (or 'unknown') depending
-  // on which process asked. plugin-data doesn't depend on $TMPDIR, so SessionStart
-  // also stamps the id here and getSessionId() prefers it.
+  // Env-independent session-id anchor. SessionStart stamps the canonical id
+  // (the harness $CLAUDE_CODE_SESSION_ID) into session/id; getSessionId() reads
+  // the env var first, then this file. Earlier revisions keyed per-process files
+  // here (id-<ppid>), but ppid is not a session key — it differs per process and
+  // the stale files shadowed the real id — so the single unsuffixed file is all
+  // that remains.
   session: (pd) => join(pd, 'session'),
-  sessionId: (pd, ppid) => join(pd, 'session', `id-${ppid}`),
   provenance: (pd) => join(pd, 'provenance'),
   federation: (pd) => join(pd, 'federation'),
   sessionStartCache: (pd) => join(pd, 'session-start-cache'),

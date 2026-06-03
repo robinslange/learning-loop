@@ -84,15 +84,13 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
   let fakeVaultRoot;
   // The marker DIR is plugin-data/reflect-scratch (env-independent across the
   // hook/shell process boundary), set via CLAUDE_PLUGIN_DATA. The session id
-  // keys the file within it via getSessionId(); these tests drive the tmp
-  // fallback (plugin-data has no session/ subdir), so seed the tmp id file.
-  // getSessionId() reads tmpdir() at CALL time, so the id-file paths must be
-  // computed AFTER we override $TMPDIR (in before()) — otherwise we'd seed one
-  // dir and the resolver would read another. The ppid-suffixed variant wins.
+  // keys the file within it via getSessionId(). With $CLAUDE_CODE_SESSION_ID
+  // cleared (in before()), these outer tests drive the tmp fallback (plugin-data
+  // has no session/ subdir), so seed the unsuffixed tmp id file. getSessionId()
+  // reads tmpdir() at CALL time, so the path must be computed AFTER we override
+  // $TMPDIR — otherwise we'd seed one dir and the resolver would read another.
   const SID = 'reflect-test';
-  let sidFilePpid;
   let sidFileBare;
-  let savedSidPpid;
   let savedSidBare;
 
   before(() => {
@@ -116,12 +114,9 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     process.env.CLAUDE_PLUGIN_DATA = pluginData;
     delete process.env.CLAUDE_CODE_SESSION_ID;
 
-    // Seed getSessionId()'s source at the tmpdir it resolves NOW ($TMPDIR=tmpRoot).
-    sidFilePpid = join(tmpdir(), `learning-loop-session-id-${process.ppid}`);
+    // Seed getSessionId()'s tmp fallback at the tmpdir it resolves NOW ($TMPDIR=tmpRoot).
     sidFileBare = join(tmpdir(), 'learning-loop-session-id');
-    savedSidPpid = existsSync(sidFilePpid) ? readFileSync(sidFilePpid, 'utf8') : null;
     savedSidBare = existsSync(sidFileBare) ? readFileSync(sidFileBare, 'utf8') : null;
-    writeFileSync(sidFilePpid, SID);
     writeFileSync(sidFileBare, SID);
   });
 
@@ -137,8 +132,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     else delete process.env.CLAUDE_PLUGIN_DATA;
     if (savedVault !== undefined) process.env.LL_VAULT_PATH = savedVault;
     else delete process.env.LL_VAULT_PATH;
-    if (savedSidPpid !== null) writeFileSync(sidFilePpid, savedSidPpid);
-    else rmSync(sidFilePpid, { force: true });
     if (savedSidBare !== null) writeFileSync(sidFileBare, savedSidBare);
     else rmSync(sidFileBare, { force: true });
   });
@@ -280,7 +273,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       const sessionDir = join(pluginData, 'session');
       mkdirSync(sessionDir, { recursive: true });
       writeFileSync(join(sessionDir, 'id'), 'crossproc-sid');
-      rmSync(sidFilePpid, { force: true });
       rmSync(sidFileBare, { force: true });
 
       const resolvePaths = join(__dirname, '..', 'scripts', 'resolve-paths.mjs');
@@ -316,10 +308,9 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
 
     before(async () => {
       // Reset session-id state the cross-process test mutated: clear any
-      // plugin-data sid it seeded and restore the tmp sid files this suite's
+      // plugin-data sid it seeded and restore the tmp sid file this suite's
       // outer before() relies on.
       rmSync(join(pluginData, 'session'), { recursive: true, force: true });
-      writeFileSync(sidFilePpid, SID);
       writeFileSync(sidFileBare, SID);
       // Fresh import so the module re-reads env at call time.
       const mod = await import('../hooks/modules/reflect-track.mjs?bust=' + Date.now());
@@ -475,48 +466,46 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     });
   });
 
-  // Regression (root-caused 2026-06-01): the marker handshake was a fifth
-  // session-id resolver that never joined the 2026-05-23 getSessionId()
-  // consolidation, AND it anchored the marker in tmp. os.tmpdir() honors
-  // $TMPDIR; a hook subprocess (writer) doesn't inherit the interactive shell's
-  // $TMPDIR (reader), so the two landed in different dirs → empty marker,
-  // refinement step silently skipped, no error. Fix: key the file via canonical
-  // getSessionId() and anchor the DIR in plugin-data (env-independent across the
-  // process boundary). These tests pin that getSessionId() is the id source,
-  // $TMPDIR and $CLAUDE_CODE_SESSION_ID are both ignored, an explicit arg still
-  // overrides, and the marker round-trips through the same path on both sides.
+  // Regression (root-caused 2026-06-03): the marker handshake broke a THIRD
+  // time. getSessionId() keyed candidates on process.ppid (id-<ppid> first),
+  // but ppid is the immediate parent and differs per process — the hook's
+  // parent is the harness, the skill's node's parent is its bash — so the
+  // writer and reader never shared a ppid file; they only met by falling
+  // through to the unsuffixed `id`. Worse, id-<ppid> files accumulated forever
+  // (18 stale ones in the wild, ppids reused across sessions) and a stale one
+  // shadowed the real id, re-splitting the handshake → empty marker, refinement
+  // silently skipped. Fix: $CLAUDE_CODE_SESSION_ID — the one id identical across
+  // every process in a session and independent of both $TMPDIR and ppid — is now
+  // the canonical key getSessionId() returns. These tests pin that the marker
+  // keys off the harness id, an explicit arg still overrides, the resolver falls
+  // through to disk/'unknown' when the var is absent, and the marker round-trips
+  // through the same path on both sides.
   describe('session-id resolution via canonical getSessionId()', () => {
     let runReflectTrack;
     let reflectNewNotesPath;
     let savedSid;
 
     before(async () => {
-      // Pin a distinct env-var value so any test that wrongly reads it fails loudly.
       savedSid = process.env.CLAUDE_CODE_SESSION_ID;
-      process.env.CLAUDE_CODE_SESSION_ID = 'env-var-must-be-ignored';
       const mod = await import('../hooks/modules/reflect-track.mjs?bust=file' + Date.now());
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
-      // Restore the id files the outer suite seeded (a sub-test below removes them).
-      writeFileSync(sidFilePpid, SID);
-      writeFileSync(sidFileBare, SID);
     });
 
     after(() => {
       if (savedSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedSid;
       else delete process.env.CLAUDE_CODE_SESSION_ID;
-      writeFileSync(sidFilePpid, SID);
       writeFileSync(sidFileBare, SID);
     });
 
-    it('reads the id from getSessionId(), never from $CLAUDE_CODE_SESSION_ID', () => {
-      writeFileSync(sidFilePpid, 'file-sid-abc123');
-      const expected = join(scratchDir, 'll-file-sid-abc123-reflect-new-notes.txt');
+    it('keys the marker off $CLAUDE_CODE_SESSION_ID (the canonical session id)', () => {
+      process.env.CLAUDE_CODE_SESSION_ID = 'harness-sid-abc123';
+      const expected = join(scratchDir, 'll-harness-sid-abc123-reflect-new-notes.txt');
       assert.equal(reflectNewNotesPath(), expected);
     });
 
     it('honors an explicit sessionId argument over the resolver', () => {
-      writeFileSync(sidFilePpid, 'file-sid-abc123');
+      process.env.CLAUDE_CODE_SESSION_ID = 'harness-sid-abc123';
       const realSid = 'f7ad287f-2e93-473c-8c83-dd8e0380fc2c';
       assert.equal(
         reflectNewNotesPath(realSid),
@@ -524,11 +513,11 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
-    it('falls back to getSessionId()\'s "unknown" sentinel when no id file exists', () => {
+    it('falls back to getSessionId()\'s "unknown" sentinel when neither env var nor id file exists', () => {
       // getSessionId() returns 'unknown' outside a Claude Code session; the
       // marker path keys on that. The skill's resolve-paths.mjs SESSION_ID
       // returns the same value, so both sides still meet.
-      rmSync(sidFilePpid, { force: true });
+      delete process.env.CLAUDE_CODE_SESSION_ID;
       rmSync(sidFileBare, { force: true });
       assert.equal(reflectNewNotesPath(), join(scratchDir, 'll-unknown-reflect-new-notes.txt'));
     });
@@ -536,8 +525,9 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     it('appends to the skill-created marker when both sides resolve the same id', async () => {
       // Mirror production: post-tool.js passes sessionId:null, so the hook
       // resolves the path purely from getSessionId() — the same resolver the
-      // skill's bash runs via resolve-paths.mjs SESSION_ID.
-      writeFileSync(sidFilePpid, 'shared-sid-xyz');
+      // skill's bash runs via resolve-paths.mjs SESSION_ID. The harness session
+      // id is identical in both processes, so they land on the same marker.
+      process.env.CLAUDE_CODE_SESSION_ID = 'shared-sid-xyz';
       const skillMarker = join(scratchDir, 'll-shared-sid-xyz-reflect-new-notes.txt');
       mkdirSync(scratchDir, { recursive: true });
       writeFileSync(skillMarker, '');
@@ -586,7 +576,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // simulating a concurrent session that started later (last-writer-wins on
       // the unsuffixed plugin-data id). The fix must ignore this and key off
       // LL_REFLECT_SID instead.
-      writeFileSync(sidFilePpid, 'other-concurrent-session');
       writeFileSync(sidFileBare, 'other-concurrent-session');
       const mod = await import('../hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now());
       runReflectTrack = mod.runReflectTrack;
@@ -596,7 +585,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     after(() => {
       if (savedReflectSid !== undefined) process.env.LL_REFLECT_SID = savedReflectSid;
       else delete process.env.LL_REFLECT_SID;
-      writeFileSync(sidFilePpid, SID);
       writeFileSync(sidFileBare, SID);
     });
 
