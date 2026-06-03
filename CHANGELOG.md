@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.14
+
 ### Fixed
 
 - **Release builds no longer fail when HuggingFace rate-limits the compile-time model download.** `ll-core/build.rs` fetches the reranker ONNX model and tokenizer from HuggingFace during the build; it did so with a single `curl -fsSL` and a bare `assert!` on success. When two tag pushes raced the same endpoint (v1.25.12 + v1.25.13 pushed together), HuggingFace returned HTTP 429, curl exited non-zero, and the build panicked at `build.rs:16` — the fail-fast matrix then cancelled the other platforms and skipped the GitHub Release. The download now retries up to 5 times with exponential backoff (2s/4s/8s/16s), writes to a `.partial` temp file renamed only on success (so an interrupted attempt can't leave a truncated file that the `dest.exists()` short-circuit treats as complete), and panics with a clearer message only after all attempts are exhausted. Verified the retry/backoff path against a forced-429 endpoint.
