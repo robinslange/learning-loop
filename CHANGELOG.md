@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.25.16
+
+### Fixed
+
+- **Lifecycle hooks no longer fail to spawn when the session's working directory has been deleted.** Each hook command is run by Claude Code as `/bin/sh -c "<command>"`; on macOS, `posix_spawn` reports `ENOENT` against the shell executable itself when the spawning process's current working directory no longer exists — surfacing as `Failed with non-blocking status code: ... ENOENT: no such file or directory, posix_spawn '/bin/sh'` even though `/bin/sh` is present. This happens when a session was started in a directory that is later removed (e.g. a git worktree that gets cleaned up). Every hook command now prefixes `cd "$HOME" &&` so the shell relocates to a guaranteed-valid directory before invoking node. The hooks were already cwd-independent for locating their scripts (they use `${CLAUDE_PLUGIN_ROOT}`) and read the session cwd from the stdin payload rather than the shell's cwd, so this guard is purely spawn-resilience and changes no behavior.
+
 ## v1.25.15
 
 ### Fixed

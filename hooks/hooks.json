@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js\"",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-nudge.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/stop-nudge.js\"",
             "timeout": 5
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-label.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-label.js\"",
             "timeout": 3
           }
         ]
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js\"",
             "timeout": 3
           }
         ]
@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool.js\"",
             "timeout": 7
           }
         ]
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-read-retrieval.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-read-retrieval.js\"",
             "timeout": 2
           }
         ]
@@ -72,7 +72,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-search-tracking.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-search-tracking.js\"",
             "timeout": 2
           }
         ]
@@ -83,7 +83,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.js\"",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact.js\"",
             "timeout": 5
           }
         ]
