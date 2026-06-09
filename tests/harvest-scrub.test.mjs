@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { scrubNotes } from "../scripts/harvest-scrub.mjs";
 
 test("deny-list hit blocks on word boundary (case-insensitive)", () => {
@@ -67,4 +71,27 @@ test("derived instance facts block even with an empty hand-listed denylist", () 
   });
   assert.deepEqual(blocked.map((b) => b.path), ["leak.md"]);
   assert.equal(clean.length, 0);
+});
+
+test("CLI reads note paths from stdin when no path args given", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-cli-"));
+  try {
+    const ok = join(dir, "ok.md");
+    const leak = join(dir, "leak.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(ok, "a generic retry lesson");
+    writeFileSync(leak, "we used NRD at work");
+    writeFileSync(deny, "nrd\n");
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const out = execFileSync(
+      process.execPath,
+      [scrubScript, deny, ""],            // empty pluginData => no derived facts
+      { input: `${ok}\n${leak}\n`, encoding: "utf8" },
+    );
+    const result = JSON.parse(out);
+    assert.deepEqual(result.blocked.map((b) => b.path), [leak]);
+    assert.deepEqual(result.clean.map((c) => c.path), [ok]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
