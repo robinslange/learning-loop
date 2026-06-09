@@ -57,9 +57,9 @@ Create `<out>/harvest-bundle-<date>/`:
 - `HARVEST-MANIFEST.md` — carried files; dropped files with reason (blocked/tripwire-dropped/review-dropped); which checks each carried file passed; source instance label.
 
 ### 7. Record dedup (do not mutate notes)
-Append the carried paths to the log (resolved via `DATA_FILES.harvestedLog`):
+Append the carried paths to the log (resolved via `DATA_FILES.harvestedLog`). Uses `.then()` chaining (CJS-safe on every Node version, matching the Paths-section one-liners):
 ```
-printf '%s\n' <carried-path...> | node -e "const m=await import('PLUGIN/scripts/harvest-dedup.mjs'); const fs=await import('node:fs'); const paths=fs.readFileSync(0,'utf8').split(/\r?\n/).map(s=>s.trim()).filter(Boolean); m.appendHarvested(process.argv[1], paths)" "<dedupLog>"
+printf '%s\n' <carried-path...> | node -e "import('PLUGIN/scripts/harvest-dedup.mjs').then(m=>{const fs=require('node:fs');const paths=fs.readFileSync(0,'utf8').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);m.appendHarvested(process.argv[1],paths)})" "<dedupLog>"
 ```
 Leave the `portable: true` markers in place — the log handles dedup; markers are never stripped.
 
