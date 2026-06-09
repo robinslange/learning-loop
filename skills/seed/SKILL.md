@@ -36,7 +36,7 @@ If vault tiers were opted in, run the candidate notes through the same scrubber 
 ```
 node PLUGIN/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <note-path...>
 ```
-Block anything the scrub blocks. (Reuses the harvest scrubber — same mechanical gate.) For `--for-job` (no tiers) this step is skipped entirely.
+Block anything the scrub blocks. (Reuses the harvest scrubber — same mechanical gate.) A vault tier can hold hundreds of notes; if the path list is large, pipe paths on stdin instead of argv: `... harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" < notes.txt`. For `--for-job` (no tiers) this step is skipped entirely.
 
 ### 5. Assemble the bundle
 Create `<out>/seed-bundle-<date>/` (default `<out>` = cwd):

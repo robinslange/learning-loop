@@ -43,7 +43,7 @@ The deny terms = hand-listed file + mechanically-derived instance facts (the CLI
 ```
 node PLUGIN/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <candidate-path...>
 ```
-(Candidate paths here are the deduped survivors — typically a small set after collect+dedup, safe for argv.) Returns `{blocked, tripwire, clean}`. Report `blocked` to the operator (with hits) — these are excluded and CANNOT be added back. Surface `tripwire` flags for attention. Only `clean` proceeds.
+Candidate paths here are the deduped survivors — typically a small set after collect+dedup, safe for argv. If the set is large (a bulk-marked vault tier), omit the path args and pipe them on stdin instead, one per line: `... harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" < candidates.txt`. Returns `{blocked, tripwire, clean}`. Report `blocked` to the operator (with hits) — these are excluded and CANNOT be added back. Surface `tripwire` flags for attention. Only `clean` proceeds.
 
 ### 5. Review (LLM narrows, never widens)
 For each note in `clean`, read it and judge: is this genuinely generic + safe to carry, or does it leak paraphrased/conceptual IP the deny-list missed? Drop anything doubtful. Present the final keep list to the operator for confirmation.

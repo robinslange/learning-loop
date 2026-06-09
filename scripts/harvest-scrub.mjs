@@ -41,13 +41,18 @@ export function scrubNotes(notes, opts) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  // CLI: harvest-scrub.mjs <denylistFile> <pluginData> <note-path...>  -> JSON report.
+  // CLI: harvest-scrub.mjs <denylistFile> <pluginData> [note-path...]  -> JSON report.
+  // Note paths come from argv (small sets) OR, when none are passed, from stdin
+  // (one per line) so a large bulk-marked set never exceeds ARG_MAX.
   // The hard gate = hand-listed deny terms (from the file) MERGED with mechanically
   // derived instance facts (peer ids, own pubkey, email domains) via deriveInstanceFacts.
   const { readFileSync } = await import('node:fs');
   const { deriveInstanceFacts } = await import('./lib/instance-facts.mjs');
   const { getConfig } = await import('./lib/config.mjs');
-  const [denyFile, pluginData, ...paths] = process.argv.slice(2);
+  const [denyFile, pluginData, ...argvPaths] = process.argv.slice(2);
+  const paths = argvPaths.length > 0
+    ? argvPaths
+    : readFileSync(0, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const fileTerms = denyFile
     ? readFileSync(denyFile, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))
     : [];
