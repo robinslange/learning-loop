@@ -73,6 +73,41 @@ test("derived instance facts block even with an empty hand-listed denylist", () 
   assert.equal(clean.length, 0);
 });
 
+test("deny term in the FILENAME blocks even when body is clean (finding 1)", () => {
+  const notes = [
+    { path: "project_foster_moore_vue_role.md", text: "a totally generic body about retries" },
+    { path: "clean_note.md", text: "nothing sensitive here" },
+  ];
+  const { blocked, clean } = scrubNotes(notes, {
+    denylist: ["foster_moore"],
+    tripwirePatterns: [],
+  });
+  assert.deepEqual(blocked.map((b) => b.path), ["project_foster_moore_vue_role.md"]);
+  assert.deepEqual(clean.map((c) => c.path), ["clean_note.md"]);
+});
+
+test("deny term matches hyphen/underscore compounds (finding 2)", () => {
+  const notes = [
+    { path: "a.md", text: "we shipped the acme-registry integration" },
+    { path: "b.md", text: "notes on acme_registry internals" },
+    { path: "c.md", text: "an unrelated acmecorp mention should NOT match" },
+  ];
+  const { blocked, clean } = scrubNotes(notes, {
+    denylist: ["acme"],
+    tripwirePatterns: [],
+  });
+  assert.deepEqual(blocked.map((b) => b.path).sort(), ["a.md", "b.md"]);
+  assert.deepEqual(clean.map((c) => c.path), ["c.md"]);
+});
+
+test("word-boundary still does not match inside an alphanumeric word after the fix", () => {
+  // regression guard for the original finding: 'ai' must not match 'maintainer'
+  const notes = [{ path: "x.md", text: "the maintainer fixed a domain bug" }];
+  const { blocked, clean } = scrubNotes(notes, { denylist: ["ai"], tripwirePatterns: [] });
+  assert.equal(blocked.length, 0);
+  assert.deepEqual(clean.map((c) => c.path), ["x.md"]);
+});
+
 test("CLI reads note paths from stdin when no path args given", () => {
   const dir = mkdtempSync(join(tmpdir(), "ll-scrub-cli-"));
   try {

@@ -4,6 +4,8 @@
 // Deny terms match on WORD BOUNDARIES and are regex-escaped, so "ai" does not
 // block "maintainer" and "foster.co.nz" matches dots literally.
 
+import { basename } from 'node:path';
+
 function escapeRegExp(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -16,7 +18,7 @@ function escapeRegExp(s) {
 export function scrubNotes(notes, opts) {
   const denyRes = (opts.denylist || [])
     .filter((d) => typeof d === 'string' && d.trim())
-    .map((d) => ({ term: d, re: new RegExp(`(?<![\\w-])${escapeRegExp(d)}(?![\\w-])`, 'i') }));
+    .map((d) => ({ term: d, re: new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(d)}(?![A-Za-z0-9])`, 'i') }));
   const tripRes = (opts.tripwirePatterns || [])
     .map((p) => { try { return new RegExp(p, 'g'); } catch { return null; } })
     .filter(Boolean);
@@ -24,7 +26,8 @@ export function scrubNotes(notes, opts) {
   const tripwire = [];
   const clean = [];
   for (const note of notes) {
-    const denyHits = denyRes.filter((d) => d.re.test(note.text)).map((d) => d.term);
+    const haystacks = [note.text, basename(note.path || '')];
+    const denyHits = denyRes.filter((d) => haystacks.some((h) => d.re.test(h))).map((d) => d.term);
     if (denyHits.length > 0) {
       blocked.push({ path: note.path, hits: denyHits });
       continue; // block wins; do not add to clean
