@@ -48,7 +48,7 @@ Candidate paths here are the deduped survivors — typically a small set after c
 ### 5. Review (LLM narrows, never widens)
 For each note in `clean`, read it and judge: is this genuinely generic + safe to carry, or does it leak paraphrased/conceptual IP the deny-list missed? Drop anything doubtful. Present the final keep list to the operator for confirmation.
 
-Be especially alert to **compound forms of deny-listed names** that the mechanical gate cannot catch: the deny-list matches on word boundaries treating `-` and `_` as boundaries, so a lowercase hyphenated/underscored compound of a listed org or product (e.g. `acme-registry` when only `acme` is listed) passes the gate uncaught. Treat any compound of a denylisted term as a drop.
+The mechanical gate catches deny terms verbatim (in body or filename, including `-`/`_` compounds like `acme-registry`). Your job in review is the leakage it CANNOT catch: **paraphrased or conceptual IP** — a company's approach, architecture, or named-but-not-listed person described in your own words without ever using a deny term. Drop anything that conveys work-specific knowledge even when no listed term appears.
 
 ### 6. Emit the lift-bundle
 Create `<out>/harvest-bundle-<date>/`:

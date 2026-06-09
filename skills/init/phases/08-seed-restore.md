@@ -24,7 +24,7 @@ Harvest (`/learning-loop:harvest`) will never let a note leave this instance if 
 
 Prompt the operator: "If this instance is for work or a context with IP that must never leave, list the terms harvest should hard-block (company name, product names, internal codenames, email domains). One per line. Leave blank for a personal instance."
 
-The deny-list matches on word boundaries treating `-` and `_` as boundaries, so list **each compound form explicitly** — e.g. list both `acme` AND `acme-registry`, not just `acme`. A bare term will not catch its hyphenated or underscored compounds.
+List a bare term and the gate also catches its hyphenated, underscored, and dotted compounds (e.g. `acme` blocks `acme-registry`, `acme_registry`, `acme.co`) — no need to enumerate variants. It will NOT match a term embedded in a longer alphanumeric word (`acme` does not block `acmecorp`), so list those separately if needed.
 
 Write the answers to the path resolved by `DATA_FILES.harvestDenylist(PLUGIN_DATA)` (i.e. `PLUGIN_DATA/.harvest-denylist`), one term per line, `#` for comments. Resolve it mechanically:
 ```

@@ -1,8 +1,10 @@
 // scripts/harvest-scrub.mjs : mechanical IP scrub for harvest.
 // denylist hit => hard block (fail closed). tripwire hit => flag only (review aid).
 // LLM review (in SKILL.md) operates on `clean` and may drop more, never un-block.
-// Deny terms match on WORD BOUNDARIES and are regex-escaped, so "ai" does not
-// block "maintainer" and "foster.co.nz" matches dots literally.
+// Deny terms match on alphanumeric word boundaries and are regex-escaped, so
+// "ai" does not block "maintainer", "foster.co.nz" matches dots literally, and
+// "-"/"_" count as boundaries so "acme" matches "acme-registry"/"acme_registry".
+// Both the note body AND the note's filename basename are scanned.
 
 import { basename } from 'node:path';
 
