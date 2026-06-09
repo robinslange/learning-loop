@@ -1,6 +1,10 @@
 // scripts/seed-select.mjs : mechanical selection of memory files for a seed bundle.
 // Keep by frontmatter `type`; drop by filename deny pattern. Pure + CLI.
+// Deny patterns match on word boundaries via the shared matcher (the same
+// semantics harvest uses, documented in init phase 08): "ai" drops
+// "feedback_ai_research.md" but not "feedback_maintain.md".
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
+import { denyTermMatches } from './lib/deny-match.mjs';
 
 /**
  * @param {{name: string, text: string}[]} files
@@ -9,12 +13,11 @@ import { parseFrontmatter } from './lib/markdown-parse.mjs';
  */
 export function selectSeedMemories(files, opts) {
   const types = new Set(opts.types || []);
-  const deny = (opts.denyNamePatterns || []).map((p) => p.toLowerCase());
+  const deny = (opts.denyNamePatterns || []).filter((p) => typeof p === 'string' && p.trim());
   const kept = [];
   const dropped = [];
   for (const file of files) {
-    const lower = file.name.toLowerCase();
-    const denied = deny.find((p) => p.length > 0 && lower.includes(p));
+    const denied = deny.find((p) => denyTermMatches(p, file.name));
     if (denied) {
       dropped.push({ name: file.name, reason: 'name-denied' });
       continue;

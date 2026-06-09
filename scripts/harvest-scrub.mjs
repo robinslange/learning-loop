@@ -1,16 +1,13 @@
 // scripts/harvest-scrub.mjs : mechanical IP scrub for harvest.
 // denylist hit => hard block (fail closed). tripwire hit => flag only (review aid).
 // LLM review (in SKILL.md) operates on `clean` and may drop more, never un-block.
-// Deny terms match on alphanumeric word boundaries and are regex-escaped, so
+// Deny terms match via the shared word-boundary matcher (lib/deny-match.mjs), so
 // "ai" does not block "maintainer", "foster.co.nz" matches dots literally, and
 // "-"/"_" count as boundaries so "acme" matches "acme-registry"/"acme_registry".
 // Both the note body AND the note's filename basename are scanned.
 
 import { basename } from 'node:path';
-
-function escapeRegExp(s) {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+import { denyTermRegExp } from './lib/deny-match.mjs';
 
 /**
  * @param {{path:string,text:string}[]} notes
@@ -20,7 +17,7 @@ function escapeRegExp(s) {
 export function scrubNotes(notes, opts) {
   const denyRes = (opts.denylist || [])
     .filter((d) => typeof d === 'string' && d.trim())
-    .map((d) => ({ term: d, re: new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(d)}(?![A-Za-z0-9])`, 'i') }));
+    .map((d) => ({ term: d, re: denyTermRegExp(d) }));
   const tripRes = (opts.tripwirePatterns || [])
     .map((p) => { try { return new RegExp(p, 'g'); } catch { return null; } })
     .filter(Boolean);
@@ -63,7 +60,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     : [];
   let cfg = {};
   try { cfg = getConfig(); } catch { cfg = {}; }
-  const facts = pluginData ? deriveInstanceFacts(pluginData, cfg) : [];
+  // Fail CLOSED: a malformed config (e.g. email_domains as an object) must not
+  // crash with an opaque stack trace and no report — that hides which gate failed.
+  // Surface a clear operator error and exit non-zero so nothing is treated as clean.
+  let facts = [];
+  if (pluginData) {
+    try {
+      facts = deriveInstanceFacts(pluginData, cfg);
+    } catch (err) {
+      process.stderr.write(`[harvest-scrub] cannot derive instance facts: ${err.message}\n`);
+      process.exit(1);
+    }
+  }
   const denylist = [...new Set([...fileTerms, ...facts])];
   const TRIPWIRES = ['https?://\\S+', '\\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\\b'];
   const notes = paths.map((p) => ({ path: p, text: readFileSync(p, 'utf8') }));

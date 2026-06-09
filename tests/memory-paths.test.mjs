@@ -30,3 +30,20 @@ test("listMemoryFiles returns .md files in a memory dir, excludes MEMORY.md and 
 
   assert.deepEqual(files, ["feedback_a.md", "project_b.md"]);
 });
+
+test("listMemoryFiles excludes dotfiles, as its docstring promises", () => {
+  // A `.env.backup.md` ends in .md and isn't underscore-prefixed, so it used to
+  // slip through into seed bundles (which only require type: feedback). The
+  // docstring claims dotfiles are excluded; enforce that so the gate stays closed.
+  const root = join(tmpdir(), `ll-mem-dot-${randomBytes(8).toString("hex")}`);
+  const memDir = join(root, "memory");
+  mkdirSync(memDir, { recursive: true });
+  writeFileSync(join(memDir, "feedback_a.md"), "x");
+  writeFileSync(join(memDir, ".env.backup.md"), "secret");
+  writeFileSync(join(memDir, ".hidden.md"), "x");
+
+  const files = listMemoryFiles(memDir).map((f) => f.name).sort();
+  rmSync(root, { recursive: true, force: true });
+
+  assert.deepEqual(files, ["feedback_a.md"]);
+});

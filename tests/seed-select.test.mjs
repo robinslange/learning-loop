@@ -36,6 +36,28 @@ test("name deny-list drops project-flavored feedback even when type matches", ()
   assert.equal(dropped[0].reason, "name-denied");
 });
 
+test("name deny uses word boundaries, not substrings — 'ai' must not drop 'maintain'/'fail'", () => {
+  // seed-select shares the deny semantics documented in 08-seed-restore.md and used
+  // by harvest-scrub: a bare token matches on word boundaries (so `acme` blocks
+  // `acme-registry` but not `acmecorp`). A substring match would wrongly drop
+  // feedback_maintain.md (m-ai-n) and feedback_fail_modes.md (f-ai-l).
+  const files = [
+    mk("feedback_maintain.md", "feedback"),
+    mk("feedback_fail_modes.md", "feedback"),
+    mk("feedback_ai_research.md", "feedback"),
+  ];
+  const { kept, dropped } = selectSeedMemories(files, {
+    types: ["feedback"],
+    denyNamePatterns: ["ai"],
+  });
+  assert.deepEqual(
+    kept.map((k) => k.name).sort(),
+    ["feedback_fail_modes.md", "feedback_maintain.md"],
+  );
+  assert.deepEqual(dropped.map((d) => d.name), ["feedback_ai_research.md"]);
+  assert.equal(dropped[0].reason, "name-denied");
+});
+
 test("missing type frontmatter is excluded, not crashed", () => {
   const files = [{ name: "weird.md", text: "no frontmatter here" }];
   const { kept, dropped } = selectSeedMemories(files, {

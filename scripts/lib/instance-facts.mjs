@@ -6,7 +6,7 @@ import { safeLoad } from './safe-load.mjs';
 
 /**
  * @param {string} pluginData
- * @param {{email_domains?: string[]}} [config]  the loaded learning-loop config
+ * @param {{email_domains?: string[] | string}} [config]  the loaded learning-loop config
  * @returns {string[]} deny terms (peer ids, own pubkey, email domains)
  */
 export function deriveInstanceFacts(pluginData, config = {}) {
@@ -24,9 +24,23 @@ export function deriveInstanceFacts(pluginData, config = {}) {
   const { value: parsed } = safeLoad(FEDERATION_PATHS.config(pluginData), { fallback: null });
   if (parsed?.identity?.pubkey) facts.add(parsed.identity.pubkey);
 
-  // Configured email domains (operator-set in config).
-  for (const d of config.email_domains || []) {
-    if (typeof d === 'string' && d.trim()) facts.add(d.trim());
+  // Configured email domains (operator-set in config). A bare string is the
+  // natural single-domain typo — coerce it so it is added whole, never iterated
+  // character-by-character (that would shred "acme.com" into ['a','c','m',...]
+  // and silently un-protect the company name: a fail-OPEN of the hard gate).
+  // Any other non-array shape (object, number) cannot mean a domain — fail CLOSED
+  // by throwing so the caller surfaces it rather than running with no protection.
+  const domains = config.email_domains;
+  if (domains != null) {
+    const list = typeof domains === 'string' ? [domains] : domains;
+    if (!Array.isArray(list)) {
+      throw new TypeError(
+        `config.email_domains must be an array of domains or a single domain string, got ${typeof domains}`,
+      );
+    }
+    for (const d of list) {
+      if (typeof d === 'string' && d.trim()) facts.add(d.trim());
+    }
   }
 
   return [...facts];

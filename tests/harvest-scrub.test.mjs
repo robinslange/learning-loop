@@ -130,3 +130,58 @@ test("CLI reads note paths from stdin when no path args given", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("CLI blocks an instance domain even when email_domains is a bare string (not array)", () => {
+  // B1: a string-typed email_domains must not shred into single chars that fail
+  // to block the company domain. The note must be BLOCKED, never land in clean.
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-str-"));
+  try {
+    const note = join(dir, "leak.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "we standardised on acmecorp.com for everything");
+    writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ email_domains: "acmecorp.com" }));
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const out = execFileSync(process.execPath, [scrubScript, deny, dir], {
+      input: `${note}\n`,
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+    });
+    const result = JSON.parse(out);
+    assert.deepEqual(result.blocked.map((b) => b.path), [note]);
+    assert.deepEqual(result.clean.map((c) => c.path), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI fails closed (non-zero exit, no clean output) when email_domains is a non-coercible object", () => {
+  // M1: an object email_domains used to throw an uncaught TypeError before any
+  // JSON was written — the operator saw nothing. It must now fail closed: a clear
+  // error on stderr and a non-zero exit, never a partial/empty report read as success.
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-obj-"));
+  try {
+    const note = join(dir, "leak.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "we used acmecorp.com");
+    writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), JSON.stringify({ email_domains: { a: "acmecorp.com" } }));
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    let threw = false;
+    let stderr = "";
+    try {
+      execFileSync(process.execPath, [scrubScript, deny, dir], {
+        input: `${note}\n`,
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+      });
+    } catch (e) {
+      threw = true;
+      stderr = String(e.stderr || "");
+    }
+    assert.ok(threw, "scrub CLI must exit non-zero on a non-coercible email_domains config");
+    assert.match(stderr, /email_domains/, "error must name the offending config key");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

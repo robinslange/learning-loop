@@ -8,7 +8,7 @@ description: "Collect opt-in-marked, IP-scrubbed insights from THIS instance to 
 Collects notes/memories marked `portable: true`, scrubs them against this instance's IP deny-list, lets you review survivors, and emits a `harvest-bundle-<date>/` to carry home and absorb with `/learning-loop:ingest`.
 
 ## Invariants (do not violate)
-- **Whitelist only:** only `portable: true`. Never harvest by `visibility`, tag, or inference.
+- **Whitelist only:** only `portable: true`. Never harvest by `visibility`, tag, or inference. The gate matches the exact literal lowercase `true` — `portable: True`, `yes`, or `1` are silently excluded (fail-closed, no leak), so if an operator expected a note to carry and it didn't, check the marker is exactly `portable: true`.
 - **Mechanical gate:** the deny-list block is authoritative. You may drop MORE in review; you may never un-block or add a note the gate excluded.
 
 ## Paths

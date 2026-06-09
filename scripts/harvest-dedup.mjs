@@ -1,6 +1,7 @@
 // scripts/harvest-dedup.mjs : dedup harvested notes via a local .harvested-log.
 // Does NOT mutate notes — the portable marker is preserved; the log handles dedup.
-import { readFileSync, appendFileSync, existsSync } from 'node:fs';
+import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 /** @returns {string[]} previously harvested paths */
 export function readHarvested(logPath) {
@@ -24,6 +25,9 @@ export function filterUnharvested(candidatePaths, harvested, all) {
 
 export function appendHarvested(logPath, paths) {
   if (paths.length === 0) return;
+  // Ensure the parent dir exists — the SKILL appends via a catch-less .then()
+  // chain, so an ENOENT here would crash and silently lose the dedup record.
+  mkdirSync(dirname(logPath), { recursive: true });
   appendFileSync(logPath, paths.join('\n') + '\n');
 }
 

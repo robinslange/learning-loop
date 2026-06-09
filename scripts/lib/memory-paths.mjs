@@ -37,6 +37,7 @@ export function listMemoryFiles(memDir) {
     .map((e) => e.name)
     .filter((n) => n.endsWith('.md'))
     .filter((n) => !n.startsWith('_'))
+    .filter((n) => !n.startsWith('.'))
     .filter((n) => !NON_MEMORY.has(n))
     .map((name) => ({ name, path: join(memDir, name) }));
 }

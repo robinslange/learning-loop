@@ -33,3 +33,20 @@ test("returns empty array when nothing derivable", () => {
   rmSync(pd, { recursive: true, force: true });
   assert.deepEqual(facts, []);
 });
+
+test("a bare-string email_domains is treated as one domain, never shredded into chars", () => {
+  // The natural single-domain typo: email_domains: "acmecorp.com" (string, not array).
+  // Must yield the whole domain as one deny term, NOT ['a','c','m',...] which would
+  // fail open (the deny-list silently stops blocking the company name).
+  const facts = deriveInstanceFacts("/nonexistent-pd", { email_domains: "acmecorp.com" });
+  assert.deepEqual(facts, ["acmecorp.com"]);
+});
+
+test("a non-array, non-string email_domains fails closed by throwing, never silently", () => {
+  // An object can't be coerced to a single domain. Failing closed = throw so the
+  // caller surfaces it; the alternative (ignore) would leave the gate unprotected.
+  assert.throws(
+    () => deriveInstanceFacts("/nonexistent-pd", { email_domains: { a: "acmecorp.com" } }),
+    /email_domains/,
+  );
+});
