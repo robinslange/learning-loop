@@ -5,7 +5,7 @@ description: "First-time setup or upgrade for the learning-loop plugin. Configur
 
 # Init: Learning Loop Setup
 
-Seven-phase detect-confirm-apply flow. One question at a time. Safe to re-run: detects existing state and skips completed steps.
+Eight-phase detect-confirm-apply flow. One question at a time. Safe to re-run: detects existing state and skips completed steps.
 
 All operations use Node.js APIs (fs, path, child_process). No bash `find`, no shell globbing for detection.
 
@@ -28,6 +28,7 @@ Read each phase file in order and execute its instructions. After Phase 1's dash
 5. **Read `PLUGIN/skills/init/phases/05-claudemd.md`** -- CLAUDE.md integration.
 6. **Read `PLUGIN/skills/init/phases/06-cache-health.md`** -- optional cache-health statusline.
 7. **Read `PLUGIN/skills/init/phases/07-librarian.md`** -- optional librarian background agent.
+8. **Read `PLUGIN/skills/init/phases/08-seed-restore.md`** -- restore a seed bundle if present and seed the harvest deny-list.
 
 After all phases complete, present the summary below.
 
@@ -44,6 +45,8 @@ Learning loop configured.
   CLAUDE.md:    [status]
   Cache health: [installed | skipped: oh-my-claude not found]
   Librarian:    [enabled | skipped: ollama/hardware not available]
+  Seed restore: [restored from bundle | no bundle present]
+  Harvest list: [seeded | empty (personal instance)]
   Shims:        ll-watch + ll-search installed in ~/.local/bin
 
 Start the watcher with: ll-watch
