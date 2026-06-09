@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Instance portability: carry your working-style and curated insights between learning-loop instances you own, without leaking IP in either direction.** Two new generic skills plus an `/init` restore phase:
+  - **`/learning-loop:seed`** builds a portable starter slice — feedback memories + `_system` (persona, capture-rules, protocol) + the portable sections of your global `CLAUDE.md` — that a fresh instance can boot from. No vault notes and no projects by default (`--for-job`); carries working-style, not knowledge. Selection is mechanical (frontmatter `type` filter + word-boundary filename deny-list); you review and prune at the source before the bundle is written.
+  - **`/learning-loop:harvest`** collects notes/memories you explicitly marked `portable: true`, scrubs them against this instance's IP deny-list, lets you review the survivors, and emits a lift-bundle to carry home and absorb with `/learning-loop:ingest`. Two axes are kept strictly orthogonal: `portable` (may leave this instance) governs harvest; `visibility` (federation share) is never consulted. The deny-list is a **hard, fail-closed gate** (hand-listed terms merged with mechanically-derived instance facts — federation peer ids, your own pubkey, configured email domains); a hit blocks unconditionally, and review may only drop more, never un-block. Deny terms match on word boundaries in both the note body and the filename, including `-`/`_`/`.` compounds (`acme` blocks `acme-registry` but not `acmecorp`).
+  - **`/init` phase 08** restores a seed bundle on a fresh instance and seeds the harvest deny-list for a work/IP context.
+
 ## v1.25.16
 
 ### Fixed
