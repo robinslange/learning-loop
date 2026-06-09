@@ -202,6 +202,8 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:gaps "topic"` | Challenge vault knowledge: find tensions, thin ice, and missing perspectives |
 | `/learning-loop:rewrite "old" "new" [reason]` | Cross-store correction: vault + auto-memory + episodic supersession |
 | `/learning-loop:ingest [linear\|repo\|context] [--deep]` | Pull external context into vault + auto-memory; `--deep` forces parallel deep mappers on `repo` |
+| `/learning-loop:seed [--for-job] [--types a,b] [--out <dir>]` | Build a portable starter slice for a fresh instance (ramp up at a new job / second machine) |
+| `/learning-loop:harvest [--all] [--out <dir>]` | Collect opt-in `portable: true`, IP-scrubbed insights from this instance to carry back home |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard: ghost dupes, orphans, stale notes, broken links |
 | `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
