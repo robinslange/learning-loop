@@ -84,6 +84,8 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | `/health`               | Vault health dashboard                                               |
 | `/health --librarian`   | Review librarian observations                                        |
 | `/ingest`               | Pull from Linear, repos, or any content Claude can read              |
+| `/seed [--for-job]`     | Build a portable starter slice for a fresh instance (new job, second machine) |
+| `/harvest [--all]`      | Carry opt-in, IP-scrubbed insights from a work instance back home    |
 | `/diagram "concept"`    | Generate Excalidraw diagram                                          |
 | `/init`                 | First-time setup: vault path, persona, binary, optional integrations |
 | `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync   |
