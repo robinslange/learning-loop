@@ -1,7 +1,8 @@
 // scripts/lib/instance-facts.mjs : mechanically derive IP-sensitive terms present
 // on this instance, to merge into the harvest hard-gate denylist.
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { FEDERATION_PATHS } from './paths.mjs';
+import { safeLoad } from './safe-load.mjs';
 
 /**
  * @param {string} pluginData
@@ -13,24 +14,15 @@ export function deriveInstanceFacts(pluginData, config = {}) {
 
   // Federation peer directory names are peer ids.
   const peersDir = FEDERATION_PATHS.peersDir(pluginData);
-  try {
+  if (existsSync(peersDir)) {
     for (const e of readdirSync(peersDir, { withFileTypes: true })) {
       if (e.isDirectory()) facts.add(e.name);
     }
-  } catch {
-    /* no peers dir — fine */
   }
 
   // Own federation pubkey.
-  const cfgPath = FEDERATION_PATHS.config(pluginData);
-  if (existsSync(cfgPath)) {
-    try {
-      const parsed = JSON.parse(readFileSync(cfgPath, 'utf8'));
-      if (parsed?.identity?.pubkey) facts.add(parsed.identity.pubkey);
-    } catch {
-      /* unparseable — skip */
-    }
-  }
+  const { value: parsed } = safeLoad(FEDERATION_PATHS.config(pluginData), { fallback: null });
+  if (parsed?.identity?.pubkey) facts.add(parsed.identity.pubkey);
 
   // Configured email domains (operator-set in config).
   for (const d of config.email_domains || []) {

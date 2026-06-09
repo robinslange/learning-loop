@@ -52,7 +52,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     ? readFileSync(denyFile, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))
     : [];
   let cfg = {};
-  try { cfg = getConfig(); } catch { /* config optional */ }
+  try { cfg = getConfig(); } catch { cfg = {}; }
   const facts = pluginData ? deriveInstanceFacts(pluginData, cfg) : [];
   const denylist = [...new Set([...fileTerms, ...facts])];
   const TRIPWIRES = ['https?://\\S+', '\\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\\b'];

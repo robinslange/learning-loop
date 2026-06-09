@@ -1,5 +1,5 @@
 // scripts/federation-active.mjs : is this instance federated? (mechanical guard)
-import { readFileSync, existsSync } from 'node:fs';
+import { safeLoad } from './lib/safe-load.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
 
 /**
@@ -8,14 +8,8 @@ import { FEDERATION_PATHS } from './lib/paths.mjs';
  */
 export function isFederationActive(pluginData) {
   if (!pluginData) return false;
-  const cfg = FEDERATION_PATHS.config(pluginData);
-  if (!existsSync(cfg)) return false;
-  try {
-    const parsed = JSON.parse(readFileSync(cfg, 'utf8'));
-    return Boolean(parsed && parsed.identity && parsed.identity.pubkey);
-  } catch {
-    return false;
-  }
+  const { value: parsed } = safeLoad(FEDERATION_PATHS.config(pluginData), { fallback: null });
+  return Boolean(parsed && parsed.identity && parsed.identity.pubkey);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
