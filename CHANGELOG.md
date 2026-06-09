@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.26.0
+
 ### Added
 
 - **Instance portability: carry your working-style and curated insights between learning-loop instances you own, without leaking IP in either direction.** Two new generic skills plus an `/init` restore phase:
