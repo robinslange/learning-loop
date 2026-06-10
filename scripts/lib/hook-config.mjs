@@ -53,6 +53,7 @@ export const HookConfig = Object.freeze({
   RECENT_MSG_WINDOW: 80,
   SESSION_SIZE_THRESHOLD_BYTES: 51_200,
   HOOK_STDOUT_MAX_BYTES: 8192,
+  MEMORY_INDEX_MAX_BYTES: 3072,
 
   // --- Per-module post-tool timeout (ms) ---
   POST_TOOL_MODULE_TIMEOUT_MS: 2000,

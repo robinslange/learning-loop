@@ -23,6 +23,22 @@ function memoryIsFresh(path) {
   }
 }
 
+const MEM_CAP = HookConfig.MEMORY_INDEX_MAX_BYTES;
+
+// Read a memory index capped at MEM_CAP bytes. Oversized files are cut at the
+// last full line and tagged with a pointer to the full file, so the assembled
+// SessionStart context stays within the hook stdout budget instead of relying
+// on emitJson's blind backstop trim.
+function readMemoryIndexCapped(path) {
+  const raw = readFileSync(path, 'utf8');
+  if (Buffer.byteLength(raw, 'utf8') <= MEM_CAP) return raw.trim();
+  let head = raw.slice(0, MEM_CAP);
+  while (Buffer.byteLength(head, 'utf8') > MEM_CAP) head = head.slice(0, -1);
+  const cut = head.lastIndexOf('\n');
+  if (cut > 0) head = head.slice(0, cut);
+  return `${head.trim()}\n[truncated — full index at ${path}]`;
+}
+
 export async function run(ctx) {
   const {
     pluginDir,
@@ -72,7 +88,7 @@ export async function run(ctx) {
     const memoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
     if (existsSync(memoryIndex) && memoryIsFresh(memoryIndex)) {
       try {
-        const index = readFileSync(memoryIndex, 'utf8').trim();
+        const index = readMemoryIndexCapped(memoryIndex);
         if (index) {
           ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
         }
@@ -88,7 +104,7 @@ export async function run(ctx) {
   const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
   if (existsSync(globalMemory) && memoryIsFresh(globalMemory)) {
     try {
-      const globalIndex = readFileSync(globalMemory, 'utf8').trim();
+      const globalIndex = readMemoryIndexCapped(globalMemory);
       if (globalIndex) {
         ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
       }

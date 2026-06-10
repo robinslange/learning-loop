@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, rmSync, utimesSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = new URL('../hooks/session-start.js', import.meta.url).pathname;
@@ -373,6 +373,40 @@ test(
         hso.additionalContext.includes('forced inject'),
         'env override should inject even very stale MEMORY.md',
       );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'a 230KB MEMORY.md is injected capped, and the hook output stays valid JSON',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'big-global-mem' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        // Arrange: oversized GLOBAL memory index, mtime fresh (now). Line-oriented
+        // content so the cap cuts on a newline. The global memory path keys on the
+        // vault PARENT, mirroring context-assembly.mjs.
+        const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
+        const globalMemoryPath = join(sb, '.claude', 'projects', encodedVaultParent, 'memory', 'MEMORY.md');
+        mkdirSync(dirname(globalMemoryPath), { recursive: true });
+        const big = ('- [note](note.md) - ' + 'x'.repeat(80) + '\n').repeat(2500); // ~230KB
+        writeFileSync(globalMemoryPath, big);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const out = r.stdout;
+      const parsed = JSON.parse(out);
+      const ctx = parsed.hookSpecificOutput.additionalContext;
+      assert.ok(ctx.includes('## Global memory index:'));
+      assert.ok(ctx.includes('[truncated — full index at'));
+      // The injected section is capped, not the whole file:
+      assert.ok(Buffer.byteLength(out, 'utf8') <= 8192);
     } finally {
       r.cleanup();
     }
