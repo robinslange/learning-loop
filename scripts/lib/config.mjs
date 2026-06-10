@@ -134,7 +134,13 @@ export function getConfigStrict() {
     if (!p || !existsSync(p)) continue;
     const { value, error } = safeLoad(p);
     if (error) throw new Error(`config unreadable at ${p}: ${error}`);
-    return value ?? {};
+    // Reaching here with value===null means the FILE literally contained `null`
+    // (real failures carry `error` and threw above). A null/non-object config
+    // silently vanishes email_domains — corrupt for gate purposes, so throw.
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`config at ${p} is not an object`);
+    }
+    return value;
   }
   return {};
 }

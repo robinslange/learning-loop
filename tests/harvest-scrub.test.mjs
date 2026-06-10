@@ -211,14 +211,15 @@ test("CLI exits 1 when config.json exists but is unparseable (fail closed)", () 
 });
 
 test("CLI exits 1 when federation config exists but is unparseable", () => {
-  // Main config.json is absent in this fresh tmp dir, so the failure exercised
-  // is the federation one (FEDERATION_PATHS.config = <pluginData>/federation/config.json).
+  // Main config.json is VALID here, pinning the exercised failure to the
+  // federation one (FEDERATION_PATHS.config = <pluginData>/federation/config.json).
   const dir = mkdtempSync(join(tmpdir(), "ll-scrub-badfed-"));
   try {
     const note = join(dir, "clean-note.md");
     const deny = join(dir, "deny.txt");
     writeFileSync(note, "nothing sensitive here");
     writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), "{}");
     mkdirSync(join(dir, "federation"), { recursive: true });
     writeFileSync(join(dir, "federation", "config.json"), "{nope");
     const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
@@ -227,6 +228,49 @@ test("CLI exits 1 when federation config exists but is unparseable", () => {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
     });
     assert.equal(res.status, 1);
+    assert.match(res.stderr, /federation/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI exits 1 when config.json contains literal null (not an object)", () => {
+  // Valid JSON `null` parses cleanly but vanishes email_domains with no error —
+  // corrupt for gate purposes, not a default.
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-nullcfg-"));
+  try {
+    const note = join(dir, "clean-note.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "nothing sensitive here");
+    writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), "null");
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not an object/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI exits 1 when config.json contains an array (not an object)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-arrcfg-"));
+  try {
+    const note = join(dir, "clean-note.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "nothing sensitive here");
+    writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), "[1,2]");
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /not an object/i);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
