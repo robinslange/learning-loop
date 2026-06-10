@@ -1,4 +1,11 @@
-const MARKERS = ['[unresolved]', '[unverified]', '[not in abstract]', '[not in source]'];
+const MARKERS = [
+  '[unresolved]',
+  '[unverified]',
+  '[not in abstract]',
+  '[not in source]',
+  '[needs verification]',
+  '[citation needed]',
+];
 
 // Caller-only destinations: the gate respects them but never auto-routes here.
 // Literature lives in 2-literature/ via the literature-capturer skill.
@@ -17,7 +24,9 @@ function stripFencedBlocks(body) {
 }
 
 function findMarkers(body) {
-  const stripped = stripFencedBlocks(body);
+  // Markers are LLM-written text; normalize case before matching — a gate
+  // that [Unverified] sails through is not a gate.
+  const stripped = stripFencedBlocks(body).toLowerCase();
   return MARKERS.filter((m) => stripped.includes(m));
 }
 

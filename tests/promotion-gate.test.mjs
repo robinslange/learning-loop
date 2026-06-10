@@ -244,3 +244,28 @@ test('promoteWithVerification respects caller destination 5-maps (skip verifier,
   assert.equal(result.destination, '5-maps/');
   assert.equal(calls, 0);
 });
+
+// ---------------------------------------------------------------------------
+// Case-insensitive marker matching
+// ---------------------------------------------------------------------------
+
+function passingNote(extraBody = '') {
+  return {
+    body: 'A claim. [[some-link]]' + extraBody,
+    frontmatter: { tags: ['x'] },
+    gateCriteria: { depth: true, sourcing: true, linking: true, voice: true, atomicity: true, sourceIntegrity: true },
+  };
+}
+
+test('capitalized verification markers still block promotion', () => {
+  const res = canPromote(passingNote('\n[Unverified] claim pending.'));
+  assert.equal(res.allowed, false);
+  assert.equal(res.destination, '1-fleeting/');
+});
+
+test('[needs verification] and [citation needed] block promotion in any case', () => {
+  for (const marker of ['[Needs Verification]', '[needs verification]', '[Citation Needed]', '[citation needed]']) {
+    const res = canPromote(passingNote(`\n${marker}`));
+    assert.equal(res.allowed, false, marker);
+  }
+});
