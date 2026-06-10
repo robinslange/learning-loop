@@ -3,6 +3,7 @@ import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
 import { expandHome } from './paths.mjs';
+import { safeLoad } from './safe-load.mjs';
 import { env } from './env.mjs';
 import { logError } from './log.mjs';
 
@@ -114,6 +115,28 @@ export function getConfig() {
 
   _config = {};
   return _config;
+}
+
+/**
+ * Like getConfig(), but a config file that EXISTS and cannot be read/parsed
+ * throws instead of silently returning {}. Gates that weaken when config is
+ * missing (harvest deny terms) must use this: swallow-and-default is a
+ * fail-open for them. A genuinely absent config still returns {}.
+ *
+ * Deliberately stricter than getConfig: a corrupt primary does NOT fall
+ * through to a readable legacy (resurrecting a stale legacy config is itself
+ * a fail-open), and the _config cache is never used (gates want on-disk truth).
+ */
+export function getConfigStrict() {
+  const primary = configPath();
+  const legacy = legacyConfigPath();
+  for (const p of [primary, legacy]) {
+    if (!p || !existsSync(p)) continue;
+    const { value, error } = safeLoad(p);
+    if (error) throw new Error(`config unreadable at ${p}: ${error}`);
+    return value ?? {};
+  }
+  return {};
 }
 
 /**

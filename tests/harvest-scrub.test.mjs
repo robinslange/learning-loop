@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scrubNotes } from "../scripts/harvest-scrub.mjs";
@@ -184,4 +184,64 @@ test("CLI fails closed (non-zero exit, no clean output) when email_domains is a 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("CLI exits 1 when config.json exists but is unparseable (fail closed)", () => {
+  // getConfigStrict resolves the config via CLAUDE_PLUGIN_DATA (getPluginData),
+  // NOT via the argv pluginData — without the env the CLI would read the real
+  // repo config and exit 0.
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-badcfg-"));
+  try {
+    const note = join(dir, "clean-note.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "nothing sensitive here");
+    writeFileSync(deny, "");
+    writeFileSync(join(dir, "config.json"), "{ this is not json");
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+    });
+    assert.equal(res.status, 1);
+    assert.match(res.stderr, /config/i);
+    assert.ok(!res.stdout.includes('"clean"'), "no report at all on a corrupt config");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI exits 1 when federation config exists but is unparseable", () => {
+  // Main config.json is absent in this fresh tmp dir, so the failure exercised
+  // is the federation one (FEDERATION_PATHS.config = <pluginData>/federation/config.json).
+  const dir = mkdtempSync(join(tmpdir(), "ll-scrub-badfed-"));
+  try {
+    const note = join(dir, "clean-note.md");
+    const deny = join(dir, "deny.txt");
+    writeFileSync(note, "nothing sensitive here");
+    writeFileSync(deny, "");
+    mkdirSync(join(dir, "federation"), { recursive: true });
+    writeFileSync(join(dir, "federation", "config.json"), "{nope");
+    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
+      encoding: "utf8",
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
+    });
+    assert.equal(res.status, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("numeric deny term is coerced and still blocks", () => {
+  const { blocked } = scrubNotes(
+    [{ path: "a.md", text: "project code 4711 is secret" }],
+    { denylist: [4711], tripwirePatterns: [] },
+  );
+  assert.equal(blocked.length, 1);
+});
+
+test("object deny term throws (fail closed, never silently dropped)", () => {
+  assert.throws(() =>
+    scrubNotes([{ path: "a.md", text: "x" }], { denylist: [{ term: "acme" }], tripwirePatterns: [] }),
+  );
 });

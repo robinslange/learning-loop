@@ -16,7 +16,15 @@ import { denyTermRegExp } from './lib/deny-match.mjs';
  */
 export function scrubNotes(notes, opts) {
   const denyRes = (opts.denylist || [])
-    .filter((d) => typeof d === 'string' && d.trim())
+    .map((d) => {
+      if (typeof d === 'number') return String(d);
+      if (typeof d !== 'string') {
+        throw new TypeError(`deny term must be a string, got ${typeof d}: ${JSON.stringify(d)}`);
+      }
+      return d;
+    })
+    .map((d) => d.trim())
+    .filter(Boolean)
     .map((d) => ({ term: d, re: denyTermRegExp(d) }));
   const tripRes = (opts.tripwirePatterns || [])
     .map((p) => { try { return new RegExp(p, 'g'); } catch { return null; } })
@@ -50,7 +58,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // derived instance facts (peer ids, own pubkey, email domains) via deriveInstanceFacts.
   const { readFileSync } = await import('node:fs');
   const { deriveInstanceFacts } = await import('./lib/instance-facts.mjs');
-  const { getConfig } = await import('./lib/config.mjs');
+  const { getConfigStrict } = await import('./lib/config.mjs');
   const [denyFile, pluginData, ...argvPaths] = process.argv.slice(2);
   const paths = argvPaths.length > 0
     ? argvPaths
@@ -58,11 +66,17 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const fileTerms = denyFile
     ? readFileSync(denyFile, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))
     : [];
-  let cfg = {};
-  try { cfg = getConfig(); } catch { cfg = {}; }
-  // Fail CLOSED: a malformed config (e.g. email_domains as an object) must not
-  // crash with an opaque stack trace and no report — that hides which gate failed.
-  // Surface a clear operator error and exit non-zero so nothing is treated as clean.
+  // Fail CLOSED: an unreadable config silently dropping email_domains deny
+  // terms is exactly the gate-weakening this CLI exists to prevent.
+  let cfg;
+  try {
+    cfg = getConfigStrict();
+  } catch (err) {
+    process.stderr.write(`[harvest-scrub] ${err.message}\n`);
+    process.exit(1);
+  }
+  // Likewise a malformed config value (e.g. email_domains as an object): surface
+  // a clear operator error and exit non-zero so nothing is treated as clean.
   let facts = [];
   if (pluginData) {
     try {

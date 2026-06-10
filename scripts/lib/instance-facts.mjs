@@ -21,7 +21,13 @@ export function deriveInstanceFacts(pluginData, config = {}) {
   }
 
   // Own federation pubkey.
-  const { value: parsed } = safeLoad(FEDERATION_PATHS.config(pluginData), { fallback: null });
+  const fedConfigPath = FEDERATION_PATHS.config(pluginData);
+  const { value: parsed, error: fedErr } = safeLoad(fedConfigPath, { fallback: null });
+  if (fedErr && fedErr !== 'enoent' && fedErr !== 'no path') {
+    // Fail CLOSED: an unreadable federation config means the own-pubkey deny
+    // term silently vanishes from the harvest gate.
+    throw new Error(`federation config unreadable at ${fedConfigPath}: ${fedErr}`);
+  }
   if (parsed?.identity?.pubkey) facts.add(parsed.identity.pubkey);
 
   // Configured email domains (operator-set in config). A bare string is the
