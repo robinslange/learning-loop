@@ -13,7 +13,7 @@ if [ -z "$1" ]; then
     CONFIG="$SCRIPT_DIR/../config.json"
   fi
   if [ -f "$CONFIG" ]; then
-    VAULT=$(node -e "const c=JSON.parse(require('fs').readFileSync('$CONFIG','utf-8')); const v=c.vault_path; if(!v){process.exit(1)} console.log(v.replace(/^~/, process.env.HOME))")
+    VAULT=$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1],'utf-8')); const v=c.vault_path; if(!v){process.exit(1)} console.log(v.replace(/^~/, process.env.HOME))" "$CONFIG")
     if [ $? -ne 0 ] || [ -z "$VAULT" ]; then
       echo "No vault_path configured" >&2
       exit 1
@@ -27,7 +27,25 @@ else
 fi
 FLEETING="$VAULT/1-fleeting"
 PERMANENT="$VAULT/3-permanent"
-PROJECT_SLUGS="solenoid|kinso|reguard|willems|auctionsense|nibbler|thalen|solwen"
+# Project slugs = 4-projects/*.md basenames (the project index notes).
+# Instance-specific names must never be hardcoded here: this file ships publicly.
+PROJECT_SLUGS_FILE=$(mktemp)
+trap 'rm -f "$PROJECT_SLUGS_FILE"' EXIT
+if [ -d "$VAULT/4-projects" ]; then
+  for p in "$VAULT/4-projects"/*.md; do
+    [ -f "$p" ] || continue
+    basename "$p" .md >> "$PROJECT_SLUGS_FILE"
+  done
+fi
+
+matches_project_slug() {
+  # substring match against any slug; literal (no regex) so slug text is safe
+  while IFS= read -r slug; do
+    [ -n "$slug" ] || continue
+    case "$1" in *"$slug"*) return 0 ;; esac
+  done < "$PROJECT_SLUGS_FILE"
+  return 1
+}
 STALE_DAYS=60
 
 for f in "$FLEETING"/*.md; do
@@ -38,7 +56,7 @@ for f in "$FLEETING"/*.md; do
   grep -q '^challenged:\|^challenges:' "$f" && continue
 
   # Count inbound links from permanent notes
-  perm_count=$(grep -rl "\[\[$name\]\]" "$PERMANENT/" 2>/dev/null | wc -l | tr -d ' ')
+  perm_count=$(grep -rlF "[[$name]]" "$PERMANENT/" 2>/dev/null | wc -l | tr -d ' ')
 
   if [ "$perm_count" -ge 2 ]; then
     echo -e "PROMOTED\t$name\t$perm_count permanent refs"
@@ -46,9 +64,9 @@ for f in "$FLEETING"/*.md; do
   fi
 
   # Check stale project notes
-  if echo "$name" | grep -qE "$PROJECT_SLUGS"; then
+  if matches_project_slug "$name"; then
     # Any inbound links from anywhere?
-    all_count=$(grep -rl "\[\[$name\]\]" "$VAULT/" 2>/dev/null | wc -l | tr -d ' ')
+    all_count=$(grep -rlF "[[$name]]" "$VAULT/" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$all_count" -eq 0 ]; then
       file_mod=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)
       mod_days=$(( ( $(date +%s) - file_mod ) / 86400 ))

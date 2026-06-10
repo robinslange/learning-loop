@@ -29,7 +29,7 @@ It automatically skips counterpoint notes (`challenged:`/`challenges:` in frontm
 | Note | Reason | Detail |
 |------|--------|--------|
 | bacopa-effects-grow-over-weeks | promoted | 3 permanent refs |
-| solenoid-hero-copy | stale project note | 0 refs, 90 days old |
+| acme-app-hero-copy | stale project note | 0 refs, 90 days old |
 
 Archive these [N] notes to `_archive/1-fleeting/`? (y/n)
 ```
