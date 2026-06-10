@@ -343,6 +343,8 @@ try {
     process.exit(0);
   }
 
+  const scrubbedContext = scrubSecrets(injection.additionalContext);
+
   if (mode === 'shadow') {
     logShadow({
       type: 'gate-pass-payload',
@@ -353,11 +355,11 @@ try {
         vault_notes: injection.injectedVaultPaths.length,
       },
       dedupe_filtered_count: dedupeFilteredCount,
-      would_inject: scrubSecrets(injection.additionalContext),
+      would_inject: scrubbedContext,
     });
     persistDedupeState(session_id, injection.injectedVaultPaths);
   } else if (mode === 'live') {
-    emitHookOutput({ event: 'UserPromptSubmit', additionalContext: injection.additionalContext });
+    emitHookOutput({ event: 'UserPromptSubmit', additionalContext: scrubbedContext });
     persistDedupeState(session_id, injection.injectedVaultPaths);
   }
 } catch (err) {

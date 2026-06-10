@@ -218,3 +218,63 @@ describe('session-label stdout contract', () => {
     assert.equal(out, '');
   });
 });
+
+describe('session-label live injection scrubbing', () => {
+  it('live mode scrubs secrets from injected context (parity with shadow)', () => {
+    const base = mkdtempSync(join(tmpdir(), 'll-live-scrub-'));
+    try {
+      const vault = join(base, 'vault');
+      const pluginData = join(base, 'plugin-data');
+      const home = join(base, 'home');
+      const stubBin = join(base, 'bin');
+      mkdirSync(join(vault, 'notes'), { recursive: true });
+      mkdirSync(pluginData, { recursive: true });
+      mkdirSync(home, { recursive: true });
+      mkdirSync(stubBin, { recursive: true });
+
+      writeFileSync(
+        join(vault, 'notes', 'aws-key-rotation.md'),
+        'The deploy key AKIAIOSFODNN7EXAMPLE must be rotated quarterly. Keep the rotation runbook current.\n',
+      );
+
+      // Stub ll-search on PATH emitting one above-threshold hit without a body,
+      // so the hook enriches it by reading the vault note (which holds the secret).
+      const hit = JSON.stringify([
+        { path: 'notes/aws-key-rotation.md', title: 'aws-key-rotation', score: 0.99 },
+      ]);
+      writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+        mode: 0o755,
+      });
+
+      const input = JSON.stringify({
+        session_id: randomUUID(),
+        prompt: 'how should we rotate the AWS deploy key for the worker',
+        transcript_path: '',
+        cwd: '/tmp',
+      });
+      const out = execFileSync('node', [HOOK], {
+        input,
+        encoding: 'utf-8',
+        timeout: 30000,
+        env: {
+          ...process.env,
+          HOME: home,
+          PATH: `${stubBin}:${process.env.PATH}`,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          VAULT_PATH: vault,
+          LEARNING_LOOP_INJECTION_MODE: 'live',
+          LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+          // Generous race cap: under full-suite load the 1500ms default can
+          // abort the stub backend before it answers, failing the gate.
+          LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+        },
+      });
+
+      assert.ok(out.length > 0, 'gate did not pass — stub arrangement broken, fix before judging the scrub');
+      assert.ok(!out.includes('AKIAIOSFODNN7EXAMPLE'), 'AWS key leaked into live injection');
+      assert.ok(out.includes('[REDACTED]'));
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
