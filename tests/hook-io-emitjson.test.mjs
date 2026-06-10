@@ -46,9 +46,22 @@ test('oversized payload with no trimmable field emits nothing on stdout + logs t
 });
 
 test('multibyte content never splits a code point', () => {
-  const { stdout } = runEmit(`{
-    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: '🧠'.repeat(30_000) },
-  }`);
+  // A well-formed string can never land the binary search mid-pair: a lone
+  // high surrogate at a mid-pair boundary serializes as a 6-byte \uXXXX
+  // escape while completing the pair costs only 4 UTF-8 bytes, so the
+  // largest fitting prefix always pair-completes. Plant a lone high
+  // surrogate exactly at the landing boundary (keep=8089 for this shape) so
+  // the surrogate guard actually fires.
+  const { stdout } = runEmit(
+    `{
+    hookSpecificOutput: {
+      hookEventName: 'SessionStart',
+      additionalContext: '🧠🧠' + 'x'.repeat(8084) + '\\ud83e' + '🧠'.repeat(2000),
+    },
+  }`,
+  );
   const parsed = JSON.parse(stdout);
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes('🧠'));
+  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(parsed.hookSpecificOutput.additionalContext));
+  assert.ok(Buffer.byteLength(stdout, 'utf8') <= 8192);
 });
