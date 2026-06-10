@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, saveDb, getEdgesFrom } from '../scripts/lib/edges.mjs';
 
 test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));
@@ -13,7 +13,11 @@ test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () =
   saveDb(db, dbPath);
   assert.ok(!readdirSync(dir).some((f) => f.endsWith('.tmp')), 'tmp file left behind');
   const reopened = await openEdgeDb(dbPath);
-  assert.ok(reopened);
+  const edges = getEdgesFrom(reopened, 'a.md');
+  assert.ok(
+    edges.some((e) => e.to_path === 'b.md' && e.edge_type === 'evidence_for'),
+    'a.md→b.md evidence_for edge lost in round-trip',
+  );
 });
 
 test('saveDb uses rename, not a direct writeFileSync to the db path', () => {
