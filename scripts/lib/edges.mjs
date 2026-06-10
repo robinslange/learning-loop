@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
 import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
@@ -475,5 +475,10 @@ export function findMatchingSupersessions(db, query) {
 export function saveDb(db, dbPath) {
   mkdirSync(dirname(dbPath), { recursive: true });
   const data = db.export();
-  writeFileSync(dbPath, Buffer.from(data));
+  // Full-image rewrite on every vault write: a crash mid-write must not
+  // corrupt the whole justification graph. Write-then-rename is atomic on
+  // the same filesystem.
+  const tmp = `${dbPath}.${process.pid}.tmp`;
+  writeFileSync(tmp, Buffer.from(data));
+  renameSync(tmp, dbPath);
 }
