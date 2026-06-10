@@ -27,7 +27,13 @@ export function scrubNotes(notes, opts) {
     .filter(Boolean)
     .map((d) => ({ term: d, re: denyTermRegExp(d) }));
   const tripRes = (opts.tripwirePatterns || [])
-    .map((p) => { try { return new RegExp(p, 'g'); } catch { return null; } })
+    .map((p) => {
+      try {
+        return new RegExp(p, 'g');
+      } catch {
+        return null;
+      }
+    })
     .filter(Boolean);
   const blocked = [];
   const tripwire = [];
@@ -60,11 +66,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const { deriveInstanceFacts } = await import('./lib/instance-facts.mjs');
   const { getConfigStrict } = await import('./lib/config.mjs');
   const [denyFile, pluginData, ...argvPaths] = process.argv.slice(2);
-  const paths = argvPaths.length > 0
-    ? argvPaths
-    : readFileSync(0, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const paths =
+    argvPaths.length > 0
+      ? argvPaths
+      : readFileSync(0, 'utf8')
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
   const fileTerms = denyFile
-    ? readFileSync(denyFile, 'utf8').split(/\r?\n/).map((s) => s.trim()).filter((s) => s && !s.startsWith('#'))
+    ? readFileSync(denyFile, 'utf8')
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter((s) => s && !s.startsWith('#'))
     : [];
   // Fail CLOSED: an unreadable config silently dropping email_domains deny
   // terms is exactly the gate-weakening this CLI exists to prevent.
@@ -89,5 +102,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const denylist = [...new Set([...fileTerms, ...facts])];
   const TRIPWIRES = ['https?://\\S+', '\\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\\b'];
   const notes = paths.map((p) => ({ path: p, text: readFileSync(p, 'utf8') }));
-  console.log(JSON.stringify(scrubNotes(notes, { denylist, tripwirePatterns: TRIPWIRES }), null, 2));
+  console.log(
+    JSON.stringify(scrubNotes(notes, { denylist, tripwirePatterns: TRIPWIRES }), null, 2),
+  );
 }

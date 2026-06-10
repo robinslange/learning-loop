@@ -45,11 +45,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     text: readMemoryFile(f.path),
   }));
   const result = selectSeedMemories(files, {
-    types: (typesArg || 'feedback').split(',').map((s) => s.trim()).filter(Boolean),
-    denyNamePatterns: (denyArg || '').split(',').map((s) => s.trim()).filter(Boolean),
+    types: (typesArg || 'feedback')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    denyNamePatterns: (denyArg || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
   });
-  console.log(JSON.stringify(
-    { kept: result.kept.map((k) => k.name), dropped: result.dropped },
-    null, 2,
-  ));
+  console.log(
+    JSON.stringify({ kept: result.kept.map((k) => k.name), dropped: result.dropped }, null, 2),
+  );
 }

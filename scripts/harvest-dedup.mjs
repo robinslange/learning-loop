@@ -39,7 +39,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const all = args.includes('--all');
   const logPath = args.find((a) => a !== '--all');
   const stdin = readFileSync(0, 'utf8');
-  const candidates = stdin.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const candidates = stdin
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
   const filtered = filterUnharvested(candidates, readHarvested(logPath), all);
   for (const p of filtered) console.log(p);
 }
