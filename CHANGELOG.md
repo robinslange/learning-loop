@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **SessionStart no longer emits malformed JSON when the assembled context exceeds the 8KiB hook stdout budget** (e.g. a large auto-memory index). Two layers: memory-index injection is now capped at 3KiB per section, cut at the last full line with a `[truncated — full index at <path>]` pointer to the full file; and `emitJson` itself now trims the `additionalContext` field and re-serializes instead of byte-slicing the stringified envelope — when nothing is trimmable it logs and emits nothing, because no output beats corrupt output.
+- **The harvest scrub gate fails closed on an unreadable config.** `getConfig()` never throws (it logs and returns `{}`), so the scrub CLI's try/catch was dead code: a corrupt `config.json` silently dropped the `email_domains` deny terms and the scrub reported clean. The CLI now loads strictly via the new `getConfigStrict()` and exits 1 when a config exists but won't parse (or parses to a non-object); an unreadable federation config surfaces instead of silently dropping the own-pubkey deny term; numeric deny terms are coerced to strings, any other non-string shape throws.
+- **`fleeting-sweep.sh` no longer hardcodes instance-specific project slugs** (which also made stale-project detection a no-op on every other install). Slugs now derive from `4-projects/*.md` index notes with anchored prefix matching (a short slug like `ai` no longer flags unrelated notes via substring); the config path is passed via argv instead of interpolated into inline JS, and wikilink greps are fixed-string.
+- **Promotion-gate verification markers match case-insensitively.** Markers are LLM-written text, and `[Unverified]` sailed straight through the lowercase-literal match into `3-permanent/`. The body is lowercased before matching, and `[needs verification]` / `[citation needed]` — already declared blocking in `promote-gate.md` — gained the mechanical backstop.
+- **`edges.db` is written atomically.** `saveDb` rewrote the full database image in place on every vault write; a crash mid-write corrupted the whole justification graph. Writes now go through a pid-suffixed tmp file plus rename, which also closes a torn-read window for unlocked readers.
+- **Live injection mode scrubs secrets.** Shadow mode passed the would-be injection through `scrubSecrets`; live mode emitted the raw context. Both now share one scrubbed value computed above the mode branch.
+
 ## v1.26.0
 
 ### Added
