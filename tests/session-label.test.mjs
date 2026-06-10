@@ -226,9 +226,8 @@ describe('session-label live injection scrubbing', () => {
       const vault = join(base, 'vault');
       const pluginData = join(base, 'plugin-data');
       const home = join(base, 'home');
-      const stubBin = join(base, 'bin');
+      const stubBin = join(pluginData, 'bin');
       mkdirSync(join(vault, 'notes'), { recursive: true });
-      mkdirSync(pluginData, { recursive: true });
       mkdirSync(home, { recursive: true });
       mkdirSync(stubBin, { recursive: true });
 
@@ -237,8 +236,10 @@ describe('session-label live injection scrubbing', () => {
         'The deploy key AKIAIOSFODNN7EXAMPLE must be rotated quarterly. Keep the rotation runbook current.\n',
       );
 
-      // Stub ll-search on PATH emitting one above-threshold hit without a body,
-      // so the hook enriches it by reading the vault note (which holds the secret).
+      // Stub ll-search in <pluginData>/bin — findBinary()'s first slot, so it
+      // beats a locally built native/target/release binary and any PATH entry.
+      // It emits one above-threshold hit without a body, so the hook enriches
+      // it by reading the vault note (which holds the secret).
       const hit = JSON.stringify([
         { path: 'notes/aws-key-rotation.md', title: 'aws-key-rotation', score: 0.99 },
       ]);
@@ -259,7 +260,7 @@ describe('session-label live injection scrubbing', () => {
         env: {
           ...process.env,
           HOME: home,
-          PATH: `${stubBin}:${process.env.PATH}`,
+          TMPDIR: base,
           CLAUDE_PLUGIN_DATA: pluginData,
           VAULT_PATH: vault,
           LEARNING_LOOP_INJECTION_MODE: 'live',
