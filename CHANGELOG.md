@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.26.1
+
 ### Fixed
 
 - **SessionStart no longer emits malformed JSON when the assembled context exceeds the 8KiB hook stdout budget** (e.g. a large auto-memory index). Two layers: memory-index injection is now capped at 3KiB per section, cut at the last full line with a `[truncated — full index at <path>]` pointer to the full file; and `emitJson` itself now trims the `additionalContext` field and re-serializes instead of byte-slicing the stringified envelope — when nothing is trimmable it logs and emits nothing, because no output beats corrupt output.
