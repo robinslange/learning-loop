@@ -49,6 +49,20 @@ test('empty 4-projects: no STALE detection, no error', () => {
   assert.doesNotMatch(out, /STALE/);
 });
 
+test('slug matching is anchored to name prefix, not substring', () => {
+  const vault = makeVault();
+  writeFileSync(join(vault, '4-projects', 'ai.md'), '# ai');
+  const inner = join(vault, '1-fleeting', 'maintain-codebase.md');
+  writeFileSync(inner, 'old note with slug as inner substring');
+  utimesSync(inner, OLD, OLD);
+  const prefixed = join(vault, '1-fleeting', 'ai-research-idea.md');
+  writeFileSync(prefixed, 'old note with slug as prefix');
+  utimesSync(prefixed, OLD, OLD);
+  const out = run(vault);
+  assert.doesNotMatch(out, /^STALE\tmaintain-codebase\t/m);
+  assert.match(out, /^STALE\tai-research-idea\t/m);
+});
+
 test('2+ permanent inbound links reports PROMOTED (regression guard for grep -F change)', () => {
   const vault = makeVault();
   writeFileSync(join(vault, '1-fleeting', 'some-idea.md'), 'body');

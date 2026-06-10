@@ -29,7 +29,7 @@ FLEETING="$VAULT/1-fleeting"
 PERMANENT="$VAULT/3-permanent"
 # Project slugs = 4-projects/*.md basenames (the project index notes).
 # Instance-specific names must never be hardcoded here: this file ships publicly.
-PROJECT_SLUGS_FILE=$(mktemp)
+PROJECT_SLUGS_FILE=$(mktemp) || exit 1
 trap 'rm -f "$PROJECT_SLUGS_FILE"' EXIT
 if [ -d "$VAULT/4-projects" ]; then
   for p in "$VAULT/4-projects"/*.md; do
@@ -39,10 +39,10 @@ if [ -d "$VAULT/4-projects" ]; then
 fi
 
 matches_project_slug() {
-  # substring match against any slug; literal (no regex) so slug text is safe
+  # anchored prefix match (slug or slug-*); literal (no regex) so slug text is safe
   while IFS= read -r slug; do
     [ -n "$slug" ] || continue
-    case "$1" in *"$slug"*) return 0 ;; esac
+    case "$1" in "$slug"|"$slug"-*) return 0 ;; esac
   done < "$PROJECT_SLUGS_FILE"
   return 1
 }
