@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Supersedes v1.27.0, whose build failed in CI before any artifacts published** (the tag has no release). This release ships the same content plus the fixes below.
+- **`build-native` no longer fails on a guard hunting a library that never ships.** The packaging steps demanded a standalone onnxruntime next to the binary, but `ort`'s `download-binaries` feature statically links it — every release ever has shipped a self-contained `ll-search`. The guard and the copy are gone; packaging ships the binary alone, as before.
+- **Two `writeMarker` tests no longer depend on the developer machine's real plugin-data.** They passed locally only because `~/.claude/plugins/data/.ll-data-path` exists there, and failed on CI where it doesn't; the marker-cache tests now sandbox `CLAUDE_PLUGIN_DATA` into a temp dir like the rest of the marker family.
+
 ## v1.27.0
 
 ### Changed
@@ -18,7 +24,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
-- **Release and CI hardening.** `release.sh` gains a main-only, fast-forward-synced preflight, lockfile sync, and atomic push, and no longer supports `--skip-tests`; `build-native` builds `--locked` with a durable model cache and no longer silently skips ONNX/NLI assets; CI enforces the NLI truncation contract against a release binary instead of skipping.
+- **Release and CI hardening.** `release.sh` gains a main-only, fast-forward-synced preflight, lockfile sync, and atomic push, and no longer supports `--skip-tests`; `build-native` builds `--locked` with a durable model cache and ships the self-contained `ll-search` binary (onnxruntime is statically linked via `ort`'s `download-binaries`); CI enforces the NLI truncation contract against a release binary instead of skipping.
 - **Subagent verification loops actually run.** `/discovery`'s note-verifier loop is hoisted out of the researcher agent (where it never executed) into the skill; `/inbox` rewrites flow through an explicit worklist from the inbox-organiser, with an NLI-hold column so held notes defer promotion; PostToolUse hooks are replayed after sub-agent fan-out; dispatched vault agents get minimal tool allowlists and a uniform `${CLAUDE_PLUGIN_ROOT}` path contract; `note-writer` reports the filename it actually used. A lint suite pins these subagent architecture invariants.
 - **Skill UX.** `/health` splits into a light default and a deep mode (plus fixes for live bugs found in the split), `/verify` and `/gaps` run their defaults immediately instead of prompting, `/doctor` targets the real install for its fixes, and `/quick` gains a verification posture.
 - **`/ingest` and `/reflect` upstream-refinement pipeline.** Paths are vault-derived instead of hardcoded, a heredoc env bug is fixed, and the deferred refinement queue is actually drained.
@@ -59,7 +65,7 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
-- **Release build resilience, part two: the NLI model download now retries too, and the model cache survives `build.rs` edits.** v1.25.14 added retry/backoff to `ll-core/build.rs`, but the v1.25.14 release build still failed: there is a *second* compile-time HuggingFace fetch in `ll-search/build.rs` (the DeBERTa NLI model, behind the `nli` feature) that still used a single `curl` and panicked on the first 429 — before `ll-core` even got to retry. That second downloader now retries up to 5 times with the same exponential backoff (2s/4s/8s/16s), preserving its SHA-256 pin and size-floor validation on the final bytes. Separately, the `Cache models` step in `build-native.yml` was keyed on `hashFiles('native/crates/ll-search/build.rs')`, so *editing build.rs to add the retry* changed the key and guaranteed a cold HuggingFace fetch on the very release that needed the cache most. The key is now a manual `native-model-v5` tag, bumped only when the pinned model/SHA actually changes, so build.rs edits no longer bust it. (v1.25.14 was tagged but its build failed, so no GitHub Release was cut for it; this is shipped as v1.25.15.)
+- **Release build resilience, part two: the NLI model download now retries too, and the model cache survives `build.rs` edits.** v1.25.14 added retry/backoff to `ll-core/build.rs`, but the v1.25.14 release build still failed: there is a _second_ compile-time HuggingFace fetch in `ll-search/build.rs` (the DeBERTa NLI model, behind the `nli` feature) that still used a single `curl` and panicked on the first 429 — before `ll-core` even got to retry. That second downloader now retries up to 5 times with the same exponential backoff (2s/4s/8s/16s), preserving its SHA-256 pin and size-floor validation on the final bytes. Separately, the `Cache models` step in `build-native.yml` was keyed on `hashFiles('native/crates/ll-search/build.rs')`, so _editing build.rs to add the retry_ changed the key and guaranteed a cold HuggingFace fetch on the very release that needed the cache most. The key is now a manual `native-model-v5` tag, bumped only when the pinned model/SHA actually changes, so build.rs edits no longer bust it. (v1.25.14 was tagged but its build failed, so no GitHub Release was cut for it; this is shipped as v1.25.15.)
 
 ## v1.25.14
 
