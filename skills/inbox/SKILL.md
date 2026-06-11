@@ -1,6 +1,6 @@
 ---
 name: inbox
-description: 'Batch triage inbox notes and sweep fleeting for archival. Usage: /learning-loop:inbox (no args). Classifies intention status (intentioned/resolved/limbo), clusters by topic, auto-promotes mature notes, surfaces top-5 limbo notes for close-or-plan decision, sweeps 1-fleeting/ for promoted/stale notes to archive, recommends merge/deepen/delete for the rest (asks before destructive actions).'
+description: 'Batch triage inbox notes and sweep fleeting for archival. Usage: /learning-loop:inbox [--skip-nli]. Classifies intention status (intentioned/resolved/limbo), clusters by topic, auto-promotes mature notes, surfaces top-5 limbo notes for close-or-plan decision, sweeps 1-fleeting/ for promoted/stale notes to archive, recommends merge/deepen/delete for the rest (asks before destructive actions); --skip-nli bypasses the NLI contradiction check.'
 ---
 
 # Inbox: Batch Triage and Processing
@@ -45,7 +45,7 @@ Use `subagent_type: "learning-loop:inbox-organiser"` with the full prompt from t
 
 ### Step 1.5: Surface Librarian Observations for Inbox Notes
 
-Before the agent returns, check the librarian queue for pending observations targeting inbox notes.
+While the inbox-organiser agent runs (this check is independent of its output), check the librarian queue for pending observations targeting inbox notes.
 
 Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'`, `target` starts with `0-inbox/`, and `task` is one of: `voice_flag`, `tag_suggestion`, `duplicate_flag`.
 

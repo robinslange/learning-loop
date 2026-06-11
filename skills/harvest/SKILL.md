@@ -1,6 +1,7 @@
 ---
 name: harvest
 description: "Collect opt-in-marked, IP-scrubbed insights from THIS instance to carry back to another learning-loop instance you own. Usage: /learning-loop:harvest [--all] [--out <dir>]. Keys ONLY on frontmatter `portable: true` (never `visibility`). Mechanical deny-list blocks IP; you review what survives. Emits a lift-bundle to ingest on the home instance."
+disable-model-invocation: true
 ---
 
 # Harvest portable insights

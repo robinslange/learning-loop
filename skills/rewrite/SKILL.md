@@ -1,6 +1,7 @@
 ---
 name: rewrite
 description: 'Cross-store correction for a retracted or updated belief. Usage: /learning-loop:rewrite "old pattern" "new pattern" [reason]. Searches vault, auto-memory, and episodic history; presents an impact map for triage; executes user-approved changes; records a supersession so future episodic searches get annotated.'
+disable-model-invocation: true
 ---
 
 # Rewrite: Context Gene Editing

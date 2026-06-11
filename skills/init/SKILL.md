@@ -1,6 +1,7 @@
 ---
 name: init
 description: "First-time setup or upgrade for the learning-loop plugin. Configures vault path, persona voice, CLAUDE.md integration, and verifies the installation. Hands federation off to /learning-loop:federation. Safe to re-run: detects existing state and skips completed steps."
+disable-model-invocation: true
 ---
 
 # Init: Learning Loop Setup

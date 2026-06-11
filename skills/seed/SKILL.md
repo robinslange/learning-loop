@@ -1,6 +1,7 @@
 ---
 name: seed
 description: "Build a portable starter slice from this learning-loop instance for a fresh instance to boot from. Usage: /learning-loop:seed [--for-job] [--types feedback,reference] [--out <dir>]. Default --for-job carries working-style (feedback memories + _system + portable prefs), no vault notes, no projects. Use when ramping up at a new job, a new project vault, or a second machine."
+disable-model-invocation: true
 ---
 
 # Seed a fresh instance
@@ -41,7 +42,7 @@ Block anything the scrub blocks. (Reuses the harvest scrubber — same mechanica
 ### 5. Assemble the bundle
 Create `<out>/seed-bundle-<date>/` (default `<out>` = cwd):
 - `memory/` — copy each kept memory file verbatim.
-- `_system/` — copy `persona.md`, `capture-rules.md`, `learning-loop-protocol.md` from VAULT/_system. Do NOT copy `nli-conflicts.md` (large, instance-specific).
+- `_system/` — copy `persona.md`, `capture-rules.md` from VAULT/_system, and `learning-loop-protocol.md` if present. Do NOT copy `nli-conflicts.md` (large, instance-specific).
 - `CLAUDE-portable.md` — extract the portable sections of the operator's global `~/.claude/CLAUDE.md` (the learning-loop, code-style, git sections). Ask the operator to confirm the slice before writing — global CLAUDE.md may contain machine/personal specifics.
 - `SEED-MANIFEST.md` — list contents, every dropped file + reason, and boot instructions: "Clone learning-loop at the target instance, run /learning-loop:init, and point it at this bundle when prompted."
 

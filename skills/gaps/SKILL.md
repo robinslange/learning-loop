@@ -52,19 +52,10 @@ Per-note tracking is handled automatically by the PostToolUse hook.
 
 ### Step -1: Parameter Resolution
 
-Use `AskUserQuestion` to help users discover and configure parameters when no arguments are provided.
-
 **No arguments (`/gaps`):**
-Before auto-picking, ask:
+Run auto-pick immediately (find the densest unchallenged cluster — see Step 0). After presenting results, mention the alternatives in one line:
 
-> What would you like to challenge? Options:
->
-> - **A topic**: e.g., `/gaps "theanine"`: focused analysis on one domain
-> - **Auto-pick**: I'll find the densest unchallenged cluster
-> - **Sweep**: analyse all major domain clusters (`--sweep`)
-> - **Dry-run**: show what would be analysed without running (`--dry-run`)
->
-> Optional: `--depth shallow|medium|deep` (defaults to note maturity)
+> Analysed [cluster]. Alternatives: `/gaps "topic"` for a specific domain, `/gaps --sweep` across all clusters, `--depth shallow|medium|deep` to override maturity scaling.
 
 **Topic provided (`/gaps "topic"`):**
 Proceed immediately. Depth auto-scales to note maturity.

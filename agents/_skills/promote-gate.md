@@ -163,7 +163,7 @@ Four constants live in `hooks/modules/edge-infer.mjs`, each gating a different d
 
 Ordering invariant (enforced at module load): `TENSION ≤ contradiction-write ≤ HARD`. Tuning one threshold below another throws on hook load rather than silently breaking surface tiers.
 
-## NLI Contradiction Check (Bundle 2)
+## NLI Contradiction Check
 
 Before promoting a note from `0-inbox/` to a higher folder, query NLI contradiction edges for the note. This complements (does not replace) the Source Integrity check and runs alongside it.
 

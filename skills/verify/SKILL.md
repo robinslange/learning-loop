@@ -62,14 +62,9 @@ A note with zero score records is a pass.
 ### Step 0: Parameter Resolution
 
 **No argument (`/verify`):**
-Use `AskUserQuestion`:
+Run the `inbox` scope immediately (the default — no prompting needed). After presenting results, mention the other scopes in one line:
 
-> What would you like to verify?
->
-> - **`inbox`**: check all inbox notes (default)
-> - **`permanent`**: check all permanent notes
-> - **`"note-name"`**: check a specific note
-> - **`"topic"`**: check all notes matching a topic
+> Verified inbox. Other scopes: `/verify "note-name"`, `/verify permanent`, `/verify "topic"`.
 
 **Argument provided:**
 Proceed immediately.

@@ -125,6 +125,8 @@ No args: infers the change from recent conversation context. With args: searches
 
 If you've enabled the librarian (see below), `/health` also shows pending librarian observations in the dashboard. Run `/health --librarian` to review and act on them.
 
+If `/health` reports installation problems (missing binary, broken shims, stale daemons), run `/learning-loop:doctor` — it diagnoses your install and walks you through fixes one at a time, re-checking each after you apply it.
+
 **The vault librarian** runs in the background when `ll-watch` is active, using Gemma 4 E2B locally via ollama. It wanders the vault autonomously, finding orphan notes that should be linked, suggesting tags for under-tagged notes, flagging topic-style titles, flagging duplicates against near-neighbours, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
 
 ```
@@ -179,7 +181,7 @@ librarian  → /learning-loop:health --librarian → approve links + tags, revie
 
 If you've configured federation via `/learning-loop:federation` (also reachable from `/learning-loop:init`), search results automatically include notes from connected peers. Peer results appear with a `peer:<name>/` prefix in their path.
 
-- **Manual sync:** `node vault-search.mjs sync` refreshes peer indexes from the hub
+- **Manual sync:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` refreshes peer indexes from the hub
 - **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
 - **Visibility:** you control what peers see of your vault (public/listed/private tiers, configured during init)
 - **Details:** see `guide/federation.md`
@@ -206,6 +208,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:harvest [--all] [--out <dir>]` | Collect opt-in `portable: true`, IP-scrubbed insights from this instance to carry back home |
 | `/learning-loop:health [--deep] [--auto]` | Vault hygiene dashboard: ghost dupes, orphans, stale notes, broken links |
 | `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
+| `/learning-loop:doctor` | Diagnose your learning-loop installation: runs health checks, presents issues, offers per-fix remediation, re-runs each check after the fix to confirm |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
 | `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
 | `/learning-loop:help` | This guide |

@@ -92,7 +92,7 @@ For each check with `status === "fail"`:
 | `binary-exists`, `binary-version-file`, `binary-runs` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/download-binary.mjs` |
 | `shims-exist` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-shims.mjs --install` |
 | `vault-folders` | `mkdir -p` each missing folder under `<VAULT>` |
-| `vault-system-files` | Write default content from `${CLAUDE_PLUGIN_ROOT}/templates/persona.md` and `${CLAUDE_PLUGIN_ROOT}/templates/capture-rules.md` |
+| `vault-system-files` | Write the default content defined in `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/02-vault.md` §2c |
 | `search-index-exists` | `ll-search index` |
 | `nli-socket-fresh` (stale file) | `rm <path>` |
 | `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch start` |

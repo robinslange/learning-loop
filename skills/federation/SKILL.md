@@ -1,6 +1,7 @@
 ---
 name: federation
 description: "Set up or repair learning-loop federation: identity creation, token redemption, Tailscale, visibility rules, and the first sync test. Run when /init asked you to defer federation, when sync is broken, or when rotating identity. Safe to re-run."
+disable-model-invocation: true
 ---
 
 # Federation Setup
