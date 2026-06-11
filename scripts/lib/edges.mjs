@@ -192,7 +192,8 @@ export function getEdgesTo(db, notePath) {
 // Skills consuming this helper directly should expect camelCase keys.
 //
 // Returns NLI edges where notePath is either endpoint, with confidence_score
-// in [minConfidence, 1]. Consumers: inbox-organiser promote-gate (Bundle 2),
+// in [minConfidence, 1]. Consumers: inbox-organiser promote-gate (hard-bucket
+// NLI contradiction),
 // refinement-proposer pair hint, /verify consistency detection. Uses literal
 // source_graph='nli' to deliberately exclude peer NLI edges; federation
 // authority handling is a future bundle.

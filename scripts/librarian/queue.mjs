@@ -1,6 +1,6 @@
 // scripts/librarian/queue.mjs : persistent JSONL work queue for the librarian daemon.
 //
-// Migrated from scripts/lib/librarian-queue.mjs (phase 1H). Adopts:
+// Migrated from the scripts/lib/ shim (phase 1H). Adopts:
 //   - safeLoad() for state.json reads
 //   - withLock() for mutating writes (appendItem, expireStaleItems, saveState)
 //   - logError() instead of bare catch {}
@@ -10,9 +10,6 @@
 // can interleave without the lock. Full-file rewrites go through tmp+rename so
 // a crash mid-write never truncates the queue or state file.
 // readQueue reads JSONL line-by-line without JSON.parse(readFileSync) monolith.
-//
-// The shim at scripts/lib/librarian-queue.mjs re-exports every symbol here;
-// do not remove until phase 2 removes the shim.
 
 import {
   readFileSync,

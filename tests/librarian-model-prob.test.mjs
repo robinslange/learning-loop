@@ -151,7 +151,7 @@ describe('submitLink model_prob + cosine_score plumbing', () => {
       `../scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const queue = await import(
-      `../scripts/lib/librarian-queue.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     executeTool = tools.executeTool;
     submitLink = (args) => executeTool('submit_link', args);

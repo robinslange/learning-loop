@@ -51,7 +51,7 @@ function parseThresholdEnv(varName, defaultValue) {
 
 const NLI_CONTRADICTION_THRESHOLD = parseThresholdEnv('LL_NLI_THRESHOLD', 0.9);
 const NLI_ENTAILMENT_THRESHOLD = parseThresholdEnv('LL_NLI_ENTAIL_THRESHOLD', 0.75);
-// Bundle 2 promotion-gate thresholds. HARD is the hard-bucket cutoff:
+// Hard-bucket NLI contradiction thresholds. HARD is the hard-bucket cutoff:
 // contradiction edges at or above it block autonomous promotion (the
 // inbox-organiser / promote-gate supersede-or-qualify prompt). TENSION is the
 // advisory-flag floor (matches the entailment

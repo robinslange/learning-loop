@@ -31,7 +31,7 @@ describe('submitLink defensive checks', () => {
       `../scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const queue = await import(
-      `../scripts/lib/librarian-queue.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const { executeTool } = tools;
     submitLink = (args) => executeTool('submit_link', args);

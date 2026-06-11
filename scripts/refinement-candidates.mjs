@@ -124,8 +124,8 @@ async function buildCandidates(newNotePaths, opts = {}) {
   }
   const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
   const bin = resolveBinary();
-  // Bundle 2: open edges.db for NLI hint lookup per pair. Lower threshold
-  // (0.5) than the inbox-organiser gate floor (0.75) because the proposer
+  // Open edges.db for NLI contradiction hint lookup per pair. Lower threshold
+  // (0.5) than the inbox-organiser hard-bucket gate floor (0.75) because the proposer
   // can act on weaker hints; the gate threshold is for user-blocking surfaces.
   const edgesDb = await openEdgesDbSafely();
 
