@@ -42,16 +42,11 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Capture Rules
 
-Every note must follow these constraints:
-- **Title**: States the insight, not the topic. "Spaced repetition works because forgetting is active" not "Spaced Repetition."
-- **Body**: 3-10 lines (up to 15 for deep notes with sources). One idea per note.
-- **Tags**: Max 3. Pick the most specific ones.
-- **Links**: At least one wiki-link to a related note. More is better if genuine.
-- **Frontmatter**: Include `tags`, `date`, and `source` (the source URL or identifier). Never write `status: inbox/permanent/fleeting`: the folder location IS the maturity status. The `status:` field is reserved for intention tracking (`intentioned | resolved | limbo`) managed by inbox-organiser.
+Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md` and follow it for every note — it is canonical; do not work from memory of it. Two constraints bite hardest here: the title states the insight (not the topic), and `status:` is reserved for intention tracking (`intentioned | resolved | limbo`) — never write `status: inbox/permanent/fleeting`, the folder IS the maturity status.
 
 ## Output Format
 
-Return the complete note content ready to write to disk:
+Write the note to its destination folder yourself (using the `Write` tool), then report both the complete note content and the exact written path:
 
 ```markdown
 ---
@@ -95,7 +90,7 @@ If `existing_note` is provided:
 
 ## Diagram Generation
 
-When the note describes a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves, generate an accompanying Excalidraw diagram.
+Apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` — it is canonical; do not restate it from memory.
 
 Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 

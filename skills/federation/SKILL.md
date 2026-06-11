@@ -146,6 +146,7 @@ Only reached if F succeeded. Write `PLUGIN_DATA/federation/config.json` with ide
 Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `${CLAUDE_PLUGIN_ROOT}/package.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
 
 ```javascript
+const PLUGIN = process.env.CLAUDE_PLUGIN_ROOT;
 const pluginVersion = JSON.parse(readFileSync(join(PLUGIN, 'package.json'), 'utf-8')).version;
 const meta = {
   created_at: new Date().toISOString(),

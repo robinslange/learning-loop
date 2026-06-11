@@ -117,7 +117,7 @@ Run confidence gate (decision-gates):
 
 ## Diagram Generation
 
-After drafting findings, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
+After drafting findings, apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` to decide whether the findings warrant an Excalidraw diagram.
 
 Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 

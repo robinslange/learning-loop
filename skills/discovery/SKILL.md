@@ -217,7 +217,7 @@ Sources found: N (run /literature to capture)
 ### note-verifier
 - Launch from Step 1.5 after every researcher return
 - Pass the full brief as `note_content`, placeholders resolved to literal paths
-- PASS/ISSUES verdicts drive the revise-and-re-verify loop (max 3 rounds)
+- PASS/PARTIAL/ISSUES verdicts drive Step 1.5 (max 3 rounds)
 
 **Always spawn agents in the same turn when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. Use a single message with multiple Agent tool calls.
 
