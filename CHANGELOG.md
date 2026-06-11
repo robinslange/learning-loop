@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.27.0
+
 ### Changed
 
 - **The installed plugin now ships only the runtime.** The plugin moved into `plugin/` and the marketplace source points there, so an install pulls ~6.6M of runtime (hooks, skills, agents, scripts) instead of the whole repository — tests, native sources, benches, and CI stay behind. Provenance templates ship inside `plugin/`, and version readers derive from `.claude-plugin/plugin.json`. First release cut in the plugin-shaped layout.
