@@ -7,7 +7,9 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.js');
-const TMP = join(tmpdir(), 'session-label-test');
+// mkdtemp, not a fixed name: parallel test runs sharing one dir flake when
+// one run's after() rmSync deletes another run's live transcripts.
+const TMP = mkdtempSync(join(tmpdir(), 'session-label-test-'));
 
 function makeTranscript(userMessages) {
   return userMessages

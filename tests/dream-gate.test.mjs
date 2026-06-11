@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir, homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
@@ -12,16 +12,21 @@ const PLUGIN_DATA = mkdtempSync(join(tmp, 'll-test-dream-plugin-data-'));
 const DREAM_MARKER = join(PLUGIN_DATA, 'retrieval', 'last-dream');
 const DREAM_LOCK = join(PLUGIN_DATA, 'markers', 'dream-lock');
 
-const FAKE_PROJECT_DIR = join(tmp, 'll-test-dream-project');
+// Unique per-run project dir AND a sandboxed HOME: the gate resolves its
+// memory dir via home() (env.HOME first), so overriding HOME keeps the test
+// out of the real ~/.claude/projects and lets parallel runs coexist.
+const FAKE_PROJECT_DIR = mkdtempSync(join(tmp, 'll-test-dream-project-'));
+const FAKE_HOME = mkdtempSync(join(tmp, 'll-test-dream-home-'));
 const encodedPath = FAKE_PROJECT_DIR.replace(/[/\\]/g, '-');
-const home = process.env.HOME || process.env.USERPROFILE || homedir();
-const memoryDir = join(home, '.claude', 'projects', encodedPath, 'memory');
+const memoryDir = join(FAKE_HOME, '.claude', 'projects', encodedPath, 'memory');
 
 function run() {
   return execFileSync('node', [HOOK], {
     encoding: 'utf-8',
     env: {
       ...process.env,
+      HOME: FAKE_HOME,
+      USERPROFILE: FAKE_HOME,
       CLAUDE_PROJECT_DIR: FAKE_PROJECT_DIR,
       CLAUDE_PLUGIN_DATA: PLUGIN_DATA,
     },
@@ -42,7 +47,8 @@ describe('dream-gate', () => {
 
   after(() => {
     rmSync(PLUGIN_DATA, { recursive: true, force: true });
-    rmSync(memoryDir, { recursive: true, force: true });
+    rmSync(FAKE_HOME, { recursive: true, force: true });
+    rmSync(FAKE_PROJECT_DIR, { recursive: true, force: true });
   });
 
   it('exits silently when lock file exists', () => {
