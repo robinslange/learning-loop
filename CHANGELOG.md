@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.27.1
+
 ### Fixed
 
 - **Supersedes v1.27.0, whose build failed in CI before any artifacts published** (the tag has no release). This release ships the same content plus the fixes below.
