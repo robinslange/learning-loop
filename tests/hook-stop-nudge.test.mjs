@@ -208,6 +208,35 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
     assert.equal(r2.stdout.trim(), '', 'dream-nudged once-guard must suppress the second nudge');
   } finally {
     r2.cleanup();
+  }
+
+  // Third run: a fresh dream-nudged marker from a DIFFERENT session must NOT
+  // suppress — the guard is once-per-SESSION, not once-per-cooldown-window. A
+  // mutant that ignores session_id and suppresses on the ts cooldown alone
+  // would pass r1/r2 but fail here.
+  const r3 = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed: (pluginDataDir, sandboxRoot) => {
+      seed(pluginDataDir, sandboxRoot);
+      writeFileSync(
+        join(pluginDataDir, 'markers', 'dream-nudged'),
+        JSON.stringify({ ts: Math.floor(Date.now() / 1000), session_id: 'other-session' }),
+      );
+    },
+  });
+  try {
+    assert.equal(r3.exitCode, 0, r3.stderr);
+    const out3 = r3.stdout.trim();
+    assert.ok(
+      out3.length > 0,
+      "another session's dream-nudged marker must not suppress this session's nudge",
+    );
+    const parsed3 = JSON.parse(out3);
+    assert.equal(parsed3.decision, 'block');
+    assert.match(parsed3.reason, /\/dream/);
+  } finally {
+    r3.cleanup();
     rmSync(projectDir, { recursive: true, force: true });
   }
 });

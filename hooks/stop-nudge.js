@@ -75,8 +75,8 @@ if (pluginData && projectDir) {
         const dreamRecent =
           typeof lastDream === 'number' && now() - lastDream < HookConfig.DREAM_COOLDOWN_SECS;
 
-        // Once-guard (M3): nudge at most once per session. Legacy marker
-        // content was a bare timestamp; honor it via the cooldown window.
+        // Once-guard (M3): nudge at most once per session. Defensive:
+        // tolerate a bare-timestamp marker via the cooldown window.
         const nudgedPath = MARKER_PATHS.dreamNudged(pluginData);
         const nudged = readMarker(nudgedPath, { ttlMs: Infinity });
         const nudgedTs = typeof nudged === 'number' ? nudged : nudged?.ts;
