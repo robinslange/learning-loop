@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run as runHealthDetector } from '../hooks/session-start/health-detector.mjs';
+import { run as runHealthDetector } from '../plugin/hooks/session-start/health-detector.mjs';
 
 test('health-detector: appends single line to ctx.context when fails exist', async () => {
   const ctx = {

@@ -18,9 +18,9 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cpus, totalmem } from 'node:os';
-import { env as pluginEnv, spawnEnv } from '../scripts/lib/env.mjs';
-import { logError } from '../scripts/lib/log.mjs';
-import { safeLoad } from '../scripts/lib/safe-load.mjs';
+import { env as pluginEnv, spawnEnv } from '../plugin/scripts/lib/env.mjs';
+import { logError } from '../plugin/scripts/lib/log.mjs';
+import { safeLoad } from '../plugin/scripts/lib/safe-load.mjs';
 
 const BENCH_DIR = import.meta.dirname;
 const REPO_ROOT = resolve(BENCH_DIR, '..');

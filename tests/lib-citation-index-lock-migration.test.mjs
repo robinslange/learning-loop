@@ -32,7 +32,7 @@ test('updateCitationIndex: round-trip — write under withLock then read back', 
   process.env.CLAUDE_PLUGIN_DATA = sb;
   try {
     const { updateCitationIndex, loadCitationIndex } = await import(
-      `../scripts/lib/sources/citation-index.mjs?cachebust=${sb}`
+      `../plugin/scripts/lib/sources/citation-index.mjs?cachebust=${sb}`
     );
 
     await updateCitationIndex('12345', { authors: ['Doe J'], title: 'Test', year: 2024 }, 'note-a.md');
@@ -68,7 +68,7 @@ test('updateCitationIndex: ELOCK_TIMEOUT is surfaced via logError, not silently 
   process.env.CLAUDE_PLUGIN_DATA = sb;
   try {
     const { updateCitationIndex } = await import(
-      `../scripts/lib/sources/citation-index.mjs?cachebust=${sb}-timeout`
+      `../plugin/scripts/lib/sources/citation-index.mjs?cachebust=${sb}-timeout`
     );
 
     const indexPath = join(sb, 'data', 'citation-index.json');

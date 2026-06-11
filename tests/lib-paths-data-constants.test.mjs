@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { DATA_PATHS, FEDERATION_PATHS, DATA_FILES } from '../scripts/lib/paths.mjs';
+import { DATA_PATHS, FEDERATION_PATHS, DATA_FILES } from '../plugin/scripts/lib/paths.mjs';
 
 test('DATA_PATHS resolves PLUGIN_DATA subdirectories', () => {
   const pd = '/tmp/test-pd';

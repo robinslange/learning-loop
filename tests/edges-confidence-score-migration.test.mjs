@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb } from '../scripts/lib/edges.mjs';
-import { initSQL } from '../scripts/lib/sqljs.mjs';
+import { openEdgeDb } from '../plugin/scripts/lib/edges.mjs';
+import { initSQL } from '../plugin/scripts/lib/sqljs.mjs';
 
 const OLD_SCHEMA = `
 CREATE TABLE edges (
@@ -111,7 +111,7 @@ test('re-opening migrated db is idempotent (data + schema intact)', async () => 
     await writePreV119Fixture(dbPath);
 
     let db = await openEdgeDb(dbPath);
-    const { saveDb } = await import('../scripts/lib/edges.mjs');
+    const { saveDb } = await import('../plugin/scripts/lib/edges.mjs');
     saveDb(db, dbPath);
     db.close();
 

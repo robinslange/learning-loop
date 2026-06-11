@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { safeLoad } from '../scripts/lib/safe-load.mjs';
+import { safeLoad } from '../plugin/scripts/lib/safe-load.mjs';
 
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'll-safeload-'));

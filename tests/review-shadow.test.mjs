@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'review-shadow.mjs');
+const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'review-shadow.mjs');
 
 describe('review-shadow', () => {
   let dataDir;

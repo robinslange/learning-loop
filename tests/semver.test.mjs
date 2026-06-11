@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { semverCmp, isPlainSemver } from '../scripts/lib/semver.mjs';
+import { semverCmp, isPlainSemver } from '../plugin/scripts/lib/semver.mjs';
 
 test('semverCmp orders X.Y.Z correctly across all positions', () => {
   assert.ok(semverCmp('1.0.0', '2.0.0') < 0);

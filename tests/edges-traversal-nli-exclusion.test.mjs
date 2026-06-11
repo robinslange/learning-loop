@@ -15,7 +15,7 @@ import {
   getDownstream,
   getDownstreamSymmetric,
   getSoleJustificationDependents,
-} from '../scripts/lib/edges.mjs';
+} from '../plugin/scripts/lib/edges.mjs';
 
 async function freshDb(t) {
   // openEdgeDb on a nonexistent path gives an in-memory sql.js db; queries

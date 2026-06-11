@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../hooks/stop-nudge.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/stop-nudge.js', import.meta.url).pathname;
 
 // On macOS, the hook child uses /tmp (the symlink) as its tmpdir().
 // Use this consistent path for pre-seeded markers and cleanup.

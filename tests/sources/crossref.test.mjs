@@ -35,7 +35,7 @@ describe('crossref adapter', () => {
 
   before(async () => {
     originalFetch = globalThis.fetch;
-    adapter = (await import('../../scripts/lib/sources/adapters/crossref.mjs')).default;
+    adapter = (await import('../../plugin/scripts/lib/sources/adapters/crossref.mjs')).default;
   });
 
   after(() => {

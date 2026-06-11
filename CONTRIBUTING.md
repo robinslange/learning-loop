@@ -21,7 +21,7 @@ npm test
 cd native && cargo test --workspace
 
 # Prettier auto-format (run before committing)
-npx prettier --write 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
+npx prettier --write 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'
 ```
 
 If a test fails on your branch but passes on `main`, rebuild the native binary (`cd native && cargo build --release`) and re-run; stale binaries account for most local-only failures.
@@ -33,9 +33,9 @@ If a test fails on your branch but passes on `main`, rebuild the native binary (
 1. **node** -- `npm test`. Runs `node --test` over `tests/*.test.mjs`.
 2. **cargo** -- `cargo test --workspace` inside `native/`, with `~/.cargo` and `native/target` cached by `Cargo.lock` hash.
 3. **lint** -- three checks:
-   - **Resolved-paths grep.** No file under `agents/` or `skills/` may contain `$HOME/brain/learning-loop`, `~/brain/learning-loop`, `$HOME/brain/brain`, or `~/brain/brain`. These paths are Robin's local layout. Use `${CLAUDE_PLUGIN_ROOT}`, `$PLUGIN`, or `{{VAULT}}` tokens instead.
-   - **Prettier check.** `npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'` must pass with no diff. Vendored code under `scripts/lib/vendor/` and `vendor/` is excluded.
-   - **Code-fence tag check.** No markdown file under `skills/`, `agents/`, `docs/`, `guide/`, `hooks/`, `scripts/` (plus `CHANGELOG.md` and `README.md`) may use non-canonical code-fence tags. Use `bash`, `js`, or `ts` only.
+   - **Resolved-paths grep.** No file under `plugin/agents/` or `plugin/skills/` may contain `$HOME/brain/learning-loop`, `~/brain/learning-loop`, `$HOME/brain/brain`, or `~/brain/brain`. These paths are Robin's local layout. Use `${CLAUDE_PLUGIN_ROOT}`, `$PLUGIN`, or `{{VAULT}}` tokens instead.
+   - **Prettier check.** `npx prettier --check 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'` must pass with no diff. Vendored code under `plugin/scripts/lib/vendor/` and `plugin/vendor/` is excluded.
+   - **Code-fence tag check.** No markdown file under `plugin/skills/`, `plugin/agents/`, `docs/`, `guide/`, `plugin/hooks/`, `plugin/scripts/` (plus `CHANGELOG.md` and `README.md`) may use non-canonical code-fence tags. Use `bash`, `js`, or `ts` only.
 
 ## Commit style
 

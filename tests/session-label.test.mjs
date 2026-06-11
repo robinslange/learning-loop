@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'session-label.js');
+const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.js');
 const TMP = join(tmpdir(), 'session-label-test');
 
 function makeTranscript(userMessages) {

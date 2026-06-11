@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendJsonlLine, appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
+import { appendJsonlLine, appendJsonlLineSafe } from '../plugin/scripts/lib/jsonl.mjs';
 
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'll-jsonl-'));

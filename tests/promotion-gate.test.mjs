@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canPromote, promoteWithVerification } from '../scripts/promotion-gate.mjs';
+import { canPromote, promoteWithVerification } from '../plugin/scripts/promotion-gate.mjs';
 
 test('canPromote allows clean note with all criteria passing', () => {
   const note = {

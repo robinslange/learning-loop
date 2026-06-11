@@ -78,7 +78,7 @@ describe('tag classifier structured-output suggestion', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-happy-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-happy-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body about pharmacokinetics of a nootropic.',
       existingTagsOverride: '',
@@ -106,7 +106,7 @@ describe('tag classifier structured-output suggestion', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-empty-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-empty-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Some body.',
       existingTagsOverride: '',
@@ -130,7 +130,7 @@ describe('tag classifier structured-output suggestion', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-vocab-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-vocab-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: '',
@@ -156,7 +156,7 @@ describe('tag classifier structured-output suggestion', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-existing-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-existing-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: 'pharmacology',
@@ -176,7 +176,7 @@ describe('tag classifier structured-output suggestion', () => {
       json: async () => ({ message: { content: 'not json' } }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-malformed-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-malformed-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: '',
@@ -191,7 +191,7 @@ describe('tag classifier structured-output suggestion', () => {
 
     globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-http-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-http-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body.',
       existingTagsOverride: '',
@@ -209,7 +209,7 @@ describe('tag classifier structured-output suggestion', () => {
     });
 
     const mod = await import(
-      `../scripts/librarian.mjs?bust=tag-timeout-${runId}-${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian.mjs?bust=tag-timeout-${runId}-${randomBytes(4).toString('hex')}`
     );
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: 'Body.',
@@ -229,7 +229,7 @@ describe('tag classifier structured-output suggestion', () => {
       return { ok: true, json: async () => ({ message: { content: '{}' } }) };
     });
 
-    const mod = await import(`../scripts/librarian.mjs?bust=tag-emptybody-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=tag-emptybody-${runId}`);
     await mod.__test__.tagCheck('3-permanent/foo.md', {
       bodyOverride: '',
       existingTagsOverride: '',

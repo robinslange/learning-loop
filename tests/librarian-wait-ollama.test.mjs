@@ -32,7 +32,7 @@ describe('waitForOllama bounded retry', () => {
     });
 
     const { __test__ } = await import(
-      `../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     await assert.rejects(
       () => __test__.waitForOllama({ maxAttempts: 3, intervalMs: 1 }),
@@ -50,7 +50,7 @@ describe('waitForOllama bounded retry', () => {
     });
 
     const { __test__ } = await import(
-      `../scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     await __test__.waitForOllama({ maxAttempts: 5, intervalMs: 1 });
     assert.equal(calls, 2);

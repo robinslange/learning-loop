@@ -15,7 +15,7 @@ function findBinary() {
   }
 
   const devBuild = resolve(
-    join(import.meta.dirname, '..', '..', 'native', 'target', 'release', BINARY_NAME),
+    join(import.meta.dirname, '..', '..', '..', 'native', 'target', 'release', BINARY_NAME),
   );
   if (existsSync(devBuild)) return devBuild;
 

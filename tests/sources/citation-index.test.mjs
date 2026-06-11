@@ -21,7 +21,7 @@ describe('citation-index', () => {
 
   it('loadCitationIndex returns {} when no file exists', async () => {
     const { loadCitationIndex } = await import(
-      `../../scripts/lib/sources/citation-index.mjs?bust=${runId}`
+      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${runId}`
     );
     const index = loadCitationIndex();
     assert.deepEqual(index, {});
@@ -29,7 +29,7 @@ describe('citation-index', () => {
 
   it('updateCitationIndex creates entry and adds noteFilename', async () => {
     const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../scripts/lib/sources/citation-index.mjs?bust=${runId}2`
+      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${runId}2`
     );
     await updateCitationIndex(
       '12345678',
@@ -44,7 +44,7 @@ describe('citation-index', () => {
   it('5 parallel updateCitationIndex calls all persist', async () => {
     const bust = runId + 'parallel';
     const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../scripts/lib/sources/citation-index.mjs?bust=${bust}`
+      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${bust}`
     );
     const metadata = { authors: ['Jones B'], title: 'Parallel Test', year: 2021 };
     const promises = Array.from({ length: 5 }, (_, i) =>
@@ -59,7 +59,7 @@ describe('citation-index', () => {
   it('duplicate noteFilename not added twice', async () => {
     const bust = runId + 'dedup';
     const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../scripts/lib/sources/citation-index.mjs?bust=${bust}`
+      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${bust}`
     );
     const metadata = { authors: ['Lee C'], title: 'Dedup Test', year: 2022 };
     await updateCitationIndex('55555555', metadata, 'same-note.md');

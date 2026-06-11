@@ -8,9 +8,9 @@ import { randomBytes } from 'node:crypto';
 import {
   openEdgeDb, addSupersession, removeSupersession,
   listSupersessions, findMatchingSupersessions, saveDb,
-} from '../scripts/lib/edges.mjs';
+} from '../plugin/scripts/lib/edges.mjs';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-search-tracking.js');
+const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'post-search-tracking.js');
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-super-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
 

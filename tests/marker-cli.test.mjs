@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CLI = new URL('../scripts/marker.mjs', import.meta.url).pathname;
+const CLI = new URL('../plugin/scripts/marker.mjs', import.meta.url).pathname;
 
 function run(args, pluginData) {
   return spawnSync(process.execPath, [CLI, ...args], {

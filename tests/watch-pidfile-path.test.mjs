@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { mkdtempSync, writeFileSync, mkdirSync, chmodSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'watch.mjs');
+const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'watch.mjs');
 
 describe('ll-watch pidfile path alignment with watch-daemon', () => {
   it('status looks at <vault>/.vault-search/watch.pid, not <pluginData>/watch.pid', () => {

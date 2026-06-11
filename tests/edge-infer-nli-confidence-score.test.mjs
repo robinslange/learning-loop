@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, saveDb } from '../plugin/scripts/lib/edges.mjs';
 
 test('addEdge persists confidence_score when provided', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));

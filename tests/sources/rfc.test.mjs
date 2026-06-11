@@ -15,7 +15,7 @@ describe('rfc adapter', () => {
 
   before(async () => {
     originalFetch = globalThis.fetch;
-    adapter = (await import('../../scripts/lib/sources/adapters/rfc.mjs')).default;
+    adapter = (await import('../../plugin/scripts/lib/sources/adapters/rfc.mjs')).default;
   });
 
   after(() => {

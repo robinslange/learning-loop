@@ -10,7 +10,7 @@ import learningLoopPlugin from './eslint-plugin-learning-loop/index.mjs';
 
 export default [
   {
-    files: ['hooks/**/*.{js,mjs}', 'scripts/**/*.{js,mjs}'],
+    files: ['plugin/hooks/**/*.{js,mjs}', 'plugin/scripts/**/*.{js,mjs}'],
     languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },
     plugins: {
       'learning-loop': learningLoopPlugin,
@@ -28,8 +28,8 @@ export default [
       '.worktrees/**',
       '.claude/**',
       'native/**',
-      'vendor/**',
-      'scripts/lib/vendor/**',
+      'plugin/vendor/**',
+      'plugin/scripts/lib/vendor/**',
       'data/**',
       'provenance/**',
       'docs/**',

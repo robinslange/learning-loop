@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { acquireLock, releaseLock, withLock } from '../scripts/lib/file-lock.mjs';
+import { acquireLock, releaseLock, withLock } from '../plugin/scripts/lib/file-lock.mjs';
 
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'll-flock-'));
@@ -132,7 +132,7 @@ test('releaseLock is idempotent on null/undefined handle', () => {
 });
 
 test('cross-process race: both children terminate cleanly (mutual exclusion holds)', async () => {
-  const flockPath = fileURLToPath(new URL('../scripts/lib/file-lock.mjs', import.meta.url));
+  const flockPath = fileURLToPath(new URL('../plugin/scripts/lib/file-lock.mjs', import.meta.url));
   const dir = mkdtempSync(join(tmpdir(), 'll-flock-race-'));
   try {
     const target = join(dir, 'race.json');

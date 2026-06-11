@@ -27,7 +27,7 @@ describe('extractModelProb', () => {
 
   before(async () => {
     const tools = await import(
-      `../scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     extractModelProb = tools.extractModelProb;
   });
@@ -148,10 +148,10 @@ describe('submitLink model_prob + cosine_score plumbing', () => {
 
   before(async () => {
     const tools = await import(
-      `../scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const queue = await import(
-      `../scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     executeTool = tools.executeTool;
     submitLink = (args) => executeTool('submit_link', args);
@@ -274,7 +274,7 @@ describe('submitLink model_prob + cosine_score plumbing', () => {
 
   it('TOOL_DEFS submit_link schema does NOT expose model_prob or cosine_score to the model', async () => {
     const tools = await import(
-      `../scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const def = tools.TOOL_DEFS.find((t) => t.function.name === 'submit_link');
     assert.ok(def);

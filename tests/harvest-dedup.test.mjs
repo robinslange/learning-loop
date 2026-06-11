@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readHarvested, filterUnharvested, appendHarvested } from "../scripts/harvest-dedup.mjs";
+import { readHarvested, filterUnharvested, appendHarvested } from "../plugin/scripts/harvest-dedup.mjs";
 import { existsSync } from "node:fs";
 
 test("filters already-harvested paths; appendHarvested persists", () => {

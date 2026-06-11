@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const CLI = new URL('../scripts/seed-select.mjs', import.meta.url).pathname;
+const CLI = new URL('../plugin/scripts/seed-select.mjs', import.meta.url).pathname;
 let memDir;
 
 function runCli(args) {

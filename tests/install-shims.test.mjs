@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'install-shims.mjs');
+const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'install-shims.mjs');
 
 describe('install-shims --check (macOS smoke test)', () => {
   it('exits 0 and prints shim paths', () => {

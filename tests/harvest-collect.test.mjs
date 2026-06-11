@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectPortable } from "../scripts/harvest-collect.mjs";
+import { collectPortable } from "../plugin/scripts/harvest-collect.mjs";
 
 test("keeps only portable: true; ignores visibility entirely", () => {
   const notes = [

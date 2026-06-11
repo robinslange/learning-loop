@@ -27,11 +27,11 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { run as runCacheCleanup } from '../hooks/session-start/cache-cleanup.mjs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { run as runCacheCleanup } from '../plugin/hooks/session-start/cache-cleanup.mjs';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../hooks/session-start.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/session-start.js', import.meta.url).pathname;
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
 function makeFixture({ version = '1.25.1' } = {}) {

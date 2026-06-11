@@ -5,7 +5,7 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync,
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'lib', 'dream-gate.js');
+const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
 
 const PLUGIN_DATA = mkdtempSync(join(tmp, 'll-test-dream-plugin-data-'));
@@ -127,7 +127,7 @@ describe('dream-gate', () => {
   });
 
   it('a last-dream stamp written by marker.mjs suppresses the 24h gate — M1', () => {
-    const CLI = join(import.meta.dirname, '..', 'scripts', 'marker.mjs');
+    const CLI = join(import.meta.dirname, '..', 'plugin', 'scripts', 'marker.mjs');
     rmSync(DREAM_MARKER, { force: true });
     const stampedPath = execFileSync('node', [CLI, 'stamp', 'last-dream'], {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },

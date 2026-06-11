@@ -15,9 +15,9 @@ mkdirSync(join(tmpVault, '0-inbox'), { recursive: true });
 writeFileSync(join(tmpVault, '0-inbox', 'seed.md'), 'seed\n');
 
 const snapshotPath = join(tmpPluginData, 'vault-snapshot.json');
-const snapshotMjsPath = fileURLToPath(new URL('../hooks/lib/snapshot.mjs', import.meta.url));
+const snapshotMjsPath = fileURLToPath(new URL('../plugin/hooks/lib/snapshot.mjs', import.meta.url));
 
-const mod = await import('../hooks/lib/snapshot.mjs');
+const mod = await import('../plugin/hooks/lib/snapshot.mjs');
 const { rebuildVaultSnapshot } = mod;
 
 rebuildVaultSnapshot(tmpVault);

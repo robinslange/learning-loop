@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeSlug } from '../scripts/ingest-slug.mjs';
+import { computeSlug } from '../plugin/scripts/ingest-slug.mjs';
 
 test('uses origin url hash when origin available', () => {
   const slug = computeSlug('/path/to/learning-loop', 'git@github.com:robinslange/learning-loop.git');

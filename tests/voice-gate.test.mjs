@@ -78,7 +78,7 @@ describe('voice-gate structured-output classification', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=topic-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=topic-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
 
     const items = readQueue();
@@ -104,7 +104,7 @@ describe('voice-gate structured-output classification', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=claim-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=claim-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/cached-array-references-mutate-through-reverse.md');
 
     const items = readQueue();
@@ -121,7 +121,7 @@ describe('voice-gate structured-output classification', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=malformed-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=malformed-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
 
     const items = readQueue();
@@ -136,7 +136,7 @@ describe('voice-gate structured-output classification', () => {
       status: 500,
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=http-error-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=http-error-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
 
     const items = readQueue();
@@ -151,7 +151,7 @@ describe('voice-gate structured-output classification', () => {
     });
 
     const mod = await import(
-      `../scripts/librarian.mjs?bust=timeout-${runId}-${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian.mjs?bust=timeout-${runId}-${randomBytes(4).toString('hex')}`
     );
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
 

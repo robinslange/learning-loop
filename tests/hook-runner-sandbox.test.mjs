@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook, sweepStaleSandboxes } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../hooks/pre-write-check.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // A non-Write tool makes pre-write-check exit immediately — cheapest real hook.

@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { warnOnce, resetForTests } from '../scripts/lib/warn-once.mjs';
+import { warnOnce, resetForTests } from '../plugin/scripts/lib/warn-once.mjs';
 
 describe('warnOnce', () => {
   beforeEach(() => {

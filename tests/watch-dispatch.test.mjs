@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'watch.mjs');
+const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'watch.mjs');
 
 function runWatch(...args) {
   return spawnSync('node', [SCRIPT, ...args], {

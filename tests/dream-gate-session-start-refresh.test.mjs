@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const DREAM_GATE = new URL('../hooks/lib/dream-gate.js', import.meta.url).pathname;
+const DREAM_GATE = new URL('../plugin/hooks/lib/dream-gate.js', import.meta.url).pathname;
 
 function runGate(pluginData, { home, env = {} } = {}) {
   return spawnSync(process.execPath, [DREAM_GATE, '--session-start-refresh'], {

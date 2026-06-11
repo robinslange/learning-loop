@@ -50,7 +50,7 @@ function resolveBinary() {
     '.claude/plugins/data/learning-loop-learning-loop-marketplace/bin/ll-search',
   );
   if (existsSync(installed)) return installed;
-  const dev = resolve(__dirname, '..', 'native/target/release/ll-search');
+  const dev = resolve(__dirname, '..', '..', 'native/target/release/ll-search');
   if (existsSync(dev)) return dev;
   throw new Error('ll-search binary not found');
 }

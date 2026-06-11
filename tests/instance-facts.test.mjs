@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deriveInstanceFacts } from "../scripts/lib/instance-facts.mjs";
+import { deriveInstanceFacts } from "../plugin/scripts/lib/instance-facts.mjs";
 
 test("derives peer ids, own pubkey, and configured email domains", () => {
   const pd = mkdtempSync(join(tmpdir(), "ll-facts-"));

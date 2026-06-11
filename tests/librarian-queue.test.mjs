@@ -20,7 +20,7 @@ describe('librarian-queue', () => {
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
-    queue = await import('../scripts/librarian/queue.mjs?bust=queue-' + runId);
+    queue = await import('../plugin/scripts/librarian/queue.mjs?bust=queue-' + runId);
   });
 
   after(() => {

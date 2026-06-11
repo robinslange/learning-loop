@@ -194,21 +194,23 @@ node scripts/install-shims.mjs --install
 
 ```
 learning-loop/
-  .claude-plugin/            Plugin manifest
-  agents/                    Specialized agent definitions
-  agents/_skills/            Shared agent skills
-  skills/                    User-invocable skills (slash commands)
-  scripts/                   Vault search, provenance, source-resolver,
-                             injection review, cache-health, binary download,
-                             librarian agent loop
-  scripts/lib/               Queue, tools, config, binary helpers
-  scripts/lib/vendor/        Vendored JS deps (winkNLP for POS-tagged
-                             citation extraction)
-  vendor/                    Vendored JS deps (sql.js WASM, ed25519, picomatch)
-  hooks/                     Lifecycle hooks (enforcement layer)
-  hooks/lib/inject.mjs       Shared helpers for the injection pipeline
-  native/                    Cargo workspace
-  native/crates/ll-core/     Search library: embed, graph, score, rerank, store
-  native/crates/ll-search/   CLI binary, sync client, preprocess, model loader
-  plugins/omc-cache-health/  oh-my-claude cache statusline plugin
+  .claude-plugin/                   Marketplace manifest
+  plugin/                           The installed plugin (marketplace source)
+    .claude-plugin/                 Plugin manifest
+    agents/                         Specialized agent definitions
+    agents/_skills/                 Shared agent skills
+    skills/                         User-invocable skills (slash commands)
+    scripts/                        Vault search, provenance, source-resolver,
+                                    injection review, cache-health, binary download,
+                                    librarian agent loop
+    scripts/lib/                    Queue, tools, config, binary helpers
+    scripts/lib/vendor/             Vendored JS deps (winkNLP for POS-tagged
+                                    citation extraction)
+    vendor/                         Vendored JS deps (sql.js WASM)
+    hooks/                          Lifecycle hooks (enforcement layer)
+    hooks/lib/inject.mjs            Shared helpers for the injection pipeline
+    plugins/omc-cache-health/       oh-my-claude cache statusline plugin
+  native/                           Cargo workspace
+  native/crates/ll-core/            Search library: embed, graph, score, rerank, store
+  native/crates/ll-search/          CLI binary, sync client, preprocess, model loader
 ```

@@ -21,7 +21,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { run as runCacheCleanup } from '../hooks/session-start/cache-cleanup.mjs';
+import { run as runCacheCleanup } from '../plugin/hooks/session-start/cache-cleanup.mjs';
 
 // Poll for an async side effect (detached spawn lands its file asynchronously).
 async function waitForFile(path, timeoutMs = 1500) {
@@ -123,7 +123,7 @@ test('cache-cleanup: missing .version file DOES spawn downloader (fresh install)
 test('cache-cleanup: v-prefix tolerance — installed has v, running does not, treat as match', async () => {
   // Regression guard for the prefix-mismatch shape: the on-disk .version file
   // historically contains `v1.25.1` (download-binary.mjs prepends `v`) while
-  // ctx.pluginVersion is the bare semver `1.25.1` (from package.json read).
+  // ctx.pluginVersion is the bare semver `1.25.1` (from plugin.json read).
   // stripV on both sides makes the comparison robust.
   const fx = makeFixture({ installedVersion: 'v1.25.1', runningVersion: '1.25.1' });
   const prev = process.env.CLAUDE_PLUGIN_DATA;

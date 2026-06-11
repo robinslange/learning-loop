@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileS
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const VAULT_SEARCH = new URL('../scripts/vault-search.mjs', import.meta.url).pathname;
+const VAULT_SEARCH = new URL('../plugin/scripts/vault-search.mjs', import.meta.url).pathname;
 
 // Create a minimal stub ll-search binary that emits an empty JSON array and
 // exits 0. Without a discoverable binary, vault-search.mjs exits early (code 2)

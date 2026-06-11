@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
-const HOOK = join(import.meta.dirname, '..', 'hooks', 'post-read-retrieval.js');
+const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'post-read-retrieval.js');
 const runId = randomBytes(8).toString('hex');
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-readret-${runId}`);
 const RETRIEVAL_DIR = join(PLUGIN_DATA, 'retrieval');

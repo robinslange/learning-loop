@@ -14,27 +14,37 @@ Read the baseline docs before touching code:
 
 ```
 learning-loop/
-  hooks/                -- Claude Code lifecycle hooks (entry: *.js)
-    lib/                -- hook-shared helpers (snapshot, inject, log)
-    modules/            -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
-    session-start/      -- session-start submodules (context-assembly, watch-daemon,
+  plugin/               -- the installed plugin (marketplace source ./plugin)
+    .claude-plugin/     -- plugin manifest (plugin.json)
+    hooks/              -- Claude Code lifecycle hooks (entry: *.js)
+      lib/              -- hook-shared helpers (snapshot, inject, log)
+      modules/          -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
+      session-start/    -- session-start submodules (context-assembly, watch-daemon,
                            vault-snapshot, cache-cleanup, health-detector, update-check)
-    session-start.js    -- vault context injection on session open
-    session-label.js    -- just-in-time injection pipeline on each prompt
-    post-tool.js        -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
-    pre-write-check.js  -- duplicate detection before vault write
-    stop-nudge.js       -- /reflect nudge on session close
-    pre-compact.js      -- context capture before compaction
-    post-read-retrieval.js  -- passive read telemetry
-    post-search-tracking.js -- episodic-memory search query tracking
+      session-start.js  -- vault context injection on session open
+      session-label.js  -- just-in-time injection pipeline on each prompt
+      post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
+      pre-write-check.js  -- duplicate detection before vault write
+      stop-nudge.js     -- /reflect nudge on session close
+      pre-compact.js    -- context capture before compaction
+      post-read-retrieval.js  -- passive read telemetry
+      post-search-tracking.js -- episodic-memory search query tracking
 
-  scripts/              -- CLI utilities and long-running daemons
-    lib/                -- shared primitives (env, config, file-lock, log, etc.)
-    librarian.mjs       -- librarian daemon: tag suggest, duplicate detect
-    vault-search.mjs    -- ll-search query wrapper
-    watch.mjs           -- file watcher daemon
-    edges-cli.mjs       -- graph edge management CLI
-    provenance*.mjs     -- provenance event read/write
+    scripts/            -- CLI utilities and long-running daemons
+      lib/              -- shared primitives (env, config, file-lock, log, etc.)
+      librarian.mjs     -- librarian daemon: tag suggest, duplicate detect
+      vault-search.mjs  -- ll-search query wrapper
+      watch.mjs         -- file watcher daemon
+      edges-cli.mjs     -- graph edge management CLI
+      provenance*.mjs   -- provenance event read/write
+
+    skills/             -- Claude Code skill definitions (markdown)
+    agents/             -- agent definitions (markdown)
+    plugins/
+      omc-cache-health/ -- cache health subplugin
+    templates/          -- CLAUDE.md section template version
+    vendor/             -- vendored schemas and NLP libs
+    config.json         -- plugin config
 
   native/               -- Rust workspace
     crates/
@@ -43,19 +53,15 @@ learning-loop/
       ll-search/        -- daemon binary (ships with plugin)
                         -- search, index, sync, NLI
 
+  .claude-plugin/       -- marketplace manifest (marketplace.json)
   tests/                -- Node.js tests (node --test)
   docs/
     baseline/           -- convention docs (this directory)
     superpowers/        -- plan archives
   guide/                -- user-facing docs (configuration, workflows)
-  skills/               -- Claude Code skill definitions (markdown)
-  agents/               -- agent definitions (markdown)
-  plugins/
-    omc-cache-health/   -- cache health subplugin
   calibration/          -- calibration harness
   provenance/           -- provenance event log
   bench/                -- plugin bench harness
-  vendor/               -- vendored schemas and NLP libs
   .planning/            -- planning artefacts (not shipped)
     inventory/          -- phase -1 audit outputs
     refactors/          -- refactor plans

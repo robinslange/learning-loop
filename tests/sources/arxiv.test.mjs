@@ -28,7 +28,7 @@ describe('arxiv adapter', () => {
 
   before(async () => {
     originalFetch = globalThis.fetch;
-    adapter = (await import('../../scripts/lib/sources/adapters/arxiv.mjs')).default;
+    adapter = (await import('../../plugin/scripts/lib/sources/adapters/arxiv.mjs')).default;
   });
 
   after(() => {
@@ -88,7 +88,7 @@ describe('arxiv adapter', () => {
   });
 
   it('parseArxivEntry extracts authors correctly', async () => {
-    const { parseArxivEntry } = await import('../../scripts/lib/sources/adapters/arxiv.mjs');
+    const { parseArxivEntry } = await import('../../plugin/scripts/lib/sources/adapters/arxiv.mjs');
     const entry = `<entry>
       <id>http://arxiv.org/abs/2001.00001v1</id>
       <title>Test Paper</title>

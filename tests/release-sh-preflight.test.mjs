@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'release.sh');
+const SCRIPT = join(import.meta.dirname, '..', 'release.sh');
 
 function runWithGitStub(stubBody, args = ['patch']) {
   const dir = mkdtempSync(join(tmpdir(), 'll-rel-'));

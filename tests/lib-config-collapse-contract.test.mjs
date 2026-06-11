@@ -6,9 +6,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import * as hooksCommon from '../hooks/lib/common.mjs';
-import * as libConfig from '../scripts/lib/config.mjs';
-import * as libSession from '../scripts/lib/session.mjs';
+import * as hooksCommon from '../plugin/hooks/lib/common.mjs';
+import * as libConfig from '../plugin/scripts/lib/config.mjs';
+import * as libSession from '../plugin/scripts/lib/session.mjs';
 
 test('hooks/lib/common.resolveVaultPath === scripts/lib/config.getVaultPath', () => {
   assert.equal(

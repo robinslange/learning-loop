@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import {
   openEdgeDb, addEdge, saveDb,
   getDownstreamSymmetric, getSoleJustificationDependentsSymmetric,
-} from '../scripts/lib/edges.mjs';
+} from '../plugin/scripts/lib/edges.mjs';
 
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-symmetric-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');

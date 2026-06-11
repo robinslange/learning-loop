@@ -7,7 +7,7 @@ import { withLock } from '../file-lock.mjs';
 import { logError } from '../log.mjs';
 
 const PLUGIN_DATA = getPluginData();
-const PLUGIN_DIR = resolve(fileURLToPath(import.meta.url), '../../../../..');
+const PLUGIN_DIR = resolve(fileURLToPath(import.meta.url), '../../../..');
 const DATA_DIR = PLUGIN_DATA ? join(PLUGIN_DATA, 'data') : join(PLUGIN_DIR, 'data');
 mkdirSync(DATA_DIR, { recursive: true });
 

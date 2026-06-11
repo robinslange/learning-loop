@@ -18,7 +18,7 @@ describe('source-resolver check-claims', () => {
     mkdirSync(TEMP_DATA, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
     originalFetch = globalThis.fetch;
-    const mod = await import(`../scripts/source-resolver.mjs?bust=${runId}`);
+    const mod = await import(`../plugin/scripts/source-resolver.mjs?bust=${runId}`);
     __test__ = mod.__test__;
   });
 
@@ -159,7 +159,7 @@ describe('fetchPageText error surfacing', () => {
       throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
     };
     const { __test__ } = await import(
-      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const result = await __test__.fetchPageText('https://example.com/x');
     assert.equal(result.ok, false);
@@ -169,7 +169,7 @@ describe('fetchPageText error surfacing', () => {
   it('returns { ok: false, kind: "http", status } on 4xx', async () => {
     globalThis.fetch = async () => ({ ok: false, status: 404 });
     const { __test__ } = await import(
-      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const result = await __test__.fetchPageText('https://example.com/y');
     assert.equal(result.ok, false);
@@ -183,7 +183,7 @@ describe('fetchPageText error surfacing', () => {
       text: async () => '<html><body>hello world</body></html>',
     });
     const { __test__ } = await import(
-      `../scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const result = await __test__.fetchPageText('https://example.com/z');
     assert.equal(result.ok, true);

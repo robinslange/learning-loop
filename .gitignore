@@ -2,7 +2,7 @@
 **/.DS_Store
 
 # Model cache (downloaded on first run, ~40MB)
-scripts/.model-cache/
+plugin/scripts/.model-cache/
 
 # Provenance event logs and summaries (local-only)
 provenance/events-*.jsonl
@@ -24,7 +24,7 @@ federation/.seed
 federation/data/
 federation/config.json
 node_modules/
-scripts/node_modules/
+plugin/scripts/node_modules/
 federation/node_modules/
 federation/relay/node_modules/
 native/node_modules/

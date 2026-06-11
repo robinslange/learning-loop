@@ -4,7 +4,7 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { openEdgeDb, addEdge, removeOutgoingEdges, getEdgesFrom, getDownstream, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, removeOutgoingEdges, getEdgesFrom, getDownstream, saveDb } from '../plugin/scripts/lib/edges.mjs';
 
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-archive-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { routeArtefact, extractProjectSlug, readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
+import { routeArtefact, extractProjectSlug, readVaultProjectIndexSync, listProjectSlugs } from '../plugin/scripts/route-project-artefact.mjs';
 
 const vault = {
   projectFiles: ['acme.md', 'omit.md', 'umbrella.md', 'fabrikam.md', 'widget-co.md'],

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { selectSeedMemories } from "../scripts/seed-select.mjs";
+import { selectSeedMemories } from "../plugin/scripts/seed-select.mjs";
 
 const mk = (name, type, extra = "") => ({
   name,

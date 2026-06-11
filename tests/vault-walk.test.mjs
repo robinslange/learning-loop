@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { listVaultNotes } from "../scripts/lib/vault-walk.mjs";
+import { listVaultNotes } from "../plugin/scripts/lib/vault-walk.mjs";
 
 test("walks .md recursively, excludes _archive/_archived/Excalidraw and dotdirs", () => {
   const v = join(tmpdir(), `ll-vault-${randomBytes(8).toString("hex")}`);

@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = join(__dirname, '..', 'scripts', 'sweep-hook-replay.mjs');
+const SCRIPT = join(__dirname, '..', 'plugin', 'scripts', 'sweep-hook-replay.mjs');
 
 function run(args, opts = {}) {
   return spawnSync('node', [SCRIPT, ...args], {

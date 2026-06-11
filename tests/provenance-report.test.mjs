@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 const REPORT = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
+  'plugin',
   'scripts',
   'provenance-report.mjs',
 );

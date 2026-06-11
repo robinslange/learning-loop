@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, rmSync, chmodSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getSessionId } from '../scripts/lib/session.mjs';
+import { getSessionId } from '../plugin/scripts/lib/session.mjs';
 
 // getSessionId() resolves plugin-data/session/id[-<ppid>] BEFORE the tmp files.
 // Point CLAUDE_PLUGIN_DATA at an empty temp dir for the tmp-fallback tests so

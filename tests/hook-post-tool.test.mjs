@@ -7,7 +7,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../hooks/post-tool.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/post-tool.js', import.meta.url).pathname;
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
 // Read all provenance JSONL lines from pluginData.

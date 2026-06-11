@@ -96,7 +96,7 @@ describe('duplicate classifier structured-output flag', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-happy-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-happy-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -127,7 +127,7 @@ describe('duplicate classifier structured-output flag', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-same-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-same-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -150,7 +150,7 @@ describe('duplicate classifier structured-output flag', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-unrel-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-unrel-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -173,7 +173,7 @@ describe('duplicate classifier structured-output flag', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-nonbr-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-nonbr-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -196,7 +196,7 @@ describe('duplicate classifier structured-output flag', () => {
       }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-slug-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-slug-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -214,7 +214,7 @@ describe('duplicate classifier structured-output flag', () => {
       json: async () => ({ message: { content: 'unrelated' } }),
     }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-malformed-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-malformed-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -227,7 +227,7 @@ describe('duplicate classifier structured-output flag', () => {
 
     globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-http-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-http-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
     });
@@ -243,7 +243,7 @@ describe('duplicate classifier structured-output flag', () => {
     });
 
     const mod = await import(
-      `../scripts/librarian.mjs?bust=dup-timeout-${runId}-${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian.mjs?bust=dup-timeout-${runId}-${randomBytes(4).toString('hex')}`
     );
     await mod.__test__.duplicateCheck(TARGET, {
       neighboursOverride: NEIGHBOURS,
@@ -261,7 +261,7 @@ describe('duplicate classifier structured-output flag', () => {
       return { ok: true, json: async () => ({ message: { content: '{}' } }) };
     });
 
-    const mod = await import(`../scripts/librarian.mjs?bust=dup-noneigh-${runId}`);
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=dup-noneigh-${runId}`);
     await mod.__test__.duplicateCheck(TARGET, { neighboursOverride: [] });
 
     assert.equal(fetchCalled, false);

@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { listMemoryFiles, resolveMemoryDir } from "../scripts/lib/memory-paths.mjs";
+import { listMemoryFiles, resolveMemoryDir } from "../plugin/scripts/lib/memory-paths.mjs";
 
 test("resolveMemoryDir encodes the project dir like dream-gate does", () => {
   const dir = resolveMemoryDir("/Users/robin/brain", "/home/x");

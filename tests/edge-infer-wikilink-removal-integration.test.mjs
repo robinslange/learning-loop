@@ -19,8 +19,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
-import { runEdgeInfer, __setNliBatchOverrideForTesting } from '../hooks/modules/edge-infer.mjs';
+import { openEdgeDb, addEdge, saveDb } from '../plugin/scripts/lib/edges.mjs';
+import { runEdgeInfer, __setNliBatchOverrideForTesting } from '../plugin/hooks/modules/edge-infer.mjs';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 

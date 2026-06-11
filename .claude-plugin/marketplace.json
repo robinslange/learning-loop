@@ -9,7 +9,7 @@
     {
       "name": "learning-loop",
       "description": "Self-improving learning loop across Claude sessions: retrieval, capture, consolidation, and cross-project transfer with a hybrid-search Rust binary, Obsidian vault integration, and federation.",
-      "source": "./",
+      "source": "./plugin",
       "homepage": "https://github.com/robinslange/learning-loop",
       "license": "SEE LICENSE IN LICENSE",
       "keywords": [

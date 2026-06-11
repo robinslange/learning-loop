@@ -10,16 +10,16 @@ import {
   pluginId,
   dataDir,
   cacheDir,
-} from '../scripts/lib/plugin-meta.mjs';
+} from '../plugin/scripts/lib/plugin-meta.mjs';
 
 const MOD = JSON.stringify(
-  fileURLToPath(new URL('../scripts/lib/plugin-meta.mjs', import.meta.url)),
+  fileURLToPath(new URL('../plugin/scripts/lib/plugin-meta.mjs', import.meta.url)),
 );
 
-test('pluginRoot resolves to repo root', () => {
+test('pluginRoot resolves to the plugin root', () => {
   const root = pluginRoot();
-  // Should end with /learning-loop (direct checkout or worktree under .worktrees/ or .claude/worktrees/).
-  assert.match(root, /learning-loop(\/(\.claude\/)?\.?worktrees\/[^/]+)?$/);
+  // Should end with /learning-loop/plugin (direct checkout or worktree under .worktrees/ or .claude/worktrees/).
+  assert.match(root, /learning-loop(\/(\.claude\/)?\.?worktrees\/[^/]+)?\/plugin$/);
 });
 
 test('pluginRoot is an absolute path', () => {

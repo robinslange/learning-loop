@@ -34,7 +34,7 @@ describe('registry', () => {
 
   before(async () => {
     originalFetch = globalThis.fetch;
-    registry = await import('../../scripts/lib/sources/registry.mjs');
+    registry = await import('../../plugin/scripts/lib/sources/registry.mjs');
   });
 
   after(() => {

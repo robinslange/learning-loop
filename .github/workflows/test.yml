@@ -102,7 +102,7 @@ jobs:
       - name: Check for resolved paths in agents and skills
         run: |
           set -e
-          matches=$(grep -rEl '\$HOME/brain/learning-loop|~/brain/learning-loop|\$HOME/brain/brain|~/brain/brain' agents skills 2>/dev/null || true)
+          matches=$(grep -rEl '\$HOME/brain/learning-loop|~/brain/learning-loop|\$HOME/brain/brain|~/brain/brain' plugin/agents plugin/skills 2>/dev/null || true)
           if [ -n "$matches" ]; then
             echo "ERROR: the following files contain resolved paths — use PLUGIN or {{VAULT}} tokens"
             echo "$matches"
@@ -110,7 +110,7 @@ jobs:
           fi
 
       - name: Prettier check
-        run: npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
+        run: npx prettier --check 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'
 
       - name: Lint (eslint custom rules)
         run: npx eslint .
@@ -119,7 +119,7 @@ jobs:
         run: |
           if grep -rEn '^```(sh|shell|typescript)( |$)' \
               --exclude-dir=vendor \
-              skills/ agents/ docs/ guide/ hooks/ scripts/ \
+              plugin/skills/ plugin/agents/ docs/ guide/ plugin/hooks/ plugin/scripts/ \
               CHANGELOG.md README.md \
               --include='*.md' 2>/dev/null; then
             echo "ERROR: non-canonical code-fence tags found. Use bash, js, or ts."

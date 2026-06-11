@@ -33,9 +33,9 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, existsSync } 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
-import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
-import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
+import { openEdgeDb, addEdge, saveDb } from '../plugin/scripts/lib/edges.mjs';
+import { runEdgeInfer } from '../plugin/hooks/modules/edge-infer.mjs';
+import { __resetBinaryCacheForTesting } from '../plugin/scripts/lib/binary.mjs';
 
 // These tests fork the real ll-search stub to exercise the daemon->subprocess
 // fallback. The production 1500ms execFileSync budget is too tight under a

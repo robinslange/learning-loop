@@ -48,10 +48,10 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SKILL_PATH = join(__dirname, '..', 'skills', 'reflect', 'SKILL.md');
+const SKILL_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'SKILL.md');
 // Step 4.6's bash blocks live in the extracted step file; the handshake
 // contract (canonical resolvers, no tmp anchors) covers both files.
-const REFINEMENT_STEP_PATH = join(__dirname, '..', 'skills', 'reflect', 'steps', 'refinement.md');
+const REFINEMENT_STEP_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'steps', 'refinement.md');
 
 // Extract the ```bash fence containing the given marker substring on any
 // line inside its body. Returns the block contents without the fences.
@@ -285,7 +285,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       writeFileSync(join(sessionDir, 'id'), 'crossproc-sid');
       rmSync(sidFileBare, { force: true });
 
-      const resolvePaths = join(__dirname, '..', 'scripts', 'resolve-paths.mjs');
+      const resolvePaths = join(__dirname, '..', 'plugin', 'scripts', 'resolve-paths.mjs');
       const childEnv = { ...process.env, TMPDIR: join(tmpRoot, 'child-sees-a-different-tmpdir') };
       const run = (field) =>
         execFileSync('node', [resolvePaths, field], { encoding: 'utf8', env: childEnv }).trim();
@@ -297,7 +297,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
 
       // Hook side: reflectNewNotesPath() in THIS process (its own $TMPDIR).
       const { reflectNewNotesPath } = await import(
-        '../hooks/modules/reflect-track.mjs?bust=xproc' + Date.now()
+        '../plugin/hooks/modules/reflect-track.mjs?bust=xproc' + Date.now()
       );
       const hookMarker = reflectNewNotesPath();
 
@@ -323,7 +323,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       rmSync(join(pluginData, 'session'), { recursive: true, force: true });
       writeFileSync(sidFileBare, SID);
       // Fresh import so the module re-reads env at call time.
-      const mod = await import('../hooks/modules/reflect-track.mjs?bust=' + Date.now());
+      const mod = await import('../plugin/hooks/modules/reflect-track.mjs?bust=' + Date.now());
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
     });
@@ -497,7 +497,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
 
     before(async () => {
       savedSid = process.env.CLAUDE_CODE_SESSION_ID;
-      const mod = await import('../hooks/modules/reflect-track.mjs?bust=file' + Date.now());
+      const mod = await import('../plugin/hooks/modules/reflect-track.mjs?bust=file' + Date.now());
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
     });
@@ -587,7 +587,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // the unsuffixed plugin-data id). The fix must ignore this and key off
       // LL_REFLECT_SID instead.
       writeFileSync(sidFileBare, 'other-concurrent-session');
-      const mod = await import('../hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now());
+      const mod = await import('../plugin/hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now());
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
     });
@@ -654,7 +654,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         '---\ntags: [test]\n---\n\nBody with a [[wikilink]] so the old filter would skip it.\n',
       );
 
-      const replay = join(__dirname, '..', 'scripts', 'sweep-hook-replay.mjs');
+      const replay = join(__dirname, '..', 'plugin', 'scripts', 'sweep-hook-replay.mjs');
       // The replay's child post-tool.js resolves the vault from config; point it
       // at the fake vault via VAULT_PATH (getVaultPath() reads it first).
       const childEnv = {

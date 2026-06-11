@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { writePolicy, readPolicy, clearPolicy, isActive } from '../scripts/ingest-policy.mjs';
+import { writePolicy, readPolicy, clearPolicy, isActive } from '../plugin/scripts/ingest-policy.mjs';
 
 test('write+read round-trip', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'policy-test-'));

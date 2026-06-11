@@ -52,7 +52,7 @@ describe('pubmed adapter', () => {
 
   before(async () => {
     originalFetch = globalThis.fetch;
-    adapter = (await import('../../scripts/lib/sources/adapters/pubmed.mjs')).default;
+    adapter = (await import('../../plugin/scripts/lib/sources/adapters/pubmed.mjs')).default;
   });
 
   after(() => {

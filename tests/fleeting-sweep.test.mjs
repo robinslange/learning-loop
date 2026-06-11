@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'fleeting-sweep.sh');
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts', 'fleeting-sweep.sh');
 
 function makeVault() {
   const vault = mkdtempSync(join(tmpdir(), 'll-sweep-'));

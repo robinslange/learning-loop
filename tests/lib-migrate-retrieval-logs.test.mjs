@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { migrateRetrievalLogsIfNeeded } from '../scripts/lib/migrate-retrieval-logs.mjs';
+import { migrateRetrievalLogsIfNeeded } from '../plugin/scripts/lib/migrate-retrieval-logs.mjs';
 
 test('migrate removes pre-v2 jsonl files and writes marker', () => {
   const pd = mkdtempSync(join(tmpdir(), 'll-pd-'));

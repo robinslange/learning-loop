@@ -39,7 +39,7 @@ describe('librarian-tools-duplicate', () => {
     process.env.VAULT_PATH = TEMP_VAULT;
     writeFileSync(join(TEMP_VAULT, TARGET), '---\ntags: test\n---\nSome claim body.\n');
     writeFileSync(join(TEMP_VAULT, NEIGHBOUR_A), '---\ntags: test\n---\nSame claim body.\n');
-    const mod = await import('../scripts/librarian/tools/duplicate.mjs?bust=dup-' + runId);
+    const mod = await import('../plugin/scripts/librarian/tools/duplicate.mjs?bust=dup-' + runId);
     duplicateCheck = mod.duplicateCheck;
     submitDuplicateFlag = mod.submitDuplicateFlag;
     origFetch = globalThis.fetch;

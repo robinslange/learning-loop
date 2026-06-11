@@ -20,7 +20,7 @@ writeFileSync(join(tmpVault, 'Excalidraw', 'diagram.excalidraw.md'), 'diagram\n'
 
 const snapshotPath = join(tmpPluginData, 'vault-snapshot.json');
 
-const mod = await import('../hooks/lib/snapshot.mjs');
+const mod = await import('../plugin/hooks/lib/snapshot.mjs');
 const {
   loadVaultSnapshot,
   rebuildVaultSnapshot,

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const MAX = HookConfig.HOOK_STDOUT_MAX_BYTES;
@@ -12,7 +12,7 @@ const MAX = HookConfig.HOOK_STDOUT_MAX_BYTES;
 // capture exactly what a hook would emit.
 function runEmit(objLiteral) {
   const src = `
-    import { emitJson } from '${pathToFileURL(join(root, 'hooks/lib/io.mjs')).href}';
+    import { emitJson } from '${pathToFileURL(join(root, 'plugin/hooks/lib/io.mjs')).href}';
     emitJson(${objLiteral});
   `;
   const res = spawnSync(process.execPath, ['--input-type=module', '-e', src], {
@@ -60,8 +60,8 @@ test('multibyte content never splits a code point', () => {
   // byte-budget estimate. The pad tracks MAX so the surrogate guard keeps
   // firing if the constant changes.
   const src = `
-    import { emitJson } from '${pathToFileURL(join(root, 'hooks/lib/io.mjs')).href}';
-    import { HookConfig } from '${pathToFileURL(join(root, 'scripts/lib/hook-config.mjs')).href}';
+    import { emitJson } from '${pathToFileURL(join(root, 'plugin/hooks/lib/io.mjs')).href}';
+    import { HookConfig } from '${pathToFileURL(join(root, 'plugin/scripts/lib/hook-config.mjs')).href}';
     const pad = HookConfig.HOOK_STDOUT_MAX_BYTES - 108;
     emitJson({
       hookSpecificOutput: {

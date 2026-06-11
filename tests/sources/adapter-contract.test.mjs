@@ -1,19 +1,19 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-import pubmed from '../../scripts/lib/sources/adapters/pubmed.mjs';
-import arxiv from '../../scripts/lib/sources/adapters/arxiv.mjs';
-import crossref from '../../scripts/lib/sources/adapters/crossref.mjs';
-import europepmc from '../../scripts/lib/sources/adapters/europepmc.mjs';
-import semanticScholar from '../../scripts/lib/sources/adapters/semantic-scholar.mjs';
-import openalex from '../../scripts/lib/sources/adapters/openalex.mjs';
-import dblp from '../../scripts/lib/sources/adapters/dblp.mjs';
-import biorxiv from '../../scripts/lib/sources/adapters/biorxiv.mjs';
-import unpaywall from '../../scripts/lib/sources/adapters/unpaywall.mjs';
-import rfc from '../../scripts/lib/sources/adapters/rfc.mjs';
-import openlibrary from '../../scripts/lib/sources/adapters/openlibrary.mjs';
-import chembl from '../../scripts/lib/sources/adapters/chembl.mjs';
-import pmc from '../../scripts/lib/sources/adapters/pmc.mjs';
+import pubmed from '../../plugin/scripts/lib/sources/adapters/pubmed.mjs';
+import arxiv from '../../plugin/scripts/lib/sources/adapters/arxiv.mjs';
+import crossref from '../../plugin/scripts/lib/sources/adapters/crossref.mjs';
+import europepmc from '../../plugin/scripts/lib/sources/adapters/europepmc.mjs';
+import semanticScholar from '../../plugin/scripts/lib/sources/adapters/semantic-scholar.mjs';
+import openalex from '../../plugin/scripts/lib/sources/adapters/openalex.mjs';
+import dblp from '../../plugin/scripts/lib/sources/adapters/dblp.mjs';
+import biorxiv from '../../plugin/scripts/lib/sources/adapters/biorxiv.mjs';
+import unpaywall from '../../plugin/scripts/lib/sources/adapters/unpaywall.mjs';
+import rfc from '../../plugin/scripts/lib/sources/adapters/rfc.mjs';
+import openlibrary from '../../plugin/scripts/lib/sources/adapters/openlibrary.mjs';
+import chembl from '../../plugin/scripts/lib/sources/adapters/chembl.mjs';
+import pmc from '../../plugin/scripts/lib/sources/adapters/pmc.mjs';
 
 const ADAPTERS = [
   pubmed,

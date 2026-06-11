@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildGatePrompt, parseGateResponse } from '../scripts/ingest-depth-gate.mjs';
+import { buildGatePrompt, parseGateResponse } from '../plugin/scripts/ingest-depth-gate.mjs';
 
 test('prompt mentions the key thresholds', () => {
   const p = buildGatePrompt({ name: 'x', file_count: 50, languages: { ts: 50 }, frameworks_detected: ['next'] });

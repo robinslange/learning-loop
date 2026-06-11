@@ -1,6 +1,6 @@
 node_modules/
-scripts/lib/vendor/
-vendor/
+plugin/scripts/lib/vendor/
+plugin/vendor/
 native/
 data/
 docs/

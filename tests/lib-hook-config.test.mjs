@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 test('HookConfig is frozen', () => {
   assert.equal(Object.isFrozen(HookConfig), true);
@@ -83,7 +83,7 @@ test('DEDUPE_WINDOW_MS is exactly 3 minutes in milliseconds', () => {
 
 test('pre-write-check inner query budget leaves headroom inside its hooks.json timeout', () => {
   const hooksJson = JSON.parse(
-    readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'),
+    readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
   );
   const entry = hooksJson.hooks.PreToolUse.find((e) => e.matcher.split('|').includes('Write'));
   assert.ok(entry, 'hooks.json must have a PreToolUse entry whose matcher includes Write');

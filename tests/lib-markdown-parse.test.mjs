@@ -5,7 +5,7 @@ import {
   stripFrontmatter,
   parseTags,
   extractWikilinks,
-} from '../scripts/lib/markdown-parse.mjs';
+} from '../plugin/scripts/lib/markdown-parse.mjs';
 
 test('parseFrontmatter returns empty fm + original body when no frontmatter', () => {
   const { fm, body } = parseFrontmatter('hello\n\nworld');

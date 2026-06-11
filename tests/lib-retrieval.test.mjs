@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { writeRetrieval } from '../scripts/lib/retrieval.mjs';
+import { writeRetrieval } from '../plugin/scripts/lib/retrieval.mjs';
 
 test('writeRetrieval emits record with all mandatory fields', () => {
   const sb = mkdtempSync(join(tmpdir(), 'll-retrieval-'));

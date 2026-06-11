@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
-const SCRIPT = resolve(REPO_ROOT, 'scripts/refinement-candidates.mjs');
+const SCRIPT = resolve(REPO_ROOT, 'plugin/scripts/refinement-candidates.mjs');
 
 test('refinement-candidates: exits non-zero with diagnostic when vault path unconfigured', () => {
   const sb = mkdtempSync(join(tmpdir(), 'll-vp-test-'));

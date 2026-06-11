@@ -7,10 +7,10 @@ import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSyn
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { resolvePluginData } from '../../scripts/lib/config.mjs';
+import { resolvePluginData } from '../../plugin/scripts/lib/config.mjs';
 
 const PKG_VERSION = JSON.parse(
-  readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../plugin/.claude-plugin/plugin.json', import.meta.url), 'utf8'),
 ).version;
 
 const SANDBOX_PREFIX = 'll-hook-sb-';

@@ -16,7 +16,7 @@ import {
   readMarker,
   writeMarker,
   dreamLockHeld,
-} from '../scripts/lib/marker-cache.mjs';
+} from '../plugin/scripts/lib/marker-cache.mjs';
 
 const PD = '/fake/plugin-data';
 

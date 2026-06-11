@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { openEdgeDb, addEdge, getNliEdgesForNote, saveDb } from '../scripts/lib/edges.mjs';
+import { openEdgeDb, addEdge, getNliEdgesForNote, saveDb } from '../plugin/scripts/lib/edges.mjs';
 
 test('returns nli edges where note is from_path or to_path above threshold', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));

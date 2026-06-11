@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { tryRemoveIfStale, releaseLock } from '../scripts/lib/file-lock.mjs';
+import { tryRemoveIfStale, releaseLock } from '../plugin/scripts/lib/file-lock.mjs';
 
 function withStderrCapture(fn) {
   const chunks = [];

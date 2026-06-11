@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
+const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const EMITTER = join(SCRIPTS, 'provenance.mjs');
 const MARKER_CACHE_URL = pathToFileURL(join(SCRIPTS, 'lib', 'marker-cache.mjs')).href;
 const CONFIG_URL = pathToFileURL(join(SCRIPTS, 'lib', 'config.mjs')).href;

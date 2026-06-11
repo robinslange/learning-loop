@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readMarker, writeMarker, MARKER_TTL_MS } from '../scripts/lib/marker-cache.mjs';
+import { readMarker, writeMarker, MARKER_TTL_MS } from '../plugin/scripts/lib/marker-cache.mjs';
 
 test('readMarker returns null when marker is absent', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));

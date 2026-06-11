@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isFederationActive } from "../scripts/federation-active.mjs";
+import { isFederationActive } from "../plugin/scripts/federation-active.mjs";
 
 test("true only when federation/config.json exists and parses with an identity", () => {
   const pd = mkdtempSync(join(tmpdir(), "ll-fed-"));

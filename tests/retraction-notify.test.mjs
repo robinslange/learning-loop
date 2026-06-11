@@ -5,9 +5,9 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { initSQL } from '../scripts/lib/sqljs.mjs';
+import { initSQL } from '../plugin/scripts/lib/sqljs.mjs';
 
-const SCRIPT = join(import.meta.dirname, '..', 'scripts', 'retraction-notify.mjs');
+const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'retraction-notify.mjs');
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-retraction-${randomBytes(8).toString('hex')}`);
 const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
 const PEERS_DIR = join(FEDERATION_DIR, 'data', 'peers');

@@ -51,7 +51,7 @@ describe("plugin-data marker stomp guard", () => {
     writeFileSync(MARKER, sentinel, "utf-8");
 
     process.env.CLAUDE_PLUGIN_DATA = TEMP_PLUGIN_DATA;
-    const mod = await import(`../scripts/lib/config.mjs?bust=temp-${runId}`);
+    const mod = await import(`../plugin/scripts/lib/config.mjs?bust=temp-${runId}`);
     const result = mod.getPluginData();
 
     assert.equal(result, TEMP_PLUGIN_DATA, "returns env value to caller");
@@ -68,7 +68,7 @@ describe("plugin-data marker stomp guard", () => {
 
     process.env.CLAUDE_PLUGIN_DATA = "/var/folders/abc/T/some-test/plugin-data";
     const mod = await import(
-      `../scripts/lib/config.mjs?bust=varfolders-${runId}`
+      `../plugin/scripts/lib/config.mjs?bust=varfolders-${runId}`
     );
     const result = mod.getPluginData();
 
@@ -80,7 +80,7 @@ describe("plugin-data marker stomp guard", () => {
     rmSync(MARKER, { force: true });
 
     process.env.CLAUDE_PLUGIN_DATA = REAL_LIKE_PLUGIN_DATA;
-    const mod = await import(`../scripts/lib/config.mjs?bust=real-${runId}`);
+    const mod = await import(`../plugin/scripts/lib/config.mjs?bust=real-${runId}`);
     const result = mod.getPluginData();
 
     assert.equal(result, REAL_LIKE_PLUGIN_DATA);
@@ -96,7 +96,7 @@ describe("plugin-data marker stomp guard", () => {
     writeFileSync(MARKER, sentinel, "utf-8");
 
     process.env.CLAUDE_PLUGIN_DATA = TEMP_PLUGIN_DATA;
-    const mod = await import(`../hooks/lib/common.mjs?bust=hooks-${runId}`);
+    const mod = await import(`../plugin/hooks/lib/common.mjs?bust=hooks-${runId}`);
     const result = mod.resolvePluginData();
 
     assert.equal(result, TEMP_PLUGIN_DATA);

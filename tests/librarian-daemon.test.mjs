@@ -30,7 +30,7 @@ describe('librarian-daemon', () => {
   });
 
   it('__test__ on librarian.mjs includes investigateNote', async () => {
-    const mod = await import('../scripts/librarian.mjs?bust=daemon-test-' + runId);
+    const mod = await import('../plugin/scripts/librarian.mjs?bust=daemon-test-' + runId);
     assert.ok(typeof mod.__test__ === 'object', '__test__ must be exported');
     const keys = Object.keys(mod.__test__);
     assert.ok(keys.includes('voiceCheck'), 'voiceCheck missing');
@@ -42,7 +42,7 @@ describe('librarian-daemon', () => {
 
   it('runDaemon exits cleanly when AbortSignal is pre-aborted', async () => {
     const { runDaemon } = await import(
-      '../scripts/librarian/daemon.mjs?bust=daemon-preabort-' + runId
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-preabort-' + runId
     );
     const ac = new AbortController();
     ac.abort();
@@ -81,7 +81,7 @@ describe('librarian-daemon', () => {
 
   it('runDaemon saves state on abort (drain path)', async () => {
     const { runDaemon } = await import(
-      '../scripts/librarian/daemon.mjs?bust=daemon-drain-' + runId
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-drain-' + runId
     );
     const ac = new AbortController();
 
@@ -106,7 +106,7 @@ describe('librarian-daemon', () => {
 
     // Pre-set state to something recognizable
     const { saveState, loadState, resetState } = await import(
-      '../scripts/librarian/queue.mjs?bust=daemon-drain-q-' + runId
+      '../plugin/scripts/librarian/queue.mjs?bust=daemon-drain-q-' + runId
     );
     resetState();
     saveState({ visited: [], notes_visited: 0, counters: {}, last_note: null, started_at: null });
@@ -130,7 +130,7 @@ describe('librarian-daemon', () => {
 
   it('runDaemon returns immediately when disabled in config', async () => {
     const { runDaemon } = await import(
-      '../scripts/librarian/daemon.mjs?bust=daemon-disabled-' + runId
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-disabled-' + runId
     );
     const cfg = { enabled: false };
     const start = Date.now();

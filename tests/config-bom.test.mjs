@@ -21,7 +21,7 @@ test("getConfig handles UTF-8 BOM in config.json", async (t) => {
   try {
     const bust = randomBytes(4).toString("hex");
     const { getConfig } = await import(
-      `../scripts/lib/config.mjs?bust=${bust}`
+      `../plugin/scripts/lib/config.mjs?bust=${bust}`
     );
     const config = getConfig();
     assert.equal(config.vault_path, "/test-vault");

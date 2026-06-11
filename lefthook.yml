@@ -1,7 +1,7 @@
 pre-commit:
   commands:
     no-resolved-paths:
-      glob: "{agents/*.md,skills/**/*.md}"
+      glob: "{plugin/agents/*.md,plugin/skills/**/*.md}"
       run: |
         for file in {staged_files}; do
           if grep -qF "$HOME/brain/learning-loop" "$file" 2>/dev/null || \
@@ -14,10 +14,10 @@ pre-commit:
         done
 
     prettier:
-      glob: "{hooks,scripts}/**/*.{js,mjs}"
+      glob: "{plugin/hooks,plugin/scripts}/**/*.{js,mjs}"
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
     test:
-      glob: "{hooks,scripts,tests,agents,skills,native}/**"
+      glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native}/**"
       run: npm test --silent

@@ -30,7 +30,7 @@ describe('librarian-tools-voice', () => {
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
-    const mod = await import('../scripts/librarian/tools/voice.mjs?bust=voice-' + runId);
+    const mod = await import('../plugin/scripts/librarian/tools/voice.mjs?bust=voice-' + runId);
     voiceCheck = mod.voiceCheck;
     submitVoiceFlag = mod.submitVoiceFlag;
     origFetch = globalThis.fetch;

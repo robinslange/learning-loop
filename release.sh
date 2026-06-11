@@ -2,9 +2,9 @@
 # Bump version across all manifests, commit, tag, and push.
 #
 # Usage:
-#   ./scripts/release.sh patch    # 1.2.2 -> 1.2.3
-#   ./scripts/release.sh minor    # 1.2.2 -> 1.3.0
-#   ./scripts/release.sh major    # 1.2.2 -> 2.0.0
+#   ./release.sh patch    # 1.2.2 -> 1.2.3
+#   ./release.sh minor    # 1.2.2 -> 1.3.0
+#   ./release.sh major    # 1.2.2 -> 2.0.0
 #
 # Flags:
 #   --dry-run     Show what would happen without making changes
@@ -16,7 +16,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$SCRIPT_DIR/.."
+ROOT="$SCRIPT_DIR"
 cd "$ROOT"
 
 BUMP="${1:-}"
@@ -78,7 +78,7 @@ fi
 
 # Test gate: run prettier + JS + Rust suites before tagging.
 echo "Running prettier check..."
-npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
+npx prettier --check 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'
 echo "Running npm test..."
 npm test
 if [ -d native ]; then
@@ -89,7 +89,7 @@ fi
 # Update all versioned manifests
 perl -i -pe "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
   package.json \
-  .claude-plugin/plugin.json
+  plugin/.claude-plugin/plugin.json
 
 for cargo_toml in native/crates/*/Cargo.toml; do
   [ -f "$cargo_toml" ] || continue
@@ -103,7 +103,7 @@ done
 # CHANGELOG: refuse if Unreleased section is empty; otherwise rename and stub.
 if [ ! -f CHANGELOG.md ]; then
   echo "Error: CHANGELOG.md missing"
-  git checkout -- package.json .claude-plugin/plugin.json native/crates/*/Cargo.toml
+  git checkout -- package.json plugin/.claude-plugin/plugin.json native/crates/*/Cargo.toml
   exit 1
 fi
 
@@ -116,7 +116,7 @@ UNRELEASED_BODY=$(awk '
 if [ -z "$UNRELEASED_BODY" ]; then
   echo "Error: CHANGELOG.md ## Unreleased section is empty; nothing to release"
   echo "Add a section under '## Unreleased' describing this release, then re-run."
-  git checkout -- package.json .claude-plugin/plugin.json native/crates/*/Cargo.toml
+  git checkout -- package.json plugin/.claude-plugin/plugin.json native/crates/*/Cargo.toml
   exit 1
 fi
 
@@ -129,16 +129,16 @@ echo "Syncing lockfiles..."
 npm install --package-lock-only --silent
 
 # Verify
-for f in package.json .claude-plugin/plugin.json; do
+for f in package.json plugin/.claude-plugin/plugin.json; do
   v=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$f','utf-8')).version)")
   if [ "$v" != "$NEW" ]; then
     echo "Error: $f version is $v, expected $NEW"
-    git checkout -- package.json .claude-plugin/plugin.json CHANGELOG.md native/crates/*/Cargo.toml native/Cargo.lock package-lock.json
+    git checkout -- package.json plugin/.claude-plugin/plugin.json CHANGELOG.md native/crates/*/Cargo.toml native/Cargo.lock package-lock.json
     exit 1
   fi
 done
 
-git add package.json .claude-plugin/plugin.json CHANGELOG.md native/Cargo.lock package-lock.json
+git add package.json plugin/.claude-plugin/plugin.json CHANGELOG.md native/Cargo.lock package-lock.json
 git add native/crates/*/Cargo.toml 2>/dev/null
 git commit -m "release: v$NEW"
 git tag "v$NEW"

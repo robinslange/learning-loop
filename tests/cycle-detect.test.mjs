@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findContradictionCycles } from '../scripts/lib/cycle-detect.mjs';
+import { findContradictionCycles } from '../plugin/scripts/lib/cycle-detect.mjs';
 
 test('finds a 3-cycle with one contradiction', () => {
   const edges = [

@@ -31,7 +31,7 @@ describe('librarian-tools-tag', () => {
   before(async () => {
     mkdirSync(LIB_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
-    const mod = await import('../scripts/librarian/tools/tag-suggest.mjs?bust=tag-' + runId);
+    const mod = await import('../plugin/scripts/librarian/tools/tag-suggest.mjs?bust=tag-' + runId);
     tagCheck = mod.tagCheck;
     submitTagSuggestion = mod.submitTagSuggestion;
     origFetch = globalThis.fetch;

@@ -12,8 +12,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const CLI = new URL('../scripts/marker.mjs', import.meta.url).pathname;
-const STOP_HOOK = new URL('../hooks/stop-nudge.js', import.meta.url).pathname;
+const CLI = new URL('../plugin/scripts/marker.mjs', import.meta.url).pathname;
+const STOP_HOOK = new URL('../plugin/hooks/stop-nudge.js', import.meta.url).pathname;
 
 test('last-reflect stamped under one $TMPDIR suppresses stop-nudge under another', () => {
   const pd = mkdtempSync(join(tmpdir(), 'll-pair-pd-'));

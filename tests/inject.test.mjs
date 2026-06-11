@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../hooks/lib/inject.mjs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../plugin/hooks/lib/inject.mjs';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 describe('scrubSecrets', () => {
   it('masks AWS access key', () => {

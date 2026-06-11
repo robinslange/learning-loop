@@ -5,10 +5,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { acquireLock, releaseLock } from '../scripts/lib/edges.mjs';
+import { acquireLock, releaseLock } from '../plugin/scripts/lib/edges.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const EDGES_MODULE_URL = pathToFileURL(join(HERE, '..', 'scripts/lib/edges.mjs')).href;
+const EDGES_MODULE_URL = pathToFileURL(join(HERE, '..', 'plugin/scripts/lib/edges.mjs')).href;
 
 test('acquireLock + releaseLock create and clean up the lock file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-lock-'));

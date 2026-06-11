@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CHECK_IDS, SEVERITIES, makeCheck } from '../scripts/lib/health-checks/types.mjs';
+import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
 import {
   checkVaultPath,
   checkVaultFolders,
@@ -19,20 +19,20 @@ import {
   checkSearchIndexExists,
   checkNliSocketFresh,
   checkAbiDrift,
-} from '../scripts/lib/health-checks/quick.mjs';
+} from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
   checkNodeVersion,
   checkClaudeVersion,
   checkPluginInstalled,
   checkBinaryRuns,
   checkWatchDaemon,
-} from '../scripts/lib/health-checks/full.mjs';
+} from '../plugin/scripts/lib/health-checks/full.mjs';
 import {
   readHealthCache,
   writeHealthCache,
   isCacheStale,
   CACHE_TTL_MS,
-} from '../scripts/lib/health-checks/cache.mjs';
+} from '../plugin/scripts/lib/health-checks/cache.mjs';
 
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
   const quick = [
@@ -477,7 +477,7 @@ test('readHealthCache returns null on corrupt JSON', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-import { runQuickChecks, formatMissingDeps } from '../scripts/health-check.mjs';
+import { runQuickChecks, formatMissingDeps } from '../plugin/scripts/health-check.mjs';
 
 test('runQuickChecks: returns ran=quick + non-empty checks array', async () => {
   const result = await runQuickChecks({

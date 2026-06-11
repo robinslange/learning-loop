@@ -25,7 +25,7 @@ describe('provenance dedupe', () => {
   });
 
   it('writes one provenance line per unique (session_id, agent_id, path)', async () => {
-    const mod = await import('../hooks/lib/common.mjs?bust=1');
+    const mod = await import('../plugin/hooks/lib/common.mjs?bust=1');
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/b.md', action: 'write' });
@@ -65,7 +65,7 @@ describe('getSessionId fallback chain', () => {
   it('returns "unknown" silently when no session-id files exist', async () => {
     if (existsSync(legacyPath)) unlinkSync(legacyPath);
 
-    const mod = await import('../hooks/lib/common.mjs?bust=2');
+    const mod = await import('../plugin/hooks/lib/common.mjs?bust=2');
     const errs = [];
     const origErr = console.error;
     console.error = (...args) => errs.push(args.join(' '));
@@ -87,7 +87,7 @@ describe('getSessionId fallback chain', () => {
     writeFileSync(legacyPath, 'legacy-session');
     process.env.CLAUDE_CODE_SESSION_ID = 'harness-session';
     try {
-      const mod = await import('../hooks/lib/common.mjs?bust=3');
+      const mod = await import('../plugin/hooks/lib/common.mjs?bust=3');
       assert.equal(mod.getSessionId(), 'harness-session');
     } finally {
       delete process.env.CLAUDE_CODE_SESSION_ID;
@@ -96,7 +96,7 @@ describe('getSessionId fallback chain', () => {
 
   it('falls back to the legacy file when the env var is absent', async () => {
     writeFileSync(legacyPath, 'legacy-only');
-    const mod = await import('../hooks/lib/common.mjs?bust=4');
+    const mod = await import('../plugin/hooks/lib/common.mjs?bust=4');
     assert.equal(mod.getSessionId(), 'legacy-only');
   });
 });

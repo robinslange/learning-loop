@@ -4,7 +4,7 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { parseSums, verifyArtifact, isAllowedRedirect } from '../scripts/lib/artifact-verify.mjs';
+import { parseSums, verifyArtifact, isAllowedRedirect } from '../plugin/scripts/lib/artifact-verify.mjs';
 
 test('parseSums maps filenames to hashes (sha256sum format, ignores blank/comment lines)', () => {
   const sums = 'aaaa  ll-search-darwin-arm64.tar.gz\nbbbb *ll-search-linux-x64.tar.gz\n\n';

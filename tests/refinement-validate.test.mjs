@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateEdit } from '../scripts/refinement-validate.mjs';
+import { validateEdit } from '../plugin/scripts/refinement-validate.mjs';
 
 const FM = '---\nname: t\n---\n';
 

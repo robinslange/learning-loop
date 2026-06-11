@@ -7,8 +7,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const collectScript = new URL("../scripts/harvest-collect.mjs", import.meta.url).pathname;
-const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+const collectScript = new URL("../plugin/scripts/harvest-collect.mjs", import.meta.url).pathname;
+const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
 
 test("collect -> scrub: portable+deny note is blocked; non-portable never reaches scrub", () => {
   const root = mkdtempSync(join(tmpdir(), "ll-pipeline-"));

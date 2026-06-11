@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { auditPostFanout } from '../scripts/ingest-postfanout-audit.mjs';
+import { auditPostFanout } from '../plugin/scripts/ingest-postfanout-audit.mjs';
 
 test('audit passes when 4 docs + METADATA exist', () => {
   const vault = mkdtempSync(join(tmpdir(), 'audit-'));

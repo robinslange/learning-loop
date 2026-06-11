@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendIngestEvent } from '../scripts/ingest-provenance.mjs';
+import { appendIngestEvent } from '../plugin/scripts/ingest-provenance.mjs';
 
 test('appends one JSONL line per call', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'prov-test-'));

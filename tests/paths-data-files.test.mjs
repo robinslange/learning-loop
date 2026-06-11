@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DATA_FILES } from "../scripts/lib/paths.mjs";
+import { DATA_FILES } from "../plugin/scripts/lib/paths.mjs";
 
 test("harvest denylist + dedup log anchor under plugin-data", () => {
   const pd = "/tmp/pd";

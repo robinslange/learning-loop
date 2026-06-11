@@ -4,9 +4,9 @@ import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
-import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../hooks/lib/snapshot.mjs';
+import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot.mjs';
 
-const HOOK = new URL('../hooks/pre-write-check.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
 let VAULT;
 let NON_VAULT;
 

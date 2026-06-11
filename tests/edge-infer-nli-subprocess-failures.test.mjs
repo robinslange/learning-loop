@@ -23,9 +23,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { openEdgeDb, addEdge, saveDb } from '../scripts/lib/edges.mjs';
-import { runEdgeInfer } from '../hooks/modules/edge-infer.mjs';
-import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
+import { openEdgeDb, addEdge, saveDb } from '../plugin/scripts/lib/edges.mjs';
+import { runEdgeInfer } from '../plugin/hooks/modules/edge-infer.mjs';
+import { __resetBinaryCacheForTesting } from '../plugin/scripts/lib/binary.mjs';
 
 // Most tests here fork the real stub and only need it to spawn (stubs return
 // immediately); under a saturating parallel suite the production 1500ms

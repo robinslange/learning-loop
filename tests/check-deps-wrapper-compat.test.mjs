@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 
 test('check-deps.mjs still emits the same top-level shape as before refactor', () => {
   // Smoke: run it, verify it returns valid JSON, expected fields present.
-  const out = execFileSync('node', ['scripts/check-deps.mjs'], {
+  const out = execFileSync('node', ['plugin/scripts/check-deps.mjs'], {
     encoding: 'utf-8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
@@ -22,7 +22,7 @@ test('check-deps.mjs still emits the same top-level shape as before refactor', (
 });
 
 test('detectAbiDrift exported from impl module', async () => {
-  const mod = await import('../scripts/check-deps-impl.mjs');
+  const mod = await import('../plugin/scripts/check-deps-impl.mjs');
   assert.equal(typeof mod.detectAbiDrift, 'function');
   const r = mod.detectAbiDrift({ currentAbi: process.versions.modules });
   assert.ok(['ok', 'abi-mismatch', 'error'].includes(r.status));

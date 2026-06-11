@@ -9,7 +9,7 @@ import {
   removeOutgoingEdges,
   removeOutgoingNliEdges,
   saveDb,
-} from '../scripts/lib/edges.mjs';
+} from '../plugin/scripts/lib/edges.mjs';
 
 test('removeOutgoingNliEdges deletes only source_graph=nli rows', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));

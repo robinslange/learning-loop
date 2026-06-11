@@ -14,7 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const MOD = JSON.stringify(
-  fileURLToPath(new URL('../scripts/download-binary.mjs', import.meta.url)),
+  fileURLToPath(new URL('../plugin/scripts/download-binary.mjs', import.meta.url)),
 );
 
 // Spawned so argv is controlled (getVersion short-circuits on process.argv[2])

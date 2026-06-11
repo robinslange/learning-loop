@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { generateProfile } from '../scripts/ingest-profile.mjs';
+import { generateProfile } from '../plugin/scripts/ingest-profile.mjs';
 
 test('generates profile for a tiny TS repo', () => {
   const dir = mkdtempSync(join(tmpdir(), 'profile-'));

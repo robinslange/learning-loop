@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../hooks/session-start.js', import.meta.url).pathname;
+const HOOK = new URL('../plugin/hooks/session-start.js', import.meta.url).pathname;
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 
 // Fresh update-check.json so the hook does not spawn the background

@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { scrubNotes } from "../scripts/harvest-scrub.mjs";
+import { scrubNotes } from "../plugin/scripts/harvest-scrub.mjs";
 
 test("deny-list hit blocks on word boundary (case-insensitive)", () => {
   const notes = [
@@ -117,7 +117,7 @@ test("CLI reads note paths from stdin when no path args given", () => {
     writeFileSync(ok, "a generic retry lesson");
     writeFileSync(leak, "we used NRD at work");
     writeFileSync(deny, "nrd\n");
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const out = execFileSync(
       process.execPath,
       [scrubScript, deny, ""],            // empty pluginData => no derived facts
@@ -141,7 +141,7 @@ test("CLI blocks an instance domain even when email_domains is a bare string (no
     writeFileSync(note, "we standardised on acmecorp.com for everything");
     writeFileSync(deny, "");
     writeFileSync(join(dir, "config.json"), JSON.stringify({ email_domains: "acmecorp.com" }));
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const out = execFileSync(process.execPath, [scrubScript, deny, dir], {
       input: `${note}\n`,
       encoding: "utf8",
@@ -166,7 +166,7 @@ test("CLI fails closed (non-zero exit, no clean output) when email_domains is a 
     writeFileSync(note, "we used acmecorp.com");
     writeFileSync(deny, "");
     writeFileSync(join(dir, "config.json"), JSON.stringify({ email_domains: { a: "acmecorp.com" } }));
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     let threw = false;
     let stderr = "";
     try {
@@ -197,7 +197,7 @@ test("CLI exits 1 when config.json exists but is unparseable (fail closed)", () 
     writeFileSync(note, "nothing sensitive here");
     writeFileSync(deny, "");
     writeFileSync(join(dir, "config.json"), "{ this is not json");
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
@@ -222,7 +222,7 @@ test("CLI exits 1 when federation config exists but is unparseable", () => {
     writeFileSync(join(dir, "config.json"), "{}");
     mkdirSync(join(dir, "federation"), { recursive: true });
     writeFileSync(join(dir, "federation", "config.json"), "{nope");
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
@@ -244,7 +244,7 @@ test("CLI exits 1 when config.json contains literal null (not an object)", () =>
     writeFileSync(note, "nothing sensitive here");
     writeFileSync(deny, "");
     writeFileSync(join(dir, "config.json"), "null");
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
@@ -264,7 +264,7 @@ test("CLI exits 1 when config.json contains an array (not an object)", () => {
     writeFileSync(note, "nothing sensitive here");
     writeFileSync(deny, "");
     writeFileSync(join(dir, "config.json"), "[1,2]");
-    const scrubScript = new URL("../scripts/harvest-scrub.mjs", import.meta.url).pathname;
+    const scrubScript = new URL("../plugin/scripts/harvest-scrub.mjs", import.meta.url).pathname;
     const res = spawnSync(process.execPath, [scrubScript, deny, dir, note], {
       encoding: "utf8",
       env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },

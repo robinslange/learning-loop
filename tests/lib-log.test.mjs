@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const MOD = JSON.stringify(
-  fileURLToPath(new URL('../scripts/lib/log.mjs', import.meta.url)),
+  fileURLToPath(new URL('../plugin/scripts/lib/log.mjs', import.meta.url)),
 );
 
 function runChild(envOverrides, code) {
