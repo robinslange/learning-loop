@@ -88,7 +88,7 @@ Surface any `failures` from the JSON summary in Step 3.
 
 **2b. Gated actions.** Present merges, deletes, and Bundle 2 NLI contradictions in one block; one user response handles all of them. NLI contradictions accept per-item replies in the form `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both) or batched `all:3`. On approval, execute in order:
 1. deletes — `rm` each approved inbox copy
-2. merges — for each approved `type: merge` item, spawn `note-writer` with BOTH notes' full content as input, the worklist destination, and instruction to write one merged note; after it reports the written file, `rm` both source notes, run the 6a hygiene checks, and replay the hook chain on the merged file (same snippet as 2a)
+2. merges — for each approved `type: merge` item, spawn `note-writer` with BOTH notes' full content as input, the worklist destination, and instruction to write one merged note; after it reports the written file, `rm` both source notes, run the 6a hygiene checks, and replay the hook chain on the merged file (same snippet as 2a). If note-writer returned the merged note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the two sources.
 3. NLI resolutions — per the agent's documented mechanics
 4. `held: nli` worklist rows — execute each per the user's per-item NLI choice: **skip** → leave the note in `0-inbox/` untouched; **supersede/qualify/keep-both** → execute the row (`type: rewrite` via note-writer + hook replay, `type: promote` via `mv`), applying the 6a hygiene checks to every file written or moved in this step
 

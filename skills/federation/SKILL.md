@@ -147,6 +147,7 @@ Immediately after the config write, stamp the seed with version metadata so Sess
 
 ```javascript
 const PLUGIN = process.env.CLAUDE_PLUGIN_ROOT;
+const PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA;
 const pluginVersion = JSON.parse(readFileSync(join(PLUGIN, 'package.json'), 'utf-8')).version;
 const meta = {
   created_at: new Date().toISOString(),

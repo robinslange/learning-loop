@@ -35,6 +35,8 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: post-write source and claim verification against public APIs
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: canonical note format constraints (title, body, tags, links, frontmatter)
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md`: when to diagram + Excalidraw format spec
 
 ## Voice
 
