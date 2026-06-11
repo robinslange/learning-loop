@@ -79,7 +79,7 @@ For each cluster, process all its inbox notes together:
 
 **a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `PLUGIN/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
 
-- `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Surface in step 5 gated-action block under a new "NLI contradictions" header with the supersede / qualify / keep-both / skip prompt.
+- `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Surface in step 5 gated-action block under a new "NLI contradictions" header with the supersede / qualify / keep-both / skip prompt. The note's Rewrite Worklist row (5.6) — `rewrite` if voice fails, `promote` if it only needed a `mv` — gets `held: nli` and is NEVER executed autonomously; the skill executes it only after the user's per-item choice.
 - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **soft bucket**: promote with annotation. Stamp `nli_tension: true` and `nli_tension_partners: [partner-path, ...]` on the new note's frontmatter at promotion time. Mention inline in the cluster table.
 
 Frontmatter escape: if the candidate already has `nli_resolved: deliberate` in its frontmatter (set at capture time for retraction notes), skip the gate entirely and promote.
@@ -175,7 +175,7 @@ Acceptable reply formats for the NLI contradictions:
 - per-item: `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both, skip=leave in inbox)
 - batched: `all:3` keep-both for everything
 
-Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → autonomous promotions of any held-back inbox notes. NLI resolution mechanics:
+Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice. NLI resolution mechanics:
 
 - **supersede**: call existing `/rewrite` flow on the existing note (rewrite to match the new one); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; new note promotes to its routed destination.
 - **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; new note promotes.
@@ -215,27 +215,32 @@ You cannot spawn any agent (subagents cannot spawn subagents). Every action that
 
 Output exactly this table (the skill parses it):
 
-| # | type | note | destination | reason | related_notes |
-|---|------|------|-------------|--------|---------------|
-| 1 | rewrite | 0-inbox/foo.md | 3-permanent/ | voice fail | [[bar]], [[baz]] |
-| 2 | rewrite | 0-inbox/qux.md | 1-fleeting/ | voice fail, verify-note FAIL | [[bar]] |
-| 3 | merge | 0-inbox/dup.md + 0-inbox/dup-deeper.md | 1-fleeting/ | same idea, second more developed | [[bar]] |
+| # | type | note | destination | reason | related_notes | held |
+|---|------|------|-------------|--------|---------------|------|
+| 1 | rewrite | 0-inbox/foo.md | 3-permanent/ | voice fail | [[bar]], [[baz]] | - |
+| 2 | rewrite | 0-inbox/qux.md | 1-fleeting/ | voice fail, hard NLI contradiction | [[bar]] | nli |
+| 3 | merge | 0-inbox/dup.md + 0-inbox/dup-deeper.md | 1-fleeting/ | same idea, second more developed | [[bar]] | - |
+| 4 | promote | 0-inbox/baz.md | 3-permanent/ | skip-rewrite, hard NLI contradiction | [[bar]] | nli |
 
-- `rewrite` items are autonomous: the skill executes them without approval.
+- `held` is `-` or `nli`. Any note in the hard NLI bucket (3a.5) gets `held: nli` on its row and is NEVER executed autonomously — by you or the skill — until the user resolves the contradiction.
+- `rewrite` items with `held: -` are autonomous: the skill executes them without approval.
 - `merge` items are gated: the skill executes them only after user approval (they also appear in the Needs-approval block above).
+- `promote` items exist only for NLI-held mv-promotions: the note needed no rewrite but is hard-blocked; the skill `mv`-promotes it if the user resolves in its favour.
 - Include in `reason` which gate criteria failed — the skill passes it to note-writer as context.
+- If there are no worklist items, output the single line `Rewrite Worklist: empty` instead of the table — never echo the example rows.
 
 ### 6. Execute
 
 **Autonomous (no approval needed):**
-- Promote via `mv` when skip-rewrite is true
+- Promote via `mv` when skip-rewrite is true and the note is not in the hard NLI bucket (hard-blocked notes become `type: promote, held: nli` worklist rows instead)
 - After every `mv` promotion, run frontmatter hygiene on the promoted file (see 6a)
 - Add counter-argument links (both directions) via `Edit`
-- Notes needing rewrite: add to the Rewrite Worklist (5.6). The skill executes them after you return and applies the same 6a hygiene to each rewritten file.
+- Notes needing rewrite: add to the Rewrite Worklist (5.6), with `held: nli` if hard-blocked. The skill executes them after you return and applies the same 6a hygiene to each rewritten file.
 
 **Gated (listed for approval, executed by the skill):**
 - Merges: add to the Rewrite Worklist as `type: merge` AND to the Needs-approval block
 - Deletes: list in the Needs-approval block; the skill runs `rm` after approval
+- NLI-held rows (`held: nli`): the skill executes them only after the user's per-item NLI choice; "skip" leaves the note in `0-inbox/` untouched
 
 ### 6a. Post-Promotion Frontmatter Hygiene
 
@@ -256,11 +261,10 @@ The inbox skill applies these same three checks to every file it rewrites via no
 ```
 Inbox processed: [N] notes across [C] clusters.
 Promoted: [X] → 3-permanent/ ([S] skipped rewrite), [Y] → 1-fleeting/
-Rewrite worklist: [W] items returned to the skill ([Wr] rewrites, [Wm] merges pending approval)
+Rewrite worklist: [W] items returned to the skill ([Wr] rewrites, [Wm] merges pending approval, [Wp] NLI-held promotes)
 Counter-arguments linked: [L]
 NLI tensions flagged: [T]                       (soft tier, auto-stamped)
 NLI contradictions surfaced: [R_surfaced]       (hard tier, awaiting user resolution via the skill)
-Merge candidates: [Z] (gated, pending approval)
 Deletes pending: [D] ghost duplicates (gated, pending approval)
 Remaining: [R] in inbox
 ```
@@ -289,6 +293,8 @@ After completing inbox processing, emit a triage summary:
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
 ```
+
+Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows, held or not), `merge_candidates` = [Wm]. NLI-held `promote` rows are counted in `nli_contradictions_surfaced`, not separately. Executed-counts (rewrites done, merges done, NLI resolutions) belong to the skill's session-end event, not this payload.
 
 ## Rules
 

@@ -26,10 +26,10 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill
 
 **At session end:**
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"limbo":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"nli_resolutions":{"supersede":N,"qualify":N,"keep_both":N,"skip":N},"limbo":N}'
 ```
 
-Per-note tracking is handled automatically by the PostToolUse hook.
+Per-note tracking is automatic for main-thread writes via the PostToolUse hook; subagent (note-writer) writes bypass it and are covered by the Step 2 hook replay.
 
 ## Process
 
@@ -68,20 +68,29 @@ These are informational: the user decides whether to act on them during triage. 
 
 The agent cannot spawn note-writer (subagents cannot spawn subagents). It returns a Rewrite Worklist; executing it is this skill's job.
 
-**2a. Autonomous rewrites (no approval needed).** For each `type: rewrite` item, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with:
+**2a. Autonomous rewrites (no approval needed).** For each item with `type: rewrite` AND `held: -` (ONLY those — `held: nli` rows wait for 2b step 4), spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with:
 - **insight**: the note's core idea
 - **existing_note**: the full current note content (read it first)
 - **destination**: the worklist destination
 - **related_notes**: from the worklist row
 - the worklist `reason` as rewrite context
 
-Resolve all path placeholders in each prompt to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file.
+Resolve all path placeholders in each prompt to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
+
+When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant):
+
+```bash
+printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Surface any `failures` from the JSON summary in Step 3.
 
 **2b. Gated actions.** Present merges, deletes, and Bundle 2 NLI contradictions in one block; one user response handles all of them. NLI contradictions accept per-item replies in the form `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both) or batched `all:3`. On approval, execute in order:
 1. deletes — `rm` each approved inbox copy
-2. merges — for each approved `type: merge` item, spawn `note-writer` with BOTH notes' full content as input, the worklist destination, and instruction to write one merged note; after it reports the written file, `rm` both source notes and run the 6a hygiene checks
+2. merges — for each approved `type: merge` item, spawn `note-writer` with BOTH notes' full content as input, the worklist destination, and instruction to write one merged note; after it reports the written file, `rm` both source notes, run the 6a hygiene checks, and replay the hook chain on the merged file (same snippet as 2a)
 3. NLI resolutions — per the agent's documented mechanics
-4. any held-back autonomous promotions
+4. `held: nli` worklist rows — execute each per the user's per-item NLI choice: **skip** → leave the note in `0-inbox/` untouched; **supersede/qualify/keep-both** → execute the row (`type: rewrite` via note-writer + hook replay, `type: promote` via `mv`), applying the 6a hygiene checks to every file written or moved in this step
 
 **`--skip-nli` flag**: if the user invokes `/learning-loop:inbox --skip-nli`, pass the flag through to the inbox-organiser agent prompt as additional context. The agent will skip Step 3a.5 (NLI contradiction check) entirely and surface a note in the report: `note: --skip-nli set; promotions ran without NLI contradiction checks`. Useful when calibrating thresholds or after a known-noisy NLI run.
 
