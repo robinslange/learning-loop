@@ -18,4 +18,4 @@ Always archive, never delete. The `_archived/` directory is the safety net.
 - Archived: `project_old_sprint.md` -> `_archived/` (stale)
 ```
 
-Emit provenance after each operation: `PLUGIN/scripts/provenance-emit.js '{"agent":"dream","action":"prune","target":"FILENAME"}'`
+Emit provenance after each operation: `${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js '{"agent":"dream","action":"prune","target":"FILENAME"}'`

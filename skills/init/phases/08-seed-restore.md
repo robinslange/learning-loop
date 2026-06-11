@@ -9,7 +9,7 @@ Check the current working directory (and ask the operator for a path) for a `see
 If found and the operator confirms:
 1. Copy `memory/*` into this instance's auto-memory dir. Resolve it mechanically:
    ```
-   node -e "import('PLUGIN/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
+   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
    ```
 2. Copy `_system/*` into `VAULT/_system/`.
 3. Merge `CLAUDE-portable.md` into this instance's `~/.claude/CLAUDE.md` (append under a clear heading; do not clobber existing content).
@@ -28,6 +28,6 @@ List a bare term and the gate also catches its hyphenated, underscored, and dott
 
 Write the answers to the path resolved by `DATA_FILES.harvestDenylist(PLUGIN_DATA)` (i.e. `PLUGIN_DATA/.harvest-denylist`), one term per line, `#` for comments. Resolve it mechanically:
 ```
-node -e "import('PLUGIN/scripts/lib/paths.mjs').then(m=>console.log(m.DATA_FILES.harvestDenylist(process.argv[1])))" "<PLUGIN_DATA>"
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/paths.mjs').then(m=>console.log(m.DATA_FILES.harvestDenylist(process.argv[1])))" "<PLUGIN_DATA>"
 ```
 If blank, write the file with only a comment header so harvest finds an (empty) list rather than erroring. Note: harvest ALSO merges mechanically-derived instance facts (peer ids, pubkey, configured email domains) at scrub time, so an empty hand-list is not the same as no protection.

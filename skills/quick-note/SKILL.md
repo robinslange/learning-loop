@@ -27,7 +27,7 @@ Captures a single insight to `0-inbox/` mid-conversation. No preview, no approva
 
 ### Step 2: Delegate to Note Writer
 
-Spawn a single `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with this prompt:
+Spawn a single `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with this prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders):
 
 ```
 Write a quick inbox note for the Obsidian vault.
@@ -39,7 +39,7 @@ Date: <today YYYY-MM-DD>
 Destination: 0-inbox/
 
 Before writing, run this command to find related vault notes:
-node PLUGIN/scripts/vault-search.mjs search "<key terms from insight>" --rerank
+node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<key terms from insight>" --rerank
 
 Use the top 1-3 relevant results as wiki-links in the note.
 

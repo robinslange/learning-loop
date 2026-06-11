@@ -9,16 +9,16 @@ A read-mostly diagnostic. Runs the health-check library, presents the result, an
 
 ## Paths
 
-`PLUGIN`, `PLUGIN_DATA`, `VAULT` are injected by the session-start hook. If absent:
+`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If absent:
 
 ```bash
-node PLUGIN/scripts/resolve-paths.mjs
+node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
 ```
 
 ## Step 1: Run all checks
 
 ```bash
-node PLUGIN/scripts/health-check.mjs --full --json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json
 ```
 
 Parse the JSON. The schema:
@@ -77,11 +77,11 @@ For each check with `status === "fail"`:
    - Option A': `Run the suggested command and tell me when done` — when the fix is manual
    - Option B: `Skip — I'll handle this later`
    - Option C: `Stop the doctor session` — exits cleanly
-3. On choice A: execute the corresponding fix command via Bash. After it finishes, re-run `node PLUGIN/scripts/health-check.mjs --full --json` and find the same check by its `id` field. Report:
+3. On choice A: execute the corresponding fix command via Bash. After it finishes, re-run `node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json` and find the same check by its `id` field. Report:
    - `✓ Fixed (new state: <detail>)` if the check now returns ok
    - `⚠ Still warning: <new detail>` if it improved to warn
    - `✗ Still failing: <new detail>` if it didn't help (don't loop — move on)
-4. On choice A' (manual): print the command, then ask `Done? [Y]es / [N]o`. On Yes, re-run `node PLUGIN/scripts/health-check.mjs --full --json` and find the same check by its `id` field, then report as above.
+4. On choice A' (manual): print the command, then ask `Done? [Y]es / [N]o`. On Yes, re-run `node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json` and find the same check by its `id` field, then report as above.
 5. On choice B: track as skipped and move to next.
 6. On choice C: print summary and exit.
 
@@ -89,10 +89,10 @@ For each check with `status === "fail"`:
 
 | Check id | Action |
 |---|---|
-| `binary-exists`, `binary-version-file`, `binary-runs` | `node PLUGIN/scripts/download-binary.mjs` |
-| `shims-exist` | `node PLUGIN/scripts/install-shims.mjs --install` |
+| `binary-exists`, `binary-version-file`, `binary-runs` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/download-binary.mjs` |
+| `shims-exist` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-shims.mjs --install` |
 | `vault-folders` | `mkdir -p` each missing folder under `<VAULT>` |
-| `vault-system-files` | Write default content from `PLUGIN/templates/persona.md` and `PLUGIN/templates/capture-rules.md` |
+| `vault-system-files` | Write default content from `${CLAUDE_PLUGIN_ROOT}/templates/persona.md` and `${CLAUDE_PLUGIN_ROOT}/templates/capture-rules.md` |
 | `search-index-exists` | `ll-search index` |
 | `nli-socket-fresh` (stale file) | `rm <path>` |
 | `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch start` |
@@ -122,7 +122,7 @@ Doctor summary
 Then write the final result via:
 
 ```bash
-node PLUGIN/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
 ```
 
 (One last cache refresh so the next session-start detector reflects the post-doctor state.)

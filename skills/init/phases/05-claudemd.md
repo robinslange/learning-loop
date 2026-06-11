@@ -12,7 +12,7 @@ Phase 5 requires outputs from earlier phases:
 
 ## 5a: Detect
 
-Read the template version from `PLUGIN/templates/claudemd-section.version`. Then check three things:
+Read the template version from `${CLAUDE_PLUGIN_ROOT}/templates/claudemd-section.version`. Then check three things:
 
 1. Does `~/.claude/CLAUDE.md` exist at all?
 2. If yes, does it contain `## Learning Loop`?
@@ -91,7 +91,7 @@ Captures go to 0-inbox/ as atomic notes. Tag with source project. Link to the pr
 Follow the rules in _system/capture-rules.md. Read _system/persona.md for voice and tone.
 ```
 
-**Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vN` with the integer template version from `PLUGIN/templates/claudemd-section.version`.
+**Template substitution:** Replace `VAULT_PATH` with the detected vault path. Replace `vN` with the integer template version from `${CLAUDE_PLUGIN_ROOT}/templates/claudemd-section.version`.
 
 **Conditional lines:** Before generating, check which system files and folders exist:
 

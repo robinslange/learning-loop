@@ -42,7 +42,7 @@ Search every store for the OLD pattern. Run all four searches in parallel (singl
 
 1. **Vault: semantic + keyword:**
    ```
-   node PLUGIN/scripts/vault-search.mjs search "<old pattern>" --rerank
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<old pattern>" --rerank
    ```
 
 2. **Vault: wiki-link/title hits:**
@@ -114,12 +114,12 @@ Run the approved actions. Use the right tool per store.
 - Use `Edit` for surgical changes (preferred: preserves frontmatter, links)
 - **Always `Read` the file immediately before each `Edit`**, even if you read it during Phase 2. The triage map can grow stale between rendering and execution if other tools touched the file in the meantime. The fresh read also lets you verify the surrounding text still matches what you'll pass to `Edit`.
 - For an ARCHIVE action, follow this exact sequence:
-  1. **Dump outgoing edges first.** Run `node PLUGIN/scripts/edges-cli.mjs list <archived-note>` and capture the `outgoing` array from the JSON response. Each entry has `from_path`, `to_path`, `edge_type`, `confidence`, and `direction_flipped`.
+  1. **Dump outgoing edges first.** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs list <archived-note>` and capture the `outgoing` array from the JSON response. Each entry has `from_path`, `to_path`, `edge_type`, `confidence`, and `direction_flipped`.
   2. **Move the file** to `_archive/` (create the dir if missing).
   3. **Write the stub** at the original path with a single line: `Superseded: see [[<replacement>]]`. The stub Write fires the post-write hook chain, which calls `removeOutgoingEdges`. With the v1.14.1 fix, that query now skips `source_graph='archived'` rows: but we have not added any yet, so this pass correctly wipes the live edges as intended.
   4. **Re-insert the dumped edges** with `source_graph='archived'`. For each edge in the dumped `outgoing` array, run:
      ```bash
-     node PLUGIN/scripts/edges-cli.mjs add <from_path> <to_path> <edge_type> \
+     node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs add <from_path> <to_path> <edge_type> \
        --confidence <high|medium> \
        --source-graph archived \
        --direction-flipped <0|1>
@@ -142,7 +142,7 @@ Write a new note to `0-inbox/` capturing the correction itself:
 Always write the supersession, regardless of which other actions ran:
 
 ```bash
-node PLUGIN/scripts/edges-cli.mjs super-add "<old pattern>" \
+node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs super-add "<old pattern>" \
   --replacement "<vault path of transition note or primary rewritten note>" \
   --reason "<reason>"
 ```

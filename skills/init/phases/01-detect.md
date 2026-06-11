@@ -3,7 +3,7 @@
 Run the health-check library, which is the single source of truth used by `/learning-loop:doctor` and the session-start detector:
 
 ```bash
-node PLUGIN/scripts/health-check.mjs --full --json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json
 ```
 
 Parse the JSON. Each result has `id`, `name`, `status`, `severity`, `detail`, `fix`.
@@ -11,7 +11,7 @@ Parse the JSON. Each result has `id`, `name`, `status`, `severity`, `detail`, `f
 Also write the result as the shared cache for future session-start detector runs:
 
 ```bash
-node PLUGIN/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
+node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
 ```
 
 Now render the dashboard, mapping each check id to its dashboard row. Use these mappings:
@@ -40,11 +40,11 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
 
-**Seed location:** Check if `.seed` exists in `PLUGIN/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
+**Seed location:** Check if `.seed` exists in `${CLAUDE_PLUGIN_ROOT}/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
 
 **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 
-**Cache health statusline:** Run `node PLUGIN/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
+**Cache health statusline:** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 
 **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
 

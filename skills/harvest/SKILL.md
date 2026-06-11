@@ -12,36 +12,36 @@ Collects notes/memories marked `portable: true`, scrubs them against this instan
 - **Mechanical gate:** the deny-list block is authoritative. You may drop MORE in review; you may never un-block or add a note the gate excluded.
 
 ## Paths
-`PLUGIN`, `PLUGIN_DATA`, `VAULT` injected; else `node PLUGIN/scripts/resolve-paths.mjs`. The deny-list file and dedup log are resolved mechanically, NOT hardcoded:
-- deny-list: `node -e "import('PLUGIN/scripts/lib/paths.mjs').then(m=>console.log(m.DATA_FILES.harvestDenylist(process.argv[1])))" PLUGIN_DATA`
+`PLUGIN_DATA` and `VAULT` injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line); else `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`. The deny-list file and dedup log are resolved mechanically, NOT hardcoded:
+- deny-list: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/paths.mjs').then(m=>console.log(m.DATA_FILES.harvestDenylist(process.argv[1])))" PLUGIN_DATA`
 - dedup log: same with `DATA_FILES.harvestedLog`.
-The memory dir: `node -e "import('PLUGIN/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"`.
+The memory dir: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"`.
 
 ## Process
 
 ### 1. Collect (mechanical whitelist)
 Pass DIRECTORIES — the script walks them; do not enumerate files yourself:
 ```
-node PLUGIN/scripts/harvest-collect.mjs "<VAULT>" "<memDir>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/harvest-collect.mjs "<VAULT>" "<memDir>"
 ```
 prints the paths with `portable: true`. These are the ONLY candidates. Capture them to a temp file for the next steps.
 
 ### 2. Dedup
 ```
-node PLUGIN/scripts/harvest-dedup.mjs "<dedupLog>" [--all] < candidates.txt
+node ${CLAUDE_PLUGIN_ROOT}/scripts/harvest-dedup.mjs "<dedupLog>" [--all] < candidates.txt
 ```
 (CLI reads candidate paths on stdin, one per line; `--all` ignores the log.) Use the printed filtered list going forward.
 
 ### 3. Federation guard (mechanical, warn-not-block)
 ```
-node PLUGIN/scripts/federation-active.mjs "<PLUGIN_DATA>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/federation-active.mjs "<PLUGIN_DATA>"
 ```
 If it prints `FEDERATED`, show this before review: "⚠ this instance is federated — confirm each note is yours to carry, not company IP." Friction, not a block.
 
 ### 4. Scrub (mechanical hard block + tripwire)
 The deny terms = hand-listed file + mechanically-derived instance facts (the CLI merges them; pass PLUGIN_DATA so it can derive peer ids / pubkey / email domains):
 ```
-node PLUGIN/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <candidate-path...>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <candidate-path...>
 ```
 Candidate paths here are the deduped survivors — typically a small set after collect+dedup, safe for argv. If the set is large (a bulk-marked vault tier), omit the path args and pipe them on stdin instead, one per line: `... harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" < candidates.txt`. Returns `{blocked, tripwire, clean}`. Report `blocked` to the operator (with hits) — these are excluded and CANNOT be added back. Surface `tripwire` flags for attention. Only `clean` proceeds.
 
@@ -59,7 +59,7 @@ Create `<out>/harvest-bundle-<date>/`:
 ### 7. Record dedup (do not mutate notes)
 Append the carried paths to the log (resolved via `DATA_FILES.harvestedLog`). Uses `.then()` chaining (CJS-safe on every Node version, matching the Paths-section one-liners):
 ```
-printf '%s\n' <carried-path...> | node -e "import('PLUGIN/scripts/harvest-dedup.mjs').then(m=>{const fs=require('node:fs');const paths=fs.readFileSync(0,'utf8').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);m.appendHarvested(process.argv[1],paths)})" "<dedupLog>"
+printf '%s\n' <carried-path...> | node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/harvest-dedup.mjs').then(m=>{const fs=require('node:fs');const paths=fs.readFileSync(0,'utf8').split(/\r?\n/).map(s=>s.trim()).filter(Boolean);m.appendHarvested(process.argv[1],paths)})" "<dedupLog>"
 ```
 Leave the `portable: true` markers in place — the log handles dedup; markers are never stripped.
 

@@ -16,14 +16,14 @@ Only list items that are actually needed. After confirmation, run sequentially.
 ## 3a: Binary Download
 
 ```bash
-node PLUGIN/scripts/download-binary.mjs
+node ${CLAUDE_PLUGIN_ROOT}/scripts/download-binary.mjs
 ```
 
 Detects the platform and downloads the correct binary from GitHub releases. Extracts to `PLUGIN_DATA/bin/`, sets executable permission, writes `.version`. Skips if the installed version already matches.
 
 ## 3b: Verify Vendor Dependencies
 
-Confirm `PLUGIN/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored in `PLUGIN/vendor/` and require no npm install.
+Confirm `${CLAUDE_PLUGIN_ROOT}/vendor/sql-wasm.wasm` exists. All JS dependencies are vendored in `${CLAUDE_PLUGIN_ROOT}/vendor/` and require no npm install.
 
 ## 3b.5: Clean up orphan search.db files
 
@@ -44,7 +44,7 @@ Run `ll-search index` to build the search index. Report progress.
 ## 3d: Install CLI shims
 
 ```bash
-node PLUGIN/scripts/install-shims.mjs --install
+node ${CLAUDE_PLUGIN_ROOT}/scripts/install-shims.mjs --install
 ```
 
 Writes two stable shims to `~/.local/bin/`:
@@ -52,7 +52,7 @@ Writes two stable shims to `~/.local/bin/`:
 - `ll-watch`: resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
 - `ll-search`: resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
 
-Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node PLUGIN/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
+Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node ${CLAUDE_PLUGIN_ROOT}/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
 
 ## 3e.5: Optional - ygrep (local indexed code search)
 
@@ -98,7 +98,7 @@ Idempotent: re-running when `ygrep` is already on PATH is a no-op (the `command 
 
 ## 3e: Plugin Dependencies
 
-Run `node PLUGIN/scripts/check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
+Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
 
 For required deps (`required: true`) — block until the user confirms or explicitly declines:
 

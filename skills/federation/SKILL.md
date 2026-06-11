@@ -11,7 +11,7 @@ This skill is invoked from `/init` Phase 4 when the user opts in, but is safe to
 
 ## Paths
 
-`PLUGIN`, `PLUGIN_DATA`, and `VAULT` are injected by the session-start hook. If not present, resolve them via `node PLUGIN/scripts/resolve-paths.mjs`.
+`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If not present, resolve them via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`.
 
 ## Process
 
@@ -41,9 +41,9 @@ Exit cleanly.
 
 ## C: Identity
 
-The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `PLUGIN/federation/.seed` (gets wiped on reinstall).
+The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `${CLAUDE_PLUGIN_ROOT}/federation/.seed` (gets wiped on reinstall).
 
-**Migration check:** If `PLUGIN/federation/.seed` exists but `PLUGIN_DATA/federation/.seed` does not, migrate it:
+**Migration check:** If `${CLAUDE_PLUGIN_ROOT}/federation/.seed` exists but `PLUGIN_DATA/federation/.seed` does not, migrate it:
 
 1. Copy the seed to `PLUGIN_DATA/federation/.seed` (mode 0o600)
 2. Delete the old one from the marketplace directory
@@ -143,7 +143,7 @@ Be explicit about the trade: "The token is single-use and was consumed. If sync 
 
 Only reached if F succeeded. Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from D), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
 
-Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `PLUGIN/package.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
+Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `${CLAUDE_PLUGIN_ROOT}/package.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
 
 ```javascript
 const pluginVersion = JSON.parse(readFileSync(join(PLUGIN, 'package.json'), 'utf-8')).version;

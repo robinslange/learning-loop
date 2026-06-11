@@ -37,7 +37,7 @@ Launch the `literature-capturer` agent with:
 - **source**: The URL, title, or citation provided by the user
 - **vault_path**: `{{VAULT}}/`
 
-The agent definition is at `PLUGIN/agents/literature-capturer.md`.
+The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/literature-capturer.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
 
 ### Step 2: Handle Backlink Offers
 

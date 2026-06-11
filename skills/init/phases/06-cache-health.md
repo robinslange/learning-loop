@@ -23,10 +23,10 @@ Ask:
 On confirmation, run:
 
 ```bash
-node PLUGIN/scripts/install-cache-health.mjs
+node ${CLAUDE_PLUGIN_ROOT}/scripts/install-cache-health.mjs
 ```
 
-The script is idempotent. It copies `PLUGIN/plugins/omc-cache-health/plugin.js` to `~/.claude/oh-my-claude/plugins/cache-health/`, then inserts `cache-health` into `~/.claude/oh-my-claude/config.json` under the first line's `left` column (after `context-percent` if present) and adds a default plugin config.
+The script is idempotent. It copies `${CLAUDE_PLUGIN_ROOT}/plugins/omc-cache-health/plugin.js` to `~/.claude/oh-my-claude/plugins/cache-health/`, then inserts `cache-health` into `~/.claude/oh-my-claude/config.json` under the first line's `left` column (after `context-percent` if present) and adds a default plugin config.
 
 If the target directory is a symlink (development mode), the script leaves the file alone and only updates config.
 

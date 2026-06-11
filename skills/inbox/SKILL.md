@@ -39,7 +39,7 @@ Launch the `inbox-organiser` agent with:
 - **vault_path**: `{{VAULT}}/`
 - **scope**: `all` (or `topic:<name>` if the user specified a topic filter)
 
-The agent definition is at `PLUGIN/agents/inbox-organiser.md`.
+The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/inbox-organiser.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
 
 Use `subagent_type: "learning-loop:inbox-organiser"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 

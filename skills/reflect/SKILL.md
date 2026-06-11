@@ -68,7 +68,7 @@ List each learning as a single line.
 Run a single retrieval call for all learnings identified in Step 2. Pass each learning summary as a query:
 
 ```bash
-node PLUGIN/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
+node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
 ```
 
 **MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; calling the raw binary forces you to pass them yourself, and a missing DB arg silently corrupts results — clap consumes the first query string as the db path and the binary returns hits from an empty schema-only DB plus any federation peers.
@@ -224,10 +224,10 @@ If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates
 
 #### 4.6.b: Dispatch refinement-proposer agent
 
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-pairs.json`):
+Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders):
 
 ```
-Read the agent definition at PLUGIN/agents/refinement-proposer.md and follow it exactly.
+Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/refinement-proposer.md and follow it exactly.
 
 pairs_file: <resolved-pairs-path>
 vault_path: {{VAULT}}/

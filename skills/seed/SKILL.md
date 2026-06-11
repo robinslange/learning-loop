@@ -9,9 +9,9 @@ Produces a `seed-bundle-<date>/` an empty learning-loop instance can boot from v
 
 ## Paths
 
-`PLUGIN`, `PLUGIN_DATA`, `VAULT` are injected by the session-start hook. If absent, resolve via `node PLUGIN/scripts/resolve-paths.mjs`. Resolve the auto-memory dir mechanically (do NOT hand-construct the slug):
+`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`. Resolve the auto-memory dir mechanically (do NOT hand-construct the slug):
 ```
-node -e "import('PLUGIN/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
+node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
 ```
 
 ## Process
@@ -24,7 +24,7 @@ node -e "import('PLUGIN/scripts/lib/memory-paths.mjs').then(m=>console.log(m.res
 ### 2. Mechanical selection
 Run:
 ```
-node PLUGIN/scripts/seed-select.mjs <memDir> <types-csv> <deny-csv>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/seed-select.mjs <memDir> <types-csv> <deny-csv>
 ```
 This returns `{kept, dropped}`. The `type` filter and name deny-list are mechanical. Do not add files the script dropped.
 
@@ -34,7 +34,7 @@ Show the operator the `kept` list and the `dropped` list with reasons. Ask: any 
 ### 4. Scrub (only if --tiers used)
 If vault tiers were opted in, run the candidate notes through the same scrubber harvest uses (pass PLUGIN_DATA so instance facts merge in):
 ```
-node PLUGIN/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <note-path...>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <note-path...>
 ```
 Block anything the scrub blocks. (Reuses the harvest scrubber — same mechanical gate.) A vault tier can hold hundreds of notes; if the path list is large, pipe paths on stdin instead of argv: `... harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" < notes.txt`. For `--for-job` (no tiers) this step is skipped entirely.
 

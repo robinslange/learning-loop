@@ -59,12 +59,12 @@ Parse remaining args as source-specific parameters.
 
 ### Step 2: Launch Source Agent
 
-Spawn the appropriate agent in the foreground.
+Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders).
 
 **Linear:** Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent definition at PLUGIN/agents/ingest-linear.md and follow it exactly.
+Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-linear.md and follow it exactly.
 
 Scope: {scope}
 State filter: {state_filter or "none"}
@@ -73,7 +73,7 @@ State filter: {state_filter or "none"}
 **Context:** Spawn a `general-purpose` agent with prompt:
 
 ```
-Read the agent definition at PLUGIN/agents/ingest-context.md and follow it exactly.
+Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-context.md and follow it exactly.
 
 Source label: {source_label or "pasted text"}
 Text:
@@ -130,10 +130,10 @@ REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.s
 
 #### Step 2.4a: tier=single → existing single-pass flow
 
-Spawn a `general-purpose` agent with prompt:
+Spawn a `general-purpose` agent with prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders):
 
 ```
-Read the agent definition at PLUGIN/agents/ingest-repo.md and follow it exactly.
+Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-repo.md and follow it exactly.
 
 Repo path: {repo_path}
 ```
@@ -242,7 +242,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m =>
 
 Take the insights JSON returned by the agent.
 
-Read `PLUGIN/agents/_skills/preview-format.md` and format the preview accordingly.
+Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/preview-format.md` and format the preview accordingly.
 
 Display the preview to the user. Wait for confirmation via `AskUserQuestion`:
 
@@ -264,10 +264,10 @@ Determine the project name:
 - Repo: derive from the repo directory name
 - Context: ask via `AskUserQuestion` if not obvious
 
-Spawn a `general-purpose` agent with prompt:
+Spawn a `general-purpose` agent with prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders):
 
 ```
-Read the agent skill at PLUGIN/agents/_skills/route-output.md and follow it exactly.
+Read the agent skill at ${CLAUDE_PLUGIN_ROOT}/agents/_skills/route-output.md and follow it exactly.
 
 Project name: {project_name}
 Vault path: {{VAULT}}/

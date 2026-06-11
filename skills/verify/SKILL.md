@@ -34,7 +34,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skil
 
 For each note with issues, run:
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}'
 ```
 
 Where:
@@ -45,7 +45,7 @@ Where:
 
 For quality scores, emit one event per note:
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}'
 ```
 
 A note with no finding events is a pass.
@@ -88,7 +88,7 @@ Proceed immediately.
 
 - For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`, Read it
 - For folder-based: `Glob` for `*.md` in the target folder
-- For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node PLUGIN/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
+- For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
 Read each note.
 
@@ -109,8 +109,8 @@ Wait for all scoring agents to complete before proceeding.
 After all scorer agents return, parse their results and emit one provenance event per note via `provenance-emit.js`. Run all emit calls in a single Bash command (chained with `&&`) to avoid excessive tool calls:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}' && \
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","gate":"2/6","claim_specificity":0,"source_grounded":0}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}' && \
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","gate":"2/6","claim_specificity":0,"source_grounded":0}'
 ```
 
 This closes the subagent provenance gap -- scorer agents return text results, the main thread emits them to the provenance system.
@@ -124,7 +124,7 @@ Two-source check: embeddings find topical similarity; NLI finds logical relation
    - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **advisory tension**
    - `edgeType === 'nli_supports'` → silent (entailment is not a /verify concern)
 
-2. **Embedding similarity (fallback).** For each note, run `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
+2. **Embedding similarity (fallback).** For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
    - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
    - **Potential contradiction** (similarity 0.7–0.85, conflicting claims, no NLI edge): notes that look related but opposed. Recommend review.
 
