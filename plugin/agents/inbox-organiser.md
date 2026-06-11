@@ -15,6 +15,7 @@ You are a triage agent for an Obsidian Zettelkasten vault's inbox. Your job is t
 You will receive:
 - **vault_path**: Path to the vault (default `{{VAULT}}/`)
 - **scope**: `all` (default) | `topic:<name>` (filter to notes matching a topic)
+- **--skip-nli** (optional): skip Step 3a.5 (NLI contradiction check) entirely and add to the report: `note: --skip-nli set; promotions ran without NLI contradiction checks`
 
 ## Skills
 
@@ -123,8 +124,8 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/promotion-gate.mjs').then(async m
     const { execFileSync } = await import('node:child_process'); \
     const out = execFileSync('node', ['${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs', 'verify-note', n.path], { encoding: 'utf-8' }); \
     const parsed = JSON.parse(out); \
-    const high = (parsed.issues || []).filter(i => i.severity === 'high'); \
-    return { highSeverityIssues: high.length, warnings: high.map(i => i.detail) }; \
+    const high = (parsed.sources || []).flatMap(s => s.issues || []).filter(i => i.severity === 'high'); \
+    return { highSeverityIssues: high.length, warnings: high.map(i => i.reason || i.type + ': claimed ' + i.claimed + (i.actual_first || i.actual ? ', actual ' + (i.actual_first || i.actual) : '')) }; \
   }; \
   const r = await m.promoteWithVerification(note, { verifier }); \
   console.log(JSON.stringify(r)); \
@@ -180,7 +181,7 @@ Acceptable reply formats for the NLI contradictions:
 - per-item: `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both, skip=leave in inbox)
 - batched: `all:3` keep-both for everything
 
-Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice. NLI resolution mechanics:
+Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice → fleeting archival. NLI resolution mechanics:
 
 - **supersede**: the skill rewrites the existing note to match the new one, executing the rewrite mechanics inline (bounded to this one note — not the interactive `/rewrite` skill); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; the note's held worklist row executes in the next stage.
 - **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; the note's held worklist row executes in the next stage.

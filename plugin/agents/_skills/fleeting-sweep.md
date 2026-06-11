@@ -36,12 +36,12 @@ It automatically skips counterpoint notes (`challenged:`/`challenges:` in frontm
 
 Archival is **gated** -- only the user approves it. The destination is `_archive/1-fleeting/`. How the gate clears depends on who is executing this skill:
 
-- **Run by a subagent** (the current executor: inbox-organiser Step 8): you cannot converse with the user. Do NOT archive anything. After the table, return a machine-readable candidates list the calling skill can parse and present for approval -- one path per line:
+- **Run by a subagent** (the current executor: inbox-organiser Step 8): you cannot converse with the user. Do NOT archive anything. After the table, return the candidates as the `fleeting archival` section of the Needs-approval block (the fourth of its four gate categories; the calling skill parses it and presents for approval) -- one path per line:
 
   ```
-  ### Archival candidates
-  1-fleeting/bacopa-effects-grow-over-weeks.md -- promoted (3 permanent refs)
-  1-fleeting/acme-app-hero-copy.md -- stale (0 refs, 90 days old)
+  fleeting archival (2), to _archive/1-fleeting/:
+  - 1-fleeting/bacopa-effects-grow-over-weeks.md -- promoted (3 permanent refs)
+  - 1-fleeting/acme-app-hero-copy.md -- stale (0 refs, 90 days old)
   ```
 
   Report: `Fleeting: [A] archival candidates returned, [F] active notes remain.`

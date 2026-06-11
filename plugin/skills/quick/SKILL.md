@@ -42,11 +42,10 @@ Return relevant notes with content, and identify gaps.
 Answer this specific question with web research.
 
 Topic: <the question>
-Depth: shallow
 Existing knowledge: (empty: vault results not available yet)
 
 Focus on answering the question directly, not mapping the landscape.
-Find 2-3 sources. Source-resolve any academic claims.
+Source-resolve any academic claims.
 Return: direct answer, supporting evidence, sources with metadata, confidence level.
 ```
 
