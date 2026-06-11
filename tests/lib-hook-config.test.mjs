@@ -81,6 +81,8 @@ test('pre-write-check inner query budget leaves headroom inside its hooks.json t
     readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'),
   );
   const entry = hooksJson.hooks.PreToolUse.find((e) => e.matcher.split('|').includes('Write'));
+  assert.ok(entry, 'hooks.json must have a PreToolUse entry whose matcher includes Write');
+  assert.ok(entry.hooks?.[0]?.timeout, 'the PreToolUse Write entry must declare a timeout');
   const hookBudgetMs = entry.hooks[0].timeout * 1000;
   assert.ok(
     HookConfig.QUERY_TIMEOUT_MS < hookBudgetMs,
