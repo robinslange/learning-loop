@@ -204,10 +204,10 @@ After presenting the cluster summary, if any LIMBO notes exist:
    → close or plan?
 ```
 
-3. Handle responses:
-   - **"close"** or **"close all"**: Add `status: resolved` to frontmatter via `Edit`
-   - **"plan"**: Ask for a one-line intention. Extract to `intentions:` frontmatter as `- "<context>: <cue>"` and set `status: intentioned`
-   - **"skip"**: Leave as-is, move to next note
+3. The skill executes responses after you return — you cannot converse, so do NOT claim to handle them. Your job ends at presenting the list; for the skill's benefit, each reply maps to:
+   - **"close"** or **"close all"**: the skill adds `status: resolved` to frontmatter via `Edit`
+   - **"plan"**: the skill asks for a one-line intention, writes it to `intentions:` frontmatter as `- "<context>: <cue>"`, and sets `status: intentioned`
+   - **"skip"**: leave as-is
 
 Do NOT display:
 - Total limbo count
@@ -280,6 +280,20 @@ If NLI was unavailable this run (daemon offline, DB missing, etc), add one line:
 ```
 note: NLI daemon unreachable this session. promotions ran without contradiction checks.
 ```
+
+### 7b. Touched Files Inventory
+
+Your `Edit` and `mv` calls never fire the PostToolUse hook chain (autolink, edge-infer, provenance); the skill replays it after you return, but only over paths you declare. End the report with a machine-readable inventory — exactly this heading, one vault path per line, no annotations:
+
+```
+### Touched files
+3-permanent/promoted-note.md
+0-inbox/status-stamped-note.md
+0-inbox/counter-argument.md
+3-permanent/challenged-note.md
+```
+
+Include every file you Edited or mv'd this run: `mv`-promotion destinations, both sides of each counter-argument link pair, Zeigarnik status-stamped notes (1.5), `nli_tension`/`nli_resolved`/`nli_qualified_by` stamps, and 6a hygiene edits. Deleted paths are excluded; files written by the skill's note-writer fan-out are its own to replay. If you touched nothing, output `### Touched files` followed by `none`.
 
 ### 8. Fleeting Sweep
 

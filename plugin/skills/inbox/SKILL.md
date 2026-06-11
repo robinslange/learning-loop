@@ -29,7 +29,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"nli_resolutions":{"supersede":N,"qualify":N,"keep_both":N,"skip":N},"limbo":N}'
 ```
 
-Per-note tracking is automatic for main-thread writes via the PostToolUse hook; subagent (note-writer) writes bypass it and are covered by the Step 2 hook replay.
+Per-note tracking is automatic for main-thread writes via the PostToolUse hook; subagent writes and edits (note-writer files, the organiser's own Edits and mv-promotions) bypass it and are covered by the Step 2 hook replays (2a for note-writer output, 2c for the agent's touched-files inventory).
 
 ## Process
 
@@ -93,11 +93,28 @@ Surface any `failures` from the JSON summary in Step 3.
 4. `held: nli` worklist rows — execute each per the user's per-item NLI choice: **skip** → leave the note in `0-inbox/` untouched; **supersede/qualify/keep-both** → execute the row (`type: rewrite` via note-writer + hook replay, `type: promote` via `mv`, `type: merge` via the step-2 merge mechanics), applying the 6a hygiene checks to every file written or moved in this step
 5. fleeting archival — `mv` each approved candidate to `{{VAULT}}/_archive/1-fleeting/` (create with `mkdir -p` if needed); the agent returns candidates only and never archives
 
+**2c. Replay hooks over the agent's touched files.** The organiser's own `Edit` and `mv` calls (counter-argument link pairs, Zeigarnik status stamps, NLI frontmatter stamps, mv-promotions, 6a hygiene) also bypassed PostToolUse — 2a covers only note-writer output. After the gated actions complete, parse the `### Touched files` inventory from the agent's report (one vault path per line; skip if it says `none`) and replay the hook chain over it, same snippet as 2a:
+
+```bash
+printf '%s\n' "$TOUCHED_PATH_1" "$TOUCHED_PATH_2" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Counter-argument link pairs matter most here — they are exactly what edge-infer should index. Resolve vault-relative paths to absolute before piping. Surface any `failures` from the JSON summary in Step 3.
+
 **`--skip-nli` flag**: if the user invokes `/learning-loop:inbox --skip-nli`, pass the flag through to the inbox-organiser agent prompt as additional context. The agent will skip Step 3a.5 (NLI contradiction check) entirely and surface a note in the report: `note: --skip-nli set; promotions ran without NLI contradiction checks`. Useful when calibrating thresholds or after a known-noisy NLI run.
 
-### Step 3: Report
+### Step 3: Report and Limbo Relay
 
-The agent returns a structured summary. Present it to the user.
+The agent returns a structured summary. Present it to the user, including the top-5 limbo list (Step 5.5 of the agent) verbatim.
+
+The agent only presents that list — it cannot converse. Relay the user's per-note replies by executing the frontmatter edits the agent documented:
+
+- **"close"** or **"close all"**: add `status: resolved` to the note's frontmatter via `Edit`
+- **"plan"**: ask the user for a one-line intention, then write `intentions:` frontmatter as `- "<context>: <cue>"` and set `status: intentioned`
+- **"skip"**: leave the note as-is
+
+Limbo notes the skill edits here join the hook-replay scope: pipe them through the same 2c snippet if any were edited after 2c already ran.
 
 ## Key Principles
 
