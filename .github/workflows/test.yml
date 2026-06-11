@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           out=$(node --test --test-reporter=tap tests/edge-infer-nli-truncation.test.mjs)
           echo "$out"
-          if echo "$out" | grep -qi '# SKIP'; then
+          if echo "$out" | grep -qE '^# skipped [1-9]'; then
             echo "ERROR: truncation contract tests skipped — binary install step is broken"
             exit 1
           fi
