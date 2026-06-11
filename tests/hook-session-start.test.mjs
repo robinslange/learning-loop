@@ -427,12 +427,14 @@ test(
   'session-start stamps CLAUDE_CODE_SESSION_ID into plugin-data/session/id and writes no ppid file',
   { timeout: 12000 },
   () => {
+    const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-sid-'));
     const r = runHook(HOOK, {
       stdin: { source: 'startup' },
       env: {
         VAULT_PATH: VAULT,
         CLAUDE_PROJECT_DIR: '/tmp/test-project-sid',
         CLAUDE_CODE_SESSION_ID: 'harness-uuid-xyz',
+        LL_SESSION_TMP_DIR: isolatedTmp,
       },
       seed: (pd) => seedUpdateCheck(pd),
     });
@@ -450,6 +452,7 @@ test(
       assert.deepEqual(ppidFiles, [], `no id-<ppid> files expected, found: ${ppidFiles}`);
     } finally {
       r.cleanup();
+      rmSync(isolatedTmp, { recursive: true, force: true });
     }
   },
 );
@@ -498,12 +501,14 @@ test(
   { timeout: 12000 },
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-proj-'));
+    const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-m4-'));
     const encodedPath = projectDir.replace(/[/\\]/g, '-');
     const r = runHook(HOOK, {
       env: {
         VAULT_PATH: VAULT,
         CLAUDE_PROJECT_DIR: projectDir,
         CLAUDE_CODE_SESSION_ID: 'env-id-should-lose',
+        LL_SESSION_TMP_DIR: isolatedTmp,
       },
       stdin: { session_id: 'payload-id-wins', source: 'startup' },
       seed: (pd, sandboxRoot) => {
@@ -524,9 +529,17 @@ test(
         existsSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-payload-id-wins')),
         'memory snapshot must be keyed by the payload id in plugin-data',
       );
+      assert.deepEqual(
+        JSON.parse(
+          readFileSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-payload-id-wins'), 'utf8'),
+        ),
+        ['a.md'],
+        'snapshot content must be the bare files array (stop-nudge reads via Array.isArray)',
+      );
     } finally {
       r.cleanup();
       rmSync(projectDir, { recursive: true, force: true });
+      rmSync(isolatedTmp, { recursive: true, force: true });
     }
   },
 );
