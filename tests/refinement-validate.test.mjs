@@ -54,6 +54,19 @@ test('strips em-dashes the agent introduces in new lines', () => {
   assert.equal(violation.count, 2);
 });
 
+test('strips en-dashes the agent introduces the same as em-dashes', () => {
+  const upstream = FM + '\n# Title\n\nOriginal line, no dashes.\n';
+  const proposed = upstream + '\nAgent added – an en-dash here.\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'n', proposed_body: proposed }, upstream);
+
+  assert.doesNotMatch(result.cleaned_body, /–/, 'en-dash in agent-added line must be stripped');
+  assert.match(result.cleaned_body, /Agent added ,  an en-dash here/);
+  const violation = result.flags.find((f) => f.type === 'em_dash_violation');
+  assert.ok(violation, 'em_dash_violation flag must fire for agent-introduced en-dashes');
+  assert.equal(violation.count, 1);
+});
+
 test('does not flag when agent adds zero new content', () => {
   const upstream = FM + '\n# Title\n\nLine A — with em-dash.\nLine B.\n';
   const proposed = upstream;

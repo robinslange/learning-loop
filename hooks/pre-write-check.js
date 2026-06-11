@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
@@ -182,15 +182,26 @@ runHook(({ tool, input }) => {
     }
   }
 
+  // Same added-only delta rule as the Edit path: a Write that rewrites an
+  // existing note (reflect refinement applies upstream edits via Write) must
+  // not be denied for dashes the note already carries on disk. New files keep
+  // the any-dash deny.
   const emDashLines = findEmDashLines(fmBody);
   if (emDashLines.length > 0) {
-    const list = emDashLines.map((l) => `  line ${l.line}: ${l.text}`).join('\n');
-    deny(
-      `Em/en-dashes in body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
-        `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
-        `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
-    );
-    return;
+    let dashAdded = true;
+    if (existsSync(filePath)) {
+      const { body: onDiskBody } = parseFrontmatter(readFileSync(filePath, 'utf-8'));
+      dashAdded = countExposedDashes(fmBody) > countExposedDashes(onDiskBody);
+    }
+    if (dashAdded) {
+      const list = emDashLines.map((l) => `  line ${l.line}: ${l.text}`).join('\n');
+      deny(
+        `Em/en-dashes in body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
+          `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
+          `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
+      );
+      return;
+    }
   }
 
   const warnings = [];

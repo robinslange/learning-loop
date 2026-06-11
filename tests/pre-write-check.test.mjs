@@ -63,6 +63,10 @@ describe('pre-write-check', () => {
     }
     writeFileSync(join(VAULT, '3-permanent', 'existing-note.md'), '---\ntitle: existing note\n---\n');
     writeFileSync(join(VAULT, '6-writing', 'the-loud-room.md'), '---\ntitle: the loud room\n---\n');
+    writeFileSync(
+      join(VAULT, '3-permanent', 'dashed-note.md'),
+      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\n',
+    );
   });
 
   after(() => {
@@ -204,6 +208,28 @@ describe('pre-write-check', () => {
     const content = '---\ntags: [test]\n---\n\n# Test Note\n\nSources: a blog post.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions-2.md'), content);
     assert.equal(result, null);
+  });
+
+  it('allows a Write to an existing file whose pre-existing em-dash is carried unchanged', () => {
+    const content = '---\ntags: [test]\n---\nThe gate is policy — not aspiration. A new clean sentence.\n';
+    const result = run('Write', join(VAULT, '3-permanent', 'dashed-note.md'), content);
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('denies a Write to an existing dashed file when the new content ADDS another dash', () => {
+    const content =
+      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\nA second dash — added now.\n';
+    const result = run('Write', join(VAULT, '3-permanent', 'dashed-note.md'), content);
+    assert.ok(result, 'expected a deny payload');
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /em.?dash|en.?dash|dash/i);
+  });
+
+  it('denies a Write to a NEW file carrying an em-dash (any-dash deny unchanged)', () => {
+    const content = '---\ntags: [test]\n---\nBrand new note — with a dash.\n';
+    const result = run('Write', join(VAULT, '0-inbox', 'brand-new-dashed.md'), content);
+    assert.ok(result, 'expected a deny payload');
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
   });
 
   it('denies an Edit whose new_string ADDS an em-dash (old_string clean)', () => {

@@ -33,7 +33,7 @@ import { stripFrontmatter } from './lib/markdown-parse.mjs';
 
 const OVERSIZED_THRESHOLD = 0.2;
 const AUTO_REJECT_THRESHOLD = 0.5;
-const EM_DASH = '\u2014';
+const EM_DASH = '[\u2014\u2013]';
 const EM_DASH_REPLACEMENT = ', ';
 
 // Needs the raw frontmatter block verbatim for byte-equality checks — cannot
@@ -192,13 +192,17 @@ export function validateEdit(decision, currentBody) {
 
 function validateCounterpoint(decision) {
   const flags = [];
-  if (!decision.new_note_link_text || !/\[\[.+\]\]/.test(decision.new_note_link_text)) {
+  const newNoteLinkText = stripEmDashes(decision.new_note_link_text).cleaned;
+  const upstreamLinkText = stripEmDashes(decision.upstream_link_text).cleaned;
+  if (!newNoteLinkText || !/\[\[.+\]\]/.test(newNoteLinkText)) {
     flags.push({ type: 'malformed_link', side: 'new_note' });
   }
-  if (!decision.upstream_link_text || !/\[\[.+\]\]/.test(decision.upstream_link_text)) {
+  if (!upstreamLinkText || !/\[\[.+\]\]/.test(upstreamLinkText)) {
     flags.push({ type: 'malformed_link', side: 'upstream' });
   }
   return {
+    new_note_link_text: newNoteLinkText,
+    upstream_link_text: upstreamLinkText,
     flags,
     status: flags.length ? 'malformed' : 'ok',
   };
@@ -336,6 +340,8 @@ function main() {
       const result = validateCounterpoint(d);
       validated.push({
         ...d,
+        new_note_link_text: result.new_note_link_text,
+        upstream_link_text: result.upstream_link_text,
         upstream_path: pair.candidate,
         new_note_path: pair.new_note,
         cosine: pair.cosine,
