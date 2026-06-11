@@ -32,7 +32,9 @@ import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
 // execFileSync budget can be exhausted by the fork alone, flaking them. Raise
 // it file-wide. The one test that genuinely asserts a subprocess *timeout*
 // (sleep-past-budget) sets its own tight budget locally — see that test.
-process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '15000';
+// 5000ms is a generous-but-bounded margin for stub-fork latency now that the
+// Gatekeeper-saturation source (sandbox binary copies) is fixed by Task 1.
+process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '5000';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 const NOTE_REL = '0-inbox/rebuttal-note.md';
@@ -124,6 +126,37 @@ function regexAndNliCtx() {
   };
 }
 
+// runEdgeInfer runs IN-PROCESS here, so logError lines land on our own
+// stderr. Capture them to assert the failure CLASS, not just the shared
+// end-state (a timeout also yields "no NLI edges" — these tests must not
+// pass for the wrong reason).
+function captureStderr() {
+  const chunks = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (chunk, ...rest) => {
+    chunks.push(String(chunk));
+    return orig.call(process.stderr, chunk, ...rest);
+  };
+  return {
+    subprocessErrors: () =>
+      chunks
+        .join('')
+        .split('\n')
+        .filter(Boolean)
+        .flatMap((l) => {
+          try {
+            return [JSON.parse(l)];
+          } catch {
+            return [];
+          }
+        })
+        .filter((e) => e.scope === 'edge-infer.runNliBatch.subprocess'),
+    restore: () => {
+      process.stderr.write = orig;
+    },
+  };
+}
+
 // Tests are intentionally serial: they share STUB_BIN_PATH and edges.db.
 // node:test runs tests within a file serially by default.
 
@@ -143,7 +176,15 @@ test('runEdgeInfer NLI subprocess: timeout does not crash, regex edges survive',
     const dbPath = await seedPriorRegexEdge();
     const ctx = regexAndNliCtx();
 
-    await runEdgeInfer(ctx);
+    const cap = captureStderr();
+    try {
+      await runEdgeInfer(ctx);
+    } finally {
+      cap.restore();
+    }
+    const errs = cap.subprocessErrors();
+    assert.equal(errs.length, 1, `expected exactly one subprocess logError; got ${JSON.stringify(errs)}`);
+    assert.equal(errs[0].meta.err.code, 'ETIMEDOUT', `expected a genuine timeout; got ${JSON.stringify(errs[0].meta.err)}`);
 
     const db2 = await openEdgeDb(dbPath);
     try {
@@ -187,7 +228,16 @@ test('runEdgeInfer NLI subprocess: non-zero exit writes no NLI edges, no crash',
     const dbPath = await seedPriorRegexEdge();
     const ctx = nliOnlyCtx();
 
-    await runEdgeInfer(ctx);
+    const cap = captureStderr();
+    try {
+      await runEdgeInfer(ctx);
+    } finally {
+      cap.restore();
+    }
+    const errs = cap.subprocessErrors();
+    assert.equal(errs.length, 1, `expected exactly one subprocess logError; got ${JSON.stringify(errs)}`);
+    assert.notEqual(errs[0].meta.err.code, 'ETIMEDOUT', 'must be an exit-status failure, not a timeout masquerading as one');
+    assert.match(errs[0].meta.err.message, /Command failed/, `expected execFileSync exit-status error; got ${JSON.stringify(errs[0].meta.err)}`);
 
     const db2 = await openEdgeDb(dbPath);
     try {
@@ -229,7 +279,15 @@ test('runEdgeInfer NLI subprocess: malformed JSON output writes no NLI edges, no
     const dbPath = await seedPriorRegexEdge();
     const ctx = nliOnlyCtx();
 
-    await runEdgeInfer(ctx);
+    const cap = captureStderr();
+    try {
+      await runEdgeInfer(ctx);
+    } finally {
+      cap.restore();
+    }
+    const errs = cap.subprocessErrors();
+    assert.equal(errs.length, 1, `expected exactly one subprocess logError; got ${JSON.stringify(errs)}`);
+    assert.equal(errs[0].meta.err.name, 'SyntaxError', `expected a JSON parse failure; got ${JSON.stringify(errs[0].meta.err)}`);
 
     const db2 = await openEdgeDb(dbPath);
     try {

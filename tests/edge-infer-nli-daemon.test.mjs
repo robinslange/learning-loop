@@ -40,8 +40,10 @@ import { __resetBinaryCacheForTesting } from '../scripts/lib/binary.mjs';
 // These tests fork the real ll-search stub to exercise the daemon->subprocess
 // fallback. The production 1500ms execFileSync budget is too tight under a
 // saturating parallel suite (the stub spawn itself can exceed it), so the test
-// raises it. Production is unaffected — it never sets this var.
-process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '15000';
+// raises it. 5000ms is a generous-but-bounded margin for stub-fork latency now
+// that the Gatekeeper-saturation source (sandbox binary copies) is fixed.
+// Production is unaffected — it never sets this var.
+process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS = process.env.LL_NLI_SUBPROCESS_TIMEOUT_MS || '5000';
 
 const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
 const NOTE_REL = '0-inbox/rebuttal-note.md';
