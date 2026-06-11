@@ -13,7 +13,7 @@ import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
 
-  const { findBinary: findBinaryShared } = await import('../lib/common.mjs');
+  const { findBinary: findBinaryShared, recordDetachedChild } = await import('../lib/common.mjs');
   const binary = findBinaryShared();
 
   const DB_PATH = join(vaultRoot, '.vault-search', 'vault-index.db');
@@ -171,6 +171,7 @@ export async function run(ctx) {
           env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
         });
         child.unref();
+        recordDetachedChild(child.pid);
       } catch (err) {
         logError('session-start.watch-daemon.spawn', err);
       }

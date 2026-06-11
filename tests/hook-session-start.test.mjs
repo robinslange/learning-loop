@@ -630,6 +630,66 @@ test(
   },
 );
 
+// ---------------------------------------------------------------------------
+// W2 ENOTEMPTY class: every detached spawn must be recorded via
+// recordDetachedChild so the harness can reap it before rmSync walks the
+// sandbox. The watch-daemon spawn was the only one missing.
+// ---------------------------------------------------------------------------
+test(
+  'watch-daemon spawn is recorded in the detached-child pidfile',
+  { timeout: 12000 },
+  async () => {
+    const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-rec-'));
+    const vsDir = join(vaultDir, '.vault-search');
+    mkdirSync(vsDir, { recursive: true });
+    writeFileSync(join(vsDir, 'vault-index.db'), '');
+
+    const r = runHook(HOOK, {
+      env: { VAULT_PATH: vaultDir },
+      stdin: '',
+      seed: (pluginDataDir) => {
+        seedUpdateCheck(pluginDataDir);
+        const bin = join(pluginDataDir, 'bin', 'll-search');
+        // The fake daemon writes its own pid where the real one would, so the
+        // test can match it against the recorded detached-child pids. Guard on
+        // $1: vault-search.mjs invokes the same stub with 'intentions' and
+        // would otherwise clobber the pidfile with a grandchild pid.
+        writeFileSync(
+          bin,
+          `#!/bin/sh\n[ "$1" = watch ] && echo $$ > "${join(vsDir, 'watch.pid')}"\nexit 0\n`,
+          { mode: 0o755 },
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      let watchPid = null;
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline) {
+        try {
+          const raw = readFileSync(join(vsDir, 'watch.pid'), 'utf8').trim();
+          if (raw) {
+            watchPid = Number(raw);
+            break;
+          }
+        } catch {}
+        await new Promise((resolveSleep) => setTimeout(resolveSleep, 50));
+      }
+      assert.ok(watchPid, 'fake daemon never wrote its pidfile');
+      const childPidFile = join(r.sandboxRoot, '.child-pids');
+      assert.ok(existsSync(childPidFile), 'detached children must be recorded');
+      const recorded = readFileSync(childPidFile, 'utf8').split('\n').filter(Boolean).map(Number);
+      assert.ok(
+        recorded.includes(watchPid),
+        `watch-daemon child ${watchPid} must be recorded (got: ${recorded.join(', ')})`,
+      );
+    } finally {
+      r.cleanup();
+      rmSync(vaultDir, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   'LL_SESSION_TMP_DIR redirects the legacy tmp session-id write',
   { timeout: 12000 },
