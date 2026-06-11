@@ -13,12 +13,17 @@ import { getSessionId } from '../scripts/lib/session.mjs';
 let pdRoot;
 let savedPluginData;
 let savedHarnessSid;
+let sessionTmpDir;
+let savedSessionTmpDir;
 
 before(() => {
   savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
   savedHarnessSid = process.env.CLAUDE_CODE_SESSION_ID;
+  savedSessionTmpDir = process.env.LL_SESSION_TMP_DIR;
   pdRoot = mkdtempSync(join(tmpdir(), 'll-session-test-pd-'));
+  sessionTmpDir = mkdtempSync(join(tmpdir(), 'll-session-tmp-'));
   process.env.CLAUDE_PLUGIN_DATA = pdRoot;
+  process.env.LL_SESSION_TMP_DIR = sessionTmpDir;
   // The harness session id is the canonical key; clear it for the file-based
   // tests below so they exercise the on-disk fallbacks, and set it explicitly
   // in the tests that assert the env-first behavior.
@@ -27,14 +32,29 @@ before(() => {
 
 after(() => {
   rmSync(pdRoot, { recursive: true, force: true });
+  rmSync(sessionTmpDir, { recursive: true, force: true });
   if (savedPluginData !== undefined) process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
   else delete process.env.CLAUDE_PLUGIN_DATA;
   if (savedHarnessSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedHarnessSid;
   else delete process.env.CLAUDE_CODE_SESSION_ID;
+  if (savedSessionTmpDir !== undefined) process.env.LL_SESSION_TMP_DIR = savedSessionTmpDir;
+  else delete process.env.LL_SESSION_TMP_DIR;
+});
+
+test('getSessionId reads the tmp candidate from LL_SESSION_TMP_DIR when set', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-session-inject-'));
+  process.env.LL_SESSION_TMP_DIR = dir;
+  writeFileSync(join(dir, 'learning-loop-session-id'), 'injected-dir-id');
+  try {
+    assert.equal(getSessionId(), 'injected-dir-id');
+  } finally {
+    process.env.LL_SESSION_TMP_DIR = sessionTmpDir;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('getSessionId reads the unsuffixed tmp file', () => {
-  const path = join(tmpdir(), 'learning-loop-session-id');
+  const path = join(sessionTmpDir, 'learning-loop-session-id');
   writeFileSync(path, 'session-from-tmp');
   try {
     assert.equal(getSessionId(), 'session-from-tmp');
@@ -44,12 +64,12 @@ test('getSessionId reads the unsuffixed tmp file', () => {
 });
 
 test('getSessionId returns "unknown" when no file is present', () => {
-  rmSync(join(tmpdir(), 'learning-loop-session-id'), { force: true });
+  rmSync(join(sessionTmpDir, 'learning-loop-session-id'), { force: true });
   assert.equal(getSessionId(), 'unknown');
 });
 
 test('getSessionId trims trailing whitespace from file contents', () => {
-  const path = join(tmpdir(), 'learning-loop-session-id');
+  const path = join(sessionTmpDir, 'learning-loop-session-id');
   writeFileSync(path, 'session-with-newline\n');
   try {
     assert.equal(getSessionId(), 'session-with-newline');
@@ -59,7 +79,7 @@ test('getSessionId trims trailing whitespace from file contents', () => {
 });
 
 test('getSessionId returns "unknown" when the tmp file is whitespace-only', () => {
-  const path = join(tmpdir(), 'learning-loop-session-id');
+  const path = join(sessionTmpDir, 'learning-loop-session-id');
   writeFileSync(path, '   \n');
   try {
     assert.equal(getSessionId(), 'unknown');
@@ -76,7 +96,7 @@ test(
     const sessionDir = join(pdRoot, 'session');
     mkdirSync(sessionDir, { recursive: true });
     const pdId = join(sessionDir, 'id');
-    const fallback = join(tmpdir(), 'learning-loop-session-id');
+    const fallback = join(sessionTmpDir, 'learning-loop-session-id');
     writeFileSync(pdId, 'unreadable');
     chmodSync(pdId, 0o000);
     writeFileSync(fallback, 'recovered');
@@ -97,7 +117,7 @@ test(
 // because os.tmpdir() honors $TMPDIR (a hook subprocess and the interactive
 // shell disagree) while plugin-data does not.
 test('getSessionId prefers plugin-data/session/id over the tmp file', () => {
-  const tmpFile = join(tmpdir(), 'learning-loop-session-id');
+  const tmpFile = join(sessionTmpDir, 'learning-loop-session-id');
   writeFileSync(tmpFile, 'tmp-loses');
   const sessionDir = join(pdRoot, 'session');
   mkdirSync(sessionDir, { recursive: true });
@@ -111,7 +131,7 @@ test('getSessionId prefers plugin-data/session/id over the tmp file', () => {
 });
 
 test('getSessionId falls through to tmp when plugin-data has no session id', () => {
-  const tmpFile = join(tmpdir(), 'learning-loop-session-id');
+  const tmpFile = join(sessionTmpDir, 'learning-loop-session-id');
   writeFileSync(tmpFile, 'tmp-fallback');
   try {
     assert.equal(getSessionId(), 'tmp-fallback');

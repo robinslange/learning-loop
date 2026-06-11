@@ -42,7 +42,11 @@ export function getSessionId() {
   const candidates = [];
   const pd = resolvePluginData();
   if (pd) candidates.push(join(DATA_PATHS.session(pd), 'id'));
-  candidates.push(join(tmpdir(), 'learning-loop-session-id'));
+  // Test seam: the tmp candidate is machine-global (a live session's marker).
+  // LL_SESSION_TMP_DIR points tests at a private dir so they never read or
+  // delete the real file.
+  const tmpBase = (process.env.LL_SESSION_TMP_DIR || '').trim() || tmpdir();
+  candidates.push(join(tmpBase, 'learning-loop-session-id'));
 
   for (const path of candidates) {
     if (!existsSync(path)) continue;

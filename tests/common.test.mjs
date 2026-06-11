@@ -38,24 +38,26 @@ describe('provenance dedupe', () => {
 
 describe('getSessionId fallback chain', () => {
   // The two paths tried, in order. We poke ppid-suffixed + the legacy file
-  // into tmpdir() to exercise each fallback rung. Missing files must not
+  // into a PRIVATE tmp dir to exercise each fallback rung. Missing files must not
   // log — provenance-emit was spewing ENOENT lines to stderr because every
   // fallback step ran through a `try { read } catch { logError }` block
   // even when "file absent" was the entirely expected branch.
-  const legacyPath = join(tmpdir(), 'learning-loop-session-id');
-  // Save original contents so we restore the developer's real session id and
-  // env var when the suite finishes. Clear the env var so these tests exercise
-  // the file fallback rung (getSessionId() prefers $CLAUDE_CODE_SESSION_ID).
-  let savedLegacy = null;
+  let sessionTmpDir;
+  let legacyPath;
   let savedEnvSid;
+  let savedSessionTmpDir;
   before(() => {
-    if (existsSync(legacyPath)) savedLegacy = readFileSync(legacyPath, 'utf8');
+    sessionTmpDir = mkdtempSync(join(tmpdir(), 'll-common-session-tmp-'));
+    legacyPath = join(sessionTmpDir, 'learning-loop-session-id');
+    savedSessionTmpDir = process.env.LL_SESSION_TMP_DIR;
+    process.env.LL_SESSION_TMP_DIR = sessionTmpDir;
     savedEnvSid = process.env.CLAUDE_CODE_SESSION_ID;
     delete process.env.CLAUDE_CODE_SESSION_ID;
   });
   after(() => {
-    if (savedLegacy !== null) writeFileSync(legacyPath, savedLegacy);
-    else if (existsSync(legacyPath)) unlinkSync(legacyPath);
+    rmSync(sessionTmpDir, { recursive: true, force: true });
+    if (savedSessionTmpDir !== undefined) process.env.LL_SESSION_TMP_DIR = savedSessionTmpDir;
+    else delete process.env.LL_SESSION_TMP_DIR;
     if (savedEnvSid !== undefined) process.env.CLAUDE_CODE_SESSION_ID = savedEnvSid;
     else delete process.env.CLAUDE_CODE_SESSION_ID;
   });
