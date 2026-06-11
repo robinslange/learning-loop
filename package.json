@@ -10,9 +10,9 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs tests/**/*.test.mjs",
     "lint": "eslint .",
-    "bench": "node scripts/bench.mjs",
-    "bench:quick": "node scripts/bench.mjs --quick",
-    "bench:baseline": "node scripts/bench.mjs --save-baseline"
+    "bench": "node bench/bench.mjs",
+    "bench:quick": "node bench/bench.mjs --quick",
+    "bench:baseline": "node bench/bench.mjs --save-baseline"
   },
   "devDependencies": {
     "eslint": "^9.39.4",

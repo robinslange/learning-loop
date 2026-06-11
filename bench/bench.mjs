@@ -6,27 +6,25 @@
  * JSON output suitable for comparison and baseline storage.
  *
  * Usage:
- *   node scripts/bench.mjs                    # full bench (long)
- *   node scripts/bench.mjs --quick            # 1k notes, fewer iterations
- *   node scripts/bench.mjs --save-baseline    # write to bench/baselines/YYYY-MM-DD.json
- *   node scripts/bench.mjs --compare <path>   # compare against saved baseline
- *   node scripts/bench.mjs --rust-only        # skip plugin bench
- *   node scripts/bench.mjs --plugin-only      # skip Rust bench
+ *   node bench/bench.mjs                    # full bench (long)
+ *   node bench/bench.mjs --quick            # 1k notes, fewer iterations
+ *   node bench/bench.mjs --save-baseline    # write to bench/baselines/YYYY-MM-DD.json
+ *   node bench/bench.mjs --compare <path>   # compare against saved baseline
+ *   node bench/bench.mjs --rust-only        # skip plugin bench
+ *   node bench/bench.mjs --plugin-only      # skip Rust bench
  */
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve } from 'node:path';
 import { cpus, totalmem } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { env as pluginEnv, spawnEnv } from './lib/env.mjs';
-import { logError } from './lib/log.mjs';
-import { safeLoad } from './lib/safe-load.mjs';
+import { env as pluginEnv, spawnEnv } from '../scripts/lib/env.mjs';
+import { logError } from '../scripts/lib/log.mjs';
+import { safeLoad } from '../scripts/lib/safe-load.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, '..');
+const BENCH_DIR = import.meta.dirname;
+const REPO_ROOT = resolve(BENCH_DIR, '..');
 const NATIVE_DIR = join(REPO_ROOT, 'native');
-const BENCH_DIR = join(REPO_ROOT, 'bench');
 const BASELINES_DIR = join(BENCH_DIR, 'baselines');
 
 const SCHEMA_VERSION = 1;
@@ -368,6 +366,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  process.stderr.write(`scripts/bench.mjs failed: ${err.message}\n`);
+  process.stderr.write(`bench/bench.mjs failed: ${err.message}\n`);
   process.exit(1);
 });

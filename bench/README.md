@@ -23,9 +23,9 @@ npm run bench:quick -- --save-baseline
 | `npm run bench` | Full bench run |
 | `npm run bench:quick` | Quick run (1k notes, reduced iterations) |
 | `npm run bench:baseline` | Full run + save to `bench/baselines/YYYY-MM-DD.json` |
-| `node scripts/bench.mjs --compare bench/baselines/2026-05-11.json` | Compare against baseline |
-| `node scripts/bench.mjs --rust-only` | Skip plugin bench |
-| `node scripts/bench.mjs --plugin-only` | Skip Rust bench |
+| `node bench/bench.mjs --compare bench/baselines/2026-05-11.json` | Compare against baseline |
+| `node bench/bench.mjs --rust-only` | Skip plugin bench |
+| `node bench/bench.mjs --plugin-only` | Skip Rust bench |
 
 ## With real ONNX embeddings
 
@@ -184,7 +184,7 @@ After a significant optimisation (Track 1E / 1F), regenerate with real ONNX:
 
 ```bash
 node bench/fixtures/generate-vault.mjs --count 10000 --out bench/fixtures/.cache/vault-10k --seed 20260511
-LL_BENCH_REAL_ONNX=1 node scripts/bench.mjs --save-baseline
+LL_BENCH_REAL_ONNX=1 node bench/bench.mjs --save-baseline
 ```
 
 Commit `bench/baselines/{date}.json`. The old baseline stays in the repo
