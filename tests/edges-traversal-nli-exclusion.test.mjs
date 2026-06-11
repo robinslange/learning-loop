@@ -18,6 +18,9 @@ import {
 } from '../scripts/lib/edges.mjs';
 
 async function freshDb(t) {
+  // openEdgeDb on a nonexistent path gives an in-memory sql.js db; queries
+  // read it directly, so no saveDb roundtrip is needed (unlike the
+  // edges-symmetric.test.mjs idiom).
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-nli-'));
   const db = await openEdgeDb(join(dir, 'edges.db'));
   t.after(() => {
@@ -54,7 +57,7 @@ test('getSoleJustificationDependents returns the edge when notePath is the only 
   addEdge(db, { fromPath: 'a.md', toPath: 't.md', edgeType: 'evidence_for' });
 
   const rows = getSoleJustificationDependents(db, 'a.md');
-  assert.equal(rows.length, 1);
+  assert.equal(rows.length, 1, `expected 1 sole-justification row; got ${JSON.stringify(rows)}`);
   assert.equal(rows[0].to_path, 't.md');
   assert.equal(rows[0].edge_type, 'evidence_for');
 });
@@ -82,7 +85,8 @@ test('a second justifier that is nli-sourced does NOT rescue the target — stil
 
 test('getSoleJustificationDependents ignores non-justifying edge types from notePath', async (t) => {
   const db = await freshDb(t);
-  // 'related' is not in VALID_TYPES; using 'associative' as the non-justifying type.
+  // 'associative' is a valid edge type but is NOT in the function's
+  // ('evidence_for', 'supports') justification whitelist.
   addEdge(db, { fromPath: 'a.md', toPath: 't.md', edgeType: 'associative' });
 
   const rows = getSoleJustificationDependents(db, 'a.md');
