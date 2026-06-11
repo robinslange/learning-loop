@@ -97,6 +97,29 @@ Spawn both subagents in the same turn (a single message with two Agent tool call
 
 While agents work, confirm parameters with the user if any were ambiguous.
 
+### Step 1.5: Verify the Research Brief
+
+Run this after EVERY `discovery-researcher` return — orientation and every loop round — before presenting findings. The researcher returns an UNVERIFIED brief; subagents cannot spawn subagents, so this loop is the only verification gate.
+
+1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with:
+   - **note_content**: the full research brief, verbatim (including the Verified Sources table)
+   Resolve all path placeholders in the prompt to literal absolute paths first (see `agents/_skills/vault-io.md` → Placeholders).
+2. **PASS**: proceed to presentation.
+3. **ISSUES FOUND**: revise the brief yourself — you hold the full brief and the verifier's issue list:
+   - **Dead URL**: remove the source and any claims that depended solely on it.
+   - **Unsupported claim**: reword the claim to match what the source actually says, or move it to `Gaps & Uncertainties`.
+   - **Fabricated reference**: remove entirely. Never repair a fabricated source.
+   - **Missing citation**: move the claim to `Gaps & Uncertainties`.
+   Then spawn a fresh `note-verifier` on the revised brief.
+4. **Max 3 verification rounds per brief.** If issues persist, append an `### Unresolved Verification Issues` section to the brief and tell the user explicitly which findings are unverified.
+5. After the loop settles, emit a provenance event (silently):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|ISSUES_FOUND","rounds":N}'
+```
+
+Findings never reach the user or the vault unverified.
+
 ### Step 2: Present Orientation
 
 Combine agent results. Present in the chosen tone:
@@ -124,8 +147,9 @@ Repeat until the user says "done", "wrap up", or similar:
    - The new angle/question
    - `prior_rounds`: summary of what's been covered (prevent repetition)
    - `existing_knowledge`: vault scout findings + prior round findings
-3. **Present**: deliver findings in chosen style and tone
-4. **Capture** (if `full` mode): after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body: don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
+3. **Verify**: run Step 1.5 on the returned brief
+4. **Present**: deliver findings in chosen style and tone
+5. **Capture** (if `full` mode): after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body: don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
 
 **Steering keywords the skill should recognize:**
 - "go deeper" / "more on that" → same angle, increase detail
@@ -185,7 +209,12 @@ Sources found: N (run /literature to capture)
 - Pass topic, angle, existing_knowledge, prior_rounds
 - Search intensity is self-regulating via mechanical convergence detection
 - Use results as the raw material for presentation
-- **Internally spawns `note-verifier`** on its own findings before returning. Revises and re-verifies up to 3 times. All findings presented to the user are pre-verified.
+- Returns an UNVERIFIED brief. Run Step 1.5 (note-verifier loop) on every brief before presenting — subagents cannot spawn subagents, so verification is this skill's job.
+
+### note-verifier
+- Launch from Step 1.5 after every researcher return
+- Pass the full brief as `note_content`, placeholders resolved to literal paths
+- PASS/ISSUES verdicts drive the revise-and-re-verify loop (max 3 rounds)
 
 **Always spawn agents in the same turn when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. Use a single message with multiple Agent tool calls.
 

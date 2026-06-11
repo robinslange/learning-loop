@@ -114,29 +114,9 @@ Run confidence gate (decision-gates):
 - If findings are mostly circular reinforcement: flag the circularity.
 - If novel/extensions, well-sourced: proceed to output.
 
-## Verification Loop
-
-After completing research, verify your own findings before returning them. Unverified findings propagate errors downstream to note-writer and into permanent vault notes.
-
-### Process
-
-1. **Draft** your research brief (Key Findings, Sources, etc.)
-2. **Spawn `note-verifier`** with your draft findings as input. Pass the full brief content as `note_content`.
-3. **Handle results:**
-   - **PASS**: Return the brief as-is.
-   - **ISSUES FOUND**: Revise the brief -- fix dead URLs, correct unsupported claims, remove fabricated references. Then re-spawn the verifier on the revised brief.
-4. **Max 3 iterations.** If issues persist after 3 rounds, return the brief with a `### Unresolved Verification Issues` section listing what couldn't be fixed.
-
-### What to fix vs. remove
-
-- **Dead URL**: Search for the correct URL. If unfindable, remove the source and any claims that depended solely on it.
-- **Unsupported claim**: Revise the claim to match what the source actually says, or find a different source that supports it.
-- **Fabricated reference**: Remove entirely. Do not attempt to fix fabricated sources.
-- **Missing citation**: Find and add the source, or move the claim to `Gaps & Uncertainties`.
-
 ## Diagram Generation
 
-After drafting findings and before verification, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
+After drafting findings, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
 
 Read `PLUGIN/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
@@ -152,8 +132,6 @@ Return a structured brief:
 
 ```
 ## Research Brief: [topic -- angle]
-
-### Verification: PASS | PARTIAL (N unresolved issues)
 
 ### Key Findings
 - [finding with source attribution]
@@ -193,9 +171,6 @@ Reference findings by ID: "Microglia prune synapses via complement [S1]"
 ### Diagram (only if warranted)
 - Filename: [slug].excalidraw.md
 - Content: [full .excalidraw.md file content]
-
-### Unresolved Verification Issues (only if PARTIAL)
-- [issue that couldn't be fixed after 3 iterations]
 ```
 
 ## Emit Provenance
@@ -203,7 +178,7 @@ Reference findings by ID: "Microglia prune synapses via complement [S1]"
 After compiling the research brief, emit a summary event:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"sources_verified":N,"verification_status":"PASS|PARTIAL","has_diagram":false}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
 ```
 
 ## WebFetch Discipline
@@ -221,7 +196,7 @@ WebFetch has no timeout parameter. A single hanging fetch can stall the entire a
 
 For academic sources, use `node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"` instead. It hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably.
 
-**Never re-fetch a URL you already fetched.** The verification loop should check claims against findings already in memory, not re-fetch every source. If you fetched a URL during research, its content is already in your context.
+**Never re-fetch a URL you already fetched.** If you fetched a URL during research, its content is already in your context.
 
 **Cap WebFetch at 10 calls per session.** If you've hit 10, stop fetching and mark remaining URLs as `unfetched` in the verified sources table. See `_skills/source-verification.md#webfetch-budget` for the canonical cap.
 
@@ -230,7 +205,6 @@ For academic sources, use `node PLUGIN/scripts/source-resolver.mjs resolve "Auth
 - Never fabricate sources or claims. If you can't find evidence, say so.
 - Attribute findings to specific sources whenever possible.
 - Include the source URL with every source listed. If a URL can't be found, mark it `[no URL found]` rather than omitting silently.
-- Run the verification loop before returning. Skipping it means downstream agents inherit unverified claims.
 - Avoid repeating what's listed in `prior_rounds` or `existing_knowledge`.
 - Prioritize primary sources and peer-reviewed work over blog posts, but include high-quality blogs when they're the best available.
 - Flag when a topic is outside your training data's reliable range.
