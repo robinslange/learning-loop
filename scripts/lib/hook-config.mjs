@@ -19,7 +19,7 @@
 export const HookConfig = Object.freeze({
   // --- Timeouts (ms) ---
   LABEL_TIMEOUT_MS: 3000,
-  QUERY_TIMEOUT_MS: 3000,
+  QUERY_TIMEOUT_MS: 2000,
   DEPS_CHECK_TIMEOUT_MS: 5000,
   DETECTOR_TIMEOUT_MS: 200,
   SNAPSHOT_TIMEOUT_MS: 10000,

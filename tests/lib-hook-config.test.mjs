@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 
 test('HookConfig is frozen', () => {
@@ -73,4 +74,18 @@ test('CONVERGENCE_TTL_MS is exactly 7 days in milliseconds', () => {
 
 test('DEDUPE_WINDOW_MS is exactly 3 minutes in milliseconds', () => {
   assert.equal(HookConfig.DEDUPE_WINDOW_MS, 3 * 60 * 1000);
+});
+
+test('pre-write-check inner query budget leaves headroom inside its hooks.json timeout', () => {
+  const hooksJson = JSON.parse(
+    readFileSync(new URL('../hooks/hooks.json', import.meta.url), 'utf8'),
+  );
+  const entry = hooksJson.hooks.PreToolUse.find((e) => e.matcher.split('|').includes('Write'));
+  const hookBudgetMs = entry.hooks[0].timeout * 1000;
+  assert.ok(
+    HookConfig.QUERY_TIMEOUT_MS < hookBudgetMs,
+    `QUERY_TIMEOUT_MS (${HookConfig.QUERY_TIMEOUT_MS}ms) must be strictly inside the ` +
+      `pre-write-check hook budget (${hookBudgetMs}ms): an inner exec that eats the whole ` +
+      `window gets the hook killed, losing every warning`,
+  );
 });
