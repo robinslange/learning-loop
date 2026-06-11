@@ -5,8 +5,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, readdirSync, mkdirSync, existsSync, rmSync, utimesSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, existsSync, rmSync, utimesSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = new URL('../hooks/session-start.js', import.meta.url).pathname;
@@ -427,7 +428,7 @@ test(
   { timeout: 12000 },
   () => {
     const r = runHook(HOOK, {
-      stdin: { session_id: 'ignored-stdin-id' },
+      stdin: { source: 'startup' },
       env: {
         VAULT_PATH: VAULT,
         CLAUDE_PROJECT_DIR: '/tmp/test-project-sid',
@@ -454,12 +455,21 @@ test(
 );
 
 test(
-  'session-start falls back to a generated id when CLAUDE_CODE_SESSION_ID is absent',
+  'session-start falls back to a generated id when no payload or env session id exists',
   { timeout: 12000 },
   () => {
+    // LL_SESSION_TMP_DIR isolates the legacy tmp candidate: without it,
+    // getSessionId() in the hook child could resolve a live session's
+    // machine-global /tmp/learning-loop-session-id instead of falling through
+    // to the generated id.
+    const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-fallback-'));
     const r = runHook(HOOK, {
-      stdin: { session_id: 'ignored' },
-      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-sid2' },
+      stdin: { source: 'startup' },
+      env: {
+        VAULT_PATH: VAULT,
+        CLAUDE_PROJECT_DIR: '/tmp/test-project-sid2',
+        LL_SESSION_TMP_DIR: isolatedTmp,
+      },
       seed: (pd) => seedUpdateCheck(pd),
     });
     try {
@@ -473,6 +483,78 @@ test(
       );
     } finally {
       r.cleanup();
+      rmSync(isolatedTmp, { recursive: true, force: true });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// M4: the stdin hook payload's session_id is the canonical key — it must win
+// over $CLAUDE_CODE_SESSION_ID and land in both the plugin-data session id and
+// the memory-snapshot marker that stop-nudge diffs against.
+// ---------------------------------------------------------------------------
+test(
+  'session-start prefers the stdin payload session_id and stamps it everywhere — M4',
+  { timeout: 12000 },
+  () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-proj-'));
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const r = runHook(HOOK, {
+      env: {
+        VAULT_PATH: VAULT,
+        CLAUDE_PROJECT_DIR: projectDir,
+        CLAUDE_CODE_SESSION_ID: 'env-id-should-lose',
+      },
+      stdin: { session_id: 'payload-id-wins', source: 'startup' },
+      seed: (pd, sandboxRoot) => {
+        seedUpdateCheck(pd);
+        const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        writeFileSync(join(memDir, 'a.md'), '# x');
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.equal(
+        readFileSync(join(r.pluginDataDir, 'session', 'id'), 'utf8').trim(),
+        'payload-id-wins',
+        'plugin-data session id must carry the payload id',
+      );
+      assert.ok(
+        existsSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-payload-id-wins')),
+        'memory snapshot must be keyed by the payload id in plugin-data',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'LL_SESSION_TMP_DIR redirects the legacy tmp session-id write',
+  { timeout: 12000 },
+  () => {
+    const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-seam-'));
+    const r = runHook(HOOK, {
+      env: {
+        VAULT_PATH: VAULT,
+        LL_SESSION_TMP_DIR: isolatedTmp,
+        CLAUDE_CODE_SESSION_ID: 'seam-test-id',
+      },
+      stdin: '',
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.equal(
+        readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8').trim(),
+        'seam-test-id',
+        'writer must honor the LL_SESSION_TMP_DIR seam',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(isolatedTmp, { recursive: true, force: true });
     }
   },
 );

@@ -11,7 +11,13 @@ import { warnOnce } from '../scripts/lib/warn-once.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import { resolvePluginData, resolveVaultPath, findEpisodicBinary, home } from './lib/common.mjs';
+import {
+  resolvePluginData,
+  resolveVaultPath,
+  findEpisodicBinary,
+  home,
+  readStdin,
+} from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
 import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
@@ -38,18 +44,34 @@ const ctx = {
   // Resolve tmp the same way the canonical readers do: bare tmpdir()
   // (scripts/lib/session.mjs:getSessionId and hooks/stop-nudge.js both use
   // `const tmp = tmpdir()`). vault-snapshot.mjs writes learning-loop-session-id
-  // and the memory snapshots under ctx.tmp; those are read only by other hook
-  // subprocesses, which — like this one — don't inherit the interactive shell's
-  // $TMPDIR, so all agree on /tmp. (The /reflect marker handshake, whose reader
-  // IS the interactive shell, is anchored in plugin-data instead of tmp for
-  // exactly this reason — see hooks/modules/reflect-track.mjs.)
+  // under ctx.tmp; that is read only by other hook subprocesses, which — like
+  // this one — don't inherit the interactive shell's $TMPDIR, so all agree on
+  // /tmp. (The /reflect marker handshake, whose reader IS the interactive
+  // shell, is anchored in plugin-data instead of tmp for exactly this reason —
+  // see hooks/modules/reflect-track.mjs.)
   tmp: tmpdir(),
   context: '',
   depsAllSatisfied: true,
   depsMissing: '',
   updateCacheFile,
   sessionId: null,
+  payloadSessionId: '',
 };
+
+// SessionStart payload: the harness writes { session_id, source, ... } on
+// stdin. The payload id is the canonical session key (M4) — prefer it over
+// $CLAUDE_CODE_SESSION_ID, which is absent in some hosts.
+try {
+  const raw = await readStdin();
+  if (raw.trim()) {
+    const payload = JSON.parse(raw);
+    if (payload && typeof payload.session_id === 'string') {
+      ctx.payloadSessionId = payload.session_id.trim();
+    }
+  }
+} catch (err) {
+  logError('session-start.payload', err);
+}
 
 // Order matters: cache-cleanup before update-check (uses cache parent).
 await runCacheCleanup(ctx);

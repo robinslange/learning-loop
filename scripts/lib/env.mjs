@@ -60,6 +60,12 @@ export const env = Object.freeze({
   // --- Diagnostics ---
   LL_HOOK_DEBUG: isTruthy(process.env.LL_HOOK_DEBUG),
 
+  // --- Test seam ---
+  // Redirects the legacy tmp session-id file (writer in
+  // hooks/session-start/vault-snapshot.mjs, reader in scripts/lib/session.mjs)
+  // so tests never touch the machine-global file.
+  LL_SESSION_TMP_DIR: pick('LL_SESSION_TMP_DIR', ''),
+
   // --- Reflect new-notes handshake ---
   // Explicit session id for the /reflect new-notes marker. Set by the reflect
   // skill (and sweep-hook-replay, which forwards it) so a replayed Write appends
