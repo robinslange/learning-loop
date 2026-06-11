@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, utimesSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook, sweepStaleSandboxes } from './helpers/hook-runner.mjs';
@@ -53,10 +53,10 @@ test('cleanup removes the sandbox root', () => {
 });
 
 test('sweepStaleSandboxes removes ll-hook-sb-* older than 1h, keeps fresh ones', () => {
-  const oldDir = join(tmpdir(), 'll-hook-sb-stale-fixture');
-  const freshDir = join(tmpdir(), 'll-hook-sb-fresh-fixture');
-  mkdirSync(oldDir, { recursive: true });
-  mkdirSync(freshDir, { recursive: true });
+  // mkdtemp-unique names: fixed fixture names would race with a parallel
+  // session running this same suite.
+  const oldDir = mkdtempSync(join(tmpdir(), 'll-hook-sb-stale-'));
+  const freshDir = mkdtempSync(join(tmpdir(), 'll-hook-sb-fresh-'));
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
   utimesSync(oldDir, twoHoursAgo, twoHoursAgo);
   try {

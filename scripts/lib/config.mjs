@@ -67,6 +67,22 @@ export function getPluginData() {
 // historical naming difference.
 export const resolvePluginData = getPluginData;
 
+/**
+ * Never resurrect a deleted plugin-data: session-start spawns detached
+ * workers (provenance emitter, intentions refresh, dream-gate) that can
+ * outlive a test sandbox's cleanup, and an unguarded recursive mkdir would
+ * re-create the rmSync'd sandbox root (the ll-hook-sb-* leak, 2026-06).
+ * Writers may create SUBdirs, but must call this and no-op when the root is
+ * gone. Real installs always have an existing plugin-data, so they never
+ * no-op. Accepted race: this check can pass and the dir be rmSync'd before
+ * the subsequent mkdir lands; that residue is reclaimed by the test
+ * harness's 1h startup sweep.
+ */
+export function pluginDataExists() {
+  const pd = getPluginData();
+  return Boolean(pd && existsSync(pd));
+}
+
 function readJsonStripBom(path) {
   let raw = readFileSync(path, 'utf-8');
   if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
@@ -160,6 +176,7 @@ export function resetConfigCache() {
 }
 
 function migrateConfig(from, to) {
+  if (!pluginDataExists()) return;
   mkdirSync(dirname(to), { recursive: true });
   copyFileSync(from, to);
   process.stderr.write(`[config] Migrated config to ${to}\n`);

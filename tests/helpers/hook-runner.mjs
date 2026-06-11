@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, statSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 
 const PKG_VERSION = JSON.parse(
@@ -76,7 +77,7 @@ function resolveRealBinary() {
     const pd = resolvePluginData();
     if (pd) candidates.push(join(pd, 'bin', 'll-search'));
   } catch {}
-  candidates.push(new URL('../../native/target/release/ll-search', import.meta.url).pathname);
+  candidates.push(fileURLToPath(new URL('../../native/target/release/ll-search', import.meta.url)));
   realBinaryPath = candidates.find((c) => existsSync(c)) || null;
   return realBinaryPath;
 }

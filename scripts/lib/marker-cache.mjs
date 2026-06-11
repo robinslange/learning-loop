@@ -9,6 +9,7 @@
 import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logError } from './log.mjs';
+import { pluginDataExists } from './config.mjs';
 import { DATA_PATHS } from './paths.mjs';
 
 // 25 hours: ensures at least one session per day refreshes, even on weekly cadence.
@@ -47,6 +48,7 @@ export function readMarker(path) {
 // retry. If you ever need observable write failures, consider setting
 // process.exitCode and inspecting it from the parent.
 export function writeMarker(path, value) {
+  if (!pluginDataExists()) return;
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(value));

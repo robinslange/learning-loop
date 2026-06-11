@@ -6,24 +6,29 @@
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
-import { getPluginData } from './lib/config.mjs';
+import { getPluginData, pluginDataExists } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
 
-const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
+// Resolved lazily, not at module load: getPluginData() can be null, and an
+// eager join would throw before emitProvenance's guard ever runs.
+function provenanceDir() {
+  return DATA_PATHS.provenance(getPluginData());
+}
+
 const TEMPLATE_DIR = join(import.meta.dirname, '..', 'provenance');
 
 function getCurrentMonthFile() {
   const now = new Date();
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  return join(PROVENANCE_DIR, `events-${month}.jsonl`);
+  return join(provenanceDir(), `events-${month}.jsonl`);
 }
 
 let _seeded = false;
 function seedTemplates() {
   if (_seeded) return;
   for (const name of ['learned-patterns.md', 'retired-patterns.md']) {
-    const dest = join(PROVENANCE_DIR, name);
+    const dest = join(provenanceDir(), name);
     if (!existsSync(dest)) {
       const src = join(TEMPLATE_DIR, name);
       if (existsSync(src)) copyFileSync(src, dest);
@@ -33,14 +38,9 @@ function seedTemplates() {
 }
 
 export function emitProvenance(event) {
-  // Never resurrect a deleted plugin-data: session-start spawns this emitter
-  // detached, so it can outlive a test sandbox's cleanup — mkdirSync here
-  // re-created rmSync'd sandboxes (the residual ll-hook-sb-* leak, 2026-06).
-  // Real installs always have an existing plugin-data, so this never no-ops
-  // for them.
-  const pluginData = getPluginData();
-  if (!pluginData || !existsSync(pluginData)) return;
-  mkdirSync(PROVENANCE_DIR, { recursive: true });
+  // Guards the detached-child resurrection class — see pluginDataExists().
+  if (!pluginDataExists()) return;
+  mkdirSync(provenanceDir(), { recursive: true });
   seedTemplates();
   const record = {
     ts: new Date().toISOString(),
