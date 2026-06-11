@@ -51,23 +51,37 @@ test('readMarker returns null on parse error rather than throwing', () => {
 
 test('writeMarker creates intermediate directories', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  const savedEnv = process.env.CLAUDE_PLUGIN_DATA;
   try {
+    process.env.CLAUDE_PLUGIN_DATA = dir;
     const path = join(dir, 'nested', 'deep', 'marker.json');
     assert.equal(writeMarker(path, { hello: 'world' }), true, 'persisted write returns true');
     assert.deepEqual(readMarker(path), { hello: 'world' });
   } finally {
+    if (savedEnv === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedEnv;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('writeMarker overwrites existing markers', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  const savedEnv = process.env.CLAUDE_PLUGIN_DATA;
   try {
+    process.env.CLAUDE_PLUGIN_DATA = dir;
     const path = join(dir, 'overwrite.json');
     writeMarker(path, { v: 1 });
     writeMarker(path, { v: 2 });
     assert.deepEqual(readMarker(path), { v: 2 });
   } finally {
+    if (savedEnv === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedEnv;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -76,7 +90,9 @@ test('writeMarker swallows errors when target is unwritable', () => {
   // Use a path under a non-existent unwritable parent: trying to mkdir inside
   // a file (not a directory) will throw ENOTDIR.
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
+  const savedEnv = process.env.CLAUDE_PLUGIN_DATA;
   try {
+    process.env.CLAUDE_PLUGIN_DATA = dir;
     const blocker = join(dir, 'is-a-file');
     writeFileSync(blocker, 'content');
     // writeMarker tries to mkdir(dirname(badPath)) where dirname is `is-a-file` — fails.
@@ -84,6 +100,11 @@ test('writeMarker swallows errors when target is unwritable', () => {
     // Must not throw — and must report the failure via its return value.
     assert.equal(writeMarker(badPath, { x: 1 }), false, 'failed write returns false');
   } finally {
+    if (savedEnv === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = savedEnv;
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
