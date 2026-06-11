@@ -279,7 +279,7 @@ EOF
 @test "run_logged: propagates success exit code" {
   run bash -c '
     export LL_INSTALL_NO_TRAP=1
-    export INSTALL_VERSION=1
+    export LL_INSTALL_LOADED=1
     export LOG_FILE=$(mktemp)
     export STEP_NAME="test step"
     source '"'${BATS_TEST_DIRNAME}/../../install.sh'"'
@@ -292,7 +292,7 @@ EOF
 @test "run_logged: propagates failure exit code" {
   run bash -c '
     export LL_INSTALL_NO_TRAP=1
-    export INSTALL_VERSION=1
+    export LL_INSTALL_LOADED=1
     export LOG_FILE=$(mktemp)
     export STEP_NAME="test step"
     source '"'${BATS_TEST_DIRNAME}/../../install.sh'"'
@@ -308,7 +308,7 @@ EOF
   log=$(mktemp)
   run bash -c "
     export LL_INSTALL_NO_TRAP=1
-    export INSTALL_VERSION=1
+    export LL_INSTALL_LOADED=1
     export LOG_FILE='$log'
     export STEP_NAME='test step'
     source '${BATS_TEST_DIRNAME}/../../install.sh'
