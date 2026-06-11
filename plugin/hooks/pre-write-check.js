@@ -141,17 +141,46 @@ runHook(({ tool, input }) => {
   const vaultRoot = resolveVaultPath();
   if (!isVaultNote(filePath, vaultRoot)) return;
 
-  // Edit payloads carry string fragments, not whole notes: deny only dashes
-  // the edit ADDS, warn on broken wikilinks in the replacement text, and skip
-  // the duplicate-tag/duplicate-note checks (a fragment has no reliable
-  // frontmatter or title to judge).
+  // Edit payloads carry string fragments, not whole notes: recompute the
+  // post-edit note from disk so the dash delta runs on the SAME body-only
+  // semantics as the Write path (frontmatter excluded, Source:/Related: line
+  // prefixes visible even when the fragment omits them). Warn on broken
+  // wikilinks in the replacement text, and skip the duplicate-tag/
+  // duplicate-note checks (a fragment has no reliable title to judge).
   if (tool === 'Edit') {
     const oldString = input.old_string || '';
     const newString = input.new_string || '';
 
-    if (countExposedDashes(newString) > countExposedDashes(oldString)) {
+    // Fallback when the file is unreadable: judge the raw fragments.
+    let oldText = oldString;
+    let newText = newString;
+    let skipDashCheck = false;
+    if (oldString) {
+      let disk = null;
+      try {
+        disk = readFileSync(filePath, 'utf-8');
+      } catch {
+        disk = null;
+      }
+      if (disk !== null) {
+        const idx = disk.indexOf(oldString);
+        if (idx === -1) {
+          // old_string not on disk: the Edit tool itself errors — nothing to gate.
+          skipDashCheck = true;
+        } else {
+          const postEdit = input.replace_all
+            ? disk.split(oldString).join(newString)
+            : disk.slice(0, idx) + newString + disk.slice(idx + oldString.length);
+          oldText = parseFrontmatter(disk).body;
+          newText = parseFrontmatter(postEdit).body;
+        }
+      }
+    }
+
+    if (!skipDashCheck && countExposedDashes(newText) > countExposedDashes(oldText)) {
       const offending = findEmDashLines(newString);
-      const list = offending.map((l) => `  ${l.text}`).join('\n');
+      const lines = offending.length > 0 ? offending : findEmDashLines(newText);
+      const list = lines.map((l) => `  ${l.text}`).join('\n');
       deny(
         `This edit adds em/en-dashes to body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
           `Replace each with a comma, colon, or semicolon. If the dash is structural ` +

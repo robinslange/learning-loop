@@ -32,12 +32,14 @@ function run(toolName, filePath, content) {
   }
 }
 
-function runEdit(filePath, oldString, newString) {
+function runEdit(filePath, oldString, newString, { replaceAll = false } = {}) {
+  const tool_input = { file_path: filePath, old_string: oldString, new_string: newString };
+  if (replaceAll) tool_input.replace_all = true;
   const r = runHook(HOOK, {
     stdin: {
       hook_event_name: 'PreToolUse',
       tool_name: 'Edit',
-      tool_input: { file_path: filePath, old_string: oldString, new_string: newString },
+      tool_input,
     },
     env: { VAULT_PATH: VAULT },
   });
@@ -263,6 +265,45 @@ describe('pre-write-check', () => {
     assert.ok(result.hookSpecificOutput.additionalContext);
     assert.match(result.hookSpecificOutput.additionalContext, /nonexistent-note/);
     assert.match(result.hookSpecificOutput.additionalContext, /also-missing/);
+  });
+
+  // Edit-path dash semantics must match the Write path: recompute the
+  // post-edit note from disk, strip frontmatter, and deny only when the
+  // exposed BODY dash count increases. Fragment-only heuristics false-deny
+  // when the fragment loses its frontmatter or Source:-line context.
+  it('allows an Edit adding a dash inside frontmatter only', () => {
+    const p = join(VAULT, '3-permanent', 'fm-edit-note.md');
+    writeFileSync(p, '---\ntags: [test]\nsource: 2026-05-29 vault sweep\n---\nClean body with no dashes.\n');
+    const result = runEdit(p, 'source: 2026-05-29 vault sweep', 'source: 2026-05-29 vault sweep — span bug caught in preview');
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('allows an Edit adding a dash to an existing Source: line via a fragment without the line prefix', () => {
+    const p = join(VAULT, '3-permanent', 'source-line-edit-note.md');
+    writeFileSync(p, '---\ntags: [test]\n---\nClean body.\n\nSource: example.com\n');
+    const result = runEdit(p, 'example.com', 'example.com — pulled after second reading');
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('still denies an Edit adding a dash to body prose of an on-disk note', () => {
+    const p = join(VAULT, '3-permanent', 'body-prose-edit-note.md');
+    writeFileSync(p, '---\ntags: [test]\n---\nThe rule is policy.\n');
+    const result = runEdit(p, 'The rule is policy.', 'The rule is policy — or it is aspiration.');
+    assert.ok(result, 'expected a deny payload');
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /em.?dash|en.?dash|dash/i);
+  });
+
+  it('allows a replace_all Edit over dashed content when the dash count is unchanged', () => {
+    const p = join(VAULT, '3-permanent', 'replace-all-edit-note.md');
+    writeFileSync(
+      p,
+      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\nAgain: the gate is policy — not aspiration.\n',
+    );
+    const result = runEdit(p, 'policy — not aspiration', 'policy — never aspiration', {
+      replaceAll: true,
+    });
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('Edit payloads skip the duplicate-tags deny even when new_string carries duplicated tags', () => {
