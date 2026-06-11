@@ -348,10 +348,10 @@ Keep it to 2-4 lines. The user can see the diffs if they want details.
 Write a timestamp so the Stop hook knows reflection already happened:
 
 ```bash
-node -e "require('fs').writeFileSync(require('path').join(require('os').tmpdir(), 'learning-loop-last-reflect'), Math.floor(Date.now()/1000).toString())"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-reflect
 ```
 
-Run this via the Bash tool at the end of every /reflect invocation.
+Run this via the Bash tool at the end of every /reflect invocation. The marker lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote.
 
 ## Subagent Usage
 
