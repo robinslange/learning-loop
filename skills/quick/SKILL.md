@@ -78,7 +78,7 @@ Evaluate silently in the main thread. Do not ask the user.
 
 ONE round only — no revise loop. This is the lightweight tier; the spoken answer in Step 3 is NOT gated, only the captured note.
 
-**Then spawn** a `note-writer` subagent (subagent_type: `learning-loop:note-writer`):
+**Then spawn** a `note-writer` subagent (subagent_type: `learning-loop:note-writer`); the Insight/Research content in the prompt is the POST-correction draft (after the verifier's Corrections and `[partial]` flags are applied), not the original:
 ```
 Write an inbox note for the Obsidian vault.
 
