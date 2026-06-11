@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
+import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../hooks/lib/snapshot.mjs';
 
 const HOOK = new URL('../hooks/pre-write-check.js', import.meta.url).pathname;
 let VAULT;
@@ -22,6 +23,8 @@ function run(toolName, filePath, content) {
   });
   try {
     assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(!r.stderr.includes('"level":"error"'), `hook logged an error: ${r.stderr}`);
     const out = r.stdout.trim();
     return out ? JSON.parse(out) : null;
   } finally {
@@ -33,10 +36,11 @@ describe('pre-write-check', () => {
   before(() => {
     VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-vault-'));
     NON_VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-other-'));
-    mkdirSync(join(VAULT, '0-inbox'), { recursive: true });
-    mkdirSync(join(VAULT, '3-permanent'), { recursive: true });
-    mkdirSync(join(VAULT, '6-writing'), { recursive: true });
-    mkdirSync(join(VAULT, '_system'), { recursive: true });
+    // Every dir the snapshot rebuild scans must exist, or the hook logs a
+    // readdir error that trips run()'s clean-stderr assertion.
+    for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
+      mkdirSync(join(VAULT, dir), { recursive: true });
+    }
     writeFileSync(join(VAULT, '3-permanent', 'existing-note.md'), '---\ntitle: existing note\n---\n');
     writeFileSync(join(VAULT, '6-writing', 'the-loud-room.md'), '---\ntitle: the loud room\n---\n');
   });
@@ -104,28 +108,22 @@ describe('pre-write-check', () => {
     assert.match(result.hookSpecificOutput.additionalContext, /also-missing/);
   });
 
-  // The next three were if-guarded before (silently passed when result was
-  // null). A resolved link must produce NO broken-link mention — assert that
-  // unconditionally over the null-or-context shape.
   it('resolves bare-basename wikilinks to notes living in 6-writing/', () => {
     const content = '---\ntags: [sleep]\n---\nSee [[the-loud-room]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
-    const ctx = result?.hookSpecificOutput?.additionalContext ?? '';
-    assert.ok(!ctx.includes('the-loud-room'), `resolved link flagged as broken: ${ctx}`);
+    assert.equal(result, null);
   });
 
   it('resolves subdir-prefixed wikilinks like [[6-writing/the-loud-room]]', () => {
     const content = '---\ntags: [sleep]\n---\nSee [[6-writing/the-loud-room]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
-    const ctx = result?.hookSpecificOutput?.additionalContext ?? '';
-    assert.ok(!ctx.includes('the-loud-room'), `resolved link flagged as broken: ${ctx}`);
+    assert.equal(result, null);
   });
 
   it('resolves subdir-prefixed wikilinks like [[3-permanent/existing-note]]', () => {
     const content = '---\ntags: [sleep]\n---\nSee [[3-permanent/existing-note]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
-    const ctx = result?.hookSpecificOutput?.additionalContext ?? '';
-    assert.ok(!ctx.includes('existing-note'), `resolved link flagged as broken: ${ctx}`);
+    assert.equal(result, null);
   });
 
   it('denies an em-dash in body prose, naming the line', () => {
@@ -144,9 +142,9 @@ describe('pre-write-check', () => {
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
   });
 
-  // The next two were if-guarded before. permissionDecision must not be
-  // 'deny' whether the hook emitted output or not — optional chaining over
-  // null gives undefined, which correctly satisfies notEqual.
+  // permissionDecision must not be 'deny' whether the hook emitted output or
+  // not — optional chaining over null gives undefined, which satisfies
+  // notEqual.
   it('allows an em-dash on a Source: line', () => {
     const content = '---\ntags: [sleep]\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
@@ -173,9 +171,9 @@ describe('pre-write-check', () => {
     assert.match(result.hookSpecificOutput.permissionDecisionReason, /sleep/);
   });
 
-  // Carried over from the deleted hook-pre-write-check.test.mjs, with real
-  // teeth: the vault convention "frontmatter source: + body Sources: line"
-  // must produce NO output at all (it is neither a leak nor a violation).
+  // Vault convention: frontmatter source: is an origin tag and a body
+  // Sources: line is a citation — together they are neither a leak nor a
+  // violation, so the hook must produce no output at all.
   it('stays silent on frontmatter source: plus a body Sources: line', () => {
     const content = '---\ntags: [test]\nsource: https://example.com/paper\ndate: 2026-05-21\n---\n\n# Test Note\n\nThe claim happens.\n\nSources: pulled from example.com after second reading.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions.md'), content);
