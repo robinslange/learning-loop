@@ -51,10 +51,14 @@ test('multibyte content never splits a code point', () => {
   // A well-formed string can never land the binary search mid-pair (a lone
   // high surrogate serializes as a 6-byte escape while completing the pair
   // costs 4 UTF-8 bytes), so plant a LONE high surrogate exactly at the
-  // landing boundary to force the surrogate guard to fire. The boundary is
-  // derived from the constant: 108 bytes = fixed JSON envelope + the
-  // '…[truncated]' marker + the two leading 4-byte emoji. With the historic
-  // MAX=8192 this lands the pad at 8084 (keep=8089), the verified shape.
+  // landing boundary to force the surrogate guard to fire.
+  // 108 is empirically derived: with MAX=8192 the binary-search best lands at
+  // keep=8089 (8088 after the surrogate trim), giving pad = MAX - 108 = 8084.
+  // Structural overhead (envelope + '…[truncated]' + two leading emoji) is 100
+  // bytes; the remaining 8 come from the planted lone surrogate serializing as
+  // a 6-byte \uXXXX escape, which shifts the landing point past a pure
+  // byte-budget estimate. The pad tracks MAX so the surrogate guard keeps
+  // firing if the constant changes.
   const src = `
     import { emitJson } from '${pathToFileURL(join(root, 'hooks/lib/io.mjs')).href}';
     import { HookConfig } from '${pathToFileURL(join(root, 'scripts/lib/hook-config.mjs')).href}';
