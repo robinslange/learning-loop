@@ -56,7 +56,8 @@ test('lock-acquire/release lifecycle: acquire → second acquire fails → relea
     assert.equal(r1.status, 0, r1.stderr);
     assert.ok(existsSync(lockPath));
 
-    // Fresh lock (age floor) — held even though the writer pid is gone.
+    // Fresh lock — new lock content carries no pid, so the age floor alone
+    // holds it (file younger than the 1h staleness window).
     const r2 = run(['lock-acquire', 'dream'], pd);
     assert.equal(r2.status, 1, 'second acquire must fail while lock is fresh');
 
@@ -90,11 +91,11 @@ test('lock-acquire reclaims a stale lock (old mtime, dead pid) — the M5 fix', 
   }
 });
 
-test('unknown command/key exits 1 with usage', () => {
+test('unknown command/key exits 2 with usage — exit 1 is reserved for "lock held"', () => {
   const pd = mkdtempSync(join(tmpdir(), 'll-mcli-'));
   try {
-    assert.equal(run(['stamp', 'dream-lock'], pd).status, 1, 'stamp only accepts timestamps');
-    assert.equal(run(['frobnicate'], pd).status, 1);
+    assert.equal(run(['stamp', 'dream-lock'], pd).status, 2, 'stamp only accepts timestamps');
+    assert.equal(run(['frobnicate'], pd).status, 2);
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
