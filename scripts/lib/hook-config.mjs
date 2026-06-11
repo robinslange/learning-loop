@@ -39,6 +39,10 @@ export const HookConfig = Object.freeze({
   NPM_INSTALL_TIMEOUT_MS: 10000,
 
   // --- Cooldowns (seconds) ---
+  // A dream lock whose recorded pid is dead is considered abandoned after
+  // this age. Skill bash pids die when the Bash tool call returns, so the
+  // age floor — not pid liveness — is the real staleness mechanism (M5).
+  DREAM_LOCK_STALE_SECS: 3600,
   REFLECT_COOLDOWN_SECS: 300,
   DREAM_COOLDOWN_SECS: 300,
   VERSION_CHECK_TTL_SECS: 3600,
