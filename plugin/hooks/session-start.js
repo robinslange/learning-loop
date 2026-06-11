@@ -37,8 +37,7 @@ const ctx = {
   pluginDir: PLUGIN_DIR,
   pluginVersion:
     safeLoad(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, { fallback: { version: '0.0.0' } }).value
-      ?.version ||
-    '0.0.0',
+      ?.version || '0.0.0',
   pluginData,
   vaultRoot: resolveVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,

@@ -63,7 +63,9 @@ if (cmd === 'stamp' && (name === 'last-dream' || name === 'last-reflect')) {
 } else if (cmd === 'lock-acquire' && name === 'dream') {
   const p = pathFor('dream-lock');
   if (dreamLockHeld(p)) {
-    process.stderr.write(`marker: dream lock held (${p}) — another /dream is running or crashed <1h ago\n`);
+    process.stderr.write(
+      `marker: dream lock held (${p}) — another /dream is running or crashed <1h ago\n`,
+    );
     process.exit(1);
   }
   // No pid in new lock content: the CLI's ppid is the per-call bash, which

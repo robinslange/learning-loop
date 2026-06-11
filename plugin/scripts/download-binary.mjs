@@ -178,7 +178,9 @@ async function main() {
   } catch (dlErr) {
     if (existsSync(tmpPath)) unlinkSync(tmpPath);
     if (dlErr.statusCode === 404) {
-      console.error(`  Release ${version} has no ${artifact} yet — release still building, will retry next session.`);
+      console.error(
+        `  Release ${version} has no ${artifact} yet — release still building, will retry next session.`,
+      );
       process.exit(0);
     }
     console.error(`Download failed: ${dlErr.message}`);
@@ -204,7 +206,9 @@ async function main() {
         unlinkSync(tmpPath);
         process.exit(0);
       }
-      console.error('  Warning: release has no SHA256SUMS (pre-1.27 release) — skipping verification');
+      console.error(
+        '  Warning: release has no SHA256SUMS (pre-1.27 release) — skipping verification',
+      );
     } else {
       console.error(`Failed to fetch SHA256SUMS: ${sumsErr.message}`);
       console.error('Check your network connection and try again.');

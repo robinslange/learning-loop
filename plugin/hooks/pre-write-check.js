@@ -195,7 +195,9 @@ runHook(({ tool, input }) => {
       return target && !noteExistsInIndex(target, noteIndex);
     });
     if (broken.length > 0) {
-      warn(`Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`);
+      warn(
+        `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
+      );
     }
     return;
   }
