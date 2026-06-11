@@ -108,6 +108,8 @@ Review queued observations with `/health --librarian`. The librarian observes; h
 
 If you run [oh-my-claude](https://github.com/eric-gaudet/oh-my-claude), `/learning-loop:init` Phase 6 offers to install a `cache-health` plugin from `plugins/omc-cache-health/`. It reads per-turn cache metrics (`cache_read_input_tokens`, `cache_creation_input_tokens`, `input_tokens`) from the statusline payload and persists them to `PLUGIN_DATA/retrieval/cache-health-YYYY-MM.jsonl`, deduping by `session_id` + token counts so repeated statusline fires inside one turn don't double-count.
 
+The `node scripts/...` commands below run from the plugin root — the installed cache version directory, or `plugin/` in a repo checkout.
+
 ```bash
 # Weighted hit rate, p50/p25/p10, per-session breakdown, zero-hit events
 node scripts/cache-health-report.mjs [--session <id>] [--month YYYY-MM]

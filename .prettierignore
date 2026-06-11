@@ -2,5 +2,5 @@ node_modules/
 plugin/scripts/lib/vendor/
 plugin/vendor/
 native/
-data/
-docs/
+/data/
+/docs/

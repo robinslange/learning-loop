@@ -9,7 +9,7 @@ provenance/events-*.jsonl
 provenance/summaries/
 
 # Data files (local-only)
-data/
+/data/
 
 .config-applied
 .config-state
@@ -53,8 +53,8 @@ tests/fixtures/**/.vault-search/
 
 # Local artefacts (not committed)
 .superpowers/
-coverage/
-calibration/
+/coverage/
+/calibration/
 native/docs/
 native/crates/ll-search/src/sync/test_write.txt
 
