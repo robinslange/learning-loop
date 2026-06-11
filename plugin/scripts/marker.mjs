@@ -53,6 +53,12 @@ if (cmd === 'stamp' && (name === 'last-dream' || name === 'last-reflect')) {
   const p = pathFor(name);
   if (!pluginDataExists()) process.stderr.write('marker: plugin-data missing — stamp skipped\n');
   writeMarker(p, Math.floor(Date.now() / 1000));
+  // A successful /dream invalidates any cached session-start nudge: without
+  // this, the dream-gate cache (written by the pre-stamp background refresh)
+  // keeps nudging for one more session.
+  if (name === 'last-dream') {
+    writeMarker(MARKER_PATHS.dreamGate(pluginData), { nudge: null });
+  }
   console.log(p);
 } else if (cmd === 'lock-acquire' && name === 'dream') {
   const p = pathFor('dream-lock');

@@ -115,7 +115,7 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
 
 1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md): description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
 
-2. Write MEMORY.md (full overwrite). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read — do not write the timestamp by hand; this command is the single writer).
+2. Write MEMORY.md (full overwrite). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
 
 3. Report:
    ```

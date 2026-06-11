@@ -47,6 +47,22 @@ test('stamp last-dream writes under retrieval/', () => {
   }
 });
 
+test('stamp last-dream clears a stale dream-gate nudge so the next session does not ghost-nudge', () => {
+  const pd = mkdtempSync(join(tmpdir(), 'll-mcli-'));
+  try {
+    const gatePath = join(pd, 'session-start-cache', 'dream-gate.json');
+    mkdirSync(join(pd, 'session-start-cache'), { recursive: true });
+    writeFileSync(gatePath, JSON.stringify({ nudge: 'Run /dream to consolidate.' }));
+
+    const r = run(['stamp', 'last-dream'], pd);
+    assert.equal(r.status, 0, r.stderr);
+    const gate = JSON.parse(readFileSync(gatePath, 'utf8'));
+    assert.equal(gate.nudge, null, 'dream-gate cache must read {nudge: null} after a successful stamp');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
 test('lock-acquire/release lifecycle: acquire → second acquire fails → release → acquire again', () => {
   const pd = mkdtempSync(join(tmpdir(), 'll-mcli-'));
   try {
