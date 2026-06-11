@@ -17,8 +17,11 @@ const AGENT_NAMES =
   'refinement-proposer|ingest-[a-z-]+';
 // Lexical contract: "run" is the sanctioned wording for skill-executed fragments
 // (route-output, ingest-synthesizer's "run automatically by note-writer");
-// spawn/launch/dispatch are forbidden near agent names in agent-visible files — do not add "run" here.
-const SPAWN_VERB = '\\b(spawn|launch|dispatch)(s|ing|es|ed)?\\b';
+// spawn/launch/dispatch/invoke/delegate are forbidden near agent names in
+// agent-visible files — do not add "run" here. The e-final verbs (invoke,
+// delegate) carry their inflections explicitly so "invoked"/"delegating" match
+// without the (s|ing|es|ed) group double-matching the bare-stem verbs.
+const SPAWN_VERB = '(?:\\b(?:spawn|launch|dispatch)(?:s|ing|es|ed)?|\\b(?:invok|delegat)(?:e|es|ed|ing))\\b';
 const SPAWN_RE = new RegExp(`${SPAWN_VERB}[^.\\n]*\\b(${AGENT_NAMES})\\b`, 'i');
 const SPAWN_REV_RE = new RegExp(`\\b(${AGENT_NAMES})\\b[^.\\n]*${SPAWN_VERB}`, 'i');
 
