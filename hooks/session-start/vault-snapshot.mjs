@@ -1,5 +1,5 @@
 // hooks/session-start/vault-snapshot.mjs : federation backfill, session ID
-// stamping, memory snapshot, and session-dedupe TTL sweep.
+// stamping, memory snapshot, and stale-marker TTL sweeps.
 
 import { writeFileSync, existsSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -116,23 +116,49 @@ export async function run(ctx) {
     logError('session-start.vault-snapshot.writeSessionId', err);
   }
 
-  // TTL sweep for session-dedupe files older than SESSION_DEDUPE_TTL_MS.
-  if (ctx.pluginData) {
+  // TTL sweeps. One pass, three targets:
+  //   (a) retrieval/session-dedupe + markers/ entries older than 7 days
+  //       (memory-snapshot-<sid> accumulates one file per session);
+  //   (b) edges.db.<pid>.tmp orphans (crash between saveDb's write and
+  //       rename) older than 1 hour;
+  //   (c) tmp per-session/legacy markers older than 7 days — stop-nudged
+  //       transcript-dedupe, session-label files, and the pre-v1.27 tmp
+  //       marker names that nothing reads anymore. NEVER the live
+  //       learning-loop-session-id fallback.
+  function sweepDir(dir, match, cutoffMs) {
+    let names;
     try {
-      const dedupeDir = DATA_PATHS.retrievalSessionDedupe(ctx.pluginData);
-      if (existsSync(dedupeDir)) {
-        const cutoff = Date.now() - HookConfig.SESSION_DEDUPE_TTL_MS;
-        for (const f of readdirSync(dedupeDir)) {
-          const full = join(dedupeDir, f);
-          try {
-            if (statSync(full).mtimeMs < cutoff) rmSync(full, { force: true });
-          } catch (err) {
-            logError('session-start.vault-snapshot.dedupeSwept', err);
-          }
-        }
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    for (const f of names) {
+      if (!match(f)) continue;
+      const full = join(dir, f);
+      try {
+        const st = statSync(full);
+        if (st.isFile() && st.mtimeMs < cutoffMs) rmSync(full, { force: true });
+      } catch (err) {
+        logError('session-start.vault-snapshot.ttlSweep', err);
       }
-    } catch (err) {
-      logError('session-start.vault-snapshot.dedupeSweep', err);
     }
   }
+
+  const weekCutoff = Date.now() - HookConfig.SESSION_DEDUPE_TTL_MS;
+  if (ctx.pluginData) {
+    sweepDir(DATA_PATHS.retrievalSessionDedupe(ctx.pluginData), () => true, weekCutoff);
+    sweepDir(DATA_PATHS.markers(ctx.pluginData), () => true, weekCutoff);
+    sweepDir(ctx.pluginData, (f) => /^edges\.db\..+\.tmp$/.test(f), Date.now() - 3_600_000);
+  }
+  const TMP_SWEEP_PATTERNS = [
+    /^learning-loop-stop-nudged-/,
+    /^claude-session-label-.+\.txt$/,
+    /^learning-loop-memory-snapshot/,
+    /^learning-loop-session-start-/,
+    /^learning-loop-last-dream$/,
+    /^learning-loop-last-reflect$/,
+    /^learning-loop-dream-nudged$/,
+    /^learning-loop-dream-lock$/,
+  ];
+  sweepDir(ctx.tmp, (f) => TMP_SWEEP_PATTERNS.some((re) => re.test(f)), weekCutoff);
 }
