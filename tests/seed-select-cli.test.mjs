@@ -15,7 +15,11 @@ let memDir;
 
 function runCli(args) {
   const out = execFileSync(process.execPath, [CLI, ...args], { encoding: 'utf8', timeout: 10000 });
-  return JSON.parse(out);
+  try {
+    return JSON.parse(out);
+  } catch {
+    throw new Error(`CLI stdout was not valid JSON: ${out}`);
+  }
 }
 
 function mem(name, type) {
@@ -48,7 +52,7 @@ test('comma-split types arg widens the selection', () => {
 
 test('comma-split deny arg drops on word-boundary name match', () => {
   const { kept, dropped } = runCli([memDir, 'feedback', 'acme,unused-term']);
-  assert.deepEqual(kept, ['feedback_clean.md']);
+  assert.deepEqual(kept.sort(), ['feedback_clean.md']);
   const denied = dropped.find((d) => d.name === 'feedback_acme_notes.md');
   assert.equal(denied.reason, 'name-denied');
 });
