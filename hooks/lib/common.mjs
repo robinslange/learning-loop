@@ -3,7 +3,7 @@
 // scripts/lib/config.mjs as the single source of truth; this module re-exports
 // `resolvePluginData` for backward compatibility with hook callers.
 
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, appendFileSync } from 'node:fs';
 import { join, sep, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import {
@@ -57,6 +57,21 @@ export function findEpisodicBinary() {
     logError('common.findEpisodicBinary', err);
   }
   return null;
+}
+
+// Test seam: when LL_CHILD_PID_FILE is set (hook-runner sandboxes), record
+// every detached child pid so the harness can reap them before it removes
+// the sandbox — a child mkdir-ing mid-rmSync-walk resurrects just-deleted
+// dirs and fails cleanup with ENOTEMPTY. No-op in production (var unset).
+export function recordDetachedChild(pid) {
+  const file = env.LL_CHILD_PID_FILE;
+  if (!file || !pid) return;
+  try {
+    appendFileSync(file, `${pid}\n`);
+    // eslint-disable-next-line learning-loop/no-empty-catch
+  } catch {
+    // Best-effort: a lost record only means the harness can't reap early.
+  }
 }
 
 export function vaultRelPath(filePath, vaultPath) {

@@ -124,6 +124,41 @@ function reapPidfile(pidPath) {
 }
 
 /**
+ * Reap every pid recorded in the sandbox's LL_CHILD_PID_FILE (one pid per
+ * line, written by recordDetachedChild in hooks/lib/common.mjs). Detached
+ * session-start children (dream-gate refresh, intentions worker, provenance
+ * emitter) can still be writing inside the sandbox while cleanup's rmSync
+ * walks it — a mid-walk mkdir resurrects a just-deleted subdir and the
+ * parent rmdir fails with ENOTEMPTY. SIGTERM, brief wait, SIGKILL survivors.
+ *
+ * @param {string} pidFile
+ */
+function reapRecordedChildren(pidFile) {
+  let raw;
+  try {
+    raw = readFileSync(pidFile, 'utf8');
+  } catch {
+    return;
+  }
+  const pids = raw
+    .split('\n')
+    .map((l) => parseInt(l, 10))
+    .filter((p) => Number.isFinite(p) && p > 0);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {}
+  }
+  if (pids.length) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 0);
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+}
+
+/**
  * Run a hook script in a hermetic sandbox.
  *
  * @param {string} hookPath   Absolute path to the hook .js file.
@@ -209,6 +244,8 @@ export function runHook(hookPath, opts = {}) {
 
   const beforeKeys = listTmpKeys();
 
+  const childPidFile = join(sandboxRoot, '.child-pids');
+
   const stdinStr = typeof stdin === 'string' ? stdin : JSON.stringify(stdin);
 
   const result = spawnSync(process.execPath, [hookPath], {
@@ -227,6 +264,9 @@ export function runHook(hookPath, opts = {}) {
       LL_HOOK_DEBUG: '0',
       // Inject plugin data dir so resolvePluginData() finds it.
       CLAUDE_PLUGIN_DATA: pluginDataDir,
+      // Detached children record their pids here so cleanup() can reap them
+      // before rmSync — otherwise their writes race the walk (ENOTEMPTY).
+      LL_CHILD_PID_FILE: childPidFile,
       // Consumer-provided overrides (VAULT_PATH, CLAUDE_PROJECT_DIR, etc.).
       ...env,
     },
@@ -236,6 +276,10 @@ export function runHook(hookPath, opts = {}) {
   const tmpKeys = [...afterKeys].filter((k) => !beforeKeys.has(k));
 
   function cleanup() {
+    // Reap recorded detached children FIRST: a live child writing into the
+    // sandbox during the rmSync walk below resurrects just-deleted dirs and
+    // fails the parent rmdir with ENOTEMPTY.
+    reapRecordedChildren(childPidFile);
     // Reap any watch daemons this test caused to spawn. Two locations:
     // (1) the sandbox's plugin-data (legacy pidfile location);
     // (2) the vault's .vault-search/ if a VAULT_PATH was supplied (current

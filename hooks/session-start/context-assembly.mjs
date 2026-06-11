@@ -11,6 +11,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
+import { recordDetachedChild } from '../lib/common.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -139,6 +140,7 @@ export async function run(ctx) {
       );
       child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
       child.unref();
+      recordDetachedChild(child.pid);
     } catch (err) {
       logError('session-start.context-assembly.intentions', err);
     }
@@ -178,6 +180,7 @@ export async function run(ctx) {
       );
       child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
       child.unref();
+      recordDetachedChild(child.pid);
     } catch (err) {
       logError('session-start.context-assembly.dreamGate', err);
     }
@@ -234,6 +237,7 @@ export async function run(ctx) {
     );
     child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
     child.unref();
+    recordDetachedChild(child.pid);
   } catch (err) {
     logError('session-start.context-assembly.provenance', err);
   }

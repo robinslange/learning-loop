@@ -12,6 +12,7 @@
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
 import { emitJson } from './lib/io.mjs';
+import { recordDetachedChild } from './lib/common.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 
 async function readStdin() {
@@ -41,6 +42,7 @@ try {
         stdio: 'ignore',
       });
       child.unref();
+      recordDetachedChild(child.pid);
     }
   }
 } catch (err) {

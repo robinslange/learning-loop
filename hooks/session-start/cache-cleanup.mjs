@@ -20,7 +20,7 @@ import { join, resolve } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
 import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
-import { home } from '../lib/common.mjs';
+import { home, recordDetachedChild } from '../lib/common.mjs';
 import { DATA_FILES, DATA_PATHS } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 
@@ -133,6 +133,7 @@ export async function run(ctx) {
     });
     child.on('error', () => {});
     child.unref();
+    recordDetachedChild(child.pid);
   } catch (err) {
     logError('session-start.binary-update', err);
   }

@@ -17,6 +17,7 @@ import {
   findEpisodicBinary,
   home,
   readStdin,
+  recordDetachedChild,
 } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
@@ -98,6 +99,7 @@ try {
       stdio: 'ignore',
     });
     child.unref();
+    recordDetachedChild(child.pid);
   } else {
     warnOnce(
       'episodic-unavailable',

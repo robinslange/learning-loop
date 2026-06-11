@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { recordDetachedChild } from '../lib/common.mjs';
 
 export async function run(ctx) {
   if (!ctx.updateCacheFile) return;
@@ -66,6 +67,7 @@ export async function run(ctx) {
       { stdio: 'ignore', detached: true },
     );
     child.unref();
+    recordDetachedChild(child.pid);
   } catch (err) {
     logError('session-start.update-check.spawn', err);
   }

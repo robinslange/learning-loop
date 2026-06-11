@@ -66,6 +66,12 @@ export const env = Object.freeze({
   // so tests never touch the machine-global file.
   LL_SESSION_TMP_DIR: pick('LL_SESSION_TMP_DIR', ''),
 
+  // --- Test seam ---
+  // When set (hook-runner sandboxes), every detached child pid is appended to
+  // this file so the harness can reap the children before removing the
+  // sandbox. Unset in production.
+  LL_CHILD_PID_FILE: pick('LL_CHILD_PID_FILE', ''),
+
   // --- Reflect new-notes handshake ---
   // Explicit session id for the /reflect new-notes marker. Set by the reflect
   // skill (and sweep-hook-replay, which forwards it) so a replayed Write appends
