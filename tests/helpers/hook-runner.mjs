@@ -144,13 +144,18 @@ function reapRecordedChildren(pidFile) {
     .split('\n')
     .map((l) => parseInt(l, 10))
     .filter((p) => Number.isFinite(p) && p > 0);
-  for (const pid of pids) {
+  // Probe-first: most recorded children are already dead by cleanup time;
+  // only pay the grace wait when a SIGTERM actually landed on a live pid.
+  const alive = pids.filter((p) => {
     try {
-      process.kill(pid, 'SIGTERM');
-    } catch {}
-  }
-  if (pids.length) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
-  for (const pid of pids) {
+      process.kill(p, 'SIGTERM');
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (alive.length) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 150);
+  for (const pid of alive) {
     try {
       process.kill(pid, 0);
       process.kill(pid, 'SIGKILL');

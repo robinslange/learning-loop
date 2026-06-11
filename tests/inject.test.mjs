@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../hooks/lib/inject.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
 
 describe('scrubSecrets', () => {
   it('masks AWS access key', () => {
@@ -289,7 +290,10 @@ describe('emitHookOutput', () => {
     const out = captureStdout(() =>
       emitHookOutput({ event: 'UserPromptSubmit', additionalContext: big }),
     );
-    assert.ok(Buffer.byteLength(out, 'utf8') <= 8192, 'output must fit HOOK_STDOUT_MAX_BYTES');
+    assert.ok(
+      Buffer.byteLength(out, 'utf8') <= HookConfig.HOOK_STDOUT_MAX_BYTES,
+      'output must fit HOOK_STDOUT_MAX_BYTES',
+    );
     const parsed = JSON.parse(out);
     assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
     assert.match(parsed.hookSpecificOutput.additionalContext, /…\[truncated\]$/);
