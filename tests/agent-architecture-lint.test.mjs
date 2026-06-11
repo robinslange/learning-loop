@@ -15,10 +15,12 @@ const AGENT_NAMES =
   'note-writer|note-verifier|note-scorer|note-deepener|gap-analyser|correction-analyser|' +
   'discovery-researcher|discovery-vault-scout|inbox-organiser|literature-capturer|' +
   'refinement-proposer|ingest-[a-z-]+';
-const SPAWN_RE = new RegExp(
-  `\\b(spawn|launch|dispatch)(ing|es|ed)?\\b[^.\\n]*\\b(${AGENT_NAMES})\\b`,
-  'i',
-);
+// Lexical contract: "run" is the sanctioned wording for skill-executed fragments
+// (route-output, ingest-synthesizer's "run automatically by note-writer");
+// spawn/launch/dispatch are forbidden near agent names in agent-visible files — do not add "run" here.
+const SPAWN_VERB = '\\b(spawn|launch|dispatch)(s|ing|es|ed)?\\b';
+const SPAWN_RE = new RegExp(`${SPAWN_VERB}[^.\\n]*\\b(${AGENT_NAMES})\\b`, 'i');
+const SPAWN_REV_RE = new RegExp(`\\b(${AGENT_NAMES})\\b[^.\\n]*${SPAWN_VERB}`, 'i');
 
 test('no agent file instructs spawning another agent (M13)', () => {
   const offenders = [];
@@ -26,7 +28,8 @@ test('no agent file instructs spawning another agent (M13)', () => {
     readFileSync(join(ROOT, rel), 'utf8')
       .split('\n')
       .forEach((line, i) => {
-        if (SPAWN_RE.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (SPAWN_RE.test(line) || SPAWN_REV_RE.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (!rel.includes('_skills/') && line.includes('subagent_type')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
   }
   assert.deepEqual(offenders, [], 'subagents cannot spawn subagents; fan-out belongs in the calling skill');
