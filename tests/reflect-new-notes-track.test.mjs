@@ -49,6 +49,9 @@ import { execFileSync } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(__dirname, '..', 'skills', 'reflect', 'SKILL.md');
+// Step 4.6's bash blocks live in the extracted step file; the handshake
+// contract (canonical resolvers, no tmp anchors) covers both files.
+const REFINEMENT_STEP_PATH = join(__dirname, '..', 'skills', 'reflect', 'steps', 'refinement.md');
 
 // Extract the ```bash fence containing the given marker substring on any
 // line inside its body. Returns the block contents without the fences.
@@ -95,7 +98,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
   let savedSidBare;
 
   before(() => {
-    skill = readFileSync(SKILL_PATH, 'utf8');
+    skill = readFileSync(SKILL_PATH, 'utf8') + '\n' + readFileSync(REFINEMENT_STEP_PATH, 'utf8');
     tmpRoot = mkdtempSync(join(tmpdir(), 'll-reflect-newnotes-test-'));
     fakeVaultRoot = mkdtempSync(join(tmpdir(), 'll-reflect-newnotes-vault-'));
     pluginData = mkdtempSync(join(tmpdir(), 'll-reflect-newnotes-pd-'));

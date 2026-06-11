@@ -71,7 +71,7 @@ Run a single retrieval call for all learnings identified in Step 2. Pass each le
 node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
 ```
 
-**MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; calling the raw binary forces you to pass them yourself, and a missing DB arg silently corrupts results — clap consumes the first query string as the db path and the binary returns hits from an empty schema-only DB plus any federation peers.
+**MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; if you call the raw binary, always pass the db path explicitly — a missing DB arg silently corrupts results.
 
 Parse the JSON result. For each query:
 - `top_match_similarity > 0.90`: likely duplicate. Read the existing note and update it instead of creating a new one.
@@ -110,8 +110,8 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note you write this session** (where `LL_SID` is resolved as in the Step 4 init block below). This is the durable, concurrency-safe attribution the Step 4.4 sweep uses to recover notes written by sub-agents: PostToolUse hooks don't fire on sub-agent writes, so those notes never hit the marker directly, and there is no other on-disk record that says *which* `/reflect` run produced a given note when several run at once. `reflect_sid` is a transient capture-time field; the Step 4.6.g cleanup strips it from the notes it lists once tracking is done.
-- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer, which is what prevents the bundled-fence regression documented in `tests/reflect-new-notes-track.test.mjs`. Both sides must resolve the marker path the same way across a process boundary. Read the session id via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID` (the `LL_SID` snippet below, which runs the canonical `getSessionId()`), and the marker DIR via `resolve-paths.mjs REFLECT_SCRATCH` (`LL_SCRATCH` below) — the hook (`reflect-track.mjs`) builds its path from the identical `reflectScratchDir()` + `getSessionId()`. The dir is anchored in **plugin-data**, NOT tmp: `os.tmpdir()` honors `$TMPDIR`, and a hook subprocess doesn't inherit the interactive shell's `$TMPDIR`, so a tmp anchor put the hook (writer) and this skill's bash (reader) in different dirs and the handshake broke silently. Do NOT `cat` the id file out of a temp directory or build the path under one. Running the one canonical resolver on both sides keeps them in lockstep and lets parallel `/reflect` invocations key off one stable id.
+- **Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note you write this session** (where `LL_SID` is resolved as in the Step 4 init block below). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
+- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: resolve the session id via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID` and the marker dir via `resolve-paths.mjs REFLECT_SCRATCH` (as in the init block below), the same resolvers the hook uses, so writer and reader stay in lockstep.
 
 ```bash
 # Step 4 init: truncate the new-notes file (the hook handshake marker).
@@ -125,7 +125,7 @@ LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
-If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly, so its path never reaches the marker through the live hook. Step 4.4's sweep recovers those notes: it finds every note carrying this session's `reflect_sid`, then replays the hook chain via `sweep-hook-replay.mjs` with `LL_REFLECT_SID=$LL_SID` set. That env var flows into the replayed `reflect-track.mjs` as the explicit session override (see `hooks/post-tool.js`), so each replayed Write appends to *this* session's marker even when another `/reflect` is running concurrently. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it. (Historically the sweep only replayed notes that lacked `[[links]]` — an autolink-backfill filter — which silently dropped every well-formed sub-agent note, since capture-rules requires a link. That left the marker empty and made Step 4.6 skip. The `reflect_sid` selection below fixes it.)
+If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly, so its path never reaches the marker through the live hook. Step 4.4's sweep recovers those notes: it finds every note carrying this session's `reflect_sid`, then replays the hook chain via `sweep-hook-replay.mjs` with `LL_REFLECT_SID=$LL_SID` set. That env var flows into the replayed `reflect-track.mjs` as the explicit session override (see `hooks/post-tool.js`), so each replayed Write appends to *this* session's marker even when another `/reflect` is running concurrently. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it.
 
 ### Step 4.4: Post-Batch Sweep
 
@@ -207,128 +207,11 @@ This ensures new notes with intentions appear in the next session's intention su
 
 ### Step 4.6: Upstream Refinement
 
-When a new vault note touches a claim already in the vault, the existing claim should be refined to incorporate the new evidence. This step finds those pairs, asks the `refinement-proposer` agent to draft edits, validates them, presents the batch for confirmation, and applies via `Write`. Contradictions route to inline counter-argument linking instead of editing the upstream body.
+**Trigger**: the reflect new-notes file (`${LL_SCRATCH}/ll-${LL_SID}-reflect-new-notes.txt`, where `LL_SCRATCH` comes from `resolve-paths.mjs REFLECT_SCRATCH` and `LL_SID` from `resolve-paths.mjs SESSION_ID`) exists and is non-empty.
 
-Skip this entire step if the reflect new-notes file (`${LL_SCRATCH}/ll-${LL_SID}-reflect-new-notes.txt`, where `LL_SCRATCH` comes from `resolve-paths.mjs REFLECT_SCRATCH` and `LL_SID` from `resolve-paths.mjs SESSION_ID` as in the blocks below) does not exist or is empty (the session wrote no vault notes).
+Read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` and execute it (sub-steps 4.6.a through 4.6.g: candidate pairs + deferred-queue drain, proposer dispatch, validation, confirmation, apply, provenance, cleanup).
 
-#### 4.6.a: Build candidate pairs
-
-```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
-```
-
-If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
-
-#### 4.6.b: Dispatch refinement-proposer agent
-
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders):
-
-```
-Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/refinement-proposer.md and follow it exactly.
-
-pairs_file: <resolved-pairs-path>
-vault_path: {{VAULT}}/
-
-Return the JSON response only, no commentary, no markdown fences.
-```
-
-Capture the agent's stdout response. Write it to `${LL_TMP_PREFIX}-refinement-agent-output.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-agent-output.json`, resolving `LL_SCRATCH`/`LL_SID` via `resolve-paths.mjs` as in the blocks above).
-
-#### 4.6.c: Validate
-
-```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
-```
-
-The validator strips em-dashes, computes sentence delta, and tags each decision with status `ok`, `oversized_warning`, or `auto_rejected`. The cleaned proposed bodies replace the agent's originals.
-
-#### 4.6.d: Present batch for confirmation
-
-Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-validated.json`). Build a preview-format table from the `decisions` array:
-
-```markdown
-## Refinement Proposals (N total)
-
-### Edits ({edit_ok} ok, {edit_oversized} oversized warnings, {edit_auto_rejected} auto-rejected)
-
-| # | upstream | type | Δ% | summary |
-|---|----------|------|----|---------|
-| 1 | websocket-has-no-built-in-reconnection | extends | 12% | Added Vercel/CF/AWS proxy timeout numbers |
-| 2 | (warn) digital-signatures-prove-authorship | qualifies | 28% | Added challenge-response gap discussion |
-
-### Counterpoints ({counterpoint_ok})
-
-| # | upstream | reason |
-|---|----------|--------|
-| 3 | concept-creep-and-diagnostic-bracket-creep | new note disputes the bracket-vs-vertical distinction |
-
-### Auto-rejected ({edit_auto_rejected})
-
-| # | upstream | Δ% | reason |
-|---|----------|----|--------|
-| 4 | ... | 73% | exceeded 50% body change ceiling |
-
-**Actions**: type `apply all` to apply every ok + oversized item, `apply ok` to apply only `ok` items, `apply N M` for specific IDs, `diff N` to print the unified diff for one item, or `none` to cancel.
-```
-
-Use `AskUserQuestion` for the action selection.
-
-If the user types `diff N`, print the unified diff between the upstream's current body and the validated `proposed_body` for decision N, then re-prompt.
-
-#### 4.6.e: Apply approved edits
-
-For each decision in the approved set:
-
-- **edit**: write the validated `proposed_body` to `upstream_path` using the `Write` tool. The post-write hook chain re-fires (autolink, edge-infer, provenance).
-- **counterpoint**: append `new_note_link_text` to the new note's body via `Edit`, and append `upstream_link_text` to the upstream's body via `Edit`. Do NOT modify the upstream's claim. Both edits should append to the body, not modify existing lines. Skip if a link with the same target already exists in either file.
-- **auto_rejected**: never apply. Log only.
-- **pass**: never apply. Log only.
-
-#### 4.6.f: Emit provenance
-
-For each applied refinement:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"refinement-proposer","skill":"reflect","action":"refinement-applied","target":"<upstream-path>","new_note":"<new-note-path>","subtype":"<edit_subtype>","cosine":<cosine>}'
-```
-
-For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"`.
-
-#### 4.6.g: Cleanup
-
-```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
-
-# Strip the transient reflect_sid stamp from every note this session tracked
-# (the marker holds their absolute paths). Removing it here keeps the field
-# from leaking into the permanent vault while still having served its Step 4.4
-# attribution purpose. Idempotent: notes without the line are left untouched.
-if [ -f "${LL_TMP_PREFIX}-new-notes.txt" ]; then
-  while IFS= read -r note; do
-    [ -f "$note" ] || continue
-    LL_NOTE="$note" python3 - <<'PY'
-import os, re
-p = os.environ["LL_NOTE"]
-text = open(p).read()
-new = re.sub(r"^reflect_sid:[^\n]*\n", "", text, count=1, flags=re.MULTILINE)
-if new != text:
-    open(p, "w").write(new)
-PY
-  done < "${LL_TMP_PREFIX}-new-notes.txt"
-fi
-
-rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
-```
-
-Report counts in Step 5: `Refinement: N edits applied, M counterpoints linked, K passed, J auto-rejected`.
+Skip this entire step if the new-notes file does not exist or is empty (the session wrote no vault notes).
 
 ### Step 5: Report
 

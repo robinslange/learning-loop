@@ -59,7 +59,7 @@ Parse remaining args as source-specific parameters.
 
 ### Step 2: Launch Source Agent
 
-Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders).
+Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders). Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID`; when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
 **Linear:** Spawn a `general-purpose` agent with prompt:
 
@@ -281,41 +281,7 @@ Confirmed insights:
 
 The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse hooks, so notes it creates miss `post-write-autolink.js` and `post-write-edge-infer.js`: ending up without suggested backlinks or typed edges.
 
-Replay the hook chain on any vault notes missing structural backlinks. Idempotent: safe on already-hooked notes.
-
-```bash
-# Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
-# installed by /init or the SessionStart hook) handles binary location and ORT
-# env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
-LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
-
-# Ensure new notes are indexed before the sweep + any downstream similarity queries.
-ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
-
-SWEEP_CANDIDATES="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-sweep-candidates.txt"
-
-LL_VAULT="$LL_VAULT" python3 - <<'PY' > "$SWEEP_CANDIDATES"
-import os, re
-root = os.environ["LL_VAULT"]
-for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
-    for dirpath, _, files in os.walk(os.path.join(root, d)):
-        for f in files:
-            if not f.endswith(".md"): continue
-            p = os.path.join(dirpath, f)
-            try:
-                body = open(p).read()
-                body = re.sub(r"^---\n.*?\n---\n", "", body, count=1, flags=re.DOTALL)
-                if not re.search(r"\[\[[^\]]+\]\]", body):
-                    print(p)
-            except: pass
-PY
-
-if [ -s "$SWEEP_CANDIDATES" ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
-fi
-rm -f "$SWEEP_CANDIDATES"
-```
+Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; it filters to notes with no `[[wikilinks]]` in the body and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
 Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch (ingest typically produces few subagent-written notes that the routing step hasn't already linked via its prompt).
 
@@ -333,9 +299,13 @@ All temp files in 5.6 use a session-keyed prefix so parallel `/ingest` invocatio
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
-cd "$HOME/brain"
-git diff --name-only --diff-filter=A HEAD -- brain/0-inbox/ brain/1-fleeting/ brain/2-literature/ brain/3-permanent/ brain/5-maps/ \
-  | sed "s|^|$HOME/brain/|" \
+VAULT_ROOT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
+REPO_ROOT=$(git -C "$VAULT_ROOT" rev-parse --show-toplevel)
+VAULT_REL=$(node -e "const p=require('path'); console.log(p.relative(process.argv[1], process.argv[2]))" "$REPO_ROOT" "$VAULT_ROOT")
+cd "$REPO_ROOT"
+PREFIX="${VAULT_REL:+$VAULT_REL/}"
+git diff --name-only --diff-filter=A HEAD -- "${PREFIX}0-inbox/" "${PREFIX}1-fleeting/" "${PREFIX}2-literature/" "${PREFIX}3-permanent/" "${PREFIX}5-maps/" \
+  | sed "s|^|$REPO_ROOT/|" \
   > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
@@ -350,13 +320,13 @@ LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
-If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap).
+If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap) — see `skills/reflect/steps/refinement.md` 4.6.a.
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
 DATA_DIR="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
 mkdir -p "$DATA_DIR"
-LL_PAIRS_PATH="${LL_TMP_PREFIX}-refinement-pairs.json" python3 - <<'PY'
+CLAUDE_PLUGIN_DATA="$DATA_DIR" LL_PAIRS_PATH="${LL_TMP_PREFIX}-refinement-pairs.json" python3 - <<'PY'
 import json, os
 pairs_path = os.environ["LL_PAIRS_PATH"]
 pairs = json.load(open(pairs_path))
@@ -373,7 +343,7 @@ PY
 
 #### 5.6.c: Dispatch, validate, present, apply
 
-Same as `/reflect` Step 4.6.b through 4.6.f. Spawn `refinement-proposer` with the pairs file, validate via `refinement-validate.mjs`, present preview-format table, apply approved edits via `Write`, route counterpoints via `Edit`, emit provenance events.
+Same as `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` sub-steps 4.6.b through 4.6.f. Spawn `refinement-proposer` with the pairs file, validate via `refinement-validate.mjs`, present preview-format table, apply approved edits via `Write`, route counterpoints via `Edit`, emit provenance events.
 
 The `subagent_type` is `learning-loop:refinement-proposer`. The `pairs_file` is the resolved value of `${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest-refinement-pairs.json` (substitute the literal path before passing to the agent). Likewise for the agent output (`-refinement-agent-output.json`) and validated output (`-refinement-validated.json`). Use `AskUserQuestion` for batch confirmation.
 
