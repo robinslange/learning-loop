@@ -16,13 +16,17 @@ Read the baseline docs before touching code:
 learning-loop/
   hooks/                -- Claude Code lifecycle hooks (entry: *.js)
     lib/                -- hook-shared helpers (snapshot, inject, log)
+    modules/            -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
+    session-start/      -- session-start submodules (context-assembly, watch-daemon,
+                           vault-snapshot, cache-cleanup, health-detector, update-check)
     session-start.js    -- vault context injection on session open
     session-label.js    -- just-in-time injection pipeline on each prompt
-    post-tool.js        -- search query tracking
+    post-tool.js        -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
     pre-write-check.js  -- duplicate detection before vault write
     stop-nudge.js       -- /reflect nudge on session close
     pre-compact.js      -- context capture before compaction
-    post-*.js           -- provenance, autolink, edge-infer, read-retrieval
+    post-read-retrieval.js  -- passive read telemetry
+    post-search-tracking.js -- episodic-memory search query tracking
 
   scripts/              -- CLI utilities and long-running daemons
     lib/                -- shared primitives (env, config, file-lock, log, etc.)
@@ -92,12 +96,15 @@ flowchart LR
   B --> C[ll-search query near-duplicate check]
   C --> D[warn or allow write]
   D --> E[fs write completes]
-  E --> F[post-write-autolink.js]
-  E --> G[post-write-edge-infer.js]
-  E --> H[post-tool-provenance.js]
-  F --> I[backlinks and semantic links added]
-  G --> J[graph edges stored in SQLite]
-  H --> K[provenance JSONL appended]
+  E --> F[post-tool.js dispatcher]
+  F --> G[autolink.mjs]
+  F --> H[edge-infer.mjs]
+  F --> I[provenance.mjs]
+  F --> J[reflect-track.mjs]
+  G --> K[backlinks and semantic links added]
+  H --> L[graph edges stored in SQLite]
+  I --> M[provenance JSONL appended]
+  J --> N[reflect session marker appended]
 ```
 
 Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart and supervises it via the per-vault pidfile at `<vault>/.vault-search/watch.pid`. The watcher is a long-running process that incrementally reindexes notes as they change (fs-watch-driven). It also hosts the NLI daemon over a unix domain socket for hook callers. On binary upgrade, mtime changes trigger SIGTERM + respawn. A one-shot migration on first run after an upgrade reaps any legacy daemon still holding the old `$CLAUDE_PLUGIN_DATA/watch.pid` path. The Stop hook (`hooks/stop-nudge.js`) does not reindex; it only emits reflect/dream nudges based on transcript size and memory-file delta.
@@ -189,7 +196,7 @@ A running learning-loop deployment has three long-lived processes and several tr
 | Process          | Binary / script                                                        | Lifecycle                                                                                                                                                                                                                        |
 | ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
-| librarian daemon | `scripts/librarian.mjs`                                                | Launched by session-start on first session; processes background tasks                                                                                                                                                           |
+| librarian daemon | `scripts/librarian.mjs`                                                | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); processes background tasks; exits with the watcher                                                                  |
 | NLI server (UDS) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock`; loads the 233MB NLI model lazily on first request and reuses it. Unix-only. Falls back to subprocess on non-unix or when the socket is absent. |
 | Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
 
@@ -268,9 +275,9 @@ On session open, hooks fire in this order:
 1. `session-start.js` -- context injection, cache cleanup, daemon spawn, vault snapshot
 2. (session is now live)
 3. On each user prompt: `session-label.js` -- JIT injection pipeline
-4. On each Write/Edit tool use:
-   - Before: `pre-write-check.js` -- near-duplicate gate
-   - After: `post-write-autolink.js`, `post-write-edge-infer.js`, `post-tool-provenance.js`
+4. On each Write/Edit/Agent/Skill tool use:
+   - Before (Write only): `pre-write-check.js` -- near-duplicate gate
+   - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the autolink, edge-infer, provenance, and reflect-track modules (`hooks/modules/`), on Agent/Skill it runs provenance only
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
 7. On session close: `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
@@ -283,11 +290,11 @@ Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKI
 
 The ll-search daemon is managed via a PID file at `<vault>/.vault-search/watch.pid`. Both `scripts/watch.mjs` (user-invoked via `ll-watch`) and `hooks/session-start/watch-daemon.mjs` (auto-spawned at SessionStart) share this per-vault path. On first run after an upgrade, `watch-daemon.mjs` performs a one-shot migration that reaps any daemon still holding the legacy `$CLAUDE_PLUGIN_DATA/watch.pid` file and removes it. Session-start writes the PID on daemon spawn and reads it on subsequent sessions to check if the process is still alive. If the PID is stale, the daemon is relaunched.
 
-The librarian daemon uses a similar pattern at `$CLAUDE_PLUGIN_DATA/librarian.pid`.
+The librarian daemon has no PID file of its own: it runs as a child of `ll-search watch` (spawned via `--librarian-script`) and dies with the watcher.
 
-Do not kill these processes directly. Use `node scripts/watch.mjs stop` and `node scripts/librarian.mjs stop` which flush pending work before exiting.
+Do not kill the watcher directly. Use `node scripts/watch.mjs stop` (or the `ll-watch stop` shim), which SIGTERMs the watcher and removes the PID file; the watcher's SIGTERM handler shuts the librarian child down with it. `librarian.mjs` has no `stop` subcommand -- it only supports `--help` and zero-arg invocation, and is not meant to be run standalone.
 
-Both daemons check for an existing live process before spawning. If `kill -0 <pid>` succeeds, the existing process is reused. Stale PID files (process gone) are detected and overwritten.
+Both `watch.mjs` and `watch-daemon.mjs` check for an existing live watcher before spawning. If `kill -0 <pid>` succeeds, the existing process is reused. Stale PID files (process gone) are detected and overwritten.
 
 ---
 

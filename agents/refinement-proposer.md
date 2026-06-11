@@ -47,7 +47,7 @@ These are not guidelines. Violation means the driver discards your output.
 
 3. **NEVER invent evidence.** If a number, source, or mechanism is not in the new note, it does not appear in the proposed body.
 
-4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. The post-write hook chain handles edge frontmatter sync; you do not.
+4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. Frontmatter is not yours to manage.
 
 5. **20% ceiling on body change.** Count the sentences in the upstream body (excluding frontmatter). Your edit may add at most `ceil(0.20 * sentence_count)` new sentences. If the change would be larger, return `pass` instead. The driver also enforces this and auto-rejects oversized proposals: but if you self-limit, the user sees fewer rejected items in the review.
 

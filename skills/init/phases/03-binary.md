@@ -4,7 +4,7 @@ Present a single confirmation covering all needed work:
 
 ```
 Dependencies need installing. This will:
-  - Download ll-search binary (~77MB)
+  - Download ll-search binary (~290MB)
   - Install packages (sql.js, no native deps)
   - Index your vault (~30s for 2,000 notes)
 

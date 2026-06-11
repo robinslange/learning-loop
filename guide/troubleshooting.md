@@ -1,12 +1,14 @@
 # Troubleshooting
 
+Run `/learning-loop:doctor` first — it diagnoses and offers fixes for most of the issues below.
+
 ## `/learning-loop:init` hangs on binary download
 
-The `ll-search` binary is ~77MB (includes embedding and reranker models). On slow connections, the download can take a few minutes. If it fails, re-run init.
+The `ll-search` binary is ~290MB (includes embedding, reranker, and NLI models). On slow connections, the download can take a few minutes. If it fails, re-run init.
 
 ## Search returns no results
 
-Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. Under normal operation the index stays current via the `ll-search watch` daemon spawned at SessionStart — check that the daemon is alive with `kill -0 "$(cat <vault>/.vault-search/watch.pid)"`. If the pidfile is missing or stale, start a new session or run `node scripts/watch.mjs start`.
+Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. Under normal operation the index stays current via the `ll-search watch` daemon spawned at SessionStart — check that the daemon is alive with `kill -0 "$(cat <vault>/.vault-search/watch.pid)"`. If the pidfile is missing or stale, start a new session or run `node scripts/watch.mjs` (no arguments).
 
 ## Shadow injection log shows 0 passes
 

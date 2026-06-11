@@ -1,12 +1,12 @@
 # Post-Write Hook Replay
 
-PostToolUse hooks (`post-write-autolink.js`, `post-write-edge-infer.js`) do **not** fire on subagent Write/Edit tool calls. Notes written by subagents (`note-writer`, `literature-capturer`, `note-deepener`, etc.) bypass the structural backlink and typed-edge infrastructure entirely. Until Claude Code provides matcher support for subagent tool calls, skills must replay the hook chain explicitly.
+The PostToolUse dispatcher (`hooks/post-tool.js`, which runs the autolink, edge-infer, provenance, and reflect-track modules) does **not** fire on subagent Write/Edit tool calls. Notes written by subagents (`note-writer`, `literature-capturer`, `note-deepener`, etc.) bypass the structural backlink and typed-edge infrastructure entirely. Until Claude Code provides matcher support for subagent tool calls, skills must replay the hook chain explicitly.
 
-`scripts/sweep-hook-replay.mjs` does this. It accepts vault paths via `--stdin` (newline-separated) or as positional args, replays both hooks (15s timeout each), and emits a JSON summary `{processed, ok, failed, failures}`. The hooks are idempotent — safe to run on already-hooked notes.
+`scripts/sweep-hook-replay.mjs` does this. It accepts vault paths via `--stdin` (newline-separated) or as positional args, replays the dispatcher per file (15s timeout each), and emits a JSON summary `{processed, ok, failed, failures}`. The modules are idempotent — safe to run on already-hooked notes.
 
 ## Canonical snippet (unlinked-body filter)
 
-This is the pattern used by `/reflect` Step 4.4 and `/ingest` Step 5.5. It walks the vault, identifies markdown files whose bodies contain no `[[wikilinks]]`, and replays the hooks on those. Works regardless of git state.
+This is the pattern used by `/reflect` Step 4.4, `/ingest` Step 5.5, `/gaps` Step 4.5, and `/deepen` Step 1.5. It walks the vault, identifies markdown files whose bodies contain no `[[wikilinks]]`, and replays the hooks on those. Works regardless of git state.
 
 ```bash
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,

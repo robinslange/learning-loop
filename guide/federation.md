@@ -26,7 +26,7 @@ The architecture mirrors Signal's sealed-sender or Matrix's federated-room model
 
 - **Federated search** -- your vault search results include relevant notes from peers, ranked by reciprocal rank fusion with provenance tracking
 - **Visibility control** -- you decide what to share. Three tiers: `public` (full content), `listed` (title + summary only), `private` (not shared). Glob rules + per-note frontmatter overrides
-- **Automatic sync** -- session hooks handle reindexing, exporting, and syncing. No manual commands needed
+- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs with the hub on its periodic ticks. No manual commands needed
 - **Ed25519 identity** -- each peer has a persistent cryptographic identity. All index exchanges are signed and verified
 
 ## How it works
@@ -184,4 +184,14 @@ node scripts/vault-search.mjs sync
 ll-watch
 ```
 
-Sync runs automatically: reindex on session start, export+sync on session end (unless watch mode is running).
+Sync runs automatically inside the always-on `ll-search watch` daemon (spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`): the watcher's `tokio::select!` loop runs sync alongside the reindex debounce, the poll tick, and the resync tick (see [Sync wire format](#sync-wire-format)). Nothing syncs at session end -- the Stop hook only emits nudges. The manual commands above cover the cases where the daemon isn't running.
+
+## Retractions
+
+`scripts/retraction-notify.mjs` emits a retraction event when a note that previously reached peers is retracted. Events append to `PLUGIN_DATA/federation/outbox/retractions-YYYY-MM.jsonl`, targeted at each peer whose index contains the retracted note:
+
+```bash
+node scripts/retraction-notify.mjs <note_path> [--reason "<reason>"] [--replacement <new_note_path>]
+```
+
+Emission is not yet wired into `/learning-loop:rewrite`; hooking retraction events into the rewrite flow is future federation work.

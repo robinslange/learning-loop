@@ -63,10 +63,10 @@ cat "$VAULT_PIDFILE"                         # prints a numeric PID
 kill -0 "$(cat "$VAULT_PIDFILE")" && echo "watcher alive" || echo "watcher not running"
 
 # Query the daemon directly to confirm it can serve results
-node scripts/vault-search.mjs query "test" --limit 1
+node scripts/vault-search.mjs query "test" --top 1
 ```
 
-The watch daemon is spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`. If the pidfile is missing or the process is gone, start a new session or run `node scripts/watch.mjs start` to relaunch it manually.
+The watch daemon is spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`. If the pidfile is missing or the process is gone, start a new session or run `node scripts/watch.mjs` (no arguments) to relaunch it manually.
 
 ## Reporting issues
 

@@ -50,7 +50,7 @@ Render as a table:
 ```
 Current LL_NLI_THRESHOLD (contradiction): <process.env.LL_NLI_THRESHOLD || '0.90 (default)'>
 Current LL_NLI_ENTAIL_THRESHOLD (entailment): <process.env.LL_NLI_ENTAIL_THRESHOLD || '0.75 (default)'>
-Spec sync threshold (frontmatter): 0.95
+Current LL_NLI_HARD_THRESHOLD (promotion hard-block): <process.env.LL_NLI_HARD_THRESHOLD || '0.95 (default)'>
 ```
 
 **3a. Schema-mismatch / daemon-error count (last 7 days)**
@@ -100,6 +100,6 @@ Render as a horizontal text histogram (one row per bin, block characters scaled 
 0.99-1.00  ██ 7
 ```
 
-Useful for tuning `LL_NLI_THRESHOLD` and the sync threshold (0.95) per spec. Bins above 0.95 propagate to note frontmatter; bins below stay in the db only.
+Useful for tuning `LL_NLI_THRESHOLD` and `LL_NLI_HARD_THRESHOLD` (0.95). Contradiction edges at or above 0.95 land in the hard bucket: they block autonomous promotion in `inbox-organiser` and surface the supersede / qualify / keep-both / skip prompt. Bins below stay advisory (soft-bucket tension annotation at promotion time, pair hints, /verify consistency checks).
 
 Then stop (do not proceed to Step 1).

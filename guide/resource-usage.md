@@ -8,11 +8,11 @@ Every session gets a context injection with your memory index, recent captures, 
 
 ## Local compute
 
-The `ll-search` binary (~77MB) bundles two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum. Linux x64 and Windows x64 binaries are CI-built; see [cross-platform.md](cross-platform.md) for per-platform status.
+The `ll-search` binary (~290MB) bundles three quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking, DeBERTa-v3-base NLI for edge inference) and runs inference on your machine. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 16GB+ RAM is the practical minimum. Linux x64 and Windows x64 binaries are CI-built; see [cross-platform.md](cross-platform.md) for per-platform status.
 
 ## Librarian (optional)
 
-If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama alongside `ll-watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
+If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama as a child of `ll-watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
 
 ## What we do to keep costs down
 
@@ -20,7 +20,7 @@ If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB activ
 - Recent captures capped at the last 5 notes
 - Intention summaries use compact format
 - Provenance, backlinks, and session labels write to disk, not into context
-- Pre-compact hook captures insights before Claude compresses context (opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`; zero overhead unless enabled)
+- Pre-compact hook spawns a detached worker that extracts atomic notes from the pre-compaction transcript into `0-inbox/` (opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`; zero overhead unless enabled)
 - Search batches multiple queries into a single process
 
 ## Measuring cache impact
