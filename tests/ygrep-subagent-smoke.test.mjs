@@ -13,7 +13,7 @@ const fixtureRoot = tmpdir().startsWith('/tmp') ? homedir() : tmpdir();
 
 function ygrepAvailable() {
   try {
-    execFileSync('ygrep', ['--version'], { encoding: 'utf-8' });
+    execFileSync('ygrep', ['--version'], { encoding: 'utf-8', timeout: 5000 });
     return true;
   } catch {
     return false;
