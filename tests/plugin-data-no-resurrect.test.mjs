@@ -119,3 +119,29 @@ test('getConfig legacy migration still writes when plugin-data exists', { skip: 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// --- scripts/marker.mjs (skill-facing CLI; runs in live sessions, but pin
+// --- the guard anyway: a deleted plugin-data must never be resurrected) ---
+
+const MARKER_CLI = join(SCRIPTS, 'marker.mjs');
+
+function markerCli(args, pluginData) {
+  return spawnSync(process.execPath, [MARKER_CLI, ...args], {
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
+    encoding: 'utf-8',
+  });
+}
+
+test('marker.mjs stamp does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-mcli-gone-');
+  const result = markerCli(['stamp', 'last-reflect'], root);
+  assert.equal(result.status, 0, `stamp must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});
+
+test('marker.mjs lock-acquire does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-mcli-lock-gone-');
+  const result = markerCli(['lock-acquire', 'dream'], root);
+  assert.equal(result.status, 0, `lock-acquire must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});

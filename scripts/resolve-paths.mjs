@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { MARKER_PATHS } from './lib/marker-cache.mjs';
 
 const pluginData = getPluginData();
 
@@ -25,6 +26,11 @@ const fields = {
   // $TMPDIR and the other doesn't (os.tmpdir() honors $TMPDIR; plugin-data
   // doesn't, so it agrees across the hook/shell process boundary).
   REFLECT_SCRATCH: pluginData ? DATA_PATHS.reflectScratch(pluginData) : tmpdir(),
+  // Dream/reflect marker paths (read-side convenience for skills/doctor —
+  // WRITES go through scripts/marker.mjs so the resurrection guard applies).
+  LAST_DREAM: pluginData ? MARKER_PATHS.lastDream(pluginData) : '',
+  LAST_REFLECT: pluginData ? MARKER_PATHS.lastReflect(pluginData) : '',
+  DREAM_LOCK: pluginData ? MARKER_PATHS.dreamLock(pluginData) : '',
 };
 
 const arg = process.argv[2];
