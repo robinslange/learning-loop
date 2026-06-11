@@ -145,3 +145,17 @@ test('marker.mjs lock-acquire does not re-create a deleted plugin-data dir', () 
   assert.equal(result.status, 0, `lock-acquire must no-op cleanly, stderr: ${result.stderr}`);
   assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
 });
+
+// --- dream-gate first-run write (spawned detached by context-assembly) ---
+
+const DREAM_GATE = join(SCRIPTS, '..', 'hooks', 'lib', 'dream-gate.js');
+
+test('dream-gate first-run stamp does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-dg-gone-');
+  const result = spawnSync(process.execPath, [DREAM_GATE], {
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
+    encoding: 'utf-8',
+  });
+  assert.equal(result.status, 0, `dream-gate must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});

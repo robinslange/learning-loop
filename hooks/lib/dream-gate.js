@@ -5,22 +5,26 @@
 // nudge string to stdout (legacy synchronous path, kept for direct CLI use).
 // Conditions (dual-gate): 24+ hours AND 5+ memory files modified since last dream.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { home, resolvePluginData } from './common.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { writeMarker, readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
-import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
+import {
+  writeMarker,
+  readMarker,
+  MARKER_PATHS,
+  dreamLockHeld,
+} from '../../scripts/lib/marker-cache.mjs';
 
-const tmp = tmpdir();
 const pluginData = resolvePluginData();
-const DREAM_MARKER = pluginData
-  ? join(DATA_PATHS.retrieval(pluginData), 'last-dream')
-  : join(tmp, 'learning-loop-last-dream');
-// DREAM_RUNNING_MARKER is a presence signal (not a lock) — checked via existsSync only.
-const DREAM_RUNNING_MARKER = join(tmp, 'learning-loop-dream-lock');
+// Without plugin-data there is nowhere to read or write markers (the skill
+// writers are plugin-data-only too) — the gate is inert. Bare-CLI/test
+// invocations set CLAUDE_PLUGIN_DATA.
+if (!pluginData) process.exit(0);
+
+const DREAM_MARKER = MARKER_PATHS.lastDream(pluginData);
+const DREAM_RUNNING_MARKER = MARKER_PATHS.dreamLock(pluginData);
 
 const isSessionStartRefresh = process.argv.includes('--session-start-refresh');
 
@@ -30,7 +34,6 @@ function now() {
 
 function writeMarkerIfNeeded(nudge) {
   if (!isSessionStartRefresh) return;
-  if (!pluginData) return;
   const markerPath = MARKER_PATHS.dreamGate(pluginData);
   if (nudge == null) {
     // Don't overwrite a prior real nudge with null. The prior nudge stays
@@ -46,24 +49,25 @@ function writeMarkerIfNeeded(nudge) {
 // Compute nudge: null unless all gates pass and we have a real nudge string.
 let nudge = null;
 
-// Gate 1: Abort if a dream is already running.
-if (existsSync(DREAM_RUNNING_MARKER)) {
+// Gate 1: Abort if a dream is genuinely running (lock fresh, or legacy
+// bare-pid lock with a live pid). A crashed dream's stale lock no longer
+// silences the gate forever (M5).
+if (dreamLockHeld(DREAM_RUNNING_MARKER)) {
   writeMarkerIfNeeded(null);
   process.exit(0);
 }
 
 // Gate 2: Time gate — 24+ hours since last dream.
-if (existsSync(DREAM_MARKER)) {
-  const lastDream = parseInt(readFileSync(DREAM_MARKER, 'utf8').trim(), 10);
-  if (now() - lastDream < 86400) {
+const lastDreamTs = readMarker(DREAM_MARKER, { ttlMs: Infinity });
+if (typeof lastDreamTs === 'number') {
+  if (now() - lastDreamTs < 86400) {
     writeMarkerIfNeeded(null);
     process.exit(0);
   }
 } else {
-  // First-ever run. If two session-starts race here, both will write the
-  // timestamp (last writer wins, may be off by ms). Both will then write
-  // { nudge: null } to the cache marker — idempotent. Risk: accepted.
-  writeFileSync(DREAM_MARKER, String(now()));
+  // First-ever run (or unreadable marker — self-heal by re-stamping).
+  // Two racing session-starts both write; last writer wins. Risk: accepted.
+  writeMarker(DREAM_MARKER, now());
   writeMarkerIfNeeded(null);
   process.exit(0);
 }
@@ -88,7 +92,6 @@ try {
 }
 
 // Compute modified count.
-const lastDreamTs = parseInt(readFileSync(DREAM_MARKER, 'utf8').trim(), 10);
 let modifiedCount = 0;
 
 for (const file of readdirSync(memoryDir)) {

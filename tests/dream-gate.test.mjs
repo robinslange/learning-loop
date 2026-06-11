@@ -1,4 +1,4 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync, mkdtempSync } from 'node:fs';
@@ -7,10 +7,10 @@ import { tmpdir, homedir } from 'node:os';
 
 const HOOK = join(import.meta.dirname, '..', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
-const DREAM_LOCK = join(tmp, 'learning-loop-dream-lock');
 
 const PLUGIN_DATA = mkdtempSync(join(tmp, 'll-test-dream-plugin-data-'));
 const DREAM_MARKER = join(PLUGIN_DATA, 'retrieval', 'last-dream');
+const DREAM_LOCK = join(PLUGIN_DATA, 'markers', 'dream-lock');
 
 const FAKE_PROJECT_DIR = join(tmp, 'll-test-dream-project');
 const encodedPath = FAKE_PROJECT_DIR.replace(/[/\\]/g, '-');
@@ -29,29 +29,18 @@ function run() {
   });
 }
 
-function saveTmpFile(path) {
-  if (existsSync(path)) return readFileSync(path);
-  return null;
-}
-
-function restoreTmpFile(path, data) {
-  if (data !== null) writeFileSync(path, data);
-  else rmSync(path, { force: true });
-}
-
 describe('dream-gate', () => {
-  let savedLock;
-
   before(() => {
-    savedLock = saveTmpFile(DREAM_LOCK);
-
     mkdirSync(join(PLUGIN_DATA, 'retrieval'), { recursive: true });
+    mkdirSync(join(PLUGIN_DATA, 'markers'), { recursive: true });
     mkdirSync(memoryDir, { recursive: true });
   });
 
-  after(() => {
-    restoreTmpFile(DREAM_LOCK, savedLock);
+  beforeEach(() => {
+    rmSync(DREAM_LOCK, { force: true });
+  });
 
+  after(() => {
     rmSync(PLUGIN_DATA, { recursive: true, force: true });
     rmSync(memoryDir, { recursive: true, force: true });
   });
@@ -59,16 +48,11 @@ describe('dream-gate', () => {
   it('exits silently when lock file exists', () => {
     writeFileSync(DREAM_LOCK, '1');
     rmSync(DREAM_MARKER, { force: true });
-    try {
-      const out = run();
-      assert.equal(out, '');
-    } finally {
-      rmSync(DREAM_LOCK, { force: true });
-    }
+    const out = run();
+    assert.equal(out, '');
   });
 
   it('creates marker and exits on first run (no existing marker)', () => {
-    rmSync(DREAM_LOCK, { force: true });
     rmSync(DREAM_MARKER, { force: true });
 
     const out = run();
@@ -81,7 +65,6 @@ describe('dream-gate', () => {
   });
 
   it('exits silently when last dream was less than 24h ago', () => {
-    rmSync(DREAM_LOCK, { force: true });
     const recentTs = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
     writeFileSync(DREAM_MARKER, String(recentTs));
 
@@ -90,7 +73,6 @@ describe('dream-gate', () => {
   });
 
   it('exits silently when fewer than 5 files modified since last dream', () => {
-    rmSync(DREAM_LOCK, { force: true });
     const oldTs = Math.floor(Date.now() / 1000) - 90000; // 25 hours ago
     writeFileSync(DREAM_MARKER, String(oldTs));
 
@@ -110,7 +92,6 @@ describe('dream-gate', () => {
   });
 
   it('outputs nudge when both gates pass (24h elapsed + 5+ modified files)', () => {
-    rmSync(DREAM_LOCK, { force: true });
     const oldTs = Math.floor(Date.now() / 1000) - 90000; // 25 hours ago
     writeFileSync(DREAM_MARKER, String(oldTs));
 
@@ -127,5 +108,31 @@ describe('dream-gate', () => {
     const out = run();
     assert.match(out, /7 files modified/);
     assert.match(out, /Run \/dream to consolidate/);
+  });
+
+  it('stale lock (old mtime, dead pid) does not silence the gate — M5', () => {
+    writeFileSync(DREAM_LOCK, '2147483647');
+    const old = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+    utimesSync(DREAM_LOCK, old, old);
+    rmSync(DREAM_MARKER, { force: true });
+    run();
+    assert.ok(existsSync(DREAM_MARKER), 'gate must proceed past a stale lock');
+  });
+
+  it('fresh lock blocks the gate', () => {
+    writeFileSync(DREAM_LOCK, JSON.stringify({ ts: Math.floor(Date.now() / 1000) }));
+    rmSync(DREAM_MARKER, { force: true });
+    run();
+    assert.ok(!existsSync(DREAM_MARKER), 'fresh lock must keep the gate silent');
+  });
+
+  it('a last-dream stamp written by marker.mjs suppresses the 24h gate — M1', () => {
+    const CLI = join(import.meta.dirname, '..', 'scripts', 'marker.mjs');
+    rmSync(DREAM_MARKER, { force: true });
+    execFileSync('node', [CLI, 'stamp', 'last-dream'], {
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
+    });
+    const out = run();
+    assert.equal(out.trim(), '', 'fresh dream stamp → no nudge');
   });
 });
