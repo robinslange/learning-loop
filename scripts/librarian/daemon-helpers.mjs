@@ -8,6 +8,7 @@ import { join, basename } from 'node:path';
 import { VAULT_PATH, DB_PATH } from '../lib/constants.mjs';
 import { appendItem, newItemId } from './queue.mjs';
 import { logError } from '../lib/log.mjs';
+import { stripFrontmatter } from '../lib/markdown-parse.mjs';
 
 /**
  * Pick a random unvisited note from allPaths.
@@ -111,11 +112,7 @@ export async function getTagVocabulary(db, structuralTags) {
 export function readNoteBody(notePath, maxChars = 500) {
   const fullPath = join(VAULT_PATH, notePath);
   if (!existsSync(fullPath)) return null;
-  let content = readFileSync(fullPath, 'utf-8');
-  if (content.startsWith('---')) {
-    const end = content.indexOf('\n---', 3);
-    if (end !== -1) content = content.slice(end + 4);
-  }
+  const content = stripFrontmatter(readFileSync(fullPath, 'utf-8'));
   return content.trim().slice(0, maxChars);
 }
 

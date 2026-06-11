@@ -63,7 +63,8 @@ async function peerHasNote(peerId, notePath) {
     );
     db.close();
     return result.length > 0 && result[0].values.length > 0;
-  } catch {
+  } catch (err) {
+    logError('retraction-notify.peerHasNote', err);
     return false;
   }
 }

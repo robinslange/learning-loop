@@ -5,6 +5,7 @@
 import { readdirSync } from 'fs';
 import { join, basename, sep } from 'path';
 import { logError } from './log.mjs';
+import { stripFrontmatter } from './markdown-parse.mjs';
 
 // Iteration order is the resolution-priority order: when two folders contain
 // notes with the same basename, the first folder in this list wins. Permanent
@@ -102,8 +103,7 @@ export const PATTERNS = [
 ];
 
 export function extractLinksWithContext(content) {
-  const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-  const body = fmEnd ? content.slice(fmEnd[0].length) : content;
+  const body = stripFrontmatter(content);
   const results = [];
   const re = /\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g;
   let m;

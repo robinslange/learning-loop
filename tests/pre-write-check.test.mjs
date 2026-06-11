@@ -32,6 +32,26 @@ function run(toolName, filePath, content) {
   }
 }
 
+function runEdit(filePath, oldString, newString) {
+  const r = runHook(HOOK, {
+    stdin: {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: filePath, old_string: oldString, new_string: newString },
+    },
+    env: { VAULT_PATH: VAULT },
+  });
+  try {
+    assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(!r.stderr.includes('"level":"error"'), `hook logged an error: ${r.stderr}`);
+    const out = r.stdout.trim();
+    return out ? JSON.parse(out) : null;
+  } finally {
+    r.cleanup();
+  }
+}
+
 describe('pre-write-check', () => {
   before(() => {
     VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-vault-'));
@@ -183,6 +203,48 @@ describe('pre-write-check', () => {
   it('stays silent on a body Sources: line with no frontmatter source field', () => {
     const content = '---\ntags: [test]\n---\n\n# Test Note\n\nSources: a blog post.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions-2.md'), content);
+    assert.equal(result, null);
+  });
+
+  it('denies an Edit whose new_string ADDS an em-dash (old_string clean)', () => {
+    const result = runEdit(
+      join(VAULT, '0-inbox', 'test.md'),
+      'The rule is policy or it is aspiration.',
+      'The rule is policy — or it is aspiration.',
+    );
+    assert.ok(result, 'expected a deny payload');
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /em.?dash|en.?dash|dash/i);
+  });
+
+  it('allows an Edit whose old_string and new_string both carry the same em-dash (pre-existing, not added)', () => {
+    const result = runEdit(
+      join(VAULT, '0-inbox', 'test.md'),
+      'The rule is policy — or it is aspiration.',
+      'The rule is policy — or it is an ambition.',
+    );
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('warns on broken wikilinks in an Edit new_string (additionalContext, NOT deny)', () => {
+    const result = runEdit(
+      join(VAULT, '0-inbox', 'test.md'),
+      'Clean body.',
+      'See [[nonexistent-note]] and [[also-missing]].',
+    );
+    assert.ok(result);
+    assert.equal(result.hookSpecificOutput.permissionDecision, undefined);
+    assert.ok(result.hookSpecificOutput.additionalContext);
+    assert.match(result.hookSpecificOutput.additionalContext, /nonexistent-note/);
+    assert.match(result.hookSpecificOutput.additionalContext, /also-missing/);
+  });
+
+  it('Edit payloads skip the duplicate-tags deny even when new_string carries duplicated tags', () => {
+    const result = runEdit(
+      join(VAULT, '0-inbox', 'test.md'),
+      '---\ntags: [sleep]\n---\nBody text.',
+      '---\ntags: [sleep, circadian, sleep]\n---\nBody text.',
+    );
     assert.equal(result, null);
   });
 });

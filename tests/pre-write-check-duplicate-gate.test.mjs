@@ -20,12 +20,12 @@ let VAULT;
 // broken-link noise in additionalContext).
 const NOTE = '---\ntags: [sleep]\n---\n\n# Sleep consolidates memory\n\nClean body.\n';
 
-function runWithStub(stubScript, filePath, { allowStderrError = false } = {}) {
+function runWithStub(stubScript, filePath, { allowStderrError = false, tool = 'Write', toolInput = null } = {}) {
   const r = runHook(HOOK, {
     stdin: {
       hook_event_name: 'PreToolUse',
-      tool_name: 'Write',
-      tool_input: { file_path: filePath, content: NOTE },
+      tool_name: tool,
+      tool_input: toolInput ?? { file_path: filePath, content: NOTE },
     },
     env: { VAULT_PATH: VAULT },
     seed: (pluginDataDir) => {
@@ -123,6 +123,19 @@ describe('pre-write-check duplicate-note gate', () => {
       join(VAULT, '0-inbox', 'new-note.md'),
     );
     assert.equal(result, null);
+  });
+
+  it('Edit payloads skip the duplicate-note gate even when the title would collide', () => {
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const { result } = runWithStub(
+      envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+      target,
+      {
+        tool: 'Edit',
+        toolInput: { file_path: target, old_string: 'Clean body.', new_string: NOTE },
+      },
+    );
+    assert.equal(result, null, 'duplicate gate must not run for Edit payloads');
   });
 
   it('crashing binary fails OPEN: no output, error logged at the gate scope', () => {

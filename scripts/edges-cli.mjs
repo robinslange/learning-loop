@@ -4,6 +4,7 @@ import { join, basename } from 'path';
 import { readFileSync } from 'fs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
+import { stripFrontmatter } from './lib/markdown-parse.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -69,8 +70,7 @@ function extractEdgeContext(fromPath, toTarget) {
   try {
     const fullPath = join(VAULT_PATH, fromPath);
     const content = readFileSync(fullPath, 'utf-8');
-    const fmEnd = content.match(/^---\n[\s\S]*?\n---\n?/);
-    const body = fmEnd ? content.slice(fmEnd[0].length) : content;
+    const body = stripFrontmatter(content);
     const linkRe = new RegExp(
       `\\[\\[${toTarget.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
     );

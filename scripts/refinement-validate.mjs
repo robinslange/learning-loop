@@ -29,18 +29,15 @@ import { resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
+import { stripFrontmatter } from './lib/markdown-parse.mjs';
 
 const OVERSIZED_THRESHOLD = 0.2;
 const AUTO_REJECT_THRESHOLD = 0.5;
 const EM_DASH = '\u2014';
 const EM_DASH_REPLACEMENT = ', ';
 
-function stripFrontmatter(body) {
-  const m = body.match(/^---\n[\s\S]*?\n---\n?/);
-  if (m) return body.slice(m[0].length);
-  return body;
-}
-
+// Needs the raw frontmatter block verbatim for byte-equality checks — cannot
+// go through markdown-parse's parsed representation.
 function extractFrontmatter(body) {
   const m = body.match(/^---\n[\s\S]*?\n---\n?/);
   return m ? m[0] : '';

@@ -127,7 +127,7 @@ export async function run(ctx) {
     if (installed === running) return;
     const downloader = join(ctx.pluginDir, 'scripts', 'download-binary.mjs');
     if (!existsSync(downloader)) return;
-    const child = spawn('node', [downloader], {
+    const child = spawn(process.execPath, [downloader], {
       detached: true,
       stdio: 'ignore',
     });

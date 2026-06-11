@@ -44,6 +44,19 @@ function findEmDashLines(body) {
   return offending;
 }
 
+// Count em/en-dashes on non-exempt lines (same Source:/Related: exemption as
+// findEmDashLines). Used to detect dashes ADDED by an Edit: a dash that exists
+// in both old_string and new_string is pre-existing and must not deny.
+function countExposedDashes(text) {
+  let count = 0;
+  for (const line of text.split('\n')) {
+    if (/^(Sources?:|Related:)/.test(line.trimStart())) continue;
+    const matches = line.match(/[—–]/g);
+    if (matches) count += matches.length;
+  }
+  return count;
+}
+
 function buildNoteIndex(vaultRoot) {
   const snap = loadVaultSnapshot(vaultRoot);
   const notes = snap?.notes ?? [];
@@ -120,15 +133,45 @@ function warn(context) {
 }
 
 runHook(({ tool, input }) => {
-  if (tool !== 'Write') return;
+  if (tool !== 'Write' && tool !== 'Edit') return;
 
   const filePath = input.file_path;
-  const content = input.content || '';
   if (!filePath) return;
 
   const vaultRoot = resolveVaultPath();
   if (!isVaultNote(filePath, vaultRoot)) return;
 
+  // Edit payloads carry string fragments, not whole notes: deny only dashes
+  // the edit ADDS, warn on broken wikilinks in the replacement text, and skip
+  // the duplicate-tag/duplicate-note checks (a fragment has no reliable
+  // frontmatter or title to judge).
+  if (tool === 'Edit') {
+    const oldString = input.old_string || '';
+    const newString = input.new_string || '';
+
+    if (countExposedDashes(newString) > countExposedDashes(oldString)) {
+      const offending = findEmDashLines(newString);
+      const list = offending.map((l) => `  ${l.text}`).join('\n');
+      deny(
+        `This edit adds em/en-dashes to body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
+          `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
+          `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
+      );
+      return;
+    }
+
+    const noteIndex = buildNoteIndex(vaultRoot);
+    const broken = extractWikilinks(newString).filter((l) => {
+      const target = l.split('#')[0].trim();
+      return target && !noteExistsInIndex(target, noteIndex);
+    });
+    if (broken.length > 0) {
+      warn(`Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`);
+    }
+    return;
+  }
+
+  const content = input.content || '';
   const { fm, body: fmBody } = parseFrontmatter(content);
   if (Object.keys(fm).length > 0) {
     const tags = parseTags(fm);

@@ -60,7 +60,17 @@ export async function run(ctx) {
           } catch {}
         });
       });
-      req.on('error', () => {});
+      req.on('timeout', () => req.destroy());
+      req.on('error', () => {
+        // Stamp the cache so offline machines do not re-spawn a checker every
+        // session; the TTL reader only validates 'checked'.
+        try {
+          fs.writeFileSync(cacheFile, JSON.stringify({
+            checked: Math.floor(Date.now() / 1000),
+            error: true,
+          }));
+        } catch {}
+      });
       req.end();
     `,
       ],

@@ -13,6 +13,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState, incrementCounter } from '../queue.mjs';
 import { DB_PATH } from '../../lib/constants.mjs';
+import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 import { getVaultPath } from '../../lib/config.mjs';
 import { logError } from '../../lib/log.mjs';
 
@@ -30,11 +31,7 @@ function defaultReadNoteBody(notePath, maxChars = 500) {
   if (!vaultPath) return null;
   const fullPath = join(vaultPath, notePath);
   if (!existsSync(fullPath)) return null;
-  let content = readFileSync(fullPath, 'utf-8');
-  if (content.startsWith('---')) {
-    const end = content.indexOf('\n---', 3);
-    if (end !== -1) content = content.slice(end + 4);
-  }
+  const content = stripFrontmatter(readFileSync(fullPath, 'utf-8'));
   return content.trim().slice(0, maxChars);
 }
 

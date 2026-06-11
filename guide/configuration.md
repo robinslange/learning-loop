@@ -57,6 +57,12 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
+## Operator tools
+
+- edge backfill: `node scripts/backfill-edges.mjs` — walks the vault and bulk-classifies every note's wikilink edges into `edges.db`. Re-runnable (each pass is idempotent) and never mutates note content — only the post-write hook touches frontmatter.
+- flags: `--dry-run` (classify without writing), `--folder <dir>` (restrict to one vault folder), `--limit N` (cap notes processed, handy for spot-checks)
+- when to run: after a bulk import, or once when first enabling NLI edge inference, so existing notes get edges without waiting for each to be rewritten
+
 ## Environment variables
 
 | Variable | Purpose |

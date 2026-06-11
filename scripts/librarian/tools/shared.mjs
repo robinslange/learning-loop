@@ -17,6 +17,7 @@ import {
 } from '../queue.mjs';
 import { VAULT_PATH, DB_PATH } from '../../lib/constants.mjs';
 import { logError } from '../../lib/log.mjs';
+import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 
 export const MAX_RESULT = 1500;
 
@@ -95,13 +96,7 @@ export async function getTags() {
 export async function readNote({ note_path }) {
   const fullPath = join(VAULT_PATH, note_path);
   if (!existsSync(fullPath)) return 'Note not found: ' + note_path;
-  let content = readFileSync(fullPath, 'utf-8');
-  if (content.startsWith('---')) {
-    const end = content.indexOf('\n---', 3);
-    if (end !== -1) {
-      content = content.slice(end + 4).trimStart();
-    }
-  }
+  const content = stripFrontmatter(readFileSync(fullPath, 'utf-8')).trimStart();
   return cap(content.slice(0, 500));
 }
 

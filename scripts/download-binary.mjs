@@ -79,6 +79,10 @@ async function download(url, dest) {
             }
           });
           res.pipe(file);
+          res.on('error', (e) => {
+            file.close();
+            reject(e);
+          });
           file.on('finish', () => {
             file.close();
             if (total > 0) process.stderr.write('\n');

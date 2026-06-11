@@ -111,7 +111,7 @@ export function rebuildVaultSnapshot(vaultRoot) {
       for (const e of entries) {
         if (!e.isFile()) continue;
         if (!e.name.endsWith('.md')) continue;
-        const absParent = e.parentPath || dirPath;
+        const absParent = e.parentPath ?? e.path ?? dirPath;
         const abs = join(absParent, e.name);
         const rel = abs
           .slice(vaultRoot.length + 1)

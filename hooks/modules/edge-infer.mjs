@@ -20,6 +20,7 @@ import {
   releaseLock,
 } from '../../scripts/lib/edges.mjs';
 import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
+import { stripFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
 import { spawnEnv } from '../../scripts/lib/env.mjs';
 import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 
@@ -50,9 +51,10 @@ function parseThresholdEnv(varName, defaultValue) {
 
 const NLI_CONTRADICTION_THRESHOLD = parseThresholdEnv('LL_NLI_THRESHOLD', 0.9);
 const NLI_ENTAILMENT_THRESHOLD = parseThresholdEnv('LL_NLI_ENTAIL_THRESHOLD', 0.75);
-// Bundle 2 promotion-gate thresholds. HARD is the surface-and-confirm cutoff
-// in inbox-organiser (matches the existing frontmatter-sync default at
-// edges.mjs:222). TENSION is the advisory-flag floor (matches the entailment
+// Bundle 2 promotion-gate thresholds. HARD is the hard-bucket cutoff:
+// contradiction edges at or above it block autonomous promotion (the
+// inbox-organiser / promote-gate supersede-or-qualify prompt). TENSION is the
+// advisory-flag floor (matches the entailment
 // threshold for symmetry, deliberately UNVALIDATED for contradiction precision
 // in this range; see OUTCOME.md). Both used by getNliEdgesForNote consumers.
 export const NLI_HARD_THRESHOLD = parseThresholdEnv('LL_NLI_HARD_THRESHOLD', 0.95);
@@ -164,6 +166,8 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
     grouped[key].add(`[[${bare}]]`);
   }
 
+  // Round-trip splice: raw frontmatter text is preserved verbatim and written
+  // back, so this cannot go through markdown-parse's lossy parse.
   const fmMatch = content.match(/^---\n([\s\S]*?)\n---(\n?)/);
 
   if (!fmMatch) {
@@ -486,7 +490,7 @@ export async function runEdgeInfer(ctx) {
   // Extract NLI premise: first non-empty line of body, single-line, max 300 chars.
   let sourceText = sourceName.replace(/-/g, ' ');
   if (nliCandidates.length > 0) {
-    const fmStripped = noteContent.replace(/^---\n[\s\S]*?\n---\n?/, '');
+    const fmStripped = stripFrontmatter(noteContent);
     const firstLine = fmStripped
       .split('\n')
       .map((l) => l.trim())

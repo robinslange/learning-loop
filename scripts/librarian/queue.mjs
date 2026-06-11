@@ -2,10 +2,13 @@
 //
 // Migrated from scripts/lib/librarian-queue.mjs (phase 1H). Adopts:
 //   - safeLoad() for state.json reads
-//   - withLock() for mutating writes (updateItem, expireStaleItems, saveState)
+//   - withLock() for mutating writes (appendItem, expireStaleItems, saveState)
 //   - logError() instead of bare catch {}
 //
-// appendItem uses flag:'a' (atomic append on POSIX); no lock needed for append-only.
+// appendItem takes the queue lock too: appendFileSync is only atomic on POSIX
+// O_APPEND semantics, which Windows does not guarantee, so concurrent appends
+// can interleave without the lock. Full-file rewrites go through tmp+rename so
+// a crash mid-write never truncates the queue or state file.
 // readQueue reads JSONL line-by-line without JSON.parse(readFileSync) monolith.
 //
 // The shim at scripts/lib/librarian-queue.mjs re-exports every symbol here;
@@ -19,6 +22,7 @@ import {
   mkdirSync,
   unlinkSync,
   statSync,
+  renameSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -48,9 +52,17 @@ export function ensureDir() {
   mkdirSync(librarianDir(), { recursive: true });
 }
 
+function writeFileAtomic(path, data) {
+  const tmp = path + '.tmp';
+  writeFileSync(tmp, data, 'utf-8');
+  renameSync(tmp, path);
+}
+
 export function appendItem(item) {
-  ensureDir();
-  appendFileSync(queuePath(), JSON.stringify(item) + '\n', { encoding: 'utf-8' });
+  withLock(queuePath(), {}, () => {
+    ensureDir();
+    appendFileSync(queuePath(), JSON.stringify(item) + '\n', { encoding: 'utf-8' });
+  });
 }
 
 export function readQueue() {
@@ -84,18 +96,6 @@ export function pendingCount() {
   return pendingItems().length;
 }
 
-export function updateItem(id, updates) {
-  withLock(queuePath(), {}, () => {
-    const items = readQueue().map((item) => (item.id === id ? { ...item, ...updates } : item));
-    ensureDir();
-    writeFileSync(
-      queuePath(),
-      items.map((item) => JSON.stringify(item)).join('\n') + '\n',
-      'utf-8',
-    );
-  });
-}
-
 export function expireStaleItems(vaultPath) {
   withLock(queuePath(), {}, () => {
     const now = Date.now();
@@ -119,11 +119,7 @@ export function expireStaleItems(vaultPath) {
       return item;
     });
     ensureDir();
-    writeFileSync(
-      queuePath(),
-      items.map((item) => JSON.stringify(item)).join('\n') + '\n',
-      'utf-8',
-    );
+    writeFileAtomic(queuePath(), items.map((item) => JSON.stringify(item)).join('\n') + '\n');
   });
 }
 
@@ -153,7 +149,7 @@ export function incrementCounter(state, key) {
 export function saveState(state) {
   withLock(statePath(), {}, () => {
     ensureDir();
-    writeFileSync(statePath(), JSON.stringify(state, null, 2) + '\n', 'utf-8');
+    writeFileAtomic(statePath(), JSON.stringify(state, null, 2) + '\n');
   });
 }
 
