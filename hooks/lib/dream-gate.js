@@ -67,6 +67,11 @@ if (typeof lastDreamTs === 'number') {
 } else {
   // First-ever run (or unreadable marker — self-heal by re-stamping).
   // Two racing session-starts both write; last writer wins. Risk: accepted.
+  if (lastDreamTs !== null)
+    logError(
+      'dream-gate.badMarkerShape',
+      new Error(`expected epoch number, got ${typeof lastDreamTs}`),
+    );
   writeMarker(DREAM_MARKER, now());
   writeMarkerIfNeeded(null);
   process.exit(0);

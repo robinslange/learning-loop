@@ -129,9 +129,11 @@ describe('dream-gate', () => {
   it('a last-dream stamp written by marker.mjs suppresses the 24h gate — M1', () => {
     const CLI = join(import.meta.dirname, '..', 'scripts', 'marker.mjs');
     rmSync(DREAM_MARKER, { force: true });
-    execFileSync('node', [CLI, 'stamp', 'last-dream'], {
+    const stampedPath = execFileSync('node', [CLI, 'stamp', 'last-dream'], {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
-    });
+    }).toString().trim();
+    assert.equal(stampedPath, DREAM_MARKER, 'stamp must land where the gate reads');
+    assert.ok(existsSync(DREAM_MARKER), 'stamp must exist before the gate runs');
     const out = run();
     assert.equal(out.trim(), '', 'fresh dream stamp → no nudge');
   });
