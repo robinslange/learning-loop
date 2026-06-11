@@ -25,14 +25,14 @@ test("keeps only requested types", () => {
 test("name deny-list drops project-flavored feedback even when type matches", () => {
   const files = [
     mk("feedback_clean.md", "feedback"),
-    mk("feedback_strom_carousel.md", "feedback"),
+    mk("feedback_demo-brand_carousel.md", "feedback"),
   ];
   const { kept, dropped } = selectSeedMemories(files, {
     types: ["feedback"],
-    denyNamePatterns: ["strom", "ella"],
+    denyNamePatterns: ["demo-brand", "dana"],
   });
   assert.deepEqual(kept.map((k) => k.name), ["feedback_clean.md"]);
-  assert.equal(dropped[0].name, "feedback_strom_carousel.md");
+  assert.equal(dropped[0].name, "feedback_demo-brand_carousel.md");
   assert.equal(dropped[0].reason, "name-denied");
 });
 

@@ -138,10 +138,10 @@ describe('buildInjection', () => {
     const result = buildInjection({
       vaultHits: [],
       episodicHits: [
-        { date: '2026-04-01', project: 'thalen', snippet: 'Discussed Bayesian pipeline refactor' },
-        { date: '2026-04-02', project: 'kinso', snippet: 'Reviewed thread-detail PR' },
+        { date: '2026-04-01', project: 'tracker-app', snippet: 'Discussed Bayesian pipeline refactor' },
+        { date: '2026-04-02', project: 'acme', snippet: 'Reviewed thread-detail PR' },
         { date: '2026-04-03', project: 'dist1lled', snippet: 'Stripe integration planning' },
-        { date: '2026-04-04', project: 'solwen', snippet: 'This should be excluded' },
+        { date: '2026-04-04', project: 'northwind', snippet: 'This should be excluded' },
       ],
       query: 'test',
       alreadyInjectedPaths: new Set(),
@@ -212,7 +212,7 @@ describe('parseEpisodic via runBackendsWithRaceCap', () => {
     });
 
     assert.equal(results.episodic.hits.length, 3);
-    assert.equal(results.episodic.hits[0].project, '-Users-robin-dev-kinso-monorepo');
+    assert.equal(results.episodic.hits[0].project, '-Users-robin-dev-acme-monorepo');
     assert.equal(results.episodic.hits[0].date, '2026-01-05');
     assert.equal(results.episodic.hits[0].score, 0.02);
     assert.equal(results.episodic.hits[0].snippet, "let's do it as part of that performance improvement PR in the existing stack");
