@@ -88,7 +88,7 @@ flowchart LR
 
 ### write path
 
-A vault note write triggers `pre-write-check.js` before the write and several post-write hooks after. The daemon reindexes asynchronously after the session ends.
+A vault note write triggers `pre-write-check.js` before the write and the `post-tool.js` dispatcher after. The `ll-search watch` daemon reindexes continuously as notes change; nothing waits for session end.
 
 ```mermaid
 flowchart LR

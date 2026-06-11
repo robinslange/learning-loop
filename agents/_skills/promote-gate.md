@@ -208,7 +208,7 @@ If `verify-note` returns only `low` or `medium` issues (e.g., year off by one, a
 
 ## Auto-Link Safety Net (before promotion)
 
-Before promoting a note from `0-inbox/` to `3-permanent/`, check its wikilink count. This catches notes that bypassed the post-write-autolink hook (subagent writes, manual operations).
+Before promoting a note from `0-inbox/` to `3-permanent/`, check its wikilink count. This catches notes that bypassed the post-tool autolink module (subagent writes, manual operations).
 
 ### Process
 

@@ -181,8 +181,8 @@ export function removeFromSnapshot(snap, relPath) {
 }
 
 // Build a basename-with-extension → absolute path Map for autolink.
-// First-folder-wins iteration order: inbox-first, matching the historical
-// buildNoteMap in hooks/post-write-autolink.js.
+// First-folder-wins iteration order: inbox-first, matching the buildNoteMap
+// behaviour of the pre-coalescing standalone autolink hook.
 export function buildNoteMapFromSnapshot(snap, vaultRoot) {
   const map = new Map();
   const order = [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS];

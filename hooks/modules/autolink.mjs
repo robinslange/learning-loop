@@ -1,8 +1,8 @@
 // hooks/modules/autolink.mjs : backlink loop + similarity-based auto-links.
-// Extracted from hooks/post-write-autolink.js. The synchronous indexer-fallback
-// that the old file ran when the watch daemon was absent is intentionally
-// dropped here; under the new architecture the daemon owns all writes to
-// vault-index.db.
+// Extracted from the pre-coalescing standalone autolink hook. The synchronous
+// indexer-fallback that the old file ran when the watch daemon was absent is
+// intentionally dropped here; under the new architecture the daemon owns all
+// writes to vault-index.db.
 
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';

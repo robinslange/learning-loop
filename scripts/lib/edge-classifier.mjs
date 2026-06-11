@@ -1,5 +1,5 @@
 // edge-classifier.mjs — Shared classifier for wiki-link → edge type inference.
-// Used by hooks/post-write-edge-infer.js (single-note write) and
+// Used by hooks/modules/edge-infer.mjs (single-note write) and
 // scripts/backfill-edges.mjs (bulk vault scan).
 
 import { readdirSync } from 'fs';

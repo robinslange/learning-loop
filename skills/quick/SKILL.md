@@ -97,7 +97,7 @@ Return the filename and title when done.
 
 ### Step 4.5: Replay Post-Write Hooks
 
-If Step 4 dispatched the `note-writer` subagent, replay the post-write hook chain on the new note. Subagent Write/Edit calls bypass PostToolUse, so without this the note misses `post-write-autolink.js` and `post-write-edge-infer.js`.
+If Step 4 dispatched the `note-writer` subagent, replay the post-write hook chain on the new note. Subagent Write/Edit calls bypass PostToolUse, so without this the note misses the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules).
 
 Construct `$NOTE_PATH` from the agent's response (e.g. `{{VAULT}}/0-inbox/<filename>`, where `<filename>` is the kebab-case filename note-writer returned), then pipe it directly:
 

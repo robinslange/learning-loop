@@ -279,7 +279,7 @@ Confirmed insights:
 
 ### Step 5.5: Post-Batch Sweep
 
-The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse hooks, so notes it creates miss `post-write-autolink.js` and `post-write-edge-infer.js`: ending up without suggested backlinks or typed edges.
+The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse, so notes it creates miss the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules): ending up without suggested backlinks or typed edges.
 
 Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; it filters to notes with no `[[wikilinks]]` in the body and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 

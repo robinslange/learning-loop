@@ -1,6 +1,6 @@
 // hooks/modules/edge-infer.mjs : Wikilink → edge classification.
-// Extracted from hooks/post-write-edge-infer.js. Snapshot-backed vault index
-// (no per-call recursive readdir).
+// Extracted from the pre-coalescing standalone edge-infer hook. Snapshot-backed
+// vault index (no per-call recursive readdir).
 
 import { readFileSync, writeFileSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join, basename } from 'node:path';

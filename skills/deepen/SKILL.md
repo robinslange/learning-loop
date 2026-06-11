@@ -59,7 +59,7 @@ If no note name was provided, pass no note_path: the agent will pick the shallow
 
 ### Step 1.5: Replay Post-Write Hooks
 
-The `note-deepener` is a subagent. Its Write/Edit tool calls bypass PostToolUse, so the deepened note (and any split note in `0-inbox/`) miss `post-write-autolink.js` and `post-write-edge-infer.js`.
+The `note-deepener` is a subagent. Its Write/Edit tool calls bypass PostToolUse, so the deepened note (and any split note in `0-inbox/`) misses the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules).
 
 Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; it filters to notes with no `[[wikilinks]]` in the body and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
