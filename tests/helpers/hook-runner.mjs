@@ -3,9 +3,83 @@
 // Each invocation gets a fresh temp sandbox for HOME and plugin-data.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, statSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
+import { resolvePluginData } from '../../scripts/lib/config.mjs';
+
+const PKG_VERSION = JSON.parse(
+  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+).version;
+
+const SANDBOX_PREFIX = 'll-hook-sb-';
+const STALE_SANDBOX_MS = 60 * 60 * 1000;
+
+/**
+ * Delete leftover ll-hook-sb-* sandboxes older than 1h. Killed test runs
+ * (SIGKILL skips both finally and the exit handler) leak sandboxes; this
+ * sweep at module load reclaims them. 1h margin means a concurrently-running
+ * suite's live sandboxes are never touched.
+ */
+export function sweepStaleSandboxes(now = Date.now()) {
+  let removed = 0;
+  for (const dir of new Set([tmpdir(), '/tmp'])) {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names) {
+      if (!n.startsWith(SANDBOX_PREFIX)) continue;
+      const p = join(dir, n);
+      try {
+        const st = statSync(p);
+        if (now - st.mtimeMs > STALE_SANDBOX_MS) {
+          rmSync(p, { recursive: true, force: true });
+          removed++;
+        }
+      } catch {
+        // Already gone (parallel sweep) or unreadable — skip.
+      }
+    }
+  }
+  return removed;
+}
+sweepStaleSandboxes();
+
+// At exit, re-reap EVERY sandbox this process allocated — never removed from
+// the set by cleanup(). Covers both sandboxes whose cleanup() never ran
+// (assertion threw before finally, runner aborted) and sandboxes a hook's
+// detached child (e.g. the session-start provenance emitter) resurrected
+// AFTER cleanup() ran rmSync. Children that outlive the whole test process
+// can still leak, and SIGKILL skips this handler — both residues are what
+// the 1h startup sweep above is for.
+const allSandboxes = new Set();
+process.on('exit', () => {
+  for (const p of allSandboxes) {
+    try {
+      rmSync(p, { recursive: true, force: true });
+    } catch {}
+  }
+});
+
+// Resolve a real ll-search binary to symlink into sandboxes. Lookup mirrors
+// scripts/lib/binary.mjs: installed plugin-data first, dev build second.
+let realBinaryResolved = false;
+let realBinaryPath = null;
+function resolveRealBinary() {
+  if (realBinaryResolved) return realBinaryPath;
+  realBinaryResolved = true;
+  const candidates = [];
+  try {
+    const pd = resolvePluginData();
+    if (pd) candidates.push(join(pd, 'bin', 'll-search'));
+  } catch {}
+  candidates.push(new URL('../../native/target/release/ll-search', import.meta.url).pathname);
+  realBinaryPath = candidates.find((c) => existsSync(c)) || null;
+  return realBinaryPath;
+}
 
 /**
  * Reap a watch daemon by reading a pidfile, SIGTERM-ing the pid, briefly
@@ -83,12 +157,36 @@ export function runHook(hookPath, opts = {}) {
 
   // Allocate per-call sandbox so nothing leaks across tests.
   const sandboxRoot = mkdtempSync(join(tmpdir(), 'll-hook-sb-'));
+  allSandboxes.add(sandboxRoot);
   const pluginDataDir = join(sandboxRoot, 'plugin-data');
   mkdirSync(pluginDataDir, { recursive: true });
+
+  // Seed bin/.version with the running plugin version BEFORE anything else:
+  // an absent .version makes session-start's cache-cleanup treat the sandbox
+  // as a fresh install and spawn a DETACHED download-binary.mjs that outlives
+  // cleanup() and re-creates the sandbox with a 290MB binary (the 2026-06
+  // $TMPDIR leak + Gatekeeper-rescan flake mechanism).
+  const binDir = join(pluginDataDir, 'bin');
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(binDir, '.version'), `v${PKG_VERSION}\n`);
 
   // Seed callback fires before spawn.
   if (typeof seed === 'function') {
     seed(pluginDataDir, sandboxRoot);
+  }
+
+  // Symlink (never copy) a real binary AFTER the seed callback and only when
+  // the test didn't provide its own stub: writeFileSync onto a symlink writes
+  // through to the target, so linking first would let a stub clobber the real
+  // binary. Symlinks don't trigger fresh Gatekeeper assessments.
+  const sandboxBin = join(binDir, 'll-search');
+  if (!existsSync(sandboxBin)) {
+    const real = resolveRealBinary();
+    if (real) {
+      try {
+        symlinkSync(real, sandboxBin);
+      } catch {}
+    }
   }
 
   // On macOS, tmpdir() may return /var/folders/... while child processes that
@@ -147,7 +245,8 @@ export function runHook(hookPath, opts = {}) {
     if (vaultPath) {
       reapPidfile(join(vaultPath, '.vault-search', 'watch.pid'));
     }
-    // Remove sandbox.
+    // Remove sandbox. Intentionally NOT removed from allSandboxes — the exit
+    // handler re-reaps it in case a detached child resurrects it later.
     rmSync(sandboxRoot, { recursive: true, force: true });
     // Remove any learning-loop-* tmp files this run created (check both dirs).
     for (const key of tmpKeys) {

@@ -33,6 +33,13 @@ function seedTemplates() {
 }
 
 export function emitProvenance(event) {
+  // Never resurrect a deleted plugin-data: session-start spawns this emitter
+  // detached, so it can outlive a test sandbox's cleanup — mkdirSync here
+  // re-created rmSync'd sandboxes (the residual ll-hook-sb-* leak, 2026-06).
+  // Real installs always have an existing plugin-data, so this never no-ops
+  // for them.
+  const pluginData = getPluginData();
+  if (!pluginData || !existsSync(pluginData)) return;
   mkdirSync(PROVENANCE_DIR, { recursive: true });
   seedTemplates();
   const record = {

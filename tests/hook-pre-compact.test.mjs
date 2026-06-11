@@ -57,8 +57,10 @@ test('pre-compact writes nothing to plugin-data', () => {
   try {
     assert.equal(r.exitCode, 0);
 
-    // plugin-data dir should be empty (no files written by this hook).
-    const pdEntries = readdirSync(r.pluginDataDir);
+    // plugin-data dir should contain only the harness-seeded bin/ (hook-runner
+    // plants bin/.version to suppress the detached binary downloader) —
+    // nothing written by this hook.
+    const pdEntries = readdirSync(r.pluginDataDir).filter((n) => n !== 'bin');
     assert.deepEqual(pdEntries, [], `unexpected plugin-data files: ${pdEntries.join(', ')}`);
 
     // pre-compact is pure stdout — it has no file I/O in its source.
