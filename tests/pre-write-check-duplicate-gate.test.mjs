@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../hooks/lib/snapshot.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
 
 const HOOK = new URL('../hooks/pre-write-check.js', import.meta.url).pathname;
 let VAULT;
@@ -77,6 +78,15 @@ describe('pre-write-check duplicate-note gate', () => {
     rmSync(VAULT, { recursive: true, force: true });
   });
 
+  it('fixture similarities straddle the live threshold (the suite loses meaning otherwise)', () => {
+    assert.ok(
+      0.92 > HookConfig.SIMILARITY_THRESHOLD &&
+        0.99 > HookConfig.SIMILARITY_THRESHOLD &&
+        0.5 < HookConfig.SIMILARITY_THRESHOLD,
+      'fixture similarities must straddle the threshold',
+    );
+  });
+
   it('warns with similarity percentage on an above-threshold non-self match', () => {
     const { result } = runWithStub(
       envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
@@ -93,6 +103,16 @@ describe('pre-write-check duplicate-note gate', () => {
     const { result } = runWithStub(
       envelopeStub(0.99, '0-inbox/new-note.md', 'Sleep consolidates memory'),
       join(VAULT, '0-inbox', 'new-note.md'),
+    );
+    assert.equal(result, null);
+  });
+
+  it('self-match exemption survives a non-normalized file_path (resolve() does real work)', () => {
+    // Raw string, NOT path.join — join() would normalize the .. away before
+    // the hook ever sees it.
+    const { result } = runWithStub(
+      envelopeStub(0.99, '0-inbox/new-note.md', 'Sleep consolidates memory'),
+      `${VAULT}/0-inbox/../0-inbox/new-note.md`,
     );
     assert.equal(result, null);
   });
