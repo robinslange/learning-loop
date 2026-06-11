@@ -1,7 +1,7 @@
 // hooks/session-start/vault-snapshot.mjs : federation backfill, session ID
 // stamping, memory snapshot, and stale-marker TTL sweeps.
 
-import { writeFileSync, existsSync, readdirSync, statSync, rmSync, mkdirSync } from 'node:fs';
+import { writeFileSync, existsSync, readdirSync, lstatSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
@@ -136,10 +136,10 @@ export async function run(ctx) {
       if (!match(f)) continue;
       const full = join(dir, f);
       try {
-        const st = statSync(full);
+        const st = lstatSync(full);
         if (st.isFile() && st.mtimeMs < cutoffMs) rmSync(full, { force: true });
       } catch (err) {
-        logError('session-start.vault-snapshot.ttlSweep', err);
+        if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.ttlSweep', err);
       }
     }
   }

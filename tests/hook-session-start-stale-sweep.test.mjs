@@ -19,6 +19,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
   existsSync,
   utimesSync,
   realpathSync,
@@ -130,6 +131,11 @@ test(
     const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
     const twoHoursAgo = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
     const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-tmp-'));
+    // Separate dir for the session-id rewrite: the hook rewrites
+    // learning-loop-session-id (refreshing its mtime) BEFORE the sweep, so the
+    // seeded 8-day-old copy in isolatedTmp only stays old — and the never-sweep
+    // assertion only stays load-bearing — if the rewrite lands elsewhere.
+    const sessionTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-sid-'));
 
     const oldTmpFiles = [
       'learning-loop-stop-nudged-deadbeef',
@@ -139,7 +145,7 @@ test(
     ];
 
     const r = runHook(HOOK, {
-      env: { VAULT_PATH: VAULT, TMPDIR: isolatedTmp, LL_SESSION_TMP_DIR: isolatedTmp },
+      env: { VAULT_PATH: VAULT, TMPDIR: isolatedTmp, LL_SESSION_TMP_DIR: sessionTmp },
       stdin: '',
       seed: (pluginDataDir) => {
         writeFileSync(
@@ -180,16 +186,20 @@ test(
         !existsSync(join(r.pluginDataDir, 'edges.db.12345.tmp')),
         'edges tmp orphan swept',
       );
-      for (const n of oldTmpFiles) {
-        assert.ok(!existsSync(join(isolatedTmp, n)), `${n} swept`);
-      }
-      assert.ok(
-        readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8').length > 0,
-        'session-id file must NEVER be swept (overwritten with the new id is fine)',
+      assert.deepEqual(
+        readdirSync(isolatedTmp).sort(),
+        ['learning-loop-session-id'],
+        'all four legacies swept; the 8-day-old session-id file must NEVER be swept',
+      );
+      assert.equal(
+        readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8'),
+        'keep-me',
+        'seeded session-id survives untouched (the rewrite lands in sessionTmp)',
       );
     } finally {
       r.cleanup();
       rmSync(isolatedTmp, { recursive: true, force: true });
+      rmSync(sessionTmp, { recursive: true, force: true });
     }
   },
 );
