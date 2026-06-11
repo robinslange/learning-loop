@@ -156,7 +156,7 @@ Output one table per cluster:
 | duplicate-title |: | merge into #1 |: |
 ```
 
-After the table, list any gated actions needing approval. The block has three visually-distinct sections for the three gate categories. One user response handles all of them.
+After the table, list any gated actions needing approval. The block has four visually-distinct sections for the four gate categories (the fourth — fleeting archival — is filled in by the Step 8 sweep). One user response handles all of them.
 
 ```
 Needs approval:
@@ -170,6 +170,10 @@ NLI contradictions (3), pick supersede / qualify / keep-both / skip per item:
 - [a] new: <path-a> vs existing: <path-b>  (p=0.97)
 - [b] new: <path-c> vs existing: <path-d>  (p=0.96)
 - [c] new: <path-e> vs existing: <path-f>  (p=0.95)
+
+fleeting archival (2), to _archive/1-fleeting/:
+- 1-fleeting/bacopa-effects-grow-over-weeks.md -- promoted (3 permanent refs)
+- 1-fleeting/acme-app-hero-copy.md -- stale (0 refs, 90 days old)
 ```
 
 Acceptable reply formats for the NLI contradictions:
@@ -279,13 +283,13 @@ note: NLI daemon unreachable this session. promotions ran without contradiction 
 
 ### 8. Fleeting Sweep
 
-After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md`.
+After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md` in its subagent mode: you cannot converse, so archive NOTHING. Return the candidates (path, reason, detail) as the `fleeting archival` section of the Needs-approval block (Step 5); the skill presents them and `mv`s approved files to `_archive/1-fleeting/` after you return.
 
 ### 9. Final Report
 
 ```
 Inbox: [N] notes processed, [X] promoted, [R] remaining.
-Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
+Fleeting: [A] archival candidates returned, [F] active notes remain.
 ```
 
 ## Emit Provenance
@@ -293,7 +297,7 @@ Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
 ```
 
 Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows, held or not), `merge_candidates` = [Wm]. NLI-held `promote` rows are counted in `nli_contradictions_surfaced`, not separately. Executed-counts (rewrites done, merges done, NLI resolutions) belong to the skill's session-end event, not this payload.
@@ -303,7 +307,7 @@ Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: r
 - **Process by cluster, not by note.** This is the key throughput improvement. A cluster of 5 related notes gets one assessment pass, not five independent ones.
 - **Skip rewrite when possible.** Most deep notes already match voice. Checking promote-gate's skip-rewrite flag before adding a note to the Rewrite Worklist saves the skill time and context.
 - **Promotions are autonomous.** Never ask before promoting. The promote-gate criteria are the approval.
-- **Merges and deletes are gated.** Always ask. Always wait.
+- **Merges, deletes, and fleeting archival are gated.** List them in the Needs-approval block; the skill presents them and executes after user approval.
 - **Counter-arguments are first-class.** They get promoted on their own merit, not suppressed or merged into the note they challenge.
 - **Don't over-cluster.** Two notes about the same broad topic but different specific insights are separate notes, not merge candidates.
 - **Honest assessment.** Most inbox notes are shallow. That's fine. Name it and move on.
