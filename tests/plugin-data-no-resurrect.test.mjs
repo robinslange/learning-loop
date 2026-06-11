@@ -159,3 +159,33 @@ test('dream-gate first-run stamp does not re-create a deleted plugin-data dir', 
   assert.equal(result.status, 0, `dream-gate must no-op cleanly, stderr: ${result.stderr}`);
   assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
 });
+
+// --- hooks/lib/common.mjs TWIN emitProvenance (same name as the guarded
+// --- scripts/provenance.mjs emitter; unguarded recursive mkdir reopens the
+// --- resurrection class if ever called from a detached worker) ---
+
+const COMMON_URL = pathToFileURL(join(SCRIPTS, '..', 'hooks', 'lib', 'common.mjs')).href;
+
+const HOOK_EMIT_CODE = `
+import { emitProvenance } from ${JSON.stringify(COMMON_URL)};
+emitProvenance({ path: 'x.md', agent_id: 'no-resurrect' });
+`;
+
+test('hooks/lib/common.mjs emitProvenance does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-hookprov-gone-');
+  const result = runModule(HOOK_EMIT_CODE, root);
+  assert.equal(result.status, 0, `hook emitProvenance must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});
+
+test('hooks/lib/common.mjs emitProvenance still appends when plugin-data exists', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-hookprov-live-'));
+  try {
+    const result = runModule(HOOK_EMIT_CODE, root);
+    assert.equal(result.status, 0, result.stderr);
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    assert.ok(existsSync(join(root, 'provenance', `events-${month}.jsonl`)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

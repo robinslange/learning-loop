@@ -6,7 +6,12 @@
 import { mkdirSync, existsSync } from 'node:fs';
 import { join, sep, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { resolvePluginData, getVaultPath, getConfig } from '../../scripts/lib/config.mjs';
+import {
+  resolvePluginData,
+  getVaultPath,
+  getConfig,
+  pluginDataExists,
+} from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
@@ -126,6 +131,7 @@ export function emitProvenance(event) {
   const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
   if (key !== '||' && provenanceDedupeKeys.has(key)) return;
   provenanceDedupeKeys.add(key);
+  if (!pluginDataExists()) return;
   const pd = resolvePluginData();
   if (!pd) return;
   const dir = DATA_PATHS.provenance(pd);

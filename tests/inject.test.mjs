@@ -262,19 +262,37 @@ describe('parseVault raced_out field', () => {
 });
 
 describe('emitHookOutput', () => {
-  it('writes valid JSON envelope to stdout', () => {
+  function captureStdout(fn) {
     const chunks = [];
     const original = process.stdout.write;
     process.stdout.write = (data) => { chunks.push(data); return true; };
     try {
-      emitHookOutput({ event: 'NotificationSubagentStart', additionalContext: 'test context' });
+      fn();
     } finally {
       process.stdout.write = original;
     }
-    const parsed = JSON.parse(chunks.join(''));
+    return chunks.join('');
+  }
+
+  it('writes valid JSON envelope to stdout', () => {
+    const out = captureStdout(() =>
+      emitHookOutput({ event: 'NotificationSubagentStart', additionalContext: 'test context' }),
+    );
+    const parsed = JSON.parse(out);
     assert.ok(parsed.hookSpecificOutput);
     assert.equal(parsed.hookSpecificOutput.hookEventName, 'NotificationSubagentStart');
     assert.equal(parsed.hookSpecificOutput.additionalContext, 'test context');
+  });
+
+  it('oversized additionalContext still emits valid JSON under the cap', () => {
+    const big = 'α'.repeat(20000); // multibyte: ~2 bytes/char utf8
+    const out = captureStdout(() =>
+      emitHookOutput({ event: 'UserPromptSubmit', additionalContext: big }),
+    );
+    assert.ok(Buffer.byteLength(out, 'utf8') <= 8192, 'output must fit HOOK_STDOUT_MAX_BYTES');
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
+    assert.match(parsed.hookSpecificOutput.additionalContext, /…\[truncated\]$/);
   });
 });
 

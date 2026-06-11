@@ -1,5 +1,6 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 import { findBinary, findEpisodicBinary } from './common.mjs';
+import { emitJson } from './io.mjs';
 import { warnOnce } from '../../scripts/lib/warn-once.mjs';
 import { spawnEnv } from '../../scripts/lib/env.mjs';
 
@@ -83,11 +84,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
 }
 
 export function emitHookOutput({ event, additionalContext }) {
-  process.stdout.write(
-    JSON.stringify({
-      hookSpecificOutput: { hookEventName: event, additionalContext },
-    }),
-  );
+  emitJson({ hookSpecificOutput: { hookEventName: event, additionalContext } });
 }
 
 function spawnSearch(spawnFn, cmd, args, abortSignal, env) {
