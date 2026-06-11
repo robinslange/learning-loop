@@ -36,9 +36,12 @@ jobs:
       # skip guard. Bump LL_BINARY_VERSION when the envelope contract changes;
       # it is pinned (not package.json-derived) so a release commit doesn't
       # race the build-native workflow that publishes its own artifacts.
+      # v1.26.1 has no release because its build-native run failed (W4 hardens
+      # this); the truncation contract (schema_version 1 + truncated field) is
+      # stable across these versions.
       - name: Install ll-search release binary
         env:
-          LL_BINARY_VERSION: v1.26.1
+          LL_BINARY_VERSION: v1.26.0
         run: |
           set -euo pipefail
           mkdir -p native/target/release
