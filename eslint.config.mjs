@@ -1,9 +1,10 @@
 // eslint.config.mjs -- flat config for learning-loop (ESLint 9+).
 //
-// Four custom rules are registered but configured "off": running them at
+// Three custom rules are registered but configured "off": running them at
 // "error" still reports violations in hooks/ and scripts/ (18x process.env,
 // 9x empty catch, 8x direct JSON.parse as of W4). Flip each rule to "error"
 // once its consumers migrate to scripts/lib/{env,file-lock,safe-load}.mjs.
+// no-raw-lockfile is at "error": it had zero violations when W4 wired eslint.
 
 import learningLoopPlugin from './eslint-plugin-learning-loop/index.mjs';
 
@@ -18,7 +19,7 @@ export default [
       'learning-loop/no-process-env-outside-env-module': 'off',
       'learning-loop/no-empty-catch': 'off',
       'learning-loop/no-direct-jsonparse': 'off',
-      'learning-loop/no-raw-lockfile': 'off',
+      'learning-loop/no-raw-lockfile': 'error',
     },
   },
   {
