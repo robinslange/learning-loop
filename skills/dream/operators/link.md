@@ -20,7 +20,7 @@ LINK never combines files. It only adds cross-references.
 
 ```markdown
 ### LINK
-- `feedback_graphite_workflow.md` <-> `project_kinso.md` (shared: Graphite CLI workflow)
+- `feedback_graphite_workflow.md` <-> `project_acme.md` (shared: Graphite CLI workflow)
 ```
 
 Emit provenance after each operation: `PLUGIN/scripts/provenance-emit.js '{"agent":"dream","action":"link","target":"FILENAME"}'`

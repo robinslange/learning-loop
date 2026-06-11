@@ -58,7 +58,7 @@ Identify what was learned. Categories:
 | **Pattern discovered** | "This pagination pattern works across projects" | Obsidian vault | - |
 | **Domain insight** | "Resto Druid HoT uptime benchmarks are..." | Obsidian vault | - |
 | **Project context** | "Auth rewrite is driven by compliance, not tech debt" | Auto-memory (project) | medium |
-| **Cross-project connection** | "Same caching problem exists in Kinso and Solenoid" | Obsidian vault + links | - |
+| **Cross-project connection** | "Same caching problem exists in Acme and Widget-Co" | Obsidian vault + links | - |
 | **Implicit pattern** | User always runs tests before committing (observed 3+ times, never stated) | Auto-memory (feedback) | weak |
 
 List each learning as a single line.

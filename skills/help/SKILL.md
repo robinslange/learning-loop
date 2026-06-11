@@ -146,7 +146,7 @@ Phase 1 presents link suggestions, tag suggestions, voice flags, and duplicate f
 ```
 /learning-loop:ingest linear                    # my assigned tickets
 /learning-loop:ingest linear "AI Assistant"     # tickets from a specific project
-/learning-loop:ingest repo ~/dev/kinso/monorepo # scan a repo
+/learning-loop:ingest repo ~/dev/acme/monorepo # scan a repo
 /learning-loop:ingest repo ~/dev/foo --deep     # force the parallel deep fan-out
 /learning-loop:ingest context                   # paste text to extract
 ```

@@ -66,7 +66,7 @@ Build the full Excalidraw JSON following diagram-rules exactly. Write to:
 {{VAULT}}/Excalidraw/{slug}.excalidraw.md
 ```
 
-Where `{slug}` is a descriptive kebab-case name (e.g., `thalen-engagement-loop-tiers`).
+Where `{slug}` is a descriptive kebab-case name (e.g., `tracker-app-engagement-loop-tiers`).
 
 **File format:**
 ```markdown

@@ -14,7 +14,7 @@ For each distinct piece of knowledge in the input:
 2. **Classify** — assign exactly one type:
    - `project-state` — ephemeral working context. Ticket counts, current focus areas, team assignments, deadlines, active blockers. This updates auto-memory, not the vault.
    - `durable-insight` — decisions, patterns, architecture, constraints, trade-offs worth preserving beyond this session. This becomes a vault note.
-3. **Title** — states the insight, not the topic. "Kinso attachment tickets block AI feature work" not "Kinso tickets."
+3. **Title** — states the insight, not the topic. "Acme attachment tickets block AI feature work" not "Acme tickets."
 4. **Body** — 1-3 sentences of context. For `project-state`, include dates and numbers. For `durable-insight`, include the reasoning or evidence.
 5. **Confidence** — `high` (directly stated in source), `medium` (inferred from source), `low` (speculative connection).
 

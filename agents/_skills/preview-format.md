@@ -6,7 +6,7 @@ Format extracted insights for user review before writing to memory/vault.
 
 A JSON array of insights from `extract-insights`, plus:
 - `source_type`: "linear", "repo", or "context"
-- `source_label`: Human-readable source description (e.g., "Linear — my assigned tickets", "Repo — ~/dev/kinso/monorepo")
+- `source_label`: Human-readable source description (e.g., "Linear — my assigned tickets", "Repo — ~/dev/acme/monorepo")
 
 ## Process
 

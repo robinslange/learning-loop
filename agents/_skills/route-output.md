@@ -5,7 +5,7 @@ Write confirmed insights to their destinations: auto-memory and/or vault.
 ## Input
 
 - `confirmed_insights`: JSON array of insights the user approved
-- `project_name`: Project name for auto-memory file naming (e.g., "kinso")
+- `project_name`: Project name for auto-memory file naming (e.g., "acme")
 - `vault_path`: Path to vault (default `{{VAULT}}/`)
 - `memory_path`: Path to auto-memory (derived from `CLAUDE_PROJECT_DIR`)
 
