@@ -18,13 +18,13 @@ You will receive:
 
 ## Skills
 
-- `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
 
 ## Process
 
 ### 1. Extract Claims and Sources
 
-When given a topic-based scope rather than a specific note, use `node PLUGIN/scripts/vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
+When given a topic-based scope rather than a specific note, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
 
 Read the note. Identify:
 - Every factual claim (not opinions or framing)
@@ -39,13 +39,13 @@ For each source with a PMID, PMC ID, or DOI, run the appropriate command:
 
 ```bash
 # For PubMed URLs
-node PLUGIN/scripts/source-resolver.mjs verify-pmid <pmid> "ClaimedAuthor" <year>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-pmid <pmid> "ClaimedAuthor" <year>
 
 # For DOI URLs
-node PLUGIN/scripts/source-resolver.mjs verify-doi <doi> "ClaimedAuthor" <year>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-doi <doi> "ClaimedAuthor" <year>
 
 # Or verify all sources in a note at once
-node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
 The resolver returns:
@@ -60,7 +60,7 @@ The resolver returns:
 
 **For sources cited by name without a URL:**
 ```bash
-node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"
 ```
 This searches PubMed → Semantic Scholar → CrossRef. If found, report the correct URL and verify authors match.
 
@@ -69,7 +69,7 @@ This searches PubMed → Semantic Scholar → CrossRef. If found, report the cor
 For quantitative claims, run the mechanical checker first:
 
 ```bash
-node PLUGIN/scripts/source-resolver.mjs check-claims <note-path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs check-claims <note-path>
 ```
 
 This extracts specific numbers from the note body and checks whether each appears in the source's abstract. Use results to prioritize which claims need deeper review.

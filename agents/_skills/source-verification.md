@@ -96,7 +96,7 @@ When called from note-writer or other agents that need deterministic verificatio
 ### Verify sources
 
 1. Write the note content to a temp file using the Write tool: `<tmpdir>/ll-note-verify-TIMESTAMP.md` (epoch ms for TIMESTAMP, where tmpdir is the OS temp directory)
-2. Run: `node PLUGIN/scripts/source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
+2. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
 3. Parse the JSON output. For each source:
    - `verified: true` -- no action needed
    - `wrong_author` -- replace with the resolver's `metadata.firstAuthor` surname + "et al."
@@ -109,7 +109,7 @@ When called from note-writer or other agents that need deterministic verificatio
 
 ### Check quantitative claims
 
-1. Run: `node PLUGIN/scripts/source-resolver.mjs check-claims <tmpdir>/ll-note-verify-TIMESTAMP.md`
+1. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs check-claims <tmpdir>/ll-note-verify-TIMESTAMP.md`
 2. The script checks numbers against:
    - **Abstracts** (when source has PMID, DOI, or arXiv ID) — `source_kind: "abstract"` in output
    - **Page text** (when source is a non-academic URL — docs, blogs, vendor pages) — `source_kind: "page"` in output. Paywalled/PDF domains are skipped.

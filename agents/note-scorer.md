@@ -13,8 +13,8 @@ You are a quality assessment agent for an Obsidian Zettelkasten vault. Your job 
 
 Read and follow this skill: it defines your scoring criteria:
 
-- `PLUGIN/agents/_skills/promote-gate.md`: criteria definitions, scoring scale, and maturity tiers
-- `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: criteria definitions, scoring scale, and maturity tiers
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
 
 ## Input
 
@@ -32,7 +32,7 @@ You will receive:
 5. Derive maturity tier from the note-level score (shallow < 0.4, medium 0.4-0.7, deep > 0.7).
 6. Recommend an action.
 
-For linking assessment, use `node PLUGIN/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps: notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
+For linking assessment, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps: notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
 
 ## Output Format
 
@@ -144,7 +144,7 @@ Why this is deep: Falsifiable claim (specificity 2): "negative definition is a c
 After scoring all notes, emit a summary event:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-scorer","action":"batch-score","notes_scored":N,"tiers":{"shallow":N,"medium":N,"deep":N},"actions":{"deepen":N,"promote":N,"split":N,"merge":N,"source-attach":N}}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-scorer","action":"batch-score","notes_scored":N,"tiers":{"shallow":N,"medium":N,"deep":N},"actions":{"deepen":N,"promote":N,"split":N,"merge":N,"source-attach":N}}'
 ```
 
 ## Rules

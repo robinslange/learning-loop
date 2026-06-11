@@ -22,14 +22,14 @@ If no note_path is provided, scan `0-inbox/` and pick the shallowest note.
 
 Read and follow these skills during work:
 
-- `PLUGIN/agents/_skills/promote-gate.md`: assess note quality and determine destination folder
-- `PLUGIN/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing claim
-- `PLUGIN/agents/_skills/capture-rules.md`: note format and what belongs in the vault
-- `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files
-- `PLUGIN/agents/_skills/source-verification.md`: how to verify sources
-- `PLUGIN/agents/_skills/overlap-check.md`: check if note's topic is already covered elsewhere
-- `PLUGIN/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
-- `PLUGIN/agents/_skills/decision-gates.md`: checkpoints between research phases
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: assess note quality and determine destination folder
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing claim
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: note format and what belongs in the vault
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: how to verify sources
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/overlap-check.md`: check if note's topic is already covered elsewhere
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/decision-gates.md`: checkpoints between research phases
 
 ## Process
 
@@ -55,7 +55,7 @@ Use the promote-gate assessment and overlap results to determine approach.
 **Shallow or fleeting notes (gaps in sourcing, depth, or linking) -- parallel research:**
 
 Launch two searches in parallel:
-1. **Vault context:** Use `node PLUGIN/scripts/vault-search.mjs search "<note topic>" --rerank` and `Glob` to find related vault notes. Search episodic memory for past conversations on this topic. If the episodic memory tools are unavailable, skip the episodic memory search and note "episodic memory unavailable" in your research output. Do not attempt to call the tool.
+1. **Vault context:** Use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<note topic>" --rerank` and `Glob` to find related vault notes. Search episodic memory for past conversations on this topic. If the episodic memory tools are unavailable, skip the episodic memory search and note "episodic memory unavailable" in your research output. Do not attempt to call the tool.
 2. **Web research:** Use web search to fill knowledge gaps: find sources, evidence, counterpoints for the note's claims. Focus on the specific gaps identified in Step 1.
 
 **Well-sourced permanent notes -- vault context only:**
@@ -97,7 +97,7 @@ Body: 3-10 lines (up to 15 for deep notes with sources). Max 3 tags. At least on
 **Run source-resolver on the rewritten note before finishing.** Do not rely on your own recognition of whether citations are correct: LLM-generated PMIDs are wrong ~43% of the time.
 
 ```bash
-node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
 For each source flagged:
@@ -146,7 +146,7 @@ Flag any sources found during research that aren't already in `2-literature/` as
 After completing the deepen cycle, emit a result event:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
 ```
 
 ## Rules

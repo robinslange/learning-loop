@@ -33,9 +33,9 @@ The pairs have already been pre-filtered by cosine similarity (0.78–0.92) and 
 
 Read these shared agent skills before working:
 
-- `PLUGIN/agents/_skills/counter-argument-linking.md`: patterns for detecting contradictions and the bidirectional link format
-- `PLUGIN/agents/_skills/capture-rules.md`: vault note format constraints
-- `PLUGIN/agents/_skills/vault-io.md`: how to read vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: patterns for detecting contradictions and the bidirectional link format
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: vault note format constraints
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read vault files
 
 ## ABSOLUTE RULES
 

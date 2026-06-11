@@ -20,11 +20,11 @@ You will receive:
 
 Read and follow these skills during triage:
 
-- `PLUGIN/agents/_skills/promote-gate.md`: quality gate for folder routing and skip-rewrite detection
-- `PLUGIN/agents/_skills/counter-argument-linking.md`: detect and link challenge notes
-- `PLUGIN/agents/_skills/capture-rules.md`: what belongs in the vault and note format rules
-- `PLUGIN/agents/_skills/vault-io.md`: how to read/write vault files
-- `PLUGIN/agents/_skills/fleeting-sweep.md`: sweep 1-fleeting/ for archival candidates (Step 8)
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: quality gate for folder routing and skip-rewrite detection
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect and link challenge notes
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: what belongs in the vault and note format rules
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md`: sweep 1-fleeting/ for archival candidates (Step 8)
 
 ## Process
 
@@ -65,7 +65,7 @@ Add `status: intentioned | resolved | limbo` to each note's frontmatter via `Edi
 Run semantic clustering:
 
 ```bash
-node PLUGIN/scripts/vault-search.mjs cluster --threshold 0.72
+node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs cluster --threshold 0.72
 ```
 
 Filter to clusters containing at least one inbox note. Supplement with tag overlap: notes sharing 2+ tags that weren't caught by embeddings belong in the same cluster.
@@ -78,7 +78,7 @@ For each cluster, process all its inbox notes together:
 
 **a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four. This is faster than per-note scoring passes for obvious cases.
 
-**a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `PLUGIN/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
+**a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `${CLAUDE_PLUGIN_ROOT}/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
 
 - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Surface in step 5 gated-action block under a new "NLI contradictions" header with the supersede / qualify / keep-both / skip prompt. The note's Rewrite Worklist row (5.6) — `rewrite` if voice fails, `promote` if it only needed a `mv` — gets `held: nli` and is NEVER executed autonomously; the skill executes it only after the user's per-item choice.
 - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **soft bucket**: promote with annotation. Stamp `nli_tension: true` and `nli_tension_partners: [partner-path, ...]` on the new note's frontmatter at promotion time. Mention inline in the cluster table.
@@ -278,7 +278,7 @@ note: NLI daemon unreachable this session. promotions ran without contradiction 
 
 ### 8. Fleeting Sweep
 
-After inbox processing, run the fleeting sweep per `PLUGIN/agents/_skills/fleeting-sweep.md`.
+After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md`.
 
 ### 9. Final Report
 

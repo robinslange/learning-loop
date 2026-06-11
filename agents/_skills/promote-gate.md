@@ -193,7 +193,7 @@ Before promoting a note from `0-inbox/` to a higher folder, query NLI contradict
 Before any note reaches `3-permanent/`, run:
 
 ```bash
-node PLUGIN/scripts/source-resolver.mjs verify-note <note-path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
 This mechanically checks:
@@ -219,7 +219,7 @@ Before promoting a note from `0-inbox/` to `3-permanent/`, check its wikilink co
    b. Filter: similarity >= 0.65, not self
    c. If matches found: take top 3, append as `[[note-name]]` links after the note body
    d. If no matches above threshold: proceed anyway (the note is legitimately isolated in a new domain)
-   e. Emit provenance: `node PLUGIN/scripts/provenance-emit.js '{"action":"auto-link","target":"<note.md>","links_added":N,"trigger":"promote-gate"}'`
+   e. Emit provenance: `node ${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js '{"action":"auto-link","target":"<note.md>","links_added":N,"trigger":"promote-gate"}'`
 4. Proceed with normal promotion
 
 This check is not a blocking gate. A note with zero links and zero similar notes still promotes if all other criteria pass. The auto-link is a quality improvement, not a requirement.

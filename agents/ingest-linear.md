@@ -18,8 +18,8 @@ You will receive:
 ## Skills
 
 Read and follow these skills:
-- `PLUGIN/agents/_skills/extract-insights.md`: classify raw data into insights
-- `PLUGIN/agents/_skills/vault-io.md`: file path conventions
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/extract-insights.md`: classify raw data into insights
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: file path conventions
 
 ## Process
 

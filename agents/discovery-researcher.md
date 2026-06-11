@@ -22,10 +22,10 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `PLUGIN/agents/_skills/overlap-check.md`: check if existing knowledge already covers this topic
-- `PLUGIN/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
-- `PLUGIN/agents/_skills/decision-gates.md`: checkpoints between research phases
-- `PLUGIN/agents/_skills/source-verification.md`: how to verify sources
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/overlap-check.md`: check if existing knowledge already covers this topic
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/decision-gates.md`: checkpoints between research phases
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: how to verify sources
 
 ## Process
 
@@ -41,7 +41,7 @@ Run novelty gate (decision-gates):
 ### 2. Initialize Convergence Session
 
 ```bash
-node PLUGIN/scripts/convergence-check.mjs init "SESSION_ID"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/convergence-check.mjs init "SESSION_ID"
 ```
 
 Use a unique session ID (e.g., `discovery-TIMESTAMP`).
@@ -52,14 +52,14 @@ Repeat:
 
 1. **Formulate a query** based on the topic, angle, and what you've found so far.
 
-2. **Search the web** for the query. Use the `WebSearch` tool, then read the top results (via `WebFetch` if you need full content). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node PLUGIN/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
+2. **Search the web** for the query. Use the `WebSearch` tool, then read the top results (via `WebFetch` if you need full content). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
 
    *Optional shortcut:* if `mgrep` is installed, `mgrep --web --answer "query"` returns a pre-synthesized summary you can use directly. Don't require it.
 
 3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
 
    ```bash
-   node PLUGIN/scripts/convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
+   node ${CLAUDE_PLUGIN_ROOT}/scripts/convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
    [paste the full search result text here, verbatim — your synthesis or the mgrep output]
    LL_RESULT_EOF
    ```
@@ -75,7 +75,7 @@ Do NOT override the convergence checker's verdict. It uses mechanical signals (e
 
 ### 3b. Resolve Sources (Layer 1 Verification)
 
-After the search loop ends, run `node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
+After the search loop ends, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
 - Correct author list (ground truth, not LLM inference)
 - Correct year, journal, DOI
 - Abstract text (for claim verification in later steps)
@@ -119,7 +119,7 @@ Run confidence gate (decision-gates):
 
 After drafting findings, assess whether the findings describe a mechanism, pathway, or multi-step process where relationships between parts matter more than the parts themselves. If so, generate an Excalidraw diagram.
 
-Read `PLUGIN/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 **In the research brief**, include a `### Diagram` section with:
 - The diagram filename (e.g., `glutamate-inflammation-loop.excalidraw.md`)
@@ -195,7 +195,7 @@ WebFetch has no timeout parameter. A single hanging fetch can stall the entire a
 - `eprints.*.ac.uk`, `*.edu` thesis PDFs
 - Any URL ending in `.pdf` (binary, WebFetch can't read it anyway)
 
-For academic sources, use `node PLUGIN/scripts/source-resolver.mjs resolve "Author Year Topic"` instead. It hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably.
+For academic sources, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"` instead. It hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably.
 
 **Never re-fetch a URL you already fetched.** If you fetched a URL during research, its content is already in your context.
 

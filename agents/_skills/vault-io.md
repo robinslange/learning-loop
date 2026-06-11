@@ -1,5 +1,16 @@
 # Vault I/O
 
+## Placeholders
+
+Agent and skill files use exactly two path placeholders:
+
+- `${CLAUDE_PLUGIN_ROOT}` — the plugin install root (where `scripts/`, `agents/`, `skills/` live)
+- `{{VAULT}}` — the vault root
+
+**Substitution rule: resolve both placeholders to literal absolute paths BEFORE passing any prompt to a subagent.** Skills get the values from the Learning Loop Paths session context (`PLUGIN=` and `VAULT=` lines). Subagents must never guess a path: if a placeholder reaches you unresolved, report it as a dispatch error instead of inventing a value.
+
+The spelling `PLUGIN/` is banned (a lint test enforces this); use `${CLAUDE_PLUGIN_ROOT}/`.
+
 ## Reading Notes
 
 Use the `Read` tool on `{{VAULT}}/`. Do NOT use Obsidian MCP tools — they are unreliable and frequently fail with JSON parse errors.

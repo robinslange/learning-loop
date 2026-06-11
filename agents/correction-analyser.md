@@ -25,9 +25,9 @@ You will receive:
 You do **not** read the SQLite edge database directly. Instead, you call the edges CLI with `Bash`:
 
 ```
-node PLUGIN/scripts/edges-cli.mjs list <note_path>
-node PLUGIN/scripts/edges-cli.mjs sole-dependents <note_path>
-node PLUGIN/scripts/edges-cli.mjs downstream <note_path> --max-depth 5
+node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs list <note_path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs sole-dependents <note_path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs downstream <note_path> --max-depth 5
 ```
 
 **Critical: query both directions.** The classifier can produce edges in either direction depending on the prose pattern that triggered them. "[[X]] confirms the finding" stores from=source, to=X with evidence_for, but semantically X is the evidence and source is the claim. "this proves [[X]]" has the opposite reading. You cannot tell from the edge alone which way the dependency flows.
@@ -64,7 +64,7 @@ For each downstream note, check whether `edges-cli.mjs list <note_path>` returne
 - `edge_type='nli_supports'` — NLI inferred `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default 0.75). Biases AGAINST rebuttal (the candidate logically follows from the changed note, so the change tends to strengthen rather than break it; lean **untouched** or **undermining** depending on the change_type).
 
 ```
-node PLUGIN/scripts/edges-cli.mjs list <note_path>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs list <note_path>
 ```
 
 The `outgoing` and `incoming` arrays each return full DB row objects (via `rowsToObjects`), so `source_graph`, `edge_type`, and `confidence_score` are all present in every row. Filter directly: `r.source_graph === 'nli'` then split by `r.edge_type`. The `confidence_score` (float between threshold and 1.0) tells you how strongly the model committed to the call — pass it through to your reasoning rather than treating all NLI rows as equally weighted.
