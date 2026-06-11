@@ -6,8 +6,11 @@ use std::thread::sleep;
 use std::time::Duration;
 
 // HuggingFace rate-limits (HTTP 429) under concurrent CI builds; a single curl
-// attempt makes the release build flaky. Retry with exponential backoff.
-const MAX_ATTEMPTS: u32 = 5;
+// attempt makes the release build flaky. Retry with capped backoff.
+const MAX_ATTEMPTS: u32 = 6;
+// Seconds before retry N+1. HF 429 windows outlive short exponential backoff
+// (run 27312423423: five 429s in ~30s); later waits are deliberately long.
+const BACKOFF_SECS: [u64; 5] = [2, 5, 15, 45, 90];
 
 // MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli, exported as int8 ONNX by Xenova.
 // Used by the contradiction-check hook (edge-infer.mjs -> ll-search nli-batch).
@@ -108,7 +111,7 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) {
         );
         let _ = fs::remove_file(&tmp);
         if attempt < MAX_ATTEMPTS {
-            let backoff = Duration::from_secs(2u64.pow(attempt));
+            let backoff = Duration::from_secs(BACKOFF_SECS[(attempt - 1) as usize]);
             eprintln!("  curl failed ({}); retrying in {:?}", last_err, backoff);
             sleep(backoff);
         }

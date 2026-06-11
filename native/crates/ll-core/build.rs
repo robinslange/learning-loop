@@ -45,6 +45,9 @@ fn download(url: &str, dest: &Path) {
     );
 }
 
+// LL_MODEL_CACHE_DIR is a durable CI cache outside the eviction-prone cargo cache:
+// files land there, then ALWAYS copy to OUT_DIR for include_bytes! — a conditional
+// copy could embed a stale OUT_DIR file from a restored target/ after a URL bump.
 fn fetch(url: &str, filename: &str, out_path: &Path) {
     match env::var("LL_MODEL_CACHE_DIR") {
         Ok(dir) if !dir.is_empty() => {
@@ -52,10 +55,8 @@ fn fetch(url: &str, filename: &str, out_path: &Path) {
             std::fs::create_dir_all(&cache_dir).expect("create LL_MODEL_CACHE_DIR");
             let cached = cache_dir.join(filename);
             download(url, &cached);
-            if !out_path.exists() {
-                std::fs::copy(&cached, out_path)
-                    .unwrap_or_else(|e| panic!("copy {} -> {}: {}", cached.display(), out_path.display(), e));
-            }
+            std::fs::copy(&cached, out_path)
+                .unwrap_or_else(|e| panic!("copy {} -> {}: {}", cached.display(), out_path.display(), e));
         }
         _ => download(url, out_path),
     }
