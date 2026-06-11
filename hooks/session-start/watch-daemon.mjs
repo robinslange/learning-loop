@@ -124,13 +124,15 @@ export async function run(ctx) {
   }
 
   if (shouldSpawn) {
-    // acquireLock = O_EXCL + PID-probe stale recovery + mtime backstop
-    // (scripts/lib/file-lock.mjs). The previous hand-rolled 'wx' lock was
-    // removed only on the happy path — one crash disabled vault indexing on
-    // every later session (M12). Lock name: watch.pid.lock (acquireLock
-    // appends '.lock' to the guarded path), identical to the old name, so
-    // pre-existing stale locks on real installs are recovered too.
-    const handle = acquireLock(pidPath);
+    // acquireLock guards pidPath + '.lock' = watch.pid.lock — same name the old
+    // lock used, so stale locks from older installs are recovered, not orphaned.
+    let handle = null;
+    try {
+      handle = acquireLock(pidPath);
+    } catch (err) {
+      logError('session-start.watch-daemon.acquireLock', err);
+      return;
+    }
     if (!handle) {
       logError(
         'session-start.watch-daemon.acquireLock',
@@ -139,6 +141,7 @@ export async function run(ctx) {
       return;
     }
     try {
+      if (checkAlive().state === 'alive') return;
       try {
         writeFileSync(fingerprintPath, currentFingerprint);
       } catch (err) {
