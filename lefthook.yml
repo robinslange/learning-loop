@@ -14,7 +14,12 @@ pre-commit:
         done
 
     prettier:
-      glob: "{plugin/hooks,plugin/scripts}/**/*.{js,mjs}"
+      # Both depths needed: lefthook's glob requires "**" to match at least
+      # one directory, so the deep pattern alone misses direct children like
+      # plugin/hooks/pre-write-check.js.
+      glob:
+        - "{plugin/hooks,plugin/scripts}/*.{js,mjs}"
+        - "{plugin/hooks,plugin/scripts}/**/*.{js,mjs}"
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
