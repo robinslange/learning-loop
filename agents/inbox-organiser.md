@@ -75,7 +75,7 @@ Name each cluster by its dominant theme. Single-note clusters are fine.
 
 For each cluster, process all its inbox notes together:
 
-**a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four. This is faster than spawning note-scorer agents for obvious cases.
+**a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four. This is faster than per-note scoring passes for obvious cases.
 
 **a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `PLUGIN/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
 
@@ -104,8 +104,8 @@ For each note, assign one action:
 |---|---|
 | All 6 pass + skip-rewrite + verify-note PASS | `mv` to `3-permanent/` (no rewrite needed) |
 | All 6 pass + skip-rewrite + verify-note FAIL (high severity) | `mv` to `1-fleeting/` (verification gate held) |
-| All 6 pass, voice fails, verify-note PASS | Rewrite via note-writer → `3-permanent/` |
-| All 6 pass, voice fails, verify-note FAIL | Rewrite via note-writer → `1-fleeting/` |
+| All 6 pass, voice fails, verify-note PASS | Rewrite Worklist item → `3-permanent/` |
+| All 6 pass, voice fails, verify-note FAIL | Rewrite Worklist item → `1-fleeting/` |
 | 3-4 pass | `mv` to `1-fleeting/` |
 | ≤ 2 pass | Keep in `0-inbox/` |
 | Duplicate of another inbox note | Merge (gated) |
@@ -175,7 +175,7 @@ Acceptable reply formats for the NLI contradictions:
 - per-item: `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both, skip=leave in inbox)
 - batched: `all:3` keep-both for everything
 
-Execution order on confirm: deletes → merges → NLI resolutions → autonomous promotions of any held-back inbox notes. NLI resolution mechanics:
+Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → autonomous promotions of any held-back inbox notes. NLI resolution mechanics:
 
 - **supersede**: call existing `/rewrite` flow on the existing note (rewrite to match the new one); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; new note promotes to its routed destination.
 - **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; new note promotes.
@@ -209,19 +209,33 @@ Do NOT display:
 - Age-shaming language
 - Any metric that induces guilt
 
+### 5.6. Rewrite Worklist (returned to the skill — never executed here)
+
+You cannot spawn any agent (subagents cannot spawn subagents). Every action that needs note-writer (rewrites, merges) is returned as a structured work item; the inbox skill executes the fan-out.
+
+Output exactly this table (the skill parses it):
+
+| # | type | note | destination | reason | related_notes |
+|---|------|------|-------------|--------|---------------|
+| 1 | rewrite | 0-inbox/foo.md | 3-permanent/ | voice fail | [[bar]], [[baz]] |
+| 2 | rewrite | 0-inbox/qux.md | 1-fleeting/ | voice fail, verify-note FAIL | [[bar]] |
+| 3 | merge | 0-inbox/dup.md + 0-inbox/dup-deeper.md | 1-fleeting/ | same idea, second more developed | [[bar]] |
+
+- `rewrite` items are autonomous: the skill executes them without approval.
+- `merge` items are gated: the skill executes them only after user approval (they also appear in the Needs-approval block above).
+- Include in `reason` which gate criteria failed — the skill passes it to note-writer as context.
+
 ### 6. Execute
 
 **Autonomous (no approval needed):**
 - Promote via `mv` when skip-rewrite is true
-- Promote via note-writer agent when rewrite is needed
-- After every promotion (mv or rewrite), run frontmatter hygiene on the promoted file (see 6a)
+- After every `mv` promotion, run frontmatter hygiene on the promoted file (see 6a)
 - Add counter-argument links (both directions) via `Edit`
+- Notes needing rewrite: add to the Rewrite Worklist (5.6). The skill executes them after you return and applies the same 6a hygiene to each rewritten file.
 
-**Gated (wait for approval):**
-- Merges: launch note-writer with both notes as input, write merged result, delete sources
-- Deletes: `rm` the inbox copy
-
-**Parallelism:** Launch note-writer agents in parallel for multiple rewrites. Process clusters sequentially (to present results progressively) but parallelize within clusters.
+**Gated (listed for approval, executed by the skill):**
+- Merges: add to the Rewrite Worklist as `type: merge` AND to the Needs-approval block
+- Deletes: list in the Needs-approval block; the skill runs `rm` after approval
 
 ### 6a. Post-Promotion Frontmatter Hygiene
 
@@ -235,17 +249,19 @@ After a note is promoted (either via `mv` or note-writer rewrite), run this clea
 
 This cleanup is mandatory for every promotion. It closes the gap that lets body-level sources and folder-status pollution accumulate in permanent notes.
 
+The inbox skill applies these same three checks to every file it rewrites via note-writer.
+
 ### 7. Report (Inbox)
 
 ```
 Inbox processed: [N] notes across [C] clusters.
 Promoted: [X] → 3-permanent/ ([S] skipped rewrite), [Y] → 1-fleeting/
+Rewrite worklist: [W] items returned to the skill ([Wr] rewrites, [Wm] merges pending approval)
 Counter-arguments linked: [L]
 NLI tensions flagged: [T]                       (soft tier, auto-stamped)
-NLI contradictions resolved: [R_resolved]       (hard tier, user-confirmed; supersede/qualify/keep-both)
-NLI contradictions held in inbox: [R_skipped]   (hard tier, user chose "skip")
-Merged: [Z] notes into [M] (after approval)
-Deleted: [D] ghost duplicates
+NLI contradictions surfaced: [R_surfaced]       (hard tier, awaiting user resolution via the skill)
+Merge candidates: [Z] (gated, pending approval)
+Deletes pending: [D] ghost duplicates (gated, pending approval)
 Remaining: [R] in inbox
 ```
 
@@ -271,13 +287,13 @@ Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"counter_arguments":N,"merges":N,"deletes":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced,"nli_resolutions":{"supersede":N,"qualify":N,"keep_both":N,"skip":N}}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
 ```
 
 ## Rules
 
 - **Process by cluster, not by note.** This is the key throughput improvement. A cluster of 5 related notes gets one assessment pass, not five independent ones.
-- **Skip rewrite when possible.** Most deep notes already match voice. Checking promote-gate's skip-rewrite flag before spawning a note-writer saves time and context.
+- **Skip rewrite when possible.** Most deep notes already match voice. Checking promote-gate's skip-rewrite flag before adding a note to the Rewrite Worklist saves the skill time and context.
 - **Promotions are autonomous.** Never ask before promoting. The promote-gate criteria are the approval.
 - **Merges and deletes are gated.** Always ask. Always wait.
 - **Counter-arguments are first-class.** They get promoted on their own merit, not suppressed or merged into the note they challenge.

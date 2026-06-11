@@ -64,9 +64,24 @@ Librarian observations:
 
 These are informational: the user decides whether to act on them during triage. Apply or dismiss them in `/health --librarian`.
 
-### Step 2: Handle Gated Actions
+### Step 2: Execute the Worklist and Gated Actions
 
-When the agent returns, it will list any actions needing approval (merges, deletes, and Bundle 2 NLI contradictions). Present all three categories in one block; one user response handles all of them. NLI contradictions accept per-item replies in the form `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both) or batched `all:3`. Execute approved actions in the order: deletes → merges → NLI resolutions → autonomous promotions.
+The agent cannot spawn note-writer (subagents cannot spawn subagents). It returns a Rewrite Worklist; executing it is this skill's job.
+
+**2a. Autonomous rewrites (no approval needed).** For each `type: rewrite` item, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with:
+- **insight**: the note's core idea
+- **existing_note**: the full current note content (read it first)
+- **destination**: the worklist destination
+- **related_notes**: from the worklist row
+- the worklist `reason` as rewrite context
+
+Resolve all path placeholders in each prompt to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file.
+
+**2b. Gated actions.** Present merges, deletes, and Bundle 2 NLI contradictions in one block; one user response handles all of them. NLI contradictions accept per-item replies in the form `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both) or batched `all:3`. On approval, execute in order:
+1. deletes — `rm` each approved inbox copy
+2. merges — for each approved `type: merge` item, spawn `note-writer` with BOTH notes' full content as input, the worklist destination, and instruction to write one merged note; after it reports the written file, `rm` both source notes and run the 6a hygiene checks
+3. NLI resolutions — per the agent's documented mechanics
+4. any held-back autonomous promotions
 
 **`--skip-nli` flag**: if the user invokes `/learning-loop:inbox --skip-nli`, pass the flag through to the inbox-organiser agent prompt as additional context. The agent will skip Step 3a.5 (NLI contradiction check) entirely and surface a note in the report: `note: --skip-nli set; promotions ran without NLI contradiction checks`. Useful when calibrating thresholds or after a known-noisy NLI run.
 
@@ -76,7 +91,7 @@ The agent returns a structured summary. Present it to the user.
 
 ## Key Principles
 
-- **The skill is thin.** All logic lives in the `inbox-organiser` agent and its `_skills/`.
+- **The skill is thin on judgment, not on execution.** Triage logic lives in the `inbox-organiser` agent and its `_skills/`; note-writer fan-out and gated-action execution live here, because subagents cannot spawn subagents.
 - **Promotions are autonomous.** No approval needed.
 - **Destructive actions are gated.** Merges, deletes, and fleeting archival need explicit user approval.
 - **Counter-arguments get promoted, not suppressed.** Quality determines folder.
