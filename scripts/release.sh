@@ -9,7 +9,9 @@
 # Flags:
 #   --dry-run     Show what would happen without making changes
 #   --no-push     Commit and tag locally but don't push
-#   --skip-tests  Skip the npm + cargo test gate (use only for emergency hotfixes)
+#
+# Preflight: must run on main, ff-only synced with origin. Lockfiles
+# (native/Cargo.lock, package-lock.json) are regenerated with every bump.
 
 set -euo pipefail
 
@@ -20,13 +22,14 @@ cd "$ROOT"
 BUMP="${1:-}"
 DRY_RUN=false
 NO_PUSH=false
-SKIP_TESTS=false
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run) DRY_RUN=true ;;
     --no-push) NO_PUSH=true ;;
-    --skip-tests) SKIP_TESTS=true ;;
+    --skip-tests)
+      echo "Error: --skip-tests was removed (W4) — the suite is deterministic; fix the failure instead."
+      exit 1 ;;
   esac
 done
 
@@ -61,18 +64,26 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+# Preflight: releases only ship from an up-to-date main.
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+if [ "$BRANCH" != "main" ]; then
+  echo "Error: release.sh must run on main (current: $BRANCH)"
+  exit 1
+fi
+echo "Syncing with origin (ff-only)..."
+if ! git pull --ff-only origin main; then
+  echo "Error: ff-only pull from origin main failed; reconcile with origin first."
+  exit 1
+fi
+
 # Test gate: run prettier + JS + Rust suites before tagging.
-if ! $SKIP_TESTS; then
-  echo "Running prettier check..."
-  npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
-  echo "Running npm test..."
-  npm test
-  if [ -d native ]; then
-    echo "Running cargo test --workspace..."
-    (cd native && cargo test --workspace --quiet)
-  fi
-else
-  echo "Skipping tests (--skip-tests). Hope you know what you're doing."
+echo "Running prettier check..."
+npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
+echo "Running npm test..."
+npm test
+if [ -d native ]; then
+  echo "Running cargo test --workspace..."
+  (cd native && cargo test --workspace --quiet)
 fi
 
 # Update all versioned manifests
@@ -112,17 +123,22 @@ fi
 # Rename '## Unreleased' to '## Unreleased\n\n## v$NEW' (preserves Unreleased as a future stub).
 perl -i -pe "s/^## Unreleased\$/## Unreleased\n\n## v$NEW/" CHANGELOG.md
 
+# Lockfiles must track the bumped manifest versions.
+echo "Syncing lockfiles..."
+(cd native && cargo update --workspace --quiet)
+npm install --package-lock-only --silent
+
 # Verify
 for f in package.json .claude-plugin/plugin.json; do
   v=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$f','utf-8')).version)")
   if [ "$v" != "$NEW" ]; then
     echo "Error: $f version is $v, expected $NEW"
-    git checkout -- package.json .claude-plugin/plugin.json
+    git checkout -- package.json .claude-plugin/plugin.json CHANGELOG.md native/crates/*/Cargo.toml native/Cargo.lock package-lock.json
     exit 1
   fi
 done
 
-git add package.json .claude-plugin/plugin.json CHANGELOG.md
+git add package.json .claude-plugin/plugin.json CHANGELOG.md native/Cargo.lock package-lock.json
 git add native/crates/*/Cargo.toml 2>/dev/null
 git commit -m "release: v$NEW"
 git tag "v$NEW"
@@ -130,7 +146,7 @@ git tag "v$NEW"
 if $NO_PUSH; then
   echo "Tagged v$NEW (not pushed)"
 else
-  git push origin main --tags
+  git push --atomic origin main "v$NEW"
   echo "Pushed v$NEW"
 fi
 
