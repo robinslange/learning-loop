@@ -3,8 +3,8 @@
 // Removes plugin-data directories strictly older than the running version, ensures
 // ll-watch and ll-search shims are installed, and triggers a detached binary
 // download when the installed ll-search version diverges from the plugin's
-// package.json version (plugin auto-update bumps the marketplace files but the
-// native binary lags otherwise).
+// manifest (.claude-plugin/plugin.json) version (plugin auto-update bumps the
+// marketplace files but the native binary lags otherwise).
 
 import {
   readdirSync,
@@ -112,7 +112,7 @@ export async function run(ctx) {
   // on a multi-megabyte download is not.
   //
   // Failure mode this guards against: plugin auto-update bumps marketplace
-  // files (package.json, agents, skills, hooks) but the native ll-search
+  // files (plugin.json, agents, skills, hooks) but the native ll-search
   // binary is only refreshed by download-binary.mjs, which historically only
   // ran on /learning-loop:init. Robin's machine sat on v1.20.2 for five
   // releases this way until the v1.25 retrieval/reflect-scan path tripped

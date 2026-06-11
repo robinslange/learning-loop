@@ -1,6 +1,6 @@
 // scripts/lib/plugin-meta.mjs : plugin self-introspection helpers.
 //
-// Centralises the package.json + plugin-root + plugin-data lookups that today
+// Centralises the plugin-manifest + plugin-root + plugin-data lookups that today
 // appear inline in hooks/session-start.js (lines 37, 71), scripts/lib/config.mjs
 // (getPluginRoot), and hooks/lib/inject.mjs. Reads from scripts/lib/env.mjs
 // rather than process.env directly -- this is the canonical example of how a
@@ -21,7 +21,7 @@ let _pkg = null;
 
 function readPkg() {
   if (_pkg !== null) return _pkg;
-  const path = join(pluginRoot(), 'package.json');
+  const path = join(pluginRoot(), '.claude-plugin', 'plugin.json');
   try {
     let raw = readFileSync(path, 'utf-8');
     // Strip BOM if present.
@@ -44,7 +44,7 @@ export function pluginRoot() {
 }
 
 /**
- * Version string from package.json, or empty string on read failure.
+ * Version string from .claude-plugin/plugin.json, or empty string on read failure.
  *
  * @returns {string}
  */

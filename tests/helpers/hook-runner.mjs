@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 
 const PKG_VERSION = JSON.parse(
-  readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+  readFileSync(new URL('../../.claude-plugin/plugin.json', import.meta.url), 'utf8'),
 ).version;
 
 const SANDBOX_PREFIX = 'll-hook-sb-';

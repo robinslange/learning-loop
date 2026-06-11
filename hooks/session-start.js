@@ -36,7 +36,8 @@ const updateCacheFile = pluginData ? join(pluginData, 'update-check.json') : nul
 const ctx = {
   pluginDir: PLUGIN_DIR,
   pluginVersion:
-    safeLoad(`${PLUGIN_DIR}/package.json`, { fallback: { version: '0.0.0' } }).value?.version ||
+    safeLoad(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, { fallback: { version: '0.0.0' } }).value
+      ?.version ||
     '0.0.0',
   pluginData,
   vaultRoot: resolveVaultPath(),

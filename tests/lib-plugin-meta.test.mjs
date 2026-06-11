@@ -26,7 +26,7 @@ test('pluginRoot is an absolute path', () => {
   assert.ok(pluginRoot().startsWith('/'));
 });
 
-test('pluginVersion reads version from package.json', () => {
+test('pluginVersion reads version from .claude-plugin/plugin.json', () => {
   const v = pluginVersion();
   assert.match(v, /^\d+\.\d+\.\d+/);
 });

@@ -144,12 +144,14 @@ Be explicit about the trade: "The token is single-use and was consumed. If sync 
 
 Only reached if F succeeded. Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from D), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
 
-Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `${CLAUDE_PLUGIN_ROOT}/package.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
+Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
 
 ```javascript
 const PLUGIN = process.env.CLAUDE_PLUGIN_ROOT;
 const PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA;
-const pluginVersion = JSON.parse(readFileSync(join(PLUGIN, 'package.json'), 'utf-8')).version;
+const pluginVersion = JSON.parse(
+  readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf-8'),
+).version;
 const meta = {
   created_at: new Date().toISOString(),
   plugin_version: pluginVersion,

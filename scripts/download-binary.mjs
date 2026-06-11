@@ -34,12 +34,12 @@ function getRepo() {
   return env.LL_REPO;
 }
 
-function getVersion() {
+export function getVersion(root = join(import.meta.dirname, '..')) {
   if (process.argv[2]) return process.argv[2];
 
-  const pkgPath = join(import.meta.dirname, '..', 'package.json');
-  const { value: pkg } = safeLoad(pkgPath);
-  if (pkg?.version) return `v${pkg.version}`;
+  const metaPath = join(root, '.claude-plugin', 'plugin.json');
+  const { value: meta } = safeLoad(metaPath);
+  if (meta?.version) return `v${meta.version}`;
   return 'latest';
 }
 
@@ -236,4 +236,6 @@ async function main() {
   writeFileSync(versionFile, version + '\n');
 }
 
-main();
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main();
+}
