@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **The installed plugin now ships only the runtime.** The plugin moved into `plugin/` and the marketplace source points there, so an install pulls ~6.6M of runtime (hooks, skills, agents, scripts) instead of the whole repository — tests, native sources, benches, and CI stay behind. Provenance templates ship inside `plugin/`, and version readers derive from `.claude-plugin/plugin.json`. First release cut in the plugin-shaped layout.
+- **Dash policy is unified to added-only.** The write-path dash deny applies only to lines a write adds (pre-existing dashes in a note no longer block edits), and the validator's dash character class is widened to match.
+
+### Added
+
+- **Binary downloads are verified.** `build-native` generates `SHA256SUMS` for each release, and `download-binary` verifies the fetched `ll-search` binary against it, follows https-only redirects, and orders the version stamp after the verified install.
+- **ESLint is wired into the repo**, including a no-raw-lockfile rule enforced at zero violations.
+
+### Fixed
+
+- **Release and CI hardening.** `release.sh` gains a main-only, fast-forward-synced preflight, lockfile sync, and atomic push, and no longer supports `--skip-tests`; `build-native` builds `--locked` with a durable model cache and no longer silently skips ONNX/NLI assets; CI enforces the NLI truncation contract against a release binary instead of skipping.
+- **Subagent verification loops actually run.** `/discovery`'s note-verifier loop is hoisted out of the researcher agent (where it never executed) into the skill; `/inbox` rewrites flow through an explicit worklist from the inbox-organiser, with an NLI-hold column so held notes defer promotion; PostToolUse hooks are replayed after sub-agent fan-out; dispatched vault agents get minimal tool allowlists and a uniform `${CLAUDE_PLUGIN_ROOT}` path contract; `note-writer` reports the filename it actually used. A lint suite pins these subagent architecture invariants.
+- **Skill UX.** `/health` splits into a light default and a deep mode (plus fixes for live bugs found in the split), `/verify` and `/gaps` run their defaults immediately instead of prompting, `/doctor` targets the real install for its fixes, and `/quick` gains a verification posture.
+- **`/ingest` and `/reflect` upstream-refinement pipeline.** Paths are vault-derived instead of hardcoded, a heredoc env bug is fixed, and the deferred refinement queue is actually drained.
+- **Hook lifecycle reliability.** Dream/reflect markers go through one central registry (`marker.mjs`), ending a tmpdir split-brain; the dream gate recovers stale locks and guards its first-run stamp; the stop-nudge once-guard is actually read; session-start takes its session id from the stdin payload and sweeps stale markers and tmp orphans; the watch-daemon spawn lock is crash-safe; plugin-data resurrection is closed behind one shared guard.
+- **Dead code and docs.** The librarian-queue shim and unreferenced benchmark artifacts are removed, frontmatter parsing is consolidated through `markdown-parse`, the librarian queue is crash-safe, docs are rewritten to describe the post-coalescing hook family (librarian launch story, binary size, federation sync, doctor pointer), and client names in shipped examples and fixtures are neutralised — project slugs now derive from the vault's `4-projects/` index.
+
 ## v1.26.1
 
 ### Fixed
