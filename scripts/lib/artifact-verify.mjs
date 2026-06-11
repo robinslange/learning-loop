@@ -1,5 +1,8 @@
 // Verification helpers for release-artifact downloads (SHA256SUMS format:
 // "<hex>  <filename>" or "<hex> *<filename>" per coreutils sha256sum).
+// Scope: SHA256SUMS comes from the SAME GitHub release as the artifact, so
+// this is an integrity check (corruption, truncation, single-object CDN swap)
+// — not authenticity; a compromised release defeats it.
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
