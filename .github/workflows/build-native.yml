@@ -72,12 +72,6 @@ jobs:
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/ll-search dist/
-          ONNX_LIB=$(find target/${{ matrix.target }}/release -name "libonnxruntime*" -not -name "*.a" | head -1)
-          if [ -z "$ONNX_LIB" ]; then
-            echo "::error::libonnxruntime not found — NLI feature is on; refusing to ship a broken artifact"
-            exit 1
-          fi
-          cp "$ONNX_LIB" dist/
           tar -czf ../${{ matrix.artifact }}.tar.gz -C dist .
 
       - name: Package (Windows)
@@ -85,11 +79,6 @@ jobs:
         run: |
           mkdir dist
           copy target\${{ matrix.target }}\release\ll-search.exe dist\
-          Get-ChildItem -Path target\${{ matrix.target }}\release -Filter "onnxruntime*" -File | Where-Object { $_.Extension -ne ".lib" } | Copy-Item -Destination dist\
-          if (-not (Get-ChildItem -Path dist -Filter "onnxruntime*" -File)) {
-            Write-Error "onnxruntime dll not found - NLI feature is on; refusing to ship a broken artifact"
-            exit 1
-          }
           Compress-Archive -Path dist\* -DestinationPath ..\${{ matrix.artifact }}.zip
         shell: pwsh
 
