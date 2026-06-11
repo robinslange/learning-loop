@@ -25,7 +25,7 @@ Conventions that apply across Rust and JS: versioning, performance budgets, obse
 
 - Existing CHANGELOG cadence: bump on every PR touching `hooks/` or `scripts/`.
 - Semver minor for new hooks or new `scripts/lib/` exports. Semver patch for bug fixes.
-- Plugin version and ll-search binary version must match. CI checks `package.json` version against binary `--version` output.
+- Plugin version and ll-search binary version are expected to match on installs (the downloader derives its release tag from `.claude-plugin/plugin.json`). CI does not diff the two: `.github/workflows/test.yml` downloads a pinned release binary (`LL_BINARY_VERSION`, deliberately not manifest-derived so a release commit doesn't race the build-native workflow) and runs `ll-search version` as a smoke check only.
 
 ---
 

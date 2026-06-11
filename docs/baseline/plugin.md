@@ -10,28 +10,30 @@ Conventions for `hooks/`, `scripts/`, and `scripts/lib/`. Read this before touch
 
 ```
 learning-loop/
-  hooks/
-    <hook>.js              -- entry: stdin -> dispatch -> exit. Target: <100 LOC each.
-    <hook>/                -- submodules for hooks needing decomposition
-    lib/                   -- hook-shared helpers (snapshot, inject, etc.)
-  scripts/
-    <command>.mjs          -- entry: CLI parse -> dispatch. Target: <150 LOC each.
-    <command>/             -- submodules for commands needing decomposition
-    lib/                   -- shared primitives -- the ONLY place these live
-      env.mjs              -- the only file that reads process.env
-      config.mjs           -- config.json + schema validation
-      file-lock.mjs        -- O_EXCL-based locking, used everywhere
-      jsonl.mjs            -- safe append/read with corruption recovery
-      markdown-parse.mjs   -- frontmatter, tags, wikilinks
-      plugin-meta.mjs      -- package.json, cache paths, plugin id
-      hook-config.mjs      -- numeric ceilings (timeouts, thresholds)
-      safe-load.mjs        -- safeLoad(path, schema) wrapper
-      log.mjs              -- logError() gated on LL_HOOK_DEBUG
-  tests/
-    unit/                  -- pure logic
-    hooks/                 -- one .test.mjs per hook
-    scripts/               -- one .test.mjs per CLI
+  plugin/
+    hooks/
+      <hook>.js            -- entry: stdin -> dispatch -> exit. Target: <100 LOC each.
+      <hook>/              -- submodules for hooks needing decomposition
+      lib/                 -- hook-shared helpers (common, inject, snapshot, io, dream-gate)
+      modules/             -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
+    scripts/
+      <command>.mjs        -- entry: CLI parse -> dispatch. Target: <150 LOC each.
+      <command>/           -- submodules for commands needing decomposition
+      lib/                 -- shared primitives -- the ONLY place these live
+        env.mjs            -- the only file that reads process.env
+        config.mjs         -- config.json + schema validation
+        file-lock.mjs      -- O_EXCL-based locking, used everywhere
+        jsonl.mjs          -- safe append/read with corruption recovery
+        markdown-parse.mjs -- frontmatter, tags, wikilinks
+        plugin-meta.mjs    -- manifest version, cache paths, plugin id
+        hook-config.mjs    -- numeric ceilings (timeouts, thresholds)
+        safe-load.mjs      -- safeLoad(path, schema) wrapper
+        log.mjs            -- logError() gated on LL_HOOK_DEBUG
+  tests/                   -- flat: tests/<name>.test.mjs
     fixtures/              -- shared fixtures
+    helpers/               -- shared test helpers
+    install/               -- installer tests
+    sources/               -- source-resolver adapter tests
 ```
 
 The 7 primitives in `scripts/lib/` are created by track 0C. Before they exist, equivalent logic is scattered: `process.env` reads appear in 23 files, `JSON.parse(readFileSync(...))` appears at 22 sites, and timeout values are hardcoded magic numbers across 16 locations (see `.planning/inventory/plugin-patterns.md:103-128`, `.planning/inventory/coverage-and-magic.md:177-195`).
@@ -125,7 +127,7 @@ await withLock(lockPath, async () => {
 });
 ```
 
-The inventory catalogued 9 distinct lock implementations. Four use O_EXCL correctly. One in `scripts/lib/edges.mjs:14-60` is confirmed unsafe: it relies on `writeFileSync` with `{ flag: 'wx' }` rather than `openSync(O_EXCL)`, creating a race window between the existence check and the write (`.planning/inventory/plugin-patterns.md:223-253`). Track 2N patches edges.mjs.
+The inventory catalogued 9 distinct lock implementations. Four used O_EXCL correctly. One in `scripts/lib/edges.mjs` was confirmed unsafe at baseline: it relied on `writeFileSync` with `{ flag: 'wx' }` rather than `openSync(O_EXCL)`, creating a race window between the existence check and the write (`.planning/inventory/plugin-patterns.md:223-253`). That has since been fixed: `edges.mjs` keeps its path-keyed `acquireLock(dbPath)` / `releaseLock(dbPath)` contract but delegates the actual O_EXCL + stale-recovery machinery to `lib/file-lock.mjs`.
 
 `file-lock.mjs` uses `fs.openSync` with `O_CREAT | O_EXCL | O_WRONLY` + PID + a retry loop with exponential backoff. Everything that creates a `.lock` file must go through it. After track 1I, `grep CI` pattern `writeFileSync.*\.lock` is a CI failure.
 
@@ -168,7 +170,7 @@ scripts/lib/safe-load.mjs      -- lib: always .mjs
 
 ### tests for every hook and every `scripts/lib/` module
 
-Coverage target: ≥70% line coverage on `hooks/` and `scripts/lib/`. Currently 15% by file count (10 of 68 files have tests; see `.planning/inventory/coverage-and-magic.md`). Track 0D adds characterisation tests for the four untested hooks. Track 0C adds tests for all 7 new primitives at ≥90% coverage.
+Coverage target: ≥70% line coverage on `hooks/` and `scripts/lib/`. At the 2026-05-11 baseline only 10 of 68 plugin files had tests (see `.planning/inventory/coverage-and-magic.md`); the suite has since grown past 120 test files against ~134 hook/script source files. Track 0D added characterisation tests for the four then-untested hooks; track 0C added tests for the 7 shared primitives.
 
 One test file per hook, one per `scripts/lib/` module. Name: `tests/<name>.test.mjs`. Use Node's built-in `node:test` runner; no test framework dependency.
 
@@ -186,7 +188,7 @@ node --test tests/<name>.test.mjs
 
 **Timeout discipline.** Session-start fires on every session open and has no global timeout. Sub-tasks with their own timeouts (deps check: 5000 ms, snapshot: 10000 ms) are independent, but there is no ceiling on total hook time. A stalled daemon startup at `hooks/session-start.js:266` (2000 ms poll, unbounded retries) can block Claude Code's ready signal indefinitely. `HOOK_BUDGET_MS` + `Promise.race` makes the maximum wall time explicit and auditable.
 
-**File-lock correctness.** The `{ flag: 'wx' }` pattern in session-start.js has a race between the `existsSync` check and the `writeFileSync` call. Two concurrent processes can both pass the check and both write. The `O_EXCL` flag in `openSync` is an atomic kernel operation: only one process wins, the other gets `EEXIST`. This is not a theoretical concern -- edges.mjs confirmed the pattern is broken in practice (`.planning/inventory/plugin-patterns.md:223-253`).
+**File-lock correctness.** The `{ flag: 'wx' }` pattern in session-start.js has a race between the `existsSync` check and the `writeFileSync` call. Two concurrent processes can both pass the check and both write. The `O_EXCL` flag in `openSync` is an atomic kernel operation: only one process wins, the other gets `EEXIST`. This is not a theoretical concern -- edges.mjs confirmed the pattern was broken in practice (`.planning/inventory/plugin-patterns.md:223-253`; since fixed by delegating to `file-lock.mjs`).
 
 **79 bare catches.** Silent catch blocks are the main reason hook failures produce no signal. A failed snapshot write doesn't surface until the next session when context is stale and the user notices degraded responses. `logError` makes the failure visible under `LL_HOOK_DEBUG` without polluting production output.
 

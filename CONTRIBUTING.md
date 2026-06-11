@@ -47,10 +47,10 @@ Tick what applies. Items map to a rule in `docs/baseline/`.
 
 *These checks are currently advisory. After track 1I lands and `.github/workflows/baseline.yml` exists, failing checks block merge.*
 
-- [ ] No new `process.env.X` outside `scripts/lib/env.mjs`
-- [ ] No `JSON.parse(fs.readFileSync(...))` outside `scripts/lib/safe-load.mjs`
-- [ ] No raw `.lock` file creation outside `scripts/lib/file-lock.mjs`
-- [ ] New hook has a `timeout` declared in `hooks/hooks.json` and uses `HookConfig.*_TIMEOUT_MS` (from `scripts/lib/hook-config.mjs`) for any inner per-operation deadlines
+- [ ] No new `process.env.X` outside `plugin/scripts/lib/env.mjs`
+- [ ] No `JSON.parse(fs.readFileSync(...))` outside `plugin/scripts/lib/safe-load.mjs`
+- [ ] No raw `.lock` file creation outside `plugin/scripts/lib/file-lock.mjs`
+- [ ] New hook has a `timeout` declared in `plugin/hooks/hooks.json` and uses `HookConfig.*_TIMEOUT_MS` (from `plugin/scripts/lib/hook-config.mjs`) for any inner per-operation deadlines
 - [ ] New Rust public item has `///` doc comment
 - [ ] No `.clone()` introduced in `search/{query,context,federation,graph,reflect}.rs` hot paths
 - [ ] Tests added for new module or hook
@@ -59,7 +59,7 @@ Tick what applies. Items map to a rule in `docs/baseline/`.
 
 ## Plans and skills
 
-Long-running work goes in `docs/superpowers/plans/YYYY-MM-DD-name.md` using the existing plan format. Skills (`skills/*/SKILL.md`) and agents (`agents/*.md`) follow the conventions documented in their own README files. Read two or three existing skills before adding a new one.
+Plan documents are deliberately local-only: `docs/` is gitignored except `docs/baseline/`, so long-running plans live untracked in `docs/superpowers/plans/YYYY-MM-DD-name.md` on the machine that runs them. Skills (`plugin/skills/*/SKILL.md`) and agents (`plugin/agents/*.md`) have no per-directory READMEs; the conventions live in the shared skill fragments under `plugin/agents/_skills/` (start with `vault-io.md` and `capture-rules.md`) and are enforced lexically by `tests/agent-architecture-lint.test.mjs` (agent files must not instruct spawning other agents). Read two or three existing skills before adding a new one.
 
 ## Style notes
 
