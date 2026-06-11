@@ -177,9 +177,9 @@ Acceptable reply formats for the NLI contradictions:
 
 Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice. NLI resolution mechanics:
 
-- **supersede**: call existing `/rewrite` flow on the existing note (rewrite to match the new one); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; new note promotes to its routed destination.
-- **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; new note promotes.
-- **keep-both**: stamp `nli_resolved: deliberate` on BOTH notes' frontmatter so future inbox runs skip this gate; both notes stay; new note promotes.
+- **supersede**: call existing `/rewrite` flow on the existing note (rewrite to match the new one); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; the note's held worklist row executes in the next stage.
+- **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; the note's held worklist row executes in the next stage.
+- **keep-both**: stamp `nli_resolved: deliberate` on BOTH notes' frontmatter so future inbox runs skip this gate; both notes stay; the note's held worklist row executes in the next stage.
 - **skip**: leave the new note in `0-inbox/`; do not promote.
 
 ### 5.5. Limbo Triage (Top 5)
