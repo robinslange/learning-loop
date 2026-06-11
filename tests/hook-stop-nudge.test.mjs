@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
@@ -237,6 +237,49 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
     assert.match(parsed3.reason, /\/dream/);
   } finally {
     r3.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+// Regression (W5/6d): when the once-guard marker write FAILS, the dream
+// nudge must be suppressed, not emitted. Emitting without a persisted guard
+// re-nudges on every later stop of the session (the guard never exists). The
+// at-most-once contract wins: a guard-write failure costs at most one missed
+// advisory nudge, and the realistic broken-plugin-data case can't reach this
+// branch anyway (the memory snapshot could not have been written either).
+// writeMarker's own logError records the failure.
+test('dream nudge suppressed when the once-guard write fails — W5/6d', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-guardfail-'));
+  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const sid = 'test-guard-fail';
+
+  const r = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const markersDir = join(pluginDataDir, 'markers');
+      mkdirSync(markersDir, { recursive: true });
+      writeFileSync(join(markersDir, `memory-snapshot-${sid}`), '[]');
+      const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+      mkdirSync(memDir, { recursive: true });
+      for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
+      // Read-only markers dir: the snapshot read still works, but the
+      // once-guard writeMarker fails with EACCES.
+      chmodSync(markersDir, 0o555);
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(
+      r.stdout.trim(),
+      '',
+      'an unpersisted once-guard must suppress the dream nudge (at-most-once contract)',
+    );
+  } finally {
+    try {
+      chmodSync(join(r.pluginDataDir, 'markers'), 0o755);
+    } catch {}
+    r.cleanup();
     rmSync(projectDir, { recursive: true, force: true });
   }
 });

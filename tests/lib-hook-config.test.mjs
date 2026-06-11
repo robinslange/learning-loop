@@ -22,7 +22,7 @@ test('timeout constants are in plausible ranges (ms)', () => {
   assert.ok(HookConfig.LABEL_TIMEOUT_MS >= 100 && HookConfig.LABEL_TIMEOUT_MS <= 30_000);
   assert.ok(HookConfig.SNAPSHOT_TIMEOUT_MS >= 1000 && HookConfig.SNAPSHOT_TIMEOUT_MS <= 30_000);
   assert.ok(HookConfig.DAEMON_STARTUP_DEADLINE_MS >= 100);
-  assert.ok(HookConfig.SESSION_DEDUPE_TTL_MS > 24 * 3600 * 1000, 'TTL should be > 1 day');
+  assert.ok(HookConfig.SESSION_SWEEP_TTL_MS > 24 * 3600 * 1000, 'TTL should be > 1 day');
 });
 
 test('ML thresholds are in [0, 1]', () => {
@@ -38,7 +38,8 @@ test('required keys are all present (regression guard)', () => {
     'QUERY_TIMEOUT_MS',
     'INJECTION_RACE_CAP_MS',
     'DEDUPE_WINDOW_MS',
-    'SESSION_DEDUPE_TTL_MS',
+    'SESSION_SWEEP_TTL_MS',
+    'EDGES_TMP_ORPHAN_TTL_MS',
     'CONVERGENCE_TTL_MS',
     'INJECTION_THRESHOLD',
     'SIMILARITY_THRESHOLD',
@@ -64,8 +65,12 @@ test('cooldown constants match known source values', () => {
   assert.equal(HookConfig.DREAM_COOLDOWN_SECS, 300);
 });
 
-test('SESSION_DEDUPE_TTL_MS is exactly 7 days in milliseconds', () => {
-  assert.equal(HookConfig.SESSION_DEDUPE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
+test('SESSION_SWEEP_TTL_MS is exactly 7 days in milliseconds', () => {
+  assert.equal(HookConfig.SESSION_SWEEP_TTL_MS, 7 * 24 * 60 * 60 * 1000);
+});
+
+test('EDGES_TMP_ORPHAN_TTL_MS is exactly 1 hour in milliseconds', () => {
+  assert.equal(HookConfig.EDGES_TMP_ORPHAN_TTL_MS, 60 * 60 * 1000);
 });
 
 test('CONVERGENCE_TTL_MS is exactly 7 days in milliseconds', () => {

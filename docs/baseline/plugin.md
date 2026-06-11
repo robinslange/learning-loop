@@ -294,7 +294,8 @@ The full constant inventory from `.planning/inventory/coverage-and-magic.md:177-
 | `HookConfig.SNAPSHOT_TIMEOUT_MS` | 10000 | vault snapshot timeout |
 | `HookConfig.REINDEX_TIMEOUT_MS` | 5000 | daemon reindex timeout |
 | `HookConfig.DAEMON_STARTUP_DEADLINE_MS` | 2000 | daemon ready poll deadline |
-| `HookConfig.SESSION_DEDUPE_TTL_MS` | 604800000 | 7-day sweep cutoff |
+| `HookConfig.SESSION_SWEEP_TTL_MS` | 604800000 | 7-day stale-session-artifact sweep cutoff |
+| `HookConfig.EDGES_TMP_ORPHAN_TTL_MS` | 3600000 | edges.db tmp-orphan sweep cutoff |
 | `HookConfig.SESSION_SIZE_THRESHOLD_BYTES` | 51200 | stop-nudge session size check |
 | `HookConfig.SIMILARITY_THRESHOLD` | 0.85 | pre-write duplicate gate |
 | `HookConfig.REFLECT_COOLDOWN_SECS` | 300 | stop-nudge reflect cooldown |

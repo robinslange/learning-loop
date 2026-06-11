@@ -53,7 +53,7 @@ test('writeMarker creates intermediate directories', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-marker-'));
   try {
     const path = join(dir, 'nested', 'deep', 'marker.json');
-    writeMarker(path, { hello: 'world' });
+    assert.equal(writeMarker(path, { hello: 'world' }), true, 'persisted write returns true');
     assert.deepEqual(readMarker(path), { hello: 'world' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -81,8 +81,8 @@ test('writeMarker swallows errors when target is unwritable', () => {
     writeFileSync(blocker, 'content');
     // writeMarker tries to mkdir(dirname(badPath)) where dirname is `is-a-file` — fails.
     const badPath = join(blocker, 'cannot-create.json');
-    // Must not throw.
-    assert.doesNotThrow(() => writeMarker(badPath, { x: 1 }));
+    // Must not throw — and must report the failure via its return value.
+    assert.equal(writeMarker(badPath, { x: 1 }), false, 'failed write returns false');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -144,11 +144,15 @@ export async function run(ctx) {
     }
   }
 
-  const weekCutoff = Date.now() - HookConfig.SESSION_DEDUPE_TTL_MS;
+  const weekCutoff = Date.now() - HookConfig.SESSION_SWEEP_TTL_MS;
   if (ctx.pluginData) {
     sweepDir(DATA_PATHS.retrievalSessionDedupe(ctx.pluginData), () => true, weekCutoff);
     sweepDir(DATA_PATHS.markers(ctx.pluginData), () => true, weekCutoff);
-    sweepDir(ctx.pluginData, (f) => /^edges\.db\..+\.tmp$/.test(f), Date.now() - 3_600_000);
+    sweepDir(
+      ctx.pluginData,
+      (f) => /^edges\.db\..+\.tmp$/.test(f),
+      Date.now() - HookConfig.EDGES_TMP_ORPHAN_TTL_MS,
+    );
   }
   const TMP_SWEEP_PATTERNS = [
     /^learning-loop-stop-nudged-/,

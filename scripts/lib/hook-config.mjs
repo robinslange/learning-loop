@@ -31,7 +31,12 @@ export const HookConfig = Object.freeze({
   PROVENANCE_TIMEOUT_MS: 3000,
   INJECTION_RACE_CAP_MS: 1500,
   DEDUPE_WINDOW_MS: 180_000,
-  SESSION_DEDUPE_TTL_MS: 604_800_000, // 7 days
+  // Cutoff for vault-snapshot's stale per-session artifact sweeps (three
+  // targets: retrieval/session-dedupe entries, plugin-data markers/, legacy
+  // tmp markers).
+  SESSION_SWEEP_TTL_MS: 604_800_000, // 7 days
+  // edges.db.<pid>.tmp orphans (crash between saveDb's write and rename).
+  EDGES_TMP_ORPHAN_TTL_MS: 3_600_000, // 1 hour
   CONVERGENCE_TTL_MS: 604_800_000, // 7 days
   AUTOLINK_ML_TIMEOUT_MS: 1000,
   STDIN_TIMEOUT_MS: 3000,

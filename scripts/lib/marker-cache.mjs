@@ -75,19 +75,20 @@ export function dreamLockHeld(path, { staleMs = HookConfig.DREAM_LOCK_STALE_SECS
   return Date.now() - stat.mtimeMs < staleMs;
 }
 
-// Note: writeMarker is typically called from a detached subprocess. If the
-// write fails, logError emits to stderr — but a detached child's stderr is
-// not attached to anything observable. Errors are effectively silent in
-// production. This is acceptable because (a) the worst case is a stale
-// marker on the next session-start, and (b) the next worker run will
-// retry. If you ever need observable write failures, consider setting
-// process.exitCode and inspecting it from the parent.
+// Returns true iff the marker was persisted. writeMarker is typically
+// called from a detached subprocess where logError's stderr is not attached
+// to anything observable — callers that must not proceed on an unpersisted
+// marker (e.g. stop-nudge's once-guard) check the return value instead.
+// Fire-and-forget callers may ignore it: the worst case is a stale marker
+// on the next session-start, and the next worker run retries.
 export function writeMarker(path, value) {
-  if (!pluginDataExists()) return;
+  if (!pluginDataExists()) return false;
   try {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(value));
+    return true;
   } catch (err) {
     logError('marker-cache.writeMarker', err);
+    return false;
   }
 }

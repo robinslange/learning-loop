@@ -141,7 +141,10 @@ export async function run(ctx) {
       return;
     }
     try {
-      if (checkAlive().state === 'alive') return;
+      // Occupied means alive OR writer-in-progress: an empty pidfile is a
+      // daemon mid-write of its own pid, not a free slot.
+      const post = checkAlive();
+      if (post.state === 'alive' || post.state === 'writer-in-progress') return;
       try {
         writeFileSync(fingerprintPath, currentFingerprint);
       } catch (err) {

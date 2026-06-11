@@ -32,17 +32,20 @@ function now() {
   return Math.floor(Date.now() / 1000);
 }
 
-function writeMarkerIfNeeded(nudge) {
+// computed=true means the gate finished deciding: a null nudge is a real
+// "no nudge needed" verdict and clears any prior nudge (a stale payload
+// must not outlive a successful /dream). computed=false means the gate
+// could not decide (lock held, env missing) — a prior real nudge stays
+// visible until the next computation succeeds.
+function writeMarkerIfNeeded(nudge, { computed = false } = {}) {
   if (!isSessionStartRefresh) return;
   const markerPath = MARKER_PATHS.dreamGate(pluginData);
-  if (nudge == null) {
-    // Don't overwrite a prior real nudge with null. The prior nudge stays
-    // visible until the next real nudge computation succeeds.
+  if (nudge == null && !computed) {
     const existing = readMarker(markerPath);
     if (existing?.nudge) return;
     writeMarker(markerPath, { nudge: null });
   } else {
-    writeMarker(markerPath, { nudge });
+    writeMarker(markerPath, { nudge: nudge ?? null });
   }
 }
 
@@ -61,7 +64,7 @@ if (dreamLockHeld(DREAM_RUNNING_MARKER)) {
 const lastDreamTs = readMarker(DREAM_MARKER, { ttlMs: Infinity });
 if (typeof lastDreamTs === 'number') {
   if (now() - lastDreamTs < 86400) {
-    writeMarkerIfNeeded(null);
+    writeMarkerIfNeeded(null, { computed: true });
     process.exit(0);
   }
 } else {
@@ -73,7 +76,8 @@ if (typeof lastDreamTs === 'number') {
       new Error(`expected epoch number, got ${typeof lastDreamTs}`),
     );
   writeMarker(DREAM_MARKER, now());
-  writeMarkerIfNeeded(null);
+  // Fresh baseline stamp ⇒ no nudge by construction: a real verdict.
+  writeMarkerIfNeeded(null, { computed: true });
   process.exit(0);
 }
 
@@ -116,7 +120,7 @@ if (modifiedCount >= 5) {
 }
 
 // Write marker (if --session-start-refresh) then emit nudge to stdout.
-writeMarkerIfNeeded(nudge);
+writeMarkerIfNeeded(nudge, { computed: true });
 if (nudge) {
   process.stdout.write(nudge);
 }

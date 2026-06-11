@@ -86,13 +86,19 @@ if (pluginData && projectDir) {
             : typeof nudgedTs === 'number' && now() - nudgedTs < HookConfig.DREAM_COOLDOWN_SECS
           : false;
 
+        // Nudge only when the once-guard persisted: emitting on a failed
+        // guard write re-nudges on every later stop of the session. The
+        // miss is cheap (advisory nudge; a plugin-data broken enough to
+        // fail this write couldn't have written the snapshot this branch
+        // needs either) and writeMarker logs the failure itself.
         if (!dreamRecent && !alreadyNudged) {
-          writeMarker(nudgedPath, { ts: now(), session_id: sessionId });
-          emitJson({
-            decision: 'block',
-            reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
-          });
-          process.exit(0);
+          if (writeMarker(nudgedPath, { ts: now(), session_id: sessionId })) {
+            emitJson({
+              decision: 'block',
+              reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
+            });
+            process.exit(0);
+          }
         }
       }
     } catch (err) {

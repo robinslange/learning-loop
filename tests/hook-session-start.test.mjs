@@ -586,6 +586,50 @@ test(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Regression (W5/6b): the post-acquire re-probe treated only 'alive' as
+// occupied. An empty watch.pid means a daemon is mid-write of its own pidfile
+// ('writer-in-progress') — that slot is occupied too. Pre-fix the hook fell
+// through and spawned a second daemon on top of the writer.
+// ---------------------------------------------------------------------------
+test(
+  'watch-daemon does not spawn over a writer-in-progress pidfile',
+  { timeout: 12000 },
+  () => {
+    const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-wip-'));
+    const vsDir = join(vaultDir, '.vault-search');
+    mkdirSync(vsDir, { recursive: true });
+    writeFileSync(join(vsDir, 'vault-index.db'), '');
+    // A daemon has created its pidfile but not yet written the pid: the file
+    // exists and is empty for the whole hook run (the real daemon's write can
+    // land later than both probes).
+    writeFileSync(join(vsDir, 'watch.pid'), '');
+
+    const r = runHook(HOOK, {
+      env: { VAULT_PATH: vaultDir },
+      stdin: '',
+      seed: (pluginDataDir) => {
+        seedUpdateCheck(pluginDataDir);
+        const bin = join(pluginDataDir, 'bin', 'll-search');
+        writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      // The fingerprint write is the first spawn-path side effect after the
+      // post-acquire probe; its absence proves the hook treated
+      // writer-in-progress as occupied and backed off.
+      assert.ok(
+        !existsSync(join(vsDir, 'watch.fingerprint')),
+        'writer-in-progress pidfile must suppress the spawn (no fingerprint written)',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(vaultDir, { recursive: true, force: true });
+    }
+  },
+);
+
 test(
   'LL_SESSION_TMP_DIR redirects the legacy tmp session-id write',
   { timeout: 12000 },
