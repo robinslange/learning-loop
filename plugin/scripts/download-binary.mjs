@@ -18,6 +18,7 @@ import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
+import { semverCmp, isPlainSemver } from './lib/semver.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -41,6 +42,24 @@ export function getVersion(root = join(import.meta.dirname, '..')) {
   const { value: meta } = safeLoad(metaPath);
   if (meta?.version) return `v${meta.version}`;
   return 'latest';
+}
+
+// Every release from v1.27.0 ships SHA256SUMS, so a 404 on SUMS for those
+// tags means the release is still mid-build (artifact uploaded, sums not
+// yet) — retry next session rather than installing unverified. Pre-1.27 and
+// non-semver tags (e.g. 'latest') legitimately have no SUMS: fail open.
+export function sumsRequired(tag) {
+  const v = String(tag || '').replace(/^v/, '');
+  return isPlainSemver(v) && semverCmp(v, '1.27.0') >= 0;
+}
+
+// Verify the downloaded artifact against the release SHA256SUMS. A null
+// sumsText is the sanctioned pre-1.27 skip (returns false); anything else
+// must verify or throw.
+export function verifyAgainstSums(tmpPath, artifact, sumsText) {
+  if (sumsText === null) return false;
+  verifyArtifact(tmpPath, sumsText, artifact);
+  return true;
 }
 
 async function download(url, dest) {
@@ -178,6 +197,13 @@ async function main() {
   } catch (sumsErr) {
     if (existsSync(sumsPath)) unlinkSync(sumsPath);
     if (sumsErr.statusCode === 404) {
+      if (sumsRequired(tag)) {
+        console.error(
+          `  Release ${version} has no SHA256SUMS yet — release still building, will retry next session.`,
+        );
+        unlinkSync(tmpPath);
+        process.exit(0);
+      }
       console.error('  Warning: release has no SHA256SUMS (pre-1.27 release) — skipping verification');
     } else {
       console.error(`Failed to fetch SHA256SUMS: ${sumsErr.message}`);
@@ -187,15 +213,14 @@ async function main() {
     }
   }
 
-  if (sumsText !== null) {
-    try {
-      verifyArtifact(tmpPath, sumsText, artifact);
+  try {
+    if (verifyAgainstSums(tmpPath, artifact, sumsText)) {
       console.error('  Verified sha256 against SHA256SUMS');
-    } catch (verifyErr) {
-      console.error(`  ${verifyErr.message}`);
-      unlinkSync(tmpPath);
-      process.exit(1);
     }
+  } catch (verifyErr) {
+    console.error(`  ${verifyErr.message}`);
+    unlinkSync(tmpPath);
+    process.exit(1);
   }
 
   // Extract (archive is removed whether extraction succeeds or throws)

@@ -75,6 +75,25 @@ function extractFence(skillText, markerSubstring) {
   return null;
 }
 
+// Extract every ```bash fence body (with its start line) from a markdown file.
+function extractAllFences(text) {
+  const lines = text.split('\n');
+  const fences = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (lines[i].trim() === '```bash') {
+      const start = i + 1;
+      let end = start;
+      while (end < lines.length && lines[end].trim() !== '```') end++;
+      fences.push({ body: lines.slice(start, end).join('\n'), startLine: start + 1 });
+      i = end + 1;
+    } else {
+      i++;
+    }
+  }
+  return fences;
+}
+
 describe('/reflect Step 4 new-notes tracking handshake', () => {
   let skill;
   let tmpRoot;
@@ -193,21 +212,46 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         /LL_TMP="\$\(node -e 'process\.stdout\.write\(require\("os"\)\.tmpdir/,
         'the reflect marker dir must come from REFLECT_SCRATCH (plugin-data), not os.tmpdir()',
       );
-      // Every reflect prefix must read its dir from LL_SCRATCH.
-      const prefixOccurrences = skill.match(/\$\{LL_SCRATCH\}\/ll-\$\{LL_SID\}-reflect/g) || [];
-      assert.ok(
-        prefixOccurrences.length >= 3,
-        `expected at least 3 references to the scratch-keyed reflect prefix ` +
-          `(init, 4.6.a, 4.6.c/g); found ${prefixOccurrences.length}`,
-      );
-      // LL_SCRATCH must be resolved via REFLECT_SCRATCH — pin it so a future edit
-      // can't silently swap it back to a tmp dir.
-      const scratchResolver =
+    });
+
+    it('every fence referencing the reflect scratch prefix carries BOTH canonical resolvers', () => {
+      // Per-fence, not aggregate: an aggregate count (>=4 resolver snippets
+      // across the whole file) stays green when ONE fence hardcodes LL_SID or
+      // inherits LL_SCRATCH from a previous fence — bash fences run in separate
+      // shells, so each must resolve its own. A drifted fence re-splits the
+      // hook/shell handshake for exactly the steps that fence drives.
+      const PREFIX = '${LL_SCRATCH}/ll-${LL_SID}-reflect';
+      const SID_RESOLVER =
+        'LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)';
+      const SCRATCH_RESOLVER =
         'LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)';
-      const scratchCount = skill.split(scratchResolver).length - 1;
+      let found = 0;
+      for (const { file, path } of [
+        { file: 'SKILL.md', path: SKILL_PATH },
+        { file: 'steps/refinement.md', path: REFINEMENT_STEP_PATH },
+      ]) {
+        for (const fence of extractAllFences(readFileSync(path, 'utf8'))) {
+          if (!fence.body.includes(PREFIX)) continue;
+          found++;
+          assert.ok(
+            fence.body.includes(SID_RESOLVER),
+            `${file}: the bash fence starting at line ${fence.startLine} references the ` +
+              `reflect scratch prefix but does not resolve LL_SID via the canonical ` +
+              `resolve-paths.mjs SESSION_ID snippet — a hardcoded or inherited LL_SID ` +
+              `re-splits the handshake for that fence.`,
+          );
+          assert.ok(
+            fence.body.includes(SCRATCH_RESOLVER),
+            `${file}: the bash fence starting at line ${fence.startLine} references the ` +
+              `reflect scratch prefix but does not resolve LL_SCRATCH via the canonical ` +
+              `resolve-paths.mjs REFLECT_SCRATCH snippet.`,
+          );
+        }
+      }
       assert.ok(
-        scratchCount >= 4,
-        `each reflect/sweep bash block must resolve LL_SCRATCH via REFLECT_SCRATCH; found ${scratchCount}`,
+        found >= 3,
+        `expected at least 3 bash fences referencing the reflect scratch prefix ` +
+          `(init, 4.6.a, 4.6.c/g); found ${found}`,
       );
     });
 
@@ -247,12 +291,13 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // resolve-paths.mjs SESSION_ID (which calls getSessionId()); the hook
       // calls getSessionId() directly. Pin the exact snippet so a future edit
       // can't drop back to `cat`-ing the id file under an env-dependent path.
+      // Per-fence coverage of the resolver lives in the dedicated fence test
+      // above; here pin only that the canonical snippet is present at all and
+      // the legacy patterns are gone.
       const snippet = 'LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)';
-      const snippetCount = skill.split(snippet).length - 1;
       assert.ok(
-        snippetCount >= 4,
-        `expected the canonical LL_SID resolver in every reflect/sweep bash block ` +
-          `(init, sweep, 4.6.a, 4.6.c); found ${snippetCount}`,
+        skill.includes(snippet),
+        'expected the canonical LL_SID resolver snippet somewhere in the reflect skill',
       );
       // The old env-dependent cat-of-the-id-file pattern must be gone entirely.
       assert.doesNotMatch(
