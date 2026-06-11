@@ -12,6 +12,14 @@ function runWithGitStub(stubBody, args = ['patch']) {
   const stub = join(dir, 'git');
   writeFileSync(stub, `#!/usr/bin/env bash\n${stubBody}\n`);
   chmodSync(stub, 0o755);
+  for (const name of ['npm', 'npx', 'perl', 'cargo']) {
+    const containment = join(dir, name);
+    writeFileSync(
+      containment,
+      `#!/usr/bin/env bash\necho "STUB: ${name} should not be reached" >&2\nexit 1\n`,
+    );
+    chmodSync(containment, 0o755);
+  }
   return spawnSync('bash', [SCRIPT, ...args], {
     encoding: 'utf-8',
     env: { ...process.env, PATH: `${dir}:${process.env.PATH}` },
