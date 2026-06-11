@@ -3,6 +3,7 @@ name: refinement-proposer
 description: Proposes upstream refinements when a new vault note touches an existing claim. Returns structured JSON for the driver to apply via Write or counter-argument linking.
 model: sonnet
 effort: xhigh
+tools: Read, Bash
 ---
 
 # Refinement Proposer

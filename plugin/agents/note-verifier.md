@@ -176,7 +176,7 @@ Use these levels in the Claim Checks table below instead of binary supported/uns
 
 ## Emit Provenance
 
-Before returning the verification report to the caller, emit one summary event per note plus one finding event per issue. Run all emit calls in a single chained Bash command so they stay together in the log.
+Before returning the verification report to the caller, emit one summary event per note plus one finding event per issue. Run all emit calls in a single Bash invocation so they stay together in the log.
 
 ### Per-note summary (always emit)
 
@@ -186,10 +186,12 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-verifier
 
 ### Per-finding score event (emit one per issue)
 
-For each finding identified during verification, also emit:
+For each finding identified during verification, also emit. `finding_detail` carries free text — pass the payload on stdin (`-` + quoted heredoc) so quotes, backticks, and `$` in the prose cannot break shell quoting; escape only JSON's own `"` and `\`:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","finding_detail":"<one-line>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" - <<'JSON'
+{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","finding_detail":"<one-line>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}
+JSON
 ```
 
 Where:

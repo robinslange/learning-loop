@@ -153,6 +153,7 @@ Based on user choices:
 - Show proposed changes before applying
 - Launch `note-writer` with existing_note content
 - Only proceed with user approval
+- Stamp `source_grounded: 0` in the rewritten note's frontmatter and mark every claim taken from the researcher brief with `[unverified]` — same rule as counterpoint notes. A rewrite lands in place of the original, so unverified counter-evidence must not age into a permanent note unmarked.
 
 **Flag for /deepen**:
 - Add to a suggested `/deepen` queue shown at the end
@@ -165,6 +166,7 @@ Based on user choices:
 - Launch `note-writer` with the domain survey's description of the missing territory
 - Tags with `#blindspot` and links to the nearest related vault note
 - Lands in `0-inbox/` as a stub for later `/deepen`
+- Stamp `source_grounded: 0` in the stub's frontmatter and mark claims taken from the survey brief with `[unverified]` — same rule as counterpoint notes; the inbox promote-gate re-verifies before promotion
 
 **Batch actions:**
 - "Create all counterpoint notes": batch launch note-writers

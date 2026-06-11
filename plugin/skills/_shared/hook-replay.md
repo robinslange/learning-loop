@@ -6,7 +6,7 @@ The PostToolUse dispatcher (`hooks/post-tool.js`, which runs the autolink, edge-
 
 ## Canonical snippet (unlinked-body filter)
 
-This is the pattern used by `/reflect` Step 4.4, `/ingest` Step 5.5, `/gaps` Step 4.5, and `/deepen` Step 1.5. It walks the vault, identifies markdown files whose bodies contain no `[[wikilinks]]`, and replays the hooks on those. Works regardless of git state.
+This is the pattern used by `/ingest` Step 5.5, `/gaps` Step 4.5, and `/deepen` Step 1.5. (`/reflect` is not a consumer — it uses its own `reflect_sid`-keyed sweep, a different mechanism.) It walks the vault, identifies markdown files whose bodies contain no `[[wikilinks]]`, and replays the hooks on those. Works regardless of git state.
 
 ```bash
 # Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,

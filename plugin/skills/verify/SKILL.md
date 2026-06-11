@@ -32,9 +32,11 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skil
 
 **After scoring and verification, emit each finding via provenance-emit.js:**
 
-For each note with issues, run:
+For each note with issues, run the stdin form (`-` + quoted heredoc) — `finding_detail` carries free text, and prose quotes/backticks/`$` must not break shell quoting (escape only JSON's own `"` and `\`):
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" - <<'JSON'
+{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}
+JSON
 ```
 
 Where:

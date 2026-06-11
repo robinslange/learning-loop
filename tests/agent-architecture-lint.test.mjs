@@ -53,7 +53,7 @@ test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
 const ALLOWLISTED = [
   'note-scorer', 'note-verifier', 'correction-analyser', 'gap-analyser',
   'discovery-vault-scout', 'note-writer', 'note-deepener', 'literature-capturer',
-  'discovery-researcher', 'inbox-organiser',
+  'discovery-researcher', 'inbox-organiser', 'refinement-proposer',
   'ingest-mapper-arch', 'ingest-mapper-conventions', 'ingest-mapper-domain',
   'ingest-mapper-stack', 'ingest-mapper-state', 'ingest-synthesizer',
 ];

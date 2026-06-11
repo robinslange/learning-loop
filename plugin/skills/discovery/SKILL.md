@@ -121,7 +121,7 @@ Run this after EVERY `discovery-researcher` return — orientation and every loo
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|PARTIAL|ISSUES_FOUND","rounds":N}'
 ```
 
-Findings never reach the user or the vault unverified.
+Findings never reach the user or the vault unverified — with one escape: findings still unresolved after the 3-round cap are explicitly flagged (the `### Unresolved Verification Issues` section), never passed silently.
 
 ### Step 2: Present Orientation
 

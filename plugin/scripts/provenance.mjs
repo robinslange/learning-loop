@@ -6,6 +6,7 @@
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { getPluginData, pluginDataExists } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
@@ -51,7 +52,8 @@ export function emitProvenance(event) {
   appendJsonlLine(getCurrentMonthFile(), record);
 }
 
-if (process.argv[2]) {
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain && process.argv[2]) {
   try {
     emitProvenance(JSON.parse(process.argv[2]));
   } catch (e) {
