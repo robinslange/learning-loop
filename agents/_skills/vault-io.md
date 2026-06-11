@@ -9,7 +9,7 @@ Agent and skill files use exactly two path placeholders:
 
 **Substitution rule: resolve both placeholders to literal absolute paths BEFORE passing any prompt to a subagent.** Skills get the values from the Learning Loop Paths session context (`PLUGIN=` and `VAULT=` lines). Subagents must never guess a path: if a placeholder reaches you unresolved, report it as a dispatch error instead of inventing a value.
 
-The spelling `PLUGIN/` is banned (a lint test enforces this); use `${CLAUDE_PLUGIN_ROOT}/`.
+Writing a bare `PLUGIN` prefix before a path is banned (a lint test enforces this); always write `${CLAUDE_PLUGIN_ROOT}/`.
 
 ## Reading Notes
 
