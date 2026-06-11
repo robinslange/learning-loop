@@ -31,7 +31,7 @@ Eight hook handlers across six Claude Code event types enforce process disciplin
 | SessionStart | session-start.js | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn |
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
-| PreToolUse (Write) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85); blocks duplicate frontmatter tags; warns on frontmatter/body source-line leak |
+| PreToolUse (Write\|Edit) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt) |
 | PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool.js | Coalesced dispatcher. Loads one vault snapshot, then runs the autolink, edge-infer, provenance, and reflect-track modules in fixed order with per-module timeout isolation. Non-write tool events only run provenance |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
 | PostToolUse (mcp__plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
@@ -132,7 +132,7 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver verifies citations mechanically against 12 APIs: PubMed, Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
+The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
 
 Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words. The naive regex approach had a ~60% false positive rate on author-year patterns.
 

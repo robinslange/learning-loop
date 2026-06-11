@@ -35,7 +35,7 @@ Twenty working agents.
 
 ## Vault librarian (local, optional)
 
-A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It dispatches up to four tasks per visited note, mixing one tool-use loop with three single-call structured-output classifiers.
+A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It dispatches up to four model tasks per visited note (one tool-use loop plus three single-call structured-output classifiers), and additionally runs a heuristic staleness check that needs no model call.
 
 | Task | Mode | Trigger | Output |
 |---|---|---|---|
@@ -43,6 +43,7 @@ A separate tier runs outside of Claude entirely. The vault librarian (`scripts/l
 | Voice gate | Single structured-output call | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag` |
 | Tag suggestion | Single structured-output call | Notes with 0 or 1 tags | `tag_suggestion` with up to 2 tags |
 | Duplicate detection | Single structured-output call | Every visited note | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |
+| Staleness flagging | Heuristic (regex + mtime, no model call) | Notes older than 60 days carrying version and specificity signals | `staleness_suspect` |
 
 The structured-output classifiers all follow the same shape: pre-fetch context, one schema-bound call, no tool-use. Specifics:
 
@@ -50,7 +51,7 @@ The structured-output classifiers all follow the same shape: pre-fetch context, 
 - **Duplicate detector.** Compares the visited note against three nearest neighbours from `ll-search similar`, with 500 characters of body context per side. Returns one of `duplicate` (merge), `same_topic` (link), or `unrelated` (drop). False-positive rate ~3% with body context; the body context is what makes the call accurate at this model size.
 - **Voice gate.** Inspects the title only. Returns a flag if the title states a topic ("Spaced Repetition") rather than an insight ("Spaced repetition works because forgetting is active"). F1 0.78 against a hand-labelled set.
 
-All four tasks write observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field. A separate `state.json` tracks visited notes and resets after a full pass. Claude reviews the queue on demand via `/health --librarian`.
+All five task types write observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field. A separate `state.json` tracks visited notes and resets after a full pass. Claude reviews the queue on demand via `/health --librarian`.
 
 | Agent | Engine | Tasks | Speed |
 |---|---|---|---|
