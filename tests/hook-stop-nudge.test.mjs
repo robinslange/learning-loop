@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
@@ -131,6 +131,84 @@ test('stop-nudge already-nudged: no second block output', () => {
     r1.cleanup();
     r2.cleanup();
     rmSync(isolatedTmp, { recursive: true, force: true });
+  }
+});
+
+test('reflect cooldown read from plugin-data suppresses the nudge — M2', () => {
+  const transcriptPath = join(HOOK_TMP, `ll-test-transcript-cooldown-${Date.now()}.txt`);
+  writeTranscript(transcriptPath, 60000);
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'test-cooldown', transcript_path: transcriptPath, stop_hook_active: false },
+    seed: (pluginDataDir) => {
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      writeFileSync(
+        join(pluginDataDir, 'markers', 'last-reflect'),
+        String(Math.floor(Date.now() / 1000)),
+      );
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0);
+    assert.equal(r.stdout.trim(), '', 'fresh plugin-data last-reflect must suppress the nudge');
+  } finally {
+    r.cleanup();
+    rmSync(transcriptPath, { force: true });
+  }
+});
+
+test('dream nudge fires on >=3 new memories, then respects its once-guard — M3/M4', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-proj-'));
+  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const sid = 'test-dream-nudge';
+
+  const seed = (pluginDataDir, sandboxRoot) => {
+    mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+    writeFileSync(join(pluginDataDir, 'markers', `memory-snapshot-${sid}`), '[]');
+    const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+    mkdirSync(memDir, { recursive: true });
+    for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
+  };
+
+  const r1 = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed,
+  });
+  try {
+    assert.equal(r1.exitCode, 0, r1.stderr);
+    const out = r1.stdout.trim();
+    assert.ok(out.length > 0, 'first stop with 3 new memories must nudge');
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.decision, 'block');
+    assert.match(parsed.reason, /\/dream/);
+    assert.ok(
+      existsSync(join(r1.pluginDataDir, 'markers', 'dream-nudged')),
+      'first nudge must write the once-guard marker',
+    );
+  } finally {
+    r1.cleanup();
+  }
+
+  // Second run: pre-existing dream-nudged marker for the SAME session id must
+  // suppress the nudge (M3 — the marker is finally read). transcript_path
+  // /nonexistent makes the fallback transcript check exit silently.
+  const r2 = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed: (pluginDataDir, sandboxRoot) => {
+      seed(pluginDataDir, sandboxRoot);
+      writeFileSync(
+        join(pluginDataDir, 'markers', 'dream-nudged'),
+        JSON.stringify({ ts: Math.floor(Date.now() / 1000), session_id: sid }),
+      );
+    },
+  });
+  try {
+    assert.equal(r2.exitCode, 0, r2.stderr);
+    assert.equal(r2.stdout.trim(), '', 'dream-nudged once-guard must suppress the second nudge');
+  } finally {
+    r2.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
   }
 });
 

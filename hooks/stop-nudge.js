@@ -7,11 +7,11 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { home, resolvePluginData, readStdin, getSessionId } from './lib/common.mjs';
-import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
+import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
 
 const tmp = tmpdir();
 
@@ -35,63 +35,69 @@ if (hookData.stop_hook_active) process.exit(0);
 
 const pluginData = resolvePluginData();
 
-// Skip if /reflect was run recently (within last REFLECT_COOLDOWN_SECS)
-const reflectMarker = join(tmp, 'learning-loop-last-reflect');
-if (existsSync(reflectMarker)) {
-  try {
-    const lastReflect = parseInt(readFileSync(reflectMarker, 'utf8').trim(), 10);
-    if (now() - lastReflect < HookConfig.REFLECT_COOLDOWN_SECS) process.exit(0);
-  } catch (err) {
-    logError('stop-nudge.reflectMarker', err);
-  }
-}
-
-// Check if many new memory files were created this session (dream nudge)
-const dreamMarker = join(tmp, 'learning-loop-last-dream');
-const projectDir = env.CLAUDE_PROJECT_DIR;
-
 // Prefer the hook-supplied session_id; fall back to the canonical marker
 // resolver. getSessionId() returns 'unknown' when no marker is usable; the
 // snapshot-path selection below treats that as "no session" (falsy).
 let sessionId = hookData.session_id || getSessionId();
 if (sessionId === 'unknown') sessionId = '';
 
-const snapshotFile = sessionId
-  ? join(tmp, `learning-loop-memory-snapshot-${sessionId}`)
-  : join(tmp, 'learning-loop-memory-snapshot');
-if (projectDir && existsSync(snapshotFile)) {
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
-  const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
+// All dream/reflect markers live in plugin-data (MARKER_PATHS) — never tmp:
+// the skill's bash inherits $TMPDIR, hook subprocesses don't, so tmp-anchored
+// markers diverge across the boundary (the M1/M2 split-brain). Without
+// plugin-data nothing can have written markers either — skip cooldowns.
 
-  try {
-    const { value: snapshotArr } = safeLoad(snapshotFile, { fallback: [] });
-    const snapshot = new Set(Array.isArray(snapshotArr) ? snapshotArr : []);
-    const currentFiles = readdirSync(memoryDir).filter((f) => f.endsWith('.md'));
-    const newMemoryCount = currentFiles.filter((f) => !snapshot.has(f)).length;
+// Skip if /reflect was run recently (within last REFLECT_COOLDOWN_SECS).
+if (pluginData) {
+  const lastReflect = readMarker(MARKER_PATHS.lastReflect(pluginData), { ttlMs: Infinity });
+  if (typeof lastReflect === 'number' && now() - lastReflect < HookConfig.REFLECT_COOLDOWN_SECS) {
+    process.exit(0);
+  }
+}
 
-    if (newMemoryCount >= 3) {
-      // Skip if dream ran recently (last DREAM_COOLDOWN_SECS)
-      let dreamRecent = false;
-      if (existsSync(dreamMarker)) {
-        try {
-          const lastDream = parseInt(readFileSync(dreamMarker, 'utf8').trim(), 10);
-          if (now() - lastDream < HookConfig.DREAM_COOLDOWN_SECS) dreamRecent = true;
-        } catch (err) {
-          logError('stop-nudge.dreamMarker', err);
+// Check if many new memory files were created this session (dream nudge).
+const projectDir = env.CLAUDE_PROJECT_DIR;
+
+if (pluginData && projectDir) {
+  const snapshotArr = readMarker(MARKER_PATHS.memorySnapshot(pluginData, sessionId), {
+    ttlMs: Infinity,
+  });
+  if (Array.isArray(snapshotArr)) {
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
+    try {
+      const snapshot = new Set(snapshotArr);
+      const currentFiles = readdirSync(memoryDir).filter((f) => f.endsWith('.md'));
+      const newMemoryCount = currentFiles.filter((f) => !snapshot.has(f)).length;
+
+      if (newMemoryCount >= 3) {
+        // Skip if dream ran recently (last DREAM_COOLDOWN_SECS).
+        const lastDream = readMarker(MARKER_PATHS.lastDream(pluginData), { ttlMs: Infinity });
+        const dreamRecent =
+          typeof lastDream === 'number' && now() - lastDream < HookConfig.DREAM_COOLDOWN_SECS;
+
+        // Once-guard (M3): nudge at most once per session. Legacy marker
+        // content was a bare timestamp; honor it via the cooldown window.
+        const nudgedPath = MARKER_PATHS.dreamNudged(pluginData);
+        const nudged = readMarker(nudgedPath, { ttlMs: Infinity });
+        const nudgedTs = typeof nudged === 'number' ? nudged : nudged?.ts;
+        const alreadyNudged = nudged
+          ? sessionId && nudged?.session_id
+            ? nudged.session_id === sessionId
+            : typeof nudgedTs === 'number' && now() - nudgedTs < HookConfig.DREAM_COOLDOWN_SECS
+          : false;
+
+        if (!dreamRecent && !alreadyNudged) {
+          writeMarker(nudgedPath, { ts: now(), session_id: sessionId });
+          emitJson({
+            decision: 'block',
+            reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
+          });
+          process.exit(0);
         }
       }
-
-      if (!dreamRecent) {
-        writeFileSync(join(tmp, 'learning-loop-dream-nudged'), String(now()));
-        emitJson({
-          decision: 'block',
-          reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
-        });
-        process.exit(0);
-      }
+    } catch (err) {
+      logError('stop-nudge.memoryDiff', err);
     }
-  } catch (err) {
-    logError('stop-nudge.memoryDiff', err);
   }
 }
 
