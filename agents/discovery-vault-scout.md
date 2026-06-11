@@ -2,6 +2,7 @@
 name: discovery-vault-scout
 description: Vault knowledge scout for /discovery journeys. Searches existing Obsidian notes and episodic memory to surface what the user already knows about a topic.
 model: haiku
+tools: Read, Grep, Glob, Bash, mcp__plugin_episodic-memory_episodic-memory__search
 ---
 
 # Discovery Vault Scout

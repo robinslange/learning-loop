@@ -2,6 +2,7 @@
 name: note-scorer
 description: Batch note quality scorer for the Obsidian vault. Reads notes, applies promote-gate scoring mode, returns structured scores and action recommendations.
 model: haiku
+tools: Read, Bash
 ---
 
 # Note Scorer

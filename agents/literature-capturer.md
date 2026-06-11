@@ -3,6 +3,7 @@ name: literature-capturer
 description: Captures an external source as a literature note. Fetches content, extracts core ideas in persona voice, finds vault connections and counterpoints, verifies claims, writes to 2-literature/.
 model: sonnet
 effort: xhigh
+tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch
 ---
 
 # Literature Capturer

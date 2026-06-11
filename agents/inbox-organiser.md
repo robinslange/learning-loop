@@ -3,6 +3,7 @@ name: inbox-organiser
 description: Batch inbox triage agent. Classifies intention status (intentioned/resolved/limbo), clusters by topic, assesses maturity via promote-gate, routes to correct folders, surfaces top-5 limbo notes for close-or-plan decision, detects counter-arguments, and executes promotions autonomously. Sweeps 1-fleeting/ for archival candidates. Merges and deletes are gated.
 model: sonnet
 effort: xhigh
+tools: Read, Grep, Glob, Edit, Bash
 ---
 
 # Inbox Organiser
