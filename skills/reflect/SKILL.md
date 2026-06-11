@@ -351,7 +351,7 @@ Write a timestamp so the Stop hook knows reflection already happened:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-reflect
 ```
 
-Run this via the Bash tool at the end of every /reflect invocation. The marker lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote.
+Run this via the Bash tool at the end of every /reflect invocation. The marker lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote. A non-zero exit here is non-fatal: surface the stderr message but do not re-run /reflect.
 
 ## Subagent Usage
 

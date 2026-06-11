@@ -93,7 +93,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 Process in strict order: **DATE NORMALIZE, MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK.**
 
-Acquire the dream lock first using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP and tell the user instead of proceeding. Exit 2 = usage/installation error — report the stderr message; do not treat it as "already running".
+Acquire the dream lock first using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP, tell the user, and take no further /dream action this invocation. Exit 2 = usage/installation error — report the stderr message to the user and abort; do not treat it as 'already running' and do not proceed without a lock.
 
 For each operator, read its instruction file from `operators/` and execute:
 
@@ -115,7 +115,7 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
 
 1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md): description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
 
-2. Write MEMORY.md (full overwrite). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read — do not hand-roll a tmp file).
+2. Write MEMORY.md (full overwrite). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read — do not write the timestamp by hand; this command is the single writer).
 
 3. Report:
    ```
@@ -135,3 +135,4 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
 - Log every operation to `_dream_log.md`
 - Lock file prevents concurrent dreams
 - Human-in-the-loop gate before Phase 3, plus per-cluster gate for ABSTRACT
+- Lock leaks from a /dream interrupted mid-Phase 3 are expected: the 1-hour staleness window is the recovery mechanism. No manual cleanup needed.
