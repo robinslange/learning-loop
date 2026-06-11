@@ -17,16 +17,18 @@ learning-loop/
   plugin/               -- the installed plugin (marketplace source ./plugin)
     .claude-plugin/     -- plugin manifest (plugin.json)
     hooks/              -- Claude Code lifecycle hooks (entry: *.js)
-      lib/              -- hook-shared helpers (snapshot, inject, log)
+      lib/              -- hook-shared helpers (common, dream-gate, io, inject, snapshot)
       modules/          -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
       session-start/    -- session-start submodules (context-assembly, watch-daemon,
-                           vault-snapshot, cache-cleanup, health-detector, update-check)
+                           vault-snapshot, cache-cleanup, health-detector, update-check,
+                           update-check-worker)
       session-start.js  -- vault context injection on session open
       session-label.js  -- just-in-time injection pipeline on each prompt
       post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
-      pre-write-check.js  -- duplicate detection before vault write
+      pre-write-check.js  -- duplicate + added-dash gate before vault writes and edits
       stop-nudge.js     -- /reflect nudge on session close
       pre-compact.js    -- context capture before compaction
+      pre-compact-worker.mjs  -- detached worker spawned by pre-compact.js
       post-read-retrieval.js  -- passive read telemetry
       post-search-tracking.js -- episodic-memory search query tracking
 
@@ -42,6 +44,7 @@ learning-loop/
     agents/             -- agent definitions (markdown)
     plugins/
       omc-cache-health/ -- cache health subplugin
+    provenance/         -- learned/retired pattern notes
     templates/          -- CLAUDE.md section template version
     vendor/             -- vendored schemas and NLP libs
     config.json         -- plugin config
@@ -55,9 +58,11 @@ learning-loop/
 
   .claude-plugin/       -- marketplace manifest (marketplace.json)
   tests/                -- Node.js tests (node --test)
+  eslint-plugin-learning-loop/ -- custom ESLint rules (no-empty-catch, no-direct-jsonparse,
+                           no-process-env-outside-env-module, no-raw-lockfile)
   docs/
-    baseline/           -- convention docs (this directory)
-    superpowers/        -- plan archives
+    baseline/           -- convention docs (the only tracked part of docs/)
+    superpowers/        -- plan archives (local-only; docs/* is gitignored except baseline/)
   guide/                -- user-facing docs (configuration, workflows)
   calibration/          -- calibration harness
   provenance/           -- provenance event log
@@ -143,7 +148,7 @@ Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from
 | ll-core graph              | `native/crates/ll-core/src/graph.rs`                     | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
 | ll-search query pipeline   | `native/crates/ll-search/src/search/`                    | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
 | ll-search database         | `native/crates/ll-search/src/db/`                        | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
-| ll-search daemon lifecycle | `native/crates/ll-search/src/main.rs`, `app/` (track 0G) | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
+| ll-search daemon lifecycle | `native/crates/ll-search/src/main.rs`, `app/`            | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
 | ll-search sync             | `native/crates/ll-search/src/sync/`                      | `docs/baseline/cross-cutting.md` | `.planning/inventory/rust-audit.md`         |
 | Plugin shared primitives   | `scripts/lib/`                                           | `docs/baseline/plugin.md`        | `.planning/inventory/plugin-patterns.md`    |
 | Hooks                      | `hooks/`                                                 | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md` |
@@ -165,7 +170,7 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 5. All public items in `ll-core` have `///` doc comments. See `docs/baseline/rust.md`.
 
-6. `search/` modules do not import from `db/` directly. They go through the `Storage` trait in `app/`. (Pending: track 0G and 1E.) See `docs/baseline/rust.md`.
+6. `search/` modules do not import from `db/` directly. They go through the `Storage` trait in `app/`. (The 0G `Storage` trait exists in `app/storage.rs`; the 1E rewiring is pending -- `search/{query,reflect,store,cluster}.rs` still import `crate::db` directly.) See `docs/baseline/rust.md`.
 
 7. Hook entry files are under 100 LOC; script entry files are under 150 LOC. Logic lives in submodules. See `docs/baseline/plugin.md`.
 
@@ -183,9 +188,9 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **Hook surface.** The eight hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and pre-compact hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-pre-compact.test.mjs`) that lock down current behaviour.
 
-The most complex hook is `session-start.js` at 556 LOC -- a 0D characterisation test is the prerequisite before the phase 1I split into submodules.
+`session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
-**Search daemon.** Start from `native/crates/ll-search/src/main.rs`. The CLI dispatches to `search::query`, `db::index`, and `sync::client`. Hot-path code is in `search/{query,context,federation,graph,reflect}.rs`. The clone inventory in `.planning/inventory/rust-audit.md:251-324` explains the performance targets. The `app/` module (track 0G) does not yet exist; until it does, `AppState` is effectively `main.rs`-local ad-hoc setup.
+**Search daemon.** Start from `native/crates/ll-search/src/main.rs`. The CLI dispatches to `search::query`, `db::index`, and `sync::client`. Hot-path code is in `search/{query,context,federation,graph,reflect}.rs`. The clone inventory in `.planning/inventory/rust-audit.md:251-324` explains the performance targets. The `app/` module (track 0G) exists -- `app/state.rs` defines `AppState` and `app/storage.rs` defines the `Storage` trait. The genuinely pending part is the 1E rewiring: `search/{query,reflect,store,cluster}.rs` still import `crate::db` directly instead of going through `Storage`.
 
 **ll-core.** Five modules: `embed`, `scoring`, `graph`, `rerank`, `store`. All public items are undocumented at baseline (54 items; see `.planning/inventory/ll-core-api.md:179-238`). Track 0A adds doc comments and the typed `Error`. New code follows `docs/baseline/rust.md`.
 
@@ -282,7 +287,7 @@ On session open, hooks fire in this order:
 2. (session is now live)
 3. On each user prompt: `session-label.js` -- JIT injection pipeline
 4. On each Write/Edit/Agent/Skill tool use:
-   - Before (Write only): `pre-write-check.js` -- near-duplicate gate
+   - Before (Write|Edit): `pre-write-check.js` -- near-duplicate and added-dash gate
    - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the autolink, edge-infer, provenance, and reflect-track modules (`hooks/modules/`), on Agent/Skill it runs provenance only
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
@@ -336,6 +341,25 @@ ll-search sessions   <db> [--min-notes N]
 ll-search export     <db> <output> <vault>
 ```
 
+**Embedding model migration and benchmarking**
+```
+ll-search migrate   <db> --model MODEL [--drop-old]
+ll-search benchmark <db> --model-a A --model-b B <queries...>
+```
+
+**Evaluation and tuning**
+```
+ll-search tune-prf    <db> <queries...>
+ll-search eval-prf    <db> [--min-links N]
+ll-search eval-funnel <db> [--min-links N] [--limit N]
+```
+
+**NLI (compiled in with the `nli` feature)**
+```
+ll-search nli-check <text_a> <text_b>
+ll-search nli-batch <text_a> <texts_b_file>
+```
+
 **Federation**
 ```
 ll-search sync          <db> <vault> [--hub-endpoint URL] [--peer-id ID]
@@ -382,7 +406,7 @@ A complete session runs like this. The total wall time for session-start (target
 
 2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
-3. **Writes** -- `pre-write-check.js` fires before each write and warns on near-duplicate similarity (≥0.85 against existing notes); it only hard-blocks on duplicate frontmatter tags. After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
+3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags and on em/en dashes added to note body prose (both paths use an added-only delta against the note on disk, so pre-existing dashes never block; `Source:`/`Related:` lines are exempt). After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
 
 4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
 
@@ -412,7 +436,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is defined in `hooks/lib/common.mjs:178-186`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs:145-161`:
 
 ```json
 {
@@ -446,30 +470,38 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
 
 ### shadow injection log
 
-`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). Shape from `hooks/session-label.js:223-249`:
+`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js:250-266`):
 
 ```json
 {
   "ts": "2026-05-18T04:00:00.000Z",
   "session_id": "abc123",
+  "command": "gate-pass-payload",
+  "query": "",
   "session_label": "memory consolidation design",
   "prompt": "how should I...",
   "prompt_length": 142,
-  "vault": {
-    "latency_ms": 32,
-    "hits": 3,
-    "top_path": "3-permanent/note.md",
-    "error": null,
-    "raced_out": false
-  },
-  "episodic": {
-    "latency_ms": 45,
-    "hits": 1,
-    "error": null,
-    "raced_out": false
+  "type": "gate-pass-payload",
+  "gate": { "passed": true, "vault_top_score": 0.62, "episodic_top_score": 0.41 },
+  "backends": {
+    "vault": {
+      "latency_ms": 32,
+      "hits": 3,
+      "top_path": "3-permanent/note.md",
+      "error": null,
+      "raced_out": false
+    },
+    "episodic": {
+      "latency_ms": 45,
+      "hits": 1,
+      "error": null,
+      "raced_out": false
+    }
   }
 }
 ```
+
+Gate-pass records additionally carry `payload`, `dedupe_filtered_count`, and (in shadow mode) `would_inject` fields; gate-fail records carry the failing `gate` shape instead.
 
 Review with `node scripts/review-shadow.mjs` before flipping to live injection mode.
 
