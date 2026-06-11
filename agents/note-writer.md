@@ -77,7 +77,7 @@ For synthesis notes with no external source, use `source: synthesis`. For unveri
 
 Set `claim_specificity` and `source_grounded` per the promote-gate scoring dimensions. Use the highest applicable score across claims in the note. If the note is tagged `[synthesis]`, set `source_grounded` based on vault links (0 = no links, 1 = links to grounded notes).
 
-Also return a suggested filename (kebab-case, descriptive slug: not the full title).
+Also return the filename you used (kebab-case, descriptive slug: not the full title).
 
 ## When Rewriting
 
