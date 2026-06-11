@@ -7,7 +7,7 @@ description: 'Batch triage inbox notes and sweep fleeting for archival. Usage: /
 
 ## Overview
 
-Launches the `inbox-organiser` agent to process all notes in `0-inbox/`. The agent clusters by topic, assesses maturity via the promote-gate skill, detects counter-arguments, and executes promotions autonomously. Merges and deletes require approval.
+Launches the `inbox-organiser` agent to process all notes in `0-inbox/`. The agent clusters by topic, assesses maturity via the promote-gate skill, detects counter-arguments, and executes promotions autonomously. Merges, deletes, hard NLI contradictions, and fleeting archival require approval.
 
 ## When to Use
 
