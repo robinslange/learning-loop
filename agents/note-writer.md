@@ -89,6 +89,7 @@ If `existing_note` is provided:
 - Sharpen the title if it's topic-as-title.
 - Add links from `related_notes`.
 - If the note covers two ideas, return two separate notes and flag the split.
+- Preserve all existing frontmatter fields you weren't asked to change — especially `nli_qualified_by`, `nli_resolved`, `nli_tension*`, `intentions`, `status`, `reflect_sid`. Carry them through verbatim; never regenerate frontmatter from scratch.
 
 ## Diagram Generation
 

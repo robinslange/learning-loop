@@ -48,6 +48,17 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-doi <doi> "Claimed
 node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <note-path>
 ```
 
+When you received `note_content` as text rather than a path, materialize it first (you have no Write tool — use Bash):
+
+```bash
+NOTE_TMP="${TMPDIR:-/tmp}/ll-note-verify-$$.md"
+cat > "$NOTE_TMP" <<'LL_NOTE_EOF'
+[paste note_content verbatim]
+LL_NOTE_EOF
+```
+
+Run `verify-note`/`check-claims` against `$NOTE_TMP`; `rm -f "$NOTE_TMP"` when done.
+
 The resolver returns:
 - **verified: true/false**: mechanical author/year match against the actual database
 - **issues**: typed and severity-graded (wrong_author/high, author_not_first/medium, wrong_year/high)

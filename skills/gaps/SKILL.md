@@ -156,6 +156,7 @@ Based on user choices:
   - destination: `0-inbox/`
 - Note gets `#counterpoint` tag in frontmatter
 - Note backlinks to the challenged note with context
+- Stamp `source_grounded: 0` in the note's frontmatter and mark any claim taken from the researcher brief with `[unverified]`. Rationale: /gaps does not run claim-level verification; the inbox promote-gate re-verifies before promotion.
 
 **Rewrite original note** (ask permission first):
 - Show proposed changes before applying

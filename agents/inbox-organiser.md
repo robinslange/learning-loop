@@ -226,6 +226,7 @@ Output exactly this table (the skill parses it):
 - `held` is `-` or `nli`. Any note in the hard NLI bucket (3a.5) gets `held: nli` on its row and is NEVER executed autonomously — by you or the skill — until the user resolves the contradiction.
 - `rewrite` items with `held: -` are autonomous: the skill executes them without approval.
 - `merge` items are gated: the skill executes them only after user approval (they also appear in the Needs-approval block above).
+- A `type: merge` row whose note is ALSO in the hard NLI bucket gets `held: nli`. It appears in BOTH the merge approval block AND the NLI contradictions block, and the skill executes it only after BOTH gates clear: the NLI resolution runs first, then the merge. If the user resolves NLI as `skip` (or declines the merge), no merge happens and both notes stay in place.
 - `promote` items exist only for NLI-held mv-promotions: the note needed no rewrite but is hard-blocked; the skill `mv`-promotes it if the user resolves in its favour.
 - Include in `reason` which gate criteria failed — the skill passes it to note-writer as context.
 - If there are no worklist items, output the single line `Rewrite Worklist: empty` instead of the table — never echo the example rows.
@@ -292,7 +293,7 @@ Fleeting: [A] notes archived to _archive/1-fleeting/, [F] active notes remain.
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_archived":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
 ```
 
 Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows, held or not), `merge_candidates` = [Wm]. NLI-held `promote` rows are counted in `nli_contradictions_surfaced`, not separately. Executed-counts (rewrites done, merges done, NLI resolutions) belong to the skill's session-end event, not this payload.

@@ -9,7 +9,13 @@ Agent and skill files use two path placeholders for the plugin and vault roots:
 
 (`PLUGIN_DATA` / `${CLAUDE_PLUGIN_DATA}` is a separate token for the plugin's data directory — injected as its own context line, not covered by this rule.)
 
-**Substitution rule: resolve both placeholders to literal absolute paths BEFORE passing any prompt to a subagent.** Skills get the values from the Learning Loop Paths session context (`PLUGIN=` and `VAULT=` lines, where `PLUGIN=` → `${CLAUDE_PLUGIN_ROOT}` and `VAULT=` → `{{VAULT}}`). If the context block is absent, recover the plugin root in any Bash block: `echo "$CLAUDE_PLUGIN_ROOT"` (a real env var there) or `node "$CLAUDE_PLUGIN_ROOT/scripts/resolve-paths.mjs"`. Subagents must never guess a path. `${CLAUDE_PLUGIN_ROOT}` inside a Bash command runs as written (it resolves at execution); but if a placeholder reaches you unresolved in prompt or input TEXT you must use as a path, report it as a dispatch error instead of inventing a value.
+**Substitution rule:**
+
+- **Value mapping.** The Learning Loop Paths session context carries a `PLUGIN=` and a `VAULT=` line, where `PLUGIN=` → `${CLAUDE_PLUGIN_ROOT}` and `VAULT=` → `{{VAULT}}`.
+- **Resolve early.** Resolve both placeholders to literal absolute paths BEFORE passing any prompt to a subagent.
+- **Recovery when the context block is absent.** Recover the plugin root in any Bash block: `echo "$CLAUDE_PLUGIN_ROOT"` (a real env var there) or `node "$CLAUDE_PLUGIN_ROOT/scripts/resolve-paths.mjs"`.
+- **Inside Bash, it runs as written.** `${CLAUDE_PLUGIN_ROOT}` inside a Bash command resolves at execution — leave it as written.
+- **Never guess.** If a placeholder reaches you unresolved in prompt or input TEXT you must use as a path, report it as a dispatch error instead of inventing a value.
 
 Writing a bare `PLUGIN` prefix before a path is banned (a lint test enforces this); always write `${CLAUDE_PLUGIN_ROOT}/`.
 

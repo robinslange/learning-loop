@@ -95,6 +95,8 @@ When called from note-writer or other agents that need deterministic verificatio
 
 ### Verify sources
 
+The temp-file steps below use the Write tool — they are the variant for Write-granted agents (note-writer, note-deepener, literature-capturer). Read/Bash-only agents (note-verifier) have no Write tool: materialize the note via the Bash-heredoc variant in `agents/note-verifier.md` (Step 2) instead, then run the same resolver commands against that temp path.
+
 1. Write the note content to a temp file using the Write tool: `<tmpdir>/ll-note-verify-TIMESTAMP.md` (epoch ms for TIMESTAMP, where tmpdir is the OS temp directory)
 2. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
 3. Parse the JSON output. For each source:

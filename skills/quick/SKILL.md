@@ -71,7 +71,14 @@ Evaluate silently in the main thread. Do not ask the user.
 
 **Substance check:** Is the core insight a durable pattern, mechanism, or decision-relevant fact? If it's transient (today's weather, a live score, a price that will change next week), skip capture.
 
-**If both pass:** Spawn a `note-writer` subagent (subagent_type: `learning-loop:note-writer`):
+**If both pass, verify before writing.** Run ONE round of the `note-verifier` subagent (subagent_type: `learning-loop:note-verifier`) with the draft note content as `note_content` (placeholders resolved per `agents/_skills/vault-io.md`). Branch on its `### Status:`:
+- **PASS** → write as-is.
+- **PARTIAL** → write, carrying the verifier's `[partial]` claim flags into the note.
+- **ISSUES FOUND** → apply the verifier's `### Corrections` (adopt corrected URLs/claims); any claim with no surviving source moves out, or the note writes with `source: unverified`.
+
+ONE round only — no revise loop. This is the lightweight tier; the spoken answer in Step 3 is NOT gated, only the captured note.
+
+**Then spawn** a `note-writer` subagent (subagent_type: `learning-loop:note-writer`):
 ```
 Write an inbox note for the Obsidian vault.
 

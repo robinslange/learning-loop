@@ -10,7 +10,7 @@ Before investing research effort, determine if existing knowledge already covers
 
 ## Process
 
-1. **Direct search.** Search vault for the topic by name — semantic (`vault-search.mjs search --rerank`) and keyword (`Grep`).
+1. **Direct search.** Search vault for the topic by name — semantic (`vault-search.mjs search --rerank`) and keyword (`Grep`). If your tool grant lacks `Grep` (e.g. discovery-researcher), run the keyword pass via `vault-search.mjs search` instead.
 2. **Indirect search.** Search for concepts that cover the same ground via a different path. Trace upstream and downstream:
    - What is this a component of?
    - What does this produce or lead to?
