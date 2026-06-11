@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { detectAbiDrift } from '../scripts/check-deps.mjs';
+import { newestVersionDir } from '../scripts/check-deps-impl.mjs';
 
 test('detectAbiDrift returns ok when no error is supplied', () => {
   const result = detectAbiDrift({ nativeModulePath: null, currentAbi: process.versions.modules });
@@ -33,6 +37,44 @@ test('detectAbiDrift prefers currentAbi over parsed actual when supplied', () =>
     ),
   });
   assert.equal(result.actualAbi, '999');
+});
+
+test('newestVersionDir returns the highest semver dir, ignoring non-semver entries', () => {
+  const base = mkdtempSync(join(tmpdir(), 'check-deps-ver-'));
+  try {
+    for (const d of ['1.0.9', '1.0.15', '0.9.99', 'tmp-junk']) {
+      mkdirSync(join(base, d));
+    }
+    assert.equal(newestVersionDir(base), '1.0.15');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('newestVersionDir compares numerically, not lexicographically', () => {
+  const base = mkdtempSync(join(tmpdir(), 'check-deps-ver-'));
+  try {
+    for (const d of ['1.0.2', '1.0.10']) {
+      mkdirSync(join(base, d));
+    }
+    assert.equal(newestVersionDir(base), '1.0.10');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('newestVersionDir returns null for a missing dir', () => {
+  assert.equal(newestVersionDir(join(tmpdir(), 'check-deps-ver-does-not-exist')), null);
+});
+
+test('newestVersionDir returns null for a dir with no semver entries', () => {
+  const base = mkdtempSync(join(tmpdir(), 'check-deps-ver-'));
+  try {
+    mkdirSync(join(base, 'tmp-junk'));
+    assert.equal(newestVersionDir(base), null);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 test('detectAbiDrift returns error status for unrelated load failures', () => {

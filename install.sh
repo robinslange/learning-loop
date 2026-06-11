@@ -18,14 +18,15 @@
 
 set -euo pipefail
 
-if [ -z "${INSTALL_VERSION:-}" ]; then
-  readonly INSTALL_VERSION="1"
+if [ -z "${LL_INSTALL_LOADED:-}" ]; then
+  readonly LL_INSTALL_LOADED="1"
   readonly SELF_URL="https://raw.githubusercontent.com/robinslange/learning-loop/main/install.sh"
   readonly LOG_FILE="$HOME/.cache/learning-loop-install.log"
   readonly MIN_NODE_MAJOR=22
   readonly MIN_CLAUDE_VERSION="2.1.144"
   readonly CLAUDE_SESSION_VAR="CLAUDECODE"
-  readonly MARKER_TAG="learning-loop-install: PATH v${INSTALL_VERSION}"
+  readonly MARKER_PREFIX="learning-loop-install: PATH"
+  readonly MARKER_TAG="${MARKER_PREFIX} v1"
 
   readonly C_DIM="$(printf '\033[2m')"
   readonly C_GREEN="$(printf '\033[32m')"
@@ -285,7 +286,7 @@ ensure_local_bin_path() {
   mkdir -p "$(dirname "$shell_rc")"
   touch "$shell_rc"
 
-  if grep -qF "$MARKER_TAG" "$shell_rc" 2>/dev/null; then
+  if grep -qF "$MARKER_PREFIX" "$shell_rc" 2>/dev/null; then
     step_skip "marker already present in $shell_rc"
     export PATH="$local_bin:$PATH"
     return 0

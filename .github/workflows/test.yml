@@ -112,6 +112,9 @@ jobs:
       - name: Prettier check
         run: npx prettier --check 'hooks/**/*.{js,mjs}' 'scripts/**/*.{js,mjs}'
 
+      - name: Lint (eslint custom rules)
+        run: npx eslint .
+
       - name: Code-fence tag check
         run: |
           if grep -rEn '^```(sh|shell|typescript)( |$)' \

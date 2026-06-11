@@ -2,7 +2,7 @@
 // Extracted from scripts/check-deps.mjs so other modules can import the
 // helpers without spawning a subprocess.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { env } from './lib/env.mjs';
@@ -35,15 +35,29 @@ export function detectAbiDrift({ nativeModulePath, currentAbi, fakeLoadError } =
   return { status: 'error', message: msg };
 }
 
-// Version pinned per Task 1.1 (YAGNI — no auto-discovery). Bump when episodic-memory ships a new native release.
-export const NATIVE_PLUGINS = [
-  {
-    plugin: 'episodic-memory',
-    nativeModulePath:
-      (env.HOME || homedir()) +
-      '/.claude/plugins/cache/superpowers-marketplace/episodic-memory/1.0.15/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
-  },
-];
+export function newestVersionDir(baseDir) {
+  if (!existsSync(baseDir)) return null;
+  const dirs = readdirSync(baseDir).filter((d) => /^\d+\.\d+\.\d+$/.test(d));
+  if (dirs.length === 0) return null;
+  dirs.sort((a, b) => {
+    const [a1, a2, a3] = a.split('.').map(Number);
+    const [b1, b2, b3] = b.split('.').map(Number);
+    return a1 - b1 || a2 - b2 || a3 - b3;
+  });
+  return dirs[dirs.length - 1];
+}
+
+export function getNativePlugins({ home = env.HOME || homedir() } = {}) {
+  const base = home + '/.claude/plugins/cache/superpowers-marketplace/episodic-memory';
+  const ver = newestVersionDir(base);
+  if (!ver) return [];
+  return [
+    {
+      plugin: 'episodic-memory',
+      nativeModulePath: `${base}/${ver}/node_modules/better-sqlite3/build/Release/better_sqlite3.node`,
+    },
+  ];
+}
 
 export function satisfiesVersion(installed, constraint) {
   if (!constraint || !installed) return true;
@@ -58,7 +72,7 @@ export function satisfiesVersion(installed, constraint) {
 
 export function buildAbiDrift() {
   const entries = [];
-  for (const { plugin, nativeModulePath } of NATIVE_PLUGINS) {
+  for (const { plugin, nativeModulePath } of getNativePlugins()) {
     if (!existsSync(nativeModulePath)) continue;
     const result = detectAbiDrift({ nativeModulePath, currentAbi: process.versions.modules });
     if (result.status !== 'ok') {

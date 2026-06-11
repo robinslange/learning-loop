@@ -9,11 +9,13 @@
   "description": "Self-improving learning loop across Claude sessions",
   "scripts": {
     "test": "node --test tests/*.test.mjs tests/**/*.test.mjs",
+    "lint": "eslint .",
     "bench": "node scripts/bench.mjs",
     "bench:quick": "node scripts/bench.mjs --quick",
     "bench:baseline": "node scripts/bench.mjs --save-baseline"
   },
   "devDependencies": {
+    "eslint": "^9.39.4",
     "prettier": "3.8.3"
   }
 }
