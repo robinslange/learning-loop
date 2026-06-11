@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, existsSync, rmSync, utimesSync } from 'node:fs';
+import { writeFileSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, existsSync, rmSync, utimesSync, realpathSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
@@ -540,6 +540,48 @@ test(
       r.cleanup();
       rmSync(projectDir, { recursive: true, force: true });
       rmSync(isolatedTmp, { recursive: true, force: true });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// M12: a crashed previous session leaves watch.pid.lock behind. The spawn
+// guard must recover the stale lock (dead pid, old mtime) instead of treating
+// EEXIST as "locked forever" — otherwise vault indexing is silently disabled
+// on every later session.
+// ---------------------------------------------------------------------------
+test(
+  'watch-daemon recovers from a crashed spawn lock — M12',
+  { timeout: 12000 },
+  () => {
+    const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-vault-'));
+    const vsDir = join(vaultDir, '.vault-search');
+    mkdirSync(vsDir, { recursive: true });
+    writeFileSync(join(vsDir, 'vault-index.db'), '');
+    // Crashed previous session: lock file with a dead pid, old mtime.
+    writeFileSync(join(vsDir, 'watch.pid.lock'), '2147483647');
+    const old = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+    utimesSync(join(vsDir, 'watch.pid.lock'), old, old);
+
+    const r = runHook(HOOK, {
+      env: { VAULT_PATH: vaultDir },
+      stdin: '',
+      seed: (pluginDataDir) => {
+        seedUpdateCheck(pluginDataDir);
+        const bin = join(pluginDataDir, 'bin', 'll-search');
+        writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.ok(
+        existsSync(join(vsDir, 'watch.fingerprint')),
+        'daemon spawn path must proceed past a stale lock (fingerprint written)',
+      );
+      assert.ok(!existsSync(join(vsDir, 'watch.pid.lock')), 'lock released after spawn');
+    } finally {
+      r.cleanup();
+      rmSync(vaultDir, { recursive: true, force: true });
     }
   },
 );

@@ -1,5 +1,5 @@
 // hooks/session-start/watch-daemon.mjs : ll-search watch daemon lifecycle.
-// Guards spawn with a PID-file lock acquired via O_EXCL writeFileSync.
+// Guards spawn with file-lock.mjs acquireLock (O_EXCL + stale recovery).
 // SIGTERMs daemons spawned from a different binary file (detected by mtime).
 
 import { readFileSync, writeFileSync, statSync, existsSync, rmSync } from 'node:fs';
@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { spawnEnv } from '../../scripts/lib/env.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { isProcessAlive } from '../../scripts/lib/file-lock.mjs';
+import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
@@ -25,7 +25,6 @@ export async function run(ctx) {
   const lockDir = join(vaultRoot, '.vault-search');
   const pidPath = join(lockDir, 'watch.pid');
   const fingerprintPath = join(lockDir, 'watch.fingerprint');
-  const lockPath = pidPath + '.lock';
 
   // One-shot migration: older builds wrote watch.pid into <plugin-data>/.
   // Any daemon still running off the legacy pidfile must be SIGTERMed or it
@@ -125,15 +124,21 @@ export async function run(ctx) {
   }
 
   if (shouldSpawn) {
-    let lockAcquired = false;
-    try {
-      writeFileSync(lockPath, String(process.pid), { flag: 'wx' });
-      lockAcquired = true;
-    } catch (err) {
-      logError('session-start.watch-daemon.acquireLock', err);
+    // acquireLock = O_EXCL + PID-probe stale recovery + mtime backstop
+    // (scripts/lib/file-lock.mjs). The previous hand-rolled 'wx' lock was
+    // removed only on the happy path — one crash disabled vault indexing on
+    // every later session (M12). Lock name: watch.pid.lock (acquireLock
+    // appends '.lock' to the guarded path), identical to the old name, so
+    // pre-existing stale locks on real installs are recovered too.
+    const handle = acquireLock(pidPath);
+    if (!handle) {
+      logError(
+        'session-start.watch-daemon.acquireLock',
+        new Error('spawn lock busy after retries'),
+      );
+      return;
     }
-
-    if (lockAcquired) {
+    try {
       try {
         writeFileSync(fingerprintPath, currentFingerprint);
       } catch (err) {
@@ -163,11 +168,8 @@ export async function run(ctx) {
       } catch (err) {
         logError('session-start.watch-daemon.spawn', err);
       }
-      try {
-        rmSync(lockPath, { force: true });
-      } catch (err) {
-        logError('session-start.watch-daemon.releaseLock', err);
-      }
+    } finally {
+      releaseLock(handle);
     }
   }
 }
