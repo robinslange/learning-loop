@@ -40,7 +40,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/route-project-artefact.mjs').then
 If the result has a non-null `slug`, this insight is a project artefact (interview prep, client brief, evidence bundle, etc.) — its filename matches an existing project's slug in `4-projects/`. Route it to that subfolder instead of `0-inbox/`. Project artefacts are not atomic insights; they are working documents for a specific project.
 
 - If `4-projects/<slug>/` doesn't exist yet, create the directory.
-- Spawn the `note-writer` subagent with `destination: 4-projects/<slug>/`.
+- Run the `note-writer` subagent with `destination: 4-projects/<slug>/`.
 - Skip the promote-gate criteria for project artefacts — they are not graded the same way as insight notes.
 
 If the result has `slug: null`, this is a candidate atomic insight: continue with the existing flow below.
@@ -52,7 +52,7 @@ For each `durable-insight`:
    node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<key terms>" --rerank
    ```
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
-3. If novel, spawn a `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with:
+3. If novel, run a `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with:
    - **insight**: The title
    - **research**: The body + source context. Every source must include its URL. If no URL exists, include `[no URL found]` rather than omitting the source metadata.
    - **destination**: `0-inbox/`

@@ -148,7 +148,7 @@ A note does **not** need rewriting if:
 3. Sources have clickable URLs
 4. Links use correct kebab-case `[[note-name]]` format
 
-When skip-rewrite is true, the triage/promotion step can simply `mv` the file instead of spawning a note-writer agent. This is the primary throughput improvement for batch processing.
+When skip-rewrite is true, the triage/promotion step can simply `mv` the file instead of routing it through a full note-writer rewrite. This is the primary throughput improvement for batch processing.
 
 ## NLI threshold zoo
 
