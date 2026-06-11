@@ -4,7 +4,7 @@ import { join } from 'node:path';
 export function listProjectSlugs(vault) {
   const fromFiles = vault.projectFiles.map((f) => f.replace(/\.md$/, ''));
   const fromDirs = vault.projectDirs;
-  // Sort by length DESC so longest prefix wins for nested slugs (kinso-legal > kinso)
+  // Sort by length DESC so longest prefix wins for nested slugs (acme-legal > acme)
   return [...new Set([...fromFiles, ...fromDirs])].sort((a, b) => b.length - a.length);
 }
 
