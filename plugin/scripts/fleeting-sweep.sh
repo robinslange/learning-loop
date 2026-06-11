@@ -68,7 +68,7 @@ for f in "$FLEETING"/*.md; do
     # Any inbound links from anywhere?
     all_count=$(grep -rlF "[[$name]]" "$VAULT/" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$all_count" -eq 0 ]; then
-      file_mod=$(stat -f %m "$f" 2>/dev/null || stat -c %Y "$f" 2>/dev/null)
+      file_mod=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
       mod_days=$(( ( $(date +%s) - file_mod ) / 86400 ))
       if [ "$mod_days" -ge "$STALE_DAYS" ]; then
         echo -e "STALE\t$name\t0 refs, ${mod_days} days old"
