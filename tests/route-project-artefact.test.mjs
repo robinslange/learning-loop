@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { routeArtefact, extractProjectSlug } from '../scripts/route-project-artefact.mjs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { routeArtefact, extractProjectSlug, readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
 const vault = {
   projectFiles: ['kinso.md', 'omit.md', 'foster-moore.md', 'halter.md', 'solenoid-systems.md'],
@@ -46,4 +49,24 @@ test('extractProjectSlug prefers longest matching slug (kinso-legal > kinso)', (
     projectDirs: [],
   };
   assert.equal(extractProjectSlug('kinso-legal-evidence-update.md', vaultWithBoth), 'kinso-legal');
+});
+
+test('readVaultProjectIndexSync reads project files and dirs from 4-projects/', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'll-route-'));
+  mkdirSync(join(vault, '4-projects'), { recursive: true });
+  writeFileSync(join(vault, '4-projects', 'acme.md'), '# acme');
+  mkdirSync(join(vault, '4-projects', 'widget-co'), { recursive: true });
+  const idx = readVaultProjectIndexSync(vault);
+  assert.deepEqual(idx.projectFiles.sort(), ['acme.md']);
+  assert.deepEqual(idx.projectDirs.sort(), ['widget-co']);
+});
+
+test('readVaultProjectIndexSync returns empty index when 4-projects/ is absent', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'll-route-'));
+  assert.deepEqual(readVaultProjectIndexSync(vault), { projectFiles: [], projectDirs: [] });
+});
+
+test('listProjectSlugs dedupes files and dirs, longest first', () => {
+  const slugs = listProjectSlugs({ projectFiles: ['acme.md', 'acme-legal.md'], projectDirs: ['widget-co'] });
+  assert.deepEqual(slugs, ['acme-legal', 'widget-co', 'acme']);
 });
