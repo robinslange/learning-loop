@@ -103,19 +103,22 @@ Run this after EVERY `discovery-researcher` return — orientation and every loo
 
 1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with:
    - **note_content**: the full research brief, verbatim (including the Verified Sources table)
-   Resolve all path placeholders in the prompt to literal absolute paths first (see `agents/_skills/vault-io.md` → Placeholders).
-2. **PASS**: proceed to presentation.
-3. **ISSUES FOUND**: revise the brief yourself — you hold the full brief and the verifier's issue list:
-   - **Dead URL**: remove the source and any claims that depended solely on it.
-   - **Unsupported claim**: reword the claim to match what the source actually says, or move it to `Gaps & Uncertainties`.
-   - **Fabricated reference**: remove entirely. Never repair a fabricated source.
-   - **Missing citation**: move the claim to `Gaps & Uncertainties`.
-   Then spawn a fresh `note-verifier` on the revised brief.
-4. **Max 3 verification rounds per brief.** If issues persist, append an `### Unresolved Verification Issues` section to the brief and tell the user explicitly which findings are unverified.
-5. After the loop settles, emit a provenance event (silently):
+   Resolve all path placeholders in the prompt to literal absolute paths first (see `agents/_skills/vault-io.md` → Placeholders). Track the verification round number across spawns; stop after round 3.
+2. Branch on the verifier's top-level `### Status:`
+   - **PASS**: proceed to presentation.
+   - **PARTIAL** (no contradicted claims, but some scored 1-2): proceed to presentation, but carry the verifier's per-claim flags through — mark affected claims `[partial]` in the brief and mention them when presenting.
+   - **ISSUES FOUND**: revise the brief yourself — you hold the full brief and the verifier's issue list. FIRST apply the verifier's `### Corrections` section: adopt the corrected URLs and revised claim text it provides. Only remove or demote when no correction is offered:
+     - **Dead URL**: remove the source and any claims that depended solely on it.
+     - **Unsupported claim**: reword the claim to match what the source actually says, or move it to `Gaps & Uncertainties`.
+     - **Fabricated reference**: remove entirely. Never repair a fabricated source.
+     - **Missing citation**: move the claim to `Gaps & Uncertainties`.
+     - **Any other finding type** (author-swap, number-reassignment, overclaim, stale, logical-gap, conflation): apply the verifier's correction if offered, otherwise move the affected claim to `Gaps & Uncertainties`.
+     Then spawn a fresh `note-verifier` on the revised brief.
+3. **Max 3 verification rounds per brief.** If issues persist, append an `### Unresolved Verification Issues` section to the brief and tell the user explicitly which findings are unverified.
+4. After the loop settles, emit a provenance event (silently):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|ISSUES_FOUND","rounds":N}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|PARTIAL|ISSUES_FOUND","rounds":N}'
 ```
 
 Findings never reach the user or the vault unverified.
