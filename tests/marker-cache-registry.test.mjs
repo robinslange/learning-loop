@@ -20,6 +20,9 @@ import {
 
 const PD = '/fake/plugin-data';
 
+// Above Linux's pid_max ceiling (4194304) — guaranteed dead on every platform.
+const DEAD_PID = 2 ** 31 - 1;
+
 test('MARKER_PATHS resolves all five W2 markers under plugin-data', () => {
   assert.equal(MARKER_PATHS.lastDream(PD), join(PD, 'retrieval', 'last-dream'));
   assert.equal(MARKER_PATHS.lastReflect(PD), join(PD, 'markers', 'last-reflect'));
@@ -74,7 +77,7 @@ test('dreamLockHeld: missing → false; fresh → true; old+dead-pid → false; 
     const p = join(root, 'markers', 'dream-lock');
     assert.equal(dreamLockHeld(p), false, 'no lock file → not held');
 
-    writeMarker(p, { pid: 999999, ts: Math.floor(Date.now() / 1000) });
+    writeMarker(p, { pid: DEAD_PID, ts: Math.floor(Date.now() / 1000) });
     assert.equal(dreamLockHeld(p), true, 'fresh lock → held even with dead pid (age floor)');
 
     const old = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
@@ -86,6 +89,12 @@ test('dreamLockHeld: missing → false; fresh → true; old+dead-pid → false; 
     assert.equal(dreamLockHeld(p), true, 'live pid → held regardless of age');
     utimesSync(p, old, old);
     assert.equal(dreamLockHeld(p), true, 'live pid → held even when old');
+
+    // Unreadable content (leading zero is invalid JSON) → age check alone.
+    writeFileSync(p, '012345');
+    assert.equal(dreamLockHeld(p), true, 'corrupt content + fresh file → held (age floor)');
+    utimesSync(p, old, old);
+    assert.equal(dreamLockHeld(p), false, 'corrupt content + 2h-old file → stale, not held');
   } finally {
     if (savedEnv === undefined) {
       delete process.env.CLAUDE_PLUGIN_DATA;
