@@ -58,6 +58,7 @@ export async function run(ctx) {
         home: homeDir,
         pathEnv: process.env.PATH || '',
         installedVersion: readInstalledVersion(homeDir),
+        pluginVersion: ctx.pluginVersion,
         templateVersion: readTemplateVersion(ctx.pluginDir),
         abiDriftResult: (() => {
           const entries = buildAbiDrift();

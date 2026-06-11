@@ -195,6 +195,38 @@ test('checkBinaryVersionFile: warn when .version is missing', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// /doctor must see a stuck binary auto-update: .version readable but lagging
+// the running plugin version (the v1.20.2-for-five-releases failure shape).
+test('checkBinaryVersionFile: warn when binary version is behind the plugin version', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-binver-lag-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/.version'), 'v1.20.2\n');
+  const result = checkBinaryVersionFile({ pluginData: dir, pluginVersion: '1.25.0' });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /v1\.20\.2 behind plugin v1\.25\.0/);
+  assert.match(result.fix, /download-binary/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryVersionFile: ok when binary version matches the plugin version', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-binver-match-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/.version'), 'v1.25.0\n');
+  const result = checkBinaryVersionFile({ pluginData: dir, pluginVersion: '1.25.0' });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryVersionFile: ok when no pluginVersion is supplied (no comparison possible)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-binver-nover-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/.version'), 'v1.20.2\n');
+  const result = checkBinaryVersionFile({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkShimsExist: ok when both shims present and executable', () => {
   const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
   mkdirSync(join(home, '.local/bin'), { recursive: true });

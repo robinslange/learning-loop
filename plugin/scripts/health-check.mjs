@@ -18,6 +18,7 @@ import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { detectAbiDrift } from './check-deps-impl.mjs';
 import { resolvePluginData, getVaultPath } from './lib/config.mjs';
+import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
@@ -73,7 +74,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkVaultFolders({ vaultRoot: c.vaultRoot }),
     quick.checkVaultSystemFiles({ vaultRoot: c.vaultRoot }),
     quick.checkBinaryExists({ pluginData: c.pluginData }),
-    quick.checkBinaryVersionFile({ pluginData: c.pluginData }),
+    quick.checkBinaryVersionFile({ pluginData: c.pluginData, pluginVersion: c.pluginVersion }),
     quick.checkShimsExist({ home: c.home }),
     quick.checkLocalBinOnPath({ home: c.home, pathEnv: c.pathEnv }),
     quick.checkClaudemdSectionPresent({ home: c.home }),
@@ -216,6 +217,7 @@ if (isMain) {
     home,
     pathEnv: process.env.PATH || '',
     installedVersion,
+    pluginVersion: pluginVersion(),
     templateVersion: readTemplateVersion(),
     abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
     minNodeMajor: 22,

@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { DATA_FILES } from '../paths.mjs';
+import { semverCmp, isPlainSemver } from '../semver.mjs';
 
 const VAULT_FOLDERS = [
   '0-inbox',
@@ -168,7 +169,11 @@ export function checkBinaryExists({ pluginData } = {}) {
   });
 }
 
-export function checkBinaryVersionFile({ pluginData } = {}) {
+function stripV(s) {
+  return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
+}
+
+export function checkBinaryVersionFile({ pluginData, pluginVersion } = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['binary-version-file'],
@@ -192,6 +197,20 @@ export function checkBinaryVersionFile({ pluginData } = {}) {
   }
   try {
     const version = readFileSync(verPath, 'utf-8').trim();
+    // A readable .version that lags the running plugin version means the
+    // session-start binary auto-update is stuck (download failing silently).
+    const installed = stripV(version);
+    const running = stripV(pluginVersion || '');
+    if (isPlainSemver(installed) && isPlainSemver(running) && semverCmp(installed, running) < 0) {
+      return makeCheck({
+        id: CHECK_IDS['binary-version-file'],
+        name: 'Binary version file',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.warn,
+        detail: `binary v${installed} behind plugin v${running} — auto-update may be stuck`,
+        fix: 'Run node PLUGIN/scripts/download-binary.mjs manually and check network access',
+      });
+    }
     return makeCheck({
       id: CHECK_IDS['binary-version-file'],
       name: 'Binary version file',
