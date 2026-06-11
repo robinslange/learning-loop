@@ -81,6 +81,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
   let savedSessionId;
   let savedPluginData;
   let savedVault;
+  let savedSessionTmpDir;
   let fakeVaultRoot;
   // The marker DIR is plugin-data/reflect-scratch (env-independent across the
   // hook/shell process boundary), set via CLAUDE_PLUGIN_DATA. The session id
@@ -105,6 +106,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     savedSessionId = process.env.CLAUDE_CODE_SESSION_ID;
     savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
     savedVault = process.env.LL_VAULT_PATH;
+    savedSessionTmpDir = process.env.LL_SESSION_TMP_DIR;
     // Point $TMPDIR at a fixed test root so getSessionId() reads the id file we
     // seed below, AND so the regression tests can prove the marker path does NOT
     // follow $TMPDIR (production's bug: os.tmpdir() honored the reader's
@@ -113,6 +115,9 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     process.env.TMPDIR = tmpRoot;
     process.env.CLAUDE_PLUGIN_DATA = pluginData;
     delete process.env.CLAUDE_CODE_SESSION_ID;
+    // Clear LL_SESSION_TMP_DIR so getSessionId()'s tmp candidate resolves via
+    // the $TMPDIR=tmpRoot we set above — not a developer's exported dir.
+    delete process.env.LL_SESSION_TMP_DIR;
 
     // Seed getSessionId()'s tmp fallback at the tmpdir it resolves NOW ($TMPDIR=tmpRoot).
     sidFileBare = join(tmpdir(), 'learning-loop-session-id');
@@ -132,6 +137,8 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     else delete process.env.CLAUDE_PLUGIN_DATA;
     if (savedVault !== undefined) process.env.LL_VAULT_PATH = savedVault;
     else delete process.env.LL_VAULT_PATH;
+    if (savedSessionTmpDir !== undefined) process.env.LL_SESSION_TMP_DIR = savedSessionTmpDir;
+    else delete process.env.LL_SESSION_TMP_DIR;
     if (savedSidBare !== null) writeFileSync(sidFileBare, savedSidBare);
     else rmSync(sidFileBare, { force: true });
   });

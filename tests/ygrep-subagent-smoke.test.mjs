@@ -11,12 +11,22 @@ import { join } from 'node:path';
 // tmpdir() resolves under /tmp, so the indexer actually walks the fixture.
 const fixtureRoot = tmpdir().startsWith('/tmp') ? homedir() : tmpdir();
 
-test('ygrep is callable from spawned process with parent PATH', () => {
+function ygrepAvailable() {
+  try {
+    execFileSync('ygrep', ['--version'], { encoding: 'utf-8' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const SKIP = ygrepAvailable() ? false : 'ygrep binary not on PATH';
+
+test('ygrep is callable from spawned process with parent PATH', { skip: SKIP }, () => {
   const out = execFileSync('ygrep', ['--version'], { encoding: 'utf-8' });
   assert.match(out, /ygrep \d+\.\d+\.\d+/);
 });
 
-test('ygrep index + search round-trip works on a tiny repo', () => {
+test('ygrep index + search round-trip works on a tiny repo', { skip: SKIP }, () => {
   const dir = mkdtempSync(join(fixtureRoot, 'ygrep-smoke-'));
   try {
     writeFileSync(join(dir, 'a.ts'), 'export function sendCampaign() {}\n');

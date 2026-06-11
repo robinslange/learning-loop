@@ -2,6 +2,9 @@
   "name": "learning-loop",
   "version": "1.26.1",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "type": "module",
   "description": "Self-improving learning loop across Claude sessions",
   "scripts": {
