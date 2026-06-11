@@ -17,6 +17,7 @@ import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
+import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -53,10 +54,15 @@ async function download(url, dest) {
       mod
         .get(u, { headers: { 'User-Agent': 'learning-loop' } }, (res) => {
           if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            if (!isAllowedRedirect(res.headers.location)) {
+              return reject(new Error(`Refusing non-https redirect to ${res.headers.location}`));
+            }
             return follow(res.headers.location, redirects + 1);
           }
           if (res.statusCode !== 200) {
-            return reject(new Error(`HTTP ${res.statusCode} from ${u}`));
+            const err = new Error(`HTTP ${res.statusCode} from ${u}`);
+            err.statusCode = res.statusCode;
+            return reject(err);
           }
 
           const total = parseInt(res.headers['content-length'] || '0', 10);
@@ -147,37 +153,83 @@ async function main() {
   try {
     await download(ghUrl, tmpPath);
   } catch (dlErr) {
+    if (existsSync(tmpPath)) unlinkSync(tmpPath);
+    if (dlErr.statusCode === 404) {
+      console.error(`  Release ${version} has no ${artifact} yet — release still building, will retry next session.`);
+      process.exit(0);
+    }
     console.error(`Download failed: ${dlErr.message}`);
     console.error('Check your network connection and try again.');
     process.exit(1);
   }
 
-  // Extract
-  console.error('  Extracting...');
-  if (artifact.endsWith('.tar.gz')) {
-    execFileSync('tar', ['-xzf', tmpPath, '-C', binDir]);
-  } else if (artifact.endsWith('.zip')) {
-    extractZip(tmpPath, binDir);
+  // Verify against the release's SHA256SUMS (absent on pre-1.27 releases)
+  const sumsPath = `${tmpPath}.sums`;
+  const sumsUrl = `https://github.com/${repo}/releases/download/${tag}/SHA256SUMS`;
+  let sumsText = null;
+  try {
+    await download(sumsUrl, sumsPath);
+    sumsText = readFileSync(sumsPath, 'utf-8');
+    unlinkSync(sumsPath);
+  } catch (sumsErr) {
+    if (existsSync(sumsPath)) unlinkSync(sumsPath);
+    if (sumsErr.statusCode === 404) {
+      console.error('  Warning: release has no SHA256SUMS (pre-1.27 release) — skipping verification');
+    } else {
+      console.error(`Failed to fetch SHA256SUMS: ${sumsErr.message}`);
+      console.error('Check your network connection and try again.');
+      unlinkSync(tmpPath);
+      process.exit(1);
+    }
   }
 
-  // Clean up archive
-  unlinkSync(tmpPath);
+  if (sumsText !== null) {
+    try {
+      verifyArtifact(tmpPath, sumsText, artifact);
+      console.error('  Verified sha256 against SHA256SUMS');
+    } catch (verifyErr) {
+      console.error(`  ${verifyErr.message}`);
+      unlinkSync(tmpPath);
+      process.exit(1);
+    }
+  }
+
+  // Extract (archive is removed whether extraction succeeds or throws)
+  console.error('  Extracting...');
+  let extractErr = null;
+  try {
+    if (artifact.endsWith('.tar.gz')) {
+      execFileSync('tar', ['-xzf', tmpPath, '-C', binDir]);
+    } else if (artifact.endsWith('.zip')) {
+      extractZip(tmpPath, binDir);
+    }
+  } catch (err) {
+    extractErr = err;
+  } finally {
+    if (existsSync(tmpPath)) unlinkSync(tmpPath);
+  }
+  if (extractErr) {
+    console.error(`  Extraction failed: ${extractErr.message}`);
+    process.exit(1);
+  }
 
   // Set executable permission on Unix
   if (platform() !== 'win32' && existsSync(binaryPath)) {
     chmodSync(binaryPath, 0o755);
   }
 
-  // Write version file
-  writeFileSync(versionFile, version + '\n');
-
-  // Verify
+  // Smoke check before recording the install — a broken binary must not be
+  // stamped as installed or the next session would never retry
   try {
     const out = execFileSync(binaryPath, ['version'], { encoding: 'utf-8' }).trim();
     console.error(`  Installed: ll-search ${out} at ${binDir}`);
   } catch (err) {
     console.error(`  Warning: binary installed but version check failed: ${err.message}`);
+    process.exit(1);
   }
+
+  // Write version file
+  writeFileSync(versionFile, version + '\n');
 }
 
 main();
