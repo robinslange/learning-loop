@@ -48,25 +48,36 @@ jobs:
             ~/.cargo/git
             native/target
           key: ${{ matrix.target }}-cargo-${{ hashFiles('native/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.target }}-cargo-
 
       # Keyed on a manual version tag, NOT build.rs's hash: editing build.rs
       # (e.g. adding download retry) must not bust the cache and force a fresh
-      # HuggingFace fetch. Bump `v5` only when the pinned model/SHA changes.
+      # HuggingFace fetch. Bump `v6` only when the pinned model/SHA changes.
       - name: Cache models
         uses: actions/cache@v4
         with:
-          path: native/crates/ll-search/model
-          key: native-model-v5
+          path: |
+            native/crates/ll-search/model
+            native/model-cache
+          key: native-model-v6
 
       - name: Build
-        run: cargo build --release -p ll-search --features nli --target ${{ matrix.target }}
+        env:
+          LL_MODEL_CACHE_DIR: ${{ github.workspace }}/native/model-cache
+        run: cargo build --release --locked -p ll-search --features nli --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
           mkdir -p dist
           cp target/${{ matrix.target }}/release/ll-search dist/
-          find target/${{ matrix.target }}/release -name "libonnxruntime*" -not -name "*.a" | head -1 | xargs -I{} cp {} dist/ || true
+          ONNX_LIB=$(find target/${{ matrix.target }}/release -name "libonnxruntime*" -not -name "*.a" | head -1)
+          if [ -z "$ONNX_LIB" ]; then
+            echo "::error::libonnxruntime not found — NLI feature is on; refusing to ship a broken artifact"
+            exit 1
+          fi
+          cp "$ONNX_LIB" dist/
           tar -czf ../${{ matrix.artifact }}.tar.gz -C dist .
 
       - name: Package (Windows)
@@ -75,6 +86,10 @@ jobs:
           mkdir dist
           copy target\${{ matrix.target }}\release\ll-search.exe dist\
           Get-ChildItem -Path target\${{ matrix.target }}\release -Filter "onnxruntime*" -File | Where-Object { $_.Extension -ne ".lib" } | Copy-Item -Destination dist\
+          if (-not (Get-ChildItem -Path dist -Filter "onnxruntime*" -File)) {
+            Write-Error "onnxruntime dll not found - NLI feature is on; refusing to ship a broken artifact"
+            exit 1
+          }
           Compress-Archive -Path dist\* -DestinationPath ..\${{ matrix.artifact }}.zip
         shell: pwsh
 
@@ -90,10 +105,18 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
 
+      - name: Generate SHA256SUMS
+        run: |
+          find . -name '*.tar.gz' -o -name '*.zip' | while read -r f; do
+            (cd "$(dirname "$f")" && sha256sum "$(basename "$f")")
+          done | sort -k2 > SHA256SUMS
+          cat SHA256SUMS
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             **/*.tar.gz
             **/*.zip
+            SHA256SUMS
           generate_release_notes: true

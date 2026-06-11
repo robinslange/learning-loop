@@ -11,7 +11,10 @@ const RERANKER_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/ms-marco-Min
 // build flaky, so retry with exponential backoff. Downloads to a temp path and
 // renames on success, so an interrupted attempt never leaves a truncated file
 // that the `dest.exists()` short-circuit would treat as complete.
-const MAX_ATTEMPTS: u32 = 5;
+const MAX_ATTEMPTS: u32 = 6;
+// Seconds before retry N+1. HF 429 windows outlive short exponential backoff
+// (run 27312423423: five 429s in ~30s); later waits are deliberately long.
+const BACKOFF_SECS: [u64; 5] = [2, 5, 15, 45, 90];
 
 fn download(url: &str, dest: &Path) {
     if dest.exists() {
@@ -31,7 +34,7 @@ fn download(url: &str, dest: &Path) {
         }
         let _ = std::fs::remove_file(&tmp);
         if attempt < MAX_ATTEMPTS {
-            let backoff = Duration::from_secs(2u64.pow(attempt));
+            let backoff = Duration::from_secs(BACKOFF_SECS[(attempt - 1) as usize]);
             eprintln!("  curl exited {}; retrying in {:?}", status, backoff);
             sleep(backoff);
         }
@@ -42,14 +45,31 @@ fn download(url: &str, dest: &Path) {
     );
 }
 
+fn fetch(url: &str, filename: &str, out_path: &Path) {
+    match env::var("LL_MODEL_CACHE_DIR") {
+        Ok(dir) if !dir.is_empty() => {
+            let cache_dir = PathBuf::from(dir);
+            std::fs::create_dir_all(&cache_dir).expect("create LL_MODEL_CACHE_DIR");
+            let cached = cache_dir.join(filename);
+            download(url, &cached);
+            if !out_path.exists() {
+                std::fs::copy(&cached, out_path)
+                    .unwrap_or_else(|e| panic!("copy {} -> {}: {}", cached.display(), out_path.display(), e));
+            }
+        }
+        _ => download(url, out_path),
+    }
+}
+
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     let reranker_model_path = out_dir.join("reranker.onnx");
     let reranker_tokenizer_path = out_dir.join("reranker_tokenizer.json");
 
-    download(RERANKER_MODEL_URL, &reranker_model_path);
-    download(RERANKER_TOKENIZER_URL, &reranker_tokenizer_path);
+    fetch(RERANKER_MODEL_URL, "reranker.onnx", &reranker_model_path);
+    fetch(RERANKER_TOKENIZER_URL, "reranker_tokenizer.json", &reranker_tokenizer_path);
 
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=LL_MODEL_CACHE_DIR");
 }
