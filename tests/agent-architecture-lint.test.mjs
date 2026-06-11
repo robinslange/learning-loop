@@ -20,8 +20,11 @@ const AGENT_NAMES =
 // spawn/launch/dispatch/invoke/delegate are forbidden near agent names in
 // agent-visible files — do not add "run" here. The e-final verbs (invoke,
 // delegate) carry their inflections explicitly so "invoked"/"delegating" match
-// without the (s|ing|es|ed) group double-matching the bare-stem verbs.
-const SPAWN_VERB = '(?:\\b(?:spawn|launch|dispatch)(?:s|ing|es|ed)?|\\b(?:invok|delegat)(?:e|es|ed|ing))\\b';
+// without the (s|ing|es|ed) group double-matching the bare-stem verbs. The
+// optional (?:re-?) prefix catches reinvoke/re-dispatch/relaunch — there is no
+// word boundary inside "reinvoke", so the bare \\b alternation misses them.
+const SPAWN_VERB =
+  '(?:\\b(?:re-?)?(?:spawn|launch|dispatch)(?:s|ing|es|ed)?|\\b(?:re-?)?(?:invok|delegat)(?:e|es|ed|ing))\\b';
 const SPAWN_RE = new RegExp(`${SPAWN_VERB}[^.\\n]*\\b(${AGENT_NAMES})\\b`, 'i');
 const SPAWN_REV_RE = new RegExp(`\\b(${AGENT_NAMES})\\b[^.\\n]*${SPAWN_VERB}`, 'i');
 
@@ -31,11 +34,17 @@ test('no agent file instructs spawning another agent (M13)', () => {
     readFileSync(join(ROOT, rel), 'utf8')
       .split('\n')
       .forEach((line, i) => {
-        if (SPAWN_RE.test(line) || SPAWN_REV_RE.test(line)) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
-        if (!rel.includes('_skills/') && line.includes('subagent_type')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (SPAWN_RE.test(line) || SPAWN_REV_RE.test(line))
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (!rel.includes('_skills/') && line.includes('subagent_type'))
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
   }
-  assert.deepEqual(offenders, [], 'subagents cannot spawn subagents; fan-out belongs in the calling skill');
+  assert.deepEqual(
+    offenders,
+    [],
+    'subagents cannot spawn subagents; fan-out belongs in the calling skill',
+  );
 });
 
 test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
@@ -47,15 +56,31 @@ test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
         if (line.includes('PLUGIN/')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
   }
-  assert.deepEqual(offenders, [], 'use ${CLAUDE_PLUGIN_ROOT}/ (see agents/_skills/vault-io.md Placeholders)');
+  assert.deepEqual(
+    offenders,
+    [],
+    'use ${CLAUDE_PLUGIN_ROOT}/ (see agents/_skills/vault-io.md Placeholders)',
+  );
 });
 
 const ALLOWLISTED = [
-  'note-scorer', 'note-verifier', 'correction-analyser', 'gap-analyser',
-  'discovery-vault-scout', 'note-writer', 'note-deepener', 'literature-capturer',
-  'discovery-researcher', 'inbox-organiser', 'refinement-proposer',
-  'ingest-mapper-arch', 'ingest-mapper-conventions', 'ingest-mapper-domain',
-  'ingest-mapper-stack', 'ingest-mapper-state', 'ingest-synthesizer',
+  'note-scorer',
+  'note-verifier',
+  'correction-analyser',
+  'gap-analyser',
+  'discovery-vault-scout',
+  'note-writer',
+  'note-deepener',
+  'literature-capturer',
+  'discovery-researcher',
+  'inbox-organiser',
+  'refinement-proposer',
+  'ingest-mapper-arch',
+  'ingest-mapper-conventions',
+  'ingest-mapper-domain',
+  'ingest-mapper-stack',
+  'ingest-mapper-state',
+  'ingest-synthesizer',
 ];
 
 test('allowlisted agents declare tools: frontmatter (M14)', () => {

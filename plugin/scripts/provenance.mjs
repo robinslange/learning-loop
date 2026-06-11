@@ -3,7 +3,7 @@
 // Usage as module: import { emitProvenance } from './provenance.mjs'
 // Usage as CLI:    node provenance.mjs '{"agent":"x","action":"create","target":"y.md"}'
 
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { appendJsonlLine } from './lib/jsonl.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -52,7 +52,17 @@ export function emitProvenance(event) {
   appendJsonlLine(getCurrentMonthFile(), record);
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+// Node realpaths the ESM entry for import.meta.url but argv[1] keeps the
+// invoked path, so symlinked installs need the realpath before comparing.
+function argv1Url() {
+  try {
+    return pathToFileURL(realpathSync(process.argv[1])).href;
+  } catch {
+    return pathToFileURL(process.argv[1]).href;
+  }
+}
+
+const isMain = process.argv[1] && import.meta.url === argv1Url();
 if (isMain && process.argv[2]) {
   try {
     emitProvenance(JSON.parse(process.argv[2]));
