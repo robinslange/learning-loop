@@ -32,6 +32,16 @@ function run(sessionId, prompt, transcriptPath, cwd = '/tmp') {
   return null;
 }
 
+function runWithVault(sessionId, prompt, transcriptPath, vaultPath) {
+  const input = JSON.stringify({ session_id: sessionId, prompt, transcript_path: transcriptPath, cwd: '/tmp' });
+  execFileSync('node', [HOOK], {
+    input, encoding: 'utf-8', timeout: 5000,
+    env: { ...process.env, VAULT_PATH: vaultPath },
+  });
+  const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
+  return existsSync(labelFile) ? readFileSync(labelFile, 'utf8') : null;
+}
+
 describe('session-label', () => {
   before(() => {
     mkdirSync(TMP, { recursive: true });
@@ -45,12 +55,12 @@ describe('session-label', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
     writeFileSync(transcript, makeTranscript([
-      'I need to fix the Thalen iOS build',
-      'the simulator crashes on launch',
+      'I need to fix the GraphQL subscriptions',
+      'the websocket keeps dropping',
     ]));
-    const label = run(sid, 'can you check the Thalen build config?', transcript);
+    const label = run(sid, 'can you check the GraphQL subscription config?', transcript);
     assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('Thalen'), `label should mention Thalen, got: ${label}`);
+    assert.ok(/GraphQL|GQL/.test(label), `label should mention GraphQL, got: ${label}`);
   });
 
   it('handles empty transcript', () => {
@@ -76,11 +86,11 @@ describe('session-label', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
     writeFileSync(transcript, makeTranscript([
-      'I need to debug the failing tests in Kinso',
+      'I need to debug the failing tests in the MCP server',
     ]));
-    const label = run(sid, 'fix the error in the dashboard', transcript);
+    const label = run(sid, 'fix the error in the mcp handler', transcript);
     assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('Kinso'), `label should mention Kinso, got: ${label}`);
+    assert.ok(label.includes('MCP'), `label should mention MCP, got: ${label}`);
     assert.ok(label.includes('debugging'), `label should mention debugging, got: ${label}`);
   });
 
@@ -88,10 +98,10 @@ describe('session-label', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
     writeFileSync(transcript, makeTranscript([
-      'review this PR for Solenoid',
+      'review this PR for the auth flow',
     ]));
     const label = run(sid, 'review the changes', transcript);
-    assert.ok(label.includes('Solenoid'), `expected Solenoid, got: ${label}`);
+    assert.ok(label.includes('auth'), `expected auth, got: ${label}`);
     assert.ok(label.includes('review'), `expected review, got: ${label}`);
   });
 
@@ -111,16 +121,16 @@ describe('session-label', () => {
 
   it('does not crash when transcript file is missing', () => {
     const sid = randomUUID();
-    const label = run(sid, 'work on Nibbler trading bot', '/nonexistent/path.jsonl');
+    const label = run(sid, 'work on the trading grid bot', '/nonexistent/path.jsonl');
     assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('Nibbler'), `expected Nibbler, got: ${label}`);
+    assert.ok(label.includes('trading'), `expected trading, got: ${label}`);
   });
 
   it('truncates labels longer than 35 characters', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
     writeFileSync(transcript, makeTranscript([
-      'refactor the GraphQL subscriptions in the Kinso frontend',
+      'refactor the GraphQL subscriptions in the frontend component',
       'also review the authentication flow',
     ]));
     const label = run(sid, 'refactor the GraphQL subscription auth layer', transcript);
@@ -153,24 +163,40 @@ describe('session-label', () => {
       type: 'user',
       message: {
         content: [
-          { type: 'text', text: 'deploy the Solenoid worker to Cloudflare' },
+          { type: 'text', text: 'deploy the worker to Cloudflare' },
         ],
       },
     };
     writeFileSync(transcript, JSON.stringify(entry));
     const label = run(sid, 'ship it', transcript);
-    assert.ok(label.includes('Solenoid'), `expected Solenoid, got: ${label}`);
+    assert.ok(label.includes('infra'), `expected infra, got: ${label}`);
     assert.ok(label.includes('deploying'), `expected deploying, got: ${label}`);
   });
 
   it('current prompt scores higher than a single old message', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    // One old message about Kinso (will get weight 3 as recent), prompt about Thalen (weight 10)
-    writeFileSync(transcript, makeTranscript(['working on Kinso']));
-    const label = run(sid, 'switch to Thalen', transcript);
-    // Kinso: weight 3, Thalen: weight 10 -- Thalen should be primary topic
-    assert.ok(label.startsWith('Thalen'), `current prompt topic should rank first, got: ${label}`);
+    writeFileSync(transcript, makeTranscript(['working on the vault notes']));
+    const label = run(sid, 'switch to the MCP server', transcript);
+    assert.ok(label.startsWith('MCP'), `current prompt topic should rank first, got: ${label}`);
+  });
+
+  it('derives an instance topic from a 4-projects/ slug', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'll-label-vault-'));
+    mkdirSync(join(vault, '4-projects'), { recursive: true });
+    writeFileSync(join(vault, '4-projects', 'widget-co.md'), '# widget-co');
+    const sid = randomUUID();
+    const label = runWithVault(sid, 'fix the widget-co build', '/nonexistent.jsonl', vault);
+    assert.ok(label && /widget[\s-]co/i.test(label), `expected widget-co topic, got: ${label}`);
+    rmSync(vault, { recursive: true, force: true });
+  });
+
+  it('source carries no hardcoded instance-name topic patterns', () => {
+    const src = readFileSync(HOOK, 'utf8');
+    assert.match(src, /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
+      'instance-topic derivation from 4-projects/ missing');
+    assert.match(src, /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
+      'instance patterns must be spread first into allTopicPatterns');
   });
 });
 

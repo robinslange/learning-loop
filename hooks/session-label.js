@@ -25,6 +25,7 @@ import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
+import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
 const input = await new Promise((resolve) => {
   let data = '';
@@ -81,12 +82,6 @@ messages.push(prompt);
 
 // --- Topic patterns ---
 const topicPatterns = [
-  [/\bkinso\b/, 'Kinso'],
-  [/\bsolenoid\b/, 'Solenoid'],
-  [/\bthalen\b/, 'Thalen'],
-  [/\bnibbler\b/, 'Nibbler'],
-  [/\bauctionsense\b/, 'AuctionSense'],
-  [/\bwillems\b/, 'Willems'],
   [/\bgraphql\b.*\bsubscription|\bsubscription\b.*\bgraphql/, 'GQL subscriptions'],
   [/\bgraphql\b|\bgql\b/, 'GraphQL'],
   [/\bsse\b/, 'SSE'],
@@ -114,6 +109,24 @@ const topicPatterns = [
   [/\bpr\b.*#?\d+|\bpull.request/, 'PR'],
   [/\blinear\b|\bticket\b|\bkin-\d+/i, 'tickets'],
 ];
+
+function instanceTopicPatterns() {
+  try {
+    const vaultRoot = resolveVaultPath();
+    if (!vaultRoot) return [];
+    const slugs = listProjectSlugs(readVaultProjectIndexSync(vaultRoot));
+    return slugs.map((slug) => {
+      const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const label = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return [new RegExp(`\\b${escaped}\\b`), label];
+    });
+  } catch (err) {
+    logError('session-label.instanceTopicPatterns', err);
+    return [];
+  }
+}
+
+const allTopicPatterns = [...instanceTopicPatterns(), ...topicPatterns];
 
 // --- Action patterns ---
 const actionPatterns = [
@@ -157,7 +170,7 @@ function topN(patterns, textBlocks, n) {
     .map(([label]) => label);
 }
 
-const topics = topN(topicPatterns, messages, 2);
+const topics = topN(allTopicPatterns, messages, 2);
 const actions = topN(actionPatterns, messages, 1);
 const topic = topics[0] || '';
 const topic2 = topics[1] || '';
