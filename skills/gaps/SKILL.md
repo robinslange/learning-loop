@@ -260,14 +260,14 @@ Strongest domain: [cluster with fewest findings]
 - Launch at Step 1 in parallel with vault-scout and domain survey
 - Adversarial angle is mandatory: always search for counter-evidence
 - Depth matches note maturity scaling
-- Internally verifies its own findings before returning
+- Returns an UNVERIFIED brief (claim-level verification is /discovery's Step 1.5; /gaps relies on the researcher's mechanical source resolution only)
 
 ### discovery-researcher (domain survey)
 - Launch at Step 1 in parallel with vault-scout and adversarial researcher
 - Survey angle: map the full domain landscape, not challenge claims
 - Depth matches note maturity scaling
 - Output feeds blindspot detection in the analyser
-- Internally verifies its own findings before returning
+- Returns an UNVERIFIED brief (claim-level verification is /discovery's Step 1.5; /gaps relies on the researcher's mechanical source resolution only)
 
 ### gap-analyser
 - Launch at Step 2 after both Step 1 agents complete
