@@ -225,6 +225,7 @@ EOF
   chmod +x "$fake_bin/uname"
   run bash -c "
     export LL_INSTALL_NO_TRAP=1
+    export LL_INSTALL_ASSUME_NO=1
     export PATH='$fake_bin:/usr/bin:/bin'
     source '${BATS_TEST_DIRNAME}/../../install.sh'
     detect_platform </dev/null 2>/dev/null
@@ -247,6 +248,7 @@ EOF
   chmod +x "$fake_bin/uname"
   run bash -c "
     export LL_INSTALL_NO_TRAP=1
+    export LL_INSTALL_ASSUME_NO=1
     export PATH='$fake_bin:/usr/bin:/bin'
     source '${BATS_TEST_DIRNAME}/../../install.sh'
     detect_platform </dev/null 2>/dev/null

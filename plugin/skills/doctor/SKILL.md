@@ -15,6 +15,8 @@ A read-mostly diagnostic. Runs the health-check library, presents the result, an
 node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
 ```
 
+`fix` strings in the health-check JSON prefix paths with a user-facing `PLUGIN` shorthand for the plugin root (defined in `guide/troubleshooting.md`). Show them verbatim when the user will run the command; substitute `${CLAUDE_PLUGIN_ROOT}` for the leading `PLUGIN` segment when you execute it yourself via Bash.
+
 ## Step 1: Run all checks
 
 ```bash

@@ -18,7 +18,7 @@ learning-loop/
     .claude-plugin/     -- plugin manifest (plugin.json)
     hooks/              -- Claude Code lifecycle hooks (entry: *.js)
       lib/              -- hook-shared helpers (common, dream-gate, io, inject, snapshot)
-      modules/          -- post-tool modules (autolink, edge-infer, provenance, reflect-track)
+      modules/          -- post-tool modules (provenance, reflect-track, autolink, edge-infer)
       session-start/    -- session-start submodules (context-assembly, watch-daemon,
                            vault-snapshot, cache-cleanup, health-detector, update-check,
                            update-check-worker)
@@ -288,7 +288,7 @@ On session open, hooks fire in this order:
 3. On each user prompt: `session-label.js` -- JIT injection pipeline
 4. On each Write/Edit/Agent/Skill tool use:
    - Before (Write|Edit): `pre-write-check.js` -- near-duplicate and added-dash gate
-   - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the autolink, edge-infer, provenance, and reflect-track modules (`hooks/modules/`), on Agent/Skill it runs provenance only
+   - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the provenance, reflect-track, autolink, and edge-infer modules (`hooks/modules/`) in that fixed order (cheap load-bearing first), on Agent/Skill it runs provenance only
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
 7. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
@@ -406,9 +406,9 @@ A complete session runs like this. The total wall time for session-start (target
 
 2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
-3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags and on em/en dashes added to note body prose (both paths use an added-only delta against the note on disk, so pre-existing dashes never block; `Source:`/`Related:` lines are exempt). After each write, three hooks fire: autolink (backlinks), edge-infer (graph edges), and provenance.
+3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags and on em/en dashes added to note body prose (both paths use an added-only delta against the note on disk, so pre-existing dashes never block; `Source:`/`Related:` lines are exempt). After each write, `post-tool.js` runs four modules in fixed order: provenance (event log), reflect-track (new-notes marker), autolink (backlinks), and edge-infer (graph edges).
 
-4. **SessionStop** -- `stop-nudge.js` fires. If the session was substantial (>50 KB of transcript) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
+4. **Stop** -- `stop-nudge.js` fires at each turn end (every assistant Stop, not just session close). If the session was substantial (>512 KB of transcript or ≥200 transcript lines) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
 
 ---
 

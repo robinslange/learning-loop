@@ -28,7 +28,9 @@ function readProvenance(pluginDataDir) {
 function readHookErrors(pluginDataDir) {
   if (!existsSync(pluginDataDir)) return [];
   const lines = [];
-  for (const f of readdirSync(pluginDataDir).filter((n) => n.startsWith('hook-errors-') && n.endsWith('.jsonl'))) {
+  for (const f of readdirSync(pluginDataDir).filter(
+    (n) => n.startsWith('hook-errors-') && n.endsWith('.jsonl'),
+  )) {
     const raw = readFileSync(join(pluginDataDir, f), 'utf8');
     for (const line of raw.split('\n').filter((l) => l.trim())) {
       lines.push(JSON.parse(line));
@@ -81,8 +83,14 @@ test('post-tool Read tool: no provenance vault-write event', () => {
     assert.equal(r.stdout.trim(), '');
 
     const events = readProvenance(r.pluginDataDir);
-    const writeEvents = events.filter((e) => e.action === 'vault-write' || e.action === 'vault-edit');
-    assert.deepEqual(writeEvents, [], `Read should not produce vault-write events; got: ${JSON.stringify(writeEvents)}`);
+    const writeEvents = events.filter(
+      (e) => e.action === 'vault-write' || e.action === 'vault-edit',
+    );
+    assert.deepEqual(
+      writeEvents,
+      [],
+      `Read should not produce vault-write events; got: ${JSON.stringify(writeEvents)}`,
+    );
   } finally {
     r.cleanup();
   }
@@ -91,7 +99,10 @@ test('post-tool Read tool: no provenance vault-write event', () => {
 // Regression: cheap load-bearing modules (provenance, reflect-track) must run
 // BEFORE the expensive enrichment modules (autolink, edge-infer), so an outer
 // hooks.json SIGKILL mid-loop only ever drops enrichment. Autolink must stay
-// ahead of edge-infer (edge-infer reads the note body autolink appends to).
+// ahead of edge-infer: autolink populates ctx.autolinkCandidates (edge-infer's
+// NLI input), and edge-infer's Edit-path disk read — plus replayed runs, which
+// snapshot disk into input.content — see autolink's appended links. (Live
+// Write-path edge-infer reads input.content, not disk.)
 test('post-tool module order: load-bearing before enrichment, autolink before edge-infer', () => {
   const src = readFileSync(new URL('../plugin/hooks/post-tool.js', import.meta.url), 'utf8');
   const m = src.match(/const modules = isWriteEdit\s*\?\s*\[([^\]]+)\]/);

@@ -1,6 +1,14 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, readdirSync, writeFileSync, unlinkSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  unlinkSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -29,9 +37,11 @@ describe('provenance dedupe', () => {
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
     mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/b.md', action: 'write' });
-    const files = readdirSync(join(dataDir, 'provenance')).filter(f => f.startsWith('events-'));
+    const files = readdirSync(join(dataDir, 'provenance')).filter((f) => f.startsWith('events-'));
     assert.equal(files.length, 1);
-    const lines = readFileSync(join(dataDir, 'provenance', files[0]), 'utf8').trim().split('\n');
+    const lines = readFileSync(join(dataDir, 'provenance', files[0]), 'utf8')
+      .trim()
+      .split('\n');
     assert.equal(lines.length, 2, 'expected 2 records (duplicate dropped)');
   });
 });
@@ -75,7 +85,7 @@ describe('getSessionId fallback chain', () => {
     } finally {
       console.error = origErr;
     }
-    const enoentLines = errs.filter(l => l.includes('ENOENT'));
+    const enoentLines = errs.filter((l) => l.includes('ENOENT'));
     assert.equal(
       enoentLines.length,
       0,
@@ -98,6 +108,26 @@ describe('getSessionId fallback chain', () => {
     writeFileSync(legacyPath, 'legacy-only');
     const mod = await import('../plugin/hooks/lib/common.mjs?bust=4');
     assert.equal(mod.getSessionId(), 'legacy-only');
+  });
+});
+
+describe('readStdin', () => {
+  // The post-tool budget-composition test (lib-hook-config.test.mjs) sums
+  // HookConfig.STDIN_TIMEOUT_MS into the worst-case inner spend. readStdin
+  // must consume that constant — a hardcoded literal here would let the
+  // runtime drift from what the budget test measures.
+  it('uses HookConfig.STDIN_TIMEOUT_MS, not a hardcoded timeout', () => {
+    const src = readFileSync(new URL('../plugin/hooks/lib/common.mjs', import.meta.url), 'utf8');
+    const fn = src.match(/export function readStdin\(\)\s*{[\s\S]*?\n}/);
+    assert.ok(fn, 'readStdin not found in common.mjs');
+    assert.ok(
+      fn[0].includes('HookConfig.STDIN_TIMEOUT_MS'),
+      'readStdin timeout must come from HookConfig.STDIN_TIMEOUT_MS',
+    );
+    assert.ok(
+      !/setTimeout\([\s\S]*?,\s*\d/.test(fn[0]),
+      'readStdin must not hardcode a numeric timeout literal',
+    );
   });
 });
 

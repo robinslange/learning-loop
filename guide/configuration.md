@@ -32,17 +32,17 @@ Eight hook handlers across six Claude Code event types enforce process disciplin
 | Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
 | UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
 | PreToolUse (Write\|Edit) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt) |
-| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool.js | Coalesced dispatcher. Loads one vault snapshot, then runs the autolink, edge-infer, provenance, and reflect-track modules in fixed order with per-module timeout isolation. Non-write tool events only run provenance |
+| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool.js | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
 | PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
 | PostToolUse (mcp__plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
 | PreCompact | pre-compact.js | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable) |
 
-The post-tool modules live under `hooks/modules/`:
+The post-tool modules live under `hooks/modules/`, listed in execution order:
 
-- **autolink** — adds backlinks and semantic links after vault writes
-- **edge-infer** — runs NLI inference on top-3 neighbours, writes `challenges_rebuttal` and `nli_supports` edges to `edges.db`
 - **provenance** — records every vault read/write for the provenance log
 - **reflect-track** — appends each new vault Write/Edit to the `/reflect` new-notes marker while the marker exists (added v1.25.3)
+- **autolink** — adds backlinks and semantic links after vault writes
+- **edge-infer** — runs NLI inference on top-3 neighbours, writes `challenges_rebuttal` and `nli_supports` edges to `edges.db`
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 

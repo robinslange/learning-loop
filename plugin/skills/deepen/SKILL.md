@@ -70,7 +70,7 @@ If the agent flagged uncaptured sources, suggest `/literature` for each.
 
 ## Resolving Verification Markers
 
-If the note contains verification markers, prioritize resolving them. The canonical marker vocabulary and per-marker resolution rules live in `agents/_skills/capture-rules.md` → Verification Markers — read that section rather than relying on a local list; it covers all of `[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`, `[needs verification]`, `[citation needed]` (blocking) and `[partial]` (advisory). For `[unverified]`, the inspection command is `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>`. Remove each marker only once its resolution rule is satisfied.
+If the note contains verification markers, prioritize resolving them. The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents/_skills/capture-rules.md` → Verification Markers. Read that section rather than relying on a local list; restated copies drift. For `[unverified]`, the inspection command is `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>`. Remove each marker only once its resolution rule is satisfied.
 
 ## Key Principles
 

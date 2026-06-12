@@ -10,7 +10,7 @@ learning-loop is built to run on macOS, Linux, and Windows. The core hook layer 
 | Linux | x64 (glibc) | `ll-search-linux-x64.tar.gz` | CI-built. Hook layer verified. End-to-end tested by external users. |
 | Windows | x64 | `ll-search-windows-x64.zip` | CI-built. Hook layer designed cross-platform. `.cmd` shims installed by `/init`. End-to-end **not** verified by maintainers — please report issues. |
 
-Intel Macs are not currently supported (no prebuilt artifact). Build from source via `cd native && cargo build --release`.
+Intel Macs are not currently supported (no prebuilt artifact). See [Building from source](#building-from-source).
 
 ## What works the same on all three
 
@@ -52,6 +52,32 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 - **Federation seed lives in Keychain.** The `keyring` crate uses the macOS Keychain Services API; no additional system deps. Entries are namespaced by `config_dir` (`signing-seed-v1-<8-hex>`) so multiple installs on the same machine don't collide.
 - **Librarian pauses on battery (since v1.18.0).** `scripts/librarian.mjs` polls `pmset -g batt` at the top of each iteration and sleeps `battery_poll_seconds` (default 60) while on `'Battery Power'`. Disable with `librarian.pause_on_battery: false` in config if you want it to run unplugged.
 
+## Building from source
+
+For platforms without a prebuilt artifact (Intel macOS, Linux aarch64) — what `install.sh`'s "continue anyway" path commits you to:
+
+1. Install a Rust toolchain via https://rustup.rs (the workspace requires Rust 1.88+). On Linux, also `sudo apt-get install -y libdbus-1-dev pkg-config` (see Linux caveats above).
+2. Build: `cd native && cargo build --release`. The `ort` crate's `download-binaries` feature fetches the ONNX runtime at build time and links it into the binary — no separate `libonnxruntime` needs to be placed next to `ll-search`.
+3. Install where the plugin looks for it:
+
+   ```bash
+   PLUGIN_DATA="$(cat ~/.claude/plugins/data/.ll-data-path 2>/dev/null \
+     || echo "$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace")"
+   mkdir -p "$PLUGIN_DATA/bin"
+   cp native/target/release/ll-search "$PLUGIN_DATA/bin/"
+   chmod +x "$PLUGIN_DATA/bin/ll-search"
+   ```
+
+4. Stamp the version file so the session-start auto-updater doesn't retry a download. Use the installed plugin version, `v`-prefixed — the same format `scripts/download-binary.mjs` writes:
+
+   ```bash
+   echo "v<plugin version>" > "$PLUGIN_DATA/bin/.version"
+   ```
+
+5. Verify: `"$PLUGIN_DATA/bin/ll-search" version` prints the binary version.
+
+After a plugin update, rebuild and re-stamp (the auto-updater can't download a binary for your platform).
+
 ## Verification
 
 Run the cross-platform smoke test against your install. Both commands use the `ll-watch` / `ll-search` shims that `/init` installs into `~/.local/bin` — they work from any terminal (`CLAUDE_PLUGIN_DATA` is only set inside hook and skill processes, so don't rely on it in your shell):
@@ -61,7 +87,10 @@ Run the cross-platform smoke test against your install. Both commands use the `l
 ll-watch status                              # "Running (pid N)" or "Not running"
 
 # Query the index directly to confirm search serves results.
-# The plugin data dir is recorded in a marker file at install time;
+# The plugin data dir marker is stamped by the first hook run (SessionStart),
+# not at install time. If the file is missing, start one Claude Code session,
+# or set PLUGIN_DATA to the default:
+#   ~/.claude/plugins/data/learning-loop-learning-loop-marketplace
 # vault_path may be tilde-prefixed in config.json, so expand it.
 PLUGIN_DATA="$(cat ~/.claude/plugins/data/.ll-data-path)"
 DB="$(node -e "

@@ -299,6 +299,8 @@ The full constant inventory from `.planning/inventory/coverage-and-magic.md:177-
 | `HookConfig.SESSION_SWEEP_TTL_MS` | 604800000 | 7-day stale-session-artifact sweep cutoff |
 | `HookConfig.EDGES_TMP_ORPHAN_TTL_MS` | 3600000 | edges.db tmp-orphan sweep cutoff |
 | `HookConfig.SESSION_SIZE_THRESHOLD_BYTES` | 512000 | stop-nudge session size check |
+| `HookConfig.STOP_NUDGE_MESSAGE_COUNT` | 200 | stop-nudge transcript-line count trigger |
+| `HookConfig.TRANSCRIPT_TAIL_BYTES` | 262144 | session-label per-prompt transcript tail read |
 | `HookConfig.SIMILARITY_THRESHOLD` | 0.85 | pre-write duplicate gate |
 | `HookConfig.REFLECT_COOLDOWN_SECS` | 300 | stop-nudge reflect cooldown |
 

@@ -112,6 +112,21 @@ run_capture() {
   bash -c "$*" 2>>"$LOG_FILE"
 }
 
+# Read a prompt answer into $ans from the controlling terminal. Leaves $ans
+# empty (so each prompt's default applies) when LL_INSTALL_ASSUME_NO is set
+# or no usable terminal is attached — non-interactive runs (CI, bats) must
+# never block on /dev/tty.
+prompt_read() {
+  ans=""
+  if [ -n "${LL_INSTALL_ASSUME_NO:-}" ]; then
+    return 0
+  fi
+  if [ ! -e /dev/tty ] || [ ! -t 1 ]; then
+    return 0
+  fi
+  read -r ans </dev/tty 2>/dev/null || ans=""
+}
+
 detect_platform() {
   step_start "Detecting platform"
   local kernel arch ans
@@ -128,7 +143,7 @@ detect_platform() {
       echo "need a Rust toolchain to build it from source (cd native && cargo build --release)."
       echo "See guide/cross-platform.md in the repo for details."
       echo "  ${C_DIM}Continue anyway (you'll build ll-search from source)? [y/N]${C_RESET}"
-      read -r ans </dev/tty 2>/dev/null || ans=""
+      prompt_read
       case "$ans" in
         y|Y) ;;
         *) exit 1 ;;
@@ -190,7 +205,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
     echo "  ${C_DIM}No version manager detected. Install Node ${MIN_NODE_MAJOR} via fnm? [Y/n]${C_RESET}"
-    read -r ans </dev/tty 2>/dev/null || ans=""
+    prompt_read
     case "${ans:-y}" in
       y|Y|"") ;;
       *) step_fail "declined; install Node ${MIN_NODE_MAJOR}+ manually and re-run"; exit 1 ;;
@@ -200,7 +215,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Node ${MIN_NODE_MAJOR}+ required (found: ${OLD_NODE_VERSION:-none}).${C_RESET}"
     echo "  ${C_DIM}Found ${chosen_manager}. Install Node ${MIN_NODE_MAJOR} with it? [Y/n]${C_RESET}"
-    read -r ans </dev/tty 2>/dev/null || ans=""
+    prompt_read
     case "${ans:-y}" in
       y|Y|"") ;;
       *) chosen_manager="fnm-new" ;;
@@ -209,7 +224,7 @@ install_node_via_manager() {
     echo
     echo "  ${C_DIM}Multiple Node managers found: ${managers[*]}${C_RESET}"
     echo "  ${C_DIM}Which should install Node ${MIN_NODE_MAJOR}? (default: ${managers[0]})${C_RESET}"
-    read -r ans </dev/tty 2>/dev/null || ans=""
+    prompt_read
     chosen_manager="${ans:-${managers[0]}}"
   fi
 
@@ -344,7 +359,7 @@ ensure_claude_code() {
     echo
     echo "  ${C_YELLOW}Claude Code $installed is older than required ($MIN_CLAUDE_VERSION).${C_RESET}"
     echo "  ${C_DIM}Upgrade now? [Y/n]${C_RESET}"
-    read -r ans </dev/tty 2>/dev/null || ans=""
+    prompt_read
     case "${ans:-y}" in
       y|Y|"") ;;
       *) step_fail "Claude Code $MIN_CLAUDE_VERSION+ required"; exit 1 ;;

@@ -5,7 +5,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, readdirSync, mkdirSync, mkdtempSync, existsSync, rmSync, utimesSync, realpathSync } from 'node:fs';
+import {
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+  mkdtempSync,
+  existsSync,
+  rmSync,
+  utimesSync,
+  realpathSync,
+} from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
@@ -36,7 +46,11 @@ function parseOutput(stdout, label = '') {
   assert.ok(trimmed.length > 0, `${label}: stdout must not be empty`);
   const parsed = JSON.parse(trimmed);
   assert.ok(parsed.hookSpecificOutput, `${label}: missing hookSpecificOutput`);
-  assert.equal(parsed.hookSpecificOutput.hookEventName, 'SessionStart', `${label}: wrong hookEventName`);
+  assert.equal(
+    parsed.hookSpecificOutput.hookEventName,
+    'SessionStart',
+    `${label}: wrong hookEventName`,
+  );
   return parsed.hookSpecificOutput;
 }
 
@@ -83,27 +97,23 @@ test(
 // ---------------------------------------------------------------------------
 // Test 2: No vault — empty additionalContext, exit 0.
 // ---------------------------------------------------------------------------
-test(
-  'session-start no vault: additionalContext empty, exit 0',
-  { timeout: 12000 },
-  () => {
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'no-vault-session-001' },
-      // No VAULT_PATH; seed config with null vault_path so resolveVaultPath() returns null.
-      seed: (pd) => {
-        seedUpdateCheck(pd);
-        seedNoVaultConfig(pd);
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
-      const hso = parseOutput(r.stdout, 'no-vault');
-      assert.equal(hso.additionalContext, '', 'no vault should produce empty additionalContext');
-    } finally {
-      r.cleanup();
-    }
-  },
-);
+test('session-start no vault: additionalContext empty, exit 0', { timeout: 12000 }, () => {
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'no-vault-session-001' },
+    // No VAULT_PATH; seed config with null vault_path so resolveVaultPath() returns null.
+    seed: (pd) => {
+      seedUpdateCheck(pd);
+      seedNoVaultConfig(pd);
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+    const hso = parseOutput(r.stdout, 'no-vault');
+    assert.equal(hso.additionalContext, '', 'no vault should produce empty additionalContext');
+  } finally {
+    r.cleanup();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test 3: Cached update notice — matches /Plugin Update Available/.
@@ -174,34 +184,33 @@ test(
 // ---------------------------------------------------------------------------
 // Test 5: Watch daemon NOT spawned when vault-index.db absent.
 // ---------------------------------------------------------------------------
-test(
-  'session-start watch daemon not spawned when DB absent',
-  { timeout: 12000 },
-  () => {
-    // The fixture vault has .vault-search/.gitkeep but no vault-index.db.
-    // findBinary() also returns null in sandbox (no ~/.local/bin/ll-search).
-    // Either condition alone suppresses spawn; both apply here.
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'no-daemon-session' },
-      env: { VAULT_PATH: VAULT },
-      seed: (pd) => {
-        seedUpdateCheck(pd);
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}`);
+test('session-start watch daemon not spawned when DB absent', { timeout: 12000 }, () => {
+  // The fixture vault has .vault-search/.gitkeep but no vault-index.db.
+  // findBinary() also returns null in sandbox (no ~/.local/bin/ll-search).
+  // Either condition alone suppresses spawn; both apply here.
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'no-daemon-session' },
+    env: { VAULT_PATH: VAULT },
+    seed: (pd) => {
+      seedUpdateCheck(pd);
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}`);
 
-      // watch.pid must not exist in either the legacy (plugin-data) or
-      // current (vault/.vault-search) location when daemon was not spawned.
-      const legacyPidPath = join(r.pluginDataDir, 'watch.pid');
-      assert.ok(!existsSync(legacyPidPath), 'legacy watch.pid must not exist when daemon not spawned');
-      const vaultPidPath = join(VAULT, '.vault-search', 'watch.pid');
-      assert.ok(!existsSync(vaultPidPath), 'vault watch.pid must not exist when daemon not spawned');
-    } finally {
-      r.cleanup();
-    }
-  },
-);
+    // watch.pid must not exist in either the legacy (plugin-data) or
+    // current (vault/.vault-search) location when daemon was not spawned.
+    const legacyPidPath = join(r.pluginDataDir, 'watch.pid');
+    assert.ok(
+      !existsSync(legacyPidPath),
+      'legacy watch.pid must not exist when daemon not spawned',
+    );
+    const vaultPidPath = join(VAULT, '.vault-search', 'watch.pid');
+    assert.ok(!existsSync(vaultPidPath), 'vault watch.pid must not exist when daemon not spawned');
+  } finally {
+    r.cleanup();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test 6: Cached intentions marker — hook emits the intentions context block.
@@ -311,39 +320,32 @@ test(
   },
 );
 
-test(
-  'session-start memory: injects MEMORY.md when mtime within 7 days',
-  { timeout: 12000 },
-  () => {
-    const r = runHook(HOOK, {
-      stdin: { session_id: 'fresh-mem' },
-      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-fresh' },
-      seed: (pd, sb) => {
-        seedUpdateCheck(pd);
-        const encoded = '/tmp/test-project-fresh'.replace(/[/\\]/g, '-');
-        const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
-        mkdirSync(memDir, { recursive: true });
-        const memPath = join(memDir, 'MEMORY.md');
-        writeFileSync(memPath, '- [test.md](test.md) — fresh entry\n');
-        // Default mtime is now, no utimesSync needed.
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0);
-      const hso = parseOutput(r.stdout, 'fresh-mem');
-      assert.ok(
-        hso.additionalContext.includes('## Auto-memory index'),
-        'fresh MEMORY.md should be injected',
-      );
-      assert.ok(
-        hso.additionalContext.includes('fresh entry'),
-        'memory content should be in context',
-      );
-    } finally {
-      r.cleanup();
-    }
-  },
-);
+test('session-start memory: injects MEMORY.md when mtime within 7 days', { timeout: 12000 }, () => {
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'fresh-mem' },
+    env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-fresh' },
+    seed: (pd, sb) => {
+      seedUpdateCheck(pd);
+      const encoded = '/tmp/test-project-fresh'.replace(/[/\\]/g, '-');
+      const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
+      mkdirSync(memDir, { recursive: true });
+      const memPath = join(memDir, 'MEMORY.md');
+      writeFileSync(memPath, '- [test.md](test.md) — fresh entry\n');
+      // Default mtime is now, no utimesSync needed.
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0);
+    const hso = parseOutput(r.stdout, 'fresh-mem');
+    assert.ok(
+      hso.additionalContext.includes('## Auto-memory index'),
+      'fresh MEMORY.md should be injected',
+    );
+    assert.ok(hso.additionalContext.includes('fresh entry'), 'memory content should be in context');
+  } finally {
+    r.cleanup();
+  }
+});
 
 test(
   'session-start memory: env override forces injection of stale MEMORY.md',
@@ -393,7 +395,14 @@ test(
         // content so the cap cuts on a newline. The global memory path keys on the
         // vault PARENT, mirroring context-assembly.mjs.
         const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
-        const globalMemoryPath = join(sb, '.claude', 'projects', encodedVaultParent, 'memory', 'MEMORY.md');
+        const globalMemoryPath = join(
+          sb,
+          '.claude',
+          'projects',
+          encodedVaultParent,
+          'memory',
+          'MEMORY.md',
+        );
         mkdirSync(dirname(globalMemoryPath), { recursive: true });
         const big = ('- [note](note.md) - ' + 'x'.repeat(80) + '\n').repeat(2500); // ~230KB
         writeFileSync(globalMemoryPath, big);
@@ -550,41 +559,37 @@ test(
 // EEXIST as "locked forever" — otherwise vault indexing is silently disabled
 // on every later session.
 // ---------------------------------------------------------------------------
-test(
-  'watch-daemon recovers from a crashed spawn lock — M12',
-  { timeout: 12000 },
-  () => {
-    const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-vault-'));
-    const vsDir = join(vaultDir, '.vault-search');
-    mkdirSync(vsDir, { recursive: true });
-    writeFileSync(join(vsDir, 'vault-index.db'), '');
-    // Crashed previous session: lock file with a dead pid, old mtime.
-    writeFileSync(join(vsDir, 'watch.pid.lock'), '2147483647');
-    const old = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
-    utimesSync(join(vsDir, 'watch.pid.lock'), old, old);
+test('watch-daemon recovers from a crashed spawn lock — M12', { timeout: 12000 }, () => {
+  const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-vault-'));
+  const vsDir = join(vaultDir, '.vault-search');
+  mkdirSync(vsDir, { recursive: true });
+  writeFileSync(join(vsDir, 'vault-index.db'), '');
+  // Crashed previous session: lock file with a dead pid, old mtime.
+  writeFileSync(join(vsDir, 'watch.pid.lock'), '2147483647');
+  const old = (Date.now() - 2 * 60 * 60 * 1000) / 1000;
+  utimesSync(join(vsDir, 'watch.pid.lock'), old, old);
 
-    const r = runHook(HOOK, {
-      env: { VAULT_PATH: vaultDir },
-      stdin: '',
-      seed: (pluginDataDir) => {
-        seedUpdateCheck(pluginDataDir);
-        const bin = join(pluginDataDir, 'bin', 'll-search');
-        writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, r.stderr);
-      assert.ok(
-        existsSync(join(vsDir, 'watch.fingerprint')),
-        'daemon spawn path must proceed past a stale lock (fingerprint written)',
-      );
-      assert.ok(!existsSync(join(vsDir, 'watch.pid.lock')), 'lock released after spawn');
-    } finally {
-      r.cleanup();
-      rmSync(vaultDir, { recursive: true, force: true });
-    }
-  },
-);
+  const r = runHook(HOOK, {
+    env: { VAULT_PATH: vaultDir },
+    stdin: '',
+    seed: (pluginDataDir) => {
+      seedUpdateCheck(pluginDataDir);
+      const bin = join(pluginDataDir, 'bin', 'll-search');
+      writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(
+      existsSync(join(vsDir, 'watch.fingerprint')),
+      'daemon spawn path must proceed past a stale lock (fingerprint written)',
+    );
+    assert.ok(!existsSync(join(vsDir, 'watch.pid.lock')), 'lock released after spawn');
+  } finally {
+    r.cleanup();
+    rmSync(vaultDir, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Regression (W5/6b): the post-acquire re-probe treated only 'alive' as
@@ -592,43 +597,39 @@ test(
 // ('writer-in-progress') — that slot is occupied too. Pre-fix the hook fell
 // through and spawned a second daemon on top of the writer.
 // ---------------------------------------------------------------------------
-test(
-  'watch-daemon does not spawn over a writer-in-progress pidfile',
-  { timeout: 12000 },
-  () => {
-    const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-wip-'));
-    const vsDir = join(vaultDir, '.vault-search');
-    mkdirSync(vsDir, { recursive: true });
-    writeFileSync(join(vsDir, 'vault-index.db'), '');
-    // A daemon has created its pidfile but not yet written the pid: the file
-    // exists and is empty for the whole hook run (the real daemon's write can
-    // land later than both probes).
-    writeFileSync(join(vsDir, 'watch.pid'), '');
+test('watch-daemon does not spawn over a writer-in-progress pidfile', { timeout: 12000 }, () => {
+  const vaultDir = mkdtempSync(join(realpathSync(tmpdir()), 'll-wd-wip-'));
+  const vsDir = join(vaultDir, '.vault-search');
+  mkdirSync(vsDir, { recursive: true });
+  writeFileSync(join(vsDir, 'vault-index.db'), '');
+  // A daemon has created its pidfile but not yet written the pid: the file
+  // exists and is empty for the whole hook run (the real daemon's write can
+  // land later than both probes).
+  writeFileSync(join(vsDir, 'watch.pid'), '');
 
-    const r = runHook(HOOK, {
-      env: { VAULT_PATH: vaultDir },
-      stdin: '',
-      seed: (pluginDataDir) => {
-        seedUpdateCheck(pluginDataDir);
-        const bin = join(pluginDataDir, 'bin', 'll-search');
-        writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-      },
-    });
-    try {
-      assert.equal(r.exitCode, 0, r.stderr);
-      // The fingerprint write is the first spawn-path side effect after the
-      // post-acquire probe; its absence proves the hook treated
-      // writer-in-progress as occupied and backed off.
-      assert.ok(
-        !existsSync(join(vsDir, 'watch.fingerprint')),
-        'writer-in-progress pidfile must suppress the spawn (no fingerprint written)',
-      );
-    } finally {
-      r.cleanup();
-      rmSync(vaultDir, { recursive: true, force: true });
-    }
-  },
-);
+  const r = runHook(HOOK, {
+    env: { VAULT_PATH: vaultDir },
+    stdin: '',
+    seed: (pluginDataDir) => {
+      seedUpdateCheck(pluginDataDir);
+      const bin = join(pluginDataDir, 'bin', 'll-search');
+      writeFileSync(bin, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    // The fingerprint write is the first spawn-path side effect after the
+    // post-acquire probe; its absence proves the hook treated
+    // writer-in-progress as occupied and backed off.
+    assert.ok(
+      !existsSync(join(vsDir, 'watch.fingerprint')),
+      'writer-in-progress pidfile must suppress the spawn (no fingerprint written)',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(vaultDir, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // W2 ENOTEMPTY class: every detached spawn must be recorded via
@@ -718,7 +719,11 @@ test(
       const hso = parseOutput(r.stdout, 'same-path-mem');
       const ctx = hso.additionalContext;
       const occurrences = (ctx.match(/unique-dedupe-marker/g) || []).length;
-      assert.equal(occurrences, 1, `memory index must be injected exactly once, got ${occurrences}`);
+      assert.equal(
+        occurrences,
+        1,
+        `memory index must be injected exactly once, got ${occurrences}`,
+      );
       assert.ok(ctx.includes('## Auto-memory index for this project'), 'project section expected');
       assert.ok(
         !ctx.includes('## Global memory index'),
@@ -733,11 +738,12 @@ test(
 // ---------------------------------------------------------------------------
 // Regression: when the assembled context exceeds the 8KB stdout cap, emitJson
 // trims from the TAIL. The retrieval protocol (behavior-defining) must be
-// assembled ahead of the variable-size memory/intentions bulk so the trim
-// drops index lines, not the protocol.
+// assembled first, and the capped memory indexes must be assembled ahead of
+// the learned-patterns/intentions bulk, so the trim evicts the low-value tail
+// — not the protocol and not the index lines.
 // ---------------------------------------------------------------------------
 test(
-  'session-start trim ordering: retrieval protocol survives an oversized context',
+  'session-start trim ordering: protocol and memory indexes survive oversized patterns + intentions',
   { timeout: 12000 },
   () => {
     const projectDir = '/tmp/test-project-trim-order';
@@ -746,21 +752,31 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        // Project memory and global memory each fill their 3KB caps.
-        const filler = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(60); // ~6KB, capped to 3KB
+        // Small (~1KB) project and global memory indexes with unique sentinel
+        // lines at the END of each — if either index is even partially
+        // trimmed, its sentinel dies.
+        const memFiller = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(10);
         const encodedProject = projectDir.replace(/[/\\]/g, '-');
         const projMemDir = join(sb, '.claude', 'projects', encodedProject, 'memory');
         mkdirSync(projMemDir, { recursive: true });
-        writeFileSync(join(projMemDir, 'MEMORY.md'), filler);
+        writeFileSync(join(projMemDir, 'MEMORY.md'), memFiller + '- PROJECT-MEM-SENTINEL\n');
         const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
         const globalMemDir = join(sb, '.claude', 'projects', encodedVaultParent, 'memory');
         mkdirSync(globalMemDir, { recursive: true });
-        writeFileSync(join(globalMemDir, 'MEMORY.md'), filler);
-        // Plus a populated intentions marker for extra variable bulk.
+        writeFileSync(join(globalMemDir, 'MEMORY.md'), memFiller + '- GLOBAL-MEM-SENTINEL\n');
+        // Oversized learned patterns (~8KB of numbered entries; uncapped this
+        // alone would blow the stdout budget and evict everything after it).
+        const patternsDir = join(pd, 'provenance');
+        mkdirSync(patternsDir, { recursive: true });
+        let patterns = '';
+        for (let i = 1; i <= 80; i++) patterns += `${i}. pattern ${'p'.repeat(90)}\n`;
+        writeFileSync(join(patternsDir, 'learned-patterns.md'), patterns);
+        // Oversized intentions marker (~8KB rendered).
         const cacheDir = join(pd, 'session-start-cache');
         mkdirSync(cacheDir, { recursive: true });
         const intentions = [];
-        for (let i = 0; i < 40; i++) intentions.push({ context: `context-${i}`, count: i + 1 });
+        for (let i = 0; i < 80; i++)
+          intentions.push({ context: `context-${i}-${'c'.repeat(80)}`, count: i + 1 });
         writeFileSync(join(cacheDir, 'intentions.json'), JSON.stringify(intentions));
       },
     });
@@ -778,6 +794,27 @@ test(
         ctx.includes('Keep retrieval lightweight'),
         'the protocol must survive the tail trim INTACT — it must be assembled before the variable-size sections',
       );
+      assert.ok(
+        ctx.includes('PROJECT-MEM-SENTINEL'),
+        'project memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
+      );
+      assert.ok(
+        ctx.includes('GLOBAL-MEM-SENTINEL'),
+        'global memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
+      );
+      // The oversized patterns section itself must be capped (pointer marker),
+      // not injected wholesale.
+      const patternsAt = ctx.indexOf('## Learned Patterns');
+      if (patternsAt !== -1) {
+        assert.ok(
+          ctx.indexOf('## Auto-memory index for this project') < patternsAt,
+          'memory indexes must be assembled before learned patterns',
+        );
+        assert.ok(
+          ctx.includes('[truncated — full file at'),
+          'oversized learned patterns must be byte-capped with a pointer to the full file',
+        );
+      }
     } finally {
       r.cleanup();
     }
@@ -814,30 +851,26 @@ test(
   },
 );
 
-test(
-  'LL_SESSION_TMP_DIR redirects the legacy tmp session-id write',
-  { timeout: 12000 },
-  () => {
-    const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-seam-'));
-    const r = runHook(HOOK, {
-      env: {
-        VAULT_PATH: VAULT,
-        LL_SESSION_TMP_DIR: isolatedTmp,
-        CLAUDE_CODE_SESSION_ID: 'seam-test-id',
-      },
-      stdin: '',
-      seed: (pd) => seedUpdateCheck(pd),
-    });
-    try {
-      assert.equal(r.exitCode, 0, r.stderr);
-      assert.equal(
-        readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8').trim(),
-        'seam-test-id',
-        'writer must honor the LL_SESSION_TMP_DIR seam',
-      );
-    } finally {
-      r.cleanup();
-      rmSync(isolatedTmp, { recursive: true, force: true });
-    }
-  },
-);
+test('LL_SESSION_TMP_DIR redirects the legacy tmp session-id write', { timeout: 12000 }, () => {
+  const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-seam-'));
+  const r = runHook(HOOK, {
+    env: {
+      VAULT_PATH: VAULT,
+      LL_SESSION_TMP_DIR: isolatedTmp,
+      CLAUDE_CODE_SESSION_ID: 'seam-test-id',
+    },
+    stdin: '',
+    seed: (pd) => seedUpdateCheck(pd),
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(
+      readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8').trim(),
+      'seam-test-id',
+      'writer must honor the LL_SESSION_TMP_DIR seam',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(isolatedTmp, { recursive: true, force: true });
+  }
+});

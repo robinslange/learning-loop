@@ -60,9 +60,13 @@ const labelFile = join(tmpdir(), `claude-session-label-${session_id}.txt`);
 let messages = [];
 if (transcript_path && existsSync(transcript_path)) {
   try {
+    // filter(Boolean): when the transcript's final line exceeds the tail
+    // window, readFileTail returns '' — without the filter that becomes a
+    // single empty "line" that fails JSON.parse on every prompt.
     const lines = readFileTail(transcript_path, HookConfig.TRANSCRIPT_TAIL_BYTES)
       .trim()
-      .split('\n');
+      .split('\n')
+      .filter(Boolean);
     for (const line of lines.slice(-HookConfig.RECENT_MSG_WINDOW)) {
       try {
         const entry = JSON.parse(line);

@@ -26,18 +26,21 @@ function memoryIsFresh(path) {
 
 const MEM_CAP = HookConfig.MEMORY_INDEX_MAX_BYTES;
 
-// Read a memory index capped at MEM_CAP bytes. Oversized files are cut at the
-// last full line and tagged with a pointer to the full file, so the assembled
+// Cap a variable-size context section at MEM_CAP bytes. Oversized content is
+// cut at the last full line and tagged with a pointer line, so the assembled
 // SessionStart context stays within the hook stdout budget instead of relying
 // on emitJson's blind backstop trim.
-function readMemoryIndexCapped(path) {
-  const raw = readFileSync(path, 'utf8');
-  if (Buffer.byteLength(raw, 'utf8') <= MEM_CAP) return raw.trim();
-  let head = raw.slice(0, MEM_CAP);
+function capSection(text, pointer) {
+  if (Buffer.byteLength(text, 'utf8') <= MEM_CAP) return text.trim();
+  let head = text.slice(0, MEM_CAP);
   while (Buffer.byteLength(head, 'utf8') > MEM_CAP) head = head.slice(0, -1);
   const cut = head.lastIndexOf('\n');
   if (cut > 0) head = head.slice(0, cut);
-  return `${head.trim()}\n[truncated — full index at ${path}]`;
+  return `${head.trim()}\n${pointer}`;
+}
+
+function readMemoryIndexCapped(path) {
+  return capSection(readFileSync(path, 'utf8'), `[truncated — full index at ${path}]`);
 }
 
 export async function run(ctx) {
@@ -84,9 +87,12 @@ export async function run(ctx) {
   }
 
   // 2. Retrieval protocol. Emitted BEFORE the variable-size sections (memory
-  // indexes, intentions, learned patterns): emitJson trims oversized
+  // indexes, learned patterns, intentions): emitJson trims oversized
   // additionalContext from the TAIL, so behavior-defining instructions must
   // sit ahead of the bulk that could push the payload past the stdout cap.
+  // Every variable-size section below is byte-capped via capSection, and the
+  // memory indexes are assembled first among them so a backstop trim evicts
+  // the lower-value tail (patterns, intentions) before the index lines.
   //
   // NOTE: this protocol mirrors the static "Learning Loop" section /init
   // installs into the user's CLAUDE.md. The template in
@@ -134,7 +140,47 @@ export async function run(ctx) {
     }
   }
 
-  // 4. Learned patterns.
+  // 4. Project-specific auto-memory. Capped memory indexes come right after
+  // the protocol so an oversized payload evicts later, lower-value sections
+  // instead of the index lines.
+  let projectMemoryIndex = null;
+  if (projectDir) {
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
+    if (existsSync(projectMemoryIndex) && memoryIsFresh(projectMemoryIndex)) {
+      try {
+        const index = readMemoryIndexCapped(projectMemoryIndex);
+        if (index) {
+          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
+        }
+      } catch (err) {
+        logError('session-start.context-assembly.projectMemory', err);
+      }
+    }
+  }
+
+  // 5. Global memory (keyed to vault parent). When the project IS the vault
+  // parent both keys resolve to the same MEMORY.md — skip the global section
+  // rather than injecting the identical index twice.
+  const vaultParent = resolve(vaultRoot, '..');
+  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
+  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
+  if (
+    globalMemory !== projectMemoryIndex &&
+    existsSync(globalMemory) &&
+    memoryIsFresh(globalMemory)
+  ) {
+    try {
+      const globalIndex = readMemoryIndexCapped(globalMemory);
+      if (globalIndex) {
+        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
+      }
+    } catch (err) {
+      logError('session-start.context-assembly.globalMemory', err);
+    }
+  }
+
+  // 6. Learned patterns — capped like the memory indexes.
   if (pluginData) {
     const patternsFile = join(DATA_PATHS.provenance(pluginData), 'learned-patterns.md');
     if (existsSync(patternsFile)) {
@@ -142,14 +188,18 @@ export async function run(ctx) {
         const patternsContent = readFileSync(patternsFile, 'utf8');
         const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
         if (patternCount > 0) {
-          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
+          const patterns = capSection(
+            patternsContent,
+            `[truncated — full file at ${patternsFile}]`,
+          );
+          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patterns}\n`;
         }
       } catch (err) {
         logError('session-start.context-assembly.learnedPatterns', err);
       }
     }
 
-    // 5. Federation status.
+    // 7. Federation status.
     try {
       const fedConfigPath = FEDERATION_PATHS.config(pluginData);
       if (existsSync(fedConfigPath)) {
@@ -169,11 +219,13 @@ export async function run(ctx) {
     }
   }
 
-  // 6. On-demand vault captures pointer.
+  // 8. On-demand vault captures pointer.
   ctx.context += '\n## Recent vault captures\n';
   ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
-  // 7. Intention summary — read cached marker; refresh in background.
+  // 9. Intention summary — read cached marker; refresh in background. The
+  // rendered list is capped: the marker array is unbounded (one line per
+  // intention context), and an oversized list must not evict earlier sections.
   // pluginData required: the worker resolves PLUGIN_DATA from the same source
   // (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
   // produce a different path than the worker writes to.
@@ -181,10 +233,12 @@ export async function run(ctx) {
     try {
       const cached = readMarker(MARKER_PATHS.intentions(pluginData));
       if (Array.isArray(cached) && cached.length > 0) {
-        ctx.context += '\n## Notes with active intentions:\n';
+        let list = '';
         for (const item of cached) {
-          ctx.context += `- ${item.context} (${item.count} notes)\n`;
+          list += `- ${item.context} (${item.count} notes)\n`;
         }
+        ctx.context += '\n## Notes with active intentions:\n';
+        ctx.context += `${capSection(list, `[truncated — run \`${searchCmd} intentions\` for the full list]`)}\n`;
         ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
       }
       // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
@@ -198,44 +252,6 @@ export async function run(ctx) {
       recordDetachedChild(child.pid);
     } catch (err) {
       logError('session-start.context-assembly.intentions', err);
-    }
-  }
-
-  // 8. Project-specific auto-memory.
-  let projectMemoryIndex = null;
-  if (projectDir) {
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
-    projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
-    if (existsSync(projectMemoryIndex) && memoryIsFresh(projectMemoryIndex)) {
-      try {
-        const index = readMemoryIndexCapped(projectMemoryIndex);
-        if (index) {
-          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
-        }
-      } catch (err) {
-        logError('session-start.context-assembly.projectMemory', err);
-      }
-    }
-  }
-
-  // 9. Global memory (keyed to vault parent). When the project IS the vault
-  // parent both keys resolve to the same MEMORY.md — skip the global section
-  // rather than injecting the identical index twice.
-  const vaultParent = resolve(vaultRoot, '..');
-  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
-  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
-  if (
-    globalMemory !== projectMemoryIndex &&
-    existsSync(globalMemory) &&
-    memoryIsFresh(globalMemory)
-  ) {
-    try {
-      const globalIndex = readMemoryIndexCapped(globalMemory);
-      if (globalIndex) {
-        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
-      }
-    } catch (err) {
-      logError('session-start.context-assembly.globalMemory', err);
     }
   }
 

@@ -40,15 +40,41 @@ test('capture-rules.md documents the advisory [partial] marker', () => {
 });
 
 test('marker-consuming skills reference the canonical vocabulary instead of restating it', () => {
-  for (const rel of ['skills/verify/SKILL.md', 'skills/deepen/SKILL.md']) {
+  const vocabulary = new Set([...gateMarkers(), '[partial]']);
+  const sections = {
+    'skills/verify/SKILL.md': '## Verification Markers',
+    'skills/deepen/SKILL.md': '## Resolving Verification Markers',
+  };
+  for (const [rel, heading] of Object.entries(sections)) {
     const src = read(rel);
-    assert.ok(
-      src.includes('capture-rules.md'),
-      `${rel} must point its marker section at ${CANON} (restated lists drift)`,
+    const start = src.indexOf(heading);
+    assert.notEqual(start, -1, `${rel} lost its "${heading}" section`);
+    const rest = src.slice(start + heading.length);
+    const end = rest.search(/\n## /);
+    const section = rest.slice(0, end === -1 ? undefined : end);
+
+    const delegates = section.includes('capture-rules.md');
+    assert.ok(delegates, `${rel} must point its marker section at ${CANON} (restated lists drift)`);
+
+    // Every marker the gate blocks on (plus advisory [partial]) must either be
+    // named in the section or covered by the delegation to the canon.
+    for (const marker of vocabulary) {
+      assert.ok(
+        delegates || section.includes(marker),
+        `${rel} neither mentions ${marker} nor delegates to ${CANON}`,
+      );
+    }
+
+    // Any marker the section DOES restate must exist in the gate's vocabulary —
+    // a stale or invented marker here is exactly the drift the canon prevents.
+    const restated = [...section.matchAll(/(?<!\[)\[([a-z][a-z ]*[a-z])\](?!\]|\()/g)].map(
+      (m) => `[${m[1]}]`,
     );
-    assert.ok(
-      src.includes('[not in source]') && src.includes('[partial]'),
-      `${rel} marker section must acknowledge [not in source] and [partial]`,
-    );
+    for (const marker of restated) {
+      assert.ok(
+        vocabulary.has(marker),
+        `${rel} restates ${marker}, which is not in the gate's blocking set or [partial] — ${CANON} is canonical`,
+      );
+    }
   }
 });

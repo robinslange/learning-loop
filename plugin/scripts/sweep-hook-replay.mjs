@@ -5,8 +5,8 @@
 // Notes written by note-writer, discovery-researcher, literature-capturer,
 // etc. bypass the structural backlink and typed-edge infrastructure entirely.
 // This script invokes hooks/post-tool.js (the coalesced dispatcher running
-// autolink + edge-infer + provenance) on one or more vault notes as if a
-// main-thread Write had triggered it.
+// provenance + reflect-track + autolink + edge-infer) on one or more vault
+// notes as if a main-thread Write had triggered it.
 //
 // Used by the post-batch sweep step in /reflect and /ingest, and by backfill
 // runs for historical unhooked notes.
@@ -82,9 +82,9 @@ function main() {
 sweep-hook-replay.mjs --stdin                 Read newline-separated paths from stdin
 
 Invokes the post-tool dispatcher (hooks/post-tool.js) on one or more vault
-notes, running autolink + edge-infer + provenance in fixed order. Used after
-subagent writes to compensate for PostToolUse hooks not firing on subagent
-tool calls.
+notes, running provenance + reflect-track + autolink + edge-infer in fixed
+order. Used after subagent writes to compensate for PostToolUse hooks not
+firing on subagent tool calls.
 
 Output: JSON summary {processed, ok, failed, failures}. Exit code 0 on full
 success, 1 if any file failed, 2 on usage error.

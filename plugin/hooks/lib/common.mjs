@@ -24,6 +24,7 @@ import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
+import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
@@ -140,7 +141,7 @@ export function readStdin() {
   return new Promise((res) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    const timeout = setTimeout(() => res(''), 3000);
+    const timeout = setTimeout(() => res(''), HookConfig.STDIN_TIMEOUT_MS);
     process.stdin.on('data', (chunk) => (data += chunk));
     process.stdin.on('end', () => {
       clearTimeout(timeout);

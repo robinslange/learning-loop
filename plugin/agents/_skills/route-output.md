@@ -42,7 +42,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/route-project-artefact.mjs').then
 If the result has a non-null `slug`, this insight is a project artefact (interview prep, client brief, evidence bundle, etc.) — its filename matches an existing project's slug in `4-projects/`. Route it to that subfolder instead of `0-inbox/`. Project artefacts are not atomic insights; they are working documents for a specific project.
 
 - If `4-projects/<slug>/` doesn't exist yet, create the directory.
-- Add a worklist row with `destination: 4-projects/<slug>/` and `artefact: true`. Project artefacts skip the promote-gate criteria — they are not graded the same way as insight notes.
+- Add a worklist row with `destination: 4-projects/<slug>/` and `artefact: true`. Project artefacts bypass the note-writer pipeline entirely — the calling skill writes them directly to the project folder. They are documents, not graded insight notes, so promote-gate criteria and vault voice do not apply.
 
 If the result has `slug: null`, this is a candidate atomic insight: continue with the existing flow below.
 
@@ -69,7 +69,7 @@ If `{vault_path}/4-projects/{project_name}.md` exists:
 
 ## Output
 
-Return a summary AND the vault worklist. The calling skill executes the worklist via `note-writer` — never write vault notes yourself.
+Return a summary AND the vault worklist. The calling skill executes the worklist — insight rows (`artefact: false`) via `note-writer`, artefact rows (`artefact: true`) via its own direct `Write` — never write vault notes yourself.
 
 ```
 Ingest complete:
@@ -93,5 +93,5 @@ If no durable insights survived the duplicate check, return `### Vault worklist`
 - Use `Write` tool for auto-memory and project-index file I/O. Never use Obsidian MCP tools.
 - Never overwrite the entire auto-memory file. Read first, merge, write.
 - Don't create a project index note if one doesn't exist — that's a manual decision.
-- Never write vault notes directly. Return them in the worklist: the calling skill routes them through `note-writer`, which guarantees voice consistency and write-time source verification.
+- Never write vault notes directly. Return them in the worklist: the calling skill routes insight rows through `note-writer` (voice consistency, write-time source verification) and writes artefact rows itself.
 - Never run multiple route-output agents in parallel for the same project. Auto-memory uses read-merge-write without locking; parallel writes to the same `project_*.md` file will cause last-write-wins data loss.

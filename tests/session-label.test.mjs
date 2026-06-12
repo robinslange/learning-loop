@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -13,7 +13,7 @@ const TMP = mkdtempSync(join(tmpdir(), 'session-label-test-'));
 
 function makeTranscript(userMessages) {
   return userMessages
-    .map(msg => JSON.stringify({ type: 'user', message: { content: msg } }))
+    .map((msg) => JSON.stringify({ type: 'user', message: { content: msg } }))
     .join('\n');
 }
 
@@ -35,9 +35,16 @@ function run(sessionId, prompt, transcriptPath, cwd = '/tmp') {
 }
 
 function runWithVault(sessionId, prompt, transcriptPath, vaultPath) {
-  const input = JSON.stringify({ session_id: sessionId, prompt, transcript_path: transcriptPath, cwd: '/tmp' });
+  const input = JSON.stringify({
+    session_id: sessionId,
+    prompt,
+    transcript_path: transcriptPath,
+    cwd: '/tmp',
+  });
   execFileSync('node', [HOOK], {
-    input, encoding: 'utf-8', timeout: 5000,
+    input,
+    encoding: 'utf-8',
+    timeout: 5000,
     env: { ...process.env, VAULT_PATH: vaultPath },
   });
   const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
@@ -56,10 +63,10 @@ describe('session-label', () => {
   it('produces a label for a clear topic', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript([
-      'I need to fix the GraphQL subscriptions',
-      'the websocket keeps dropping',
-    ]));
+    writeFileSync(
+      transcript,
+      makeTranscript(['I need to fix the GraphQL subscriptions', 'the websocket keeps dropping']),
+    );
     const label = run(sid, 'can you check the GraphQL subscription config?', transcript);
     assert.ok(label, 'label file should exist');
     assert.ok(/GraphQL|GQL/.test(label), `label should mention GraphQL, got: ${label}`);
@@ -76,10 +83,13 @@ describe('session-label', () => {
   it('falls back to cwd basename when no patterns match', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript([
-      'what is the weather like today',
-    ]));
-    const label = run(sid, 'just chatting about nothing specific', transcript, '/Users/robin/myproject');
+    writeFileSync(transcript, makeTranscript(['what is the weather like today']));
+    const label = run(
+      sid,
+      'just chatting about nothing specific',
+      transcript,
+      '/Users/robin/myproject',
+    );
     assert.ok(label !== null, 'label file should exist');
     assert.equal(label, 'myproject');
   });
@@ -87,9 +97,10 @@ describe('session-label', () => {
   it('detects action patterns like debug', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript([
-      'I need to debug the failing tests in the MCP server',
-    ]));
+    writeFileSync(
+      transcript,
+      makeTranscript(['I need to debug the failing tests in the MCP server']),
+    );
     const label = run(sid, 'fix the error in the mcp handler', transcript);
     assert.ok(label, 'label file should exist');
     assert.ok(label.includes('MCP'), `label should mention MCP, got: ${label}`);
@@ -99,9 +110,7 @@ describe('session-label', () => {
   it('detects review action', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript([
-      'review this PR for the auth flow',
-    ]));
+    writeFileSync(transcript, makeTranscript(['review this PR for the auth flow']));
     const label = run(sid, 'review the changes', transcript);
     assert.ok(label.includes('auth'), `expected auth, got: ${label}`);
     assert.ok(label.includes('review'), `expected review, got: ${label}`);
@@ -110,15 +119,43 @@ describe('session-label', () => {
   it('does not crash on malformed transcript lines', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, [
-      'not json at all',
-      '{"type": "user", "message": {"content": "work on the vault plugin"}}',
-      '{invalid json}',
-      '{"type": "assistant", "message": "ignored"}',
-    ].join('\n'));
+    writeFileSync(
+      transcript,
+      [
+        'not json at all',
+        '{"type": "user", "message": {"content": "work on the vault plugin"}}',
+        '{invalid json}',
+        '{"type": "assistant", "message": "ignored"}',
+      ].join('\n'),
+    );
     const label = run(sid, 'continue with the plugin', transcript);
     assert.ok(label, 'label file should exist');
     assert.ok(label.includes('plugin'), `expected plugin, got: ${label}`);
+  });
+
+  // Regression: when the transcript's final line exceeds the 256KB tail
+  // window, readFileTail returns '' (no newline inside the window). The parse
+  // loop must skip empty lines instead of JSON.parse('') failing and logging
+  // a parseTranscriptLine error on EVERY prompt.
+  it('does not log a parse error when the final transcript line exceeds the tail window', () => {
+    const sid = randomUUID();
+    const transcript = join(TMP, `${sid}.jsonl`);
+    const giant = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(300_000) } });
+    writeFileSync(transcript, makeTranscript(['fix the hooks please']) + '\n' + giant);
+    const input = JSON.stringify({
+      session_id: sid,
+      prompt: 'continue with the hook work',
+      transcript_path: transcript,
+      cwd: '/tmp',
+    });
+    const result = spawnSync('node', [HOOK], { input, encoding: 'utf-8', timeout: 5000 });
+    assert.equal(result.status, 0, `hook exited ${result.status}: ${result.stderr}`);
+    assert.ok(
+      !result.stderr.includes('parseTranscriptLine'),
+      `empty tail must not be parsed as a transcript line; stderr:\n${result.stderr}`,
+    );
+    const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
+    assert.ok(existsSync(labelFile), 'label file should still be written from the prompt alone');
   });
 
   it('does not crash when transcript file is missing', () => {
@@ -131,10 +168,13 @@ describe('session-label', () => {
   it('truncates labels longer than 35 characters', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript([
-      'refactor the GraphQL subscriptions in the frontend component',
-      'also review the authentication flow',
-    ]));
+    writeFileSync(
+      transcript,
+      makeTranscript([
+        'refactor the GraphQL subscriptions in the frontend component',
+        'also review the authentication flow',
+      ]),
+    );
     const label = run(sid, 'refactor the GraphQL subscription auth layer', transcript);
     assert.ok(label.length <= 35, `label should be <= 35 chars, got ${label.length}: "${label}"`);
   });
@@ -164,9 +204,7 @@ describe('session-label', () => {
     const entry = {
       type: 'user',
       message: {
-        content: [
-          { type: 'text', text: 'deploy the worker to Cloudflare' },
-        ],
+        content: [{ type: 'text', text: 'deploy the worker to Cloudflare' }],
       },
     };
     writeFileSync(transcript, JSON.stringify(entry));
@@ -220,10 +258,16 @@ describe('session-label', () => {
 
   it('source carries no hardcoded instance-name topic patterns', () => {
     const src = readFileSync(HOOK, 'utf8');
-    assert.match(src, /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
-      'instance-topic derivation from 4-projects/ missing');
-    assert.match(src, /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
-      'instance patterns must be spread first into allTopicPatterns');
+    assert.match(
+      src,
+      /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
+      'instance-topic derivation from 4-projects/ missing',
+    );
+    assert.match(
+      src,
+      /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
+      'instance patterns must be spread first into allTopicPatterns',
+    );
   });
 });
 
@@ -256,10 +300,13 @@ describe('session-label stdout contract', () => {
   it('produces empty stdout on gate-fail path', () => {
     const emptyVault = mkdtempSync(join(tmpdir(), 'll-empty-vault-'));
     try {
-      const out = runCapturingStdout({
-        LEARNING_LOOP_INJECTION_MODE: 'live',
-        VAULT_PATH: emptyVault,
-      }, 'obscure nonsense that will not match anything in any vault anywhere xyzzy');
+      const out = runCapturingStdout(
+        {
+          LEARNING_LOOP_INJECTION_MODE: 'live',
+          VAULT_PATH: emptyVault,
+        },
+        'obscure nonsense that will not match anything in any vault anywhere xyzzy',
+      );
       assert.equal(out, '');
     } finally {
       rmSync(emptyVault, { recursive: true, force: true });
@@ -394,7 +441,10 @@ describe('session-label live injection scrubbing', () => {
         },
       });
 
-      assert.ok(out.length > 0, 'gate did not pass — stub arrangement broken, fix before judging the scrub');
+      assert.ok(
+        out.length > 0,
+        'gate did not pass — stub arrangement broken, fix before judging the scrub',
+      );
       assert.ok(!out.includes('AKIAIOSFODNN7EXAMPLE'), 'AWS key leaked into live injection');
       assert.ok(out.includes('[REDACTED]'));
     } finally {

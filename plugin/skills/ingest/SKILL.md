@@ -232,7 +232,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 #### Provenance log
 
-Append a run entry at the end of Step 5a (vault worklist execution) success or any abort path:
+Append a run entry at the start of Step 5.5 — every ingest path reaches that step, including memory-only runs whose vault worklist is `none` (those skip Step 5a entirely) — or on any abort path:
 
 ```bash
 node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
@@ -283,9 +283,15 @@ The routing agent writes auto-memory and the project index itself, but it cannot
 
 If the routing agent's `### Vault worklist` is `none`, skip to Step 5.5.
 
-For each worklist row, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel. For rows with `artefact: true`, tell note-writer the note is a project artefact: keep the caller destination (`4-projects/<slug>/`) and skip promote-gate grading.
+Split the worklist by the `artefact` flag:
 
-When the fan-out completes, replay the PostToolUse hook chain on every path note-writer reports — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
+**Artefact rows (`artefact: true`)** are project documents (interview prep, client briefs, evidence bundles), not atomic insights — vault voice and promote-gate grading add nothing, so they do NOT go through note-writer. Write each one yourself with the `Write` tool: destination is the row's `4-projects/<slug>/` folder, filename a kebab-case slug of the insight title, content the row's research body under the insight as the `#` title. Main-thread Writes fire the PostToolUse hooks natively — do not include these paths in the hook replay below.
+
+**Insight rows (`artefact: false`)**: for each, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel.
+
+When the fan-out completes, reconcile before replaying: match each insight row to a written path in the note-writer reports. Retry any unmatched row (agent failed, errored, or returned no path) once with a fresh note-writer dispatch. Rows still unwritten after the retry must not be dropped silently — a user-approved insight with no note is a data loss — carry each one's insight title and a one-line body into Step 6 as "failed to write — re-capture manually".
+
+Then replay the PostToolUse hook chain on every path note-writer reported — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
 
 ```bash
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
@@ -295,6 +301,8 @@ printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
 Surface any `failures` from the JSON summary in Step 6.
 
 ### Step 5.5: Post-Batch Sweep
+
+First, for repo parallel-tier runs, append the provenance run entry (see "Provenance log" under Step 2.4b) — it is anchored here, not in Step 5a, so memory-only runs that skipped the worklist still log it.
 
 The routing agent in Step 5 is a subagent whose own Write/Edit calls (auto-memory, project index) bypass PostToolUse, and Step 5a's targeted replay covers only the paths note-writer reported. This sweep is the backfill safety net for anything missed.
 
@@ -375,12 +383,12 @@ Report counts in Step 6.
 
 ### Step 6: Summary
 
-Display the routing agent's summary, the Step 5a worklist results (notes written, with final paths), the sweep results, and the refinement results (if `--refine` was passed). Done.
+Display the routing agent's summary, the Step 5a worklist results (notes written with final paths, artefacts written directly, and any rows that failed both note-writer attempts — list each failed insight's title and body so the user can re-capture it), the sweep results, and the refinement results (if `--refine` was passed). Done.
 
 ## Key Principles
 
 - **The skill is the UX layer.** Agents fetch and extract. The skill previews, routes, and runs the note-writer fan-out (subagents cannot spawn subagents).
 - **Preview before write.** Never write to memory or vault without user confirmation.
 - **Merge, don't overwrite.** Auto-memory files preserve manually-added context.
-- **Vault notes go through note-writer.** Voice consistency matters.
+- **Insight notes go through note-writer.** Voice consistency matters. Artefact rows are the exception: they are project documents, written directly by this skill.
 - **One source per invocation.** To ingest from multiple sources, run the skill multiple times.
