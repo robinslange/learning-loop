@@ -12,6 +12,9 @@
  *   node bench/bench.mjs --compare <path>   # compare against saved baseline
  *   node bench/bench.mjs --rust-only        # skip plugin bench
  *   node bench/bench.mjs --plugin-only      # skip Rust bench
+ *   node bench/bench.mjs --quality-only     # retrieval-quality eval only
+ *   node bench/bench.mjs --skip-quality     # skip retrieval-quality eval
+ *   node bench/bench.mjs --save-quality-baseline  # write bench/baselines/quality.json
  */
 
 import { spawnSync } from 'node:child_process';
@@ -44,9 +47,12 @@ function getArg(name, def) {
 
 const QUICK = hasFlag('quick');
 const SAVE_BASELINE = hasFlag('save-baseline');
+const SAVE_QUALITY_BASELINE = hasFlag('save-quality-baseline');
 const COMPARE_PATH = getArg('compare', null);
 const RUST_ONLY = hasFlag('rust-only');
 const PLUGIN_ONLY = hasFlag('plugin-only');
+const QUALITY_ONLY = hasFlag('quality-only');
+const SKIP_QUALITY = hasFlag('skip-quality');
 const REAL_ONNX = pluginEnv.LL_BENCH_REAL_ONNX;
 
 // ---------------------------------------------------------------------------
@@ -163,6 +169,7 @@ const BENCH_VARIANTS = {
 
 function runRustBenches() {
   if (PLUGIN_ONLY) return { skipped: 'plugin-only flag set' };
+  if (QUALITY_ONLY) return { skipped: 'quality-only flag set' };
 
   const env = spawnEnv();
   if (QUICK) env.CARGO_BENCH_QUICK = '1';
@@ -219,6 +226,7 @@ function runRustBenches() {
 
 function runPluginBenches() {
   if (RUST_ONLY) return { skipped: 'rust-only flag set' };
+  if (QUALITY_ONLY) return { skipped: 'quality-only flag set' };
 
   const iterations = QUICK ? 10 : 50;
   process.stderr.write(`[plugin] Running hook benches (${iterations} iterations)...\n`);
@@ -249,6 +257,104 @@ function runPluginBenches() {
 }
 
 // ---------------------------------------------------------------------------
+// Retrieval-quality eval (finding: bench + CI measured latency only)
+//
+// Runs `ll-search eval-funnel` against a fixed seeded fixture vault and
+// records recall@10 / ndcg@10 / mrr per funnel stage, for both query
+// distributions ([title] = short queries, [long] = body-derived NL queries
+// matching the JIT injection path). compareBaselines() hard-fails on a >3%
+// absolute drop in the gated production-shaped stage (+prf).
+// ---------------------------------------------------------------------------
+
+// Fixed fixture — independent of --quick so baselines stay comparable.
+const QUALITY_FIXTURE = { count: 500, seed: 20260612 };
+const QUALITY_EVAL_LIMIT = 200;
+const QUALITY_MIN_LINKS = 2;
+// Production pipeline shape: all four signals + PRF, rerank off.
+const QUALITY_GATE_LABELS = ['+prf [title]', '+prf [long]'];
+const QUALITY_GATE_METRICS = ['recall_at_10', 'ndcg_at_10'];
+const QUALITY_DROP_ABS = 0.03;
+const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
+
+function runQualityEval() {
+  if (SKIP_QUALITY) return { skipped: 'skip-quality flag set' };
+  if (PLUGIN_ONLY) return { skipped: 'plugin-only flag set' };
+
+  const binary = join(NATIVE_DIR, 'target', 'release', 'll-search');
+  if (!existsSync(binary)) {
+    return { skipped: 'release binary not found (cd native && cargo build --release)' };
+  }
+
+  const { count, seed } = QUALITY_FIXTURE;
+  const cacheDir = join(BENCH_DIR, 'fixtures', '.cache');
+  const vaultDir = join(cacheDir, `quality-vault-${count}-${seed}`);
+  const dbPath = join(cacheDir, `quality-${count}-${seed}.db`);
+
+  process.stderr.write(`[quality] Generating fixture vault (${count} notes, seed=${seed})...\n`);
+  const gen = spawnSync(
+    process.execPath,
+    [
+      join(BENCH_DIR, 'fixtures', 'generate-vault.mjs'),
+      '--count', String(count),
+      '--seed', String(seed),
+      '--out', vaultDir,
+    ],
+    { encoding: 'utf8', timeout: 120_000 },
+  );
+  if (gen.status !== 0) {
+    return { skipped: `fixture generation failed (exit ${gen.status})`, stderr: gen.stderr?.slice(-500) };
+  }
+
+  process.stderr.write('[quality] Indexing fixture vault (real ONNX embeddings)...\n');
+  const index = spawnSync(binary, ['index', vaultDir, dbPath], {
+    encoding: 'utf8',
+    env: spawnEnv(),
+    timeout: 900_000,
+  });
+  if (index.status !== 0) {
+    return { skipped: `index failed (exit ${index.status})`, stderr: index.stderr?.slice(-500) };
+  }
+
+  process.stderr.write(`[quality] Running eval-funnel (min-links=${QUALITY_MIN_LINKS}, limit=${QUALITY_EVAL_LIMIT})...\n`);
+  const evalRun = spawnSync(
+    binary,
+    ['eval-funnel', dbPath, '--min-links', String(QUALITY_MIN_LINKS), '--limit', String(QUALITY_EVAL_LIMIT)],
+    { encoding: 'utf8', env: spawnEnv(), timeout: 1800_000 },
+  );
+  if (evalRun.status !== 0) {
+    return { skipped: `eval-funnel failed (exit ${evalRun.status})`, stderr: evalRun.stderr?.slice(-500) };
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(evalRun.stdout);
+  } catch (err) {
+    logError('bench.qualityEval.parse', err);
+    return { skipped: 'eval-funnel JSON parse error', raw: evalRun.stdout?.slice(-300) };
+  }
+
+  const funnel = {};
+  for (const cfg of parsed.configs ?? []) {
+    funnel[cfg.label] = {
+      recall_at_5: cfg.recall_at_5,
+      recall_at_10: cfg.recall_at_10,
+      ndcg_at_10: cfg.ndcg_at_10,
+      mrr: cfg.mrr,
+      hits_at_1: cfg.hits_at_1,
+    };
+  }
+
+  return {
+    fixture: QUALITY_FIXTURE,
+    minLinks: QUALITY_MIN_LINKS,
+    evalLimit: QUALITY_EVAL_LIMIT,
+    numQueries: parsed.num_queries ?? null,
+    gate: { labels: QUALITY_GATE_LABELS, metrics: QUALITY_GATE_METRICS, maxAbsoluteDrop: QUALITY_DROP_ABS },
+    funnel,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Budget definitions (from baseline-2026-05-11.md Part 1.4)
 // ---------------------------------------------------------------------------
 
@@ -269,7 +375,7 @@ const BUDGETS = {
 // ---------------------------------------------------------------------------
 
 function compareBaselines(current, baseline) {
-  const report = { regressions: [], improvements: [] };
+  const report = { regressions: [], improvements: [], qualityRegressions: [] };
 
   function check(name, curr, prev, thresholdPct = 20) {
     if (curr == null || prev == null || prev === 0) return;
@@ -300,6 +406,37 @@ function compareBaselines(current, baseline) {
     }
   }
 
+  // Retrieval quality: hard gate on absolute drop (latency checks above are
+  // relative-percentage and soft). recall/ndcg live in [0,1], so an absolute
+  // threshold is the meaningful unit.
+  const currFunnel = current.quality?.funnel;
+  const prevFunnel = baseline.quality?.funnel;
+  if (currFunnel && prevFunnel) {
+    for (const label of QUALITY_GATE_LABELS) {
+      for (const metric of QUALITY_GATE_METRICS) {
+        const curr = currFunnel[label]?.[metric];
+        const prev = prevFunnel[label]?.[metric];
+        if (curr == null || prev == null) continue;
+        const drop = prev - curr;
+        if (drop > QUALITY_DROP_ABS) {
+          report.qualityRegressions.push({
+            name: `quality/${label}/${metric}`,
+            prev,
+            curr,
+            absoluteDrop: parseFloat(drop.toFixed(4)),
+          });
+        } else if (drop < -QUALITY_DROP_ABS) {
+          report.improvements.push({
+            name: `quality/${label}/${metric}`,
+            prev,
+            curr,
+            pct: ((curr - prev) / Math.max(prev, 1e-9) * 100).toFixed(1),
+          });
+        }
+      }
+    }
+  }
+
   return report;
 }
 
@@ -316,6 +453,7 @@ async function main() {
 
   const rustResults = runRustBenches();
   const pluginResults = runPluginBenches();
+  const qualityResults = runQualityEval();
 
   const output = {
     schemaVersion: SCHEMA_VERSION,
@@ -326,12 +464,14 @@ async function main() {
     machine,
     rust: rustResults,
     plugin: pluginResults,
+    quality: qualityResults,
     budgets: BUDGETS,
     notes: [
       'Rust benches: Criterion 0.5, synthetic in-memory DB, pre-computed embeddings.',
       'embed_throughput/real_onnx and index_reindex/*_onnx require LL_BENCH_REAL_ONNX=1.',
       'Plugin benches: child_process.spawn per iteration, sandboxed tempdir, no real cache writes.',
       'All timings are machine-specific. Compare only within same machine profile.',
+      'Quality eval: ll-search eval-funnel on a seeded fixture vault; metrics are deterministic up to ONNX numeric variance across platforms.',
     ],
   };
 
@@ -355,6 +495,23 @@ async function main() {
     process.stderr.write(`\nBaseline saved to: ${outPath}\n`);
   }
 
+  if (SAVE_QUALITY_BASELINE) {
+    if (output.quality?.skipped) {
+      process.stderr.write(`\nERROR: cannot save quality baseline — eval skipped: ${output.quality.skipped}\n`);
+      process.exit(1);
+    }
+    mkdirSync(BASELINES_DIR, { recursive: true });
+    const qualityBaseline = {
+      schemaVersion: SCHEMA_VERSION,
+      generatedAt: output.generatedAt,
+      gitSha: output.gitSha,
+      machine: output.machine,
+      quality: output.quality,
+    };
+    writeFileSync(QUALITY_BASELINE_PATH, JSON.stringify(qualityBaseline, null, 2) + '\n');
+    process.stderr.write(`\nQuality baseline saved to: ${QUALITY_BASELINE_PATH}\n`);
+  }
+
   const regressions = output.comparison?.regressions ?? [];
   if (regressions.length > 0) {
     process.stderr.write(`\nWARNING: ${regressions.length} regression(s) detected (soft gate)\n`);
@@ -362,7 +519,17 @@ async function main() {
       process.stderr.write(`  ${r.name}: +${r.pct}%\n`);
     }
   }
-  // Soft gate: exit 0. Phase 1 flips to hard fail.
+  // Latency: soft gate, exit 0. Phase 1 flips to hard fail.
+
+  // Quality: hard gate — a recall/ndcg drop is a real retrieval regression.
+  const qualityRegressions = output.comparison?.qualityRegressions ?? [];
+  if (qualityRegressions.length > 0) {
+    process.stderr.write(`\nFAIL: ${qualityRegressions.length} retrieval-quality regression(s) (hard gate)\n`);
+    for (const r of qualityRegressions) {
+      process.stderr.write(`  ${r.name}: ${r.prev.toFixed(4)} -> ${r.curr.toFixed(4)} (drop ${r.absoluteDrop})\n`);
+    }
+    process.exit(1);
+  }
 }
 
 main().catch((err) => {

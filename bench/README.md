@@ -26,6 +26,30 @@ npm run bench:quick -- --save-baseline
 | `node bench/bench.mjs --compare bench/baselines/2026-05-11.json` | Compare against baseline |
 | `node bench/bench.mjs --rust-only` | Skip plugin bench |
 | `node bench/bench.mjs --plugin-only` | Skip Rust bench |
+| `node bench/bench.mjs --quality-only` | Retrieval-quality eval only (needs release binary) |
+| `node bench/bench.mjs --skip-quality` | Skip retrieval-quality eval |
+| `node bench/bench.mjs --quality-only --save-quality-baseline` | Refresh `bench/baselines/quality.json` |
+
+## Retrieval-quality gate
+
+`bench.mjs` runs `ll-search eval-funnel` against a fixed seeded fixture vault
+(500 notes, seed 20260612, topic-clustered) and records recall@10 / ndcg@10 /
+mrr per funnel stage for two query distributions:
+
+- `[title]` — short note-title queries (precision-shaped, implicit-AND BM25)
+- `[long]` — 40-token natural-language queries derived from note bodies,
+  matching the JIT injection path (OR-mode BM25)
+
+The evaluated note is held out of the PPR/tag seeds and its outgoing edges are
+masked, so the graph stages are scored on second-order structure rather than
+the gold edges themselves.
+
+With `--compare`, a >3% **absolute** drop in recall@10 or ndcg@10 on the
+production-shaped `+prf` stage (either distribution) is a **hard failure**
+(exit 1). CI runs this on every PR via the `quality` job in
+`.github/workflows/test.yml` against the committed
+`bench/baselines/quality.json`. After an intentional quality change,
+regenerate the baseline with `--save-quality-baseline` and commit it.
 
 ## With real ONNX embeddings
 

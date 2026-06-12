@@ -619,6 +619,76 @@ export function checkNliSocketFresh({ pluginData } = {}) {
   }
 }
 
+// How many duplicate-gate timeouts in the scanned window count as "the gate is
+// permanently disabled on this machine" rather than a one-off slow write.
+const DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD = 3;
+
+// Count duplicate-gate-timeout entries in a single monthly hook-errors jsonl.
+// Tolerant of partial/corrupt lines (best-effort diagnostic, never throws).
+function countDuplicateGateTimeouts(path) {
+  if (!existsSync(path)) return 0;
+  let count = 0;
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return 0;
+  }
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj && obj.code === 'duplicate-gate-timeout') count++;
+    } catch {
+      // Skip a corrupt line — keep counting the rest.
+    }
+  }
+  return count;
+}
+
+// Warn when recent hook-errors logs show repeated duplicate-gate timeouts.
+// The pre-write duplicate gate fails OPEN on timeout (silent pass), so a slow
+// machine can permanently lose the gate with nothing surfaced but log lines.
+// This check makes that visible. Scans the current + previous month files
+// (`hook-errors-YYYY-MM.jsonl`), the same naming post-tool.js writes.
+export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) {
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['duplicate-gate-health'],
+      name: 'Duplicate gate',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available — skipped',
+      fix: null,
+    });
+  }
+  const months = [now, new Date(now.getFullYear(), now.getMonth() - 1, 1)].map((d) =>
+    d.toISOString().slice(0, 7),
+  );
+  let total = 0;
+  for (const month of months) {
+    total += countDuplicateGateTimeouts(join(pluginData, `hook-errors-${month}.jsonl`));
+  }
+  if (total >= DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD) {
+    return makeCheck({
+      id: CHECK_IDS['duplicate-gate-health'],
+      name: 'Duplicate gate',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `${total} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
+      fix: 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
+    });
+  }
+  return makeCheck({
+    id: CHECK_IDS['duplicate-gate-health'],
+    name: 'Duplicate gate',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail: total === 0 ? 'no recent timeouts' : `${total} recent timeout(s) (under threshold)`,
+    fix: null,
+  });
+}
+
 export function checkAbiDrift({ abiDriftResult } = {}) {
   // The caller is responsible for invoking detectAbiDrift from check-deps-impl.mjs.
   // This check accepts the result so it stays in the quick library (no native module loads).

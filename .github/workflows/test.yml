@@ -95,6 +95,44 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace
 
+  # Retrieval-quality regression gate: runs ll-search eval-funnel against a
+  # seeded fixture vault and hard-fails on a >3% absolute drop in recall@10 /
+  # ndcg@10 versus the committed baseline (bench/baselines/quality.json).
+  # Covers both short [title] queries and long body-derived [long] queries
+  # (the JIT injection distribution). Regenerate the baseline with:
+  #   node bench/bench.mjs --quality-only --save-quality-baseline
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux build deps (libdbus-1-dev for keyring sync-secret-service)
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: cargo-release-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Build release binary
+        working-directory: native
+        run: cargo build --release -p ll-search
+
+      - name: Retrieval quality gate
+        run: node bench/bench.mjs --quality-only --compare bench/baselines/quality.json
+
   lint:
     runs-on: ubuntu-latest
     steps:

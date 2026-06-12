@@ -88,16 +88,55 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
+/// Maximum token count for which [`fts_escape`] keeps FTS5 implicit-AND
+/// semantics. Queries with more tokens switch to OR.
+///
+/// Short queries (CLI lookups, note titles) are precision-oriented: requiring
+/// every term keeps the result list tight. Long queries are natural-language
+/// prompts (the JIT injection path) where no single note contains every
+/// token, so implicit AND returns zero rows and kills the keyword signal.
+pub const FTS_AND_MAX_TOKENS: usize = 3;
+
+/// Maximum number of tokens included in an OR-joined FTS5 query.
+///
+/// Tokens beyond this cap are dropped (after case-insensitive deduplication)
+/// to bound MATCH expression size on very long natural-language queries.
+pub const FTS_OR_TOKEN_CAP: usize = 32;
+
 /// Escape a free-text query for use in a SQLite FTS5 `MATCH` expression.
 ///
 /// Each whitespace-separated token is wrapped in double quotes so that
 /// punctuation and operator characters in user input are treated as literals.
+///
+/// Join semantics depend on query length:
+///
+/// - **<= [`FTS_AND_MAX_TOKENS`] tokens**: tokens are joined with a space
+///   (FTS5 implicit AND). Short queries — CLI lookups and title-shaped
+///   queries — want precision: all terms must be present.
+/// - **> [`FTS_AND_MAX_TOKENS`] tokens**: tokens are deduplicated
+///   (case-insensitively, keeping first occurrence), capped at
+///   [`FTS_OR_TOKEN_CAP`], and joined with ` OR `. Long queries are
+///   natural-language prompts where requiring every token matches nothing;
+///   OR semantics let BM25 rank notes containing any subset of the terms.
+///   BM25 scores remain negative (more negative = better) either way.
 pub fn fts_escape(text: &str) -> String {
-    text.split_whitespace()
+    let quoted: Vec<String> = text
+        .split_whitespace()
         .filter(|t| !t.is_empty())
         .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" ")
+        .collect();
+
+    if quoted.len() <= FTS_AND_MAX_TOKENS {
+        return quoted.join(" ");
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let deduped: Vec<String> = quoted
+        .into_iter()
+        .filter(|t| seen.insert(t.to_lowercase()))
+        .take(FTS_OR_TOKEN_CAP)
+        .collect();
+    deduped.join(" OR ")
 }
 
 /// Run a BM25 FTS5 query and return the top `limit` results.
@@ -318,10 +357,119 @@ mod tests {
     }
 
     #[test]
-    fn test_fts_escape() {
+    fn test_fts_escape_short_query_keeps_implicit_and() {
         assert_eq!(fts_escape("hello world"), "\"hello\" \"world\"");
+        assert_eq!(fts_escape("a b c"), "\"a\" \"b\" \"c\"");
         assert_eq!(fts_escape(""), "");
         assert_eq!(fts_escape("  "), "");
+    }
+
+    #[test]
+    fn test_fts_escape_long_query_uses_or() {
+        assert_eq!(
+            fts_escape("how does sticky positioning break"),
+            "\"how\" OR \"does\" OR \"sticky\" OR \"positioning\" OR \"break\""
+        );
+    }
+
+    #[test]
+    fn test_fts_escape_dedupes_case_insensitive() {
+        assert_eq!(
+            fts_escape("the cache The Cache misses again"),
+            "\"the\" OR \"cache\" OR \"misses\" OR \"again\""
+        );
+    }
+
+    #[test]
+    fn test_fts_escape_caps_token_count() {
+        let tokens: Vec<String> = (0..50).map(|i| format!("tok{i}")).collect();
+        let escaped = fts_escape(&tokens.join(" "));
+        let parts: Vec<&str> = escaped.split(" OR ").collect();
+        assert_eq!(parts.len(), FTS_OR_TOKEN_CAP);
+        assert_eq!(parts[0], "\"tok0\"");
+        assert_eq!(parts[31], "\"tok31\"");
+    }
+
+    #[test]
+    fn test_fts_escape_quotes_remain_escaped_in_or_mode() {
+        let escaped = fts_escape("one two three four \"quoted\"");
+        assert!(escaped.contains("\"\"\"quoted\"\"\""));
+        assert!(escaped.contains(" OR "));
+    }
+
+    fn fts_fixture(docs: &[(&str, &str)]) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT NOT NULL);
+             CREATE TABLE notes_content (id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT);
+             CREATE VIRTUAL TABLE notes_fts USING fts5(
+                 title, tags, body,
+                 content='notes_content',
+                 content_rowid='id',
+                 tokenize='porter unicode61 remove_diacritics 1'
+             );",
+        )
+        .unwrap();
+        for (i, (path, body)) in docs.iter().enumerate() {
+            let id = (i + 1) as i64;
+            conn.execute(
+                "INSERT INTO notes (id, path) VALUES (?1, ?2)",
+                rusqlite::params![id, path],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, '', ?3)",
+                rusqlite::params![id, path, body],
+            )
+            .unwrap();
+        }
+        conn.execute_batch("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')").unwrap();
+        conn
+    }
+
+    #[test]
+    fn test_long_nl_query_matches_subset_of_tokens() {
+        let conn = fts_fixture(&[
+            ("sticky.md", "overflow hidden on the scroll root kills position sticky"),
+            ("cache.md", "a recurring entity cache needs a hard ttl ceiling"),
+        ]);
+        // 12-token natural-language query; neither note contains every token.
+        let query = "why does my position sticky header stop working when overflow is hidden";
+        let results = fts_bm25_query(&conn, query, 10, &VAULT_FTS);
+        assert_eq!(results.len(), 1, "OR semantics should match the subset-overlap note");
+        assert_eq!(results[0].1, "sticky.md");
+        assert!(results[0].2 < 0.0, "bm25 scores stay negative (more negative = better)");
+    }
+
+    #[test]
+    fn test_long_query_ranks_higher_overlap_first() {
+        let conn = fts_fixture(&[
+            ("partial.md", "the scroll root and nothing else"),
+            ("full.md", "overflow hidden on the scroll root kills position sticky"),
+        ]);
+        let query = "position sticky broken by overflow hidden on the scroll root";
+        let results = fts_bm25_query(&conn, query, 10, &VAULT_FTS);
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].1, "full.md", "note matching more query tokens ranks first");
+        assert!(results[0].2 < results[1].2, "better match has more-negative bm25 score");
+    }
+
+    #[test]
+    fn test_short_query_requires_all_tokens() {
+        let conn = fts_fixture(&[
+            ("both.md", "token cache ceiling"),
+            ("one.md", "token budget exceeded"),
+        ]);
+        let results = fts_bm25_query(&conn, "token cache", 10, &VAULT_FTS);
+        assert_eq!(results.len(), 1, "short queries keep implicit-AND precision");
+        assert_eq!(results[0].1, "both.md");
+    }
+
+    #[test]
+    fn test_stopword_only_long_query_returns_no_match_gracefully() {
+        let conn = fts_fixture(&[("a.md", "substantive content about embeddings")]);
+        let results = fts_bm25_query(&conn, "the and of to is the and of", 10, &VAULT_FTS);
+        assert!(results.is_empty(), "no overlap means no rows, not an error");
     }
 
     #[test]

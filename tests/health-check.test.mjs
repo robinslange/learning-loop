@@ -18,6 +18,7 @@ import {
   checkPluginCacheVersionPresent,
   checkSearchIndexExists,
   checkNliSocketFresh,
+  checkDuplicateGateHealth,
   checkAbiDrift,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
@@ -49,6 +50,7 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'plugin-cache-version-present',
     'search-index-exists',
     'nli-socket-fresh',
+    'duplicate-gate-health',
     'abi-drift',
   ];
   const full = [
@@ -368,6 +370,56 @@ test('checkNliSocketFresh: warn when path exists but is not a socket', () => {
   const result = checkNliSocketFresh({ pluginData: dir });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: ok when no hook-errors log present', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-'));
+  const result = checkDuplicateGateHealth({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /no recent timeouts/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: warns on repeated duplicate-gate timeouts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-warn-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [];
+  for (let i = 0; i < 4; i++) {
+    lines.push(
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  }
+  // An unrelated error line must not be counted.
+  lines.push(JSON.stringify({ ts: now.toISOString(), module: 'other', message: 'boom' }));
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /4 duplicate-gate timeouts/);
+  assert.match(result.fix, /ll-watch/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: stays ok under the repeat threshold', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-under-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  writeFileSync(
+    join(dir, `hook-errors-${month}.jsonl`),
+    JSON.stringify({ code: 'duplicate-gate-timeout', source: 'daemon' }) + '\n',
+  );
+  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /under threshold/);
   rmSync(dir, { recursive: true, force: true });
 });
 

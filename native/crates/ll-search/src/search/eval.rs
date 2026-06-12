@@ -33,6 +33,43 @@ struct EvalQuery {
     title: String,
     path: String,
     relevant: HashSet<String>,
+    /// Synthetic long natural-language query derived from the note body
+    /// (wikilinks stripped). Covers the JIT injection path, whose queries are
+    /// dozens of tokens — a distribution title-only queries cannot represent.
+    long_query: Option<String>,
+}
+
+/// Number of leading body tokens used to build a long eval query.
+const LONG_QUERY_TOKENS: usize = 40;
+
+/// Minimum token count for a body-derived long query to be usable.
+const LONG_QUERY_MIN_TOKENS: usize = 8;
+
+/// Remove `[[wikilink]]` spans from a note body.
+///
+/// The eval ground truth is the note's outlink set; leaving link targets'
+/// titles inside the query text would leak the answers into the query.
+fn strip_wikilinks(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body;
+    while let Some(start) = rest.find("[[") {
+        out.push_str(&rest[..start]);
+        rest = match rest[start + 2..].find("]]") {
+            Some(end) => &rest[start + 2 + end + 2..],
+            None => "",
+        };
+    }
+    out.push_str(rest);
+    out
+}
+
+fn derive_long_query(body: &str) -> Option<String> {
+    let stripped = strip_wikilinks(body);
+    let tokens: Vec<&str> = stripped.split_whitespace().take(LONG_QUERY_TOKENS).collect();
+    if tokens.len() < LONG_QUERY_MIN_TOKENS {
+        return None;
+    }
+    Some(tokens.join(" "))
 }
 
 fn resolve_target(conn: &Connection, basename: &str) -> Option<String> {
@@ -80,7 +117,7 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
     }
 
     let mut queries: Vec<EvalQuery> = Vec::new();
-    for (_id, (path, title, targets)) in grouped {
+    for (id, (path, title, targets)) in grouped {
         let mut relevant = HashSet::new();
         for t in &targets {
             if let Some(resolved) = resolve_target(conn, t) {
@@ -90,7 +127,16 @@ fn build_eval_set(conn: &Connection, min_links: usize) -> Vec<EvalQuery> {
             }
         }
         if relevant.len() >= min_links {
-            queries.push(EvalQuery { title, path, relevant });
+            let body: Option<String> = conn
+                .query_row(
+                    "SELECT body FROM notes_content WHERE id = ?1",
+                    rusqlite::params![id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten();
+            let long_query = body.as_deref().and_then(derive_long_query);
+            queries.push(EvalQuery { title, path, relevant, long_query });
         }
     }
 
@@ -103,10 +149,11 @@ fn eval_ranking(
     conn: &Connection,
     query_vec: &[f32],
     query_text: &str,
+    source_path: &str,
     prf_params: Option<&PrfParams>,
 ) -> Vec<String> {
     let all_embeddings = ctx.store.all();
-    let signals = ctx.compute_signals(conn, query_vec, query_text);
+    let signals = ctx.compute_signals_holdout(conn, query_vec, query_text, source_path);
 
     let mut rrf = ctx.rrf_from_signals(&signals, None);
 
@@ -182,7 +229,7 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
 
         for q in &queries {
             let qvec = embed_query(&q.title);
-            let results = eval_ranking(&ctx, conn, &qvec, &q.title, params.as_ref());
+            let results = eval_ranking(&ctx, conn, &qvec, &q.title, &q.path, params.as_ref());
             let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
             total_r5 += r5;
             total_r10 += r10;
@@ -213,6 +260,14 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
 /// Run the funnel-ablation eval: each stage added cumulatively, scored on the
 /// same wikilink-grounded query set as `eval_prf`. Produces a table showing
 /// the marginal contribution of vec, BM25, PPR, tag-expand, PRF, and rerank.
+///
+/// Each cascade stage is scored on two query distributions: the note title
+/// (`[title]` labels — short, precision-shaped queries) and a long
+/// natural-language query derived from the note body (`[long]` labels —
+/// matches the JIT injection path). The evaluated note is held out of the
+/// PPR/tag seeds and its edges are masked (see
+/// `SearchContext::compute_signals_holdout`), so the graph stages must find
+/// relevant notes through second-order structure, not the gold edges.
 pub fn eval_funnel(
     conn: &Connection,
     _store: &EmbeddingStore,
@@ -241,17 +296,32 @@ pub fn eval_funnel(
 
     let n = queries.len() as f64;
     let no_peers: Vec<(String, Connection)> = Vec::new();
-    let mut totals: Vec<[f64; 5]> = vec![[0.0; 5]; cascade.len()];
+    let mut totals_title: Vec<[f64; 5]> = vec![[0.0; 5]; cascade.len()];
+    let mut totals_long: Vec<[f64; 5]> = vec![[0.0; 5]; cascade.len()];
+    let mut n_long = 0usize;
 
     for (qi, q) in queries.iter().enumerate() {
         let qvec = embed_query(&q.title);
-        let signals = ctx.compute_signals(conn, &qvec, &q.title);
+        let signals = ctx.compute_signals_holdout(conn, &qvec, &q.title, &q.path);
 
         for (ci, (_, flags)) in cascade.iter().enumerate() {
             let results = funnel_with_signals(&ctx, conn, &no_peers, &signals, &qvec, &q.title, flags);
             let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
-            let t = &mut totals[ci];
+            let t = &mut totals_title[ci];
             t[0] += r5; t[1] += r10; t[2] += ndcg; t[3] += mrr; t[4] += h1;
+        }
+
+        if let Some(long_query) = &q.long_query {
+            n_long += 1;
+            let long_vec = embed_query(long_query);
+            let long_signals = ctx.compute_signals_holdout(conn, &long_vec, long_query, &q.path);
+
+            for (ci, (_, flags)) in cascade.iter().enumerate() {
+                let results = funnel_with_signals(&ctx, conn, &no_peers, &long_signals, &long_vec, long_query, flags);
+                let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
+                let t = &mut totals_long[ci];
+                t[0] += r5; t[1] += r10; t[2] += ndcg; t[3] += mrr; t[4] += h1;
+            }
         }
 
         if (qi + 1) % 50 == 0 || qi + 1 == queries.len() {
@@ -259,10 +329,12 @@ pub fn eval_funnel(
         }
     }
 
-    let configs: Vec<EvalConfig> = cascade.iter().enumerate().map(|(i, (label, _))| {
-        let t = &totals[i];
+    eprintln!("  {} of {} queries had a body-derived long query", n_long, queries.len());
+
+    let mut configs: Vec<EvalConfig> = cascade.iter().enumerate().map(|(i, (label, _))| {
+        let t = &totals_title[i];
         EvalConfig {
-            label: label.to_string(),
+            label: format!("{label} [title]"),
             recall_at_5: t[0] / n,
             recall_at_10: t[1] / n,
             ndcg_at_10: t[2] / n,
@@ -270,6 +342,21 @@ pub fn eval_funnel(
             hits_at_1: t[4] / n,
         }
     }).collect();
+
+    if n_long > 0 {
+        let nl = n_long as f64;
+        configs.extend(cascade.iter().enumerate().map(|(i, (label, _))| {
+            let t = &totals_long[i];
+            EvalConfig {
+                label: format!("{label} [long]"),
+                recall_at_5: t[0] / nl,
+                recall_at_10: t[1] / nl,
+                ndcg_at_10: t[2] / nl,
+                mrr: t[3] / nl,
+                hits_at_1: t[4] / nl,
+            }
+        }));
+    }
 
     EvalResult {
         num_queries: queries.len(),
@@ -316,5 +403,38 @@ fn funnel_with_signals(
         report.scored.into_iter().map(|r| r.path).collect()
     } else {
         fused.into_iter().take(10).map(|(p, _)| p).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_wikilinks_removes_targets() {
+        assert_eq!(
+            strip_wikilinks("see [[gold target]] and [[another]] for context"),
+            "see  and  for context"
+        );
+        assert_eq!(strip_wikilinks("no links here"), "no links here");
+        assert_eq!(strip_wikilinks("unclosed [[link"), "unclosed ");
+    }
+
+    #[test]
+    fn test_derive_long_query_caps_tokens_and_excludes_link_titles() {
+        let body = (0..100).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        let q = derive_long_query(&body).expect("long body yields a query");
+        assert_eq!(q.split_whitespace().count(), LONG_QUERY_TOKENS);
+
+        let linked = "intro text mentioning [[secret gold note]] then more body words follow here today";
+        let q = derive_long_query(linked).expect("enough tokens");
+        assert!(!q.contains("secret"), "gold link titles must not leak into the query");
+    }
+
+    #[test]
+    fn test_derive_long_query_rejects_short_bodies() {
+        assert!(derive_long_query("too short").is_none());
+        assert!(derive_long_query("").is_none());
+        assert!(derive_long_query("[[only]] [[links]] [[here]]").is_none());
     }
 }

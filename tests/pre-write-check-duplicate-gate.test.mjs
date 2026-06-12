@@ -6,15 +6,76 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync, chmodSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  mkdtempSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { runHook } from './helpers/hook-runner.mjs';
 import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
+const UDS_SERVER = new URL('./helpers/uds-reflect-server.mjs', import.meta.url).pathname;
 let VAULT;
+
+function reflectEnvelope(similarity, path, title) {
+  return JSON.stringify({
+    queries: [{ query: 'Sleep consolidates memory', top_match_similarity: similarity, results: [{ path, title }] }],
+    confusable_pairs: [],
+  });
+}
+
+// Spawn the standalone UDS server on `socketPath` and block (sync poll) until
+// the socket file appears, so the hook child can connect immediately. Returns
+// the child so the test can SIGTERM it after.
+function startUdsServer(socketPath, mode) {
+  const child = spawn(process.execPath, [UDS_SERVER, socketPath, mode], { stdio: 'ignore' });
+  const deadline = Date.now() + 4000;
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  while (!existsSync(socketPath) && Date.now() < deadline) {
+    // Sleep ~5ms between polls (listen() on a UDS is sub-millisecond, but the
+    // child process needs a beat to start). Atomics.wait yields the CPU.
+    Atomics.wait(sab, 0, 0, 5);
+  }
+  return child;
+}
+
+function readHookErrorTimeouts(pluginDataDir) {
+  let count = 0;
+  let names = [];
+  try {
+    names = readdirSync(pluginDataDir);
+  } catch {
+    return 0;
+  }
+  for (const n of names) {
+    if (!n.startsWith('hook-errors-') || !n.endsWith('.jsonl')) continue;
+    let raw = '';
+    try {
+      raw = readFileSync(join(pluginDataDir, n), 'utf-8');
+    } catch {
+      continue;
+    }
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        if (JSON.parse(line).code === 'duplicate-gate-timeout') count++;
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return count;
+}
 
 // Note content with a # title (triggers the gate) and no wikilinks (no
 // broken-link noise in additionalContext).
@@ -59,6 +120,53 @@ function envelopeStub(similarity, path, title) {
     ],
   });
   return `#!/bin/sh\ncat <<'EOF'\n${payload}\nEOF\n`;
+}
+
+// Run the hook with a live UDS server at <pluginData>/nli.sock plus a stub
+// binary. `serverMode` is 'respond:<b64>' or 'hang'. Captures the
+// duplicate-gate-timeout count from the hook-errors log BEFORE cleanup wipes
+// the sandbox, and reaps the server child.
+function runWithSocket(serverMode, filePath, { stubScript, allowStderrError = false } = {}) {
+  let server = null;
+  const r = runHook(HOOK, {
+    stdin: {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Write',
+      tool_input: { file_path: filePath, content: NOTE },
+    },
+    env: { VAULT_PATH: VAULT },
+    seed: (pluginDataDir) => {
+      const binDir = join(pluginDataDir, 'bin');
+      mkdirSync(binDir, { recursive: true });
+      // Default stub fails LOUDLY if invoked, so socket-success tests prove the
+      // subprocess never ran; fallback tests pass their own working stub.
+      writeFileSync(
+        join(binDir, 'll-search'),
+        stubScript ?? '#!/bin/sh\necho "subprocess should not run" 1>&2\nexit 1\n',
+      );
+      chmodSync(join(binDir, 'll-search'), 0o755);
+      server = startUdsServer(join(pluginDataDir, 'nli.sock'), serverMode);
+    },
+  });
+  try {
+    assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+    assert.equal(r.exitCode, 0, r.stderr);
+    if (!allowStderrError) {
+      assert.ok(!r.stderr.includes('"level":"error"'), `hook logged an error: ${r.stderr}`);
+    }
+    const timeoutCount = readHookErrorTimeouts(r.pluginDataDir);
+    const out = r.stdout.trim();
+    return { result: out ? JSON.parse(out) : null, stderr: r.stderr, timeoutCount };
+  } finally {
+    if (server) {
+      try {
+        server.kill('SIGTERM');
+      } catch {
+        /* ignore */
+      }
+    }
+    r.cleanup();
+  }
 }
 
 describe('pre-write-check duplicate-note gate', () => {
@@ -146,5 +254,36 @@ describe('pre-write-check duplicate-note gate', () => {
     );
     assert.equal(result, null, 'gate failure must not block or warn');
     assert.match(stderr, /pre-write-check\.checkDuplicateNote/, `expected the gate's logError scope in stderr; got: ${stderr}`);
+  });
+
+  it('socket success: the warm daemon serves the scan and the subprocess never runs', () => {
+    const b64 = Buffer.from(
+      reflectEnvelope(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+    ).toString('base64');
+    const { result } = runWithSocket(`respond:${b64}`, join(VAULT, '0-inbox', 'new-note.md'));
+    assert.ok(result, 'expected a warning payload from the daemon path');
+    assert.match(result.hookSpecificOutput.additionalContext, /Potential duplicate/);
+    assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+  });
+
+  it('socket absent: falls back to the subprocess and still warns', () => {
+    // No nli.sock created (no server) — the gate must use the stub binary.
+    const { result } = runWithStub(
+      envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+      join(VAULT, '0-inbox', 'new-note.md'),
+    );
+    assert.ok(result, 'expected a warning payload from the subprocess fallback');
+    assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+  });
+
+  it('socket timeout: logs the distinct duplicate-gate-timeout code, then falls back to subprocess', () => {
+    const { result, timeoutCount } = runWithSocket('hang', join(VAULT, '0-inbox', 'new-note.md'), {
+      // Working subprocess stub so the gate still produces a warning after the
+      // socket times out (proves the fallback fires).
+      stubScript: envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+    });
+    assert.ok(timeoutCount >= 1, 'a socket timeout must log the duplicate-gate-timeout code');
+    assert.ok(result, 'subprocess fallback must still produce the duplicate warning');
+    assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
   });
 });

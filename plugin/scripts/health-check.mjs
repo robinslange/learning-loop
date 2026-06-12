@@ -83,6 +83,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkPluginCacheVersionPresent({ home: c.home, installedVersion: c.installedVersion }),
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
     quick.checkNliSocketFresh({ pluginData: c.pluginData }),
+    quick.checkDuplicateGateHealth({ pluginData: c.pluginData }),
     quick.checkAbiDrift({ abiDriftResult: c.abiDriftResult }),
   ];
   return {

@@ -161,6 +161,35 @@ impl SearchContext {
         query_vec: &[f32],
         query_text: &str,
     ) -> Signals {
+        self.compute_signals_inner(conn, query_vec, query_text, None)
+    }
+
+    /// Eval-only variant of [`Self::compute_signals`] that holds out a source
+    /// note from the graph stages.
+    ///
+    /// `holdout_source` is removed from the PPR/tag seed set and its outgoing
+    /// edges are masked from the link graph for this query. The wikilink eval
+    /// uses a note's own outlinks as the relevant set; without the holdout,
+    /// the source note seeds PageRank and walks the gold edges directly,
+    /// circularly inflating the graph stages. Production queries always use
+    /// [`Self::compute_signals`] (no masking).
+    pub(crate) fn compute_signals_holdout(
+        &self,
+        conn: &Connection,
+        query_vec: &[f32],
+        query_text: &str,
+        holdout_source: &str,
+    ) -> Signals {
+        self.compute_signals_inner(conn, query_vec, query_text, Some(holdout_source))
+    }
+
+    fn compute_signals_inner(
+        &self,
+        conn: &Connection,
+        query_vec: &[f32],
+        query_text: &str,
+        holdout_source: Option<&str>,
+    ) -> Signals {
         let all_embeddings = self.store.all();
         let paths = &self.paths_interned;
 
@@ -180,8 +209,19 @@ impl SearchContext {
             .collect();
 
         let fts_results = fts_bm25_query(conn, query_text, TOP_K_FTS);
-        let seeds = collect_seeds(&vec_scored, &fts_results);
-        let ppr_results = personalized_pagerank(&self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS);
+        let mut seeds = collect_seeds(&vec_scored, &fts_results);
+        let ppr_results = match holdout_source {
+            None => personalized_pagerank(&self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS),
+            Some(src) => {
+                seeds.retain(|s| s != src);
+                // The graph is stored undirected, so dropping the source's
+                // adjacency list removes every source->outlink edge; remaining
+                // inbound edges only feed score into the (filtered) source.
+                let mut masked: HashMap<String, Vec<String>> = (*self.graph).clone();
+                masked.remove(src);
+                personalized_pagerank(&masked, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS)
+            }
+        };
         let tag_results = tag_expand_from_map(&self.tags, &seeds);
 
         Signals { vec_scored, fts_results, ppr_results, tag_results }
@@ -475,6 +515,60 @@ mod tests {
         let legacy_paths: Vec<&str> = legacy_top.iter().map(|(p, _)| p.as_str()).collect();
         let ctx_paths: Vec<&str> = ctx_top.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(legacy_paths, ctx_paths);
+    }
+
+    #[test]
+    fn test_holdout_masks_gold_edges_in_ppr() {
+        // Vault: source links to a + b (the eval ground truth). Eleven filler
+        // notes sit between the query vector and a/b so that a/b are outside
+        // the top-10 vec seeds — the regime where PPR's contribution matters.
+        let emb_src = norm(&[1.0, 0.0, 0.0]);
+        let emb_a = norm(&[0.0, 1.0, 0.0]);
+        let emb_b = norm(&[0.0, 0.0, 1.0]);
+        let fillers: Vec<Vec<f32>> = (1..=11)
+            .map(|i| norm(&[1.0, 0.01 * i as f32, 0.0]))
+            .collect();
+
+        let mut notes: Vec<(String, String, String, Vec<f32>)> = vec![
+            ("source.md".into(), "source note".into(), "links to a and b".into(), emb_src),
+            ("a.md".into(), "note a".into(), "body a".into(), emb_a),
+            ("b.md".into(), "note b".into(), "body b".into(), emb_b),
+        ];
+        for (i, emb) in fillers.into_iter().enumerate() {
+            notes.push((
+                format!("filler{i}.md"),
+                format!("filler {i}"),
+                "unrelated body".into(),
+                emb,
+            ));
+        }
+        let notes_ref: Vec<(&str, &str, &str, &[f32])> = notes
+            .iter()
+            .map(|(p, t, b, e)| (p.as_str(), t.as_str(), b.as_str(), e.as_slice()))
+            .collect();
+        let conn = create_test_db(&notes_ref);
+        conn.execute_batch(
+            "CREATE TABLE links (id INTEGER PRIMARY KEY, source_id INTEGER, target_path TEXT NOT NULL);
+             INSERT INTO links (source_id, target_path) VALUES (1, 'a'), (1, 'b');",
+        )
+        .unwrap();
+
+        let ctx = SearchContext::build(&conn);
+        let qvec = norm(&[1.0, 0.0, 0.0]);
+
+        let leaky = ctx.compute_signals(&conn, &qvec, "source note");
+        let leaky_ppr: Vec<&str> = leaky.ppr_results.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(
+            leaky_ppr.contains(&"a.md") && leaky_ppr.contains(&"b.md"),
+            "without holdout, PPR ranks the gold targets by walking source's own edges: {leaky_ppr:?}"
+        );
+
+        let held = ctx.compute_signals_holdout(&conn, &qvec, "source note", "source.md");
+        let held_ppr: Vec<&str> = held.ppr_results.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(
+            !held_ppr.contains(&"a.md") && !held_ppr.contains(&"b.md"),
+            "with holdout, the gold edges alone cannot rank a.md/b.md: {held_ppr:?}"
+        );
     }
 
     #[test]

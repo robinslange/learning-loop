@@ -97,6 +97,7 @@ For each check with `status === "fail"`:
 | `vault-system-files` | Write the default content defined in `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/02-vault.md` §2c |
 | `search-index-exists` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` (resolves vault/db paths itself; bare `ll-search index` fails — the binary requires explicit `<VAULT_PATH> <DB_PATH>` positionals) |
 | `nli-socket-fresh` (stale file) | `rm <path>` |
+| `duplicate-gate-health` (repeated timeouts) | `ll-watch` (start the warm daemon so the duplicate gate uses the socket instead of cold-starting the model on every write) |
 | `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch` (no arguments — that is the background-start invocation; `start` is not a subcommand) |
 | `abi-drift` | `npm rebuild` in the affected plugin directory |
 

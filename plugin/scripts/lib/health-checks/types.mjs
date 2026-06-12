@@ -21,6 +21,7 @@ export const CHECK_IDS = Object.freeze({
   'plugin-cache-version-present': 'plugin-cache-version-present',
   'search-index-exists': 'search-index-exists',
   'nli-socket-fresh': 'nli-socket-fresh',
+  'duplicate-gate-health': 'duplicate-gate-health',
   'abi-drift': 'abi-drift',
   // full-only checks
   'node-version': 'node-version',

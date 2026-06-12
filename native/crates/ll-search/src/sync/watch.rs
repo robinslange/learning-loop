@@ -116,9 +116,12 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     #[cfg(all(feature = "nli", unix))]
     let _nli_server_task = {
         let socket_path = cfg.config_dir.join("nli.sock");
+        let db_path = cfg.db_path.clone();
         let shutdown_rx_nli = shutdown_rx.clone();
         tokio::spawn(async move {
-            if let Err(e) = crate::nli_server::run_nli_server(socket_path, shutdown_rx_nli).await {
+            if let Err(e) =
+                crate::nli_server::run_nli_server(socket_path, db_path, shutdown_rx_nli).await
+            {
                 eprintln!("NLI server task exited with error: {e}");
             }
         })

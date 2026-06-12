@@ -27,6 +27,11 @@ const COUNT = parseInt(getArg("count", "1000"), 10);
 const OUT = getArg("out", ".cache/vault");
 const SEED = parseInt(getArg("seed", "20260511"), 10);
 
+// Bump when note-content generation changes so stale .cache fixtures (and
+// quality baselines built on them) regenerate instead of silently reusing
+// old content. v2: topic-clustered vocabulary + topic-biased wikilinks.
+const GENERATOR_VERSION = 2;
+
 // ---------------------------------------------------------------------------
 // mulberry32 PRNG — no deps, deterministic, fast
 // ---------------------------------------------------------------------------
@@ -111,35 +116,62 @@ function cap(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function pickWords(rng, n) {
+// ---------------------------------------------------------------------------
+// Topic clustering — notes belong to a topic with its own vocabulary slice,
+// and wikilinks prefer same-topic notes. Without this, link targets share no
+// vocabulary with their source and link-grounded retrieval eval is pure noise.
+// ---------------------------------------------------------------------------
+
+const TOPIC_COUNT = 12;
+const TOPIC_VOCAB_SIZE = 30;
+const TOPIC_WORD_BIAS = 0.7; // probability a word is drawn from the topic vocabulary
+const SAME_TOPIC_LINK_BIAS = 0.8; // probability a wikilink targets a same-topic note
+
+function topicVocab(topic) {
+  // Overlapping windows over WORDS — adjacent topics share some vocabulary,
+  // like real vaults do.
+  const start = Math.floor((topic * WORDS.length) / TOPIC_COUNT);
+  const vocab = [];
+  for (let i = 0; i < TOPIC_VOCAB_SIZE; i++) {
+    vocab.push(WORDS[(start + i) % WORDS.length]);
+  }
+  return vocab;
+}
+
+const TOPIC_VOCABS = Array.from({ length: TOPIC_COUNT }, (_, t) => topicVocab(t));
+
+function pickWords(rng, n, topic) {
+  const vocab = TOPIC_VOCABS[topic];
   const out = [];
   for (let i = 0; i < n; i++) {
-    out.push(WORDS[Math.floor(rng() * WORDS.length)]);
+    const pool = rng() < TOPIC_WORD_BIAS ? vocab : WORDS;
+    out.push(pool[Math.floor(rng() * pool.length)]);
   }
   return out;
 }
 
-function sentence(rng) {
+function sentence(rng, topic) {
   const tmpl = SENTENCE_TEMPLATES[Math.floor(rng() * SENTENCE_TEMPLATES.length)];
-  return tmpl(pickWords(rng, 4));
+  return tmpl(pickWords(rng, 4, topic));
 }
 
-function paragraph(rng, sentences = 4) {
-  return Array.from({ length: sentences }, () => sentence(rng)).join(" ");
+function paragraph(rng, topic, sentences = 4) {
+  return Array.from({ length: sentences }, () => sentence(rng, topic)).join(" ");
 }
 
 // ---------------------------------------------------------------------------
 // Note generation
 // ---------------------------------------------------------------------------
 
-function generateNote(id, rng, allTitles) {
-  const wordSlug = pickWords(rng, 3).join("-");
+function generateNote(id, rng, allNotes) {
+  const topic = Math.floor(rng() * TOPIC_COUNT);
+  const wordSlug = pickWords(rng, 3, topic).join("-");
   const filename = `${String(id).padStart(5, "0")}-${wordSlug}.md`;
 
-  // frontmatter
-  const tagCount = 1 + Math.floor(rng() * 4);
-  const noteTags = [];
-  const tagSet = new Set();
+  // frontmatter: tags keyed off the topic plus 0-2 random extras
+  const tagCount = 1 + Math.floor(rng() * 3);
+  const noteTags = [TAGS[topic % TAGS.length]];
+  const tagSet = new Set(noteTags);
   while (noteTags.length < tagCount) {
     const t = TAGS[Math.floor(rng() * TAGS.length)];
     if (!tagSet.has(t)) { tagSet.add(t); noteTags.push(t); }
@@ -150,13 +182,19 @@ function generateNote(id, rng, allTitles) {
   const span = 2 * 365 * 24 * 3600;
   const mtime = Math.floor(baseEpoch + rng() * span);
 
-  // wikilinks (5-15, from earlier notes only — prevents forward refs)
+  // wikilinks (5-15, from earlier notes only — prevents forward refs).
+  // Same-topic targets are preferred so link structure correlates with
+  // content, making link-grounded eval meaningful.
   const linkCount = 5 + Math.floor(rng() * 11);
   const links = [];
-  const usable = allTitles.slice(0, Math.max(0, id - 1));
+  const usable = allNotes.slice(0, Math.max(0, id - 1));
+  const sameTopic = usable.filter((n) => n.topic === topic);
   if (usable.length > 0) {
     for (let i = 0; i < Math.min(linkCount, usable.length); i++) {
-      const target = usable[Math.floor(rng() * usable.length)];
+      const pool = sameTopic.length > 0 && rng() < SAME_TOPIC_LINK_BIAS ? sameTopic : usable;
+      // Wikilinks target the filename stem (Obsidian-style), so the indexer's
+      // link resolution (`<stem>.md` lookup) actually resolves them.
+      const target = pool[Math.floor(rng() * pool.length)].stem;
       if (!links.includes(target)) links.push(target);
     }
   }
@@ -164,7 +202,7 @@ function generateNote(id, rng, allTitles) {
   // body: 200-800 words → 3-10 paragraphs
   const paraCount = 3 + Math.floor(rng() * 8);
   const bodyParas = Array.from({ length: paraCount }, () =>
-    paragraph(rng, 2 + Math.floor(rng() * 4))
+    paragraph(rng, topic, 2 + Math.floor(rng() * 4))
   );
 
   const wikilinksInBody = links
@@ -183,6 +221,8 @@ function generateNote(id, rng, allTitles) {
 
   const title = cap(wordSlug.replace(/-/g, " "));
 
+  const noteMeta = { title, stem: filename.replace(/\.md$/, ""), topic };
+
   const content = [
     "---",
     `title: "${title}"`,
@@ -195,7 +235,7 @@ function generateNote(id, rng, allTitles) {
     body,
   ].join("\n");
 
-  return { filename, title, content };
+  return { filename, noteMeta, content };
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +247,7 @@ function main() {
   if (existsSync(manifestPath)) {
     try {
       const existing = JSON.parse(readFileSync(manifestPath, "utf8"));
-      if (existing.count === COUNT && existing.seed === SEED) {
+      if (existing.count === COUNT && existing.seed === SEED && existing.generatorVersion === GENERATOR_VERSION) {
         process.stdout.write(
           JSON.stringify({ status: "skipped", reason: "manifest matches", count: COUNT }) + "\n"
         );
@@ -221,14 +261,14 @@ function main() {
   mkdirSync(OUT, { recursive: true });
 
   const rng = mulberry32(SEED);
-  const allTitles = [];
+  const allNotes = [];
   const paths = [];
 
   process.stderr.write(`Generating ${COUNT} notes in ${OUT} (seed=${SEED})...\n`);
 
   for (let i = 0; i < COUNT; i++) {
-    const { filename, title, content } = generateNote(i + 1, rng, allTitles);
-    allTitles.push(title);
+    const { filename, noteMeta, content } = generateNote(i + 1, rng, allNotes);
+    allNotes.push(noteMeta);
     const filePath = join(OUT, filename);
     writeFileSync(filePath, content);
     paths.push(filename);
@@ -246,6 +286,7 @@ function main() {
   const manifest = {
     count: COUNT,
     seed: SEED,
+    generatorVersion: GENERATOR_VERSION,
     sha256OfAllPaths,
     generatedAt: new Date().toISOString(),
   };

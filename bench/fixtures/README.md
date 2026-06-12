@@ -15,9 +15,14 @@ node generate-vault.mjs --count 10000 --out .cache/vault-10k --seed 20260511
 ## Properties
 
 - Deterministic: same seed = same output on every machine.
-- Idempotent: re-running with the same count+seed is a no-op (manifest check).
-- Each note: YAML frontmatter (title, tags 1-4, mtime), body 200-800 words, 5-15 wikilinks.
-- Tags drawn from 30-word vocabulary.
+- Idempotent: re-running with the same count+seed+generator version is a no-op (manifest check).
+- Each note: YAML frontmatter (title, tags 1-3, mtime), body 200-800 words, 5-15 wikilinks.
+- Notes are topic-clustered: each note belongs to one of 12 topics with an overlapping
+  vocabulary slice; body words are 70% topic vocabulary and wikilinks prefer (80%)
+  same-topic targets. Link structure therefore correlates with content, which makes
+  link-grounded retrieval eval (`ll-search eval-funnel`) meaningful on this fixture.
+- Wikilinks target filename stems (Obsidian-style) so the indexer resolves them.
+- Tags keyed off the note topic plus random extras, drawn from a 30-tag vocabulary.
 - Body drawn from 150-word technical vocabulary + 8 sentence templates.
 
 ## What is and is not committed
