@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.27.3
+
 ### Fixed
 
 - **`/learning-loop:federation` is model-invocable again.** Its `disable-model-invocation` flag blocked the very handoffs that reference it (init Phase 4, broken-sync repair), erroring with "cannot be used with Skill tool". The flag stays on init, rewrite, seed, and harvest — those are deliberately user-only entry points.
