@@ -41,7 +41,7 @@ jobs:
       # stable across these versions.
       - name: Install ll-search release binary
         env:
-          LL_BINARY_VERSION: v1.26.0
+          LL_BINARY_VERSION: v1.27.1
         run: |
           set -euo pipefail
           mkdir -p native/target/release
