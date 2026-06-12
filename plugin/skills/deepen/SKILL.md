@@ -12,8 +12,8 @@ Launches the `note-deepener` agent to strengthen a single note. The agent assess
 ## When to Use
 
 - `/deepen <note-name>`: target a specific note
-- `/deepen`: no argument; picks the shallowest inbox note
-- When `/inbox` flags a note as needing deepening
+- `/deepen`: no argument; auto-picks the note most in need of work — the shallowest `0-inbox/` note OR a gate-demoted `1-fleeting/` note (verification markers / `source: unverified`) that has no other resurfacing path
+- When `/inbox` flags a note as needing deepening (including the fleeting NEEDS-DEEPEN recommendations)
 - When a note feels thin and the user wants to strengthen it
 
 ## Provenance
@@ -37,7 +37,7 @@ Per-note tracking is handled automatically by the PostToolUse hook.
 ### Step 0: Parameter Resolution
 
 **No argument (`/deepen`):**
-Run auto-pick immediately (the agent picks the shallowest inbox note — no prompting needed). After presenting results, mention the targeted form in one line:
+Run auto-pick immediately (the agent picks the note most in need of work — the shallowest inbox note OR a gate-demoted marker-bearing `1-fleeting/` note — no prompting needed). After presenting results, mention the targeted form in one line:
 
 > Deepened [note]. To target a specific note: `/deepen "note name"`.
 
@@ -52,7 +52,7 @@ Launch the `note-deepener` agent with:
 
 The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/note-deepener.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
 
-If no note name was provided, pass no note_path: the agent will pick the shallowest inbox note.
+If no note name was provided, pass no note_path: the agent will auto-pick from `0-inbox/` (shallowest) and `1-fleeting/` (gate-demoted marker-bearing notes), preferring an older stuck fleeting note over a thin inbox seed.
 
 ### Step 1.5: Replay Post-Write Hooks
 

@@ -6,13 +6,13 @@
 {
   "vault_path": "~/path/to/vault",
   "injection_mode": "shadow",
-  "injection_threshold": 0.35
+  "injection_threshold": 0.3
 }
 ```
 
-`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it *would* have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below).
+`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it *would* have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below). The `injection-shadow-gate` health check watches the shadow logs and nudges at session start once the go-live gate is passing; `/learning-loop:doctor` can apply the flip with your approval.
 
-`injection_threshold` is the minimum cosine similarity score the top vault or episodic hit must clear before context is injected. Defaults to `0.35`. Tune by inspecting `scripts/review-shadow.mjs` output — real top-score distributions on bge-small-en-v1.5 sit in the 0.15-0.45 band, so 0.65+ is unreachable. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
+`injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw RRF fusion sum (each of the five search signals contributes `1/(5+rank)`), **not** a cosine similarity: a hit ranked #1 in one signal scores ~0.17, #1 in two signals ~0.33, and #1 in all five ~0.83. Defaults to `0.3` — just below the two-strong-signals level, calibrated against 18k shadow-injection gate evaluations (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
 
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
@@ -52,8 +52,8 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 
 - shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
 - review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
-- flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes
-- gate threshold: `injection_threshold` in `config.json` (default `0.35`) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
+- flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes — the `injection-shadow-gate` health check surfaces a session-start nudge when the shadow data clears the gate, and `/learning-loop:doctor` applies the edit on approval (never automatically)
+- gate threshold: `injection_threshold` in `config.json` (default `0.3`, an RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
@@ -70,7 +70,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `CLAUDE_PLUGIN_DATA` | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
 | `VAULT_PATH` | Overrides `vault_path` from `config.json` |
 | `LEARNING_LOOP_INJECTION_MODE` | Per-session override of `injection_mode` (`shadow`, `live`, `off`) |
-| `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (decimal cosine, e.g. `0.4`) |
+| `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`) |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
 | `LEARNING_LOOP_PRECOMPACT_SPIKE` | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant. |
 

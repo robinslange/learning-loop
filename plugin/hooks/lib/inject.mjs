@@ -62,7 +62,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
     const top = filtered[0];
     const body = truncateAtSentenceBoundary(top.body, 300);
     const lines = [
-      `## From your vault (top match: ${top.title}, similarity ${top.score})`,
+      `## From your vault (top match: ${top.title}, match score ${top.score})`,
       '',
       body,
     ];

@@ -213,6 +213,12 @@ Read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` and execute it (
 
 Skip this entire step if the new-notes file does not exist or is empty (the session wrote no vault notes).
 
+### Step 4.7: Retrieval Usage Provenance
+
+Read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/usage-provenance.md` and execute it: list the notes that injection/retrieval surfaced to this session (`retrieval-report.mjs --session-surfaced`), classify each as used (read, edited, or linked this session) or ignored, and emit one `note-usage` provenance event per note. Surfacing alone — including an injected note body — never counts as used; when unsure, classify as ignored.
+
+Run this step even when Step 4.6 was skipped. Skip it only when nothing was surfaced to the session.
+
 ### Step 5: Report
 
 Output a brief summary:
@@ -222,6 +228,7 @@ Reflected on [domain/project] session.
 Captured: [N items] → [where they went]
 Connections: [any cross-project links made]
 Merge/Sharpen candidates: [any confusable_pairs flagged, or "none"]
+Retrieval usage: [N used / M ignored of K surfaced — omit if nothing surfaced]
 ```
 
 Keep it to 2-4 lines. The user can see the diffs if they want details.

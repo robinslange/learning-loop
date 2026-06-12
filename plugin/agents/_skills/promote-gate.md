@@ -41,6 +41,19 @@ Detection heuristic for synthesis vs factual:
 
 When in doubt, treat as factual (safer to require a source than to let an unsourced factual claim through).
 
+### Synthesis-tag re-validation (audit the self-certified tag)
+
+The `[synthesis]` tag waives Sourcing and Source Integrity, and it is assigned by the same agent that benefits from the exemption — self-certified, never re-checked. **Any consumer that reads the tag to grant the exemption must first re-run the factual-signals heuristic above against the note body.** This is the canonical audit; `inbox-organiser` (triage step 3a) and `/verify` (permanent + fleeting scopes) both reference it.
+
+Procedure:
+
+1. Scan the body (outside fenced code blocks) for **factual signals**: a numeric figure with a unit or comparator (`X%`, `n=X`, `<X`, `>X`, `X-fold`, `X mg`), a named study or author+year, an effect size, or a "research shows / studies find" attribution.
+2. **Exception — grounded vault numbers.** A figure carried in via a `[[wikilink]]` to a vault note that itself has a real source is legitimate synthesis (`source_grounded=1`). Don't demote on a number whose support is an adjacent grounded note. Demote only on bare factual signals with no wikilink backing.
+3. If a bare factual signal is present, **demote the exemption**: treat the note as factual and apply the full 6-criterion gate (Sourcing and Source Integrity no longer waived). With no real source, it cannot reach `3-permanent/` — it routes to `1-fleeting/` (or stays there) until sourced.
+4. If only synthesis signals are present, the exemption stands (4-criterion gate).
+
+The writer's "when in doubt, treat as factual" checkpoint runs once at capture time; this re-validation is the downstream backstop so a misclassified factual claim can't ride the synthesis label into permanent.
+
 ## Assessment
 
 Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
@@ -135,10 +148,11 @@ Use the highest applicable score across claims for each dimension. These fields 
 
 ## Override Rules
 
+- **If `destination_locked: true` was passed, do not override at all.** The caller has declared the requested destination final — typically because it already encodes a gate decision the override would defeat (e.g. the `/inbox` worklist routes a verify-note FAIL to `1-fleeting/`, and re-promoting it to `3-permanent/` would undo that verification gate). This is the explicit escape hatch for callers that pin their destination.
 - If the caller specifies `2-literature/`, do not override. Literature notes have different criteria.
 - If the caller specifies `5-maps/`, do not override. Hub-placement is a caller decision that the gate must respect.
-- If the caller specifies `3-permanent/` and the note only passes 2 criteria, demote to `0-inbox/` with a warning. Don't let bad notes into permanent.
-- If the caller specifies `0-inbox/` and the note passes all 6, promote to `3-permanent/` — UNLESS it satisfies the synthesis-hub conditions (synthesis-tagged + ≥10 wikilinks), in which case route to `5-maps/`. Don't bury ready notes; don't pollute permanent with hubs.
+- If the caller specifies `3-permanent/` and the note only passes 2 criteria, demote to `0-inbox/` with a warning. Don't let bad notes into permanent. (This protective demotion still fires even when `destination_locked` is set — locking pins the *requested* folder, it never forces a bad note into permanent.)
+- If the caller specifies `0-inbox/` and the note passes all 6, promote to `3-permanent/` — UNLESS the caller set `destination_locked`, OR it satisfies the synthesis-hub conditions (synthesis-tagged + ≥10 wikilinks), in which case route to `5-maps/`. Don't bury ready notes; don't pollute permanent with hubs.
 
 ## Skip-Rewrite Detection
 

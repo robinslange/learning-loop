@@ -160,6 +160,29 @@ If the queue has pending items, add recommendation:
 
 > Run `/health --librarian` to review and act on librarian suggestions.
 
+### Step 7.6: Check: Retrieval Usage
+
+Run:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs --usage --json
+```
+
+Parse the JSON. Two candidate lists:
+
+- **`surfaced_never_used`**: notes surfaced repeatedly by injection/retrieval with zero `used` provenance events. These are deepen-or-archive candidates — either the note isn't earning its retrieval rank (sharpen/`/deepen` it) or it's noise crowding out better hits (archive it).
+- **`never_surfaced`**: content notes (0-inbox, 1-fleeting, 2-literature, 3-permanent) never surfaced by any retrieval or injection in the window. Archive candidates.
+
+Honest framing — carry these caveats into the output verbatim, do not soften them:
+
+- "Used" only counts explicit `note-usage` events from `/reflect` Step 4.7. Sessions that never ran that check contribute no events, so "never used" includes "never evaluated" — surfacing alone is never counted as use, and a note the model saw but never opened counts as ignored.
+- If `coverage_limited` is true, the logs span fewer days than the window: report "never surfaced in `coverage_days`d of logs", not "in `window_days`d".
+
+If `coverage_days` is null (no surfacing telemetry yet), skip this step silently.
+
+**Light:** counts + top 5 of each list.
+**Deep:** full `surfaced_never_used` list with surfaced counts and explicit-ignore counts; `never_surfaced` count + first 20 paths.
+
 ### Step 8: Present Dashboard
 
 Output the summary dashboard:
@@ -175,9 +198,12 @@ Vault Health: YYYY-MM-DD
   Stale inbox:     N notes older than 14 days
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
+  Retrieval usage: N surfaced-never-used, M never surfaced in Kd of logs
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
+
+Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Never-used" means no recorded use — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
@@ -199,6 +225,7 @@ If `--auto` flag is NOT set:
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
+- **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-never-used notes worth sharpening, and archival (move to `_archive/`, ask first) for never-surfaced and persistently-ignored ones.
 
 ### Step 10: Summary
 

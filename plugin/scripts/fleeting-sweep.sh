@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
-# Finds fleeting notes that have been absorbed into permanent (2+ inbound links)
+# Finds fleeting notes that have been absorbed into permanent (2+ inbound links),
+# notes needing source repair (verification markers or source: unverified,
+# untouched >14 days — the gate-demoted class whose repair path is /deepen),
 # and stale project notes (no links, >60 days old, matches a project slug).
 #
 # Usage: fleeting-sweep.sh [vault_path]
 # Output: TSV lines — TYPE\tNAME\tDETAIL
+# Types: PROMOTED (archival candidate), NEEDS-DEEPEN (repair recommendation,
+# never archival), STALE (archival candidate)
 
 if [ -z "$1" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -47,6 +51,30 @@ matches_project_slug() {
   return 1
 }
 STALE_DAYS=60
+# Repair window: deliberately shorter than STALE_DAYS — a gate-demoted note
+# should surface for /deepen well before it would qualify as archival-stale,
+# but not on the very next /inbox run after the demotion.
+NEEDS_DEEPEN_DAYS=14
+
+# Blocking verification markers. Must stay in sync with the MARKERS array in
+# promotion-gate.mjs — tests/fleeting-sweep.test.mjs pins the two together.
+has_blocking_marker() {
+  # Strip fenced code blocks first (the gate ignores markers inside them),
+  # then case-insensitive fixed-string match.
+  awk '/^```/{f=!f;next} !f' "$1" | grep -qiF \
+    -e '[unresolved]' \
+    -e '[unverified]' \
+    -e '[not in abstract]' \
+    -e '[not in source]' \
+    -e '[needs verification]' \
+    -e '[citation needed]'
+}
+
+mod_days_for() {
+  local file_mod
+  file_mod=$(stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null)
+  echo $(( ( $(date +%s) - file_mod ) / 86400 ))
+}
 
 for f in "$FLEETING"/*.md; do
   [ -f "$f" ] || continue
@@ -63,13 +91,26 @@ for f in "$FLEETING"/*.md; do
     continue
   fi
 
+  mod_days=$(mod_days_for "$f")
+
+  # Gate-demoted notes whose documented repair path is /deepen: blocking
+  # verification markers or an honest source: unverified, sitting untouched.
+  if [ "$mod_days" -ge "$NEEDS_DEEPEN_DAYS" ]; then
+    if has_blocking_marker "$f"; then
+      echo -e "NEEDS-DEEPEN\t$name\tverification markers, ${mod_days} days old"
+      continue
+    fi
+    if grep -Eq '^source:[[:space:]]*"?unverified' "$f"; then
+      echo -e "NEEDS-DEEPEN\t$name\tsource: unverified, ${mod_days} days old"
+      continue
+    fi
+  fi
+
   # Check stale project notes
   if matches_project_slug "$name"; then
     # Any inbound links from anywhere?
     all_count=$(grep -rlF "[[$name]]" "$VAULT/" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$all_count" -eq 0 ]; then
-      file_mod=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null)
-      mod_days=$(( ( $(date +%s) - file_mod ) / 86400 ))
       if [ "$mod_days" -ge "$STALE_DAYS" ]; then
         echo -e "STALE\t$name\t0 refs, ${mod_days} days old"
       fi

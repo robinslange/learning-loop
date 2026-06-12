@@ -18,7 +18,8 @@ You will receive:
 - **verified_sources**: Table of URLs verified by the researcher (optional). When present, use these URLs verbatim in the `source:` frontmatter field. **NEVER generate a URL that isn't in this table.** If no verified source matches the note's topic, set `source: unverified`. If this field is absent (e.g., quick captures without research), you may include a URL only if you fetched the page yourself in this session.
 - **existing_note**: Current note content if this is a rewrite/deepen (optional)
 - **related_notes**: Vault notes to link to (optional)
-- **destination**: Suggested folder: `0-inbox/`, `1-fleeting/`, `2-literature/`, `3-permanent/`, or `5-maps/`. The promote-gate skill may override this based on note quality. `2-literature/` and `5-maps/` are caller-respected — the gate will not override them. Hub-shaped synthesis notes (`source: synthesis`/`discovery` + `synthesis` tag + ≥10 wikilinks) are auto-routed to `5-maps/` even when caller asks for `0-inbox/` or `3-permanent/`.
+- **destination**: Suggested folder: `0-inbox/`, `1-fleeting/`, `2-literature/`, `3-permanent/`, or `5-maps/`. The promote-gate skill may override this based on note quality (see the Override Rules below). `2-literature/` and `5-maps/` are caller-respected — the gate will not override them. Hub-shaped synthesis notes (`source: synthesis`/`discovery` + `synthesis` tag + ≥10 wikilinks) are auto-routed to `5-maps/` even when caller asks for `0-inbox/` or `3-permanent/`.
+- **destination_locked** (optional, default false): when `true`, the requested `destination` is final — do NOT let promote-gate override it. Callers set this when the destination is a deliberate choice the gate must not second-guess: e.g. the `/inbox` worklist, where the destination already encodes the organiser's verify-note gate result (a verify FAIL deliberately routes to `1-fleeting/`, and the gate re-promoting it to `3-permanent/` would defeat that verification gate). A plain quick capture leaves this unset, so a genuinely gate-worthy note can still be promoted out of `0-inbox/`.
 
 ### Source provenance rule
 
@@ -31,7 +32,7 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Skills
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: assess note quality and determine the correct destination folder. Override the requested destination if quality warrants it (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead). Hub-shaped synthesis notes route to `5-maps/`. Caller destinations of `2-literature/` and `5-maps/` are respected (no override).
+- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: assess note quality and determine the correct destination folder. **Override the requested destination if quality warrants it — UNLESS `destination_locked: true` was passed** (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead, but only when the destination is not locked). Hub-shaped synthesis notes route to `5-maps/`. Caller destinations of `2-literature/` and `5-maps/` are always respected (no override), as is any destination when `destination_locked` is set.
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: post-write source and claim verification against public APIs
 - `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
@@ -79,7 +80,11 @@ For synthesis notes with no external source, use `source: synthesis`. For unveri
 
 Set `claim_specificity` and `source_grounded` per the promote-gate scoring dimensions. Use the highest applicable score across claims in the note. If the note is tagged `[synthesis]`, set `source_grounded` based on vault links (0 = no links, 1 = links to grounded notes).
 
-Also return the filename you used (kebab-case, descriptive slug: not the full title).
+Also return the filename you used (kebab-case, descriptive slug: not the full title), and the **exact written path** including the folder you actually wrote to. The folder may differ from the requested `destination` when the gate overrode it (e.g. a `0-inbox/` request promoted to `3-permanent/`), so callers must read your reported path rather than reconstruct it from the requested destination — replaying hooks on a reconstructed path would miss the file. Report the path on its own line, e.g.:
+
+```
+Written: 3-permanent/the-actual-slug.md
+```
 
 ## When Rewriting
 

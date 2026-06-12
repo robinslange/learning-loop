@@ -88,9 +88,11 @@ Source project: "conversation"
 Date: <today YYYY-MM-DD>
 Destination: 0-inbox/
 
-Write the note directly to {{VAULT}}/0-inbox/<filename>.md using the Write tool.
-Return the filename and title when done.
+Write the note to its destination using the Write tool, then report the exact written path.
+Return the filename, title, and the written path when done.
 ```
+
+This is a capture, not a promotion: leave `destination_locked` unset, so a gate-worthy answer can still be promoted out of `0-inbox/`. The note may land in `1-fleeting/` or `3-permanent/` — read the folder from the agent's reported path, don't assume `0-inbox/`.
 
 **If either fails:** No capture. Move to report.
 
@@ -98,7 +100,7 @@ Return the filename and title when done.
 
 If Step 4 dispatched the `note-writer` subagent, replay the post-write hook chain on the new note. Subagent Write/Edit calls bypass PostToolUse, so without this the note misses the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules).
 
-Construct `$NOTE_PATH` from the agent's response (e.g. `{{VAULT}}/0-inbox/<filename>`, where `<filename>` is the kebab-case filename note-writer returned), then pipe it directly:
+Use the **exact path the agent reported** (the gate may have routed the note to a folder other than `0-inbox/`; a reconstructed `0-inbox/<filename>` path would point at a nonexistent file and the replay would silently fail). `$NOTE_PATH` is the absolute path built from the `Written:` line in the agent's response — never reconstructed from the requested destination:
 
 ```bash
 printf '%s\n' "$NOTE_PATH" \
@@ -109,10 +111,10 @@ Skip this step if Step 4 didn't capture (novelty/substance gate failed). See `sk
 
 ### Step 5: Report
 
-One line:
+One line, using the actual folder the agent wrote to (read it from the agent's reported path):
 
 ```
-Quick: "question" | Captured: "Note Title" → 0-inbox/filename.md
+Quick: "question" | Captured: "Note Title" → <actual-folder>/filename.md
 ```
 
 or

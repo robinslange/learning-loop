@@ -1,12 +1,108 @@
 #!/usr/bin/env node
+// retrieval-report.mjs — surfacing + usage report over retrieval telemetry.
+//
+// Modes:
+//   (default)                    full surfacing report + note-usage section
+//   --usage [--json]             note-usage section only (consumed by /health)
+//   --session-surfaced <sid>     JSON list of notes surfaced to one session
+//                                (consumed by /reflect Step 4.7)
 
 import { readFileSync, readdirSync } from 'fs';
-import { join } from 'path';
-import { getPluginData } from './lib/config.mjs';
+import { join, sep } from 'path';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { logError } from './lib/log.mjs';
+import { sessionSurfaced, usageReport } from './lib/retrieval-usage.mjs';
+import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
+
+const args = process.argv.slice(2);
+
+if (args[0] === '--session-surfaced') {
+  const sid = args[1];
+  if (!sid) {
+    console.error('Usage: retrieval-report.mjs --session-surfaced <session-id>');
+    process.exit(1);
+  }
+  console.log(JSON.stringify(sessionSurfaced(PD, sid), null, 2));
+  process.exit(0);
+}
+
+const USAGE_FOLDERS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent'];
+
+function vaultContentNotes() {
+  const vault = getVaultPath();
+  if (!vault) return null;
+  return listVaultNotes(vault)
+    .map((n) =>
+      n.path
+        .slice(vault.length + 1)
+        .split(sep)
+        .join('/'),
+    )
+    .filter((p) => USAGE_FOLDERS.some((f) => p.startsWith(f + '/')));
+}
+
+function printUsageSection() {
+  const report = usageReport(PD, { vaultNotes: vaultContentNotes() });
+
+  console.log(`Note Usage`);
+  console.log(`${'='.repeat(60)}`);
+  if (report.coverage_days === null) {
+    console.log('  No surfacing telemetry yet.');
+    console.log();
+    return;
+  }
+  const coverage = report.coverage_limited
+    ? `last ${report.window_days}d window, but logs only cover ${report.coverage_days}d`
+    : `last ${report.window_days}d`;
+  console.log(`  Window:          ${coverage}`);
+  console.log(
+    `  Usage events:    ${report.used_events} used / ${report.ignored_events} ignored across ${report.evaluated_notes} notes (from /reflect)`,
+  );
+  console.log(`  Surfaced notes:  ${report.surfaced_notes} in window`);
+  console.log();
+
+  console.log(`  Frequently surfaced, never used (deepen/archive candidates):`);
+  console.log(`  ('used' requires an explicit /reflect usage event; sessions without`);
+  console.log(`   that check count as no-use — surfacing alone is never use)`);
+  if (report.surfaced_never_used.length === 0) {
+    console.log('    (none)');
+  }
+  for (const n of report.surfaced_never_used.slice(0, 15)) {
+    const short = n.path.length > 60 ? '...' + n.path.slice(-57) : n.path;
+    console.log(
+      `    ${String(n.surfaced).padStart(3)}x  ${short}  (${n.ignored_events} explicit ignores)`,
+    );
+  }
+  console.log();
+
+  if (report.never_surfaced.length > 0) {
+    const span = report.coverage_limited
+      ? `${report.coverage_days}d of logs`
+      : `${report.window_days}d`;
+    console.log(
+      `  Never surfaced in ${span} (archive candidates): ${report.never_surfaced.length} notes`,
+    );
+    for (const p of report.never_surfaced.slice(0, 20)) {
+      console.log(`    ${p}`);
+    }
+    if (report.never_surfaced.length > 20) {
+      console.log(`    ... +${report.never_surfaced.length - 20} more`);
+    }
+    console.log();
+  }
+}
+
+if (args.includes('--usage')) {
+  if (args.includes('--json')) {
+    console.log(JSON.stringify(usageReport(PD, { vaultNotes: vaultContentNotes() }), null, 2));
+  } else {
+    printUsageSection();
+  }
+  process.exit(0);
+}
 
 function loadJsonl(prefix) {
   const results = [];
@@ -46,7 +142,7 @@ if (vaultQueries.length > 0) {
 
   for (const e of vaultQueries) {
     commands[e.command] = (commands[e.command] || 0) + 1;
-    const q = e.query?.toLowerCase().trim();
+    const q = typeof e.query === 'string' ? e.query.toLowerCase().trim() : '';
     if (q) queryFreq[q] = (queryFreq[q] || 0) + 1;
     for (const p of e.top_paths || []) {
       pathFreq[p] = (pathFreq[p] || 0) + 1;
@@ -137,7 +233,7 @@ if (episodicQueries.length > 0) {
   const sessions = new Set(episodicQueries.map((e) => e.session_id).filter(Boolean));
   const queryFreq = {};
   for (const e of episodicQueries) {
-    const q = e.query?.toLowerCase().trim();
+    const q = typeof e.query === 'string' ? e.query.toLowerCase().trim() : '';
     if (q) queryFreq[q] = (queryFreq[q] || 0) + 1;
   }
   const topQueries = Object.entries(queryFreq)
@@ -171,3 +267,6 @@ console.log(`  Episodic queries:  ${episodicQueries.length}`);
 console.log(
   `  Total events:      ${vaultQueries.length + memoryReads.length + episodicQueries.length}`,
 );
+console.log();
+
+printUsageSection();

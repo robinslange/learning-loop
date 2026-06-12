@@ -79,7 +79,27 @@ export const HookConfig = Object.freeze({
   STOP_NUDGE_MESSAGE_COUNT: 200,
 
   // --- ML thresholds / weights ---
-  INJECTION_THRESHOLD: 0.35,
+  // INJECTION_THRESHOLD gates the JIT injection pipeline (session-label.js).
+  // UNIT: raw RRF fusion sum as returned by `ll-search query` — NOT a cosine
+  // similarity. With RRF_K=5 each signal contributes 1/(5+rank), so a doc
+  // ranked #1 in one signal scores 0.167, #1 in two signals 0.333, and #1 in
+  // all five signals ~0.83. Cosine-style values (0.7+) are unreachable.
+  //
+  // Calibration (2026-06-12): shadow-injection logs 2026-04 → 2026-06,
+  // n=18,360 healthy gate evaluations with a recorded vault_top_score.
+  // Distribution: 6.8% scored 0 (no hits); every nonzero top score was
+  // >= 0.3333 (top hit ranked #1 in >= 2 signals); nonzero p25=0.367,
+  // p50=0.396, p75=0.446, p95=0.489, max=0.563. The previous 0.35 gate sat
+  // ABOVE the two-strong-signals floor and rejected that whole cohort
+  // (~10% of nonzero scores: 0.333-0.35). All logged data predates the BM25
+  // OR-mode change for long queries (which shifts this distribution), so the
+  // gate is derived from achievable-score math rather than a percentile:
+  // 0.30 sits just below the two-strong-signals level (2/(5+1) = 0.333) and
+  // above a lone single-signal #1 (1/6 = 0.167) — i.e. inject only when the
+  // top hit is corroborated near the top of at least two signals.
+  // Re-calibrate from post-OR-mode logs once they accumulate
+  // (node scripts/review-shadow.mjs).
+  INJECTION_THRESHOLD: 0.3,
   SIMILARITY_THRESHOLD: 0.85,
   COSINE_MIN: 0.74,
   COSINE_MAX: 0.92,

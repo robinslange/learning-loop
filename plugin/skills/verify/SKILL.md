@@ -13,6 +13,7 @@ Assesses vault notes on two dimensions: structural quality (depth, sourcing, lin
 
 - `/verify "note-name"`: single note
 - `/verify inbox`: everything in `0-inbox/`
+- `/verify fleeting`: everything in `1-fleeting/` (the gate-demoted notes — catches stuck verification markers and `source: unverified` notes that have no other resurfacing path)
 - `/verify permanent`: everything in `3-permanent/`
 - `/verify "topic"`: all notes matching a topic
 - `/verify`: defaults to `0-inbox/`
@@ -77,6 +78,7 @@ Proceed immediately.
 |-------|-------|
 | `/verify "note-name"` | Single note |
 | `/verify inbox` | Everything in `0-inbox/` |
+| `/verify fleeting` | Everything in `1-fleeting/` |
 | `/verify permanent` | Everything in `3-permanent/` |
 | `/verify "topic"` | All notes matching the topic across the vault |
 | `/verify` | Default to `0-inbox/` |
@@ -84,7 +86,7 @@ Proceed immediately.
 ### Step 2: Gather Notes
 
 - For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`, Read it
-- For folder-based: `Glob` for `*.md` in the target folder
+- For folder-based: `Glob` for `*.md` in the target folder (`inbox` → `0-inbox/`, `fleeting` → `1-fleeting/`, `permanent` → `3-permanent/`)
 - For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
 Read each note.
@@ -128,6 +130,23 @@ Two-source check: embeddings find topical similarity; NLI finds logical relation
 3. **Deduplicate.** If a pair surfaces from both sources, present the NLI verdict and append the cosine for context: `(NLI p=0.97, cosine 0.84)`. NLI hits sort above cosine-only hits because the signal is stronger.
 
 If `getNliEdgesForNote` throws or returns nothing (DB locked, fresh vault, daemon offline), log via the existing hook-error pattern and proceed with embedding-only. Graceful degrade. Note the absence in the report so the user knows nothing was checked.
+
+### Step 4.5: Synthesis-Tag Audit (permanent + fleeting scopes)
+
+For the `permanent` and `fleeting` scopes (and `"topic"` scopes that surface synthesis-tagged notes), audit every `source: synthesis` / `synthesis`-tagged note against the factual-signals heuristic before trusting its exemption. The exemption is self-certified by the writing agent and is never otherwise re-checked, so a smuggled factual claim can sit in `3-permanent/` unaudited.
+
+Run the canonical procedure from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md` → "Synthesis-tag re-validation": scan each synthesis note's body (outside fenced blocks) for bare factual signals (a number with a unit/comparator, a named study or author+year, an effect size, a "research shows" attribution) that are **not** backed by a grounding `[[wikilink]]`. 
+
+For each note where the audit fires, flag it in the report as `synthesis exemption misapplied` — high priority, same tier as a fabricated source, because the note bypassed Sourcing and Source Integrity it should have faced:
+
+```
+### Synthesis Audit
+| Note | Factual signal found | Recommendation |
+|------|----------------------|----------------|
+| [[some-pattern-note]] | "improves recall by 23%" (no grounding link) | demote: add source or move to 1-fleeting/ |
+```
+
+A synthesis note that cites numbers only via wikilinks to grounded vault notes passes the audit (legitimate `source_grounded=1`). Notes with no factual signals pass silently.
 
 ### Step 5: Source Verification (Parallel Subagents)
 

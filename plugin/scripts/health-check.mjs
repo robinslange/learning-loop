@@ -17,7 +17,7 @@ import { homedir } from 'node:os';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { detectAbiDrift } from './check-deps-impl.mjs';
-import { resolvePluginData, getVaultPath } from './lib/config.mjs';
+import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 
@@ -84,6 +84,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
     quick.checkNliSocketFresh({ pluginData: c.pluginData }),
     quick.checkDuplicateGateHealth({ pluginData: c.pluginData }),
+    quick.checkInjectionShadowGate({ pluginData: c.pluginData, injectionMode: c.injectionMode }),
     quick.checkAbiDrift({ abiDriftResult: c.abiDriftResult }),
   ];
   return {
@@ -163,7 +164,11 @@ export async function runFullChecks(ctx = {}) {
 
 export function formatMissingDeps(result) {
   if (!result?.checks) return '';
-  const failed = result.checks.filter((c) => c.status === 'fail');
+  // injection-shadow-gate is a readiness nudge, not a missing dependency —
+  // the session-start detector surfaces it on its own line.
+  const failed = result.checks.filter(
+    (c) => c.status === 'fail' && c.id !== 'injection-shadow-gate',
+  );
   const required = failed.filter((c) => c.severity === 'fail');
   const optional = failed.filter((c) => c.severity === 'warn');
   if (failed.length === 0) return '';
@@ -221,6 +226,7 @@ if (isMain) {
     pluginVersion: pluginVersion(),
     templateVersion: readTemplateVersion(),
     abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
+    injectionMode: getConfig().injection_mode,
     minNodeMajor: 22,
     minClaudeVersion: '2.1.144',
   };

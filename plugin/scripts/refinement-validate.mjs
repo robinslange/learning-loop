@@ -13,6 +13,10 @@
 //      c. Computes sentence delta (added - removed) / original_count
 //      d. Tags `oversized` if > 20%, `auto_rejected` if > 50%
 //      e. Verifies frontmatter byte-equality with the upstream
+//      f. Rejects sentence removal: every upstream body sentence must
+//         survive verbatim in the proposal (rule 2 allows additions only)
+//      g. Emits `upstream_hash` (sha256 of the upstream file at validation
+//         time) for the driver's pre-apply stale-read guard
 //   3. For each `counterpoint` decision: validates the link texts have stems
 //   4. Emits a cleaned JSON object with per-decision validation flags
 //
@@ -25,6 +29,7 @@
 // per-decision flags. Exit 1 if input is unparseable or pairs file missing.
 
 import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logError } from './lib/log.mjs';
@@ -53,6 +58,27 @@ function countSentences(body) {
   if (!stripped) return 0;
   const matches = stripped.match(/[^.!?]+[.!?]+/g);
   return matches ? matches.length : 1;
+}
+
+// Split a body into comparable sentence units. Per non-blank line (outside
+// code blocks): sentence chunks where terminal punctuation exists, the whole
+// line otherwise (headings, list items). Em-dashes are normalised first so a
+// strip pass on one side cannot fake a removal, and whitespace is collapsed.
+function sentenceUnits(bodyOnly) {
+  const normalised = bodyOnly
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(new RegExp(EM_DASH, 'g'), EM_DASH_REPLACEMENT);
+  const units = [];
+  for (const line of normalised.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const chunks = trimmed.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [trimmed];
+    for (const chunk of chunks) {
+      const unit = chunk.replace(/\s+/g, ' ').trim();
+      if (unit) units.push(unit);
+    }
+  }
+  return units;
 }
 
 function stripEmDashes(text) {
@@ -180,13 +206,29 @@ export function validateEdit(decision, currentBody) {
     flags.push(sizeFlag);
   }
 
-  // 4. Sentence removal check (proposed must include all original sentences as substrings, loosely)
-  // Skip for now - frontmatter check + 20% cap is the main safety. The reviewer will catch removals.
+  // 4. Sentence removal check. Rule 2 makes edits additive only: every
+  // upstream body sentence must survive verbatim in the proposal. An LCS over
+  // sentence units (rather than lines) tolerates in-paragraph insertions but
+  // catches the remove-N/add-N rewrite that the size delta scores as 0.
+  const upstreamUnits = sentenceUnits(currentBodyOnly);
+  const proposedUnits = sentenceUnits(cleanedBodyOnly);
+  const preservedUnits = lcsLineMask(proposedUnits, upstreamUnits);
+  const removedUnits = upstreamUnits.filter((_, idx) => !preservedUnits[idx]);
+  if (removedUnits.length > 0) {
+    status = 'auto_rejected';
+    flags.push({
+      type: 'sentences_removed',
+      severity: 'auto_rejected',
+      removed_count: removedUnits.length,
+      removed: removedUnits.slice(0, 5),
+    });
+  }
 
   return {
     cleaned_body: cleanedBody,
     flags,
     status,
+    upstream_hash: createHash('sha256').update(currentBody).digest('hex'),
   };
 }
 
@@ -334,7 +376,11 @@ function main() {
         upstream_path: pair.candidate,
         new_note_path: pair.new_note,
         cosine: pair.cosine,
-        validation: { status: result.status, flags: result.flags },
+        validation: {
+          status: result.status,
+          flags: result.flags,
+          upstream_hash: result.upstream_hash,
+        },
       });
     } else if (d.decision === 'counterpoint') {
       const result = validateCounterpoint(d);
@@ -375,6 +421,9 @@ function main() {
     ).length,
     em_dash_violations: validated.filter((d) =>
       d.validation.flags.some((f) => f.type === 'em_dash_violation'),
+    ).length,
+    sentences_removed_violations: validated.filter((d) =>
+      d.validation.flags.some((f) => f.type === 'sentences_removed'),
     ).length,
     frontmatter_violations: validated.filter((d) =>
       d.validation.flags.some((f) => f.type === 'frontmatter_modified'),

@@ -16,7 +16,12 @@ You will receive:
 - **note_path**: Path to the note to deepen (required)
 - **vault_path**: Path to the vault (default `{{VAULT}}/`)
 
-If no note_path is provided, scan `0-inbox/` and pick the shallowest note.
+If no note_path is provided, auto-pick the note most in need of work, considering two pools together:
+
+1. **`0-inbox/`** — the shallowest note (lowest promote-gate score).
+2. **`1-fleeting/`** — notes the promote-gate demoted and whose documented repair path is `/deepen`: those carrying a blocking verification marker (`agents/_skills/capture-rules.md` → Verification Markers) or `source: unverified`. Without this, those notes have no resurfacing path and sit forever (the gate demotes them in, nothing pulls them out).
+
+Prefer a marker-bearing `1-fleeting/` note that is older (by mtime) over a fresh inbox note: a demoted note with a stuck citation marker is a concrete, fixable gap, whereas a shallow inbox note may just be a thin seed. If both pools are empty, say so and stop.
 
 ## Skills
 

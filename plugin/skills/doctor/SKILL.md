@@ -98,6 +98,7 @@ For each check with `status === "fail"`:
 | `search-index-exists` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` (resolves vault/db paths itself; bare `ll-search index` fails — the binary requires explicit `<VAULT_PATH> <DB_PATH>` positionals) |
 | `nli-socket-fresh` (stale file) | `rm <path>` |
 | `duplicate-gate-health` (repeated timeouts) | `ll-watch` (start the warm daemon so the duplicate gate uses the socket instead of cold-starting the model on every write) |
+| `injection-shadow-gate` (ready to flip) | `node -e 'const fs=require("node:fs");const p=process.argv[1];const c=JSON.parse(fs.readFileSync(p,"utf8"));c.injection_mode="live";fs.writeFileSync(p,JSON.stringify(c,null,2)+"\n")' <PLUGIN_DATA>/config.json` — flips `injection_mode` shadow → live. The flip is consent-gated: only run after the user picks this fix, never unprompted. If `<PLUGIN_DATA>/config.json` is missing, stop and report instead of creating a partial config (offer `node ${CLAUDE_PLUGIN_ROOT}/scripts/review-shadow.mjs` so the user can judge injection quality first) |
 | `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch` (no arguments — that is the background-start invocation; `start` is not a subcommand) |
 | `abi-drift` | `npm rebuild` in the affected plugin directory |
 

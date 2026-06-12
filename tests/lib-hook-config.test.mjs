@@ -36,6 +36,22 @@ test('ML thresholds are in [0, 1]', () => {
   assert.ok(HookConfig.COSINE_MAX > HookConfig.COSINE_MIN, 'COSINE_MAX must exceed COSINE_MIN');
 });
 
+test('INJECTION_THRESHOLD is calibrated to the RRF fusion-sum scale', () => {
+  // ll-search fuses five signals with RRF_K=5: each contributes 1/(5+rank).
+  // A lone #1 in one signal scores 1/6 ≈ 0.167; #1 in two signals 2/6 ≈ 0.333.
+  // The gate must admit a two-strong-signals match (the observed nonzero
+  // floor in the shadow logs) and reject a lone single-signal #1 — see the
+  // derivation comment in hook-config.mjs.
+  assert.ok(
+    HookConfig.INJECTION_THRESHOLD <= 2 / 6,
+    'gate must not exceed the two-strong-signals floor (2/(5+1))',
+  );
+  assert.ok(
+    HookConfig.INJECTION_THRESHOLD > 1 / 6,
+    'gate must exceed a lone single-signal #1 (1/(5+1))',
+  );
+});
+
 test('required keys are all present (regression guard)', () => {
   const required = [
     'LABEL_TIMEOUT_MS',

@@ -40,17 +40,17 @@ Read these shared agent skills before working:
 
 ## ABSOLUTE RULES
 
-These are not guidelines. Violation means the driver discards your output.
+These are not guidelines. The driver re-checks each of them post-hoc and strips, flags, or auto-rejects violations.
 
-1. **NEVER use em-dashes (`—`).** This vault bans them. The character `—` (U+2014) must not appear in any `proposed_body` you produce. Use commas, hyphens, semicolons, or sentence breaks instead. The driver scans for em-dashes and logs a violation if it finds one.
+1. **NEVER use em-dashes (`—`).** This vault bans them. The character `—` (U+2014) must not appear in any `proposed_body` you produce. Use commas, hyphens, semicolons, or sentence breaks instead. The driver strips em-dashes from lines you added or changed and logs each strip as a violation.
 
-2. **NEVER remove existing sentences from the upstream.** Only add, sharpen in-place, or qualify. If the new note's evidence would require removing or contradicting an existing sentence, the decision is `counterpoint`, not `edit`.
+2. **NEVER remove or rewrite existing sentences from the upstream.** Edits are additive only: every sentence of the original body must survive verbatim in your `proposed_body`. You may insert new sentences, inside an existing paragraph or as a new one, but never reword, merge, or delete what is already there. To sharpen a vague claim, add the precise version next to it instead of rewriting it. If the new note's evidence would require removing, rewording, or contradicting an existing sentence, the decision is `counterpoint`, not `edit`. The driver diffs your proposal sentence-by-sentence and auto-rejects it if any original sentence vanishes.
 
-3. **NEVER invent evidence.** If a number, source, or mechanism is not in the new note, it does not appear in the proposed body.
+3. **NEVER invent evidence.** If a number, source, or mechanism is not in the new note, it does not appear in the proposed body. The driver cannot check this one; it is entirely on you.
 
-4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. Frontmatter is not yours to manage.
+4. **NEVER touch the frontmatter.** The block between `---` markers at the top of the upstream note must appear in your `proposed_body` byte-for-byte identical to the original. Frontmatter is not yours to manage. The one exception is the driver's, not yours: at apply time the driver itself stamps provenance, merging the new note's `source:` entries into the upstream frontmatter and appending a `[[new-note]]` wikilink to the paragraph the edit touched. Do not pre-empt that in your proposal; the driver restores the original frontmatter if you do.
 
-5. **20% ceiling on body change.** Count the sentences in the upstream body (excluding frontmatter). Your edit may add at most `ceil(0.20 * sentence_count)` new sentences. If the change would be larger, return `pass` instead. The driver also enforces this and auto-rejects oversized proposals: but if you self-limit, the user sees fewer rejected items in the review.
+5. **20% ceiling on body change.** Count the sentences in the upstream body (excluding frontmatter). Your edit may add at most `ceil(0.20 * sentence_count)` new sentences. If the change would be larger, return `pass` instead. The driver measures sentence growth too: 20-50% growth is flagged as an oversized warning the user must explicitly wave through, and above 50% the proposal is auto-rejected. If you self-limit to 20%, the user sees a clean batch.
 
 6. **Default to `pass` when in doubt.** A missed refinement is recoverable (the new note still exists; the next /reflect can try again). A bad edit is not: it ages into the vault as if it were original. Precision over recall at the agent layer; the driver handles precision again.
 
@@ -88,11 +88,11 @@ The new note is topically related but does not touch the same specific claim. Us
 
 ### `edit`: sharpens, qualifies, or extends
 The new note provides evidence that strengthens a specific claim in the upstream. Sub-types:
-- **sharpens**: replaces a vague phrasing with a tighter one ("often" → "in 30-60 seconds")
+- **sharpens**: pins a vague phrasing down by adding the precise version right after it (upstream says "often"; you append a sentence giving the 30-60 second figure). The vague sentence stays; precision is added, not substituted (rule 2).
 - **qualifies**: adds a boundary condition or exception ("X works, except in case Y")
 - **extends**: adds a related instance to a list or pattern that the upstream already opens
 
-Return the **full proposed body** of the upstream note with the change applied. The body must be byte-for-byte identical to the original except for the specific sentences your edit touches.
+Return the **full proposed body** of the upstream note with the change applied. The body must be byte-for-byte identical to the original except for the new sentences your edit inserts.
 
 ### `counterpoint`
 The new note materially contradicts a claim in the upstream. Do NOT propose an edit. Return link texts the driver will append to both notes via the existing counter-argument-linking pattern. The upstream note's body is never modified for counterpoints: the link is the entire intervention.
@@ -102,7 +102,7 @@ The new note materially contradicts a claim in the upstream. Do NOT propose an e
 1. Read the `pairs_file` JSON.
 2. For each pair, Read both notes with the `Read` tool.
 3. For each pair, decide using the rubric above.
-4. For `edit` decisions: write the full proposed body. Verify it has no em-dashes. Verify the frontmatter is identical. Verify ≤20% sentence growth.
+4. For `edit` decisions: write the full proposed body. Verify it has no em-dashes. Verify the frontmatter is identical. Verify every original body sentence survives verbatim. Verify ≤20% sentence growth.
 5. For `counterpoint` decisions: write the two link texts.
 6. Compose the response JSON with one entry per pair.
 
@@ -159,7 +159,7 @@ Notice:
 - Frontmatter is byte-for-byte identical
 - The Safari sentence is unchanged; the proxy sentence is added immediately after it as one extension
 - No em-dashes anywhere
-- Sources line is unchanged (the new note's RFC 6455 source is in the new note, not the upstream)
+- Sources line is unchanged in the proposal (the driver merges the new note's RFC 6455 source into the upstream frontmatter at apply time; you never do)
 - All other paragraphs are byte-for-byte identical
 - Sentence count went from ~7 to ~9, well within the 20% ceiling
 
@@ -184,6 +184,6 @@ If your proposed edit looks like this, return `pass` instead.
 ## Notes
 
 - The driver passes only pairs that already survived cosine + folder + basename filters. You don't re-check those.
-- The driver applies your `proposed_body` via the `Write` tool, which fires the post-write hook chain. You don't apply edits yourself.
+- The driver applies your `proposed_body` via the `Write` tool, which fires the post-write hook chain. You don't apply edits yourself. Before writing, the driver stamps provenance (source merge + `[[new-note]]` wikilink, see rule 4); leave both out of your proposal.
 - The driver post-processes em-dashes (auto-strips and warns) but you should never produce them in the first place.
 - If the input file is empty or has zero pairs, return `{"decisions": []}`.

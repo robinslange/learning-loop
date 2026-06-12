@@ -6,7 +6,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from '../../scripts/lib/log.mjs';
-import { home } from '../lib/common.mjs';
+import { home, resolveConfig } from '../lib/common.mjs';
 import { runQuickChecks, formatMissingDeps } from '../../scripts/health-check.mjs';
 import {
   readHealthCache,
@@ -64,6 +64,7 @@ export async function run(ctx) {
           const entries = buildAbiDrift();
           return entries.length > 0 ? entries[0] : { status: 'ok' };
         })(),
+        injectionMode: resolveConfig().injection_mode,
       };
 
       const TIMEOUT_SENTINEL = Symbol('timeout');
@@ -89,6 +90,15 @@ export async function run(ctx) {
     // Detector line: exactly one line on fails > 0
     if (fails.length > 0) {
       ctx.context += `⚠ learning-loop: ${fails.length} issue${fails.length === 1 ? '' : 's'} — run /learning-loop:doctor\n`;
+    }
+
+    // Shadow-gate nudge: one line when shadow-mode data clears the go-live
+    // gate. The flip itself stays consent-gated behind /doctor.
+    const shadowGate = result.checks.find(
+      (c) => c.id === 'injection-shadow-gate' && c.status === 'fail',
+    );
+    if (shadowGate) {
+      ctx.context += `learning-loop: ${shadowGate.detail} — run /learning-loop:doctor to apply\n`;
     }
 
     // Preserve context-assembly contract (replaces deps-check.mjs output)

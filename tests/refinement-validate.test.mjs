@@ -1,8 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { validateEdit } from '../plugin/scripts/refinement-validate.mjs';
 
 const FM = '---\nname: t\n---\n';
+
+function sentences(n) {
+  return Array.from({ length: n }, (_, i) => `Sentence number ${i + 1} says something distinct.`);
+}
 
 test('preserves upstream em-dashes that the agent kept verbatim', () => {
   const upstream =
@@ -92,4 +97,103 @@ test('mixed case: upstream em-dash preserved, agent em-dash stripped', () => {
   const violation = result.flags.find((f) => f.type === 'em_dash_violation');
   assert.ok(violation);
   assert.equal(violation.count, 1, 'exactly one new-line em-dash should be flagged');
+});
+
+test('auto-rejects when an upstream sentence is dropped', () => {
+  const s = sentences(5);
+  const upstream = FM + '\n# Title\n\n' + s.join(' ') + '\n';
+  const proposed = FM + '\n# Title\n\n' + [s[0], s[1], s[3], s[4]].join(' ') + '\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'r1', proposed_body: proposed }, upstream);
+
+  assert.equal(result.status, 'auto_rejected');
+  const flag = result.flags.find((f) => f.type === 'sentences_removed');
+  assert.ok(flag, 'sentences_removed flag must fire');
+  assert.equal(flag.severity, 'auto_rejected');
+  assert.equal(flag.removed_count, 1);
+  assert.match(flag.removed[0], /Sentence number 3/);
+});
+
+test('auto-rejects the remove-N-add-N rewrite that size delta scores as zero', () => {
+  const s = sentences(5);
+  const upstream = FM + '\n# Title\n\n' + s.join(' ') + '\n';
+  const rewritten = [s[0], s[1], 'A totally different replacement claim instead.', s[3], s[4]];
+  const proposed = FM + '\n# Title\n\n' + rewritten.join(' ') + '\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'r2', proposed_body: proposed }, upstream);
+
+  const size = result.flags.find((f) => f.type === 'size');
+  assert.equal(size, undefined, 'sentence delta is zero, so no size flag (the historic bypass)');
+  assert.equal(result.status, 'auto_rejected');
+  const flag = result.flags.find((f) => f.type === 'sentences_removed');
+  assert.ok(flag, 'rewrite must be caught by the removal check');
+  assert.equal(flag.removed_count, 1);
+});
+
+test('pure addition passes: in-paragraph insert and appended paragraph, no removal flag', () => {
+  const s = sentences(5);
+  const upstream =
+    FM + '\n# Title\n\n' + s.slice(0, 3).join(' ') + '\n\n' + s.slice(3).join(' ') + '\n';
+  const inserted = [s[0], s[1], 'A brand new inserted sentence with evidence.', s[2]];
+  const proposed = FM + '\n# Title\n\n' + inserted.join(' ') + '\n\n' + s.slice(3).join(' ') + '\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'a1', proposed_body: proposed }, upstream);
+
+  assert.equal(
+    result.flags.find((f) => f.type === 'sentences_removed'),
+    undefined,
+    'in-paragraph insertion preserves every upstream sentence',
+  );
+  assert.equal(result.status, 'ok', '1 added sentence on 5 is exactly 20%, not over it');
+});
+
+test('whitespace-only changes do not count as removals', () => {
+  const upstream = FM + '\n# Title\n\nLine A stays.\n\n\nLine B stays.\n';
+  const proposed = FM + '\n# Title\n\nLine A stays.\n\nLine B stays.\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'w1', proposed_body: proposed }, upstream);
+
+  assert.equal(
+    result.flags.find((f) => f.type === 'sentences_removed'),
+    undefined,
+  );
+  assert.equal(result.status, 'ok');
+});
+
+test('size thresholds: 20% exact is ok, 20-50% warns, >50% auto-rejects', () => {
+  const s = sentences(10);
+  const upstream = FM + '\n# Title\n\n' + s.join(' ') + '\n';
+  const grow = (n) =>
+    upstream +
+    '\n' +
+    sentences(20)
+      .slice(10, 10 + n)
+      .map((x) => 'Added ' + x)
+      .join(' ') +
+    '\n';
+
+  const atCeiling = validateEdit({ decision: 'edit', id: 't1', proposed_body: grow(2) }, upstream);
+  assert.equal(atCeiling.status, 'ok', 'delta 0.2 is not > 0.2');
+
+  const warned = validateEdit({ decision: 'edit', id: 't2', proposed_body: grow(3) }, upstream);
+  assert.equal(warned.status, 'oversized_warning');
+  assert.equal(warned.flags.find((f) => f.type === 'size').severity, 'warning');
+
+  const rejected = validateEdit({ decision: 'edit', id: 't3', proposed_body: grow(6) }, upstream);
+  assert.equal(rejected.status, 'auto_rejected');
+  assert.equal(rejected.flags.find((f) => f.type === 'size').severity, 'auto_rejected');
+  for (const r of [atCeiling, warned, rejected]) {
+    assert.equal(
+      r.flags.find((f) => f.type === 'sentences_removed'),
+      undefined,
+      'pure growth must never trip the removal check',
+    );
+  }
+});
+
+test('emits upstream_hash of the exact body it validated against', () => {
+  const upstream = FM + '\n# Title\n\nOnly sentence here.\n';
+  const result = validateEdit({ decision: 'edit', id: 'h1', proposed_body: upstream }, upstream);
+
+  assert.equal(result.upstream_hash, createHash('sha256').update(upstream).digest('hex'));
 });

@@ -33,7 +33,9 @@ Read and follow these skills during triage:
 
 List all `*.md` files in `0-inbox/` using `Glob`. If empty, report and stop.
 
-Read every note. For inboxes > 20 notes, read in batches of 15.
+**Skip closed notes.** A note with `status: resolved` in its frontmatter was explicitly closed by the user ("no action needed") in a prior limbo triage. Exclude these from clustering, gating, and the NLI check — re-reading and re-gating a closed note every run is the inbox ratchet this scan must not feed. Count them as `resolved_skipped` for the report, but do not process them. They still live in `0-inbox/` (close means "no open loop", not "discard" — Zeigarnik semantics), and the Step 8 sweep handles their eventual archival.
+
+Read every remaining note. For inboxes > 20 notes, read in batches of 15.
 
 ### 1.5. Zeigarnik Classification
 
@@ -77,7 +79,7 @@ Name each cluster by its dominant theme. Single-note clusters are fine.
 
 For each cluster, process all its inbox notes together:
 
-**a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four. This is faster than per-note scoring passes for obvious cases.
+**a) Run promote-gate** on each note (the 6-criterion pass/fail from the skill, including the pre-gate source routing fork). Notes tagged `[synthesis]` are exempt from Sourcing and Source Integrity criteria: assess them on the remaining four — **but before granting the exemption, run the Synthesis-tag re-validation** (`promote-gate.md` → "Synthesis-tag re-validation"). Scan the body for bare factual signals (numbers with units/comparators, named studies, effect sizes) not backed by a grounding wikilink; if any are present, the tag is self-certified-but-wrong — demote the exemption and apply the full 6-criterion gate (a smuggled factual claim then cannot reach `3-permanent/` without a real source). This is faster than per-note scoring passes for obvious cases.
 
 **a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `${CLAUDE_PLUGIN_ROOT}/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
 
@@ -109,9 +111,12 @@ For each note, assign one action:
 | All 6 pass, voice fails, verify-note PASS | Rewrite Worklist item → `3-permanent/` |
 | All 6 pass, voice fails, verify-note FAIL | Rewrite Worklist item → `1-fleeting/` |
 | 3-4 pass | `mv` to `1-fleeting/` |
-| ≤ 2 pass | Keep in `0-inbox/` |
+| ≤ 2 pass, modified within 30 days | Keep in `0-inbox/` |
+| ≤ 2 pass, untouched ≥ 30 days | Keep in `0-inbox/`, AND offer for archival (gated — see below) |
 | Duplicate of another inbox note | Merge (gated) |
 | Ghost duplicate | Delete (gated) |
+
+**Inbox archival (the ratchet exit).** A ≤2-pass note that has sat untouched for ≥ 30 days (by file mtime, mirroring the fleeting STALE window) never reaches promotion quality on its own and otherwise recirculates through every `/inbox` run forever. Offer it for archival to `_archive/0-inbox/`, **consent-gated exactly like fleeting archival** — never archive autonomously. Surface these in the Needs-approval block (Step 5) under an `inbox archival` section. Notes touched within 30 days stay in `0-inbox/` untouched: a recently captured weak note is still a live seed.
 
 ### Verification Gate
 
@@ -157,7 +162,7 @@ Output one table per cluster:
 | duplicate-title |: | merge into #1 |: |
 ```
 
-After the table, list any gated actions needing approval. The block has four visually-distinct sections for the four gate categories (the fourth — fleeting archival — is filled in by the Step 8 sweep). One user response handles all of them.
+After the table, list any gated actions needing approval. The block has five visually-distinct sections for the five gate categories: merges, deletes, NLI contradictions, inbox archival (≤2-pass notes untouched ≥30 days — Step 4), and fleeting archival (filled in by the Step 8 sweep). One user response handles all of them.
 
 ```
 Needs approval:
@@ -172,16 +177,26 @@ NLI contradictions (3), pick supersede / qualify / keep-both / skip per item:
 - [b] new: <path-c> vs existing: <path-d>  (p=0.96)
 - [c] new: <path-e> vs existing: <path-f>  (p=0.95)
 
+inbox archival (1), to _archive/0-inbox/:
+- 0-inbox/half-formed-thought.md -- 2/6, untouched 47 days
+
 fleeting archival (2), to _archive/1-fleeting/:
 - 1-fleeting/bacopa-effects-grow-over-weeks.md -- promoted (3 permanent refs)
 - 1-fleeting/acme-app-hero-copy.md -- stale (0 refs, 90 days old)
+```
+
+The Step 8 sweep may also return a non-gated `fleeting repair` section (NEEDS-DEEPEN notes) — list it after the Needs-approval block, not inside it, since it needs no approval:
+
+```
+fleeting repair (1), suggest /deepen:
+- 1-fleeting/creatine-loading-halves-uptake-time.md -- verification markers, 30 days old
 ```
 
 Acceptable reply formats for the NLI contradictions:
 - per-item: `a:1 b:3 c:skip` (1=supersede, 2=qualify, 3=keep-both, skip=leave in inbox)
 - batched: `all:3` keep-both for everything
 
-Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice → fleeting archival. NLI resolution mechanics:
+Execution order on confirm (executed by the skill after you return): deletes → merges → NLI resolutions → `held: nli` worklist rows (rewrites and promotes) per the user's per-item choice → inbox archival → fleeting archival. NLI resolution mechanics:
 
 - **supersede**: the skill rewrites the existing note to match the new one, executing the rewrite mechanics inline (bounded to this one note — not the interactive `/rewrite` skill); `removeOutgoingEdges(db, supersededRel)` clears the stale NLI edge; the note's held worklist row executes in the next stage.
 - **qualify**: stamp `nli_qualified_by: [partner-path, ...]` on the new note's frontmatter; no body changes; both notes stay; the note's held worklist row executes in the next stage.
@@ -266,13 +281,14 @@ The inbox skill applies these same three checks to every file it rewrites via no
 ### 7. Report (Inbox)
 
 ```
-Inbox processed: [N] notes across [C] clusters.
+Inbox processed: [N] notes across [C] clusters ([Rk] resolved notes skipped).
 Promoted: [X] → 3-permanent/ ([S] skipped rewrite), [Y] → 1-fleeting/
 Rewrite worklist: [W] items returned to the skill ([Wr] rewrites, [Wm] merges pending approval, [Wp] NLI-held promotes)
 Counter-arguments linked: [L]
 NLI tensions flagged: [T]                       (soft tier, auto-stamped)
 NLI contradictions surfaced: [R_surfaced]       (hard tier, awaiting user resolution via the skill)
 Deletes pending: [D] ghost duplicates (gated, pending approval)
+Inbox archival pending: [IA] ≤2-pass notes untouched ≥30 days (gated)
 Remaining: [R] in inbox
 ```
 
@@ -298,13 +314,16 @@ Include every file you Edited or mv'd this run: `mv`-promotion destinations, bot
 
 ### 8. Fleeting Sweep
 
-After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md` in its subagent mode: you cannot converse, so archive NOTHING. Return the candidates (path, reason, detail) as the `fleeting archival` section of the Needs-approval block (Step 5); the skill presents them and `mv`s approved files to `_archive/1-fleeting/` after you return.
+After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md` in its subagent mode: you cannot converse, so archive NOTHING. The sweep emits three TYPEs:
+
+- `PROMOTED` and `STALE` are archival candidates — return them as the `fleeting archival` section of the Needs-approval block (Step 5); the skill `mv`s approved files to `_archive/1-fleeting/` after you return.
+- `NEEDS-DEEPEN` is a **repair recommendation, never archival** — these are the gate-demoted notes (verification markers or `source: unverified`) that promote-gate routes to `1-fleeting/` and whose documented repair path is `/deepen`. Return them in a separate `fleeting repair` section (path, reason, detail). The skill surfaces these as a `/deepen` suggestion; nothing destructive happens and no approval is needed.
 
 ### 9. Final Report
 
 ```
 Inbox: [N] notes processed, [X] promoted, [R] remaining.
-Fleeting: [A] archival candidates returned, [F] active notes remain.
+Fleeting: [A] archival candidates returned, [D] need /deepen, [F] active notes remain.
 ```
 
 ## Emit Provenance
@@ -312,7 +331,7 @@ Fleeting: [A] archival candidates returned, [F] active notes remain.
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"resolved_skipped":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"inbox_archival_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"fleeting_needs_deepen":N,"nli_tensions":T,"nli_contradictions_surfaced":R_surfaced}'
 ```
 
 Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows, held or not), `merge_candidates` = [Wm]. NLI-held `promote` rows are counted in `nli_contradictions_surfaced`, not separately. Executed-counts (rewrites done, merges done, NLI resolutions) belong to the skill's session-end event, not this payload.
@@ -322,7 +341,7 @@ Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: r
 - **Process by cluster, not by note.** This is the key throughput improvement. A cluster of 5 related notes gets one assessment pass, not five independent ones.
 - **Skip rewrite when possible.** Most deep notes already match voice. Checking promote-gate's skip-rewrite flag before adding a note to the Rewrite Worklist saves the skill time and context.
 - **Promotions are autonomous.** Never ask before promoting. The promote-gate criteria are the approval.
-- **Merges, deletes, and fleeting archival are gated.** List them in the Needs-approval block; the skill presents them and executes after user approval.
+- **Merges, deletes, inbox archival, and fleeting archival are gated.** List them in the Needs-approval block; the skill presents them and executes after user approval. Never archive a note autonomously.
 - **Counter-arguments are first-class.** They get promoted on their own merit, not suppressed or merged into the note they challenge.
 - **Don't over-cluster.** Two notes about the same broad topic but different specific insights are separate notes, not merge candidates.
 - **Honest assessment.** Most inbox notes are shallow. That's fine. Name it and move on.

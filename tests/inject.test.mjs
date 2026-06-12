@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { scrubSecrets, buildInjection, emitHookOutput, runBackendsWithRaceCap } from '../plugin/hooks/lib/inject.mjs';
+import {
+  scrubSecrets,
+  buildInjection,
+  emitHookOutput,
+  runBackendsWithRaceCap,
+} from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 describe('scrubSecrets', () => {
@@ -55,8 +60,7 @@ describe('scrubSecrets', () => {
   });
 
   it('masks PEM private key blocks across lines', () => {
-    const pem =
-      '-----BEGIN PRIVATE KEY-----\nFAKEKEYFAKEKEYFAKEKEY\n-----END PRIVATE KEY-----';
+    const pem = '-----BEGIN PRIVATE KEY-----\nFAKEKEYFAKEKEYFAKEKEY\n-----END PRIVATE KEY-----';
     assert.ok(!scrubSecrets(pem).includes('FAKEKEY'));
     assert.ok(scrubSecrets(pem).includes('[REDACTED]'));
 
@@ -91,6 +95,21 @@ describe('buildInjection', () => {
     assert.ok(result.additionalContext.includes('From your vault'));
     assert.ok(!result.additionalContext.includes('From past conversations'));
     assert.deepEqual(result.injectedVault, [{ path: 'notes/sleep.md', level: 'body' }]);
+  });
+
+  it('labels the top-match score as "match score", not cosine similarity', () => {
+    // The score is a raw RRF fusion sum from ll-search, not a cosine value —
+    // presenting it as "similarity" misrepresents the scale to the model.
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Sleep cycles', path: 'notes/sleep.md', body: 'Short body.', score: 0.42 },
+      ],
+      episodicHits: [],
+      query: 'sleep',
+      alreadyInjected: new Map(),
+    });
+    assert.ok(result.additionalContext.includes('match score 0.42'));
+    assert.ok(!result.additionalContext.includes('similarity'));
   });
 
   it('filters out vault hits already injected at body level', () => {
@@ -175,9 +194,7 @@ describe('buildInjection', () => {
     assert.ok(longBody.length > 1200);
 
     const result = buildInjection({
-      vaultHits: [
-        { title: 'Long note', path: 'long.md', body: longBody, score: 0.90 },
-      ],
+      vaultHits: [{ title: 'Long note', path: 'long.md', body: longBody, score: 0.9 }],
       episodicHits: [],
       query: 'test',
       alreadyInjected: new Map(),
@@ -196,7 +213,11 @@ describe('buildInjection', () => {
     const result = buildInjection({
       vaultHits: [],
       episodicHits: [
-        { date: '2026-04-01', project: 'tracker-app', snippet: 'Discussed Bayesian pipeline refactor' },
+        {
+          date: '2026-04-01',
+          project: 'tracker-app',
+          snippet: 'Discussed Bayesian pipeline refactor',
+        },
         { date: '2026-04-02', project: 'acme', snippet: 'Reviewed thread-detail PR' },
         { date: '2026-04-03', project: 'dist1lled', snippet: 'Stripe integration planning' },
         { date: '2026-04-04', project: 'northwind', snippet: 'This should be excluded' },
@@ -220,7 +241,7 @@ describe('buildInjection vault Related notes header', () => {
       vaultHits: [
         { title: 'Main note', path: 'main.md', body: 'The main body.', score: 0.95 },
         { title: 'Related A', path: 'a.md', body: 'A body.', score: 0.85 },
-        { title: 'Related B', path: 'b.md', body: 'B body.', score: 0.80 },
+        { title: 'Related B', path: 'b.md', body: 'B body.', score: 0.8 },
       ],
       episodicHits: [],
       query: 'test',
@@ -232,16 +253,23 @@ describe('buildInjection vault Related notes header', () => {
 
 describe('parseEpisodic via runBackendsWithRaceCap', () => {
   it('extracts snippets from real episodic CLI output format', async () => {
-    const fixture = readFileSync(join(import.meta.dirname, 'fixtures', 'episodic-sample.txt'), 'utf8');
+    const fixture = readFileSync(
+      join(import.meta.dirname, 'fixtures', 'episodic-sample.txt'),
+      'utf8',
+    );
 
     const mockSpawn = (cmd, _args, _opts) => {
       const closeCallbacks = [];
       const dataCallbacks = [];
       const child = {
         killed: false,
-        kill: () => { child.killed = true; },
+        kill: () => {
+          child.killed = true;
+        },
         stdout: {
-          on: (evt, cb) => { if (evt === 'data') dataCallbacks.push(cb); },
+          on: (evt, cb) => {
+            if (evt === 'data') dataCallbacks.push(cb);
+          },
         },
         stderr: { on: () => {} },
         on: (evt, cb) => {
@@ -273,7 +301,10 @@ describe('parseEpisodic via runBackendsWithRaceCap', () => {
     assert.equal(results.episodic.hits[0].project, '-Users-robin-dev-acme-monorepo');
     assert.equal(results.episodic.hits[0].date, '2026-01-05');
     assert.equal(results.episodic.hits[0].score, 0.02);
-    assert.equal(results.episodic.hits[0].snippet, "let's do it as part of that performance improvement PR in the existing stack");
+    assert.equal(
+      results.episodic.hits[0].snippet,
+      "let's do it as part of that performance improvement PR in the existing stack",
+    );
     assert.equal(results.episodic.hits[1].snippet, 'review the work carefully please');
     assert.equal(results.episodic.hits[2].snippet, 'yes');
     assert.equal(results.episodic.raced_out, false);
@@ -291,9 +322,13 @@ describe('parseVault raced_out field', () => {
       const dataCallbacks = [];
       const child = {
         killed: false,
-        kill: () => { child.killed = true; },
+        kill: () => {
+          child.killed = true;
+        },
         stdout: {
-          on: (evt, cb) => { if (evt === 'data') dataCallbacks.push(cb); },
+          on: (evt, cb) => {
+            if (evt === 'data') dataCallbacks.push(cb);
+          },
         },
         stderr: { on: () => {} },
         on: (evt, cb) => {
@@ -323,7 +358,10 @@ describe('emitHookOutput', () => {
   function captureStdout(fn) {
     const chunks = [];
     const original = process.stdout.write;
-    process.stdout.write = (data) => { chunks.push(data); return true; };
+    process.stdout.write = (data) => {
+      chunks.push(data);
+      return true;
+    };
     try {
       fn();
     } finally {
@@ -389,6 +427,10 @@ describe('runBackendsWithRaceCap zombie kill', () => {
     });
 
     assert.equal(signals['ll-search'], 'SIGTERM', 'll-search should be killed with SIGTERM');
-    assert.equal(signals['episodic-memory'], 'SIGTERM', 'episodic-memory should be killed with SIGTERM');
+    assert.equal(
+      signals['episodic-memory'],
+      'SIGTERM',
+      'episodic-memory should be killed with SIGTERM',
+    );
   });
 });

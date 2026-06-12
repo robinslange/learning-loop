@@ -70,3 +70,77 @@ test('2+ permanent inbound links reports PROMOTED (regression guard for grep -F 
   writeFileSync(join(vault, '3-permanent', 'b.md'), 'also [[some-idea]]');
   assert.match(run(vault), /^PROMOTED\tsome-idea\t2 permanent refs/m);
 });
+
+const STALE_MARKER = new Date(Date.now() - 21 * 86400 * 1000); // > NEEDS_DEEPEN_DAYS, < STALE_DAYS
+
+test('old note with a blocking verification marker reports NEEDS-DEEPEN', () => {
+  const vault = makeVault();
+  const note = join(vault, '1-fleeting', 'marker-note.md');
+  writeFileSync(note, 'claim text [unverified] here');
+  utimesSync(note, STALE_MARKER, STALE_MARKER);
+  assert.match(run(vault), /^NEEDS-DEEPEN\tmarker-note\tverification markers, 21 days old/m);
+});
+
+test('old note with source: unverified frontmatter reports NEEDS-DEEPEN', () => {
+  const vault = makeVault();
+  const note = join(vault, '1-fleeting', 'honest-gap.md');
+  writeFileSync(note, '---\nsource: unverified\n---\n\nbody');
+  utimesSync(note, STALE_MARKER, STALE_MARKER);
+  assert.match(run(vault), /^NEEDS-DEEPEN\thonest-gap\tsource: unverified, 21 days old/m);
+});
+
+test('fresh marker-bearing note is NOT reported (repair window not reached)', () => {
+  const vault = makeVault();
+  writeFileSync(join(vault, '1-fleeting', 'fresh-marker.md'), 'fresh [citation needed] body');
+  assert.doesNotMatch(run(vault), /NEEDS-DEEPEN/);
+});
+
+test('marker inside a fenced code block does not trigger NEEDS-DEEPEN (matches gate semantics)', () => {
+  const vault = makeVault();
+  const note = join(vault, '1-fleeting', 'fenced.md');
+  writeFileSync(note, 'body\n\n```\n[unverified]\n```\n');
+  utimesSync(note, STALE_MARKER, STALE_MARKER);
+  assert.doesNotMatch(run(vault), /NEEDS-DEEPEN/);
+});
+
+test('marker matching is case-insensitive (matches gate normalization)', () => {
+  const vault = makeVault();
+  const note = join(vault, '1-fleeting', 'cased.md');
+  writeFileSync(note, 'body [Not In Source] here');
+  utimesSync(note, STALE_MARKER, STALE_MARKER);
+  assert.match(run(vault), /^NEEDS-DEEPEN\tcased\t/m);
+});
+
+test('PROMOTED takes precedence over NEEDS-DEEPEN (absorption beats repair)', () => {
+  const vault = makeVault();
+  const note = join(vault, '1-fleeting', 'absorbed.md');
+  writeFileSync(note, 'absorbed [unresolved] body');
+  utimesSync(note, STALE_MARKER, STALE_MARKER);
+  writeFileSync(join(vault, '3-permanent', 'a.md'), 'see [[absorbed]]');
+  writeFileSync(join(vault, '3-permanent', 'b.md'), 'also [[absorbed]]');
+  const out = run(vault);
+  assert.match(out, /^PROMOTED\tabsorbed\t/m);
+  assert.doesNotMatch(out, /^NEEDS-DEEPEN\tabsorbed\t/m);
+});
+
+test("sweep marker set matches promotion-gate.mjs MARKERS (drift guard)", () => {
+  const gateSrc = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts', 'promotion-gate.mjs'),
+    'utf8',
+  );
+  const block = gateSrc.match(/const MARKERS = \[([\s\S]*?)\];/);
+  assert.ok(block, 'promotion-gate.mjs lost its MARKERS array');
+  const gateMarkers = [...block[1].matchAll(/'(\[[^']+\])'/g)].map((m) => m[1]);
+  assert.ok(gateMarkers.length >= 4, `parsed only ${gateMarkers.length} gate markers`);
+
+  const sweepSrc = readFileSync(SCRIPT, 'utf8');
+  const fn = sweepSrc.match(/has_blocking_marker\(\) \{([\s\S]*?)\n\}/);
+  assert.ok(fn, 'fleeting-sweep.sh lost its has_blocking_marker function');
+  const sweepMarkers = [...fn[1].matchAll(/-e '(\[[^']+\])'/g)].map((m) => m[1]);
+
+  assert.deepEqual(
+    sweepMarkers.sort(),
+    gateMarkers.slice().sort(),
+    'fleeting-sweep.sh marker patterns must match the blocking set in promotion-gate.mjs',
+  );
+});

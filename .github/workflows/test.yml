@@ -6,8 +6,18 @@ on:
   pull_request:
 
 jobs:
+  # The plugin ships a Windows binary and win32 code paths, so the Node suite
+  # runs on all three OSes. macOS and Linux are blocking; Windows is
+  # continue-on-error until its failures are triaged green (flip it to
+  # blocking then — a red-but-ignored lane decays fast). ygrep is a
+  # Linux-only install: its tests skip when the binary is absent.
   node:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +27,7 @@ jobs:
           node-version: 22
 
       - name: Install ygrep
+        if: runner.os == 'Linux'
         env:
           YGREP_VERSION: 3.2.4
         run: |
@@ -40,6 +51,7 @@ jobs:
       # this); the truncation contract (schema_version 1 + truncated field) is
       # stable across these versions.
       - name: Install ll-search release binary
+        if: runner.os == 'Linux'
         env:
           LL_BINARY_VERSION: v1.27.1
         run: |
@@ -56,6 +68,7 @@ jobs:
       # `npm test` above runs binary-less by design). When adding a test with
       # a hasBinary() skip, add its file to this list.
       - name: Binary-gated tests (must not skip)
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           for suite in \

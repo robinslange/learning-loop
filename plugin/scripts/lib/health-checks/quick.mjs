@@ -1,7 +1,16 @@
 // Quick health checks: file existence, version reads, no shell-outs.
 // Each function takes its inputs explicitly (for testability) and never throws.
 
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { DATA_FILES } from '../paths.mjs';
@@ -685,6 +694,132 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
     status: SEVERITIES.ok,
     severity: SEVERITIES.warn,
     detail: total === 0 ? 'no recent timeouts' : `${total} recent timeout(s) (under threshold)`,
+    fix: null,
+  });
+}
+
+// --- Injection shadow gate (injection_mode flip readiness) ---
+// Mirrors the go/no-go verdict in scripts/review-shadow.mjs: with >=100
+// healthy shadow evaluations, >=20 gate passes, and a >=5% healthy pass rate,
+// the shadow data supports flipping injection_mode from shadow to live. This
+// check only surfaces readiness — the flip itself stays consent-gated behind
+// /learning-loop:doctor and is never applied automatically.
+const SHADOW_GATE_MIN_HEALTHY = 100;
+const SHADOW_GATE_MIN_PASSED = 20;
+const SHADOW_GATE_MIN_PASS_RATE = 0.05;
+
+// Shadow logs grow to tens of MB per month (each entry embeds the payload it
+// would have injected); the session-start detector runs quick checks under a
+// tight time budget, so read only the tail of each month file. 2MB covers
+// hundreds of recent entries — far more than the gate criteria need.
+const SHADOW_LOG_TAIL_BYTES = 2 * 1024 * 1024;
+
+function readTailLines(path, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    const start = Math.max(0, size - maxBytes);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    const lines = buf.toString('utf-8').split('\n');
+    if (start > 0) lines.shift();
+    return lines;
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+// Scan the current + previous month shadow-injection logs (the same naming
+// session-label.js writes) and count healthy entries vs gate passes.
+function collectShadowGateStats(pluginData, now) {
+  // UTC month arithmetic — log filenames come from toISOString(), so a
+  // local-time Date here would pick the wrong previous month east of UTC.
+  const months = [now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))].map(
+    (d) => d.toISOString().slice(0, 7),
+  );
+  let healthy = 0;
+  let passed = 0;
+  for (const month of months) {
+    const p = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
+    if (!existsSync(p)) continue;
+    for (const line of readTailLines(p, SHADOW_LOG_TAIL_BYTES)) {
+      if (!line.trim()) continue;
+      let e;
+      try {
+        e = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const gate = e?.gate;
+      if (!gate || gate.fast_path_skip || gate.error) continue;
+      if (e?.backends?.vault?.error || e?.backends?.episodic?.error) continue;
+      healthy++;
+      if (gate.passed === true) passed++;
+    }
+  }
+  return { healthy, passed };
+}
+
+// injectionMode is the PERSISTENT config value (config.json injection_mode,
+// default 'shadow') — per-session env overrides deliberately don't count,
+// since this check reports on what every future session will do.
+export function checkInjectionShadowGate({ pluginData, injectionMode, now = new Date() } = {}) {
+  const mode = injectionMode || 'shadow';
+  if (mode === 'live') {
+    return makeCheck({
+      id: CHECK_IDS['injection-shadow-gate'],
+      name: 'Injection shadow gate',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'injection_mode live — JIT injection active',
+      fix: null,
+    });
+  }
+  if (mode === 'off') {
+    return makeCheck({
+      id: CHECK_IDS['injection-shadow-gate'],
+      name: 'Injection shadow gate',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'injection_mode off — JIT injection disabled by config',
+      fix: null,
+    });
+  }
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['injection-shadow-gate'],
+      name: 'Injection shadow gate',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available — skipped',
+      fix: null,
+    });
+  }
+  const { healthy, passed } = collectShadowGateStats(pluginData, now);
+  const passRate = healthy > 0 ? passed / healthy : 0;
+  if (
+    healthy >= SHADOW_GATE_MIN_HEALTHY &&
+    passed >= SHADOW_GATE_MIN_PASSED &&
+    passRate >= SHADOW_GATE_MIN_PASS_RATE
+  ) {
+    return makeCheck({
+      id: CHECK_IDS['injection-shadow-gate'],
+      name: 'Injection shadow gate',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `shadow gate passing (${passed}/${healthy} recent healthy entries, ${(passRate * 100).toFixed(1)}% pass rate) — ready to flip injection_mode to live`,
+      fix: 'Review with `node PLUGIN/scripts/review-shadow.mjs`, then run /learning-loop:doctor to apply the flip (config.json injection_mode: shadow -> live)',
+    });
+  }
+  return makeCheck({
+    id: CHECK_IDS['injection-shadow-gate'],
+    name: 'Injection shadow gate',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail: `shadow mode: ${passed}/${healthy} recent healthy entries passed the gate — keep collecting`,
     fix: null,
   });
 }

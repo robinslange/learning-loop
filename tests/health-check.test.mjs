@@ -19,6 +19,7 @@ import {
   checkSearchIndexExists,
   checkNliSocketFresh,
   checkDuplicateGateHealth,
+  checkInjectionShadowGate,
   checkAbiDrift,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
@@ -51,6 +52,7 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'search-index-exists',
     'nli-socket-fresh',
     'duplicate-gate-health',
+    'injection-shadow-gate',
     'abi-drift',
   ];
   const full = [
@@ -280,7 +282,10 @@ test('checkClaudemdSectionPresent: warn when ~/.claude/CLAUDE.md missing', () =>
 test('checkClaudemdSectionPresent: ok when marker present', () => {
   const home = mkdtempSync(join(tmpdir(), 'health-claudemd-2-'));
   mkdirSync(join(home, '.claude'));
-  writeFileSync(join(home, '.claude/CLAUDE.md'), 'other content\n<!-- learning-loop v1 -->\nbody\n<!-- /learning-loop -->\n');
+  writeFileSync(
+    join(home, '.claude/CLAUDE.md'),
+    'other content\n<!-- learning-loop v1 -->\nbody\n<!-- /learning-loop -->\n',
+  );
   const result = checkClaudemdSectionPresent({ home });
   assert.equal(result.status, 'ok');
   rmSync(home, { recursive: true, force: true });
@@ -423,6 +428,115 @@ test('checkDuplicateGateHealth: stays ok under the repeat threshold', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+// --- checkInjectionShadowGate ---
+
+function writeShadowLog(dir, month, entries) {
+  mkdirSync(join(dir, 'retrieval'), { recursive: true });
+  writeFileSync(
+    join(dir, 'retrieval', `shadow-injection-${month}.jsonl`),
+    entries.map((e) => (typeof e === 'string' ? e : JSON.stringify(e))).join('\n') + '\n',
+  );
+}
+
+const shadowPass = { gate: { passed: true, vault_top_score: 0.42 }, backends: {} };
+const shadowFail = { gate: { passed: false, vault_top_score: 0.1 }, backends: {} };
+const shadowFastPath = { gate: { passed: false, fast_path_skip: true } };
+const shadowVaultError = {
+  gate: { passed: false },
+  backends: { vault: { error: 'spawn ENOENT' } },
+};
+
+test('checkInjectionShadowGate: ok when injection_mode is live', () => {
+  const result = checkInjectionShadowGate({ pluginData: '/nonexistent', injectionMode: 'live' });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /live/);
+});
+
+test('checkInjectionShadowGate: ok when injection_mode is off', () => {
+  const result = checkInjectionShadowGate({ pluginData: '/nonexistent', injectionMode: 'off' });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /off/);
+});
+
+test('checkInjectionShadowGate: ok-skipped without plugin-data', () => {
+  const result = checkInjectionShadowGate({ pluginData: null, injectionMode: 'shadow' });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /skipped/);
+});
+
+test('checkInjectionShadowGate: shadow mode with no logs stays ok (keep collecting)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-empty-'));
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow' });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /keep collecting/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: nudges ready-to-flip when the go-live gate passes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-ready-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const entries = [];
+  for (let i = 0; i < 25; i++) entries.push(shadowPass);
+  for (let i = 0; i < 80; i++) entries.push(shadowFail);
+  writeShadowLog(dir, '2026-06', entries);
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /ready to flip injection_mode to live/);
+  assert.match(result.detail, /25\/105/);
+  assert.match(result.fix, /doctor/);
+  assert.match(result.fix, /review-shadow/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: stays ok below the healthy-entry minimum', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-thin-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  writeShadowLog(dir, '2026-06', Array(50).fill(shadowPass));
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /keep collecting/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: stays ok below the pass minimum', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-fewpass-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  writeShadowLog(dir, '2026-06', [...Array(10).fill(shadowPass), ...Array(150).fill(shadowFail)]);
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: fast-path skips, backend errors, and corrupt lines are excluded', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-noise-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const entries = [
+    ...Array(25).fill(shadowPass),
+    ...Array(80).fill(shadowFail),
+    ...Array(500).fill(shadowFastPath),
+    ...Array(500).fill(shadowVaultError),
+    '{not json',
+  ];
+  writeShadowLog(dir, '2026-06', entries);
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /25\/105/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: combines current and previous month logs', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-months-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  writeShadowLog(dir, '2026-06', [...Array(15).fill(shadowPass), ...Array(40).fill(shadowFail)]);
+  writeShadowLog(dir, '2026-05', [...Array(10).fill(shadowPass), ...Array(40).fill(shadowFail)]);
+  // 25 passes over 105 healthy entries across the two months.
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /25\/105/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkAbiDrift: ok when detectAbiDrift reports ok', () => {
   const result = checkAbiDrift({ abiDriftResult: { status: 'ok' } });
   assert.equal(result.status, 'ok');
@@ -430,7 +544,12 @@ test('checkAbiDrift: ok when detectAbiDrift reports ok', () => {
 
 test('checkAbiDrift: fail on abi-mismatch', () => {
   const result = checkAbiDrift({
-    abiDriftResult: { status: 'abi-mismatch', expectedAbi: '127', actualAbi: '141', fix: 'npm rebuild' },
+    abiDriftResult: {
+      status: 'abi-mismatch',
+      expectedAbi: '127',
+      actualAbi: '141',
+      fix: 'npm rebuild',
+    },
   });
   assert.equal(result.status, 'fail');
   assert.match(result.detail, /127.*141/);
@@ -454,7 +573,10 @@ test('checkNodeVersion: fail when node not found', () => {
 });
 
 test('checkClaudeVersion: ok when version >= min', () => {
-  const result = checkClaudeVersion({ claudeVersionOutput: '2.1.145 (Claude Code)', minVersion: '2.1.144' });
+  const result = checkClaudeVersion({
+    claudeVersionOutput: '2.1.145 (Claude Code)',
+    minVersion: '2.1.144',
+  });
   assert.equal(result.status, 'ok');
 });
 
@@ -581,8 +703,12 @@ test('runQuickChecks: returns ran=quick + non-empty checks array', async () => {
 
 test('runQuickChecks: includes ts in ISO-8601 format', async () => {
   const result = await runQuickChecks({
-    pluginData: '/x', vaultRoot: null, home: '/x',
-    pathEnv: '', installedVersion: '0.0.0', templateVersion: '1',
+    pluginData: '/x',
+    vaultRoot: null,
+    home: '/x',
+    pathEnv: '',
+    installedVersion: '0.0.0',
+    templateVersion: '1',
     abiDriftResult: { status: 'ok' },
   });
   assert.match(result.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
@@ -626,4 +752,20 @@ test('formatMissingDeps: warn-severity issues go under optional heading', () => 
   };
   const md = formatMissingDeps(result);
   assert.match(md, /Missing Optional Dependencies/);
+});
+
+test('formatMissingDeps: injection-shadow-gate readiness is not a missing dependency', () => {
+  const result = {
+    checks: [
+      {
+        id: 'injection-shadow-gate',
+        name: 'Injection shadow gate',
+        status: 'fail',
+        severity: 'warn',
+        detail: 'shadow gate passing — ready to flip injection_mode to live',
+        fix: 'run /learning-loop:doctor',
+      },
+    ],
+  };
+  assert.equal(formatMissingDeps(result), '');
 });
