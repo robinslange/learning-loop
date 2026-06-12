@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.27.2
+
 ### Fixed
 
 - **Hooks no longer warn "Failed to load the ES module" on every fire.** The v1.27.1 restructure kept `package.json` at the repo root, so the installed plugin shipped without one and the eight ESM `hooks/*.js` files lost their inherited `"type": "module"` — Node fell back to per-process module detection with a stderr warning on every hook (surfacing as "Failed with non-blocking status code" in Claude Code), and runtimes without detection hard-failed. The plugin now ships its own `plugin/package.json` containing exactly `{"type": "module"}`. A regression test runs every `hooks.json`-referenced hook from an installed-layout copy of `plugin/` (no ancestor `package.json`) with module detection disabled — the stderr-cleanliness assertion the v1.27.1 install smoke lacked.
