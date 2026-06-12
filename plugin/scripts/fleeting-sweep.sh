@@ -8,6 +8,13 @@
 # Output: TSV lines — TYPE\tNAME\tDETAIL
 # Types: PROMOTED (archival candidate), NEEDS-DEEPEN (repair recommendation,
 # never archival), STALE (archival candidate)
+#
+# Repair is bounded: NEEDS-DEEPEN is capped by the deepen_attempts frontmatter
+# counter (incremented by /deepen when a repair pass fails to clear the
+# markers). After MAX_DEEPEN_ATTEMPTS failed repairs the note surfaces as
+# STALE instead — the archival exit, not another repair loop. A note matching
+# both the stale-project rule and NEEDS-DEEPEN also surfaces as STALE:
+# archival wins at end-of-life.
 
 if [ -z "$1" ]; then
   SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -55,6 +62,16 @@ STALE_DAYS=60
 # should surface for /deepen well before it would qualify as archival-stale,
 # but not on the very next /inbox run after the demotion.
 NEEDS_DEEPEN_DAYS=14
+# Repair budget: after this many failed /deepen passes (deepen_attempts
+# frontmatter counter) the note is unfixable-by-research and gets the
+# archival exit (STALE) instead of resurfacing as NEEDS-DEEPEN forever.
+MAX_DEEPEN_ATTEMPTS=2
+
+deepen_attempts_for() {
+  local n
+  n=$(grep -m1 -E '^deepen_attempts:[[:space:]]*[0-9]+' "$1" | grep -oE '[0-9]+' | head -1)
+  echo "${n:-0}"
+}
 
 # Blocking verification markers. Must stay in sync with the MARKERS array in
 # promotion-gate.mjs — tests/fleeting-sweep.test.mjs pins the two together.
@@ -93,27 +110,39 @@ for f in "$FLEETING"/*.md; do
 
   mod_days=$(mod_days_for "$f")
 
-  # Gate-demoted notes whose documented repair path is /deepen: blocking
-  # verification markers or an honest source: unverified, sitting untouched.
-  if [ "$mod_days" -ge "$NEEDS_DEEPEN_DAYS" ]; then
-    if has_blocking_marker "$f"; then
-      echo -e "NEEDS-DEEPEN\t$name\tverification markers, ${mod_days} days old"
-      continue
-    fi
-    if grep -Eq '^source:[[:space:]]*"?unverified' "$f"; then
-      echo -e "NEEDS-DEEPEN\t$name\tsource: unverified, ${mod_days} days old"
-      continue
-    fi
-  fi
-
-  # Check stale project notes
+  # Check stale project notes BEFORE the repair branch: a note that already
+  # qualifies as archival-stale keeps its archival exit even when it also
+  # carries verification markers (archival wins at end-of-life).
   if matches_project_slug "$name"; then
     # Any inbound links from anywhere?
     all_count=$(grep -rlF "[[$name]]" "$VAULT/" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$all_count" -eq 0 ]; then
       if [ "$mod_days" -ge "$STALE_DAYS" ]; then
         echo -e "STALE\t$name\t0 refs, ${mod_days} days old"
+        continue
       fi
+    fi
+  fi
+
+  # Gate-demoted notes whose documented repair path is /deepen: blocking
+  # verification markers or an honest source: unverified, sitting untouched.
+  # Bounded by the repair budget: past MAX_DEEPEN_ATTEMPTS failed /deepen
+  # passes the note routes to the archival exit instead of looping.
+  if [ "$mod_days" -ge "$NEEDS_DEEPEN_DAYS" ]; then
+    reason=""
+    if has_blocking_marker "$f"; then
+      reason="verification markers"
+    elif grep -Eq '^source:[[:space:]]*"?unverified' "$f"; then
+      reason="source: unverified"
+    fi
+    if [ -n "$reason" ]; then
+      attempts=$(deepen_attempts_for "$f")
+      if [ "$attempts" -ge "$MAX_DEEPEN_ATTEMPTS" ]; then
+        echo -e "STALE\t$name\t$reason, ${attempts} failed deepen attempts, ${mod_days} days old"
+      else
+        echo -e "NEEDS-DEEPEN\t$name\t$reason, ${mod_days} days old"
+      fi
+      continue
     fi
   fi
 done

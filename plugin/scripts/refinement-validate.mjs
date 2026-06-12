@@ -14,7 +14,9 @@
 //      d. Tags `oversized` if > 20%, `auto_rejected` if > 50%
 //      e. Verifies frontmatter byte-equality with the upstream
 //      f. Rejects sentence removal: every upstream body sentence must
-//         survive verbatim in the proposal (rule 2 allows additions only)
+//         survive verbatim in the proposal (rule 2 allows additions only);
+//         each fenced code block counts as one opaque unit, so deleting or
+//         rewriting a block is a removal too
 //      g. Emits `upstream_hash` (sha256 of the upstream file at validation
 //         time) for the driver's pre-apply stale-read guard
 //   3. For each `counterpoint` decision: validates the link texts have stems
@@ -62,15 +64,33 @@ function countSentences(body) {
 
 // Split a body into comparable sentence units. Per non-blank line (outside
 // code blocks): sentence chunks where terminal punctuation exists, the whole
-// line otherwise (headings, list items). Em-dashes are normalised first so a
-// strip pass on one side cannot fake a removal, and whitespace is collapsed.
+// line otherwise (headings, list items). Each fenced code block is kept as a
+// single opaque unit (whole block, whitespace-collapsed) so deleting or
+// rewriting a block registers as a removal without splitting code lines into
+// pseudo-sentences. Em-dashes are normalised first so a strip pass on one
+// side cannot fake a removal, and whitespace is collapsed.
 function sentenceUnits(bodyOnly) {
-  const normalised = bodyOnly
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(new RegExp(EM_DASH, 'g'), EM_DASH_REPLACEMENT);
+  const normalised = bodyOnly.replace(new RegExp(EM_DASH, 'g'), EM_DASH_REPLACEMENT);
   const units = [];
+  const pushFence = (lines) => {
+    const unit = lines.join(' ').replace(/\s+/g, ' ').trim();
+    if (unit) units.push(unit);
+  };
+  let fence = null;
   for (const line of normalised.split('\n')) {
     const trimmed = line.trim();
+    if (fence) {
+      fence.push(trimmed);
+      if (trimmed.startsWith('```')) {
+        pushFence(fence);
+        fence = null;
+      }
+      continue;
+    }
+    if (trimmed.startsWith('```')) {
+      fence = [trimmed];
+      continue;
+    }
     if (!trimmed) continue;
     const chunks = trimmed.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [trimmed];
     for (const chunk of chunks) {
@@ -78,6 +98,7 @@ function sentenceUnits(bodyOnly) {
       if (unit) units.push(unit);
     }
   }
+  if (fence) pushFence(fence);
   return units;
 }
 

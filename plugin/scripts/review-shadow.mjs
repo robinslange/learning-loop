@@ -3,6 +3,14 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
+import {
+  isVaultOk,
+  isEpisodicOk,
+  isHealthy,
+  isGatePassed,
+  SHADOW_BACKEND_HEALTH_MIN_RATE,
+  SHADOW_BACKEND_HEALTH_MIN_TOTAL,
+} from './lib/shadow-gate.mjs';
 
 function resolvePluginData() {
   const fromEnv = env.CLAUDE_PLUGIN_DATA;
@@ -41,13 +49,11 @@ for (const f of files) {
 const total = entries.length;
 const fastPathSkips = entries.filter((e) => e.gate?.fast_path_skip).length;
 
-const vaultOk = entries.filter((e) => !e.backends?.vault?.error);
-const episodicOk = entries.filter((e) => !e.backends?.episodic?.error);
-const healthy = entries.filter(
-  (e) => !e.gate?.fast_path_skip && !e.backends?.vault?.error && !e.backends?.episodic?.error,
-);
-const passed = entries.filter((e) => e.gate?.passed === true);
-const passedHealthy = healthy.filter((e) => e.gate?.passed === true);
+const vaultOk = entries.filter(isVaultOk);
+const episodicOk = entries.filter(isEpisodicOk);
+const healthy = entries.filter(isHealthy);
+const passed = entries.filter(isGatePassed);
+const passedHealthy = healthy.filter(isGatePassed);
 
 function percentiles(values) {
   if (values.length === 0) return { p50: 0, p95: 0, max: 0 };
@@ -104,20 +110,31 @@ if (healthy.length > 0) {
 }
 
 if (healthy.length > 0) {
+  // Bucket edges in integer hundredths: 0.1-wide outside the decision region,
+  // 0.02-wide inside 0.30-0.56. A uniform 0.1 step collapses the region where
+  // >90% of the nonzero mass sits (0.30-0.50) into two buckets, making the
+  // documented threshold-tuning path unable to resolve a threshold.
+  const edgesPct = [];
+  for (let x = 0; x < 30; x += 10) edgesPct.push(x);
+  for (let x = 30; x <= 56; x += 2) edgesPct.push(x);
+  for (let x = 60; x <= 90; x += 10) edgesPct.push(x);
   const buckets = new Map();
-  const step = 0.1;
   for (const e of healthy) {
     const s = Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0);
-    const bucket = Math.min(Math.floor(s / step), 9);
-    buckets.set(bucket, (buckets.get(bucket) || 0) + 1);
+    const pct = Math.min(Math.floor(s * 100), 99);
+    let idx = 0;
+    for (let i = 0; i < edgesPct.length; i++) {
+      if (pct >= edgesPct[i]) idx = i;
+    }
+    buckets.set(idx, (buckets.get(idx) || 0) + 1);
   }
   console.log('\n## Top score distribution (healthy entries)');
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < edgesPct.length; i++) {
     const n = buckets.get(i) || 0;
     if (n === 0) continue;
-    const lo = (i * step).toFixed(1),
-      hi = ((i + 1) * step).toFixed(1);
-    const marker = i * step >= threshold ? '  [PASS]' : '';
+    const lo = (edgesPct[i] / 100).toFixed(2);
+    const hi = (i + 1 < edgesPct.length ? edgesPct[i + 1] / 100 : 1).toFixed(2);
+    const marker = edgesPct[i] / 100 >= threshold ? '  [PASS]' : '';
     const bar = '#'.repeat(Math.min(40, Math.ceil((n / Math.max(1, healthy.length)) * 40)));
     console.log(`  ${lo}-${hi}: ${String(n).padStart(4)}  ${bar}${marker}`);
   }
@@ -134,7 +151,7 @@ console.log('\n## Verdict');
 const healthyRate = total > 0 ? Math.min(vaultOk.length, episodicOk.length) / total : 0;
 const passRate = healthy.length > 0 ? passedHealthy.length / healthy.length : 0;
 
-if (healthyRate < 0.6 && total >= 50) {
+if (healthyRate < SHADOW_BACKEND_HEALTH_MIN_RATE && total >= SHADOW_BACKEND_HEALTH_MIN_TOTAL) {
   console.log(`  INFRASTRUCTURE: backend health <60% (${(healthyRate * 100).toFixed(0)}%).`);
   console.log(`  Fix backend errors above before drawing conclusions about the gate.`);
 } else if (healthy.length < 100) {

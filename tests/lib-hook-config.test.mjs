@@ -128,7 +128,17 @@ test('post-tool inner budgets compose inside its hooks.json timeout', () => {
   );
 });
 
-test('pre-write-check inner query budget leaves headroom inside its hooks.json timeout', () => {
+// Regression: pre-write-check's worst-case inner spend (daemon attempt +
+// subprocess fallback + safety margin) must fit inside its hooks.json deadline.
+// Pre-fix the daemon used QUERY_TIMEOUT_MS (2s) and the subprocess used another
+// full QUERY_TIMEOUT_MS (2s), summing to ~4s+ against a 3s outer deadline —
+// Claude Code SIGKILLed the hook mid-subprocess and silently lost all warnings.
+//
+// The fix uses elapsed-aware budgeting: the subprocess timeout is computed as
+// min(QUERY_TIMEOUT_MS, budget - elapsed - margin), so the composed spend is
+// always at most PRE_WRITE_HOOK_BUDGET_MS. The static checks here pin the
+// invariants that make that arithmetic safe.
+test('pre-write-check composed worst case (daemon + subprocess) fits inside its hooks.json timeout', () => {
   const hooksJson = JSON.parse(
     readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
   );
@@ -136,10 +146,39 @@ test('pre-write-check inner query budget leaves headroom inside its hooks.json t
   assert.ok(entry, 'hooks.json must have a PreToolUse entry whose matcher includes Write');
   assert.ok(entry.hooks?.[0]?.timeout, 'the PreToolUse Write entry must declare a timeout');
   const hookBudgetMs = entry.hooks[0].timeout * 1000;
+
+  // PRE_WRITE_HOOK_BUDGET_MS must mirror the hooks.json timeout — the runtime
+  // budget computation uses this constant, so a divergence silently breaks
+  // the guard.
+  assert.equal(
+    HookConfig.PRE_WRITE_HOOK_BUDGET_MS,
+    hookBudgetMs,
+    `PRE_WRITE_HOOK_BUDGET_MS (${HookConfig.PRE_WRITE_HOOK_BUDGET_MS}ms) must mirror the ` +
+      `hooks.json timeout (${hookBudgetMs}ms) — the runtime budget computation uses this constant`,
+  );
+
+  // The daemon timer must leave headroom for at least the subprocess floor +
+  // safety margin inside the outer budget. If this fails the code always skips
+  // the subprocess even after a fast daemon attempt, making the slow path
+  // permanently inactive.
+  const daemonHeadroom =
+    hookBudgetMs - HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
   assert.ok(
-    HookConfig.QUERY_TIMEOUT_MS < hookBudgetMs,
-    `QUERY_TIMEOUT_MS (${HookConfig.QUERY_TIMEOUT_MS}ms) must be strictly inside the ` +
-      `pre-write-check hook budget (${hookBudgetMs}ms): an inner exec that eats the whole ` +
-      `window gets the hook killed, losing every warning`,
+    daemonHeadroom >= HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS,
+    `after daemon (${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms) + margin ` +
+      `(${HookConfig.PRE_WRITE_SAFETY_MARGIN_MS}ms), remaining (${daemonHeadroom}ms) must be ` +
+      `>= subprocess floor (${HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS}ms): otherwise the ` +
+      `slow-path fallback is permanently skipped`,
+  );
+
+  // The subprocess timer is min(QUERY_TIMEOUT_MS, remaining), so the composed
+  // worst case is exactly PRE_WRITE_HOOK_BUDGET_MS (the runtime arithmetic
+  // guarantees this). Verify the daemon timer is strictly shorter than the
+  // budget so a wedged daemon doesn't eat the whole window before the fallback.
+  assert.ok(
+    HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS < hookBudgetMs,
+    `PRE_WRITE_DAEMON_TIMEOUT_MS (${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms) must be ` +
+      `strictly less than the hook budget (${hookBudgetMs}ms): a daemon timeout that equals ` +
+      `the outer budget leaves no time for the subprocess fallback`,
   );
 });

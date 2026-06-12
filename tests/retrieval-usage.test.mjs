@@ -195,6 +195,63 @@ test('CLI default report survives non-string query records and reaches the usage
   }
 });
 
+test('usageReport: reflect-scan queries do NOT create surfaced_never_used candidates', () => {
+  // Finding 25: loadSurfacedEvents must exclude records with command:'reflect-scan'
+  // so /reflect's own internal similarity scan does not manufacture surfaced+ignored telemetry.
+  const pd = makePluginData({
+    queries: [1, 2, 3].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      command: 'reflect-scan',
+      top_paths: ['3-permanent/hub-note.md'],
+    })),
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    assert.deepStrictEqual(
+      r.surfaced_never_used.map((n) => n.path),
+      [],
+      'reflect-scan records must not contribute to surfaced_never_used',
+    );
+    assert.strictEqual(r.surfaced_notes, 0, 'reflect-scan records must not count as surfaced');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('usageReport: a used event outside the window does not shield the note from candidacy', () => {
+  // Finding 28: loadNoteUsageEvents is windowed — an old used event (> 90d ago)
+  // must not permanently shield a note that is surfaced and ignored today.
+  const pd = makePluginData({
+    queries: [1, 2, 3].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      top_paths: ['3-permanent/hot.md'],
+    })),
+    provenance: [
+      {
+        ts: daysAgo(200),
+        session_id: 's0',
+        action: 'note-usage',
+        target: '3-permanent/hot.md',
+        status: 'used',
+        signals: ['read'],
+      },
+    ],
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, windowDays: 90, minSurfaced: 3 });
+    assert.deepStrictEqual(
+      r.surfaced_never_used.map((n) => n.path),
+      ['3-permanent/hot.md'],
+      'a used event 200 days ago must not shield a note surfaced 3x in the current window',
+    );
+    assert.strictEqual(r.used_events, 0, 'out-of-window used event must not appear in counts');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
 test('CLI --usage --json emits the aggregation; text mode carries the honesty label', () => {
   const pd = makePluginData({
     queries: [1, 2, 3].map((d) => ({

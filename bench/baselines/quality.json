@@ -29,6 +29,11 @@
       ],
       "maxAbsoluteDrop": 0.03
     },
+    "provenance": {
+      "platform": "darwin/arm64",
+      "modelRevision": "ea104dacec62c0de699686887e3f920caeb4f3e3",
+      "generatorVersion": 2
+    },
     "funnel": {
       "vec [title]": {
         "recall_at_5": 0.038333333333333316,

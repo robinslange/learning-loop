@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Removed
+
+- **NLI contradiction-edge subsystem removed.** The DeBERTa-backed `challenges_rebuttal` / `nli_supports` edge types and their promotion-gate buckets have been fully removed after an audit showed 12% precision and zero recorded outcomes. Counter-argument detection now relies exclusively on the regex `challenges_*` classifier and embedding-similarity signals, which were already the primary path. Existing installs should run `node plugin/scripts/nli-cleanup.mjs` to purge residual `source_graph='nli'` rows from `edges.db`, drop unused NLI-bucket columns from `promotion_log`, and strip `nli_qualified_by` / `nli_resolved` / `nli_tension*` frontmatter fields from vault notes. **MIGRATION**
+
 ## v1.27.3
 
 ### Fixed

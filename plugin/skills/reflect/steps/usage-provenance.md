@@ -23,25 +23,36 @@ Output is a JSON array of `{path, via, level?}`:
   only the title/path was shown; `level: "body"` means the note body was
   injected.
 - `via: ["retrieved"]` — the note ranked in the top results of a
-  `vault-search` query this session (including the Step 2.5 reflect-scan).
+  `vault-search` query this session (excluding the Step 2.5 reflect-scan, which
+  is filtered from the surfacing ledger because it is the pipeline scanning
+  itself, not a retrieval surfaced to a session).
 
 If the array is empty, skip to the next step — emit nothing.
 
-Known gap, accept it: the injected record keeps only the session's most
-recent injection burst (the dedupe state is pruned on write), so an early
-injection in a long session may be missing. Classify what the list gives you;
-do not reconstruct paths from memory.
+Known gap, accept it: the injected record keeps only the session's most recent
+injection burst (the dedupe state is pruned on write), so earlier injections
+in the same session may be missing. The durable injections ledger captures the
+burst at the time of the report run, but any burst that came and went before a
+sync ran is gone permanently. Classify what the list gives you; do not
+reconstruct paths from memory.
 
 ## 4.7.b: Classify each note as used or ignored
 
 A note is **used** only if at least one of these happened in THIS session:
 
-- **read** — you opened the note's content (Read tool, `cat`, or it was the
-  subject of a duplicate-check read in Step 3).
+- **read** — you personally opened the note's content (Read tool or `cat`).
+  Pipeline-mandated reads do NOT count: the Step 3 duplicate-check read is a
+  system operation required by the reflect workflow, not engagement — do not
+  count it as a 'read' signal.
 - **edited** — the note itself was edited or refined this session (it appears
   in the reflect new-notes marker, was a Step 4.6 refinement target, or you
-  ran Write/Edit on it).
-- **linked** — a note you wrote this session contains a `[[wikilink]]` to it.
+  ran Write/Edit on it directly with intent to improve it).
+- **linked** — a wikilink to the note was written by you in a note this session.
+  Autolink-hook-appended links do NOT count: the autolink hook mechanically
+  appends `[[wikilinks]]` to every new note after write; those links are
+  machine-generated, not authored engagement. To distinguish: check whether the
+  link appears in the note body you dictated vs. a trailing autolink block you
+  did not write. When in doubt, do not count it.
 
 Everything else is **ignored**. Honesty rules — these keep the downstream
 report meaningful:
@@ -52,6 +63,9 @@ report meaningful:
 - Appearing in search results is never use. Parsing reflect-scan similarity
   scores does not make the matched notes used — only reading/editing/linking
   them does.
+- Machine-generated signals are never use. Hook-chain-triggered reads (duplicate
+  gate, edge-infer scan) and autolink-appended wikilinks fire without model
+  engagement and must be excluded.
 - When unsure, classify as ignored. A false "used" poisons the
   surfaced-never-used candidate list; a false "ignored" merely delays it.
 

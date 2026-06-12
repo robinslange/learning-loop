@@ -5,9 +5,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  chmodSync,
+  existsSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { skipOnWindows } from './helpers/platform.mjs';
 
 const VAULT_SEARCH = new URL('../plugin/scripts/vault-search.mjs', import.meta.url).pathname;
 
@@ -24,7 +33,7 @@ function createStubBinary(binDir) {
 
 test(
   'vault-search intentions --session-start-refresh writes intentions.json marker',
-  { timeout: 12000 },
+  { timeout: 12000, skip: skipOnWindows('shebang stub: #!/bin/sh stubs not executable on win32') },
   () => {
     const tmpPluginData = mkdtempSync(join(tmpdir(), 'll-vssr-'));
     try {
@@ -48,13 +57,13 @@ test(
         },
       );
 
-      assert.ok(
-        result.signal === null,
-        `vault-search killed by signal ${result.signal}`,
-      );
+      assert.ok(result.signal === null, `vault-search killed by signal ${result.signal}`);
 
       const markerPath = join(tmpPluginData, 'session-start-cache', 'intentions.json');
-      assert.ok(existsSync(markerPath), `marker file must exist at ${markerPath}\nstderr: ${result.stderr}`);
+      assert.ok(
+        existsSync(markerPath),
+        `marker file must exist at ${markerPath}\nstderr: ${result.stderr}`,
+      );
 
       const raw = readFileSync(markerPath, 'utf8');
       let parsed;

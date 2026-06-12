@@ -116,26 +116,21 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 ### Step 4: Consistency Detection
 
-Two-source check: embeddings find topical similarity; NLI finds logical relation. NLI is the stronger signal when present; embeddings are the fallback.
+Embeddings find topical similarity and surface both near-duplicates and potential contradictions.
 
-1. **NLI edges (high-confidence first).** Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`). For each assessed note, call `getNliEdgesForNote(db, notePath, 0.75)`. Filter to `edgeType === 'challenges_rebuttal'`. Bucket:
-   - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **high-confidence contradiction**
-   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (configured 0.75–0.95; effectively 0.90–0.95 — edges below the 0.90 write floor are never written, see `agents/_skills/promote-gate.md` → NLI threshold zoo) → **advisory tension**
-   - `edgeType === 'nli_supports'` → silent (entailment is not a /verify concern)
+For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
+- **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
+- **Potential contradiction** (similarity 0.7–0.85, conflicting claims): notes that look related but opposed. Recommend review.
 
-2. **Embedding similarity (fallback).** For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
-   - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
-   - **Potential contradiction** (similarity 0.7–0.85, conflicting claims, no NLI edge): notes that look related but opposed. Recommend review.
-
-3. **Deduplicate.** If a pair surfaces from both sources, present the NLI verdict and append the cosine for context: `(NLI p=0.97, cosine 0.84)`. NLI hits sort above cosine-only hits because the signal is stronger.
-
-If `getNliEdgesForNote` throws or returns nothing (DB locked, fresh vault, daemon offline), log via the existing hook-error pattern and proceed with embedding-only. Graceful degrade. Note the absence in the report so the user knows nothing was checked.
+Also check `edges.db` (see `scripts/lib/edges.mjs`) for `challenges_*` typed edges written by the regex classifier — these are authoritative contradiction signals where they exist.
 
 ### Step 4.5: Synthesis-Tag Audit (permanent + fleeting scopes)
 
 For the `permanent` and `fleeting` scopes (and `"topic"` scopes that surface synthesis-tagged notes), audit every `source: synthesis` / `synthesis`-tagged note against the factual-signals heuristic before trusting its exemption. The exemption is self-certified by the writing agent and is never otherwise re-checked, so a smuggled factual claim can sit in `3-permanent/` unaudited.
 
-Run the canonical procedure from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md` → "Synthesis-tag re-validation": scan each synthesis note's body (outside fenced blocks) for bare factual signals (a number with a unit/comparator, a named study or author+year, an effect size, a "research shows" attribution) that are **not** backed by a grounding `[[wikilink]]`. 
+**Skip-if-fresh:** Before running the audit on a note, read its `synthesis_validated` frontmatter field. If the field is present and the note's file `mtime` is not newer than that date, the verdict is fresh — skip the audit for that note and count it as passing (the body is unchanged since the last judgment). This prevents `/verify` and the inbox organiser from diverging on notes that neither of them has changed.
+
+Run the canonical procedure from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md` → "Synthesis-tag re-validation" for notes that are not skipped: scan each synthesis note's body (outside fenced blocks) for bare factual signals (a number with a unit/comparator, a named study or author+year, an effect size, a "research shows" attribution) that are **not** backed by a grounding `[[wikilink]]`. After the audit, apply the verdict stamp per the canonical procedure (stamp `synthesis_validated: <today>` on pass; remove the field on demote).
 
 For each note where the audit fires, flag it in the report as `synthesis exemption misapplied` — high priority, same tier as a fabricated source, because the note bypassed Sourcing and Source Integrity it should have faced:
 
@@ -177,10 +172,9 @@ Merge outputs from all agents into a single report:
 | [[note]] | shallow | 2/6 (missing: sourcing, voice, source integrity, depth) | 0 | 0 | no sources, topic-as-title |
 
 ### Consistency
-- [[note-A]] ↔ [[note-B]] (NLI contradiction p=0.97, cosine 0.84): high-confidence conflict, run /rewrite or mark as deliberate
-- [[note-C]] ↔ [[note-D]] (NLI tension p=0.92): advisory, may be worth reading together
-- [[note-E]] ↔ [[note-F]] (cosine 0.91): near-duplicate, merge candidate
-- [[note-G]] ↔ [[note-H]] (cosine 0.78): potential contradiction (embedding-only): [specific conflict]
+- [[note-A]] ↔ [[note-B]] (challenges_* counter-argument edge, cosine 0.84): conflict, run /rewrite or mark as deliberate
+- [[note-C]] ↔ [[note-D]] (cosine 0.91): near-duplicate, merge candidate
+- [[note-E]] ↔ [[note-F]] (cosine 0.78): potential contradiction: [specific conflict]
 
 ### Source Issues
 #### [[note-name]]: N issues
@@ -200,8 +194,8 @@ Notes with `wrong_author` or fabricated sources should be flagged in the top sec
 
 Prioritize notes by combined quality + source issues:
 
-1. High priority: fabricated references, dead URLs, unsupported claims, NLI hard contradictions (p ≥ 0.95)
-2. Medium priority: shallow notes with potential, missing citations, NLI advisory tensions (below the 0.95 hard threshold; effectively 0.90–0.95)
+1. High priority: fabricated references, dead URLs, unsupported claims, confirmed contradictions (challenges_* counter-argument edge or strong embedding signal)
+2. Medium priority: shallow notes with potential, missing citations
 3. Low priority: minor voice issues, weak links
 
 ```

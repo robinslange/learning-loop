@@ -40,16 +40,12 @@ jobs:
       - name: Run tests
         run: npm test
 
-      # The truncation contract tests skip without a real binary; on CI that
-      # meant the contract was never enforced. Download the pinned release
-      # binary AFTER the main run (the missing-binary test in the NLI failures
-      # suite must see a binary-less tree) and re-run the contract file with a
-      # skip guard. Bump LL_BINARY_VERSION when the envelope contract changes;
-      # it is pinned (not package.json-derived) so a release commit doesn't
-      # race the build-native workflow that publishes its own artifacts.
-      # v1.26.1 has no release because its build-native run failed (W4 hardens
-      # this); the truncation contract (schema_version 1 + truncated field) is
-      # stable across these versions.
+      # Binary-gated suites skip without a real binary; on CI that means the
+      # contract is never enforced. Download the pinned release binary AFTER
+      # the main run and re-run the contract file with a skip guard. Bump
+      # LL_BINARY_VERSION when the envelope contract changes; it is pinned
+      # (not package.json-derived) so a release commit doesn't race the
+      # build-native workflow that publishes its own artifacts.
       - name: Install ll-search release binary
         if: runner.os == 'Linux'
         env:
@@ -72,7 +68,6 @@ jobs:
         run: |
           set -euo pipefail
           for suite in \
-            tests/edge-infer-nli-truncation.test.mjs \
             tests/convergence-check-keys.test.mjs; do
             out=$(node --test --test-reporter=tap "$suite")
             echo "$out"
@@ -112,8 +107,15 @@ jobs:
   # seeded fixture vault and hard-fails on a >3% absolute drop in recall@10 /
   # ndcg@10 versus the committed baseline (bench/baselines/quality.json).
   # Covers both short [title] queries and long body-derived [long] queries
-  # (the JIT injection distribution). Regenerate the baseline with:
-  #   node bench/bench.mjs --quality-only --save-quality-baseline
+  # (the JIT injection distribution).
+  #
+  # Bless path (update the baseline):
+  #   1. Trigger the "Regenerate quality baseline" workflow_dispatch on GitHub.
+  #      It builds the release binary on ubuntu-latest, regenerates the eval,
+  #      and uploads bench/baselines/quality.json as the "quality-baseline" artifact.
+  #   2. Download the artifact from the Actions run, inspect it (numQueries should
+  #      be 200, provenance.platform should be "linux/x64"), then commit it:
+  #        git add bench/baselines/quality.json && git commit -m "regen quality baseline"
   quality:
     runs-on: ubuntu-latest
     steps:
@@ -144,7 +146,18 @@ jobs:
         run: cargo build --release -p ll-search
 
       - name: Retrieval quality gate
-        run: node bench/bench.mjs --quality-only --compare bench/baselines/quality.json
+        run: |
+          node bench/bench.mjs --quality-only --compare bench/baselines/quality.json \
+            > /tmp/quality-result.json
+          cat /tmp/quality-result.json
+
+      - name: Upload quality metrics artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-metrics-${{ github.run_id }}
+          path: /tmp/quality-result.json
+          retention-days: 30
 
   lint:
     runs-on: ubuntu-latest

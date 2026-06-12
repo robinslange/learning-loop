@@ -13,6 +13,7 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ## Note Format
 
 - **Title**: States the insight, not the topic. "Spaced repetition works because forgetting is active" not "Spaced Repetition."
+- **Filename**: kebab-case slug of the insight, no spaces — `spaced-repetition-fights-active-forgetting.md`, never `Spaced Repetition.md`. Match the existing vault convention; never introduce a second naming style.
 - **Body**: 3-10 lines (up to 15 for deep notes with sources). Notes under 5 lines should be substantive enough to stand alone. One idea per note.
 - **Tags**: Max 3. Pick the most specific ones.
 - **Links**: At least one wiki-link to a related note. More if genuine.

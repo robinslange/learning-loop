@@ -9,9 +9,9 @@
  * Idempotent: skips generation if manifest exists with matching count+seed.
  */
 
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // ---------------------------------------------------------------------------
 // CLI parse
@@ -23,9 +23,9 @@ function getArg(name, def) {
   return i !== -1 ? args[i + 1] : def;
 }
 
-const COUNT = parseInt(getArg("count", "1000"), 10);
-const OUT = getArg("out", ".cache/vault");
-const SEED = parseInt(getArg("seed", "20260511"), 10);
+const COUNT = parseInt(getArg('count', '1000'), 10);
+const OUT = getArg('out', '.cache/vault');
+const SEED = parseInt(getArg('seed', '20260511'), 10);
 
 // Bump when note-content generation changes so stale .cache fixtures (and
 // quality baselines built on them) regenerate instead of silently reusing
@@ -51,50 +51,214 @@ function mulberry32(a) {
 // ---------------------------------------------------------------------------
 
 const TAGS = [
-  "cognition", "sleep", "productivity", "llm", "zettelkasten",
-  "neuroscience", "memory", "attention", "learning", "metacognition",
-  "statistics", "bayesian", "causal", "information-theory", "entropy",
-  "systems", "feedback", "emergence", "complexity", "resilience",
-  "health", "nutrition", "exercise", "circadian", "stress",
-  "software", "architecture", "distributed", "reliability", "testing",
+  'cognition',
+  'sleep',
+  'productivity',
+  'llm',
+  'zettelkasten',
+  'neuroscience',
+  'memory',
+  'attention',
+  'learning',
+  'metacognition',
+  'statistics',
+  'bayesian',
+  'causal',
+  'information-theory',
+  'entropy',
+  'systems',
+  'feedback',
+  'emergence',
+  'complexity',
+  'resilience',
+  'health',
+  'nutrition',
+  'exercise',
+  'circadian',
+  'stress',
+  'software',
+  'architecture',
+  'distributed',
+  'reliability',
+  'testing',
 ];
 
 const WORDS = [
-  "activation", "adaptive", "aggregate", "algorithm", "alignment",
-  "allocation", "analysis", "anchor", "annotation", "architecture",
-  "assertion", "attention", "attribute", "augmentation", "autoencoder",
-  "backpropagation", "bandwidth", "baseline", "batch", "bayesian",
-  "bias", "boundary", "branching", "buffer", "calibration",
-  "capacity", "causal", "chain", "channel", "classifier",
-  "cluster", "coherence", "compression", "computation", "concept",
-  "confidence", "consolidation", "constraint", "context", "convergence",
-  "correlation", "coupling", "criterion", "cross-entropy", "cycle",
-  "decay", "decoding", "decomposition", "delta", "density",
-  "dependency", "depth", "derivative", "detection", "dimension",
-  "direction", "distribution", "divergence", "domain", "dropout",
-  "dynamics", "efficiency", "embedding", "encoding", "entropy",
-  "epoch", "equilibrium", "error", "evaluation", "evidence",
-  "evolution", "expansion", "expectation", "exploration", "extraction",
-  "factorization", "feedback", "filter", "finetuning", "flow",
-  "focus", "formation", "forward-pass", "foundation", "frequency",
-  "function", "gain", "gradient", "graph", "heuristic",
-  "hierarchy", "hypothesis", "identity", "inference", "initialization",
-  "integration", "interaction", "interpolation", "invariance", "iteration",
-  "kernel", "knowledge", "label", "latent", "layer",
-  "learning", "likelihood", "linear", "loss", "manifold",
-  "mapping", "margin", "matrix", "mechanism", "memory",
-  "metric", "mixture", "model", "momentum", "monitoring",
-  "network", "noise", "normalization", "objective", "optimization",
-  "output", "overfitting", "parameter", "pattern", "penalty",
-  "perception", "pipeline", "posterior", "prediction", "prior",
-  "probability", "projection", "propagation", "prototype", "pruning",
-  "query", "ranking", "recall", "reconstruction", "recurrence",
-  "regularization", "reinforcement", "representation", "residual", "retrieval",
-  "sampling", "scalar", "search", "selection", "sensitivity",
-  "sequence", "signal", "similarity", "softmax", "sparsity",
-  "spectrum", "state", "strategy", "structure", "supervision",
-  "tensor", "threshold", "training", "transfer", "transformation",
-  "uncertainty", "update", "variance", "vector", "weight",
+  'activation',
+  'adaptive',
+  'aggregate',
+  'algorithm',
+  'alignment',
+  'allocation',
+  'analysis',
+  'anchor',
+  'annotation',
+  'architecture',
+  'assertion',
+  'attention',
+  'attribute',
+  'augmentation',
+  'autoencoder',
+  'backpropagation',
+  'bandwidth',
+  'baseline',
+  'batch',
+  'bayesian',
+  'bias',
+  'boundary',
+  'branching',
+  'buffer',
+  'calibration',
+  'capacity',
+  'causal',
+  'chain',
+  'channel',
+  'classifier',
+  'cluster',
+  'coherence',
+  'compression',
+  'computation',
+  'concept',
+  'confidence',
+  'consolidation',
+  'constraint',
+  'context',
+  'convergence',
+  'correlation',
+  'coupling',
+  'criterion',
+  'cross-entropy',
+  'cycle',
+  'decay',
+  'decoding',
+  'decomposition',
+  'delta',
+  'density',
+  'dependency',
+  'depth',
+  'derivative',
+  'detection',
+  'dimension',
+  'direction',
+  'distribution',
+  'divergence',
+  'domain',
+  'dropout',
+  'dynamics',
+  'efficiency',
+  'embedding',
+  'encoding',
+  'entropy',
+  'epoch',
+  'equilibrium',
+  'error',
+  'evaluation',
+  'evidence',
+  'evolution',
+  'expansion',
+  'expectation',
+  'exploration',
+  'extraction',
+  'factorization',
+  'feedback',
+  'filter',
+  'finetuning',
+  'flow',
+  'focus',
+  'formation',
+  'forward-pass',
+  'foundation',
+  'frequency',
+  'function',
+  'gain',
+  'gradient',
+  'graph',
+  'heuristic',
+  'hierarchy',
+  'hypothesis',
+  'identity',
+  'inference',
+  'initialization',
+  'integration',
+  'interaction',
+  'interpolation',
+  'invariance',
+  'iteration',
+  'kernel',
+  'knowledge',
+  'label',
+  'latent',
+  'layer',
+  'learning',
+  'likelihood',
+  'linear',
+  'loss',
+  'manifold',
+  'mapping',
+  'margin',
+  'matrix',
+  'mechanism',
+  'memory',
+  'metric',
+  'mixture',
+  'model',
+  'momentum',
+  'monitoring',
+  'network',
+  'noise',
+  'normalization',
+  'objective',
+  'optimization',
+  'output',
+  'overfitting',
+  'parameter',
+  'pattern',
+  'penalty',
+  'perception',
+  'pipeline',
+  'posterior',
+  'prediction',
+  'prior',
+  'probability',
+  'projection',
+  'propagation',
+  'prototype',
+  'pruning',
+  'query',
+  'ranking',
+  'recall',
+  'reconstruction',
+  'recurrence',
+  'regularization',
+  'reinforcement',
+  'representation',
+  'residual',
+  'retrieval',
+  'sampling',
+  'scalar',
+  'search',
+  'selection',
+  'sensitivity',
+  'sequence',
+  'signal',
+  'similarity',
+  'softmax',
+  'sparsity',
+  'spectrum',
+  'state',
+  'strategy',
+  'structure',
+  'supervision',
+  'tensor',
+  'threshold',
+  'training',
+  'transfer',
+  'transformation',
+  'uncertainty',
+  'update',
+  'variance',
+  'vector',
+  'weight',
 ];
 
 // ---------------------------------------------------------------------------
@@ -156,7 +320,7 @@ function sentence(rng, topic) {
 }
 
 function paragraph(rng, topic, sentences = 4) {
-  return Array.from({ length: sentences }, () => sentence(rng, topic)).join(" ");
+  return Array.from({ length: sentences }, () => sentence(rng, topic)).join(' ');
 }
 
 // ---------------------------------------------------------------------------
@@ -165,8 +329,8 @@ function paragraph(rng, topic, sentences = 4) {
 
 function generateNote(id, rng, allNotes) {
   const topic = Math.floor(rng() * TOPIC_COUNT);
-  const wordSlug = pickWords(rng, 3, topic).join("-");
-  const filename = `${String(id).padStart(5, "0")}-${wordSlug}.md`;
+  const wordSlug = pickWords(rng, 3, topic).join('-');
+  const filename = `${String(id).padStart(5, '0')}-${wordSlug}.md`;
 
   // frontmatter: tags keyed off the topic plus 0-2 random extras
   const tagCount = 1 + Math.floor(rng() * 3);
@@ -174,7 +338,10 @@ function generateNote(id, rng, allNotes) {
   const tagSet = new Set(noteTags);
   while (noteTags.length < tagCount) {
     const t = TAGS[Math.floor(rng() * TAGS.length)];
-    if (!tagSet.has(t)) { tagSet.add(t); noteTags.push(t); }
+    if (!tagSet.has(t)) {
+      tagSet.add(t);
+      noteTags.push(t);
+    }
   }
 
   // mtime: spread over 2 years (seconds)
@@ -202,38 +369,33 @@ function generateNote(id, rng, allNotes) {
   // body: 200-800 words → 3-10 paragraphs
   const paraCount = 3 + Math.floor(rng() * 8);
   const bodyParas = Array.from({ length: paraCount }, () =>
-    paragraph(rng, topic, 2 + Math.floor(rng() * 4))
+    paragraph(rng, topic, 2 + Math.floor(rng() * 4)),
   );
 
   const wikilinksInBody = links
     .slice(0, 3)
     .map((t) => `[[${t}]]`)
-    .join(", ");
+    .join(', ');
 
-  const body = [
-    ...bodyParas,
-    links.length > 0
-      ? `Related: ${wikilinksInBody}.`
-      : "",
-  ]
+  const body = [...bodyParas, links.length > 0 ? `Related: ${wikilinksInBody}.` : '']
     .filter(Boolean)
-    .join("\n\n");
+    .join('\n\n');
 
-  const title = cap(wordSlug.replace(/-/g, " "));
+  const title = cap(wordSlug.replace(/-/g, ' '));
 
-  const noteMeta = { title, stem: filename.replace(/\.md$/, ""), topic };
+  const noteMeta = { title, stem: filename.replace(/\.md$/, ''), topic };
 
   const content = [
-    "---",
+    '---',
     `title: "${title}"`,
-    `tags: [${noteTags.map((t) => `"${t}"`).join(", ")}]`,
+    `tags: [${noteTags.map((t) => `"${t}"`).join(', ')}]`,
     `mtime: ${mtime}`,
-    "---",
-    "",
+    '---',
+    '',
     `# ${title}`,
-    "",
+    '',
     body,
-  ].join("\n");
+  ].join('\n');
 
   return { filename, noteMeta, content };
 }
@@ -243,18 +405,30 @@ function generateNote(id, rng, allNotes) {
 // ---------------------------------------------------------------------------
 
 function main() {
-  const manifestPath = join(OUT, "manifest.json");
+  const manifestPath = join(OUT, 'manifest.json');
   if (existsSync(manifestPath)) {
     try {
-      const existing = JSON.parse(readFileSync(manifestPath, "utf8"));
-      if (existing.count === COUNT && existing.seed === SEED && existing.generatorVersion === GENERATOR_VERSION) {
+      const existing = JSON.parse(readFileSync(manifestPath, 'utf8'));
+      if (
+        existing.count === COUNT &&
+        existing.seed === SEED &&
+        existing.generatorVersion === GENERATOR_VERSION
+      ) {
         process.stdout.write(
-          JSON.stringify({ status: "skipped", reason: "manifest matches", count: COUNT }) + "\n"
+          JSON.stringify({ status: 'skipped', reason: 'manifest matches', count: COUNT }) + '\n',
         );
         return;
       }
+      // GENERATOR_VERSION changed (or count/seed mismatch): wipe the output
+      // directory so stale v(N-1) notes do not blend with the new generation.
+      // Without this, a version bump that renames files leaves the old set
+      // behind and the indexed vault contains a mix of two generator versions.
+      process.stderr.write(
+        `Manifest mismatch (want v${GENERATOR_VERSION}, got v${existing.generatorVersion ?? '?'}); clearing ${OUT}\n`,
+      );
+      rmSync(OUT, { recursive: true, force: true });
     } catch {
-      // regenerate
+      // Corrupt manifest — fall through to regenerate into the existing dir.
     }
   }
 
@@ -279,9 +453,9 @@ function main() {
   }
 
   // manifest
-  const hash = createHash("sha256");
+  const hash = createHash('sha256');
   for (const p of paths) hash.update(p);
-  const sha256OfAllPaths = hash.digest("hex");
+  const sha256OfAllPaths = hash.digest('hex');
 
   const manifest = {
     count: COUNT,
@@ -293,7 +467,7 @@ function main() {
   writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
   process.stdout.write(
-    JSON.stringify({ status: "generated", count: COUNT, out: OUT, sha256OfAllPaths }) + "\n"
+    JSON.stringify({ status: 'generated', count: COUNT, out: OUT, sha256OfAllPaths }) + '\n',
   );
 }
 

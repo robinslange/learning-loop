@@ -88,130 +88,80 @@ pub fn dot_product(a: &[f32], b: &[f32]) -> f32 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
 }
 
-/// Maximum token count for which [`fts_escape`] keeps FTS5 implicit-AND
-/// semantics. Queries with more tokens switch to OR.
+/// Maximum number of tokens included in the OR-joined FTS5 fallback query.
 ///
-/// Short queries (CLI lookups, note titles) are precision-oriented: requiring
-/// every term keeps the result list tight. Long queries are natural-language
-/// prompts (the JIT injection path) where no single note contains every
-/// token, so implicit AND returns zero rows and kills the keyword signal.
-pub const FTS_AND_MAX_TOKENS: usize = 3;
-
-/// Maximum number of tokens included in an OR-joined FTS5 query.
+/// Tokens beyond this cap are dropped (after case-insensitive deduplication
+/// and stopword removal) to bound MATCH expression size on very long
+/// natural-language queries.
 ///
-/// Tokens beyond this cap are dropped (after case-insensitive deduplication)
-/// to bound MATCH expression size on very long natural-language queries.
+/// The cap keeps the query HEAD: substantive tokens past the first 32 unique
+/// ones never reach the keyword signal. This is a deliberate head-keeping
+/// bias — JIT prompts that bury the topic at the tail lose those terms from
+/// FTS (the vector signal still sees the full query).
 pub const FTS_OR_TOKEN_CAP: usize = 32;
 
-/// Escape a free-text query for use in a SQLite FTS5 `MATCH` expression.
+/// Pure-stopword tokens dropped from the OR fallback query.
+///
+/// Under OR semantics a stopword matches almost every note, so each one
+/// pollutes the candidate list with weakly-related rows and dilutes BM25
+/// ranking. Under implicit AND (the first-pass query) stopwords are harmless
+/// — they only tighten the match — so they are kept there.
+const FTS_OR_STOPWORDS: &[&str] = &[
+    "a", "about", "after", "all", "an", "and", "any", "are", "as", "at", "be",
+    "been", "but", "by", "can", "could", "did", "do", "does", "for", "from",
+    "had", "has", "have", "how", "i", "if", "in", "into", "is", "it", "its",
+    "just", "me", "my", "no", "not", "of", "on", "or", "our", "should", "so",
+    "some", "than", "that", "the", "their", "them", "then", "there", "these",
+    "they", "this", "to", "up", "was", "we", "were", "what", "when", "where",
+    "which", "who", "why", "will", "with", "would", "you", "your",
+];
+
+fn quote_token(t: &str) -> String {
+    format!("\"{}\"", t.replace('"', "\"\""))
+}
+
+/// Escape a free-text query as an FTS5 implicit-AND `MATCH` expression.
 ///
 /// Each whitespace-separated token is wrapped in double quotes so that
 /// punctuation and operator characters in user input are treated as literals.
-///
-/// Join semantics depend on query length:
-///
-/// - **<= [`FTS_AND_MAX_TOKENS`] tokens**: tokens are joined with a space
-///   (FTS5 implicit AND). Short queries — CLI lookups and title-shaped
-///   queries — want precision: all terms must be present.
-/// - **> [`FTS_AND_MAX_TOKENS`] tokens**: tokens are deduplicated
-///   (case-insensitively, keeping first occurrence), capped at
-///   [`FTS_OR_TOKEN_CAP`], and joined with ` OR `. Long queries are
-///   natural-language prompts where requiring every token matches nothing;
-///   OR semantics let BM25 rank notes containing any subset of the terms.
-///   BM25 scores remain negative (more negative = better) either way.
+/// All tokens are required (FTS5 implicit AND) — precision first. Callers
+/// that want recall when AND matches nothing fall back to
+/// [`fts_escape_or`]; [`fts_bm25_query`] does this automatically.
 pub fn fts_escape(text: &str) -> String {
+    let quoted: Vec<String> = text.split_whitespace().map(quote_token).collect();
+    quoted.join(" ")
+}
+
+/// Escape a free-text query as an OR-joined FTS5 `MATCH` expression.
+///
+/// Used as the recall fallback when the implicit-AND form of the same query
+/// matches zero rows (long natural-language prompts rarely have all tokens in
+/// one note). Tokens are deduplicated case-insensitively (keeping first
+/// occurrence), pure stopwords are dropped (see [`FTS_OR_STOPWORDS`]), and
+/// the survivors are capped at [`FTS_OR_TOKEN_CAP`] — head-keeping, see the
+/// cap's docs for the bias this implies. Returns an empty string when every
+/// token is a stopword. BM25 scores remain negative (more negative = better)
+/// either way.
+pub fn fts_escape_or(text: &str) -> String {
+    let mut seen = std::collections::HashSet::new();
     let quoted: Vec<String> = text
         .split_whitespace()
-        .filter(|t| !t.is_empty())
-        .map(|t| format!("\"{}\"", t.replace('"', "\"\"")))
-        .collect();
-
-    if quoted.len() <= FTS_AND_MAX_TOKENS {
-        return quoted.join(" ");
-    }
-
-    let mut seen = std::collections::HashSet::new();
-    let deduped: Vec<String> = quoted
-        .into_iter()
-        .filter(|t| seen.insert(t.to_lowercase()))
+        .filter(|t| {
+            let lower = t.to_lowercase();
+            !FTS_OR_STOPWORDS.contains(&lower.as_str()) && seen.insert(lower)
+        })
         .take(FTS_OR_TOKEN_CAP)
+        .map(quote_token)
         .collect();
-    deduped.join(" OR ")
+    quoted.join(" OR ")
 }
 
-/// Run a BM25 FTS5 query and return the top `limit` results.
-///
-/// Returns `Vec<(note_id, path, bm25_score)>`. The score is the raw SQLite
-/// `bm25()` value (negative; more negative = better match). Returns an empty
-/// vec on query failure rather than propagating the error, so callers can
-/// degrade gracefully when FTS is unavailable.
-pub fn fts_bm25_query(
+fn run_fts_query(
     conn: &rusqlite::Connection,
-    query: &str,
+    escaped: &str,
     limit: usize,
     config: &FtsConfig,
-) -> Vec<(i64, String, f64)> {
-    let escaped = fts_escape(query);
-    if escaped.is_empty() {
-        return Vec::new();
-    }
-
-    let sql = format!(
-        "SELECT nc.{id}, n.{path}, bm25({fts}, {weights}) as score
-         FROM {fts}
-         JOIN {content} nc ON nc.{id} = {fts}.rowid
-         JOIN {items} n ON n.{id} = nc.{id}
-         WHERE {fts} MATCH ?1
-         ORDER BY score
-         LIMIT ?2",
-        id = config.id_column,
-        path = config.path_column,
-        fts = config.fts_table,
-        content = config.content_table,
-        items = config.items_table,
-        weights = config.bm25_weights,
-    );
-
-    let mut stmt = match conn.prepare(&sql) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
-    };
-
-    let rows = match stmt.query_map(rusqlite::params![escaped, limit as i64], |row| {
-        Ok((
-            row.get::<_, i64>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, f64>(2)?,
-        ))
-    }) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-
-    rows.filter_map(|r| r.ok()).collect()
-}
-
-/// Run a BM25 FTS5 query and return the top `limit` results, propagating errors.
-///
-/// Returns `Vec<(note_id, path, bm25_score)>`. The score is the raw SQLite
-/// `bm25()` value (negative; more negative = better match). Returns
-/// `Err(ll_core::Error::Sqlite(_))` if the FTS table is missing or the query
-/// fails, so callers can distinguish infrastructure failures from empty result
-/// sets.
-///
-/// Use [`fts_bm25_query`] when a best-effort fallback to empty vec is preferred
-/// (e.g. federation peers where FTS may be unavailable).
-pub fn try_fts_bm25_query(
-    conn: &rusqlite::Connection,
-    query: &str,
-    limit: usize,
-    config: &FtsConfig,
-) -> crate::Result<Vec<(i64, String, f64)>> {
-    let escaped = fts_escape(query);
-    if escaped.is_empty() {
-        return Ok(Vec::new());
-    }
-
+) -> Result<Vec<(i64, String, f64)>, rusqlite::Error> {
     let sql = format!(
         "SELECT nc.{id}, n.{path}, bm25({fts}, {weights}) as score
          FROM {fts}
@@ -236,8 +186,74 @@ pub fn try_fts_bm25_query(
             row.get::<_, f64>(2)?,
         ))
     })?;
+    rows.collect()
+}
 
-    rows.collect::<Result<Vec<_>, rusqlite::Error>>().map_err(crate::Error::from)
+/// Run a BM25 FTS5 query and return the top `limit` results.
+///
+/// Tries the implicit-AND form first (precision: all terms required). When
+/// that matches zero rows — typical for long natural-language prompts where
+/// no single note contains every token — it reruns the query as an OR join
+/// over deduplicated, stopword-filtered tokens ([`fts_escape_or`]). The
+/// fallback costs one extra prepared query only on AND misses, so the hot
+/// path is unaffected and there is no hard precision cliff at any token
+/// count.
+///
+/// Returns `Vec<(note_id, path, bm25_score)>`. The score is the raw SQLite
+/// `bm25()` value (negative; more negative = better match). Returns an empty
+/// vec on query failure rather than propagating the error, so callers can
+/// degrade gracefully when FTS is unavailable.
+pub fn fts_bm25_query(
+    conn: &rusqlite::Connection,
+    query: &str,
+    limit: usize,
+    config: &FtsConfig,
+) -> Vec<(i64, String, f64)> {
+    let and_escaped = fts_escape(query);
+    if and_escaped.is_empty() {
+        return Vec::new();
+    }
+    let results = run_fts_query(conn, &and_escaped, limit, config).unwrap_or_default();
+    if !results.is_empty() {
+        return results;
+    }
+    let or_escaped = fts_escape_or(query);
+    if or_escaped.is_empty() || or_escaped == and_escaped {
+        return results;
+    }
+    run_fts_query(conn, &or_escaped, limit, config).unwrap_or_default()
+}
+
+/// Run a BM25 FTS5 query and return the top `limit` results, propagating errors.
+///
+/// Same AND-first / OR-fallback semantics as [`fts_bm25_query`]. Returns
+/// `Vec<(note_id, path, bm25_score)>`. The score is the raw SQLite
+/// `bm25()` value (negative; more negative = better match). Returns
+/// `Err(ll_core::Error::Sqlite(_))` if the FTS table is missing or the query
+/// fails, so callers can distinguish infrastructure failures from empty result
+/// sets.
+///
+/// Use [`fts_bm25_query`] when a best-effort fallback to empty vec is preferred
+/// (e.g. federation peers where FTS may be unavailable).
+pub fn try_fts_bm25_query(
+    conn: &rusqlite::Connection,
+    query: &str,
+    limit: usize,
+    config: &FtsConfig,
+) -> crate::Result<Vec<(i64, String, f64)>> {
+    let and_escaped = fts_escape(query);
+    if and_escaped.is_empty() {
+        return Ok(Vec::new());
+    }
+    let results = run_fts_query(conn, &and_escaped, limit, config)?;
+    if !results.is_empty() {
+        return Ok(results);
+    }
+    let or_escaped = fts_escape_or(query);
+    if or_escaped.is_empty() || or_escaped == and_escaped {
+        return Ok(results);
+    }
+    run_fts_query(conn, &or_escaped, limit, config).map_err(crate::Error::from)
 }
 
 /// Accumulate RRF scores for a ranked list of document paths.
@@ -357,33 +373,41 @@ mod tests {
     }
 
     #[test]
-    fn test_fts_escape_short_query_keeps_implicit_and() {
+    fn test_fts_escape_always_implicit_and() {
         assert_eq!(fts_escape("hello world"), "\"hello\" \"world\"");
         assert_eq!(fts_escape("a b c"), "\"a\" \"b\" \"c\"");
         assert_eq!(fts_escape(""), "");
         assert_eq!(fts_escape("  "), "");
-    }
-
-    #[test]
-    fn test_fts_escape_long_query_uses_or() {
+        // No token-count cliff: long queries stay AND in the first pass.
         assert_eq!(
             fts_escape("how does sticky positioning break"),
-            "\"how\" OR \"does\" OR \"sticky\" OR \"positioning\" OR \"break\""
+            "\"how\" \"does\" \"sticky\" \"positioning\" \"break\""
         );
     }
 
     #[test]
-    fn test_fts_escape_dedupes_case_insensitive() {
+    fn test_fts_escape_or_drops_stopwords() {
         assert_eq!(
-            fts_escape("the cache The Cache misses again"),
-            "\"the\" OR \"cache\" OR \"misses\" OR \"again\""
+            fts_escape_or("how does sticky positioning break"),
+            "\"sticky\" OR \"positioning\" OR \"break\""
+        );
+        assert_eq!(fts_escape_or("the and of to is"), "");
+    }
+
+    #[test]
+    fn test_fts_escape_or_dedupes_case_insensitive() {
+        assert_eq!(
+            fts_escape_or("the cache The Cache misses again"),
+            "\"cache\" OR \"misses\" OR \"again\""
         );
     }
 
     #[test]
-    fn test_fts_escape_caps_token_count() {
+    fn test_fts_escape_or_caps_token_count_keeping_head() {
+        // Head-keeping bias is deliberate (see FTS_OR_TOKEN_CAP docs): the
+        // first 32 unique substantive tokens win, tail tokens are dropped.
         let tokens: Vec<String> = (0..50).map(|i| format!("tok{i}")).collect();
-        let escaped = fts_escape(&tokens.join(" "));
+        let escaped = fts_escape_or(&tokens.join(" "));
         let parts: Vec<&str> = escaped.split(" OR ").collect();
         assert_eq!(parts.len(), FTS_OR_TOKEN_CAP);
         assert_eq!(parts[0], "\"tok0\"");
@@ -391,8 +415,8 @@ mod tests {
     }
 
     #[test]
-    fn test_fts_escape_quotes_remain_escaped_in_or_mode() {
-        let escaped = fts_escape("one two three four \"quoted\"");
+    fn test_fts_escape_or_quotes_remain_escaped() {
+        let escaped = fts_escape_or("one two three four \"quoted\"");
         assert!(escaped.contains("\"\"\"quoted\"\"\""));
         assert!(escaped.contains(" OR "));
     }
@@ -446,12 +470,33 @@ mod tests {
         let conn = fts_fixture(&[
             ("partial.md", "the scroll root and nothing else"),
             ("full.md", "overflow hidden on the scroll root kills position sticky"),
+            // Pure-stopword note: without stopword filtering, the OR fallback
+            // would match this on "by"/"on"/"the" and pollute the ranking.
+            ("stopwords.md", "the and of to is on that by with this"),
         ]);
         let query = "position sticky broken by overflow hidden on the scroll root";
         let results = fts_bm25_query(&conn, query, 10, &VAULT_FTS);
+        let paths: Vec<&str> = results.iter().map(|(_, p, _)| p.as_str()).collect();
+        assert!(
+            !paths.contains(&"stopwords.md"),
+            "stopword-only notes must not enter the OR fallback results: {paths:?}"
+        );
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].1, "full.md", "note matching more query tokens ranks first");
         assert!(results[0].2 < results[1].2, "better match has more-negative bm25 score");
+    }
+
+    #[test]
+    fn test_and_hit_skips_or_fallback() {
+        // 4-token query where AND matches: under the old >3-token OR cliff,
+        // noise.md (sharing only "alpha") would have entered the results.
+        let conn = fts_fixture(&[
+            ("exact.md", "alpha beta gamma delta"),
+            ("noise.md", "alpha epsilon zeta eta"),
+        ]);
+        let results = fts_bm25_query(&conn, "alpha beta gamma delta", 10, &VAULT_FTS);
+        assert_eq!(results.len(), 1, "AND hit keeps precision — no OR dilution");
+        assert_eq!(results[0].1, "exact.md");
     }
 
     #[test]
@@ -463,6 +508,14 @@ mod tests {
         let results = fts_bm25_query(&conn, "token cache", 10, &VAULT_FTS);
         assert_eq!(results.len(), 1, "short queries keep implicit-AND precision");
         assert_eq!(results[0].1, "both.md");
+    }
+
+    #[test]
+    fn test_short_query_zero_rows_falls_back_to_or() {
+        let conn = fts_fixture(&[("one.md", "token budget exceeded")]);
+        let results = fts_bm25_query(&conn, "token cache", 10, &VAULT_FTS);
+        assert_eq!(results.len(), 1, "zero AND rows rerun as OR at any token count");
+        assert_eq!(results[0].1, "one.md");
     }
 
     #[test]

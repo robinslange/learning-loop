@@ -131,6 +131,8 @@ Run the promote-gate assessment on the finished note:
 
 For `[synthesis]`-tagged notes, "all applicable" means 4/4 (Sourcing and Source Integrity exempt).
 
+**Track the repair budget.** If the finished note STILL carries a blocking verification marker or `source: unverified` (this deepen pass failed to repair it) and it is being written to `1-fleeting/` or overwritten in place, increment the `deepen_attempts` frontmatter counter (add `deepen_attempts: 1` if absent, else +1). The fleeting sweep reads this counter: after 2 failed attempts it stops recommending `/deepen` and offers the note for archival instead. If the repair succeeded (no blocking markers and no `source: unverified` remain), remove any `deepen_attempts` field — the budget resets once the note is fixed.
+
 Use `Write` tool for all file operations. Use `Bash rm` to delete originals after promotion. Never use Obsidian MCP tools.
 
 ### 9. Report

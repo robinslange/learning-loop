@@ -109,7 +109,6 @@ ll-search/src/
     index.rs
     query.rs
   search/             -- pure query pipeline; uses Storage trait from app/
-  nli/                -- entailment inference
   sync/               -- network only -- no search logic
 ```
 

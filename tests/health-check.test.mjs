@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
+import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
@@ -21,6 +22,7 @@ import {
   checkDuplicateGateHealth,
   checkInjectionShadowGate,
   checkAbiDrift,
+  recentUtcMonths,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
   checkNodeVersion,
@@ -172,15 +174,19 @@ test('checkVaultSystemFiles: warn when persona.md missing', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkBinaryExists: ok when binary present and executable', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'health-bin-'));
-  mkdirSync(join(dir, 'bin'));
-  writeFileSync(join(dir, 'bin/ll-search'), '#!/usr/bin/env bash\n');
-  chmodSync(join(dir, 'bin/ll-search'), 0o755);
-  const result = checkBinaryExists({ pluginData: dir });
-  assert.equal(result.status, 'ok');
-  rmSync(dir, { recursive: true, force: true });
-});
+test(
+  'checkBinaryExists: ok when binary present and executable',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'health-bin-'));
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin/ll-search'), '#!/usr/bin/env bash\n');
+    chmodSync(join(dir, 'bin/ll-search'), 0o755);
+    const result = checkBinaryExists({ pluginData: dir });
+    assert.equal(result.status, 'ok');
+    rmSync(dir, { recursive: true, force: true });
+  },
+);
 
 test('checkBinaryExists: fail when binary missing', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-bin-missing-'));
@@ -231,28 +237,36 @@ test('checkBinaryVersionFile: ok when no pluginVersion is supplied (no compariso
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkShimsExist: ok when both shims present and executable', () => {
-  const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
-  mkdirSync(join(home, '.local/bin'), { recursive: true });
-  for (const s of ['ll-watch', 'll-search']) {
-    writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
-    chmodSync(join(home, '.local/bin', s), 0o755);
-  }
-  const result = checkShimsExist({ home });
-  assert.equal(result.status, 'ok');
-  rmSync(home, { recursive: true, force: true });
-});
+test(
+  'checkShimsExist: ok when both shims present and executable',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const s of ['ll-watch', 'll-search']) {
+      writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
+      chmodSync(join(home, '.local/bin', s), 0o755);
+    }
+    const result = checkShimsExist({ home });
+    assert.equal(result.status, 'ok');
+    rmSync(home, { recursive: true, force: true });
+  },
+);
 
-test('checkShimsExist: fail when one shim missing', () => {
-  const home = mkdtempSync(join(tmpdir(), 'health-shims-half-'));
-  mkdirSync(join(home, '.local/bin'), { recursive: true });
-  writeFileSync(join(home, '.local/bin/ll-search'), '#!/usr/bin/env bash\n');
-  chmodSync(join(home, '.local/bin/ll-search'), 0o755);
-  const result = checkShimsExist({ home });
-  assert.equal(result.status, 'fail');
-  assert.match(result.detail, /ll-watch/);
-  rmSync(home, { recursive: true, force: true });
-});
+test(
+  'checkShimsExist: fail when one shim missing',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-half-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    writeFileSync(join(home, '.local/bin/ll-search'), '#!/usr/bin/env bash\n');
+    chmodSync(join(home, '.local/bin/ll-search'), 0o755);
+    const result = checkShimsExist({ home });
+    assert.equal(result.status, 'fail');
+    assert.match(result.detail, /ll-watch/);
+    rmSync(home, { recursive: true, force: true });
+  },
+);
 
 test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
   const result = checkLocalBinOnPath({
@@ -428,6 +442,66 @@ test('checkDuplicateGateHealth: stays ok under the repeat threshold', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkDuplicateGateHealth: warns on stale-daemon error code with restart advice', () => {
+  // A single stale-daemon entry triggers a distinct warning with restart advice,
+  // not the generic ll-watch start advice.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-stale-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  writeFileSync(
+    join(dir, `hook-errors-${month}.jsonl`),
+    JSON.stringify({
+      code: 'duplicate-gate-stale-daemon',
+      source: 'daemon',
+      message: 'parse request: ...',
+    }) + '\n',
+  );
+  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /stale daemon/i);
+  assert.match(result.fix, /restart/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: previous-month UTC arithmetic (regression for UTC+ timezone bug)', () => {
+  // In NZ (UTC+13), local midnight on 2026-06-01 is 2026-05-31T11:00Z,
+  // so `new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()`
+  // would produce '2026-04-...' instead of '2026-05'. recentUtcMonths must
+  // use UTC arithmetic.
+  // Place timeout entries in the PREVIOUS UTC month's file. With a `now`
+  // near the start of June UTC (but June 1 local in UTC+13), the previous
+  // UTC month is May. A local-time implementation would scan April instead.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-utc-'));
+  // now = 2026-06-01T05:00:00Z — still May 31 in UTC-... no, we want UTC+13.
+  // Use 2026-06-01T00:30:00Z — this is 2026-06-01T13:30 NZST (UTC+13:00),
+  // so local midnight check of getMonth()-1 would land on April not May.
+  const now = new Date('2026-06-01T00:30:00Z');
+  const prevUtcMonth = '2026-05';
+  // Write 4 timeouts in the previous UTC month file.
+  const lines = Array(4)
+    .fill(null)
+    .map(() => JSON.stringify({ code: 'duplicate-gate-timeout', source: 'daemon' }));
+  writeFileSync(join(dir, `hook-errors-${prevUtcMonth}.jsonl`), lines.join('\n') + '\n');
+  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  assert.equal(result.status, 'fail', 'must scan previous UTC month, not local-time month-2');
+  assert.match(result.detail, /4 duplicate-gate timeouts/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('recentUtcMonths: returns UTC YYYY-MM for current and previous month', () => {
+  // Verify the helper itself produces correct UTC strings for a UTC+ edge case.
+  const now = new Date('2026-06-01T00:30:00Z');
+  const months = recentUtcMonths(now);
+  assert.deepEqual(months, ['2026-06', '2026-05']);
+});
+
+test('recentUtcMonths: wraps year boundary correctly (Jan -> prev Dec)', () => {
+  const now = new Date('2026-01-15T00:00:00Z');
+  const months = recentUtcMonths(now);
+  assert.deepEqual(months, ['2026-01', '2025-12']);
+});
+
 // --- checkInjectionShadowGate ---
 
 function writeShadowLog(dir, month, entries) {
@@ -438,10 +512,21 @@ function writeShadowLog(dir, month, entries) {
   );
 }
 
-const shadowPass = { gate: { passed: true, vault_top_score: 0.42 }, backends: {} };
-const shadowFail = { gate: { passed: false, vault_top_score: 0.1 }, backends: {} };
-const shadowFastPath = { gate: { passed: false, fast_path_skip: true } };
+// Fixtures include ts at the calibration epoch so the epoch filter counts them.
+const POST_EPOCH_TS = '2026-06-12T01:00:00.000Z';
+const shadowPass = {
+  ts: POST_EPOCH_TS,
+  gate: { passed: true, vault_top_score: 0.42 },
+  backends: {},
+};
+const shadowFail = {
+  ts: POST_EPOCH_TS,
+  gate: { passed: false, vault_top_score: 0.1 },
+  backends: {},
+};
+const shadowFastPath = { ts: POST_EPOCH_TS, gate: { passed: false, fast_path_skip: true } };
 const shadowVaultError = {
+  ts: POST_EPOCH_TS,
   gate: { passed: false },
   backends: { vault: { error: 'spawn ENOENT' } },
 };
@@ -472,7 +557,7 @@ test('checkInjectionShadowGate: shadow mode with no logs stays ok (keep collecti
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkInjectionShadowGate: nudges ready-to-flip when the go-live gate passes', () => {
+test('checkInjectionShadowGate: nudges ready-for-review when the go-live gate passes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-ready-'));
   const now = new Date('2026-06-12T00:00:00Z');
   const entries = [];
@@ -482,7 +567,7 @@ test('checkInjectionShadowGate: nudges ready-to-flip when the go-live gate passe
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
-  assert.match(result.detail, /ready to flip injection_mode to live/);
+  assert.match(result.detail, /ready for review/);
   assert.match(result.detail, /25\/105/);
   assert.match(result.fix, /doctor/);
   assert.match(result.fix, /review-shadow/);
@@ -508,8 +593,12 @@ test('checkInjectionShadowGate: stays ok below the pass minimum', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkInjectionShadowGate: fast-path skips, backend errors, and corrupt lines are excluded', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-noise-'));
+test('checkInjectionShadowGate: infrastructure warning when backend health below 60%', () => {
+  // 500 vault-error entries out of 1105 total puts backend health at ~55%,
+  // squarely in review-shadow.mjs's INFRASTRUCTURE regime. The check must report
+  // infrastructure warning rather than ready-to-flip — pass rates over surviving
+  // entries aren't evidence about the gate when >40% of entries errored.
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-infra-'));
   const now = new Date('2026-06-12T00:00:00Z');
   const entries = [
     ...Array(25).fill(shadowPass),
@@ -520,8 +609,28 @@ test('checkInjectionShadowGate: fast-path skips, backend errors, and corrupt lin
   ];
   writeShadowLog(dir, '2026-06', entries);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  assert.equal(result.status, 'ok', 'infrastructure problem must not emit the ready-to-flip nudge');
+  assert.match(result.detail, /infrastructure/i);
+  assert.match(result.detail, /review-shadow/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: fast-path skips and corrupt lines are excluded from healthy count', () => {
+  // Fast-path skips and corrupt lines must not count as healthy entries.
+  // With 100 vault-ok entries (25 pass + 75 fail) and no backend errors,
+  // the gate should see the clean 25/100 and report ready-to-flip.
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-noise-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const entries = [
+    ...Array(25).fill(shadowPass),
+    ...Array(75).fill(shadowFail),
+    ...Array(10).fill(shadowFastPath),
+    '{not json',
+  ];
+  writeShadowLog(dir, '2026-06', entries);
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
-  assert.match(result.detail, /25\/105/);
+  assert.match(result.detail, /25\/100/);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -534,6 +643,39 @@ test('checkInjectionShadowGate: combines current and previous month logs', () =>
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
   assert.match(result.detail, /25\/105/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: snooze dismissed silences the nag when gate-ready', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-snooze-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const entries = [...Array(25).fill(shadowPass), ...Array(80).fill(shadowFail)];
+  writeShadowLog(dir, '2026-06', entries);
+  // Gate-ready but nudge dismissed — should not emit the ready-for-review fail.
+  const result = checkInjectionShadowGate({
+    pluginData: dir,
+    injectionMode: 'shadow',
+    injectionNudge: 'dismissed',
+    now,
+  });
+  assert.equal(result.status, 'ok', 'dismissed nudge must silence the ready-for-review fail');
+  assert.match(result.detail, /dismissed/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkInjectionShadowGate: pre-epoch entries are filtered out', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-epoch-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  // Pre-epoch entries should not count toward the gate criteria.
+  const preEpochTs = '2026-06-11T23:59:59.000Z';
+  const stalePass = { ts: preEpochTs, gate: { passed: true, vault_top_score: 0.42 }, backends: {} };
+  const staleFail = { ts: preEpochTs, gate: { passed: false, vault_top_score: 0.1 }, backends: {} };
+  const entries = [...Array(200).fill(stalePass), ...Array(100).fill(staleFail)];
+  writeShadowLog(dir, '2026-06', entries);
+  const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
+  // All 300 entries predate the epoch — gate sees 0 post-epoch healthy entries.
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /keep collecting/);
   rmSync(dir, { recursive: true, force: true });
 });
 

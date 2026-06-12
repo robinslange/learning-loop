@@ -187,16 +187,7 @@ enum Commands {
         #[arg(long, help = "Cap the number of queries (random sample)")]
         limit: Option<usize>,
     },
-    #[cfg(feature = "nli")]
-    NliCheck {
-        text_a: String,
-        text_b: String,
-    },
-    #[cfg(feature = "nli")]
-    NliBatch {
-        text_a: String,
-        texts_b_file: String,
-    },
+
 }
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
@@ -494,24 +485,7 @@ async fn main() {
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
             out(&result);
         }
-        #[cfg(feature = "nli")]
-        Commands::NliCheck { text_a, text_b } => {
-            let result = ll_search::nli::nli_check(&text_a, &text_b);
-            out(&result);
-        }
-        #[cfg(feature = "nli")]
-        Commands::NliBatch { text_a, texts_b_file } => {
-            let content = std::fs::read_to_string(&texts_b_file)
-                .expect("failed to read texts_b file");
-            let texts_b: Vec<String> = content
-                .lines()
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .map(String::from)
-                .collect();
-            let results = ll_search::nli::nli_batch(&text_a, &texts_b);
-            out(&results);
-        }
+
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a);
             let mb = parse_model(&model_b);

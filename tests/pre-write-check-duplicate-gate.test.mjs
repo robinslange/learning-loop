@@ -20,16 +20,26 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
 import { runHook } from './helpers/hook-runner.mjs';
+import { skipOnWindows } from './helpers/platform.mjs';
 import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { DUPLICATE_GATE_STALE_DAEMON_CODE } from '../plugin/hooks/pre-write-check.js';
 
 const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
 const UDS_SERVER = new URL('./helpers/uds-reflect-server.mjs', import.meta.url).pathname;
+
+const SKIP = skipOnWindows('UDS socket: filesystem sockets not supported on win32');
 let VAULT;
 
 function reflectEnvelope(similarity, path, title) {
   return JSON.stringify({
-    queries: [{ query: 'Sleep consolidates memory', top_match_similarity: similarity, results: [{ path, title }] }],
+    queries: [
+      {
+        query: 'Sleep consolidates memory',
+        top_match_similarity: similarity,
+        results: [{ path, title }],
+      },
+    ],
     confusable_pairs: [],
   });
 }
@@ -49,7 +59,7 @@ function startUdsServer(socketPath, mode) {
   return child;
 }
 
-function readHookErrorTimeouts(pluginDataDir) {
+function readHookErrorsByCode(pluginDataDir, code) {
   let count = 0;
   let names = [];
   try {
@@ -68,7 +78,7 @@ function readHookErrorTimeouts(pluginDataDir) {
     for (const line of raw.split('\n')) {
       if (!line.trim()) continue;
       try {
-        if (JSON.parse(line).code === 'duplicate-gate-timeout') count++;
+        if (JSON.parse(line).code === code) count++;
       } catch {
         /* skip */
       }
@@ -77,11 +87,19 @@ function readHookErrorTimeouts(pluginDataDir) {
   return count;
 }
 
+function readHookErrorTimeouts(pluginDataDir) {
+  return readHookErrorsByCode(pluginDataDir, 'duplicate-gate-timeout');
+}
+
 // Note content with a # title (triggers the gate) and no wikilinks (no
 // broken-link noise in additionalContext).
 const NOTE = '---\ntags: [sleep]\n---\n\n# Sleep consolidates memory\n\nClean body.\n';
 
-function runWithStub(stubScript, filePath, { allowStderrError = false, tool = 'Write', toolInput = null } = {}) {
+function runWithStub(
+  stubScript,
+  filePath,
+  { allowStderrError = false, tool = 'Write', toolInput = null } = {},
+) {
   const r = runHook(HOOK, {
     stdin: {
       hook_event_name: 'PreToolUse',
@@ -169,7 +187,7 @@ function runWithSocket(serverMode, filePath, { stubScript, allowStderrError = fa
   }
 }
 
-describe('pre-write-check duplicate-note gate', () => {
+describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
   before(() => {
     VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-dupe-vault-'));
     // Create canonical dirs so rebuildVaultSnapshot doesn't log missing-dir errors.
@@ -201,7 +219,11 @@ describe('pre-write-check duplicate-note gate', () => {
       join(VAULT, '0-inbox', 'new-note.md'),
     );
     assert.ok(result, 'expected a warning payload');
-    assert.equal(result.hookSpecificOutput.permissionDecision, undefined, 'duplicate gate must warn, never deny');
+    assert.equal(
+      result.hookSpecificOutput.permissionDecision,
+      undefined,
+      'duplicate gate must warn, never deny',
+    );
     assert.match(result.hookSpecificOutput.additionalContext, /Potential duplicate/);
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
     assert.match(result.hookSpecificOutput.additionalContext, /sleep-existing\.md/);
@@ -253,7 +275,11 @@ describe('pre-write-check duplicate-note gate', () => {
       { allowStderrError: true },
     );
     assert.equal(result, null, 'gate failure must not block or warn');
-    assert.match(stderr, /pre-write-check\.checkDuplicateNote/, `expected the gate's logError scope in stderr; got: ${stderr}`);
+    assert.match(
+      stderr,
+      /pre-write-check\.checkDuplicateNote/,
+      `expected the gate's logError scope in stderr; got: ${stderr}`,
+    );
   });
 
   it('socket success: the warm daemon serves the scan and the subprocess never runs', () => {
@@ -285,5 +311,53 @@ describe('pre-write-check duplicate-note gate', () => {
     assert.ok(timeoutCount >= 1, 'a socket timeout must log the duplicate-gate-timeout code');
     assert.ok(result, 'subprocess fallback must still produce the duplicate warning');
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+  });
+
+  it('stale daemon: logs distinct stale-daemon code and falls back to subprocess', () => {
+    // A stale daemon binary replies with the old-daemon error envelope
+    // ({schema_version:1,error:'parse request:...'}) — the hook must log
+    // the distinct stale-daemon code and still fall back to the subprocess.
+    let server = null;
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        server = startUdsServer(join(pluginDataDir, 'nli.sock'), 'stale-daemon');
+      },
+    });
+    try {
+      assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+      assert.equal(r.exitCode, 0, r.stderr);
+      const staleDaemonCount = readHookErrorsByCode(
+        r.pluginDataDir,
+        DUPLICATE_GATE_STALE_DAEMON_CODE,
+      );
+      assert.ok(staleDaemonCount >= 1, 'stale daemon response must log the stale-daemon code');
+      const out = r.stdout.trim();
+      const result = out ? JSON.parse(out) : null;
+      // Subprocess fallback must still run and produce the duplicate warning.
+      assert.ok(result, 'subprocess fallback must produce a warning even after stale-daemon error');
+      assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+    } finally {
+      if (server) {
+        try {
+          server.kill('SIGTERM');
+        } catch {
+          /* ignore */
+        }
+      }
+      r.cleanup();
+    }
   });
 });

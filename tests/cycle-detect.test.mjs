@@ -121,7 +121,7 @@ test('multi-edge same direction does not multiply cycle count', () => {
   // single key so the output stays at one cycle.
   const edges = [
     { fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
-    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'nli_supports', sourceGraph: 'nli' },
+    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports', sourceGraph: 'nli' },
     { fromPath: 'b.md', toPath: 'a.md', edgeType: 'challenges_rebuttal', sourceGraph: 'local' },
   ];
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });

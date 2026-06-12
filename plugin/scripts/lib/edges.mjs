@@ -47,8 +47,6 @@ const VALID_TYPES = [
   'challenges_rebuttal',
   'derived_from',
   'associative',
-  // NLI-derived edge types (source_graph='nli' convention):
-  'nli_supports', // entailment p > NLI_ENTAILMENT_THRESHOLD; advisory, filtered out of sole-dependent queries
 ];
 
 const VALID_CONFIDENCE = ['high', 'medium', 'low'];
@@ -108,10 +106,9 @@ export async function openEdgeDb(dbPath) {
 // source_graph value space:
 //   'local'    — edge inferred from a write/edit on this machine (default)
 //   'archived' — edge preserved across an archive flow; removeOutgoingEdges skips these
-//   'nli'      — edge inferred by NLI model at write-time; advisory; confidence is always
-//                'low'; excluded from downstream traversal queries by default;
-//                deleted on re-write (removeOutgoingEdges applies — re-derived from
-//                current content each write)
+//   'nli'      — legacy: written by the removed NLI contradiction subsystem. Still
+//                excluded from traversal queries so pre-cleanup DBs behave; deleted
+//                by scripts/nli-cleanup.mjs
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(
   db,
@@ -161,10 +158,6 @@ export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
 }
 
-export function removeOutgoingNliEdges(db, notePath) {
-  db.run("DELETE FROM edges WHERE from_path = ? AND source_graph = 'nli'", [notePath]);
-}
-
 function rowsToObjects(result) {
   if (!result || result.length === 0) return [];
   const { columns, values } = result[0];
@@ -185,36 +178,6 @@ export function getEdgesTo(db, notePath) {
   return rowsToObjects(db.exec('SELECT * FROM edges WHERE to_path = ?', [notePath]));
 }
 
-// NOTE: this helper hand-maps to camelCase ({fromPath, toPath, edgeType,
-// confidenceScore, partner}). Other helpers in this file (rowsToObjects,
-// getEdgesFrom, getEdgesTo) preserve raw DB column names (snake_case).
-// `edges-cli list` uses rowsToObjects so its JSON output is snake_case.
-// Skills consuming this helper directly should expect camelCase keys.
-//
-// Returns NLI edges where notePath is either endpoint, with confidence_score
-// in [minConfidence, 1]. Consumers: inbox-organiser promote-gate (hard-bucket
-// NLI contradiction),
-// refinement-proposer pair hint, /verify consistency detection. Uses literal
-// source_graph='nli' to deliberately exclude peer NLI edges; federation
-// authority handling is a future bundle.
-export function getNliEdgesForNote(db, notePath, minConfidence = 0.75) {
-  const res = db.exec(
-    'SELECT from_path, to_path, edge_type, confidence_score FROM edges ' +
-      "WHERE source_graph = 'nli' AND confidence_score IS NOT NULL " +
-      'AND confidence_score >= ? AND (from_path = ? OR to_path = ?) ' +
-      'ORDER BY confidence_score DESC',
-    [minConfidence, notePath, notePath],
-  );
-  if (!res[0]) return [];
-  return res[0].values.map(([fromPath, toPath, edgeType, confidenceScore]) => ({
-    fromPath,
-    toPath,
-    edgeType,
-    confidenceScore,
-    partner: fromPath === notePath ? toPath : fromPath,
-  }));
-}
-
 export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
@@ -232,10 +195,8 @@ export function getDownstream(db, notePath, maxDepth = 10) {
 }
 
 export function getSoleJustificationDependents(db, notePath) {
-  // Explicit `source_graph != 'nli'` guard: edge_type IN ('evidence_for',
-  // 'supports') already excludes nli_supports today, but if someone later
-  // renames nli_supports → supports (or adds another nli-flavoured edge type)
-  // this rule alone wouldn't catch it. Defense in depth.
+  // Explicit `source_graph != 'nli'` guard: legacy NLI rows may still exist in
+  // pre-cleanup DBs and must never count as real justification.
   const sql = `
     SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at
     FROM edges e

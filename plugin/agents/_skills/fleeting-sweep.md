@@ -18,9 +18,13 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/fleeting-sweep.sh {{VAULT}}/
 Output is TSV: `TYPE\tNAME\tDETAIL`. The script finds:
 - **PROMOTED**: 2+ inbound links from `3-permanent/` (insight absorbed into permanent knowledge) — archival candidate
 - **NEEDS-DEEPEN**: blocking verification markers or `source: unverified`, untouched >14 days (the class the promote-gate demotes to `1-fleeting/`; its documented repair path is `/deepen`) — repair recommendation, never archival
-- **STALE**: project-slug filename, zero inbound links, >60 days old — archival candidate
+- **STALE**: archival candidate, two routes in:
+  - project-slug filename, zero inbound links, >60 days old
+  - repair budget exhausted: a marker-bearing note whose `deepen_attempts` frontmatter counter (incremented by `/deepen` on each failed repair pass) has reached 2 — no longer fixable by research, so it gets the archival exit instead of resurfacing as NEEDS-DEEPEN forever
 
 It automatically skips counterpoint notes (`challenged:`/`challenges:` in frontmatter).
+
+Precedence: `PROMOTED` beats everything (absorption is the best exit), and `STALE` beats `NEEDS-DEEPEN` — a note that qualifies for archival never surfaces as a repair recommendation (archival wins at end-of-life).
 
 ## Present
 
@@ -34,7 +38,7 @@ It automatically skips counterpoint notes (`challenged:`/`challenges:` in frontm
 | acme-app-hero-copy | stale project note | 0 refs, 90 days old |
 ```
 
-`PROMOTED` wins over `NEEDS-DEEPEN` for the same note (absorption is the better exit). `NEEDS-DEEPEN` notes are a repair recommendation — present them but never offer them for archival; route the user to `/deepen "<note>"`.
+`NEEDS-DEEPEN` notes are a repair recommendation — present them but never offer them for archival; route the user to `/deepen "<note>"`. (Precedence between TYPEs is the script's job — see above.)
 
 ## Gate
 

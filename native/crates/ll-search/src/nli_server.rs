@@ -1,25 +1,17 @@
 //! UDS server hosted inside `ll-search watch`.
 //!
 //! Wire contract (line-delimited JSON, one request per connection — no keep-alive).
-//! Requests are distinguished by their shape (additive, so old clients are
-//! unaffected): a request carrying `premise`/`hypotheses` is an NLI batch; one
-//! carrying `kind: "duplicate-scan"` is a reflect-style duplicate scan.
-//!
-//!   NLI request:    {"premise": "...", "hypotheses": ["...", "..."], "schema_version": 1 (optional)}\n
-//!   NLI response:   {"schema_version": 1, "results": [{...}, ...]}\n
 //!
 //!   Dup request:    {"kind": "duplicate-scan", "queries": ["..."], "top": 1, "candidates": 5, "schema_version": 1 (optional)}\n
 //!   Dup response:   {"schema_version": 1, "queries": [{...}], "confusable_pairs": [...]}\n
 //!
 //!   Error:          {"schema_version": 1, "error": "..."}\n
 //!
-//! Both the NLI model and the embedding model are loaded once (lazily, on the
-//! first request that needs them) inside the daemon and reused thereafter — no
-//! per-hook-fire re-load.
+//! The embedding model is loaded once (lazily, on the first request) inside
+//! the daemon and reused thereafter — no per-request re-load.
 //!
 //! The server is unix-only. On non-unix platforms the daemon-side wiring is
-//! a no-op; the hook falls back to the existing `execFileSync` subprocess
-//! path.
+//! a no-op.
 
 #![cfg(unix)]
 
@@ -33,8 +25,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::watch as watch_chan;
 use tokio::task::JoinSet;
-
-use crate::nli::nli_batch;
 
 /// Default discriminate threshold for daemon-served duplicate scans. Matches
 /// the `reflect-scan` CLI default (`main.rs` ReflectScan `threshold`) so the
@@ -56,30 +46,6 @@ const STALE_SOCKET_PROBE_TIMEOUT: Duration = Duration::from_millis(500);
 /// after a shutdown signal arrives. Aligned with watch.rs SHUTDOWN_DRAIN.
 const SHUTDOWN_DRAIN: Duration = Duration::from_secs(2);
 
-/// One request per connection. The variant is chosen by JSON shape so the
-/// wire protocol extends additively: an NLI client that never sends `kind`
-/// keeps working unchanged. `#[serde(untagged)]` tries each variant in order;
-/// `Nli` (with its required `hypotheses`) is tried first, then the
-/// `kind`-tagged `DuplicateScan`.
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum Request {
-    Nli(NliRequest),
-    DuplicateScan(DuplicateScanRequest),
-}
-
-#[derive(Deserialize)]
-struct NliRequest {
-    premise: String,
-    hypotheses: Vec<String>,
-    /// Optional — clients on the same major schema can omit it. Future
-    /// daemon revisions could reject mismatched versions instead of
-    /// silently downgrading.
-    #[serde(default)]
-    #[allow(dead_code)]
-    schema_version: Option<u32>,
-}
-
 fn default_dup_top() -> usize {
     1
 }
@@ -90,9 +56,6 @@ fn default_dup_candidates() -> usize {
 
 #[derive(Deserialize)]
 struct DuplicateScanRequest {
-    /// Discriminant — must equal `"duplicate-scan"`. Untagged deserialization
-    /// alone can't distinguish this from a future request that also omits
-    /// `hypotheses`, so the handler asserts the value before dispatching.
     kind: String,
     queries: Vec<String>,
     #[serde(default = "default_dup_top")]
@@ -117,7 +80,7 @@ struct ProtocolError {
 /// `db_path` is the search index the daemon already maintains; duplicate-scan
 /// requests open a fresh read connection against it per request (SQLite is
 /// thread-safe in this mode and the embedding model is shared via the global
-/// provider). NLI requests don't touch it.
+/// provider).
 pub async fn run_nli_server(
     socket_path: PathBuf,
     db_path: PathBuf,
@@ -135,7 +98,7 @@ pub async fn run_nli_server(
         {
             Ok(Ok(_)) => {
                 anyhow::bail!(
-                    "NLI socket {} is already in use by another daemon — refusing to start",
+                    "UDS socket {} is already in use by another daemon — refusing to start",
                     socket_path.display()
                 );
             }
@@ -150,15 +113,15 @@ pub async fn run_nli_server(
     }
 
     let listener = UnixListener::bind(&socket_path)
-        .map_err(|e| anyhow::anyhow!("bind NLI socket {}: {e}", socket_path.display()))?;
+        .map_err(|e| anyhow::anyhow!("bind UDS socket {}: {e}", socket_path.display()))?;
     // 0700 — same user only. UDS files inherit the process umask; tighten
     // explicitly so a permissive umask doesn't leak access to other users
     // on shared hosts. Window between bind() and chmod is accepted (local
     // single-user trust model).
     if let Err(e) = restrict_socket_permissions(&socket_path) {
-        eprintln!("warning: failed to restrict NLI socket permissions: {e}");
+        eprintln!("warning: failed to restrict UDS socket permissions: {e}");
     }
-    eprintln!("NLI server listening on {}", socket_path.display());
+    eprintln!("UDS server listening on {}", socket_path.display());
 
     // JoinSet lets us drain in-flight connection handlers on shutdown.
     let mut handlers: JoinSet<()> = JoinSet::new();
@@ -174,7 +137,7 @@ pub async fn run_nli_server(
             Some(join_res) = handlers.join_next() => {
                 if let Err(e) = join_res {
                     if e.is_panic() {
-                        eprintln!("NLI server handler panicked: {e}");
+                        eprintln!("UDS server handler panicked: {e}");
                     }
                 }
             }
@@ -184,12 +147,12 @@ pub async fn run_nli_server(
                         let db_path = Arc::clone(&db_path);
                         handlers.spawn(async move {
                             if let Err(e) = handle_connection(stream, db_path).await {
-                                eprintln!("NLI server connection error: {e}");
+                                eprintln!("UDS server connection error: {e}");
                             }
                         });
                     }
                     Err(e) => {
-                        eprintln!("NLI server accept error: {e}");
+                        eprintln!("UDS server accept error: {e}");
                         // Brief backoff to avoid tight error loops on persistent
                         // accept failures (fd exhaustion, etc.).
                         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -200,7 +163,7 @@ pub async fn run_nli_server(
     };
 
     eprintln!(
-        "NLI server: draining {} in-flight handlers (timeout {}s)",
+        "UDS server: draining {} in-flight handlers (timeout {}s)",
         handlers.len(),
         SHUTDOWN_DRAIN.as_secs()
     );
@@ -211,13 +174,13 @@ pub async fn run_nli_server(
     let leftover = handlers.len();
     if leftover > 0 {
         eprintln!(
-            "NLI server: {leftover} handler(s) still running after drain — aborting",
+            "UDS server: {leftover} handler(s) still running after drain — aborting",
         );
         handlers.abort_all();
     }
 
     let _ = std::fs::remove_file(&socket_path_for_cleanup);
-    eprintln!("NLI server stopped");
+    eprintln!("UDS server stopped");
     result
 }
 
@@ -243,21 +206,8 @@ async fn handle_connection(stream: UnixStream, db_path: Arc<PathBuf>) -> anyhow:
         return Ok(());
     }
 
-    let response = match serde_json::from_str::<Request>(&line) {
-        Ok(Request::Nli(req)) => {
-            // Inference is CPU-bound and serialised by the session mutex.
-            // spawn_blocking keeps it off the tokio worker so other concurrent
-            // requests (or the fs-watcher debounce) aren't starved.
-            let result =
-                tokio::task::spawn_blocking(move || nli_batch(&req.premise, &req.hypotheses))
-                    .await;
-            match result {
-                Ok(batch) => serde_json::to_string(&batch)
-                    .unwrap_or_else(|e| protocol_error(format!("serialize response: {e}"))),
-                Err(join_err) => protocol_error(format!("inference task panicked: {join_err}")),
-            }
-        }
-        Ok(Request::DuplicateScan(req)) => {
+    let response = match serde_json::from_str::<DuplicateScanRequest>(&line) {
+        Ok(req) => {
             if req.kind != "duplicate-scan" {
                 protocol_error(format!("unknown request kind: {}", req.kind))
             } else {
@@ -286,9 +236,8 @@ async fn handle_connection(stream: UnixStream, db_path: Arc<PathBuf>) -> anyhow:
 
 /// Run a reflect-style duplicate scan against the daemon's index, reusing the
 /// same `reflect_scan` pipeline the `reflect-scan` CLI command calls. The
-/// embedding provider is lazily initialised the same way the NLI model is —
-/// on first use, then reused for the daemon's lifetime — so a duplicate-scan
-/// request never re-loads the model.
+/// embedding provider is lazily initialised on first use and reused for the
+/// daemon's lifetime, so a duplicate-scan request never re-loads the model.
 fn run_duplicate_scan(
     db_path: &Path,
     req: &DuplicateScanRequest,
@@ -312,9 +261,11 @@ fn run_duplicate_scan(
     ))
 }
 
+const PROTOCOL_SCHEMA_VERSION: u32 = 1;
+
 fn protocol_error(message: String) -> String {
     serde_json::to_string(&ProtocolError {
-        schema_version: crate::nli::NLI_SCHEMA_VERSION,
+        schema_version: PROTOCOL_SCHEMA_VERSION,
         error: message,
     })
     .unwrap_or_else(|_| String::from(r#"{"schema_version":1,"error":"unserializable error"}"#))
@@ -331,58 +282,23 @@ fn restrict_socket_permissions(path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
 
-    // Wire-protocol routing: the untagged `Request` enum must classify a
-    // request by shape, additively, so old NLI clients keep working after the
-    // duplicate-scan variant was added.
-
     #[test]
-    fn nli_shaped_request_routes_to_nli() {
-        let line = r#"{"premise":"a","hypotheses":["b","c"],"schema_version":1}"#;
-        match serde_json::from_str::<Request>(line).expect("NLI request parses") {
-            Request::Nli(req) => {
-                assert_eq!(req.premise, "a");
-                assert_eq!(req.hypotheses, vec!["b".to_string(), "c".to_string()]);
-            }
-            Request::DuplicateScan(_) => panic!("NLI request misrouted to duplicate-scan"),
-        }
-    }
-
-    #[test]
-    fn nli_request_without_schema_version_still_routes_to_nli() {
-        // Old clients omit schema_version entirely — must not flip to the
-        // duplicate-scan variant.
-        let line = r#"{"premise":"a","hypotheses":["b"]}"#;
-        assert!(matches!(
-            serde_json::from_str::<Request>(line).expect("legacy NLI request parses"),
-            Request::Nli(_)
-        ));
-    }
-
-    #[test]
-    fn duplicate_scan_request_routes_with_defaults() {
+    fn duplicate_scan_request_parses_with_defaults() {
         let line = r#"{"kind":"duplicate-scan","queries":["sleep memory"]}"#;
-        match serde_json::from_str::<Request>(line).expect("dup-scan request parses") {
-            Request::DuplicateScan(req) => {
-                assert_eq!(req.kind, "duplicate-scan");
-                assert_eq!(req.queries, vec!["sleep memory".to_string()]);
-                assert_eq!(req.top, default_dup_top());
-                assert_eq!(req.candidates, default_dup_candidates());
-            }
-            Request::Nli(_) => panic!("duplicate-scan request misrouted to NLI"),
-        }
+        let req: DuplicateScanRequest = serde_json::from_str(line).expect("dup-scan request parses");
+        assert_eq!(req.kind, "duplicate-scan");
+        assert_eq!(req.queries, vec!["sleep memory".to_string()]);
+        assert_eq!(req.top, default_dup_top());
+        assert_eq!(req.candidates, default_dup_candidates());
     }
 
     #[test]
     fn duplicate_scan_request_honours_explicit_top_and_candidates() {
         let line =
             r#"{"kind":"duplicate-scan","queries":["q"],"top":3,"candidates":9,"schema_version":1}"#;
-        match serde_json::from_str::<Request>(line).expect("dup-scan request parses") {
-            Request::DuplicateScan(req) => {
-                assert_eq!(req.top, 3);
-                assert_eq!(req.candidates, 9);
-            }
-            Request::Nli(_) => panic!("duplicate-scan request misrouted to NLI"),
-        }
+        let req: DuplicateScanRequest = serde_json::from_str(line).expect("dup-scan request parses");
+        assert_eq!(req.top, 3);
+        assert_eq!(req.candidates, 9);
     }
 
     #[test]
@@ -390,7 +306,7 @@ mod tests {
         let payload = protocol_error("boom".to_string());
         let parsed: serde_json::Value =
             serde_json::from_str(&payload).expect("protocol error is valid JSON");
-        assert_eq!(parsed["schema_version"], crate::nli::NLI_SCHEMA_VERSION);
+        assert_eq!(parsed["schema_version"], PROTOCOL_SCHEMA_VERSION);
         assert_eq!(parsed["error"], "boom");
     }
 }

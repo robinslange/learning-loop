@@ -26,12 +26,34 @@ pub fn personalized_pagerank(
     damping: f32,
     iterations: usize,
 ) -> Vec<(String, f64)> {
+    personalized_pagerank_holdout(graph, seeds, damping, iterations, None)
+}
+
+/// [`personalized_pagerank`] with a held-out node (eval-only).
+///
+/// When `holdout` is `Some(path)`, that node's adjacency list is skipped
+/// during the walk — equivalent to removing the node's edges from the graph
+/// without cloning it — and the node is filtered from the output. Inbound
+/// edges may still feed score into the held-out node, but it acts as a sink:
+/// it never propagates and is never returned.
+pub fn personalized_pagerank_holdout(
+    graph: &GraphEdges,
+    seeds: &[String],
+    damping: f32,
+    iterations: usize,
+    holdout: Option<&str>,
+) -> Vec<(String, f64)> {
     if seeds.is_empty() || graph.is_empty() {
         return Vec::new();
     }
 
+    let masked = |node: &str| holdout == Some(node);
+
     let mut inlink_counts: HashMap<&str, usize> = HashMap::new();
-    for targets in graph.values() {
+    for (node, targets) in graph {
+        if masked(node) {
+            continue;
+        }
         for t in targets {
             *inlink_counts.entry(t.as_str()).or_default() += 1;
         }
@@ -39,7 +61,7 @@ pub fn personalized_pagerank(
 
     let mut seed_weights: Vec<(&str, f64)> = seeds
         .iter()
-        .filter(|s| graph.contains_key(s.as_str()))
+        .filter(|s| graph.contains_key(s.as_str()) && !masked(s.as_str()))
         .map(|s| {
             let inlinks = inlink_counts.get(s.as_str()).copied().unwrap_or(0);
             (s.as_str(), 1.0 / (inlinks as f64 + 1.0))
@@ -70,6 +92,9 @@ pub fn personalized_pagerank(
         }
 
         for (node, score) in &scores {
+            if masked(node) {
+                continue;
+            }
             if let Some(neighbors) = graph.get(node) {
                 let share = d * score / neighbors.len() as f64;
                 for neighbor in neighbors {
@@ -83,7 +108,9 @@ pub fn personalized_pagerank(
 
     let mut results: Vec<(String, f64)> = scores
         .into_iter()
-        .filter(|(path, score)| *score > 1e-6 && !seed_set.contains(path.as_str()))
+        .filter(|(path, score)| {
+            *score > 1e-6 && !seed_set.contains(path.as_str()) && !masked(path)
+        })
         .collect();
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results.truncate(crate::config::TOP_K);
@@ -108,6 +135,30 @@ mod tests {
         graph.insert("b".into(), vec!["a".into()]);
         let results = personalized_pagerank(&graph, &[], 0.5, 20);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_ppr_holdout_masks_edges_and_filters_node() {
+        // Undirected: a <-> s, s <-> g, a <-> x. Holding out s must (1) stop
+        // the walk reaching g through s's edges, (2) keep s itself out of the
+        // output even though the a -> s edge still feeds it score, and
+        // (3) leave second-order reachability (a -> x) intact.
+        let mut graph: GraphEdges = HashMap::new();
+        graph.insert("a".into(), vec!["s".into(), "x".into()]);
+        graph.insert("s".into(), vec!["a".into(), "g".into()]);
+        graph.insert("g".into(), vec!["s".into()]);
+        graph.insert("x".into(), vec!["a".into()]);
+
+        let seeds = vec!["a".to_string()];
+        let unmasked = personalized_pagerank(&graph, &seeds, 0.5, 20);
+        let unmasked_paths: Vec<&str> = unmasked.iter().map(|r| r.0.as_str()).collect();
+        assert!(unmasked_paths.contains(&"s") && unmasked_paths.contains(&"g"));
+
+        let held = personalized_pagerank_holdout(&graph, &seeds, 0.5, 20, Some("s"));
+        let held_paths: Vec<&str> = held.iter().map(|r| r.0.as_str()).collect();
+        assert!(!held_paths.contains(&"s"), "held-out node must not be returned: {held_paths:?}");
+        assert!(!held_paths.contains(&"g"), "held-out node's edges must not propagate: {held_paths:?}");
+        assert!(held_paths.contains(&"x"), "unrelated structure must survive the holdout: {held_paths:?}");
     }
 
     #[test]

@@ -32,7 +32,7 @@ Intel Macs are not currently supported (no prebuilt artifact). See [Building fro
 - **`process.kill(pid, 'SIGTERM')` is unconditional.** No graceful-shutdown semantics. The injection pipeline's race-cap abort already treats SIGTERM as "kill now," so this is not a behavioral change.
 - **`fs.rename()` can throw EXDEV** when temp and destination are on different volumes, or when a cloud sync filter (Dropbox, OneDrive) intercepts the rename. learning-loop does not use rename-after-write atomic patterns; this affects Claude Code itself more than this plugin (see anthropics/claude-code issues #25476, #42119).
 - **MAX_PATH (260 chars)** can bite very deep vault hierarchies. Enable long path support in Group Policy + application manifest if you hit it.
-- **Native Rust build from source requires curl.exe** (Windows 10 1803+ ships it) — only relevant if you build with the `nli` cargo feature locally. Pre-built binaries from CI do not need it on the install machine.
+- **Native Rust build from source requires curl.exe** (Windows 10 1803+ ships it). Pre-built binaries from CI do not need it on the install machine.
 - **Detached child + `stdio: 'ignore'` is required for long-running child processes.** Setting stdio to inherited file descriptors keeps the parent event loop blocked even after `child.unref()`. `watch-daemon.mjs` spawns `ll-search watch` with `detached: true, stdio: 'ignore'` to satisfy this constraint.
 - **Federation seed uses Windows Credential Manager.** The `keyring` crate maps to `wincred` on Windows; no additional system deps. End-to-end federation flows on Windows are not maintainer-verified — please report issues.
 

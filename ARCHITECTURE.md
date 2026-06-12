@@ -54,7 +54,7 @@ learning-loop/
       ll-core/          -- published library crate (crates.io 0.1.x)
                         -- scoring, graph, rerank, embeddings
       ll-search/        -- daemon binary (ships with plugin)
-                        -- search, index, sync, NLI
+                        -- search, index, sync
 
   .claude-plugin/       -- marketplace manifest (marketplace.json)
   tests/                -- Node.js tests (node --test)
@@ -118,7 +118,7 @@ flowchart LR
   J --> N[reflect session marker appended]
 ```
 
-Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart and supervises it via the per-vault pidfile at `<vault>/.vault-search/watch.pid`. The watcher is a long-running process that incrementally reindexes notes as they change (fs-watch-driven). It also hosts the NLI daemon over a unix domain socket for hook callers. On binary upgrade, mtime changes trigger SIGTERM + respawn. A one-shot migration on first run after an upgrade reaps any legacy daemon still holding the old `$CLAUDE_PLUGIN_DATA/watch.pid` path. The Stop hook (`hooks/stop-nudge.js`) does not reindex; it only emits reflect/dream nudges based on transcript size and memory-file delta.
+Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart and supervises it via the per-vault pidfile at `<vault>/.vault-search/watch.pid`. The watcher is a long-running process that incrementally reindexes notes as they change (fs-watch-driven). It also hosts the UDS daemon for duplicate-scan requests over a unix domain socket. On binary upgrade, mtime changes trigger SIGTERM + respawn. A one-shot migration on first run after an upgrade reaps any legacy daemon still holding the old `$CLAUDE_PLUGIN_DATA/watch.pid` path. The Stop hook (`hooks/stop-nudge.js`) does not reindex; it only emits reflect/dream nudges based on transcript size and memory-file delta.
 
 ### sync path
 
@@ -208,7 +208,7 @@ A running learning-loop deployment has three long-lived processes and several tr
 | ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
 | librarian daemon | `scripts/librarian.mjs`                                                | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); processes background tasks; exits with the watcher                                                                  |
-| NLI server (UDS) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock`; loads the 233MB NLI model lazily on first request and reuses it. Unix-only. Falls back to subprocess on non-unix or when the socket is absent. |
+| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only. |
 | Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
 
 Transient:
@@ -216,13 +216,10 @@ Transient:
 - Each hook runs as a short-lived Node process (stdin to stdout, exit).
 - `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes incrementally as notes change.
 - `scripts/watch.mjs` can run as an optional background file watcher (user-invoked via `ll-watch`).
-- `ll-search nli-batch` / `ll-search nli-check` subprocesses fire from `edge-infer.mjs` when the UDS daemon isn't available (~400ms cold-start each; the daemon path is ~10ms warm).
 
 `vault-search.mjs` invokes `ll-search` per call via `execFileSync`. Each call is a fresh subprocess invocation with positional args and flags; there is no persistent channel between the plugin and the binary.
 
-The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts the NLI daemon over a Unix domain socket for hook callers.
-
-The NLI server uses a separate transport: a Unix domain socket at `<plugin-data>/nli.sock`, line-delimited JSON, one request per connection, wrapped in a `{schema_version: 1, results: [...]}` envelope. See `native/crates/ll-search/src/nli_server.rs` for the wire protocol and `hooks/modules/edge-infer.mjs` for the client.
+The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/nli_server.rs` for the wire protocol.
 
 ---
 
@@ -246,7 +243,7 @@ Claude Code
   +-- ll-search watch     (long-running; spawned at SessionStart by watch-daemon.mjs)
   |     |
   |     +-- fs-watch reindexing (incremental, event-driven)
-  |     +-- NLI Unix domain socket daemon (nli.sock)
+  |     +-- UDS duplicate-scan server (nli.sock — legacy socket name)
   |
   +-- scripts/*.mjs       (CLI utilities; also use scripts/lib/ and ll-search)
 ```
@@ -354,12 +351,6 @@ ll-search eval-prf    <db> [--min-links N]
 ll-search eval-funnel <db> [--min-links N] [--limit N]
 ```
 
-**NLI (compiled in with the `nli` feature)**
-```
-ll-search nli-check <text_a> <text_b>
-ll-search nli-batch <text_a> <texts_b_file>
-```
-
 **Federation**
 ```
 ll-search sync          <db> <vault> [--hub-endpoint URL] [--peer-id ID]
@@ -373,7 +364,7 @@ ll-search version
 ll-search watch <vault> <db> [--sync-interval SECS] [--pid-file PATH]
 ```
 
-`ll-search watch` is the only process that runs continuously. It is spawned and supervised by `hooks/session-start/watch-daemon.mjs`. It incrementally reindexes notes on fs-watch events and hosts the NLI Unix-domain-socket daemon alongside the watcher loop.
+`ll-search watch` is the only process that runs continuously. It is spawned and supervised by `hooks/session-start/watch-daemon.mjs`. It incrementally reindexes notes on fs-watch events and hosts the UDS duplicate-scan daemon alongside the watcher loop.
 
 Each subcommand writes compact JSON to stdout. The `--pretty` flag (planned for track 2L) switches to multi-line for debugging.
 
@@ -428,7 +419,6 @@ Optional stages:
 - **Reranking** -- cross-encoder reranking via the `rerank` function in ll-core (`rerank.rs`). Applied to the top-k after RRF to improve precision on the final set.
 - **Pseudo-relevance feedback (PRF)** -- Rocchio algorithm re-embeds the query using the top results to expand coverage. Controlled by `PrfParams` in ll-core.
 - **Federation** -- peer vault results merged into the local RRF pipeline. Only active when sync peers are configured.
-- **NLI gate** -- entailment classifier filters results that don't entail the query. Implemented but not wired into the main query path at baseline (`nli.rs`; `.planning/inventory/rust-audit.md` §9.8).
 
 ---
 

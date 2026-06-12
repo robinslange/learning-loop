@@ -79,8 +79,7 @@ if (isWriteEdit && ctx.vaultRoot) {
 // Cheap load-bearing modules first (provenance reads tool_input; reflect-track
 // appends a marker): if the outer hooks.json deadline ever SIGKILLs mid-loop,
 // only enrichment (autolink, edge-infer) is lost. Autolink stays ahead of
-// edge-infer: autolink populates ctx.autolinkCandidates (edge-infer's NLI
-// input), and on the Edit path edge-infer reads the note from disk, where
+// edge-infer: on the Edit path edge-infer reads the note from disk, where
 // autolink's appended links land. (On the Write path edge-infer reads
 // input.content, not disk — there the link append is only seen by replayed
 // runs, which snapshot the on-disk body into input.content.)

@@ -15,6 +15,26 @@ import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { DATA_FILES } from '../paths.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
+import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
+import {
+  isVaultOk,
+  isEpisodicOk,
+  isHealthy,
+  isGatePassed,
+  SHADOW_BACKEND_HEALTH_MIN_RATE,
+  SHADOW_BACKEND_HEALTH_MIN_TOTAL,
+} from '../shadow-gate.mjs';
+
+// Current + previous month as YYYY-MM in UTC. Log filenames come from
+// toISOString(), so a local-time Date here would pick the wrong previous
+// month east of UTC (all of June in NZ would scan April instead of May).
+// Shared by checkDuplicateGateHealth and collectShadowGateStats so the two
+// cannot diverge. Exported for tests.
+export function recentUtcMonths(now) {
+  return [now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))].map((d) =>
+    d.toISOString().slice(0, 7),
+  );
+}
 
 const VAULT_FOLDERS = [
   '0-inbox',
@@ -632,34 +652,40 @@ export function checkNliSocketFresh({ pluginData } = {}) {
 // permanently disabled on this machine" rather than a one-off slow write.
 const DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD = 3;
 
-// Count duplicate-gate-timeout entries in a single monthly hook-errors jsonl.
-// Tolerant of partial/corrupt lines (best-effort diagnostic, never throws).
-function countDuplicateGateTimeouts(path) {
-  if (!existsSync(path)) return 0;
-  let count = 0;
+// Count duplicate-gate-timeout and duplicate-gate-stale-daemon entries in a
+// single monthly hook-errors jsonl. Returns separate counts so the check can
+// give targeted fix advice. Tolerant of partial/corrupt lines (best-effort
+// diagnostic, never throws).
+function countDuplicateGateIssues(path) {
+  if (!existsSync(path)) return { timeouts: 0, staleDaemon: 0 };
   let raw;
   try {
     raw = readFileSync(path, 'utf-8');
   } catch {
-    return 0;
+    return { timeouts: 0, staleDaemon: 0 };
   }
+  let timeouts = 0;
+  let staleDaemon = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
-      if (obj && obj.code === 'duplicate-gate-timeout') count++;
+      if (obj?.code === 'duplicate-gate-timeout') timeouts++;
+      else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
     } catch {
       // Skip a corrupt line — keep counting the rest.
     }
   }
-  return count;
+  return { timeouts, staleDaemon };
 }
 
-// Warn when recent hook-errors logs show repeated duplicate-gate timeouts.
-// The pre-write duplicate gate fails OPEN on timeout (silent pass), so a slow
-// machine can permanently lose the gate with nothing surfaced but log lines.
-// This check makes that visible. Scans the current + previous month files
-// (`hook-errors-YYYY-MM.jsonl`), the same naming post-tool.js writes.
+// Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
+// stale daemon. The pre-write duplicate gate fails OPEN on timeout (silent
+// pass), so a slow machine can permanently lose the gate with nothing surfaced
+// but log lines. A stale daemon binary (which lacks duplicate-scan support)
+// pays the round-trip + cold subprocess on every vault Write indefinitely.
+// Scans the current + previous UTC month files (`hook-errors-YYYY-MM.jsonl`),
+// the same naming pre-write-check.js writes.
 export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) {
   if (!pluginData) {
     return makeCheck({
@@ -671,20 +697,33 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
       fix: null,
     });
   }
-  const months = [now, new Date(now.getFullYear(), now.getMonth() - 1, 1)].map((d) =>
-    d.toISOString().slice(0, 7),
-  );
-  let total = 0;
+  const months = recentUtcMonths(now);
+  let totalTimeouts = 0;
+  let totalStaleDaemon = 0;
   for (const month of months) {
-    total += countDuplicateGateTimeouts(join(pluginData, `hook-errors-${month}.jsonl`));
+    const { timeouts, staleDaemon } = countDuplicateGateIssues(
+      join(pluginData, `hook-errors-${month}.jsonl`),
+    );
+    totalTimeouts += timeouts;
+    totalStaleDaemon += staleDaemon;
   }
-  if (total >= DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD) {
+  if (totalStaleDaemon > 0) {
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
       name: 'Duplicate gate',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
-      detail: `${total} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
+      detail: `stale daemon binary: ${totalStaleDaemon} stale-daemon error(s) in recent logs — the duplicate gate is paying cold-start on every vault write`,
+      fix: 'Restart the watch daemon to pick up the new binary: kill the current ll-watch, then ll-watch',
+    });
+  }
+  if (totalTimeouts >= DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD) {
+    return makeCheck({
+      id: CHECK_IDS['duplicate-gate-health'],
+      name: 'Duplicate gate',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
       fix: 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
     });
   }
@@ -693,7 +732,10 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
     name: 'Duplicate gate',
     status: SEVERITIES.ok,
     severity: SEVERITIES.warn,
-    detail: total === 0 ? 'no recent timeouts' : `${total} recent timeout(s) (under threshold)`,
+    detail:
+      totalTimeouts === 0
+        ? 'no recent timeouts'
+        : `${totalTimeouts} recent timeout(s) (under threshold)`,
     fix: null,
   });
 }
@@ -732,16 +774,18 @@ function readTailLines(path, maxBytes) {
   }
 }
 
-// Scan the current + previous month shadow-injection logs (the same naming
+// Scan the current + previous UTC month shadow-injection logs (the same naming
 // session-label.js writes) and count healthy entries vs gate passes.
+// Only counts entries ts >= INJECTION_CALIBRATION_EPOCH so stale-pipeline
+// decisions (old threshold / old BM25 mode) don't inflate the ready-to-flip
+// signal toward a pipeline those entries never exercised.
 function collectShadowGateStats(pluginData, now) {
-  // UTC month arithmetic — log filenames come from toISOString(), so a
-  // local-time Date here would pick the wrong previous month east of UTC.
-  const months = [now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))].map(
-    (d) => d.toISOString().slice(0, 7),
-  );
+  const months = recentUtcMonths(now);
   let healthy = 0;
   let passed = 0;
+  let vaultOkCount = 0;
+  let episodicOkCount = 0;
+  let total = 0;
   for (const month of months) {
     const p = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
     if (!existsSync(p)) continue;
@@ -753,20 +797,31 @@ function collectShadowGateStats(pluginData, now) {
       } catch {
         continue;
       }
-      const gate = e?.gate;
-      if (!gate || gate.fast_path_skip || gate.error) continue;
-      if (e?.backends?.vault?.error || e?.backends?.episodic?.error) continue;
+      // Epoch filter: skip entries produced by the old pipeline.
+      if (!e?.ts || e.ts < INJECTION_CALIBRATION_EPOCH) continue;
+      total++;
+      if (isVaultOk(e)) vaultOkCount++;
+      if (isEpisodicOk(e)) episodicOkCount++;
+      if (!isHealthy(e)) continue;
       healthy++;
-      if (gate.passed === true) passed++;
+      if (isGatePassed(e)) passed++;
     }
   }
-  return { healthy, passed };
+  return { healthy, passed, total, vaultOkCount, episodicOkCount };
 }
 
 // injectionMode is the PERSISTENT config value (config.json injection_mode,
 // default 'shadow') — per-session env overrides deliberately don't count,
 // since this check reports on what every future session will do.
-export function checkInjectionShadowGate({ pluginData, injectionMode, now = new Date() } = {}) {
+// injectionNudge is config.json injection_nudge — set to 'dismissed' by
+// /doctor's 'hold in shadow' option to silence the nag after the user has
+// reviewed the data and decided not to go live yet.
+export function checkInjectionShadowGate({
+  pluginData,
+  injectionMode,
+  injectionNudge,
+  now = new Date(),
+} = {}) {
   const mode = injectionMode || 'shadow';
   if (mode === 'live') {
     return makeCheck({
@@ -798,20 +853,49 @@ export function checkInjectionShadowGate({ pluginData, injectionMode, now = new 
       fix: null,
     });
   }
-  const { healthy, passed } = collectShadowGateStats(pluginData, now);
+  const { healthy, passed, total, vaultOkCount, episodicOkCount } = collectShadowGateStats(
+    pluginData,
+    now,
+  );
+  // INFRASTRUCTURE precondition (mirrors review-shadow.mjs verdict):
+  // when backend health is below the floor the surviving entries aren't
+  // representative and we must not draw gate conclusions from them.
+  const healthyRate = total > 0 ? Math.min(vaultOkCount, episodicOkCount) / total : 1;
+  if (total >= SHADOW_BACKEND_HEALTH_MIN_TOTAL && healthyRate < SHADOW_BACKEND_HEALTH_MIN_RATE) {
+    return makeCheck({
+      id: CHECK_IDS['injection-shadow-gate'],
+      name: 'Injection shadow gate',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: `infrastructure: backend health ${(healthyRate * 100).toFixed(0)}% across ${total} post-epoch entries — fix backend errors before drawing gate conclusions (run \`node PLUGIN/scripts/review-shadow.mjs\`)`,
+      fix: null,
+    });
+  }
   const passRate = healthy > 0 ? passed / healthy : 0;
   if (
     healthy >= SHADOW_GATE_MIN_HEALTHY &&
     passed >= SHADOW_GATE_MIN_PASSED &&
     passRate >= SHADOW_GATE_MIN_PASS_RATE
   ) {
+    // Snooze: user reviewed shadow data and chose to stay in shadow mode.
+    // Re-nudge only when the reviewed count has meaningfully grown.
+    if (injectionNudge === 'dismissed') {
+      return makeCheck({
+        id: CHECK_IDS['injection-shadow-gate'],
+        name: 'Injection shadow gate',
+        status: SEVERITIES.ok,
+        severity: SEVERITIES.warn,
+        detail: `shadow mode: gate-ready (${passed}/${healthy} healthy entries pass) but nudge dismissed — run /learning-loop:doctor when you want to reconsider`,
+        fix: null,
+      });
+    }
     return makeCheck({
       id: CHECK_IDS['injection-shadow-gate'],
       name: 'Injection shadow gate',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
-      detail: `shadow gate passing (${passed}/${healthy} recent healthy entries, ${(passRate * 100).toFixed(1)}% pass rate) — ready to flip injection_mode to live`,
-      fix: 'Review with `node PLUGIN/scripts/review-shadow.mjs`, then run /learning-loop:doctor to apply the flip (config.json injection_mode: shadow -> live)',
+      detail: `shadow gate passing (${passed}/${healthy} recent healthy entries, ${(passRate * 100).toFixed(1)}% pass rate) — ready for review before flipping injection_mode to live`,
+      fix: 'Review with `node PLUGIN/scripts/review-shadow.mjs`, then run /learning-loop:doctor to apply the flip or hold in shadow (config.json injection_mode: shadow -> live)',
     });
   }
   return makeCheck({

@@ -4,7 +4,7 @@ use rusqlite::Connection;
 
 #[cfg(test)]
 use crate::config::{TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN, TOP_K_GRAPH};
-pub(crate) use ll_core::graph::personalized_pagerank;
+pub(crate) use ll_core::graph::{personalized_pagerank, personalized_pagerank_holdout};
 
 pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>> {
     let mut basename_to_path: HashMap<String, String> = HashMap::new();

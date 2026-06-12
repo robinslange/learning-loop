@@ -10,9 +10,11 @@
 }
 ```
 
-`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it *would* have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below). The `injection-shadow-gate` health check watches the shadow logs and nudges at session start once the go-live gate is passing; `/learning-loop:doctor` can apply the flip with your approval.
+`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it _would_ have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below). The `injection-shadow-gate` health check watches the shadow logs and nudges at session start once the go-live gate is passing; `/learning-loop:doctor` can apply the flip with your approval.
 
 `injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw RRF fusion sum (each of the five search signals contributes `1/(5+rank)`), **not** a cosine similarity: a hit ranked #1 in one signal scores ~0.17, #1 in two signals ~0.33, and #1 in all five ~0.83. Defaults to `0.3` — just below the two-strong-signals level, calibrated against 18k shadow-injection gate evaluations (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
+
+`filename_style` controls the pre-write filename-convention advisory. Values: `'kebab'` (enforce kebab-case, e.g. `my-note.md`), `'spaces'` (enforce space-separated titles, e.g. `My Note.md`), `'auto'` (detect from the vault population), or absent (same as `'auto'`). In `auto` mode the hook reads up to 200 basenames across `0-inbox/`, `1-fleeting/`, and `3-permanent/` at write time; if >70% lack spaces the convention is kebab, if >70% have spaces the convention is spaces, otherwise the check is skipped. The advisory is non-blocking — it appears as `additionalContext`, never as a deny.
 
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
@@ -26,23 +28,23 @@ Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows 
 
 Eight hook handlers across six Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
 
-| Event | Hook | What it enforces |
-|---|---|---|
-| SessionStart | session-start.js | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn |
-| Stop | stop-nudge.js | Suggests `/reflect` after substantial sessions |
-| UserPromptSubmit | session-label.js | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`) |
-| PreToolUse (Write\|Edit) | pre-write-check.js | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt) |
-| PostToolUse (Write\|Edit\|Agent\|Skill) | post-tool.js | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
-| PostToolUse (Read) | post-read-retrieval.js | Tracks vault reads for retrieval instrumentation |
-| PostToolUse (mcp__plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches |
-| PreCompact | pre-compact.js | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable) |
+| Event                                       | Hook                    | What it enforces                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| SessionStart                                | session-start.js        | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn                                                   |
+| Stop                                        | stop-nudge.js           | Suggests `/reflect` after substantial sessions                                                                                                                                                                                                                                                    |
+| UserPromptSubmit                            | session-label.js        | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`)                                                                                                                                                                     |
+| PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt)                                                                       |
+| PostToolUse (Write\|Edit\|Agent\|Skill)     | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
+| PostToolUse (Read)                          | post-read-retrieval.js  | Tracks vault reads for retrieval instrumentation                                                                                                                                                                                                                                                  |
+| PostToolUse (mcp\_\_plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches                                                                                                                                                                                                                                                                   |
+| PreCompact                                  | pre-compact.js          | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable)                                                                                                                                                                                           |
 
 The post-tool modules live under `hooks/modules/`, listed in execution order:
 
 - **provenance** — records every vault read/write for the provenance log
 - **reflect-track** — appends each new vault Write/Edit to the `/reflect` new-notes marker while the marker exists (added v1.25.3)
 - **autolink** — adds backlinks and semantic links after vault writes
-- **edge-infer** — runs NLI inference on top-3 neighbours, writes `challenges_rebuttal` and `nli_supports` edges to `edges.db`
+- **edge-infer** — classifies wikilink pairs via regex, writes `challenges_*` typed edges to `edges.db`
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
@@ -61,18 +63,18 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 
 - edge backfill: `node scripts/backfill-edges.mjs` — walks the vault and bulk-classifies every note's wikilink edges into `edges.db`. Re-runnable (each pass is idempotent) and never mutates note content — only the post-write hook touches frontmatter.
 - flags: `--dry-run` (classify without writing), `--folder <dir>` (restrict to one vault folder), `--limit N` (cap notes processed, handy for spot-checks)
-- when to run: after a bulk import, or once when first enabling NLI edge inference, so existing notes get edges without waiting for each to be rewritten
+- when to run: after a bulk import so existing notes get edges without waiting for each to be rewritten
 
 ## Environment variables
 
-| Variable | Purpose |
-|---|---|
-| `CLAUDE_PLUGIN_DATA` | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
-| `VAULT_PATH` | Overrides `vault_path` from `config.json` |
-| `LEARNING_LOOP_INJECTION_MODE` | Per-session override of `injection_mode` (`shadow`, `live`, `off`) |
-| `LEARNING_LOOP_INJECTION_THRESHOLD` | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`) |
-| `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path |
-| `LEARNING_LOOP_PRECOMPACT_SPIKE` | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant. |
+| Variable                              | Purpose                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `CLAUDE_PLUGIN_DATA`                  | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
+| `VAULT_PATH`                          | Overrides `vault_path` from `config.json`                                                                      |
+| `LEARNING_LOOP_INJECTION_MODE`        | Per-session override of `injection_mode` (`shadow`, `live`, `off`)                                             |
+| `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`)                               |
+| `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
+| `LEARNING_LOOP_PRECOMPACT_SPIKE`      | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant.                                   |
 
 ## Vault librarian
 
@@ -90,13 +92,13 @@ An optional background agent that uses Gemma 4 E2B via ollama to continuously ma
 }
 ```
 
-| Key | Default | Purpose |
-|---|---|---|
-| `enabled` | `false` | Opt-in. Set `true` to start the librarian with `ll-watch`. |
-| `model` | `gemma4:e2b` | Ollama model for classification. E2B is validated; E4B is a future upgrade path. |
-| `pace_seconds` | `2` | Delay between note investigations. Higher values reduce resource pressure. |
-| `queue_cap` | `200` | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
-| `ollama_url` | `http://localhost:11434` | Ollama API endpoint. |
+| Key            | Default                  | Purpose                                                                                                      |
+| -------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `enabled`      | `false`                  | Opt-in. Set `true` to start the librarian with `ll-watch`.                                                   |
+| `model`        | `gemma4:e2b`             | Ollama model for classification. E2B is validated; E4B is a future upgrade path.                             |
+| `pace_seconds` | `2`                      | Delay between note investigations. Higher values reduce resource pressure.                                   |
+| `queue_cap`    | `200`                    | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
+| `ollama_url`   | `http://localhost:11434` | Ollama API endpoint.                                                                                         |
 
 The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes and dispatching multiple tasks per note. Mechanical: staleness regex. Ollama tool-use loop: link investigation for orphans. Ollama structured-output classifiers: voice gate (topic-style titles in inbox/fleeting notes), tag suggestion (under-tagged notes with vocabulary-bounded picks from the vault's existing tags), duplicate detection (3-way enum against three nearest neighbours with body context). Each task writes its observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field (`link_suggestion`, `voice_flag`, `tag_suggestion`, `duplicate_flag`, `staleness_suspect`). A separate `state.json` tracks visited notes and resets after a full pass.
 

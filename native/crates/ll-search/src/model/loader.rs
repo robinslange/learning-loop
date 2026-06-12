@@ -6,10 +6,32 @@ use anyhow::{Context, Result};
 
 use super::{bge_small, EmbeddingProvider, KnownModel};
 
+/// Pinned revision (commit hash) of the Xenova/bge-small-en-v1.5 HF repo.
+///
+/// Fetching `resolve/main` would let an upstream re-export silently change
+/// the model bytes between machines: the dev box that saved
+/// bench/baselines/quality.json keeps its cached copy forever while every
+/// ephemeral CI runner downloads whatever `main` currently serves. Pinning
+/// keeps all machines on identical bytes. Bump deliberately, then regenerate
+/// the quality baseline (the revision is recorded in its provenance block).
+pub const BGE_SMALL_REVISION: &str = "ea104dacec62c0de699686887e3f920caeb4f3e3";
+
 const BGE_SMALL_MODEL_URL: &str =
-    "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/onnx/model_quantized.onnx";
+    "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/onnx/model_quantized.onnx";
 const BGE_SMALL_TOKENIZER_URL: &str =
-    "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/main/tokenizer.json";
+    "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/tokenizer.json";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_model_urls_use_pinned_revision() {
+        assert!(BGE_SMALL_MODEL_URL.contains(BGE_SMALL_REVISION));
+        assert!(BGE_SMALL_TOKENIZER_URL.contains(BGE_SMALL_REVISION));
+        assert!(!BGE_SMALL_MODEL_URL.contains("/main/"), "model fetch must not track a moving revision");
+    }
+}
 
 fn models_dir() -> PathBuf {
     let dir = dirs_next::home_dir()

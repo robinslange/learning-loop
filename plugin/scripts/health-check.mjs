@@ -84,7 +84,11 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
     quick.checkNliSocketFresh({ pluginData: c.pluginData }),
     quick.checkDuplicateGateHealth({ pluginData: c.pluginData }),
-    quick.checkInjectionShadowGate({ pluginData: c.pluginData, injectionMode: c.injectionMode }),
+    quick.checkInjectionShadowGate({
+      pluginData: c.pluginData,
+      injectionMode: c.injectionMode,
+      injectionNudge: c.injectionNudge,
+    }),
     quick.checkAbiDrift({ abiDriftResult: c.abiDriftResult }),
   ];
   return {
@@ -227,6 +231,7 @@ if (isMain) {
     templateVersion: readTemplateVersion(),
     abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
     injectionMode: getConfig().injection_mode,
+    injectionNudge: getConfig().injection_nudge,
     minNodeMajor: 22,
     minClaudeVersion: '2.1.144',
   };

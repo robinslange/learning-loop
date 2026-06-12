@@ -7,9 +7,11 @@ import {
   runHook,
   resolvePluginData,
   resolveVaultPath,
+  resolveConfig,
   findBinary as findBinaryShared,
   isVaultNote,
 } from './lib/common.mjs';
+import { checkFilenameStyle } from './lib/filename-style.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
@@ -19,29 +21,40 @@ import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { emitJson } from './lib/io.mjs';
 
+// The hook's outer deadline (hooks.json timeout) starts when the process
+// does; the duplicate gate budgets its subprocess fallback from what's left.
+const HOOK_START_MS = Date.now();
+
 // Distinguishable error code for a duplicate-gate timeout (socket or
 // subprocess). /doctor's duplicate-gate-health check scans the monthly
 // hook-errors log for repeats of this code to detect a permanently-disabled
 // gate (the silent-pass-on-timeout failure mode).
 export const DUPLICATE_GATE_TIMEOUT_CODE = 'duplicate-gate-timeout';
 
-function logDuplicateGateTimeout(pluginData, source, detail) {
+// Distinguishable error code for a daemon running an old binary without
+// duplicate-scan support (it rejects the request with a parse error). Without
+// this, every vault write silently pays daemon round-trip + cold subprocess
+// until the daemon is restarted, and /doctor misdiagnoses any resulting
+// timeout as "daemon not running".
+export const DUPLICATE_GATE_STALE_DAEMON_CODE = 'duplicate-gate-stale-daemon';
+
+function logDuplicateGateIssue(pluginData, code, source, detail) {
   if (!pluginData) return;
   const month = new Date().toISOString().slice(0, 7);
   appendJsonlLineSafe(join(pluginData, `hook-errors-${month}.jsonl`), {
     ts: new Date().toISOString(),
     module: 'pre-write-check.checkDuplicateNote',
-    code: DUPLICATE_GATE_TIMEOUT_CODE,
+    code,
     source,
     message: String(detail).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
   });
 }
 
 // Try the long-running ll-search watch daemon's UDS socket for the duplicate
-// scan. Mirrors edge-infer.mjs's runNliBatchViaDaemon: tight connect timeout so
-// an absent daemon costs nothing, a bounded response timeout, and a structured
-// {ok, ...} result the caller dispatches on. The model stays warm in the
-// daemon, so this avoids the ~800ms-2s ONNX cold start the subprocess pays.
+// scan. Tight connect timeout so an absent daemon costs nothing, a bounded
+// response timeout, and a structured {ok, ...} result the caller dispatches on.
+// The model stays warm in the daemon, so this avoids the ~800ms-2s ONNX cold
+// start the subprocess pays.
 function reflectScanViaDaemon(socketPath, queries, top, candidates) {
   return new Promise((resolveResult) => {
     let settled = false;
@@ -60,9 +73,12 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
     const socket = createConnection({ path: socketPath });
     let buffer = '';
 
+    // Short timer (not QUERY_TIMEOUT_MS): the warm daemon answers in ~430ms,
+    // and the subprocess fallback needs the rest of the hook budget. A wedged
+    // daemon must not eat the window the fallback would run in.
     const timer = setTimeout(() => {
       settle({ ok: false, reason: 'timeout' });
-    }, HookConfig.QUERY_TIMEOUT_MS);
+    }, HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS);
 
     socket.setTimeout(50, () => {
       if (!buffer && !socket.connecting) {
@@ -195,10 +211,15 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
     const daemonResult = await reflectScanViaDaemon(socketPath, [title], 1, 5);
     if (daemonResult.ok) {
       if (daemonResult.parsed && daemonResult.parsed.error) {
-        logError(
-          'pre-write-check.checkDuplicateNote.daemon',
-          new Error(String(daemonResult.parsed.error)),
-        );
+        const msg = String(daemonResult.parsed.error);
+        // An old daemon binary parses the duplicate-scan request as a failed
+        // NLI request and returns "parse request: ..." — log the distinct
+        // stale-daemon code so /doctor can advise a daemon restart instead of
+        // misreading the per-write cold-start tax as a missing daemon.
+        if (msg.startsWith('parse request')) {
+          logDuplicateGateIssue(pluginData, DUPLICATE_GATE_STALE_DAEMON_CODE, 'daemon', msg);
+        }
+        logError('pre-write-check.checkDuplicateNote.daemon', new Error(msg));
       } else {
         return interpretScanResult(daemonResult.parsed, filePath, vaultRoot);
       }
@@ -206,7 +227,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       // The gate timed out against the warm daemon — log it distinctly so
       // /doctor can flag a permanently-disabled gate, then fall through to the
       // subprocess as a slow-path safety net.
-      logDuplicateGateTimeout(pluginData, 'daemon', daemonResult.reason);
+      logDuplicateGateIssue(pluginData, DUPLICATE_GATE_TIMEOUT_CODE, 'daemon', daemonResult.reason);
     } else if (
       daemonResult.reason !== 'socket-error' &&
       daemonResult.reason !== 'closed-before-response'
@@ -219,16 +240,33 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   }
 
   // Subprocess fallback: a fresh ll-search that cold-starts the model.
+  // Budgeted from what's left of the hook's outer deadline — a daemon attempt
+  // may already have burned its timer, and an execFileSync that outlives the
+  // hooks.json timeout gets the whole hook SIGKILLed (losing the already-
+  // computed warnings), which is strictly worse than skipping the scan.
   try {
     const binary = findBinaryShared();
     if (!binary) return null;
+
+    const elapsedMs = Date.now() - HOOK_START_MS;
+    const remainingMs =
+      HookConfig.PRE_WRITE_HOOK_BUDGET_MS - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    if (remainingMs < HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS) {
+      logDuplicateGateIssue(
+        pluginData,
+        DUPLICATE_GATE_TIMEOUT_CODE,
+        'budget',
+        `no budget for subprocess fallback (${elapsedMs}ms elapsed)`,
+      );
+      return null;
+    }
 
     const out = execFileSync(
       binary.bin,
       ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
       {
         encoding: 'utf-8',
-        timeout: HookConfig.QUERY_TIMEOUT_MS,
+        timeout: Math.min(HookConfig.QUERY_TIMEOUT_MS, remainingMs),
         env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
       },
     );
@@ -237,7 +275,12 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
     // ETIMEDOUT / SIGTERM from execFileSync's timeout is the silent-disable
     // failure mode — log it distinctly too, on top of the generic error log.
     if (err && (err.code === 'ETIMEDOUT' || err.signal === 'SIGTERM')) {
-      logDuplicateGateTimeout(pluginData, 'subprocess', err.code || err.signal);
+      logDuplicateGateIssue(
+        pluginData,
+        DUPLICATE_GATE_TIMEOUT_CODE,
+        'subprocess',
+        err.code || err.signal,
+      );
     }
     logError('pre-write-check.checkDuplicateNote', err);
     return null;
@@ -367,6 +410,19 @@ runHook(async ({ tool, input }) => {
   }
 
   const warnings = [];
+
+  const isNewFile = !existsSync(filePath);
+  const elapsedForStyle = Date.now() - HOOK_START_MS;
+  const budgetOkForStyle =
+    HookConfig.PRE_WRITE_HOOK_BUDGET_MS - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+  const styleAdvisory = checkFilenameStyle(
+    filePath,
+    vaultRoot,
+    resolveConfig(),
+    !isNewFile,
+    budgetOkForStyle,
+  );
+  if (styleAdvisory) warnings.push(styleAdvisory);
 
   const links = extractWikilinks(fmBody);
   const noteIndex = buildNoteIndex(vaultRoot);

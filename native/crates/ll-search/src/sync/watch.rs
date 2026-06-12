@@ -108,24 +108,6 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
         do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
     }
 
-    // NLI socket server: hosts the embedded NLI model behind a UDS so the
-    // edge-infer hook doesn't reload the 233MB model on every fire. Falls back
-    // to subprocess on non-unix or if nli feature is off (server module is
-    // gated identically). The hook detects socket presence and uses whichever
-    // path is available.
-    #[cfg(all(feature = "nli", unix))]
-    let _nli_server_task = {
-        let socket_path = cfg.config_dir.join("nli.sock");
-        let db_path = cfg.db_path.clone();
-        let shutdown_rx_nli = shutdown_rx.clone();
-        tokio::spawn(async move {
-            if let Err(e) =
-                crate::nli_server::run_nli_server(socket_path, db_path, shutdown_rx_nli).await
-            {
-                eprintln!("NLI server task exited with error: {e}");
-            }
-        })
-    };
 
     let mut librarian_child: Option<std::process::Child> = None;
     if let Some(ref script) = cfg.librarian_script {

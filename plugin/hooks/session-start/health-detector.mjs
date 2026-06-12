@@ -65,6 +65,7 @@ export async function run(ctx) {
           return entries.length > 0 ? entries[0] : { status: 'ok' };
         })(),
         injectionMode: resolveConfig().injection_mode,
+        injectionNudge: resolveConfig().injection_nudge,
       };
 
       const TIMEOUT_SENTINEL = Symbol('timeout');

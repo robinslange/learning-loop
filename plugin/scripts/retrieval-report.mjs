@@ -83,7 +83,13 @@ function printUsageSection() {
       ? `${report.coverage_days}d of logs`
       : `${report.window_days}d`;
     console.log(
-      `  Never surfaced in ${span} (archive candidates): ${report.never_surfaced.length} notes`,
+      `  Never retrieved by search in ${span} (archive candidates): ${report.never_surfaced.length} notes`,
+    );
+    console.log(
+      `  (injection-only notes may also appear here — the injected channel under-records)`,
+    );
+    console.log(
+      `  (use this to find notes retrieval never surfaces; not a reliable indicator they were never seen)`,
     );
     for (const p of report.never_surfaced.slice(0, 20)) {
       console.log(`    ${p}`);

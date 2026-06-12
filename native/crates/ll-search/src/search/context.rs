@@ -10,7 +10,7 @@ use crate::config::{
     TOP_K_FTS, TOP_K_GRAPH, TOP_K_INITIAL, TOP_K_VEC,
 };
 use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, rocchio_prf_with, PrfParams};
-use super::graph::{load_link_graph, load_tags_map, personalized_pagerank};
+use super::graph::{load_link_graph, load_tags_map, personalized_pagerank, personalized_pagerank_holdout};
 use super::store::{EmbeddingStore, load_store};
 use super::query::{load_titles_map, load_mtime_map};
 
@@ -214,12 +214,14 @@ impl SearchContext {
             None => personalized_pagerank(&self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS),
             Some(src) => {
                 seeds.retain(|s| s != src);
-                // The graph is stored undirected, so dropping the source's
-                // adjacency list removes every source->outlink edge; remaining
-                // inbound edges only feed score into the (filtered) source.
-                let mut masked: HashMap<String, Vec<String>> = (*self.graph).clone();
-                masked.remove(src);
-                personalized_pagerank(&masked, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS)
+                // The graph is stored undirected. The holdout skips the
+                // source's adjacency list during the walk (masking every
+                // source->outlink edge without cloning the graph) and filters
+                // the source from the output — remaining inbound edges feed
+                // score into a sink that is never returned.
+                personalized_pagerank_holdout(
+                    &self.graph, &seeds, PAGERANK_DAMPING, PAGERANK_ITERS, Some(src),
+                )
             }
         };
         let tag_results = tag_expand_from_map(&self.tags, &seeds);
@@ -522,9 +524,17 @@ mod tests {
         // Vault: source links to a + b (the eval ground truth). Eleven filler
         // notes sit between the query vector and a/b so that a/b are outside
         // the top-10 vec seeds — the regime where PPR's contribution matters.
+        // Extra structure pins the holdout's exact semantics:
+        //   - filler0 (a seed) links to second.md, a second-order candidate
+        //     reachable WITHOUT the source's edges — it must still be found,
+        //     so a total over-masking regression fails the test;
+        //   - filler1 (a seed) links to source.md, so the source accumulates
+        //     PPR mass via an inbound edge — it must be filtered from the
+        //     output, not just dropped from the seed set.
         let emb_src = norm(&[1.0, 0.0, 0.0]);
         let emb_a = norm(&[0.0, 1.0, 0.0]);
         let emb_b = norm(&[0.0, 0.0, 1.0]);
+        let emb_second = norm(&[0.0, 0.5, 0.5]);
         let fillers: Vec<Vec<f32>> = (1..=11)
             .map(|i| norm(&[1.0, 0.01 * i as f32, 0.0]))
             .collect();
@@ -542,14 +552,17 @@ mod tests {
                 emb,
             ));
         }
+        notes.push(("second.md".into(), "second order".into(), "off-query body".into(), emb_second));
         let notes_ref: Vec<(&str, &str, &str, &[f32])> = notes
             .iter()
             .map(|(p, t, b, e)| (p.as_str(), t.as_str(), b.as_str(), e.as_slice()))
             .collect();
         let conn = create_test_db(&notes_ref);
+        // ids: source=1, a=2, b=3, filler0=4, filler1=5, ..., second=15.
         conn.execute_batch(
             "CREATE TABLE links (id INTEGER PRIMARY KEY, source_id INTEGER, target_path TEXT NOT NULL);
-             INSERT INTO links (source_id, target_path) VALUES (1, 'a'), (1, 'b');",
+             INSERT INTO links (source_id, target_path) VALUES
+                 (1, 'a'), (1, 'b'), (4, 'second'), (5, 'source');",
         )
         .unwrap();
 
@@ -568,6 +581,14 @@ mod tests {
         assert!(
             !held_ppr.contains(&"a.md") && !held_ppr.contains(&"b.md"),
             "with holdout, the gold edges alone cannot rank a.md/b.md: {held_ppr:?}"
+        );
+        assert!(
+            held_ppr.contains(&"second.md"),
+            "holdout must not over-mask: second-order structure (filler0 -> second) still ranks: {held_ppr:?}"
+        );
+        assert!(
+            !held_ppr.contains(&"source.md"),
+            "source gains mass via inbound edges (filler1 -> source) but must be filtered from PPR output: {held_ppr:?}"
         );
     }
 

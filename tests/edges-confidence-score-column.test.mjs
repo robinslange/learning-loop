@@ -20,7 +20,7 @@ test('addEdge persists confidence_score when provided', async () => {
       confidenceScore: 0.967,
     });
     saveDb(db, dbPath);
-    const rows = db.exec("SELECT source_graph, confidence_score FROM edges")[0].values;
+    const rows = db.exec('SELECT source_graph, confidence_score FROM edges')[0].values;
     assert.equal(rows.length, 1);
     assert.equal(rows[0][0], 'nli');
     assert.ok(Math.abs(rows[0][1] - 0.967) < 1e-6);
@@ -43,7 +43,7 @@ test('addEdge defaults confidence_score to null', async () => {
       sourceGraph: 'local',
       directionFlipped: 0,
     });
-    const rows = db.exec("SELECT confidence_score FROM edges")[0].values;
+    const rows = db.exec('SELECT confidence_score FROM edges')[0].values;
     assert.equal(rows[0][0], null);
     db.close();
   } finally {

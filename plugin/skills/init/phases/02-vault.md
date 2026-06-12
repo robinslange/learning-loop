@@ -81,6 +81,7 @@ tags: [system]
 
 - One idea per note
 - Title states the insight, not the topic
+- Filename: kebab-case slug of the insight (no spaces; e.g. `spaced-repetition-fights-active-forgetting.md`)
 - Body: 3-10 lines. Longer means split it.
 - Max 3 tags
 - At least one link to an existing note

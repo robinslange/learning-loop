@@ -38,9 +38,6 @@ zstd = "0.13"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 
-[features]
-default = ["nli"]
-nli = []
 
 [build-dependencies]
 sha2 = "0.10"

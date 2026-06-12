@@ -107,17 +107,6 @@ your-vault/
   Excalidraw/       Diagrams
 ```
 
-## NLI advisory edges
-
-On every Write/Edit to a vault note, `edge-infer.mjs` runs the autolink top-3 neighbours through an embedded NLI model (`MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli` int8 ONNX). Two edge types land in `edges.db` with `source_graph='nli'`:
-
-- `challenges_rebuttal` when `p(contradiction) > LL_NLI_THRESHOLD` (default `0.90`)
-- `nli_supports` when `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default `0.75`)
-
-These edges are advisory signals consumed by `inbox-organiser` (promotion gate), `refinement-proposer` (pair hint), and `/verify` (consistency detection). They live in `edges.db` and are queried via `getNliEdgesForNote` in `scripts/lib/edges.mjs`. The earlier viz layer (frontmatter sync, heatmap, cycle canvas) was removed in favour of agent-moment affordances — the data isn't displayed for humans, it's queried by skills at the moments where it changes a decision.
-
-Performance: `ll-search watch` hosts a UDS daemon at `<plugin-data>/nli.sock` that keeps the 233MB model loaded. Hook calls round-trip in ~10ms warm. Without the daemon, the hook falls back to spawning fresh subprocesses (~400ms each). The daemon is unix-only — Windows users always take the subprocess path.
-
 ## Go deeper
 
 - [Workflows](guide/workflows.md) -- common patterns, session lifecycle, and chaining skills together

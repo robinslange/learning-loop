@@ -1,0 +1,57 @@
+name: Regenerate quality baseline
+
+# One-step bless path: trigger this dispatch, then download the artifact and
+# commit bench/baselines/quality.json. See test.yml quality job for context.
+#
+# When to run:
+#   - After a deliberate change that shifts retrieval metrics (BM25 tuning,
+#     PPR damping change, PRF param change, model revision bump).
+#   - After a GENERATOR_VERSION bump in bench/fixtures/generate-vault.mjs.
+#   - When the committed baseline was generated on a different platform.
+#
+# After downloading the artifact:
+#   1. Verify: numQueries == 200, provenance.platform == "linux/x64".
+#   2. Commit: git add bench/baselines/quality.json && git commit.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  regen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Linux build deps
+        run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            native/target
+          key: cargo-release-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Build release binary
+        working-directory: native
+        run: cargo build --release -p ll-search
+
+      - name: Regenerate quality baseline
+        run: node bench/bench.mjs --quality-only --save-quality-baseline
+
+      - name: Upload quality-baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-baseline
+          path: bench/baselines/quality.json
+          retention-days: 90

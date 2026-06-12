@@ -43,6 +43,22 @@ export const HookConfig = Object.freeze({
   SWEEP_HOOK_TIMEOUT_MS: 15000,
   NPM_INSTALL_TIMEOUT_MS: 10000,
 
+  // --- Pre-write duplicate-gate budget (ms) ---
+  // hooks.json gives pre-write-check 3s total, and the duplicate gate can
+  // spend from that budget twice: a daemon attempt, then a subprocess
+  // fallback. The composition must fit inside the outer deadline or Claude
+  // Code SIGKILLs the hook mid-subprocess and every warning is lost. The
+  // daemon gets a short timer (the warm path answers in ~430ms); the
+  // subprocess timer is computed at runtime from the remaining budget
+  // (min(QUERY_TIMEOUT_MS, budget - elapsed - safety margin)) and the
+  // fallback is skipped entirely when the remainder is under the measured
+  // cold-start floor. PRE_WRITE_HOOK_BUDGET_MS must mirror the hooks.json
+  // timeout — tests/lib-hook-config.test.mjs pins both.
+  PRE_WRITE_HOOK_BUDGET_MS: 3000,
+  PRE_WRITE_DAEMON_TIMEOUT_MS: 800,
+  PRE_WRITE_SAFETY_MARGIN_MS: 300,
+  PRE_WRITE_SUBPROCESS_FLOOR_MS: 300,
+
   // --- Cooldowns (seconds) ---
   // A dream lock whose recorded pid is dead is considered abandoned after
   // this age. Skill bash pids die when the Bash tool call returns, so the
@@ -97,6 +113,16 @@ export const HookConfig = Object.freeze({
   // 0.30 sits just below the two-strong-signals level (2/(5+1) = 0.333) and
   // above a lone single-signal #1 (1/6 = 0.167) — i.e. inject only when the
   // top hit is corroborated near the top of at least two signals.
+  //
+  // 0.30 is INTENTIONALLY PERMISSIVE: every observed nonzero top score sits
+  // at or above the 0.333 floor, so against the pre-OR-mode logs this gate
+  // admits ~96% of substantive prompts — behaviorally "inject on any
+  // corroborated hit", with per-session dedupe as the real spam control. A
+  // threshold that discriminates within the nonzero distribution (nonzero
+  // p25-p50 ≈ 0.37-0.40) is deferred until post-epoch shadow data
+  // accumulates: INJECTION_CALIBRATION_EPOCH below floors what the readiness
+  // check counts, and scripts/review-shadow.mjs buckets the 0.30-0.56
+  // decision region at 0.02 so the distribution is actually resolvable.
   // Re-calibrate from post-OR-mode logs once they accumulate
   // (node scripts/review-shadow.mjs).
   INJECTION_THRESHOLD: 0.3,
@@ -107,3 +133,12 @@ export const HookConfig = Object.freeze({
   MSG_WEIGHT_RECENT: 3,
   MSG_WEIGHT_OLDER: 1,
 });
+
+// Shadow-gate decisions logged before this timestamp were produced by a
+// different pipeline (threshold 0.35, BM25 AND-mode for long queries) and say
+// nothing about the gate that would go live today. The injection-shadow-gate
+// readiness check only counts shadow entries with ts >= this epoch. Bump it
+// whenever INJECTION_THRESHOLD or the fusion mode changes — the go-live
+// criteria then reset automatically to post-change data.
+// Set 2026-06-12: 0.35 -> 0.30 threshold + BM25 OR-mode for long queries.
+export const INJECTION_CALIBRATION_EPOCH = '2026-06-12T00:00:00.000Z';

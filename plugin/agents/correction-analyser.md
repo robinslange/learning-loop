@@ -58,31 +58,6 @@ For each unique downstream note, `Read` it. You need:
 - How `note_path` is referenced (the wiki-link surrounding text)
 - Whether the dependency is asserted as the _primary_ support or one of several
 
-### 2.5. NLI pre-filter (advisory only)
-
-For each downstream note, check whether `edges-cli.mjs list <note_path>` returned rows with `source_graph='nli'` and `to_path` matching the downstream note. Two edge types are relevant:
-
-- `edge_type='challenges_rebuttal'` — NLI inferred `p(contradiction) > LL_NLI_THRESHOLD` (default 0.90). Biases toward **rebuttal**.
-- `edge_type='nli_supports'` — NLI inferred `p(entailment) > LL_NLI_ENTAIL_THRESHOLD` (default 0.75). Biases AGAINST rebuttal (the candidate logically follows from the changed note, so the change tends to strengthen rather than break it; lean **untouched** or **undermining** depending on the change_type).
-
-```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs list <note_path>
-```
-
-The `outgoing` and `incoming` arrays each return full DB row objects (via `rowsToObjects`), so `source_graph`, `edge_type`, and `confidence_score` are all present in every row. Filter directly: `r.source_graph === 'nli'` then split by `r.edge_type`. The `confidence_score` (float between threshold and 1.0) tells you how strongly the model committed to the call — pass it through to your reasoning rather than treating all NLI rows as equally weighted.
-
-If zero NLI edges exist for `note_path`, skip this step entirely.
-
-For each downstream note that DOES have a matching `source_graph='nli'` row:
-
-- Tag it with the NLI hint: `[NLI hint: contradiction p=0.93]` or `[NLI hint: entailment p=0.82]`. Include the score so you can weight clear-cut signals more than borderline ones.
-- **Still read the note in Step 2.** Do not skip the Read.
-- **Still run Step 3 (LLM classification).** Do not skip the LLM step.
-
-Why: NLI advisory edges have ~86% precision at p>0.90 for contradictions (entailment precision is unvalidated on the current eval set — treat entailment hints as weaker signal). That is not high enough to gate out LLM verification on either side. Use the NLI signal + score as a hint that biases your classification, not as a final answer.
-
-Explicit constraint: LLM judgment in Step 3 overrides the NLI hint in every case. If the LLM reads the note and concludes `undercutting` or `untouched` for a pair flagged by NLI as contradiction, trust the LLM. Likewise if the LLM concludes `rebuttal` despite an entailment hint, trust the LLM.
-
 ### 3. Classify the attack type
 
 For each affected note, decide which argumentation pattern applies given the `change_type`:

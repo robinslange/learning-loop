@@ -63,7 +63,10 @@ describe('pre-write-check', () => {
     for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
       mkdirSync(join(VAULT, dir), { recursive: true });
     }
-    writeFileSync(join(VAULT, '3-permanent', 'existing-note.md'), '---\ntitle: existing note\n---\n');
+    writeFileSync(
+      join(VAULT, '3-permanent', 'existing-note.md'),
+      '---\ntitle: existing note\n---\n',
+    );
     writeFileSync(join(VAULT, '6-writing', 'the-loud-room.md'), '---\ntitle: the loud room\n---\n');
     writeFileSync(
       join(VAULT, '3-permanent', 'dashed-note.md'),
@@ -172,19 +175,22 @@ describe('pre-write-check', () => {
   // not — optional chaining over null gives undefined, which satisfies
   // notEqual.
   it('allows an em-dash on a Source: line', () => {
-    const content = '---\ntags: [sleep]\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
+    const content =
+      '---\ntags: [sleep]\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows an em-dash on a Related: line', () => {
-    const content = '---\ntags: [sleep]\n---\nClean body.\n\nRelated: [[existing-note]] — the same shape at the data layer.';
+    const content =
+      '---\ntags: [sleep]\n---\nClean body.\n\nRelated: [[existing-note]] — the same shape at the data layer.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows an em-dash inside frontmatter only', () => {
-    const content = '---\ntags: [sleep]\nsource: 2026-05-29 vault sweep — span bug caught in preview\n---\nClean body with no dashes.';
+    const content =
+      '---\ntags: [sleep]\nsource: 2026-05-29 vault sweep — span bug caught in preview\n---\nClean body with no dashes.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
@@ -201,7 +207,8 @@ describe('pre-write-check', () => {
   // Sources: line is a citation — together they are neither a leak nor a
   // violation, so the hook must produce no output at all.
   it('stays silent on frontmatter source: plus a body Sources: line', () => {
-    const content = '---\ntags: [test]\nsource: https://example.com/paper\ndate: 2026-05-21\n---\n\n# Test Note\n\nThe claim happens.\n\nSources: pulled from example.com after second reading.\n';
+    const content =
+      '---\ntags: [test]\nsource: https://example.com/paper\ndate: 2026-05-21\n---\n\n# Test Note\n\nThe claim happens.\n\nSources: pulled from example.com after second reading.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions.md'), content);
     assert.equal(result, null);
   });
@@ -213,7 +220,8 @@ describe('pre-write-check', () => {
   });
 
   it('allows a Write to an existing file whose pre-existing em-dash is carried unchanged', () => {
-    const content = '---\ntags: [test]\n---\nThe gate is policy — not aspiration. A new clean sentence.\n';
+    const content =
+      '---\ntags: [test]\n---\nThe gate is policy — not aspiration. A new clean sentence.\n';
     const result = run('Write', join(VAULT, '3-permanent', 'dashed-note.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
@@ -273,8 +281,15 @@ describe('pre-write-check', () => {
   // when the fragment loses its frontmatter or Source:-line context.
   it('allows an Edit adding a dash inside frontmatter only', () => {
     const p = join(VAULT, '3-permanent', 'fm-edit-note.md');
-    writeFileSync(p, '---\ntags: [test]\nsource: 2026-05-29 vault sweep\n---\nClean body with no dashes.\n');
-    const result = runEdit(p, 'source: 2026-05-29 vault sweep', 'source: 2026-05-29 vault sweep — span bug caught in preview');
+    writeFileSync(
+      p,
+      '---\ntags: [test]\nsource: 2026-05-29 vault sweep\n---\nClean body with no dashes.\n',
+    );
+    const result = runEdit(
+      p,
+      'source: 2026-05-29 vault sweep',
+      'source: 2026-05-29 vault sweep — span bug caught in preview',
+    );
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
@@ -313,5 +328,185 @@ describe('pre-write-check', () => {
       '---\ntags: [sleep, circadian, sleep]\n---\nBody text.',
     );
     assert.equal(result, null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Filename-style advisory tests
+// ---------------------------------------------------------------------------
+
+describe('pre-write-check filename-style advisory', () => {
+  let STYLE_VAULT;
+
+  // Populate one vault with kebab-style filenames (>70% without spaces).
+  before(() => {
+    STYLE_VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-style-vault-'));
+    for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
+      mkdirSync(join(STYLE_VAULT, dir), { recursive: true });
+    }
+    // 10 kebab names in 0-inbox so auto-detect resolves to 'kebab'.
+    for (let i = 0; i < 10; i++) {
+      writeFileSync(join(STYLE_VAULT, '0-inbox', `existing-kebab-note-${i}.md`), '');
+    }
+  });
+
+  after(() => {
+    rmSync(STYLE_VAULT, { recursive: true, force: true });
+  });
+
+  // Run the hook with an optional config.json written into the sandbox.
+  function runStyleHook(vaultPath, filePath, content, configObj) {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: filePath, content },
+      },
+      env: { VAULT_PATH: vaultPath },
+      seed: configObj
+        ? (pluginDataDir) => {
+            writeFileSync(join(pluginDataDir, 'config.json'), JSON.stringify(configObj));
+          }
+        : undefined,
+    });
+    try {
+      assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.ok(!r.stderr.includes('"level":"error"'), `hook logged an error: ${r.stderr}`);
+      const out = r.stdout.trim();
+      return out ? JSON.parse(out) : null;
+    } finally {
+      r.cleanup();
+    }
+  }
+
+  it('kebab vault + spaced new filename → advisory present (warn, not deny)', () => {
+    const result = runStyleHook(
+      STYLE_VAULT,
+      join(STYLE_VAULT, '0-inbox', 'My Spaced Note.md'),
+      '---\ntags: [test]\n---\nBody.',
+    );
+    assert.ok(result, 'expected an advisory payload');
+    assert.equal(result.hookSpecificOutput.permissionDecision, undefined, 'must warn, never deny');
+    assert.ok(result.hookSpecificOutput.additionalContext, 'expected additionalContext');
+    assert.match(result.hookSpecificOutput.additionalContext, /convention|kebab/i);
+  });
+
+  it('kebab vault + kebab new filename → no advisory', () => {
+    const result = runStyleHook(
+      STYLE_VAULT,
+      join(STYLE_VAULT, '0-inbox', 'my-clean-note.md'),
+      '---\ntags: [test]\n---\nBody.',
+    );
+    // Either null or no additionalContext about convention (may have other
+    // advisories like broken wikilinks, but not a style one).
+    if (result) {
+      assert.ok(
+        !result.hookSpecificOutput?.additionalContext?.includes('convention'),
+        'unexpected style advisory on kebab-named note',
+      );
+    }
+  });
+
+  it('spaces vault + spaced filename → no advisory', () => {
+    const spacesVault = mkdtempSync(join(tmpdir(), 'll-pwc-spaces-vault-'));
+    try {
+      for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
+        mkdirSync(join(spacesVault, dir), { recursive: true });
+      }
+      for (let i = 0; i < 10; i++) {
+        writeFileSync(join(spacesVault, '0-inbox', `Note With Spaces ${i}.md`), '');
+      }
+      const result = runStyleHook(
+        spacesVault,
+        join(spacesVault, '0-inbox', 'My New Note.md'),
+        '---\ntags: [test]\n---\nBody.',
+      );
+      if (result) {
+        assert.ok(
+          !result.hookSpecificOutput?.additionalContext?.includes('convention'),
+          'unexpected style advisory on spaces-named note in spaces vault',
+        );
+      }
+    } finally {
+      rmSync(spacesVault, { recursive: true, force: true });
+    }
+  });
+
+  it('config override filename_style=kebab beats auto on a spaces vault', () => {
+    const spacesVault = mkdtempSync(join(tmpdir(), 'll-pwc-cfg-vault-'));
+    try {
+      for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
+        mkdirSync(join(spacesVault, dir), { recursive: true });
+      }
+      for (let i = 0; i < 10; i++) {
+        writeFileSync(join(spacesVault, '0-inbox', `Note With Spaces ${i}.md`), '');
+      }
+      // Config says kebab even though vault population is spaces-dominant.
+      const result = runStyleHook(
+        spacesVault,
+        join(spacesVault, '0-inbox', 'My Spaced Note.md'),
+        '---\ntags: [test]\n---\nBody.',
+        { filename_style: 'kebab' },
+      );
+      assert.ok(result, 'expected an advisory payload');
+      assert.equal(
+        result.hookSpecificOutput.permissionDecision,
+        undefined,
+        'must warn, never deny',
+      );
+      assert.match(result.hookSpecificOutput.additionalContext, /convention|kebab/i);
+    } finally {
+      rmSync(spacesVault, { recursive: true, force: true });
+    }
+  });
+
+  it('existing-file Write (not new) → no style advisory', () => {
+    const existingPath = join(STYLE_VAULT, '0-inbox', 'existing-kebab-note-0.md');
+    const result = runStyleHook(STYLE_VAULT, existingPath, '---\ntags: [test]\n---\nUpdated body.');
+    if (result) {
+      assert.ok(
+        !result.hookSpecificOutput?.additionalContext?.includes('convention'),
+        'unexpected style advisory on existing-file Write',
+      );
+    }
+  });
+
+  it('_system Write → no style advisory (isVaultNote filter)', () => {
+    const result = runStyleHook(
+      STYLE_VAULT,
+      join(STYLE_VAULT, '_system', 'My Config.md'),
+      '---\ntags: [test]\n---\nBody.',
+    );
+    assert.equal(result, null, '_system writes must be ignored entirely');
+  });
+
+  it('Edit → no style advisory', () => {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: join(STYLE_VAULT, '0-inbox', 'My Spaced Note.md'),
+          old_string: 'old',
+          new_string: 'new',
+        },
+      },
+      env: { VAULT_PATH: STYLE_VAULT },
+    });
+    try {
+      assert.equal(r.signal, null);
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      const result = out ? JSON.parse(out) : null;
+      if (result) {
+        assert.ok(
+          !result.hookSpecificOutput?.additionalContext?.includes('convention'),
+          'unexpected style advisory on Edit',
+        );
+      }
+    } finally {
+      r.cleanup();
+    }
   });
 });

@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { writeFileSync, rmSync, mkdtempSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { skipOnWindows } from './helpers/platform.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = new URL('../plugin/hooks/stop-nudge.js', import.meta.url).pathname;
@@ -82,7 +83,11 @@ test('stop-nudge message-count arm: many small lines trigger the nudge', () => {
   writeFileSync(transcriptPath, Array(250).fill('{"type":"user"}').join('\n'));
 
   const r = runHook(HOOK, {
-    stdin: { session_id: 'test-manylines', transcript_path: transcriptPath, stop_hook_active: false },
+    stdin: {
+      session_id: 'test-manylines',
+      transcript_path: transcriptPath,
+      stop_hook_active: false,
+    },
   });
   try {
     assert.equal(r.exitCode, 0, r.stderr);
@@ -149,7 +154,11 @@ test('stop-nudge already-nudged: no second block output', () => {
   // First call: should block and write the nudge marker.
   const r1 = runHook(HOOK, {
     env: { TMPDIR: isolatedTmp },
-    stdin: { session_id: 'test-dedup-first', transcript_path: transcriptPath, stop_hook_active: false },
+    stdin: {
+      session_id: 'test-dedup-first',
+      transcript_path: transcriptPath,
+      stop_hook_active: false,
+    },
   });
   try {
     assert.equal(r1.exitCode, 0);
@@ -168,7 +177,11 @@ test('stop-nudge already-nudged: no second block output', () => {
   // by r1; if it had not been, r2 would have emitted a second block.
   const r2 = runHook(HOOK, {
     env: { TMPDIR: isolatedTmp },
-    stdin: { session_id: 'test-dedup-second', transcript_path: transcriptPath, stop_hook_active: false },
+    stdin: {
+      session_id: 'test-dedup-second',
+      transcript_path: transcriptPath,
+      stop_hook_active: false,
+    },
   });
   try {
     assert.equal(r2.exitCode, 0);
@@ -184,7 +197,11 @@ test('reflect cooldown read from plugin-data suppresses the nudge — M2', () =>
   const transcriptPath = join(HOOK_TMP, `ll-test-transcript-cooldown-${Date.now()}.txt`);
   writeTranscript(transcriptPath, 600_000);
   const r = runHook(HOOK, {
-    stdin: { session_id: 'test-cooldown', transcript_path: transcriptPath, stop_hook_active: false },
+    stdin: {
+      session_id: 'test-cooldown',
+      transcript_path: transcriptPath,
+      stop_hook_active: false,
+    },
     seed: (pluginDataDir) => {
       mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
       writeFileSync(
@@ -294,41 +311,45 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
 // advisory nudge, and the realistic broken-plugin-data case can't reach this
 // branch anyway (the memory snapshot could not have been written either).
 // writeMarker's own logError records the failure.
-test('dream nudge suppressed when the once-guard write fails — W5/6d', () => {
-  const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-guardfail-'));
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
-  const sid = 'test-guard-fail';
+test(
+  'dream nudge suppressed when the once-guard write fails — W5/6d',
+  { skip: skipOnWindows('chmod semantics: read-only dirs not enforced on win32') },
+  () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-guardfail-'));
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const sid = 'test-guard-fail';
 
-  const r = runHook(HOOK, {
-    env: { CLAUDE_PROJECT_DIR: projectDir },
-    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
-    seed: (pluginDataDir, sandboxRoot) => {
-      const markersDir = join(pluginDataDir, 'markers');
-      mkdirSync(markersDir, { recursive: true });
-      writeFileSync(join(markersDir, `memory-snapshot-${sid}`), '[]');
-      const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
-      mkdirSync(memDir, { recursive: true });
-      for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
-      // Read-only markers dir: the snapshot read still works, but the
-      // once-guard writeMarker fails with EACCES.
-      chmodSync(markersDir, 0o555);
-    },
-  });
-  try {
-    assert.equal(r.exitCode, 0, r.stderr);
-    assert.equal(
-      r.stdout.trim(),
-      '',
-      'an unpersisted once-guard must suppress the dream nudge (at-most-once contract)',
-    );
-  } finally {
+    const r = runHook(HOOK, {
+      env: { CLAUDE_PROJECT_DIR: projectDir },
+      stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+      seed: (pluginDataDir, sandboxRoot) => {
+        const markersDir = join(pluginDataDir, 'markers');
+        mkdirSync(markersDir, { recursive: true });
+        writeFileSync(join(markersDir, `memory-snapshot-${sid}`), '[]');
+        const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
+        // Read-only markers dir: the snapshot read still works, but the
+        // once-guard writeMarker fails with EACCES.
+        chmodSync(markersDir, 0o555);
+      },
+    });
     try {
-      chmodSync(join(r.pluginDataDir, 'markers'), 0o755);
-    } catch {}
-    r.cleanup();
-    rmSync(projectDir, { recursive: true, force: true });
-  }
-});
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.equal(
+        r.stdout.trim(),
+        '',
+        'an unpersisted once-guard must suppress the dream nudge (at-most-once contract)',
+      );
+    } finally {
+      try {
+        chmodSync(join(r.pluginDataDir, 'markers'), 0o755);
+      } catch {}
+      r.cleanup();
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  },
+);
 
 test('stop-nudge empty stdin: exits 0 silently', () => {
   const r = runHook(HOOK, { stdin: '' });

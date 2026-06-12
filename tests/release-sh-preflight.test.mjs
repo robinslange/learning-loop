@@ -4,6 +4,11 @@ import { mkdtempSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { skipOnWindows } from './helpers/platform.mjs';
+
+const SKIP = skipOnWindows(
+  'bash: release.sh and stub executables require bash/shebang, not available on win32',
+);
 
 const SCRIPT = join(import.meta.dirname, '..', 'release.sh');
 
@@ -26,7 +31,7 @@ function runWithGitStub(stubBody, args = ['patch']) {
   });
 }
 
-test('release.sh aborts when not on main', () => {
+test('release.sh aborts when not on main', { skip: SKIP }, () => {
   const res = runWithGitStub(`
 case "$1" in
   rev-parse) [ "$2" = "--abbrev-ref" ] && { echo feature-branch; exit 0; }; echo x ;;
@@ -37,7 +42,7 @@ esac`);
   assert.match(res.stdout + res.stderr, /must run on main/i);
 });
 
-test('release.sh aborts when ff-only pull fails (diverged from origin)', () => {
+test('release.sh aborts when ff-only pull fails (diverged from origin)', { skip: SKIP }, () => {
   const res = runWithGitStub(`
 case "$1" in
   rev-parse) [ "$2" = "--abbrev-ref" ] && { echo main; exit 0; }; echo x ;;
@@ -49,7 +54,7 @@ esac`);
   assert.match(res.stdout + res.stderr, /fast-forward|pull/i);
 });
 
-test('release.sh rejects the removed --skip-tests flag', () => {
+test('release.sh rejects the removed --skip-tests flag', { skip: SKIP }, () => {
   const res = runWithGitStub('exit 0', ['patch', '--skip-tests']);
   assert.equal(res.status, 1);
   assert.match(res.stdout + res.stderr, /skip-tests.*removed|unknown flag/i);

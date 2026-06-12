@@ -43,14 +43,22 @@ When in doubt, treat as factual (safer to require a source than to let an unsour
 
 ### Synthesis-tag re-validation (audit the self-certified tag)
 
-The `[synthesis]` tag waives Sourcing and Source Integrity, and it is assigned by the same agent that benefits from the exemption — self-certified, never re-checked. **Any consumer that reads the tag to grant the exemption must first re-run the factual-signals heuristic above against the note body.** This is the canonical audit; `inbox-organiser` (triage step 3a) and `/verify` (permanent + fleeting scopes) both reference it.
+The `[synthesis]` tag waives Sourcing and Source Integrity, and it is assigned by the same agent that benefits from the exemption — self-certified, never re-checked. **Any consumer that reads the tag to grant the exemption must first check for a fresh verdict stamp and, if absent or stale, re-run the factual-signals heuristic below.** This is the canonical audit; `inbox-organiser` (triage step 3a) and `/verify` (permanent + fleeting scopes) both reference it.
 
-Procedure:
+#### Verdict persistence (skip-if-fresh rule)
+
+Two consumers run this audit independently. Without a shared persistent verdict they can diverge on borderline notes and ping-pong a misclassified note between folders indefinitely. The verdict is persisted in frontmatter so every consumer trusts the most recent judgment:
+
+1. **Before auditing**, read the note's frontmatter for `synthesis_validated: <ISO-date>`. If the field exists and the note's file `mtime` is not newer than that date, the verdict is fresh — **skip the audit** and trust it (the body has not changed since it was last judged, so repeating it returns the same result).
+2. **After a pass verdict** (exemption stands), stamp the note: add or update `synthesis_validated: <today's ISO date>` in frontmatter via `Edit`.
+3. **After a demote verdict** (exemption withdrawn), do NOT stamp `synthesis_validated` — the note is now factual, not synthesis, and the field would mislead future readers. Remove any existing `synthesis_validated` field.
+
+#### Audit procedure
 
 1. Scan the body (outside fenced code blocks) for **factual signals**: a numeric figure with a unit or comparator (`X%`, `n=X`, `<X`, `>X`, `X-fold`, `X mg`), a named study or author+year, an effect size, or a "research shows / studies find" attribution.
 2. **Exception — grounded vault numbers.** A figure carried in via a `[[wikilink]]` to a vault note that itself has a real source is legitimate synthesis (`source_grounded=1`). Don't demote on a number whose support is an adjacent grounded note. Demote only on bare factual signals with no wikilink backing.
-3. If a bare factual signal is present, **demote the exemption**: treat the note as factual and apply the full 6-criterion gate (Sourcing and Source Integrity no longer waived). With no real source, it cannot reach `3-permanent/` — it routes to `1-fleeting/` (or stays there) until sourced.
-4. If only synthesis signals are present, the exemption stands (4-criterion gate).
+3. If a bare factual signal is present, **demote the exemption**: treat the note as factual and apply the full 6-criterion gate (Sourcing and Source Integrity no longer waived). With no real source, it cannot reach `3-permanent/` — it routes to `1-fleeting/` (or stays there) until sourced. Remove any `synthesis_validated` field.
+4. If only synthesis signals are present, the exemption stands (4-criterion gate). Stamp `synthesis_validated: <today>`.
 
 The writer's "when in doubt, treat as factual" checkpoint runs once at capture time; this re-validation is the downstream backstop so a misclassified factual claim can't ride the synthesis label into permanent.
 
@@ -163,46 +171,6 @@ A note does **not** need rewriting if:
 4. Links use correct kebab-case `[[note-name]]` format
 
 When skip-rewrite is true, the triage/promotion step can simply `mv` the file instead of routing it through a full note-writer rewrite. This is the primary throughput improvement for batch processing.
-
-## NLI threshold zoo
-
-Four constants live in `hooks/modules/edge-infer.mjs`, each gating a different decision. They share names that look like duplicates but are NOT:
-
-- **Write-time gates** decide *whether to write an edge to `edges.db`* during PostToolUse on a vault note:
-  - `LL_NLI_THRESHOLD` (default 0.90) — `p(contradiction)` floor for `challenges_rebuttal`. Validated by the 180-pair spike eval (86% precision).
-  - `LL_NLI_ENTAIL_THRESHOLD` (default 0.75) — `p(entailment)` floor for `nli_supports`. Threshold currently unvalidated on the spike eval set — see `spikes/nli-eval/OUTCOME.md`.
-- **Read-time promotion gates** decide *what to do with an edge that already exists* when promoting a note:
-  - `LL_NLI_HARD_THRESHOLD` (default 0.95) — `confidenceScore` floor for hard-blocking autonomous promotion (surface supersede/qualify/keep-both/skip prompt).
-  - `LL_NLI_TENSION_THRESHOLD` (default 0.75) — `confidenceScore` floor for soft-annotating (`nli_tension: true` on the promoted note's frontmatter).
-
-Ordering invariant (enforced at module load): `TENSION ≤ contradiction-write ≤ HARD`. Tuning one threshold below another throws on hook load rather than silently breaking surface tiers.
-
-**Effective soft band.** `challenges_rebuttal` edges only exist in `edges.db` when `p(contradiction)` cleared the 0.90 write floor (`LL_NLI_THRESHOLD`), so under defaults no edge carries a `confidenceScore` in 0.75–0.90 and the soft/tension bucket effectively spans **0.90–0.95**. Lowering `LL_NLI_TENSION_THRESHOLD` alone has no effect — the band only widens if the write floor is lowered too.
-
-## NLI Contradiction Check
-
-Before promoting a note from `0-inbox/` to a higher folder, query NLI contradiction edges for the note. This complements (does not replace) the Source Integrity check and runs alongside it.
-
-### Process
-
-1. Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`).
-2. Call `getNliEdgesForNote(db, candidatePath, NLI_TENSION_THRESHOLD)`.
-3. Filter to `edge_type === 'challenges_rebuttal'`.
-4. Bucket each remaining edge:
-   - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Caller surfaces the supersede / qualify / keep-both / skip prompt; user resolves before the move.
-   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (configured 0.75-0.95; effectively 0.90-0.95 — see NLI threshold zoo above) → **soft bucket**: promote, then stamp `nli_tension: true` + `nli_tension_partners: [...]` on the destination note's frontmatter.
-
-### Escape hatches
-
-- Frontmatter `nli_resolved: deliberate` on the candidate → skip the gate entirely (the user has already declared this is a deliberate disagreement, typically on retraction notes).
-- CLI flag `--skip-nli` on `/inbox` or `/verify` → skip the gate for the whole run.
-- DB unavailable or `getNliEdgesForNote` throws → log via hook-error pattern and proceed. Hint-mode rule: classifier biases the LLM, never silent-gates.
-
-### Interaction with other criteria
-
-- NLI is independent of the 6-criterion assessment. A note can pass all 6 criteria AND still be blocked by a hard NLI contradiction.
-- NLI is independent of counter-argument-linking. The two systems detect different signals (NLI on semantic content, counter-argument-linking on regex `challenges_*` body markers) and can coexist on the same pair.
-- NLI is independent of Source Integrity. A note can have verified sources AND still contradict an existing belief; that's the case the gate exists for.
 
 ## Source Integrity Check (before promotion to 3-permanent/)
 

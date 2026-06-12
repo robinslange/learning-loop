@@ -29,7 +29,6 @@ Quick-check command that surfaces vault hygiene issues: ghost duplicates, near-d
 | `/health --deep --auto` | deep       | yes      |
 | `/health --provenance`  | provenance | no       |
 | `/health --librarian`   | librarian  | no       |
-| `/health --nli-edges`   | nli-edges  | no       |
 
 ## Process
 
@@ -49,13 +48,12 @@ Run light mode immediately (fast, no prompting needed: it's the default and comp
 
 This teaches the modes through use rather than upfront prompting.
 
-### Step 0.5: Mode Dispatch (`--provenance` / `--librarian` / `--nli-edges`)
+### Step 0.5: Mode Dispatch (`--provenance` / `--librarian`)
 
 If one of these flags is present, skip all vault health checks and execute the matching mode file, then stop (do not proceed to Step 1):
 
 - **--provenance**: read `${CLAUDE_PLUGIN_ROOT}/skills/health/modes/provenance.md` and execute it.
 - **--librarian**: read `${CLAUDE_PLUGIN_ROOT}/skills/health/modes/librarian.md` and execute it.
-- **--nli-edges**: read `${CLAUDE_PLUGIN_ROOT}/skills/health/modes/nli-edges.md` and execute it.
 
 ### Step 1: Gather Vault State
 
@@ -171,12 +169,13 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs --usage --json
 Parse the JSON. Two candidate lists:
 
 - **`surfaced_never_used`**: notes surfaced repeatedly by injection/retrieval with zero `used` provenance events. These are deepen-or-archive candidates — either the note isn't earning its retrieval rank (sharpen/`/deepen` it) or it's noise crowding out better hits (archive it).
-- **`never_surfaced`**: content notes (0-inbox, 1-fleeting, 2-literature, 3-permanent) never surfaced by any retrieval or injection in the window. Archive candidates.
+- **`never_surfaced`**: content notes (0-inbox, 1-fleeting, 2-literature, 3-permanent) never retrieved by search in the window. These are candidates for archiving, but only when injection coverage is ruled out — do NOT recommend archiving based on `never_surfaced` alone, since the injected channel under-records (bursts pruned before a ledger sync are lost). Say "never retrieved by search" not "never seen".
 
 Honest framing — carry these caveats into the output verbatim, do not soften them:
 
 - "Used" only counts explicit `note-usage` events from `/reflect` Step 4.7. Sessions that never ran that check contribute no events, so "never used" includes "never evaluated" — surfacing alone is never counted as use, and a note the model saw but never opened counts as ignored.
-- If `coverage_limited` is true, the logs span fewer days than the window: report "never surfaced in `coverage_days`d of logs", not "in `window_days`d".
+- If `coverage_limited` is true, the logs span fewer days than the window: report "never retrieved in `coverage_days`d of logs", not "in `window_days`d".
+- `never_surfaced` measures retrieval-only. Do not frame these as "never seen" or recommend archiving without asking the user to confirm the note was not recently injected.
 
 If `coverage_days` is null (no surfacing telemetry yet), skip this step silently.
 
@@ -198,7 +197,7 @@ Vault Health: YYYY-MM-DD
   Stale inbox:     N notes older than 14 days
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
-  Retrieval usage: N surfaced-never-used, M never surfaced in Kd of logs
+  Retrieval usage: N surfaced-never-used, M never retrieved by search in Kd of logs
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
@@ -225,7 +224,7 @@ If `--auto` flag is NOT set:
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
-- **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-never-used notes worth sharpening, and archival (move to `_archive/`, ask first) for never-surfaced and persistently-ignored ones.
+- **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-never-used notes worth sharpening, and archival (move to `_archive/`, ask first) for persistently-ignored notes. For `never_surfaced` notes, do NOT recommend archiving based on retrieval telemetry alone — the injected channel under-records, so absence from search logs does not mean absence from sessions. Ask the user whether the note feels useful before suggesting archival.
 
 ### Step 10: Summary
 

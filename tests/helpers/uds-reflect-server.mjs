@@ -7,6 +7,9 @@
 //   mode = "respond:<base64-json>"  -> reply with the decoded reflect envelope
 //   mode = "hang"                   -> accept the request but never respond
 //                                      (exercises the timeout path)
+//   mode = "stale-daemon"           -> reply with the old-daemon error envelope
+//                                      ({schema_version:1,error:'parse request: ...'})
+//                                      to exercise the stale-daemon detection path
 //
 // Reads one line-delimited JSON request per connection (the duplicate-scan
 // envelope) and writes one line-delimited JSON response, matching the daemon.
@@ -30,6 +33,13 @@ const server = createServer((socket) => {
     buffer += chunk.toString('utf-8');
     if (!buffer.includes('\n')) return;
     if (mode === 'hang') return; // accept but never respond
+    if (mode === 'stale-daemon') {
+      // Mimics an old daemon binary that can't handle duplicate-scan requests.
+      const envelope = JSON.stringify({ schema_version: 1, error: 'parse request: unknown kind' });
+      socket.write(envelope + '\n');
+      socket.end();
+      return;
+    }
     if (mode.startsWith('respond:')) {
       const payload = Buffer.from(mode.slice('respond:'.length), 'base64').toString('utf-8');
       socket.write(payload + '\n');

@@ -9,16 +9,34 @@
  *   node bench/bench.mjs                    # full bench (long)
  *   node bench/bench.mjs --quick            # 1k notes, fewer iterations
  *   node bench/bench.mjs --save-baseline    # write to bench/baselines/YYYY-MM-DD.json
- *   node bench/bench.mjs --compare <path>   # compare against saved baseline
+ *   node bench/bench.mjs --compare <path>   # compare against saved baseline (fails closed)
  *   node bench/bench.mjs --rust-only        # skip plugin bench
  *   node bench/bench.mjs --plugin-only      # skip Rust bench
  *   node bench/bench.mjs --quality-only     # retrieval-quality eval only
  *   node bench/bench.mjs --skip-quality     # skip retrieval-quality eval
  *   node bench/bench.mjs --save-quality-baseline  # write bench/baselines/quality.json
+ *
+ * Bless path (update quality baseline from CI):
+ *   1. Trigger the "Regenerate quality baseline" workflow_dispatch on GitHub.
+ *      It builds a release binary on ubuntu-latest, runs the eval, and uploads
+ *      bench/baselines/quality.json as an artifact named "quality-baseline".
+ *   2. Download the artifact, verify it looks sane (numQueries == 200), then
+ *      commit it: git add bench/baselines/quality.json && git commit.
+ *   Alternatively, run locally on the same platform as CI (ubuntu-latest):
+ *      node bench/bench.mjs --quality-only --save-quality-baseline
+ *   then commit the updated quality.json.
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  statSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { cpus, totalmem } from 'node:os';
 import { env as pluginEnv, spawnEnv } from '../plugin/scripts/lib/env.mjs';
@@ -49,6 +67,9 @@ const QUICK = hasFlag('quick');
 const SAVE_BASELINE = hasFlag('save-baseline');
 const SAVE_QUALITY_BASELINE = hasFlag('save-quality-baseline');
 const COMPARE_PATH = getArg('compare', null);
+// --compare implies strict mode: pipeline failures, missing labels, and zero
+// queries are all hard errors rather than silent passes.
+const STRICT = COMPARE_PATH != null || hasFlag('strict');
 const RUST_ONLY = hasFlag('rust-only');
 const PLUGIN_ONLY = hasFlag('plugin-only');
 const QUALITY_ONLY = hasFlag('quality-only');
@@ -276,13 +297,58 @@ const QUALITY_GATE_METRICS = ['recall_at_10', 'ndcg_at_10'];
 const QUALITY_DROP_ABS = 0.03;
 const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
 
+// ---------------------------------------------------------------------------
+// Provenance helpers (finding 5: record platform/generator/model in quality.json)
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract the pinned HF model revision from loader.rs.
+ *
+ * The revision is the authoritative single source of truth for which model
+ * bytes were used to compute the stored quality baseline. CI runners fetch
+ * from this exact commit hash; the baseline checker can compare revisions
+ * and warn when the local cache predates the pin.
+ */
+function readModelRevision() {
+  const loaderPath = join(NATIVE_DIR, 'crates', 'll-search', 'src', 'model', 'loader.rs');
+  try {
+    const src = readFileSync(loaderPath, 'utf8');
+    const m = src.match(/BGE_SMALL_REVISION:\s*&str\s*=\s*"([0-9a-f]{40})"/);
+    return m ? m[1] : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Read GENERATOR_VERSION from the vault manifest written by generate-vault.mjs.
+ */
+function readGeneratorVersion(manifestPath) {
+  try {
+    const m = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    return m.generatorVersion ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Retrieval-quality eval (finding 4: fail closed; finding 5: provenance)
+// ---------------------------------------------------------------------------
+
+function qualityFailed(reason, detail) {
+  const entry = { failed: reason };
+  if (detail) entry.detail = detail;
+  return entry;
+}
+
 function runQualityEval() {
   if (SKIP_QUALITY) return { skipped: 'skip-quality flag set' };
   if (PLUGIN_ONLY) return { skipped: 'plugin-only flag set' };
 
   const binary = join(NATIVE_DIR, 'target', 'release', 'll-search');
   if (!existsSync(binary)) {
-    return { skipped: 'release binary not found (cd native && cargo build --release)' };
+    return qualityFailed('release binary not found — run: cd native && cargo build --release');
   }
 
   const { count, seed } = QUALITY_FIXTURE;
@@ -295,14 +361,17 @@ function runQualityEval() {
     process.execPath,
     [
       join(BENCH_DIR, 'fixtures', 'generate-vault.mjs'),
-      '--count', String(count),
-      '--seed', String(seed),
-      '--out', vaultDir,
+      '--count',
+      String(count),
+      '--seed',
+      String(seed),
+      '--out',
+      vaultDir,
     ],
     { encoding: 'utf8', timeout: 120_000 },
   );
   if (gen.status !== 0) {
-    return { skipped: `fixture generation failed (exit ${gen.status})`, stderr: gen.stderr?.slice(-500) };
+    return qualityFailed(`fixture generation failed (exit ${gen.status})`, gen.stderr?.slice(-500));
   }
 
   process.stderr.write('[quality] Indexing fixture vault (real ONNX embeddings)...\n');
@@ -312,17 +381,29 @@ function runQualityEval() {
     timeout: 900_000,
   });
   if (index.status !== 0) {
-    return { skipped: `index failed (exit ${index.status})`, stderr: index.stderr?.slice(-500) };
+    return qualityFailed(`index failed (exit ${index.status})`, index.stderr?.slice(-500));
   }
 
-  process.stderr.write(`[quality] Running eval-funnel (min-links=${QUALITY_MIN_LINKS}, limit=${QUALITY_EVAL_LIMIT})...\n`);
+  process.stderr.write(
+    `[quality] Running eval-funnel (min-links=${QUALITY_MIN_LINKS}, limit=${QUALITY_EVAL_LIMIT})...\n`,
+  );
   const evalRun = spawnSync(
     binary,
-    ['eval-funnel', dbPath, '--min-links', String(QUALITY_MIN_LINKS), '--limit', String(QUALITY_EVAL_LIMIT)],
+    [
+      'eval-funnel',
+      dbPath,
+      '--min-links',
+      String(QUALITY_MIN_LINKS),
+      '--limit',
+      String(QUALITY_EVAL_LIMIT),
+    ],
     { encoding: 'utf8', env: spawnEnv(), timeout: 1800_000 },
   );
   if (evalRun.status !== 0) {
-    return { skipped: `eval-funnel failed (exit ${evalRun.status})`, stderr: evalRun.stderr?.slice(-500) };
+    return qualityFailed(
+      `eval-funnel failed (exit ${evalRun.status})`,
+      evalRun.stderr?.slice(-500),
+    );
   }
 
   let parsed;
@@ -330,7 +411,14 @@ function runQualityEval() {
     parsed = JSON.parse(evalRun.stdout);
   } catch (err) {
     logError('bench.qualityEval.parse', err);
-    return { skipped: 'eval-funnel JSON parse error', raw: evalRun.stdout?.slice(-300) };
+    return qualityFailed('eval-funnel JSON parse error', evalRun.stdout?.slice(-300));
+  }
+
+  const numQueries = parsed.num_queries ?? null;
+  if (numQueries === 0) {
+    return qualityFailed(
+      'eval produced zero queries — fixture may be empty or all notes lack links',
+    );
   }
 
   const funnel = {};
@@ -344,12 +432,24 @@ function runQualityEval() {
     };
   }
 
+  const manifestPath = join(vaultDir, 'manifest.json');
+  const provenance = {
+    platform: `${process.platform}/${process.arch}`,
+    modelRevision: readModelRevision(),
+    generatorVersion: readGeneratorVersion(manifestPath),
+  };
+
   return {
     fixture: QUALITY_FIXTURE,
     minLinks: QUALITY_MIN_LINKS,
     evalLimit: QUALITY_EVAL_LIMIT,
-    numQueries: parsed.num_queries ?? null,
-    gate: { labels: QUALITY_GATE_LABELS, metrics: QUALITY_GATE_METRICS, maxAbsoluteDrop: QUALITY_DROP_ABS },
+    numQueries,
+    gate: {
+      labels: QUALITY_GATE_LABELS,
+      metrics: QUALITY_GATE_METRICS,
+      maxAbsoluteDrop: QUALITY_DROP_ABS,
+    },
+    provenance,
     funnel,
   };
 }
@@ -409,14 +509,60 @@ function compareBaselines(current, baseline) {
   // Retrieval quality: hard gate on absolute drop (latency checks above are
   // relative-percentage and soft). recall/ndcg live in [0,1], so an absolute
   // threshold is the meaningful unit.
-  const currFunnel = current.quality?.funnel;
-  const prevFunnel = baseline.quality?.funnel;
+  //
+  // Fails closed: a missing gated label, a missing gated metric, or zero
+  // queries in either run is a hard failure rather than a silent skip.
+  const currQ = current.quality;
+  const prevQ = baseline.quality;
+
+  if (currQ?.numQueries === 0) {
+    report.qualityRegressions.push({
+      name: 'quality/numQueries',
+      error: 'current eval produced zero queries',
+    });
+  }
+  if (prevQ?.numQueries === 0) {
+    report.qualityRegressions.push({
+      name: 'quality/numQueries',
+      error: 'baseline recorded zero queries — regenerate it',
+    });
+  }
+
+  const currFunnel = currQ?.funnel;
+  const prevFunnel = prevQ?.funnel;
   if (currFunnel && prevFunnel) {
     for (const label of QUALITY_GATE_LABELS) {
+      if (!(label in currFunnel)) {
+        report.qualityRegressions.push({
+          name: `quality/${label}`,
+          error: `gated label "${label}" missing from current eval — funnel label may have been renamed`,
+        });
+        continue;
+      }
+      if (!(label in prevFunnel)) {
+        report.qualityRegressions.push({
+          name: `quality/${label}`,
+          error: `gated label "${label}" missing from baseline — regenerate quality baseline`,
+        });
+        continue;
+      }
       for (const metric of QUALITY_GATE_METRICS) {
         const curr = currFunnel[label]?.[metric];
         const prev = prevFunnel[label]?.[metric];
-        if (curr == null || prev == null) continue;
+        if (curr == null) {
+          report.qualityRegressions.push({
+            name: `quality/${label}/${metric}`,
+            error: `metric "${metric}" missing from current eval`,
+          });
+          continue;
+        }
+        if (prev == null) {
+          report.qualityRegressions.push({
+            name: `quality/${label}/${metric}`,
+            error: `metric "${metric}" missing from baseline — regenerate quality baseline`,
+          });
+          continue;
+        }
         const drop = prev - curr;
         if (drop > QUALITY_DROP_ABS) {
           report.qualityRegressions.push({
@@ -430,7 +576,7 @@ function compareBaselines(current, baseline) {
             name: `quality/${label}/${metric}`,
             prev,
             curr,
-            pct: ((curr - prev) / Math.max(prev, 1e-9) * 100).toFixed(1),
+            pct: (((curr - prev) / Math.max(prev, 1e-9)) * 100).toFixed(1),
           });
         }
       }
@@ -475,7 +621,14 @@ async function main() {
     ],
   };
 
-  if (COMPARE_PATH && existsSync(COMPARE_PATH)) {
+  if (COMPARE_PATH) {
+    if (!existsSync(COMPARE_PATH)) {
+      process.stderr.write(
+        `\nFAIL: baseline not found at ${COMPARE_PATH} — run --save-quality-baseline to create it\n`,
+      );
+      process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+      process.exit(1);
+    }
     const { value: baseline, error: baselineError } = safeLoad(COMPARE_PATH);
     if (baselineError) {
       output.comparison = { error: baselineError };
@@ -496,8 +649,16 @@ async function main() {
   }
 
   if (SAVE_QUALITY_BASELINE) {
+    if (output.quality?.failed) {
+      process.stderr.write(
+        `\nERROR: cannot save quality baseline — eval failed: ${output.quality.failed}\n`,
+      );
+      process.exit(1);
+    }
     if (output.quality?.skipped) {
-      process.stderr.write(`\nERROR: cannot save quality baseline — eval skipped: ${output.quality.skipped}\n`);
+      process.stderr.write(
+        `\nERROR: cannot save quality baseline — eval skipped: ${output.quality.skipped}\n`,
+      );
       process.exit(1);
     }
     mkdirSync(BASELINES_DIR, { recursive: true });
@@ -512,6 +673,20 @@ async function main() {
     process.stderr.write(`\nQuality baseline saved to: ${QUALITY_BASELINE_PATH}\n`);
   }
 
+  // Strict mode: pipeline failures are hard errors when --compare is active.
+  // Without --compare the eval runs for observation only; skips are soft.
+  if (STRICT && output.quality?.failed) {
+    process.stderr.write(`\nFAIL: quality eval failed: ${output.quality.failed}\n`);
+    if (output.quality.detail) process.stderr.write(`  ${output.quality.detail}\n`);
+    process.exit(1);
+  }
+  if (STRICT && output.quality?.skipped) {
+    process.stderr.write(
+      `\nFAIL: quality eval skipped in strict mode: ${output.quality.skipped}\n`,
+    );
+    process.exit(1);
+  }
+
   const regressions = output.comparison?.regressions ?? [];
   if (regressions.length > 0) {
     process.stderr.write(`\nWARNING: ${regressions.length} regression(s) detected (soft gate)\n`);
@@ -524,9 +699,17 @@ async function main() {
   // Quality: hard gate — a recall/ndcg drop is a real retrieval regression.
   const qualityRegressions = output.comparison?.qualityRegressions ?? [];
   if (qualityRegressions.length > 0) {
-    process.stderr.write(`\nFAIL: ${qualityRegressions.length} retrieval-quality regression(s) (hard gate)\n`);
+    process.stderr.write(
+      `\nFAIL: ${qualityRegressions.length} retrieval-quality regression(s) (hard gate)\n`,
+    );
     for (const r of qualityRegressions) {
-      process.stderr.write(`  ${r.name}: ${r.prev.toFixed(4)} -> ${r.curr.toFixed(4)} (drop ${r.absoluteDrop})\n`);
+      if (r.error) {
+        process.stderr.write(`  ${r.name}: ${r.error}\n`);
+      } else {
+        process.stderr.write(
+          `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
+        );
+      }
     }
     process.exit(1);
   }
