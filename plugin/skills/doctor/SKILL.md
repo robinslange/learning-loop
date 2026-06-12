@@ -93,9 +93,9 @@ For each check with `status === "fail"`:
 | `shims-exist` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-shims.mjs --install` |
 | `vault-folders` | `mkdir -p` each missing folder under `<VAULT>` |
 | `vault-system-files` | Write the default content defined in `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/02-vault.md` §2c |
-| `search-index-exists` | `ll-search index` |
+| `search-index-exists` | `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` (resolves vault/db paths itself; bare `ll-search index` fails — the binary requires explicit `<VAULT_PATH> <DB_PATH>` positionals) |
 | `nli-socket-fresh` (stale file) | `rm <path>` |
-| `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch start` |
+| `watch-daemon-status` (stale pidfile) | `rm <pidfile>` then `ll-watch` (no arguments — that is the background-start invocation; `start` is not a subcommand) |
 | `abi-drift` | `npm rebuild` in the affected plugin directory |
 
 Manual-only fixes (user must run; doctor reports the command):

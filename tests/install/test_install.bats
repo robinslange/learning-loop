@@ -212,6 +212,49 @@ EOF
   [[ "$output" == *"PLATFORM=linux-x86_64"* ]]
 }
 
+@test "detect_platform: darwin-x86_64 (no prebuilt binary) exits 1 non-interactively" {
+  local fake_bin
+  fake_bin=$(mktemp -d)
+  cat >"$fake_bin/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  -s) echo "Darwin" ;;
+  -m) echo "x86_64" ;;
+esac
+EOF
+  chmod +x "$fake_bin/uname"
+  run bash -c "
+    export LL_INSTALL_NO_TRAP=1
+    export PATH='$fake_bin:/usr/bin:/bin'
+    source '${BATS_TEST_DIRNAME}/../../install.sh'
+    detect_platform </dev/null 2>/dev/null
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No prebuilt ll-search binary"* ]]
+  [[ "$output" == *"build it from source"* ]]
+}
+
+@test "detect_platform: linux-aarch64 (no prebuilt binary) exits 1 non-interactively" {
+  local fake_bin
+  fake_bin=$(mktemp -d)
+  cat >"$fake_bin/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+  -s) echo "Linux" ;;
+  -m) echo "aarch64" ;;
+esac
+EOF
+  chmod +x "$fake_bin/uname"
+  run bash -c "
+    export LL_INSTALL_NO_TRAP=1
+    export PATH='$fake_bin:/usr/bin:/bin'
+    source '${BATS_TEST_DIRNAME}/../../install.sh'
+    detect_platform </dev/null 2>/dev/null
+  "
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"No prebuilt ll-search binary"* ]]
+}
+
 @test "detect_platform: unsupported platform exits 1" {
   local fake_bin
   fake_bin=$(mktemp -d)

@@ -135,9 +135,8 @@ Then done. No follow-up suggestions. No source handoff. Back to what we were doi
 |-------|-------|------|
 | discovery-vault-scout | Haiku | Keyword search + similar-note fan-out |
 | discovery-researcher | Sonnet | 2-3 web searches + source verification |
+| note-verifier (conditional) | Sonnet | Step 4: ONE verification round, gates the captured note only |
 | note-writer (conditional) | Sonnet | Atomic note in persona voice |
-
-All agents exist. No new agents needed.
 
 ## Key Principles
 

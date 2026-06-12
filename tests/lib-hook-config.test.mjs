@@ -81,6 +81,37 @@ test('DEDUPE_WINDOW_MS is exactly 3 minutes in milliseconds', () => {
   assert.equal(HookConfig.DEDUPE_WINDOW_MS, 3 * 60 * 1000);
 });
 
+// Regression: post-tool's worst-case inner spend (stdin ceiling + one full
+// module budget per module) must fit inside its hooks.json deadline. Pre-fix
+// the outer timeout was 7s against an 11s inner worst case, so Claude Code
+// could SIGKILL the hook mid-module-loop and silently drop the tail modules.
+test('post-tool inner budgets compose inside its hooks.json timeout', () => {
+  const hooksJson = JSON.parse(
+    readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
+  );
+  const entry = hooksJson.hooks.PostToolUse.find((e) => e.matcher.split('|').includes('Write'));
+  assert.ok(entry?.hooks?.[0]?.timeout, 'hooks.json must declare a post-tool timeout');
+  const hookBudgetMs = entry.hooks[0].timeout * 1000;
+
+  // Count the Write/Edit module chain from the post-tool source so this test
+  // tracks module additions instead of hard-coding 4.
+  const src = readFileSync(new URL('../plugin/hooks/post-tool.js', import.meta.url), 'utf8');
+  const m = src.match(/const modules = isWriteEdit\s*\?\s*\[([^\]]+)\]/);
+  assert.ok(m, 'post-tool.js must declare the isWriteEdit module array');
+  const moduleCount = m[1].split(',').filter((s) => s.trim()).length;
+  assert.ok(moduleCount >= 4, `expected >= 4 write/edit modules, found ${moduleCount}`);
+
+  const worstCaseMs =
+    HookConfig.STDIN_TIMEOUT_MS + moduleCount * HookConfig.POST_TOOL_MODULE_TIMEOUT_MS;
+  assert.ok(
+    worstCaseMs < hookBudgetMs,
+    `post-tool worst-case inner spend (${worstCaseMs}ms = stdin ${HookConfig.STDIN_TIMEOUT_MS} + ` +
+      `${moduleCount} x ${HookConfig.POST_TOOL_MODULE_TIMEOUT_MS}) must be strictly inside the ` +
+      `hooks.json budget (${hookBudgetMs}ms): an outer SIGKILL mid-loop silently drops the ` +
+      `remaining modules with no hook-errors record`,
+  );
+});
+
 test('pre-write-check inner query budget leaves headroom inside its hooks.json timeout', () => {
   const hooksJson = JSON.parse(
     readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),

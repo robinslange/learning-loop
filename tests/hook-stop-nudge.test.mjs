@@ -28,7 +28,7 @@ function writeTranscript(path, size) {
 
 test('stop-nudge long transcript: decision=block with substantial session reason', () => {
   const transcriptPath = join(HOOK_TMP, `ll-test-transcript-long-${Date.now()}.txt`);
-  writeTranscript(transcriptPath, 60000);
+  writeTranscript(transcriptPath, 600_000);
 
   const r = runHook(HOOK, {
     stdin: { session_id: 'test-long', transcript_path: transcriptPath, stop_hook_active: false },
@@ -43,6 +43,52 @@ test('stop-nudge long transcript: decision=block with substantial session reason
     assert.match(parsed.reason, /substantial/i);
     // Marker-file presence is verified by the "already-nudged" test below,
     // which depends on the marker being written by the first call.
+  } finally {
+    r.cleanup();
+    rmSync(transcriptPath, { force: true });
+  }
+});
+
+// Regression: the old 51,200-byte / 25-line thresholds fired within the first
+// few tool-heavy turns of essentially every working session (transcripts embed
+// full tool outputs), interrupting mid-task. A transcript that would have
+// tripped BOTH old arms must no longer nudge.
+test('stop-nudge mid-size transcript (old 50KB/25-line thresholds): no nudge', () => {
+  const transcriptPath = join(HOOK_TMP, `ll-test-transcript-midsize-${Date.now()}.txt`);
+  // ~60KB across 30 JSONL lines: over the old size AND count thresholds,
+  // under the new ones (512KB / 200 lines).
+  const line = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(2000) } });
+  writeFileSync(transcriptPath, Array(30).fill(line).join('\n'));
+
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'test-midsize', transcript_path: transcriptPath, stop_hook_active: false },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(
+      r.stdout.trim(),
+      '',
+      'a few tool-heavy turns must not count as a substantial session',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(transcriptPath, { force: true });
+  }
+});
+
+test('stop-nudge message-count arm: many small lines trigger the nudge', () => {
+  const transcriptPath = join(HOOK_TMP, `ll-test-transcript-manylines-${Date.now()}.txt`);
+  // 250 small lines (~10KB): under the size threshold, over the count threshold.
+  writeFileSync(transcriptPath, Array(250).fill('{"type":"user"}').join('\n'));
+
+  const r = runHook(HOOK, {
+    stdin: { session_id: 'test-manylines', transcript_path: transcriptPath, stop_hook_active: false },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    const out = r.stdout.trim();
+    assert.ok(out.length > 0, 'long session by message count should nudge');
+    assert.equal(JSON.parse(out).decision, 'block');
   } finally {
     r.cleanup();
     rmSync(transcriptPath, { force: true });
@@ -69,7 +115,7 @@ test('stop-nudge short transcript: exits 0, empty stdout, no nudge marker', () =
 
 test('stop-nudge stop_hook_active=true: immediate exit 0, no output', () => {
   const transcriptPath = join(HOOK_TMP, `ll-test-transcript-active-${Date.now()}.txt`);
-  writeTranscript(transcriptPath, 60000);
+  writeTranscript(transcriptPath, 600_000);
 
   const r = runHook(HOOK, {
     stdin: { session_id: 'test-active', transcript_path: transcriptPath, stop_hook_active: true },
@@ -98,7 +144,7 @@ test('stop-nudge already-nudged: no second block output', () => {
   // run — can delete our marker between r1 and r2 under concurrent test workers.
   const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-stop-nudge-iso-'));
   const transcriptPath = join(isolatedTmp, `transcript-dedup-${Date.now()}.txt`);
-  writeTranscript(transcriptPath, 60000);
+  writeTranscript(transcriptPath, 600_000);
 
   // First call: should block and write the nudge marker.
   const r1 = runHook(HOOK, {
@@ -136,7 +182,7 @@ test('stop-nudge already-nudged: no second block output', () => {
 
 test('reflect cooldown read from plugin-data suppresses the nudge — M2', () => {
   const transcriptPath = join(HOOK_TMP, `ll-test-transcript-cooldown-${Date.now()}.txt`);
-  writeTranscript(transcriptPath, 60000);
+  writeTranscript(transcriptPath, 600_000);
   const r = runHook(HOOK, {
     stdin: { session_id: 'test-cooldown', transcript_path: transcriptPath, stop_hook_active: false },
     seed: (pluginDataDir) => {

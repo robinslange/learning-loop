@@ -2,13 +2,15 @@
 
 Run `/learning-loop:doctor` first — it diagnoses and offers fixes for most of the issues below.
 
+Commands below written as `node PLUGIN/scripts/...` use `PLUGIN` as shorthand for your installed plugin directory: `~/.claude/plugins/cache/learning-loop-marketplace/learning-loop/<version>` (or your repo checkout if you develop locally).
+
 ## `/learning-loop:init` hangs on binary download
 
 The `ll-search` binary is ~290MB (includes embedding, reranker, and NLI models). On slow connections, the download can take a few minutes. If it fails, re-run init.
 
 ## Search returns no results
 
-Run `node scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. Under normal operation the index stays current via the `ll-search watch` daemon spawned at SessionStart — check that the daemon is alive with `kill -0 "$(cat <vault>/.vault-search/watch.pid)"`. If the pidfile is missing or stale, start a new session or run `node scripts/watch.mjs` (no arguments).
+Run `node PLUGIN/scripts/vault-search.mjs index --force` to rebuild the index. The index lives in `<vault>/.vault-search/` and survives plugin reinstalls. Under normal operation the index stays current via the `ll-search watch` daemon spawned at SessionStart — check that the daemon is alive with `ll-watch status`. If it reports not running, start a new session or run `ll-watch` (no arguments).
 
 ## Shadow injection log shows 0 passes
 

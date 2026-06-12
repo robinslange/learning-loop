@@ -54,19 +54,25 @@ Intel Macs are not currently supported (no prebuilt artifact). Build from source
 
 ## Verification
 
-Run the cross-platform smoke test against your install:
+Run the cross-platform smoke test against your install. Both commands use the `ll-watch` / `ll-search` shims that `/init` installs into `~/.local/bin` — they work from any terminal (`CLAUDE_PLUGIN_DATA` is only set inside hook and skill processes, so don't rely on it in your shell):
 
 ```bash
-# Confirm the watch daemon started and wrote its pidfile
-VAULT_PIDFILE="$(node -e "const c=require(process.env.CLAUDE_PLUGIN_DATA+'/config.json'); console.log(c.vault_path+'/.vault-search/watch.pid')")"
-cat "$VAULT_PIDFILE"                         # prints a numeric PID
-kill -0 "$(cat "$VAULT_PIDFILE")" && echo "watcher alive" || echo "watcher not running"
+# Confirm the watch daemon is running (resolves and checks the pidfile for you)
+ll-watch status                              # "Running (pid N)" or "Not running"
 
-# Query the daemon directly to confirm it can serve results
-node scripts/vault-search.mjs query "test" --top 1
+# Query the index directly to confirm search serves results.
+# The plugin data dir is recorded in a marker file at install time;
+# vault_path may be tilde-prefixed in config.json, so expand it.
+PLUGIN_DATA="$(cat ~/.claude/plugins/data/.ll-data-path)"
+DB="$(node -e "
+  const os = require('os'), path = require('path');
+  const vault = require(process.argv[1] + '/config.json').vault_path.replace(/^~(?=\$|\/)/, os.homedir());
+  console.log(path.join(vault, '.vault-search', 'vault-index.db'));
+" "$PLUGIN_DATA")"
+ll-search query "$DB" "test" --top 1 --config-dir "$PLUGIN_DATA"
 ```
 
-The watch daemon is spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`. If the pidfile is missing or the process is gone, start a new session or run `node scripts/watch.mjs` (no arguments) to relaunch it manually.
+The watch daemon is spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`. If `ll-watch status` reports it is not running, start a new session or run `ll-watch` (no arguments) to relaunch it manually.
 
 ## Reporting issues
 

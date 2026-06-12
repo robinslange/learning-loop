@@ -114,17 +114,29 @@ run_capture() {
 
 detect_platform() {
   step_start "Detecting platform"
-  local kernel arch
+  local kernel arch ans
   kernel=$(uname -s | tr '[:upper:]' '[:lower:]')
   arch=$(uname -m)
   case "${kernel}-${arch}" in
     darwin-arm64)        PLATFORM="darwin-arm64" ;;
-    darwin-x86_64)       PLATFORM="darwin-x86_64" ;;
     linux-x86_64)        PLATFORM="linux-x86_64" ;;
-    linux-aarch64)       PLATFORM="linux-aarch64" ;;
+    darwin-x86_64|linux-aarch64)
+      PLATFORM="${kernel}-${arch}"
+      step_fail "No prebuilt ll-search binary for ${PLATFORM}"
+      echo "Prebuilt binaries cover: macOS arm64 (Apple Silicon), Linux x86_64, Windows x64 (WSL)."
+      echo "On ${PLATFORM}, /learning-loop:init cannot download the search binary; you would"
+      echo "need a Rust toolchain to build it from source (cd native && cargo build --release)."
+      echo "See guide/cross-platform.md in the repo for details."
+      echo "  ${C_DIM}Continue anyway (you'll build ll-search from source)? [y/N]${C_RESET}"
+      read -r ans </dev/tty 2>/dev/null || ans=""
+      case "$ans" in
+        y|Y) ;;
+        *) exit 1 ;;
+      esac
+      ;;
     *)
       step_fail "Unsupported platform: ${kernel}-${arch}"
-      echo "Supported: macOS (arm64/x86_64), Linux (x86_64/aarch64), WSL."
+      echo "Supported: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
       echo "If you're on native Windows, use WSL: https://learn.microsoft.com/en-us/windows/wsl/install"
       exit 1
       ;;
@@ -450,7 +462,7 @@ preamble() {
 learning-loop bootstrap
 =======================
 This will:
-  1. Verify your platform is supported (macOS / Linux / WSL)
+  1. Verify your platform has a prebuilt binary (macOS arm64 / Linux x86_64 / WSL x86_64)
   2. Ensure Node.js 22+ is available (detects nvm, fnm, volta, asdf, mise, n, brew)
   3. Ensure ~/.local/bin is on PATH
   4. Install Claude Code if missing

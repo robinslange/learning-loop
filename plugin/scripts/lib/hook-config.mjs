@@ -60,15 +60,23 @@ export const HookConfig = Object.freeze({
   PRIOR_MSG_SLICE_CHARS: 200,
   QUERY_SLICE_CHARS: 400,
   RECENT_MSG_WINDOW: 80,
-  SESSION_SIZE_THRESHOLD_BYTES: 51_200,
+  // session-label reads only this much of the transcript tail per prompt;
+  // transcripts embed full tool outputs and reach tens of MB, while only the
+  // last RECENT_MSG_WINDOW lines are ever consumed.
+  TRANSCRIPT_TAIL_BYTES: 262_144,
+  // Stop-nudge "substantial session" gate. Transcripts embed full tool
+  // outputs, so small thresholds fire within the first few tool-heavy turns
+  // — mid-task, not at wind-down. 500KB / 200 events approximates a genuinely
+  // long working session.
+  SESSION_SIZE_THRESHOLD_BYTES: 512_000,
   HOOK_STDOUT_MAX_BYTES: 8192,
   MEMORY_INDEX_MAX_BYTES: 3072,
 
   // --- Per-module post-tool timeout (ms) ---
   POST_TOOL_MODULE_TIMEOUT_MS: 2000,
 
-  // --- Stop-nudge message count threshold ---
-  STOP_NUDGE_MESSAGE_COUNT: 25,
+  // --- Stop-nudge message count threshold (JSONL transcript lines) ---
+  STOP_NUDGE_MESSAGE_COUNT: 200,
 
   // --- ML thresholds / weights ---
   INJECTION_THRESHOLD: 0.35,

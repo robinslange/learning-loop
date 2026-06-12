@@ -83,42 +83,97 @@ export async function run(ctx) {
     ctx.context += depsMissing;
   }
 
-  // 2. Project-specific auto-memory.
-  if (projectDir) {
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
-    const memoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
-    if (existsSync(memoryIndex) && memoryIsFresh(memoryIndex)) {
+  // 2. Retrieval protocol. Emitted BEFORE the variable-size sections (memory
+  // indexes, intentions, learned patterns): emitJson trims oversized
+  // additionalContext from the TAIL, so behavior-defining instructions must
+  // sit ahead of the bulk that could push the payload past the stdout cap.
+  //
+  // NOTE: this protocol mirrors the static "Learning Loop" section /init
+  // installs into the user's CLAUDE.md. The template in
+  // plugin/skills/init/phases/05-claudemd.md is the source of truth — keep
+  // command names and steps in sync with it (always the namespaced
+  // /learning-loop:* forms, never bare /init or /reflect).
+  ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
+  ctx.context +=
+    "You have a learning loop active. Before responding to the user's first message:\n";
+  ctx.context +=
+    '1. Check if any auto-memory indexes (listed below, if present) are relevant to the task at hand. If so, read them.\n';
+  if (depsAllSatisfied) {
+    ctx.context +=
+      '2. Search episodic memory for relevant past conversations about this topic/project.\n';
+  } else {
+    ctx.context +=
+      '2. (Skipped — episodic memory plugin not installed. Run /learning-loop:init to set up.)\n';
+  }
+  ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
+  ctx.context += `4. Check the intention summary below (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
+  ctx.context +=
+    "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
+  ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
+  ctx.context +=
+    '7. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
+  ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
+
+  // 3. Dream gate check — read cached marker; refresh in background.
+  if (pluginData) {
+    try {
+      const cached = readMarker(MARKER_PATHS.dreamGate(pluginData));
+      if (cached?.nudge) {
+        ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
+      }
+      const child = spawn(
+        'node',
+        [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
+        { detached: true, stdio: 'ignore' },
+      );
+      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+      child.unref();
+      recordDetachedChild(child.pid);
+    } catch (err) {
+      logError('session-start.context-assembly.dreamGate', err);
+    }
+  }
+
+  // 4. Learned patterns.
+  if (pluginData) {
+    const patternsFile = join(DATA_PATHS.provenance(pluginData), 'learned-patterns.md');
+    if (existsSync(patternsFile)) {
       try {
-        const index = readMemoryIndexCapped(memoryIndex);
-        if (index) {
-          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
+        const patternsContent = readFileSync(patternsFile, 'utf8');
+        const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
+        if (patternCount > 0) {
+          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
         }
       } catch (err) {
-        logError('session-start.context-assembly.projectMemory', err);
+        logError('session-start.context-assembly.learnedPatterns', err);
       }
     }
-  }
 
-  // 3. Global memory (keyed to vault parent).
-  const vaultParent = resolve(vaultRoot, '..');
-  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
-  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
-  if (existsSync(globalMemory) && memoryIsFresh(globalMemory)) {
+    // 5. Federation status.
     try {
-      const globalIndex = readMemoryIndexCapped(globalMemory);
-      if (globalIndex) {
-        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
+      const fedConfigPath = FEDERATION_PATHS.config(pluginData);
+      if (existsSync(fedConfigPath)) {
+        const peersDir = FEDERATION_PATHS.peersDir(pluginData);
+        if (existsSync(peersDir)) {
+          const peerNames = readdirSync(peersDir, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => e.name);
+          if (peerNames.length > 0) {
+            ctx.context += '\n## Federation\n';
+            ctx.context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
+          }
+        }
       }
     } catch (err) {
-      logError('session-start.context-assembly.globalMemory', err);
+      logError('session-start.context-assembly.federation', err);
     }
   }
 
-  // 4. On-demand vault captures pointer.
+  // 6. On-demand vault captures pointer.
   ctx.context += '\n## Recent vault captures\n';
   ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
-  // 5. Intention summary — read cached marker; refresh in background.
+  // 7. Intention summary — read cached marker; refresh in background.
   // pluginData required: the worker resolves PLUGIN_DATA from the same source
   // (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
   // produce a different path than the worker writes to.
@@ -146,78 +201,41 @@ export async function run(ctx) {
     }
   }
 
-  // 6. Retrieval protocol footer.
-  ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
-  ctx.context +=
-    "You have a learning loop active. Before responding to the user's first message:\n";
-  ctx.context +=
-    '1. Check if any auto-memories (listed above) are relevant to the task at hand. If so, read them.\n';
-  if (depsAllSatisfied) {
-    ctx.context +=
-      '2. Search episodic memory for relevant past conversations about this topic/project.\n';
-  } else {
-    ctx.context += '2. (Skipped — episodic memory plugin not installed. Run /init to set up.)\n';
-  }
-  ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
-  ctx.context += `4. Check the intention summary above (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
-  ctx.context +=
-    "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
-  ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
-  ctx.context += '7. After substantial work, suggest /reflect to consolidate learnings.\n';
-  ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
-
-  // 7. Dream gate check — read cached marker; refresh in background.
-  if (pluginData) {
-    try {
-      const cached = readMarker(MARKER_PATHS.dreamGate(pluginData));
-      if (cached?.nudge) {
-        ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
-      }
-      const child = spawn(
-        'node',
-        [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
-        { detached: true, stdio: 'ignore' },
-      );
-      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-      child.unref();
-      recordDetachedChild(child.pid);
-    } catch (err) {
-      logError('session-start.context-assembly.dreamGate', err);
-    }
-  }
-
-  // 7.5. Learned patterns.
-  if (pluginData) {
-    const patternsFile = join(DATA_PATHS.provenance(pluginData), 'learned-patterns.md');
-    if (existsSync(patternsFile)) {
+  // 8. Project-specific auto-memory.
+  let projectMemoryIndex = null;
+  if (projectDir) {
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
+    if (existsSync(projectMemoryIndex) && memoryIsFresh(projectMemoryIndex)) {
       try {
-        const patternsContent = readFileSync(patternsFile, 'utf8');
-        const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
-        if (patternCount > 0) {
-          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patternsContent}\n`;
+        const index = readMemoryIndexCapped(projectMemoryIndex);
+        if (index) {
+          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
         }
       } catch (err) {
-        logError('session-start.context-assembly.learnedPatterns', err);
+        logError('session-start.context-assembly.projectMemory', err);
       }
     }
+  }
 
-    // 7.6. Federation status.
+  // 9. Global memory (keyed to vault parent). When the project IS the vault
+  // parent both keys resolve to the same MEMORY.md — skip the global section
+  // rather than injecting the identical index twice.
+  const vaultParent = resolve(vaultRoot, '..');
+  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
+  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
+  if (
+    globalMemory !== projectMemoryIndex &&
+    existsSync(globalMemory) &&
+    memoryIsFresh(globalMemory)
+  ) {
     try {
-      const fedConfigPath = FEDERATION_PATHS.config(pluginData);
-      if (existsSync(fedConfigPath)) {
-        const peersDir = FEDERATION_PATHS.peersDir(pluginData);
-        if (existsSync(peersDir)) {
-          const peerNames = readdirSync(peersDir, { withFileTypes: true })
-            .filter((e) => e.isDirectory())
-            .map((e) => e.name);
-          if (peerNames.length > 0) {
-            ctx.context += '\n## Federation\n';
-            ctx.context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
-          }
-        }
+      const globalIndex = readMemoryIndexCapped(globalMemory);
+      if (globalIndex) {
+        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
       }
     } catch (err) {
-      logError('session-start.context-assembly.federation', err);
+      logError('session-start.context-assembly.globalMemory', err);
     }
   }
 

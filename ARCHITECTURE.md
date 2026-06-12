@@ -26,7 +26,7 @@ learning-loop/
       session-label.js  -- just-in-time injection pipeline on each prompt
       post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
       pre-write-check.js  -- duplicate + added-dash gate before vault writes and edits
-      stop-nudge.js     -- /reflect nudge on session close
+      stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
       pre-compact.js    -- context capture before compaction
       pre-compact-worker.mjs  -- detached worker spawned by pre-compact.js
       post-read-retrieval.js  -- passive read telemetry
@@ -291,7 +291,7 @@ On session open, hooks fire in this order:
    - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the autolink, edge-infer, provenance, and reflect-track modules (`hooks/modules/`), on Agent/Skill it runs provenance only
 5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 6. On each episodic-memory tool use: `post-search-tracking.js`
-7. On session close: `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
+7. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
 Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races both vault search and episodic memory against `HookConfig.INJECTION_RACE_CAP_MS` and emits results for whichever finishes within the cap.
 

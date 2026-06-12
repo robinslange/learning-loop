@@ -232,7 +232,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 #### Provenance log
 
-Append a run entry at the end of Step 5 (route-output) success or any abort path:
+Append a run entry at the end of Step 5a (vault worklist execution) success or any abort path:
 
 ```bash
 node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
@@ -277,23 +277,40 @@ Confirmed insights:
 {confirmed_insights_json}
 ```
 
+The routing agent writes auto-memory and the project index itself, but it cannot spawn note-writer (subagents cannot spawn subagents). It returns a **Vault worklist**; executing it is this skill's job — same pattern as `/inbox`.
+
+### Step 5a: Execute the Vault Worklist
+
+If the routing agent's `### Vault worklist` is `none`, skip to Step 5.5.
+
+For each worklist row, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel. For rows with `artefact: true`, tell note-writer the note is a project artefact: keep the caller destination (`4-projects/<slug>/`) and skip promote-gate grading.
+
+When the fan-out completes, replay the PostToolUse hook chain on every path note-writer reports — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
+
+```bash
+printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Surface any `failures` from the JSON summary in Step 6.
+
 ### Step 5.5: Post-Batch Sweep
 
-The routing agent in Step 5 is a subagent. Its Write/Edit tool calls bypass PostToolUse, so notes it creates miss the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules): ending up without suggested backlinks or typed edges.
+The routing agent in Step 5 is a subagent whose own Write/Edit calls (auto-memory, project index) bypass PostToolUse, and Step 5a's targeted replay covers only the paths note-writer reported. This sweep is the backfill safety net for anything missed.
 
-Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; it filters to notes with no `[[wikilinks]]` in the body and replays the hook chain on each). Idempotent: safe on already-hooked notes.
+Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; seed the candidate list with any subagent-written paths not already replayed in Step 5a — e.g. the routing agent's project-index writes detected via git — then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
-Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch (ingest typically produces few subagent-written notes that the routing step hasn't already linked via its prompt).
+Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch.
 
 ### Step 5.6: Upstream Refinement
 
 **Behind a flag for the first ship.** Skip this step entirely unless the user invoked `/ingest` with `--refine` in the args. Default off because ingest batches can produce many candidates and we want cost visibility before promoting to default-on.
 
-When the routing subagent in Step 5 writes new vault notes, those notes may sharpen, qualify, or extend existing claims. This step finds those pairs, dispatches the `refinement-proposer` agent, validates the output, and applies edits via `Write`. Same flow as `/reflect` Step 4.6.
+When the Step 5a fan-out writes new vault notes, those notes may sharpen, qualify, or extend existing claims. This step finds those pairs, dispatches the `refinement-proposer` agent, validates the output, and applies edits via `Write`. Same flow as `/reflect` Step 4.6.
 
 #### 5.6.a: Detect new vault notes from this ingest
 
-The routing subagent doesn't return file paths directly. Use `git diff` against HEAD to detect new files in the vault since ingest started:
+Step 5a's note-writer agents report their written paths, but the routing subagent's own writes don't return paths. Use `git diff` against HEAD to detect ALL new files in the vault since ingest started:
 
 All temp files in 5.6 use a session-keyed prefix so parallel `/ingest` invocations don't race. Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID` (stable across the session); when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
@@ -358,11 +375,11 @@ Report counts in Step 6.
 
 ### Step 6: Summary
 
-Display the routing agent's summary, the sweep results, and the refinement results (if `--refine` was passed). Done.
+Display the routing agent's summary, the Step 5a worklist results (notes written, with final paths), the sweep results, and the refinement results (if `--refine` was passed). Done.
 
 ## Key Principles
 
-- **The skill is the UX layer.** Agents fetch and extract. The skill previews and routes.
+- **The skill is the UX layer.** Agents fetch and extract. The skill previews, routes, and runs the note-writer fan-out (subagents cannot spawn subagents).
 - **Preview before write.** Never write to memory or vault without user confirmation.
 - **Merge, don't overwrite.** Auto-memory files preserve manually-added context.
 - **Vault notes go through note-writer.** Voice consistency matters.

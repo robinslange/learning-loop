@@ -88,6 +88,24 @@ test('post-tool Read tool: no provenance vault-write event', () => {
   }
 });
 
+// Regression: cheap load-bearing modules (provenance, reflect-track) must run
+// BEFORE the expensive enrichment modules (autolink, edge-infer), so an outer
+// hooks.json SIGKILL mid-loop only ever drops enrichment. Autolink must stay
+// ahead of edge-infer (edge-infer reads the note body autolink appends to).
+test('post-tool module order: load-bearing before enrichment, autolink before edge-infer', () => {
+  const src = readFileSync(new URL('../plugin/hooks/post-tool.js', import.meta.url), 'utf8');
+  const m = src.match(/const modules = isWriteEdit\s*\?\s*\[([^\]]+)\]/);
+  assert.ok(m, 'post-tool.js must declare the isWriteEdit module array');
+  const order = m[1].split(',').map((s) => s.trim());
+  const idx = (name) => order.indexOf(name);
+  for (const name of ['runProvenance', 'runReflectTrack', 'runAutolink', 'runEdgeInfer']) {
+    assert.ok(idx(name) >= 0, `${name} missing from the write/edit module chain`);
+  }
+  assert.ok(idx('runProvenance') < idx('runAutolink'), 'provenance must run before autolink');
+  assert.ok(idx('runReflectTrack') < idx('runAutolink'), 'reflect-track must run before autolink');
+  assert.ok(idx('runAutolink') < idx('runEdgeInfer'), 'autolink must run before edge-infer');
+});
+
 test('post-tool malformed stdin: exits 0, nothing written', () => {
   const r = runHook(HOOK, {
     stdin: 'this is not valid json {{{',

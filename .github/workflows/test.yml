@@ -50,15 +50,24 @@ jobs:
           chmod +x native/target/release/ll-search
           native/target/release/ll-search version
 
-      - name: Truncation contract tests (must not skip)
+      # Maintained list of binary-gated suites: every test file that skips
+      # when ll-search is absent must be re-run here, post-install, with the
+      # skip guard — otherwise it silently never executes in CI (the main
+      # `npm test` above runs binary-less by design). When adding a test with
+      # a hasBinary() skip, add its file to this list.
+      - name: Binary-gated tests (must not skip)
         run: |
           set -euo pipefail
-          out=$(node --test --test-reporter=tap tests/edge-infer-nli-truncation.test.mjs)
-          echo "$out"
-          if echo "$out" | grep -qE '^# skipped [1-9]'; then
-            echo "ERROR: truncation contract tests skipped — binary install step is broken"
-            exit 1
-          fi
+          for suite in \
+            tests/edge-infer-nli-truncation.test.mjs \
+            tests/convergence-check-keys.test.mjs; do
+            out=$(node --test --test-reporter=tap "$suite")
+            echo "$out"
+            if echo "$out" | grep -qE '^# skipped [1-9]'; then
+              echo "ERROR: $suite skipped tests — binary install step is broken"
+              exit 1
+            fi
+          done
 
   cargo:
     runs-on: ubuntu-latest

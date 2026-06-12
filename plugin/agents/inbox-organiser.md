@@ -82,7 +82,7 @@ For each cluster, process all its inbox notes together:
 **a.5) NLI contradiction check.** For every inbox note that passed promote-gate, query `getNliEdgesForNote(db, candidatePath, 0.75)` from `${CLAUDE_PLUGIN_ROOT}/scripts/lib/edges.mjs`. Filter to edges with `edgeType === 'challenges_rebuttal'`. Bucket each result:
 
 - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Surface in step 5 gated-action block under a new "NLI contradictions" header with the supersede / qualify / keep-both / skip prompt. The note's Rewrite Worklist row (5.6) — `rewrite` if voice fails, `promote` if it only needed a `mv` — gets `held: nli` and is NEVER executed autonomously; the skill executes it only after the user's per-item choice.
-- `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **soft bucket**: promote with annotation. Stamp `nli_tension: true` and `nli_tension_partners: [partner-path, ...]` on the new note's frontmatter at promotion time. Mention inline in the cluster table.
+- `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (configured 0.75–0.95; effectively 0.90–0.95 — edges below the 0.90 write floor are never written, see `_skills/promote-gate.md` → NLI threshold zoo) → **soft bucket**: promote with annotation. Stamp `nli_tension: true` and `nli_tension_partners: [partner-path, ...]` on the new note's frontmatter at promotion time. Mention inline in the cluster table.
 
 Frontmatter escape: if the candidate already has `nli_resolved: deliberate` in its frontmatter (set at capture time for retraction notes), skip the gate entirely and promote.
 

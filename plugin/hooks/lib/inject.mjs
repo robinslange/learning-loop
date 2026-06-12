@@ -40,12 +40,23 @@ function truncateAtSentenceBoundary(text, maxTokens) {
   return lastSpace > 0 ? text.slice(0, lastSpace) : slice;
 }
 
-export function buildInjection({ vaultHits, episodicHits, query, alreadyInjectedPaths }) {
-  const filtered = vaultHits.filter((h) => !alreadyInjectedPaths.has(h.path));
+// alreadyInjected is a Map of path -> 'body' | 'pointer'. A body-level entry
+// suppresses the note entirely; a pointer-level entry only suppresses a repeat
+// pointer — the note still qualifies for body injection (the model has only
+// seen a one-line title, not the content). A plain Set (legacy callers) is
+// treated as all-body.
+export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected }) {
+  const levelOf = (path) =>
+    alreadyInjected instanceof Map
+      ? alreadyInjected.get(path)
+      : alreadyInjected.has(path)
+        ? 'body'
+        : undefined;
+  const filtered = vaultHits.filter((h) => levelOf(h.path) !== 'body');
   if (filtered.length === 0 && episodicHits.length === 0) return null;
 
   const sections = [];
-  const injectedVaultPaths = [];
+  const injectedVault = [];
 
   if (filtered.length > 0) {
     const top = filtered[0];
@@ -55,14 +66,17 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
       '',
       body,
     ];
-    injectedVaultPaths.push(top.path);
+    injectedVault.push({ path: top.path, level: 'body' });
 
-    const pointers = filtered.slice(1, 5);
+    const pointers = filtered
+      .slice(1)
+      .filter((h) => !levelOf(h.path))
+      .slice(0, 4);
     if (pointers.length > 0) {
       lines.push('', 'Related notes:');
       for (const p of pointers) {
         lines.push(`- ${p.title} — ${p.path}`);
-        injectedVaultPaths.push(p.path);
+        injectedVault.push({ path: p.path, level: 'pointer' });
       }
     }
     sections.push(lines.join('\n'));
@@ -79,7 +93,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
 
   return {
     additionalContext: sections.join('\n\n'),
-    injectedVaultPaths,
+    injectedVault,
   };
 }
 

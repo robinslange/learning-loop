@@ -67,6 +67,8 @@ If the input pair includes `nli_contradiction` or `nli_entailment`, treat them a
 | `nli_entailment >= 0.75` | `edit` (sharpens or extends) | weak; entailment threshold is unvalidated and prone to false positives |
 | both null | rely on text reading alone | n/a |
 
+NLI hints come from `edges.db`, which only stores contradiction edges above the 0.90 write floor (`LL_NLI_THRESHOLD`) — under default thresholds you will never see `nli_contradiction` between 0.75 and 0.90, so the weak band is effectively 0.90–0.95 (see `_skills/promote-gate.md` → NLI threshold zoo).
+
 Conflict-resolution rules when text and hint disagree:
 
 - If `nli_contradiction >= 0.95` and your text reading suggests `pass`, escalate to `counterpoint` unless you can articulate a specific reason the model is wrong (e.g. the two notes address different scopes that the bag-of-claims NLI conflated, or one note quotes the other's position to refute a third claim). Write the reason in the `reason` field. The driver logs these overrides for later calibration.

@@ -37,12 +37,9 @@ Per-note tracking is handled automatically by the PostToolUse hook.
 ### Step 0: Parameter Resolution
 
 **No argument (`/deepen`):**
-Use `AskUserQuestion`:
+Run auto-pick immediately (the agent picks the shallowest inbox note — no prompting needed). After presenting results, mention the targeted form in one line:
 
-> Which note would you like to deepen?
->
-> - **Type a note name**: I'll find and strengthen it
-> - **Leave blank**: I'll pick the shallowest inbox note automatically
+> Deepened [note]. To target a specific note: `/deepen "note name"`.
 
 **Argument provided:**
 Proceed immediately.
@@ -61,7 +58,7 @@ If no note name was provided, pass no note_path: the agent will pick the shallow
 
 The `note-deepener` is a subagent. Its Write/Edit tool calls bypass PostToolUse, so the deepened note (and any split note in `0-inbox/`) misses the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules).
 
-Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; it filters to notes with no `[[wikilinks]]` in the body and replays the hook chain on each). Idempotent: safe on already-hooked notes.
+Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; seed the candidate list with the destination path — and any split-note paths — from the agent's report, then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
 Report failures in Step 2 if any.
 
@@ -73,11 +70,7 @@ If the agent flagged uncaptured sources, suggest `/literature` for each.
 
 ## Resolving Verification Markers
 
-If the note contains write-time verification markers, prioritize resolving them:
-
-- `[unresolved]` -- search for the source via web search. If found, add the URL/DOI and remove the marker. If genuinely unfindable, either find an alternative source for the claim or remove the claim.
-- `[unverified]` -- run `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>` to see the specific issue. Fix the author/year, then remove the marker.
-- `[not in abstract]` -- fetch the full source (web fetch the URL or DOI page). If the number appears in the full text, remove the marker. If it doesn't, either correct the number or add scope qualification.
+If the note contains verification markers, prioritize resolving them. The canonical marker vocabulary and per-marker resolution rules live in `agents/_skills/capture-rules.md` → Verification Markers — read that section rather than relying on a local list; it covers all of `[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`, `[needs verification]`, `[citation needed]` (blocking) and `[partial]` (advisory). For `[unverified]`, the inspection command is `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>`. Remove each marker only once its resolution rule is satisfied.
 
 ## Key Principles
 

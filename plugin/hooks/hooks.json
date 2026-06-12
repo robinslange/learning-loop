@@ -53,7 +53,7 @@
           {
             "type": "command",
             "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-tool.js\"",
-            "timeout": 7
+            "timeout": 12
           }
         ]
       },

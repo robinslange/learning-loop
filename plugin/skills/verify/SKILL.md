@@ -118,7 +118,7 @@ Two-source check: embeddings find topical similarity; NLI finds logical relation
 
 1. **NLI edges (high-confidence first).** Open `edges.db` from `PLUGIN_DATA/edges.db` (see `scripts/lib/edges.mjs`). For each assessed note, call `getNliEdgesForNote(db, notePath, 0.75)`. Filter to `edgeType === 'challenges_rebuttal'`. Bucket:
    - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **high-confidence contradiction**
-   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75–0.95) → **advisory tension**
+   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (configured 0.75–0.95; effectively 0.90–0.95 — edges below the 0.90 write floor are never written, see `agents/_skills/promote-gate.md` → NLI threshold zoo) → **advisory tension**
    - `edgeType === 'nli_supports'` → silent (entailment is not a /verify concern)
 
 2. **Embedding similarity (fallback).** For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
@@ -159,7 +159,7 @@ Merge outputs from all agents into a single report:
 
 ### Consistency
 - [[note-A]] ↔ [[note-B]] (NLI contradiction p=0.97, cosine 0.84): high-confidence conflict, run /rewrite or mark as deliberate
-- [[note-C]] ↔ [[note-D]] (NLI tension p=0.81): advisory, may be worth reading together
+- [[note-C]] ↔ [[note-D]] (NLI tension p=0.92): advisory, may be worth reading together
 - [[note-E]] ↔ [[note-F]] (cosine 0.91): near-duplicate, merge candidate
 - [[note-G]] ↔ [[note-H]] (cosine 0.78): potential contradiction (embedding-only): [specific conflict]
 
@@ -182,7 +182,7 @@ Notes with `wrong_author` or fabricated sources should be flagged in the top sec
 Prioritize notes by combined quality + source issues:
 
 1. High priority: fabricated references, dead URLs, unsupported claims, NLI hard contradictions (p ≥ 0.95)
-2. Medium priority: shallow notes with potential, missing citations, NLI advisory tensions (0.75 ≤ p < 0.95)
+2. Medium priority: shallow notes with potential, missing citations, NLI advisory tensions (below the 0.95 hard threshold; effectively 0.90–0.95)
 3. Low priority: minor voice issues, weak links
 
 ```
@@ -285,13 +285,9 @@ Agent (subagent_type: "learning-loop:note-verifier"):
 
 ## Verification Markers
 
-Notes processed by the updated note-writer may contain inline markers from write-time verification:
+Notes may carry inline markers from write-time verification (e.g. `[unresolved]`, `[not in source]`, `[partial]`). The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents/_skills/capture-rules.md` → Verification Markers. Read that section; do not rely on a local list (local copies drift).
 
-- `[unresolved]` -- source not found in any database. Verify manually: search the web, check if it's a non-academic source.
-- `[unverified]` -- source found but metadata mismatch persisted. Run `verify-note` on the note and inspect the specific issue.
-- `[not in abstract]` -- number not confirmable from abstract alone. Fetch the full text if accessible, or check the number against the source page via web fetch.
-
-When reporting, include marker counts in the summary. These markers indicate the write-time check already ran. Focus verification effort on resolving the markers rather than re-checking what already passed.
+When reporting, include counts for every marker in that vocabulary in the summary. Markers indicate the write-time check already ran: focus verification effort on resolving the markers rather than re-checking what already passed.
 
 ## Key Principles
 

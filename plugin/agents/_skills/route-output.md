@@ -1,6 +1,8 @@
 # Route Output
 
-Write confirmed insights to their destinations: auto-memory and/or vault.
+Write project-state insights to auto-memory, and return durable insights as a structured vault worklist.
+
+Subagents cannot spawn subagents. Vault notes are written by the `note-writer` agent, and the CALLING skill runs that fan-out (same pattern as `/inbox`) — your job is to decide, per durable insight, whether and where a note should be written, and return the worklist.
 
 ## Input
 
@@ -29,7 +31,7 @@ Write confirmed insights to their destinations: auto-memory and/or vault.
    ```
 4. Update `MEMORY.md` index if a new file was created.
 
-### Durable Insights → Vault Notes
+### Durable Insights → Vault Worklist
 
 For each `durable-insight`, first check if it is a **project artefact** rather than an atomic insight:
 
@@ -40,8 +42,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/route-project-artefact.mjs').then
 If the result has a non-null `slug`, this insight is a project artefact (interview prep, client brief, evidence bundle, etc.) — its filename matches an existing project's slug in `4-projects/`. Route it to that subfolder instead of `0-inbox/`. Project artefacts are not atomic insights; they are working documents for a specific project.
 
 - If `4-projects/<slug>/` doesn't exist yet, create the directory.
-- Run the `note-writer` subagent with `destination: 4-projects/<slug>/`.
-- Skip the promote-gate criteria for project artefacts — they are not graded the same way as insight notes.
+- Add a worklist row with `destination: 4-projects/<slug>/` and `artefact: true`. Project artefacts skip the promote-gate criteria — they are not graded the same way as insight notes.
 
 If the result has `slug: null`, this is a candidate atomic insight: continue with the existing flow below.
 
@@ -52,11 +53,12 @@ For each `durable-insight`:
    node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<key terms>" --rerank
    ```
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
-3. If novel, run a `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with:
+3. If novel, add a worklist row with:
    - **insight**: The title
    - **research**: The body + source context. Every source must include its URL. If no URL exists, include `[no URL found]` rather than omitting the source metadata.
    - **destination**: `0-inbox/`
    - **related_notes**: Top vault search results as wiki-links
+   - **artefact**: `false`
 
 ### Project Index Update
 
@@ -67,19 +69,29 @@ If `{vault_path}/4-projects/{project_name}.md` exists:
 
 ## Output
 
-Return a summary:
+Return a summary AND the vault worklist. The calling skill executes the worklist via `note-writer` — never write vault notes yourself.
 
 ```
 Ingest complete:
   Memory: updated project_{name}.md (N items)
-  Vault: wrote N notes to 0-inbox/ (M skipped as duplicates)
+  Vault worklist: N notes to write (M skipped as duplicates)
   Index: updated 4-projects/{name}.md
+
+### Vault worklist
+- insight: <title>
+  research: <body + source context with URLs>
+  destination: 0-inbox/
+  related_notes: [[note-a]], [[note-b]]
+  artefact: false
+- insight: ...
 ```
+
+If no durable insights survived the duplicate check, return `### Vault worklist` with `none`.
 
 ## Rules
 
-- Use `Write` tool for all file I/O. Never use Obsidian MCP tools.
+- Use `Write` tool for auto-memory and project-index file I/O. Never use Obsidian MCP tools.
 - Never overwrite the entire auto-memory file. Read first, merge, write.
 - Don't create a project index note if one doesn't exist — that's a manual decision.
-- Vault notes go through the `note-writer` agent to ensure voice consistency.
+- Never write vault notes directly. Return them in the worklist: the calling skill routes them through `note-writer`, which guarantees voice consistency and write-time source verification.
 - Never run multiple route-output agents in parallel for the same project. Auto-memory uses read-merge-write without locking; parallel writes to the same `project_*.md` file will cause last-write-wins data loss.

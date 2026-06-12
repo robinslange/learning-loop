@@ -108,14 +108,25 @@ If a note covers two ideas, split it. Return two separate notes and flag the spl
 
 ## Verification Markers
 
-These inline markers are set by the note-writer's API verification step. All agents should understand them:
+**This section is the canonical marker vocabulary.** Skills and agents that surface, count, or resolve markers (`/verify`, `/deepen`, note-writer, note-verifier, the promote-gate) reference this list — never restate it elsewhere; restated copies drift.
 
-- `[unresolved]` -- source could not be found in PubMed, Semantic Scholar, or CrossRef. The citation may still be correct (non-academic source, preprint, or unusual identifier). `/deepen` should attempt to resolve it.
-- `[unverified]` -- source was found but author/year mismatch could not be auto-corrected after 2 attempts. Manual review needed.
-- `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. `/verify` should check the full text when possible.
+Write-time markers, set by the note-writer's verification passes:
+
+- `[unresolved]` -- source could not be found in PubMed, Semantic Scholar, or CrossRef. The citation may still be correct (non-academic source, preprint, or unusual identifier). `/deepen` should attempt to resolve it: search the web; if found, add the URL/DOI; if genuinely unfindable, find an alternative source or remove the claim.
+- `[unverified]` -- source was found but author/year mismatch could not be auto-corrected after 2 attempts. Manual review needed: run `source-resolver.mjs verify-note` to see the specific issue, fix the metadata, remove the marker.
+- `[not in abstract]` -- a specific number in the note does not appear in the source's abstract. The number may be in the full text. Resolve by fetching the full text: if the number appears, remove the marker; if not, correct the number or add scope qualification.
 - `[not in source]` -- a specific number in the note does not appear in the fetched source page (for non-academic URLs: docs, blogs, vendor pages). Check the source manually; if absent, soften the figure or remove it.
 
-**These markers are load-bearing.** Any marker present in a note's body blocks promotion to `3-permanent/`. The promote-gate routes marker-bearing notes to `1-fleeting/` regardless of other criteria. Markers inside fenced code blocks are ignored (the gate strips fenced blocks before scanning). This is what closes the loop between write-time honesty and downstream trust: an `[unresolved]` source on a deep, well-linked note is still a gap, and the vault treats it as one.
+Citation flags, written manually or by earlier tooling, checked by `source-resolver.mjs verify-note`:
+
+- `[needs verification]` -- a claim flagged as needing source verification.
+- `[citation needed]` -- a factual claim with no citation attached.
+
+Verifier confidence flag, set by the note-verifier and carried into captured notes by `/quick` and `/discovery`:
+
+- `[partial]` -- the cited source supports the claim's direction but is incomplete, indirect, or covers a different population/context (claim-confidence level 2). Resolve by re-verifying against a more direct source, or scope-qualify the claim to what the source actually covers.
+
+**The six markers above the verifier flag are load-bearing.** Any of them in a note's body blocks promotion to `3-permanent/`: the mechanical gate (`scripts/promotion-gate.mjs`) routes marker-bearing notes to `1-fleeting/` regardless of other criteria. Markers inside fenced code blocks are ignored (the gate strips fenced blocks before scanning). `[partial]` is advisory, not blocking — the verifier counts partial-confidence claims as a pass — but `/verify` still counts it and `/deepen` should still resolve it. This is what closes the loop between write-time honesty and downstream trust: an `[unresolved]` source on a deep, well-linked note is still a gap, and the vault treats it as one.
 
 ## Finding-Type Discriminator: source-missing vs logical-gap
 

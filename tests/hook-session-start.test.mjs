@@ -690,6 +690,130 @@ test(
   },
 );
 
+// ---------------------------------------------------------------------------
+// Regression: when the project directory IS the vault parent, the project and
+// global memory keys resolve to the SAME MEMORY.md. Pre-fix it was injected
+// twice (~3KB of duplicate index per session).
+// ---------------------------------------------------------------------------
+test(
+  'session-start memory: same MEMORY.md is injected once when project dir equals vault parent',
+  { timeout: 12000 },
+  () => {
+    const vaultParent = resolve(VAULT, '..');
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'same-path-mem' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: vaultParent },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        const encoded = vaultParent.replace(/[/\\]/g, '-');
+        const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
+        mkdirSync(memDir, { recursive: true });
+        // Single occurrence of the marker per injection (a [x](x) link would
+        // double-count inside one section).
+        writeFileSync(join(memDir, 'MEMORY.md'), '- unique-dedupe-marker — entry\n');
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const hso = parseOutput(r.stdout, 'same-path-mem');
+      const ctx = hso.additionalContext;
+      const occurrences = (ctx.match(/unique-dedupe-marker/g) || []).length;
+      assert.equal(occurrences, 1, `memory index must be injected exactly once, got ${occurrences}`);
+      assert.ok(ctx.includes('## Auto-memory index for this project'), 'project section expected');
+      assert.ok(
+        !ctx.includes('## Global memory index'),
+        'global section must be skipped when it resolves to the project MEMORY.md',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Regression: when the assembled context exceeds the 8KB stdout cap, emitJson
+// trims from the TAIL. The retrieval protocol (behavior-defining) must be
+// assembled ahead of the variable-size memory/intentions bulk so the trim
+// drops index lines, not the protocol.
+// ---------------------------------------------------------------------------
+test(
+  'session-start trim ordering: retrieval protocol survives an oversized context',
+  { timeout: 12000 },
+  () => {
+    const projectDir = '/tmp/test-project-trim-order';
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'trim-order' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        // Project memory and global memory each fill their 3KB caps.
+        const filler = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(60); // ~6KB, capped to 3KB
+        const encodedProject = projectDir.replace(/[/\\]/g, '-');
+        const projMemDir = join(sb, '.claude', 'projects', encodedProject, 'memory');
+        mkdirSync(projMemDir, { recursive: true });
+        writeFileSync(join(projMemDir, 'MEMORY.md'), filler);
+        const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
+        const globalMemDir = join(sb, '.claude', 'projects', encodedVaultParent, 'memory');
+        mkdirSync(globalMemDir, { recursive: true });
+        writeFileSync(join(globalMemDir, 'MEMORY.md'), filler);
+        // Plus a populated intentions marker for extra variable bulk.
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        const intentions = [];
+        for (let i = 0; i < 40; i++) intentions.push({ context: `context-${i}`, count: i + 1 });
+        writeFileSync(join(cacheDir, 'intentions.json'), JSON.stringify(intentions));
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.ok(Buffer.byteLength(r.stdout, 'utf8') <= 8192, 'output must respect the stdout cap');
+      const hso = parseOutput(r.stdout, 'trim-order');
+      const ctx = hso.additionalContext;
+      assert.match(ctx, /…\[truncated\]$/, 'arrangement must actually overflow the cap');
+      assert.ok(
+        ctx.includes('## Learning Loop — Retrieval Protocol'),
+        'retrieval protocol header must survive the tail trim',
+      );
+      assert.ok(
+        ctx.includes('Keep retrieval lightweight'),
+        'the protocol must survive the tail trim INTACT — it must be assembled before the variable-size sections',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Regression: the protocol must use the namespaced command forms. Bare /init
+// resolves to Claude Code's built-in CLAUDE.md initializer, and bare /reflect
+// does not exist — both were actively wrong instructions.
+// ---------------------------------------------------------------------------
+test(
+  'session-start retrieval protocol uses namespaced learning-loop command names',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'namespaced-cmds' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const hso = parseOutput(r.stdout, 'namespaced-cmds');
+      const ctx = hso.additionalContext;
+      assert.ok(
+        ctx.includes('suggest /learning-loop:reflect'),
+        'protocol must reference /learning-loop:reflect',
+      );
+      assert.ok(!ctx.includes('suggest /reflect '), 'bare /reflect must not be suggested');
+      assert.ok(!/Run \/init\b/.test(ctx), 'bare /init must never be recommended');
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
 test(
   'LL_SESSION_TMP_DIR redirects the legacy tmp session-id write',
   { timeout: 12000 },

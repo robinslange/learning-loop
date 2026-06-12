@@ -193,6 +193,31 @@ describe('session-label', () => {
     rmSync(vault, { recursive: true, force: true });
   });
 
+  // Regression: the hook must read only the transcript TAIL
+  // (TRANSCRIPT_TAIL_BYTES), not the whole file — transcripts reach tens of
+  // MB and this runs on every prompt inside a 3s outer timeout. A giant early
+  // line that falls outside the tail window must not influence the label.
+  it('ignores transcript content beyond the tail window', () => {
+    const sid = randomUUID();
+    const transcript = join(TMP, `${sid}.jsonl`);
+    const giantOldLine = JSON.stringify({
+      type: 'user',
+      message: { content: `we discussed graphql ${'pad '.repeat(80_000)}` }, // ~320KB > 256KB tail
+    });
+    const recent = makeTranscript([
+      'keep working on the mobile ios build',
+      'the mobile screen still flickers',
+    ]);
+    writeFileSync(transcript, `${giantOldLine}\n${recent}`);
+    const label = run(sid, 'continue the mobile work please', transcript);
+    assert.ok(label, 'label file should exist');
+    assert.ok(label.includes('mobile'), `expected mobile, got: ${label}`);
+    assert.ok(
+      !/GraphQL|GQL/.test(label),
+      `content outside the tail window must not score topics, got: ${label}`,
+    );
+  });
+
   it('source carries no hardcoded instance-name topic patterns', () => {
     const src = readFileSync(HOOK, 'utf8');
     assert.match(src, /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
@@ -244,6 +269,76 @@ describe('session-label stdout contract', () => {
   it('produces empty stdout when pipeline throws', () => {
     const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_FORCE_ERROR: '1' });
     assert.equal(out, '');
+  });
+});
+
+describe('session-label dedupe levels across prompts', () => {
+  // Regression: a note surfaced only as a one-line "Related notes" POINTER on
+  // prompt 1 must still get its BODY injected when it is the best match on
+  // prompt 2. Pre-fix, pointer paths were persisted into the dedupe state
+  // indistinguishably from body-injected paths and filtered out wholesale for
+  // the whole DEDUPE_WINDOW_MS.
+  it('pointer-only note from prompt 1 is body-injected on prompt 2', () => {
+    const base = mkdtempSync(join(tmpdir(), 'll-live-dedupe-'));
+    try {
+      const vault = join(base, 'vault');
+      const pluginData = join(base, 'plugin-data');
+      const home = join(base, 'home');
+      const stubBin = join(pluginData, 'bin');
+      mkdirSync(join(vault, 'notes'), { recursive: true });
+      mkdirSync(home, { recursive: true });
+      mkdirSync(stubBin, { recursive: true });
+
+      writeFileSync(
+        join(vault, 'notes', 'alpha.md'),
+        'Alpha note body about hook injection ordering and budgets.\n',
+      );
+      writeFileSync(
+        join(vault, 'notes', 'beta.md'),
+        'Beta note body about dedupe windows and pointer suppression.\n',
+      );
+
+      // Stub returns the same two above-threshold hits on both prompts.
+      const hits = JSON.stringify([
+        { path: 'notes/alpha.md', title: 'alpha', score: 0.99 },
+        { path: 'notes/beta.md', title: 'beta', score: 0.9 },
+      ]);
+      writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
+        mode: 0o755,
+      });
+
+      const sid = randomUUID();
+      const env = {
+        ...process.env,
+        HOME: home,
+        TMPDIR: base,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        VAULT_PATH: vault,
+        LEARNING_LOOP_INJECTION_MODE: 'live',
+        LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+        LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+      };
+      const runPrompt = (prompt) =>
+        execFileSync('node', [HOOK], {
+          input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env,
+        });
+
+      const out1 = runPrompt('tell me about hook injection ordering and budgets');
+      assert.ok(out1.includes('Alpha note body'), 'prompt 1 must body-inject the top hit');
+      assert.ok(out1.includes('notes/beta.md'), 'prompt 1 must list beta as a pointer');
+      assert.ok(!out1.includes('Beta note body'), 'prompt 1 must not inject the pointer body');
+
+      const out2 = runPrompt('now drill into dedupe windows and pointer suppression');
+      assert.ok(
+        out2.includes('Beta note body'),
+        `pointer-seen note must be body-injected on the follow-up prompt; got: ${out2}`,
+      );
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 

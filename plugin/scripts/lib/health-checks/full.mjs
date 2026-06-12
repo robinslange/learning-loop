@@ -169,6 +169,6 @@ export function checkWatchDaemon({ pidfileExists, pidIsAlive, pid } = {}) {
     status: SEVERITIES.fail,
     severity: SEVERITIES.warn,
     detail: `pidfile claims pid ${pid} but process not running`,
-    fix: 'Run: ll-watch start',
+    fix: 'Remove the stale pidfile, then run: ll-watch (no arguments)',
   });
 }

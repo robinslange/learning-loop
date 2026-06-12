@@ -116,8 +116,9 @@ const pathHash = createHash('md5').update(transcriptPath).digest('hex');
 const nudgeMarker = join(tmp, `learning-loop-stop-nudged-${pathHash}`);
 if (existsSync(nudgeMarker)) process.exit(0);
 
-// Trigger on size threshold OR message count (union: preserves characterisation test
-// which uses a 60KB plain-text buffer with no JSONL lines).
+// Trigger on size threshold OR message count (union: the characterisation
+// tests exercise the size arm with a plain-text buffer that has no JSONL
+// lines, and the count arm with many small lines).
 let trigger = false;
 
 try {

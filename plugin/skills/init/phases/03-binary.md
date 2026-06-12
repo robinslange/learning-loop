@@ -39,7 +39,7 @@ Use Node `fs.rmSync(path, { force: true })`. Do not prompt: these files are unco
 
 ## 3c: Initial Vault Index
 
-Run `ll-search index` to build the search index. Report progress.
+Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` to build the search index (the wrapper resolves the vault and db paths; the bare binary requires explicit positionals). Report progress.
 
 ## 3d: Install CLI shims
 

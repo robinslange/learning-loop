@@ -291,14 +291,14 @@ The full constant inventory from `.planning/inventory/coverage-and-magic.md:177-
 | `HookConfig.LABEL_TIMEOUT_MS` | 3000 | session-label timeout |
 | `HookConfig.DEDUPE_WINDOW_MS` | 180000 | session deduplication window |
 | `HookConfig.INJECTION_RACE_CAP_MS` | 1500 | JIT injection race cap |
-| `HookConfig.QUERY_TIMEOUT_MS` | 3000 | pre-write-check query timeout |
+| `HookConfig.QUERY_TIMEOUT_MS` | 2000 | pre-write-check query timeout |
 | `HookConfig.DEPS_CHECK_TIMEOUT_MS` | 5000 | session-start deps check |
 | `HookConfig.SNAPSHOT_TIMEOUT_MS` | 10000 | vault snapshot timeout |
 | `HookConfig.REINDEX_TIMEOUT_MS` | 5000 | daemon reindex timeout |
 | `HookConfig.DAEMON_STARTUP_DEADLINE_MS` | 2000 | daemon ready poll deadline |
 | `HookConfig.SESSION_SWEEP_TTL_MS` | 604800000 | 7-day stale-session-artifact sweep cutoff |
 | `HookConfig.EDGES_TMP_ORPHAN_TTL_MS` | 3600000 | edges.db tmp-orphan sweep cutoff |
-| `HookConfig.SESSION_SIZE_THRESHOLD_BYTES` | 51200 | stop-nudge session size check |
+| `HookConfig.SESSION_SIZE_THRESHOLD_BYTES` | 512000 | stop-nudge session size check |
 | `HookConfig.SIMILARITY_THRESHOLD` | 0.85 | pre-write duplicate gate |
 | `HookConfig.REFLECT_COOLDOWN_SECS` | 300 | stop-nudge reflect cooldown |
 

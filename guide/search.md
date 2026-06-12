@@ -20,6 +20,8 @@ The `--rerank` flag runs a cross-encoder (ms-marco-MiniLM-L-6-v2, quantized int8
 
 ## Commands
 
+Run these from the plugin directory — on an installed machine that is `~/.claude/plugins/cache/learning-loop-marketplace/learning-loop/<version>/`, in a dev checkout it is `plugin/`:
+
 ```bash
 # Hybrid semantic + keyword search
 node scripts/vault-search.mjs query "caffeine tolerance" [--top N] [--rerank] [--candidates N]

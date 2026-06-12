@@ -100,3 +100,47 @@ describe('getSessionId fallback chain', () => {
     assert.equal(mod.getSessionId(), 'legacy-only');
   });
 });
+
+describe('readFileTail', () => {
+  let dir;
+  let readFileTail;
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'll-common-tail-'));
+    ({ readFileTail } = await import('../plugin/hooks/lib/common.mjs?bust=5'));
+  });
+  after(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns the whole file unchanged when smaller than maxBytes', () => {
+    const p = join(dir, 'small.jsonl');
+    writeFileSync(p, 'line one\nline two\nline three');
+    assert.equal(readFileTail(p, 1024), 'line one\nline two\nline three');
+  });
+
+  it('drops the partial first line when the read starts mid-file', () => {
+    const p = join(dir, 'big.jsonl');
+    const lines = [];
+    for (let i = 0; i < 100; i++) lines.push(`{"n":${i},"pad":"${'x'.repeat(50)}"}`);
+    writeFileSync(p, lines.join('\n'));
+    const tail = readFileTail(p, 300);
+    const got = tail.split('\n');
+    assert.ok(got.length >= 2, 'tail should contain complete lines');
+    for (const l of got) JSON.parse(l); // every surviving line is complete JSON
+    assert.equal(got[got.length - 1], lines[lines.length - 1]);
+  });
+
+  it('returns empty string when no newline falls inside the tail window', () => {
+    const p = join(dir, 'one-giant-line.jsonl');
+    writeFileSync(p, 'a'.repeat(10_000));
+    assert.equal(readFileTail(p, 100), '');
+  });
+
+  it('cannot leak a torn multi-byte char: drop-through-newline removes the fragment', () => {
+    const p = join(dir, 'multibyte.jsonl');
+    // 4-byte emoji repeated; window lands mid-emoji on the first (dropped) line.
+    writeFileSync(p, `${'\u{1F600}'.repeat(100)}\nfinal line`);
+    const tail = readFileTail(p, 17); // 'final line' is 10 bytes; 17 starts mid-emoji
+    assert.equal(tail, 'final line');
+  });
+});

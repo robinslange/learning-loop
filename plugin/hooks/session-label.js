@@ -11,6 +11,7 @@ import {
   resolveConfig,
   resolvePluginData,
   emitRetrieval,
+  readFileTail,
 } from './lib/common.mjs';
 import {
   buildInjection,
@@ -52,11 +53,16 @@ if (!session_id || !prompt) process.exit(0);
 
 const labelFile = join(tmpdir(), `claude-session-label-${session_id}.txt`);
 
-// Collect user messages from transcript, most recent last
+// Collect user messages from transcript, most recent last. Transcripts grow
+// to tens of MB (full tool outputs); only the tail is ever used, so read just
+// the last TRANSCRIPT_TAIL_BYTES instead of the whole file — this hook runs
+// on every UserPromptSubmit inside a hard outer timeout.
 let messages = [];
 if (transcript_path && existsSync(transcript_path)) {
   try {
-    const lines = readFileSync(transcript_path, 'utf8').trim().split('\n');
+    const lines = readFileTail(transcript_path, HookConfig.TRANSCRIPT_TAIL_BYTES)
+      .trim()
+      .split('\n');
     for (const line of lines.slice(-HookConfig.RECENT_MSG_WINDOW)) {
       try {
         const entry = JSON.parse(line);
@@ -204,16 +210,25 @@ function dedupeStatePath(sid) {
   return join(dir, `${sid}.json`);
 }
 
+// Returns Map of path -> 'body' | 'pointer'. Entries persisted before the
+// level field existed are treated as 'body' (conservative: they may have
+// carried content). Body wins when both levels are present.
 function loadDedupeState(sid) {
   const p = dedupeStatePath(sid);
-  if (!p) return new Set();
+  if (!p) return new Map();
   const { value } = safeLoad(p, { fallback: [] });
   const arr = Array.isArray(value) ? value : [];
   const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
-  return new Set(arr.filter((e) => new Date(e.ts).getTime() >= cutoff).map((e) => e.path));
+  const map = new Map();
+  for (const e of arr) {
+    if (new Date(e.ts).getTime() < cutoff) continue;
+    const level = e.level === 'pointer' ? 'pointer' : 'body';
+    if (map.get(e.path) !== 'body') map.set(e.path, level);
+  }
+  return map;
 }
 
-function persistDedupeState(sid, newPaths) {
+function persistDedupeState(sid, newEntries) {
   const p = dedupeStatePath(sid);
   if (!p) return;
   try {
@@ -223,7 +238,7 @@ function persistDedupeState(sid, newPaths) {
       const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
       const kept = existing.filter((e) => new Date(e.ts).getTime() >= cutoff);
       const ts = new Date().toISOString();
-      for (const path of newPaths) kept.push({ path, ts });
+      for (const { path, level } of newEntries) kept.push({ path, level, ts });
       const tmp = `${p}.${process.pid}.tmp`;
       writeFileSync(tmp, JSON.stringify(kept));
       renameSync(tmp, p);
@@ -322,7 +337,7 @@ try {
     process.exit(0);
   }
 
-  const alreadyInjectedPaths = loadDedupeState(session_id);
+  const alreadyInjected = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
   const enrichedVaultHits = (results.vault?.hits || [])
     .map((h) => {
@@ -341,9 +356,9 @@ try {
     vaultHits: enrichedVaultHits,
     episodicHits: results.episodic?.hits || [],
     query,
-    alreadyInjectedPaths,
+    alreadyInjected,
   });
-  const dedupeFilteredCount = rawVaultHitCount - (injection?.injectedVaultPaths?.length || 0);
+  const dedupeFilteredCount = rawVaultHitCount - (injection?.injectedVault?.length || 0);
 
   if (!injection) {
     logShadow({
@@ -365,15 +380,15 @@ try {
       backends: summarizeBackends(results),
       payload: {
         tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
-        vault_notes: injection.injectedVaultPaths.length,
+        vault_notes: injection.injectedVault.length,
       },
       dedupe_filtered_count: dedupeFilteredCount,
       would_inject: scrubbedContext,
     });
-    persistDedupeState(session_id, injection.injectedVaultPaths);
+    persistDedupeState(session_id, injection.injectedVault);
   } else if (mode === 'live') {
     emitHookOutput({ event: 'UserPromptSubmit', additionalContext: scrubbedContext });
-    persistDedupeState(session_id, injection.injectedVaultPaths);
+    persistDedupeState(session_id, injection.injectedVault);
   }
 } catch (err) {
   process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);

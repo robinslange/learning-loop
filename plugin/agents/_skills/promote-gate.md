@@ -58,7 +58,7 @@ Evaluate the note against six criteria. Each is pass/fail — no scoring needed.
 
 | Passes | Destination | Rewrite? |
 |--------|-------------|----------|
-| Verification marker present (`[unresolved]`, `[unverified]`, `[not in abstract]`, `[not in source]`) | `1-fleeting/` | No — **markers always block permanent** |
+| Verification marker present (any blocking marker from `capture-rules.md` → Verification Markers) | `1-fleeting/` | No — **markers always block permanent** |
 | All applicable criteria pass + synthesis-tagged + ≥10 wikilinks (hub note) | `5-maps/` | No — write as-is |
 | All applicable criteria pass | `3-permanent/` | No — write as-is |
 | All but voice pass | `3-permanent/` | Yes — rewrite in persona voice |
@@ -163,6 +163,8 @@ Four constants live in `hooks/modules/edge-infer.mjs`, each gating a different d
 
 Ordering invariant (enforced at module load): `TENSION ≤ contradiction-write ≤ HARD`. Tuning one threshold below another throws on hook load rather than silently breaking surface tiers.
 
+**Effective soft band.** `challenges_rebuttal` edges only exist in `edges.db` when `p(contradiction)` cleared the 0.90 write floor (`LL_NLI_THRESHOLD`), so under defaults no edge carries a `confidenceScore` in 0.75–0.90 and the soft/tension bucket effectively spans **0.90–0.95**. Lowering `LL_NLI_TENSION_THRESHOLD` alone has no effect — the band only widens if the write floor is lowered too.
+
 ## NLI Contradiction Check
 
 Before promoting a note from `0-inbox/` to a higher folder, query NLI contradiction edges for the note. This complements (does not replace) the Source Integrity check and runs alongside it.
@@ -174,7 +176,7 @@ Before promoting a note from `0-inbox/` to a higher folder, query NLI contradict
 3. Filter to `edge_type === 'challenges_rebuttal'`.
 4. Bucket each remaining edge:
    - `confidenceScore >= NLI_HARD_THRESHOLD` (default 0.95) → **hard bucket**: blocks autonomous promotion. Caller surfaces the supersede / qualify / keep-both / skip prompt; user resolves before the move.
-   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (default 0.75-0.95) → **soft bucket**: promote, then stamp `nli_tension: true` + `nli_tension_partners: [...]` on the destination note's frontmatter.
+   - `NLI_TENSION_THRESHOLD <= confidenceScore < NLI_HARD_THRESHOLD` (configured 0.75-0.95; effectively 0.90-0.95 — see NLI threshold zoo above) → **soft bucket**: promote, then stamp `nli_tension: true` + `nli_tension_partners: [...]` on the destination note's frontmatter.
 
 ### Escape hatches
 

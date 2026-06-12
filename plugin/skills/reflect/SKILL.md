@@ -238,7 +238,11 @@ Run this via the Bash tool at the end of every /reflect invocation. The marker l
 
 ## Subagent Usage
 
-None. All retrieval is handled by the `reflect-scan` binary command in the main thread.
+| Agent | Where | Role |
+|-------|-------|------|
+| refinement-proposer | Step 4.6.b (conditional: only when the session wrote new vault notes) | Classifies new-note → upstream-note pairs and proposes refinement edits |
+
+Retrieval itself stays main-thread: it is handled by the `reflect-scan` binary command, not a subagent.
 
 ## Key Principles
 

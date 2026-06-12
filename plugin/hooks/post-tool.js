@@ -76,8 +76,12 @@ if (isWriteEdit && ctx.vaultRoot) {
   ctx.snapshot = loadVaultSnapshot(ctx.vaultRoot);
 }
 
+// Cheap load-bearing modules first (provenance reads tool_input; reflect-track
+// appends a marker): if the outer hooks.json deadline ever SIGKILLs mid-loop,
+// only enrichment (autolink, edge-infer) is lost. Autolink stays ahead of
+// edge-infer — edge-infer reads the note body autolink appends to.
 const modules = isWriteEdit
-  ? [runAutolink, runEdgeInfer, runProvenance, runReflectTrack]
+  ? [runProvenance, runReflectTrack, runAutolink, runEdgeInfer]
   : [runProvenance];
 
 for (const mod of modules) {

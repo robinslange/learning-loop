@@ -40,7 +40,7 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Federation config:** Check `PLUGIN_DATA/federation/config.json` exists. If it does, read it and note: identity (displayName, pubkey), hub endpoint, local peer count, visibility rules.
 
-**Seed location:** Check if `.seed` exists in `${CLAUDE_PLUGIN_ROOT}/federation/` (legacy, needs migration) vs `PLUGIN_DATA/federation/` (correct). Flag if legacy seed found.
+**Seed location:** The federation seed normally lives in the binary's secure seed store (OS keyring or encrypted file), not as a plaintext file — no `.seed` on disk is the healthy state. Flag only if a plaintext `.seed` exists: in `${CLAUDE_PLUGIN_ROOT}/federation/` (very old installs — needs relocation, handled by the federation skill) or in `PLUGIN_DATA/federation/` (pre-v1.18 legacy — the federation skill offers `ll-search migrate-seed`).
 
 **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 

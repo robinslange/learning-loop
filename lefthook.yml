@@ -26,3 +26,7 @@ pre-commit:
     test:
       glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native}/**"
       run: npm test --silent
+
+    cargo-test:
+      glob: "native/**"
+      run: cargo test --workspace --quiet --manifest-path native/Cargo.toml

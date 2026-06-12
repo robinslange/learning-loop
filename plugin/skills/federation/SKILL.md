@@ -41,23 +41,31 @@ Exit cleanly.
 
 ## C: Identity
 
-The seed file MUST live in `PLUGIN_DATA/federation/.seed` (persists across plugin updates), NOT in `${CLAUDE_PLUGIN_ROOT}/federation/.seed` (gets wiped on reinstall).
+The identity is an Ed25519 seed managed by the `ll-search` binary's seed store. Backends in priority order: the OS keyring (macOS Keychain / Linux Secret Service / Windows Credential Manager), then an encrypted-at-rest file under `PLUGIN_DATA/federation/` (machine-derived key, used where no keyring daemon runs). A plaintext `PLUGIN_DATA/federation/.seed` file is a pre-v1.18 legacy format: still readable as a migration source, never created by the binary. On a fresh install no `.seed` file will exist — that is normal, not an error.
 
-**Migration check:** If `${CLAUDE_PLUGIN_ROOT}/federation/.seed` exists but `PLUGIN_DATA/federation/.seed` does not, migrate it:
+**Plugin-root migration check (before running `identity`):** if a legacy plaintext seed exists at `${CLAUDE_PLUGIN_ROOT}/federation/.seed` (very old installs; that location gets wiped on reinstall):
 
-1. Copy the seed to `PLUGIN_DATA/federation/.seed` (mode 0o600)
+1. Copy it to `PLUGIN_DATA/federation/.seed` (mode 0o600) — the binary's plaintext-legacy reader looks there
 2. Delete the old one from the marketplace directory
 3. Verify the pubkey matches `config.identity.pubkey` if a previous federation config exists. If it does not match, warn and offer to update the hub.
 
 Run `ll-search identity --config-dir $PLUGIN_DATA` to load or create the Ed25519 keypair. Output is JSON:
 
 ```json
-{ "pubkey_b64": "0JuQ...r5o=", "seed_path": "...", "created": false }
+{ "pubkey_b64": "0JuQ...r5o=", "backend": "keyring", "created": false }
 ```
 
-The binary's `pubkey_b64` becomes `pubkey` in config.json (written in step G).
+- `pubkey_b64` is the raw 32-byte public key as base64, ready to send to `/api/redeem` as-is. It becomes `pubkey` in config.json (written in step G).
+- `backend` is `"keyring"`, `"encrypted"`, or `"plaintext-legacy"` — where the seed was loaded from (or stored, on first run). There is no `seed_path` field.
+- `created` is `true` only when no seed existed in any backend and a fresh one was generated (into the keyring, or the encrypted file as fallback — never plaintext). The command is idempotent: existing seeds are reused, so re-runs return the same pubkey.
 
-The `pubkey_b64` value is the raw 32-byte public key as base64, ready to send to `/api/redeem` as-is. The command is idempotent: if `.seed` already exists it reuses it (`created: false`), otherwise it creates one with mode `0o600` (`created: true`). Existing seeds created by prior runs continue to work.
+**If `backend` is `"plaintext-legacy"`:** offer to upgrade the seed into a secure backend:
+
+```bash
+ll-search migrate-seed --config-dir $PLUGIN_DATA
+```
+
+The migration is fail-closed: the plaintext file is deleted only after the new backend has been written and verified, and re-running against an already-migrated seed is a no-op. Never migrate between backends by hand-copying files — the only manual file copy in this skill is the plugin-root relocation above, which exists solely to put the legacy file where `migrate-seed` and the legacy reader can find it.
 
 ## D: Redeem
 
@@ -151,15 +159,18 @@ const PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA;
 const pluginVersion = JSON.parse(
   readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf-8'),
 ).version;
+const metaPath = join(PLUGIN_DATA, 'federation', '.seed-meta.json');
+// Merge: the binary writes a `backend` field into this sidecar; preserve it.
+const existing = existsSync(metaPath)
+  ? JSON.parse(readFileSync(metaPath, 'utf-8'))
+  : {};
 const meta = {
+  ...existing,
   created_at: new Date().toISOString(),
   plugin_version: pluginVersion,
   plugin_major: parseInt(pluginVersion.split('.')[0], 10),
 };
-writeFileSync(
-  join(PLUGIN_DATA, 'federation', '.seed-meta.json'),
-  JSON.stringify(meta, null, 2),
-);
+writeFileSync(metaPath, JSON.stringify(meta, null, 2));
 
 // Successful (re-)setup clears any prior version-mismatch notice
 const noticePath = join(PLUGIN_DATA, 'federation', '.seed-notice-shown');
@@ -168,7 +179,7 @@ if (existsSync(noticePath)) unlinkSync(noticePath);
 
 **Why:** the SessionStart hook compares `meta.plugin_major` against the running plugin's major version and emits a single stderr line when they differ, suggesting `/learning-loop:federation` to rotate. Resetting `.seed-notice-shown` on every successful re-setup guarantees a future major bump (e.g. v2.x -> v3.x after the user already cleared a v1.x -> v2.x notice) re-fires correctly. The notice is informational only: nothing auto-rotates.
 
-**Key behavioural detail:** the federation config file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed setup runs leave no config behind, so re-running this skill from a fresh shell always re-enters cleanly. The seed at `PLUGIN_DATA/federation/.seed` is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey: the user will need a fresh token if the previous one was already redeemed.
+**Key behavioural detail:** the federation config file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed setup runs leave no config behind, so re-running this skill from a fresh shell always re-enters cleanly. The seed in the seed store (keyring / encrypted file / legacy plaintext) is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey: the user will need a fresh token if the previous one was already redeemed.
 
 ## Summary
 
@@ -188,5 +199,5 @@ Federation configured.
 
 - Never write the federation config until the sync test passes. Failed runs must leave no state on disk.
 - Tokens are single-use and consumed on redeem (step D). Network failures BEFORE redeem are recoverable; failures AFTER redeem require a fresh token.
-- The seed file is the user's identity. Never delete `PLUGIN_DATA/federation/.seed` without explicit user request.
+- The seed is the user's identity. Never delete it from its store — keyring entry, encrypted file, or legacy `PLUGIN_DATA/federation/.seed` — without explicit user request.
 - Tailscale auth keys expire in 24 hours. If step E fails for that reason, the token is already spent.

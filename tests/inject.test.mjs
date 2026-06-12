@@ -73,7 +73,7 @@ describe('buildInjection', () => {
       vaultHits: [],
       episodicHits: [],
       query: 'test',
-      alreadyInjectedPaths: new Set(),
+      alreadyInjected: new Map(),
     });
     assert.equal(result, null);
   });
@@ -85,15 +85,15 @@ describe('buildInjection', () => {
       ],
       episodicHits: [],
       query: 'sleep',
-      alreadyInjectedPaths: new Set(),
+      alreadyInjected: new Map(),
     });
     assert.ok(result);
     assert.ok(result.additionalContext.includes('From your vault'));
     assert.ok(!result.additionalContext.includes('From past conversations'));
-    assert.deepEqual(result.injectedVaultPaths, ['notes/sleep.md']);
+    assert.deepEqual(result.injectedVault, [{ path: 'notes/sleep.md', level: 'body' }]);
   });
 
-  it('filters out vault hits in alreadyInjectedPaths', () => {
+  it('filters out vault hits already injected at body level', () => {
     const result = buildInjection({
       vaultHits: [
         { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
@@ -101,12 +101,69 @@ describe('buildInjection', () => {
       ],
       episodicHits: [],
       query: 'test',
-      alreadyInjectedPaths: new Set(['a.md']),
+      alreadyInjected: new Map([['a.md', 'body']]),
     });
     assert.ok(result);
     assert.ok(!result.additionalContext.includes('Note A'));
     assert.ok(result.additionalContext.includes('Note B'));
-    assert.deepEqual(result.injectedVaultPaths, ['b.md']);
+    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body' }]);
+  });
+
+  it('treats a legacy Set of paths as body-level entries', () => {
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
+        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.85 },
+      ],
+      episodicHits: [],
+      query: 'test',
+      alreadyInjected: new Set(['a.md']),
+    });
+    assert.ok(result);
+    assert.ok(!result.additionalContext.includes('Note A'));
+    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body' }]);
+  });
+
+  // Regression: a note that was only surfaced as a one-line pointer must still
+  // qualify for body injection on a later prompt — the model never saw its
+  // content. Pre-fix, pointer paths were persisted indistinguishably from
+  // body-injected paths and filtered out wholesale.
+  it('pointer-level dedupe entry still gets body injection as the top hit', () => {
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.95 },
+        { title: 'Note C', path: 'c.md', body: 'Body C content here.', score: 0.85 },
+      ],
+      episodicHits: [],
+      query: 'test',
+      alreadyInjected: new Map([['b.md', 'pointer']]),
+    });
+    assert.ok(result, 'pointer-only entry must not suppress the note entirely');
+    assert.ok(
+      result.additionalContext.includes('Body B content here.'),
+      'pointer-seen note must be body-injected when it becomes the top hit',
+    );
+    assert.deepEqual(result.injectedVault[0], { path: 'b.md', level: 'body' });
+  });
+
+  it('pointer-level dedupe entry suppresses a repeat pointer', () => {
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
+        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.9 },
+        { title: 'Note C', path: 'c.md', body: 'Body C content here.', score: 0.85 },
+      ],
+      episodicHits: [],
+      query: 'test',
+      alreadyInjected: new Map([['b.md', 'pointer']]),
+    });
+    assert.ok(result);
+    assert.ok(result.additionalContext.includes('Body A content here.'));
+    assert.ok(!result.additionalContext.includes('Note B'), 'pointer must not repeat');
+    assert.deepEqual(result.injectedVault, [
+      { path: 'a.md', level: 'body' },
+      { path: 'c.md', level: 'pointer' },
+    ]);
   });
 
   it('truncates top vault body at sentence boundary under 1200 chars', () => {
@@ -123,7 +180,7 @@ describe('buildInjection', () => {
       ],
       episodicHits: [],
       query: 'test',
-      alreadyInjectedPaths: new Set(),
+      alreadyInjected: new Map(),
     });
     assert.ok(result);
     const ctx = result.additionalContext;
@@ -145,7 +202,7 @@ describe('buildInjection', () => {
         { date: '2026-04-04', project: 'northwind', snippet: 'This should be excluded' },
       ],
       query: 'test',
-      alreadyInjectedPaths: new Set(),
+      alreadyInjected: new Map(),
     });
     assert.ok(result);
     assert.ok(result.additionalContext.includes('From past conversations'));
@@ -153,7 +210,7 @@ describe('buildInjection', () => {
     assert.ok(result.additionalContext.includes('Discussed Bayesian'));
     assert.ok(result.additionalContext.includes('Stripe integration'));
     assert.ok(!result.additionalContext.includes('This should be excluded'));
-    assert.deepEqual(result.injectedVaultPaths, []);
+    assert.deepEqual(result.injectedVault, []);
   });
 });
 
@@ -167,7 +224,7 @@ describe('buildInjection vault Related notes header', () => {
       ],
       episodicHits: [],
       query: 'test',
-      alreadyInjectedPaths: new Set(),
+      alreadyInjected: new Map(),
     });
     assert.ok(result.additionalContext.includes('Related notes:'));
   });
