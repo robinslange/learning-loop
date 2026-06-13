@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.28.2
+
+### Fixed
+
+- **macOS CI lane green.** Relaxed an over-strict session-start trim-ordering test that required the lowest-priority learned-patterns section to keep its byte-cap pointer even when it was the section legitimately absorbing the stdout-budget tail trim; it passed locally by byte-position luck but failed on the macOS runner. Load-bearing invariants unchanged.
+
 ## v1.28.1
 
 ### Fixed
