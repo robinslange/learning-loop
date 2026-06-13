@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.28.0
+
 ### Added
 
 - **Retrieval-quality regression gate.** `bench.mjs` gains a quality variant that runs `ll-search eval-funnel` against a seeded fixture vault across both title-shaped and long natural-language query distributions, with a committed baseline and a CI job that hard-fails on a >3% absolute drop in recall@10/ndcg@10. The gate fails closed on eval-pipeline errors; CI uploads metrics artifacts and a `workflow_dispatch` bless path regenerates the baseline on ubuntu.
