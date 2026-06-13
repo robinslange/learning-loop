@@ -49,6 +49,11 @@ function reflectEnvelope(similarity, path, title) {
 // the child so the test can SIGTERM it after.
 function startUdsServer(socketPath, mode) {
   const child = spawn(process.execPath, [UDS_SERVER, socketPath, mode], { stdio: 'ignore' });
+  // unref the handle so the server child can never keep the test runner's event
+  // loop alive: a ChildProcess handle holds the loop open until its async 'exit'
+  // lands, which can race past end-of-tests and wedge `node --test`. Cleanup is
+  // explicit via stopUdsServer; this only removes the loop-keepalive.
+  child.unref();
   const deadline = Date.now() + 4000;
   const sab = new Int32Array(new SharedArrayBuffer(4));
   while (!existsSync(socketPath) && Date.now() < deadline) {
@@ -57,6 +62,31 @@ function startUdsServer(socketPath, mode) {
     Atomics.wait(sab, 0, 0, 5);
   }
   return child;
+}
+
+// SIGTERM the server child and block until it actually exits. server.kill() is
+// fire-and-forget; without waiting, an in-flight 'hang'-mode connection can keep
+// the orphaned child alive past worker teardown and wedge `node --test`
+// (process isolation waits on every descendant). Bounded poll on child.exitCode.
+function stopUdsServer(child) {
+  if (!child) return;
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    /* ignore */
+  }
+  const deadline = Date.now() + 3000;
+  const sab = new Int32Array(new SharedArrayBuffer(4));
+  while (child.exitCode === null && child.signalCode === null && Date.now() < deadline) {
+    Atomics.wait(sab, 0, 0, 5);
+  }
+  if (child.exitCode === null && child.signalCode === null) {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 function readHookErrorsByCode(pluginDataDir, code) {
@@ -176,13 +206,7 @@ function runWithSocket(serverMode, filePath, { stubScript, allowStderrError = fa
     const out = r.stdout.trim();
     return { result: out ? JSON.parse(out) : null, stderr: r.stderr, timeoutCount };
   } finally {
-    if (server) {
-      try {
-        server.kill('SIGTERM');
-      } catch {
-        /* ignore */
-      }
-    }
+    stopUdsServer(server);
     r.cleanup();
   }
 }
@@ -350,13 +374,7 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
       assert.ok(result, 'subprocess fallback must produce a warning even after stale-daemon error');
       assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
     } finally {
-      if (server) {
-        try {
-          server.kill('SIGTERM');
-        } catch {
-          /* ignore */
-        }
-      }
+      stopUdsServer(server);
       r.cleanup();
     }
   });

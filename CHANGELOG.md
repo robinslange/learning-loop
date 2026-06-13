@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`npm test` no longer hangs at end-of-suite.** Under Node's default `--test-isolation=process`, the runner could complete every test but never exit, wedging the CI `Test` lane indefinitely. Root causes: the duplicate-gate test's spawned UDS-server children kept the event loop alive (now `unref`'d, with bounded wait-for-exit teardown and a parent-death reaper in the helper), and the runner now passes `--test-force-exit`. Also hardened `pre-write-check`'s daemon socket to `destroy()` rather than `end()` on timeout so a wedged daemon connection is torn down immediately instead of lingering.
+
 ## v1.28.0
 
 ### Added

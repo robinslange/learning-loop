@@ -27,7 +27,15 @@ if (existsSync(socketPath)) {
   }
 }
 
+// Track every open connection so shutdown can destroy them. server.close()
+// alone stops accepting new connections but leaves a 'hang'-mode socket open,
+// which keeps the event loop (and this child) alive forever — the cause of the
+// CI hang when the parent SIGTERMs the server.
+const open = new Set();
+
 const server = createServer((socket) => {
+  open.add(socket);
+  socket.on('close', () => open.delete(socket));
   let buffer = '';
   socket.on('data', (chunk) => {
     buffer += chunk.toString('utf-8');
@@ -53,11 +61,23 @@ server.listen(socketPath, () => {
   process.stdout.write('listening\n');
 });
 
-process.on('SIGTERM', () => {
+function shutdown() {
+  for (const socket of open) socket.destroy();
   try {
     server.close();
   } catch {
     /* ignore */
   }
   process.exit(0);
-});
+}
+
+process.on('SIGTERM', shutdown);
+
+// Parent-death failsafe: if the test process that spawned us dies without
+// sending SIGTERM (crash, timeout-kill), getppid() reparents us to 1. Poll for
+// that and self-terminate so an orphaned server can never wedge `node --test`.
+const startPpid = process.ppid;
+const reaper = setInterval(() => {
+  if (process.ppid !== startPpid || process.ppid === 1) shutdown();
+}, 250);
+reaper.unref();

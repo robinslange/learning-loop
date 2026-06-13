@@ -61,8 +61,11 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
     const settle = (value) => {
       if (settled) return;
       settled = true;
+      // destroy(), not end(): a graceful half-close waits on the peer to finish,
+      // but a wedged daemon never will — that leaves the handle open and keeps
+      // the event loop alive. Hard teardown releases the socket immediately.
       try {
-        socket.end();
+        socket.destroy();
       } catch {
         /* ignore */
       }
