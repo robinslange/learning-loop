@@ -37,15 +37,15 @@ jobs:
           sudo chmod +x /usr/local/bin/ygrep
           ygrep --version
 
-      - name: Run tests
-        run: npm test
-
-      # Binary-gated suites skip without a real binary; on CI that means the
-      # contract is never enforced. Download the pinned release binary AFTER
-      # the main run and re-run the contract file with a skip guard. Bump
-      # LL_BINARY_VERSION when the envelope contract changes; it is pinned
-      # (not package.json-derived) so a release commit doesn't race the
-      # build-native workflow that publishes its own artifacts.
+      # Install the pinned release binary BEFORE the main run (Linux only) so
+      # binary-gated suites execute in the normal `npm test` rather than a
+      # separate re-run that can see a different environment. The binary lands
+      # where binary.mjs:findBinary() resolves it (native/target/release/), and
+      # the positive assertion below proves the resolution actually worked — so
+      # a gated suite skipping silently in CI is caught without re-running it.
+      # LL_BINARY_VERSION is pinned (not package.json-derived) so a release
+      # commit doesn't race the build-native workflow that publishes its own
+      # artifacts.
       - name: Install ll-search release binary
         if: runner.os == 'Linux'
         env:
@@ -58,24 +58,16 @@ jobs:
           chmod +x native/target/release/ll-search
           native/target/release/ll-search version
 
-      # Maintained list of binary-gated suites: every test file that skips
-      # when ll-search is absent must be re-run here, post-install, with the
-      # skip guard — otherwise it silently never executes in CI (the main
-      # `npm test` above runs binary-less by design). When adding a test with
-      # a hasBinary() skip, add its file to this list.
-      - name: Binary-gated tests (must not skip)
+      # Fail fast if the binary the gated suites depend on does not resolve —
+      # this is the contract the old "must not skip" re-run protected, asserted
+      # directly against binary.mjs instead of by parsing a second TAP run.
+      - name: Assert ll-search binary resolves (Linux)
         if: runner.os == 'Linux'
         run: |
-          set -euo pipefail
-          for suite in \
-            tests/convergence-check-keys.test.mjs; do
-            out=$(node --test --test-reporter=tap "$suite")
-            echo "$out"
-            if echo "$out" | grep -qE '^# skipped [1-9]'; then
-              echo "ERROR: $suite skipped tests — binary install step is broken"
-              exit 1
-            fi
-          done
+          node -e "import('./plugin/scripts/lib/binary.mjs').then(b => { if (!b.hasBinary()) { console.error('ERROR: ll-search binary installed but findBinary() does not resolve it — gated suites would skip silently'); process.exit(1); } console.log('ll-search resolves at', b.binaryPath()); })"
+
+      - name: Run tests
+        run: npm test
 
   cargo:
     runs-on: ubuntu-latest
