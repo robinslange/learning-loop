@@ -65,7 +65,7 @@ jobs:
       - name: Build
         env:
           LL_MODEL_CACHE_DIR: ${{ github.workspace }}/native/model-cache
-        run: cargo build --release --locked -p ll-search --features nli --target ${{ matrix.target }}
+        run: cargo build --release --locked -p ll-search --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: runner.os != 'Windows'

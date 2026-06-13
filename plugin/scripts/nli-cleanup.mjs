@@ -67,46 +67,50 @@ if (!dbPath) {
 } else if (!existsSync(dbPath)) {
   console.log(`[nli-cleanup] edges.db: not found at ${dbPath}; skipping DB cleanup`);
 } else {
-  const db = await openEdgeDb(dbPath);
   try {
-    const countRes = db.exec("SELECT COUNT(*) FROM edges WHERE source_graph='nli'");
-    const count = countRes[0] ? Number(countRes[0].values[0][0]) : 0;
-    nliEdgesDeleted = count;
+    const db = await openEdgeDb(dbPath);
+    try {
+      const countRes = db.exec("SELECT COUNT(*) FROM edges WHERE source_graph='nli'");
+      const count = countRes[0] ? Number(countRes[0].values[0][0]) : 0;
+      nliEdgesDeleted = count;
 
-    if (count > 0) {
-      if (dryRun) {
-        console.log(
-          `[nli-cleanup] edges.db: would delete ${count} NLI edge row(s) (source_graph='nli')`,
-        );
-      } else {
-        db.run("DELETE FROM edges WHERE source_graph='nli'");
-        console.log(`[nli-cleanup] edges.db: deleted ${count} NLI edge row(s)`);
-      }
-    } else {
-      console.log('[nli-cleanup] edges.db: no NLI edge rows found (already clean)');
-    }
-
-    for (const tableName of ['viz_meta', 'nli_frontmatter_tags']) {
-      const tableCheckRes = db.exec(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}'`,
-      );
-      if (tableCheckRes[0] && tableCheckRes[0].values.length > 0) {
-        tablesDropped.push(tableName);
+      if (count > 0) {
         if (dryRun) {
-          console.log(`[nli-cleanup] edges.db: would drop table ${tableName}`);
+          console.log(
+            `[nli-cleanup] edges.db: would delete ${count} NLI edge row(s) (source_graph='nli')`,
+          );
         } else {
-          db.run(`DROP TABLE IF EXISTS ${tableName}`);
-          console.log(`[nli-cleanup] edges.db: dropped table ${tableName}`);
+          db.run("DELETE FROM edges WHERE source_graph='nli'");
+          console.log(`[nli-cleanup] edges.db: deleted ${count} NLI edge row(s)`);
+        }
+      } else {
+        console.log('[nli-cleanup] edges.db: no NLI edge rows found (already clean)');
+      }
+
+      for (const tableName of ['viz_meta', 'nli_frontmatter_tags']) {
+        const tableCheckRes = db.exec(
+          `SELECT name FROM sqlite_master WHERE type='table' AND name='${tableName}'`,
+        );
+        if (tableCheckRes[0] && tableCheckRes[0].values.length > 0) {
+          tablesDropped.push(tableName);
+          if (dryRun) {
+            console.log(`[nli-cleanup] edges.db: would drop table ${tableName}`);
+          } else {
+            db.run(`DROP TABLE IF EXISTS ${tableName}`);
+            console.log(`[nli-cleanup] edges.db: dropped table ${tableName}`);
+          }
         }
       }
-    }
 
-    if (!dryRun && (nliEdgesDeleted > 0 || tablesDropped.length > 0)) {
-      saveDb(db, dbPath);
-      console.log(`[nli-cleanup] edges.db: saved to ${dbPath}`);
+      if (!dryRun && (nliEdgesDeleted > 0 || tablesDropped.length > 0)) {
+        saveDb(db, dbPath);
+        console.log(`[nli-cleanup] edges.db: saved to ${dbPath}`);
+      }
+    } finally {
+      db.close();
     }
-  } finally {
-    db.close();
+  } catch (err) {
+    console.error(`[nli-cleanup] edges.db: error — ${err.message}`);
   }
 }
 
@@ -138,12 +142,14 @@ function walkVault(root, dirs) {
 }
 
 function stripNliFrontmatter(content) {
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---(\n?)/);
+  // Normalise CRLF so Windows vault notes match the LF-only frontmatter delimiters.
+  const normalised = content.replace(/\r\n/g, '\n');
+  const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---(\n?)/);
   if (!fmMatch) return { changed: false, content };
 
   const fmBody = fmMatch[1];
   const trailingNewline = fmMatch[2];
-  const afterFm = content.slice(fmMatch[0].length);
+  const afterFm = normalised.slice(fmMatch[0].length);
 
   const lines = fmBody.split('\n');
   const filtered = lines.filter((line) => {
@@ -161,6 +167,7 @@ function stripNliFrontmatter(content) {
 
 let notesScanned = 0;
 let notesChanged = 0;
+let notesFailed = 0;
 
 if (!vaultPath) {
   console.log(
@@ -187,13 +194,19 @@ if (!vaultPath) {
     if (dryRun) {
       console.log(`[nli-cleanup] would strip NLI frontmatter from: ${notePath}`);
     } else {
-      writeFileSync(notePath, content, 'utf-8');
-      console.log(`[nli-cleanup] stripped NLI frontmatter from: ${notePath}`);
+      try {
+        writeFileSync(notePath, content, 'utf-8');
+        console.log(`[nli-cleanup] stripped NLI frontmatter from: ${notePath}`);
+      } catch (err) {
+        notesFailed++;
+        console.error(`[nli-cleanup] failed to write ${notePath}: ${err.message}`);
+      }
     }
   }
 
+  const failSuffix = notesFailed > 0 ? `, ${notesFailed} failed (see errors above)` : '';
   console.log(
-    `[nli-cleanup] vault: scanned ${notesScanned} note(s), ${notesChanged} would be / were changed`,
+    `[nli-cleanup] vault: scanned ${notesScanned} note(s), ${notesChanged} would be / were changed${failSuffix}`,
   );
 }
 
@@ -208,6 +221,9 @@ console.log(
 console.log(
   `  Notes with NLI fm:  ${notesChanged} / ${notesScanned} (${dryRun ? 'would strip' : 'stripped'})`,
 );
+if (notesFailed > 0) {
+  console.log(`  Notes failed:       ${notesFailed} (re-run after fixing permissions)`);
+}
 if (dryRun) {
   console.log('');
   console.log('[nli-cleanup] Re-run with --execute to apply changes.');

@@ -87,7 +87,7 @@ export const FEDERATION_PATHS = {
 
 export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),
-  nliSocket: (pd) => join(pd, 'nli.sock'),
+  nliSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only
   binVersion: (pd) => join(pd, 'bin', '.version'),
   harvestDenylist: (pd) => join(pd, '.harvest-denylist'),
   harvestedLog: (pd) => join(pd, '.harvested-log'),

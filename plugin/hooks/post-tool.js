@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // hooks/post-tool.js : coalesced post-tool dispatcher.
 //
-// Single Node entry replacing the three previous PostToolUse hooks
-// (autolink, edge-infer, provenance). One stdin read, one snapshot load,
+// Single Node entry replacing the four PostToolUse hooks
+// (provenance, reflect-track, autolink, edge-infer). One stdin read, one snapshot load,
 // fixed module order, per-module timeout isolation.
 
 import { join } from 'node:path';

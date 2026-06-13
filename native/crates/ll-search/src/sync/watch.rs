@@ -102,6 +102,23 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     eprintln!("Initial reindex...");
     do_reindex_blocking(&cfg.db_path, &cfg.vault_path).await;
 
+    // Spawn the UDS duplicate-scan server alongside the fs-watcher.
+    // The socket path matches DATA_FILES.nliSocket in pre-write-check.js
+    // (legacy name kept for JS/Rust protocol compatibility).
+    #[cfg(unix)]
+    let _dup_server_task = {
+        let socket_path = cfg.config_dir.join("nli.sock");
+        let db_path = cfg.db_path.clone();
+        let shutdown_rx_dup = shutdown_rx.clone();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::nli_server::run_nli_server(socket_path, db_path, shutdown_rx_dup).await
+            {
+                eprintln!("UDS server task exited with error: {e}");
+            }
+        })
+    };
+
     let fed_config = super::config::load_config(&cfg.config_dir).ok();
     if let Some(ref fc) = fed_config {
         eprintln!("Initial sync...");

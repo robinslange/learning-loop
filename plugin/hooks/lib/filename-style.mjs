@@ -84,9 +84,13 @@ export function checkFilenameStyle(filePath, vaultRoot, config, fileExists, budg
     expected = raw;
   } else {
     // 'auto' or absent: detect from vault population.
+    // Re-check budget before the synchronous readdirSync calls — the guard
+    // above was sampled before this call-site; slow vaults can eat budget.
+    if (!budgetOk) return null;
     try {
       expected = detectVaultStyle(vaultRoot);
     } catch (err) {
+      // Filesystem errors (permissions, unavailable mount) → skip advisory.
       logError('checkFilenameStyle.detectVaultStyle', err);
       return null;
     }
@@ -98,6 +102,8 @@ export function checkFilenameStyle(filePath, vaultRoot, config, fileExists, budg
   if (actual === expected) return null;
 
   const suggestion = expected === 'kebab' ? toKebab(stem) : toSpaces(stem);
+  // CamelCase stems produce a toSpaces() result identical to the original — no-op advisory.
+  if (suggestion === stem) return null;
   return (
     `Filename convention: this vault uses ${expected}-style names. ` +
     `Consider renaming to \`${suggestion}.md\`.`

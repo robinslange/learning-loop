@@ -93,11 +93,12 @@ Surface any `failures` from the JSON summary in Step 3.
 3. inbox archival — `mv` each approved candidate to `{{VAULT}}/_archive/0-inbox/` (create with `mkdir -p` if needed); the agent returns candidates only and never archives. This is the inbox ratchet exit: a weak note untouched for a month leaves triage instead of recirculating forever.
 4. fleeting archival — `mv` each approved candidate to `{{VAULT}}/_archive/1-fleeting/` (create with `mkdir -p` if needed); the agent returns candidates only and never archives
 
-If the agent returned a `fleeting repair` section (NEEDS-DEEPEN notes — gate-demoted notes with verification markers or `source: unverified`, untouched >14 days), surface it in Step 3 as a non-destructive `/deepen` suggestion. These are not gated and are never archived; just relay the recommendation:
+If the agent returned a `fleeting repair` section (NEEDS-DEEPEN notes — gate-demoted notes with verification markers or `source: unverified`, untouched >14 days), surface it in Step 3 as a non-destructive `/deepen` suggestion. These are not gated and are never archived; just relay the recommendation. The agent caps the list at 5 (oldest first) with a `+N more` line when there are more — relay that line verbatim:
 
 ```
 Fleeting notes needing repair (run /deepen to resolve):
 - creatine-loading-halves-uptake-time — verification markers, 30 days old → /deepen "creatine-loading-halves-uptake-time"
++3 more — run /health to see the full list
 ```
 
 **2c. Replay hooks over the agent's touched files.** The organiser's own `Edit` and `mv` calls (counter-argument link pairs, Zeigarnik status stamps, mv-promotions, 6a hygiene) also bypassed PostToolUse — 2a covers only note-writer output. After the gated actions complete, parse the `### Touched files` inventory from the agent's report (one vault path per line; skip if it says `none`) and replay the hook chain over it, same snippet as 2a:

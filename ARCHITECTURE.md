@@ -208,7 +208,7 @@ A running learning-loop deployment has three long-lived processes and several tr
 | ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
 | librarian daemon | `scripts/librarian.mjs`                                                | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); processes background tasks; exits with the watcher                                                                  |
-| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only. |
+| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only. |
 | Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
 
 Transient:
@@ -219,7 +219,7 @@ Transient:
 
 `vault-search.mjs` invokes `ll-search` per call via `execFileSync`. Each call is a fresh subprocess invocation with positional args and flags; there is no persistent channel between the plugin and the binary.
 
-The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/nli_server.rs` for the wire protocol.
+The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) for the wire protocol.
 
 ---
 

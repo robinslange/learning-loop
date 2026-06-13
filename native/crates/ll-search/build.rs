@@ -13,14 +13,13 @@ const MAX_ATTEMPTS: u32 = 6;
 const BACKOFF_SECS: [u64; 5] = [2, 5, 15, 45, 90];
 
 // MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli, exported as int8 ONNX by Xenova.
-// Used by the contradiction-check hook (edge-infer.mjs -> ll-search nli-batch).
-// Only downloaded when the `nli` cargo feature is enabled.
+// Only downloaded when the `nli` cargo feature is enabled (feature removed in
+// v1.28 — this block is preserved for a potential future re-enable path).
 const NLI_MODEL_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/onnx/model_quantized.onnx";
 const NLI_TOKENIZER_URL: &str = "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli/resolve/main/tokenizer.json";
 
-// SHA-256 pins of the exact artifacts that are know-good for the current
-// classifier head (label argmax in nli.rs assumes the MoritzLaurer ordering
-// and the spike eval validated 86% precision against these specific bytes).
+// SHA-256 pins of the exact artifacts that are know-good for the classifier
+// head (the spike eval validated 86% precision against these specific bytes).
 //
 // To upgrade the pinned model/tokenizer:
 //   1. download the new file

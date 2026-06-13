@@ -598,7 +598,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['nli-socket-fresh'],
-      name: 'NLI socket',
+      name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
       detail: 'plugin-data not available — skipped',
@@ -609,7 +609,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
   if (!existsSync(p)) {
     return makeCheck({
       id: CHECK_IDS['nli-socket-fresh'],
-      name: 'NLI socket',
+      name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
       detail: 'not running (no socket file)',
@@ -621,7 +621,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
     if (!stat.isSocket()) {
       return makeCheck({
         id: CHECK_IDS['nli-socket-fresh'],
-        name: 'NLI socket',
+        name: 'Duplicate-scan socket',
         status: SEVERITIES.fail,
         severity: SEVERITIES.warn,
         detail: 'stale (file at socket path is not a socket)',
@@ -630,7 +630,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
     }
     return makeCheck({
       id: CHECK_IDS['nli-socket-fresh'],
-      name: 'NLI socket',
+      name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
       detail: p,
@@ -639,7 +639,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
   } catch (err) {
     return makeCheck({
       id: CHECK_IDS['nli-socket-fresh'],
-      name: 'NLI socket',
+      name: 'Duplicate-scan socket',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: `stat error: ${err.message}`,

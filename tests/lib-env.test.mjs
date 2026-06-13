@@ -73,7 +73,7 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
   assert.equal(out.status, 0, out.stderr.toString());
   const parsed = JSON.parse(out.stdout.toString());
   assert.equal(parsed.debug, false);
-  assert.equal(parsed.threshold, 0.35);
+  assert.equal(parsed.threshold, 0.3);
   assert.equal(parsed.raceCap, 1500);
   assert.equal(parsed.ollama, 'http://localhost:11434');
   assert.equal(parsed.model, 'gemma4:e2b');

@@ -93,7 +93,7 @@ export const env = Object.freeze({
   ),
   LEARNING_LOOP_INJECTION_THRESHOLD: coerceNumber(
     process.env.LEARNING_LOOP_INJECTION_THRESHOLD,
-    0.35,
+    0.3, // keep in sync with HookConfig.INJECTION_THRESHOLD
   ),
 
   // --- Distribution / build ---

@@ -477,6 +477,11 @@ const BUDGETS = {
 function compareBaselines(current, baseline) {
   const report = { regressions: [], improvements: [], qualityRegressions: [] };
 
+  const currentPlatform = current.quality?.provenance?.platform;
+  const baselinePlatform = baseline.quality?.provenance?.platform;
+  const crossPlatform =
+    currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform;
+
   function check(name, curr, prev, thresholdPct = 20) {
     if (curr == null || prev == null || prev === 0) return;
     const pct = ((curr - prev) / prev) * 100;
@@ -570,6 +575,7 @@ function compareBaselines(current, baseline) {
             prev,
             curr,
             absoluteDrop: parseFloat(drop.toFixed(4)),
+            crossPlatform: crossPlatform || undefined,
           });
         } else if (drop < -QUALITY_DROP_ABS) {
           report.improvements.push({
@@ -697,21 +703,50 @@ async function main() {
   // Latency: soft gate, exit 0. Phase 1 flips to hard fail.
 
   // Quality: hard gate — a recall/ndcg drop is a real retrieval regression.
+  // Cross-platform: when the baseline was generated on a different OS/arch,
+  // demote metric regressions to loud warnings (ONNX arithmetic diverges
+  // between e.g. arm64 NEON and x86_64 AVX2). Bless a matching baseline via
+  // the "Regenerate quality baseline" workflow_dispatch on GitHub.
   const qualityRegressions = output.comparison?.qualityRegressions ?? [];
   if (qualityRegressions.length > 0) {
-    process.stderr.write(
-      `\nFAIL: ${qualityRegressions.length} retrieval-quality regression(s) (hard gate)\n`,
-    );
-    for (const r of qualityRegressions) {
-      if (r.error) {
-        process.stderr.write(`  ${r.name}: ${r.error}\n`);
-      } else {
-        process.stderr.write(
-          `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
-        );
+    const hardRegressions = qualityRegressions.filter((r) => !r.crossPlatform);
+    const softRegressions = qualityRegressions.filter((r) => r.crossPlatform);
+
+    if (softRegressions.length > 0) {
+      const bp = baseline.quality?.provenance?.platform ?? 'unknown';
+      const cp = output.quality?.provenance?.platform ?? 'unknown';
+      process.stderr.write(
+        `\nWARNING: ${softRegressions.length} quality regression(s) demoted to warning` +
+          ` — baseline platform (${bp}) differs from current (${cp}).\n` +
+          `  Bless a platform-matching baseline via the "Regenerate quality baseline"` +
+          ` workflow_dispatch on GitHub.\n`,
+      );
+      for (const r of softRegressions) {
+        if (r.error) {
+          process.stderr.write(`  ${r.name}: ${r.error}\n`);
+        } else {
+          process.stderr.write(
+            `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
+          );
+        }
       }
     }
-    process.exit(1);
+
+    if (hardRegressions.length > 0) {
+      process.stderr.write(
+        `\nFAIL: ${hardRegressions.length} retrieval-quality regression(s) (hard gate)\n`,
+      );
+      for (const r of hardRegressions) {
+        if (r.error) {
+          process.stderr.write(`  ${r.name}: ${r.error}\n`);
+        } else {
+          process.stderr.write(
+            `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
+          );
+        }
+      }
+      process.exit(1);
+    }
   }
 }
 

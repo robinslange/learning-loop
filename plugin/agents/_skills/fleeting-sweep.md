@@ -40,6 +40,8 @@ Precedence: `PROMOTED` beats everything (absorption is the best exit), and `STAL
 
 `NEEDS-DEEPEN` notes are a repair recommendation — present them but never offer them for archival; route the user to `/deepen "<note>"`. (Precedence between TYPEs is the script's job — see above.)
 
+**Cap at 5 (oldest first).** When the NEEDS-DEEPEN list exceeds 5 notes, surface only the 5 oldest and append a `+N more` line (e.g. `+8 more — run /health to see the full list`). This prevents a bulk backlog from dominating the report on the first /inbox run after upgrade.
+
 ## Gate
 
 Archival is **gated** -- only the user approves it. The destination is `_archive/1-fleeting/`. How the gate clears depends on who is executing this skill:

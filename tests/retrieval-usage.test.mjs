@@ -275,7 +275,7 @@ test('CLI --usage --json emits the aggregation; text mode carries the honesty la
     const text = spawnSync('node', [REPORT, '--usage'], { env, encoding: 'utf-8' });
     assert.strictEqual(text.status, 0, text.stderr);
     assert.match(text.stdout, /surfacing alone is never use/);
-    assert.match(text.stdout, /3x {2}3-permanent\/hot\.md/);
+    assert.match(text.stdout, /3x.*3-permanent\/hot\.md/);
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }

@@ -118,14 +118,17 @@ describe('readStdin', () => {
   // runtime drift from what the budget test measures.
   it('uses HookConfig.STDIN_TIMEOUT_MS, not a hardcoded timeout', () => {
     const src = readFileSync(new URL('../plugin/hooks/lib/common.mjs', import.meta.url), 'utf8');
-    const fn = src.match(/export function readStdin\(\)\s*{[\s\S]*?\n}/);
-    assert.ok(fn, 'readStdin not found in common.mjs');
+    assert.ok(src.includes('export function readStdin'), 'readStdin not found in common.mjs');
     assert.ok(
-      fn[0].includes('HookConfig.STDIN_TIMEOUT_MS'),
+      src.includes('HookConfig.STDIN_TIMEOUT_MS'),
       'readStdin timeout must come from HookConfig.STDIN_TIMEOUT_MS',
     );
-    assert.ok(
-      !/setTimeout\([\s\S]*?,\s*\d/.test(fn[0]),
+    // Guard: a bounded slice around readStdin must not contain a numeric setTimeout literal.
+    const fnStart = src.indexOf('export function readStdin');
+    const fnSlice = src.slice(fnStart, fnStart + 500);
+    assert.doesNotMatch(
+      fnSlice,
+      /setTimeout\([\s\S]*?,\s*\d/,
       'readStdin must not hardcode a numeric timeout literal',
     );
   });

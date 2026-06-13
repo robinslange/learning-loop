@@ -4,9 +4,31 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Retrieval-quality regression gate.** `bench.mjs` gains a quality variant that runs `ll-search eval-funnel` against a seeded fixture vault across both title-shaped and long natural-language query distributions, with a committed baseline and a CI job that hard-fails on a >3% absolute drop in recall@10/ndcg@10. The gate fails closed on eval-pipeline errors; CI uploads metrics artifacts and a `workflow_dispatch` bless path regenerates the baseline on ubuntu.
+- **Warm duplicate gate.** The watch daemon's UDS server now serves `duplicate-scan` requests with the embedding model kept warm (~430ms vs 0.8–3.7s subprocess cold start); `pre-write-check` tries the socket first with a budget-aware subprocess fallback, logs distinct `duplicate-gate-timeout` / stale-daemon codes, and a new `duplicate-gate-health` doctor check surfaces repeated failures.
+- **`filename_style` config** (`kebab` | `spaces` | `auto`, default auto-detect from the vault's existing notes): new vault notes that diverge from the vault's filename convention get a non-blocking pre-write advisory with a suggested rename. The kebab-case filename rule is now stated in the canonical capture-rules and the `/init` vault template.
+- **Shadow→live injection path.** A new `injection-shadow-gate` health check evaluates the go/no-go criteria over post-calibration shadow logs and nudges once ready; `/doctor` offers a consent-gated flip of `injection_mode` to live, or a dismissals state to hold in shadow.
+- **Usage telemetry.** `/reflect` classifies each surfaced note as used/ignored (machine-generated signals excluded) and emits `note-usage` provenance events; `/health` surfaces "frequently surfaced, never used" and "never retrieved in 90d" lists as deepen/archive candidates.
+- **Lifecycle exits.** `/verify` gains a `fleeting` scope; `/deepen` auto-pick considers gate-demoted `1-fleeting/` notes; the fleeting sweep gains a NEEDS-DEEPEN repair category capped at 2 attempts before routing to archival; resolved and ≤2-pass inbox notes get consent-gated archival to `_archive/0-inbox/`; synthesis-tagged notes are re-validated against the factual-signals heuristic with persisted verdicts.
+
+### Changed
+
+- **BM25 handles natural-language queries.** FTS queries are AND-first with an OR fallback (stopword-filtered, 32-token cap) when AND matches nothing, so the keyword signal participates on the JIT injection path instead of returning zero rows for long prompts.
+- **Injection gate recalibrated** from 0.35 to 0.30 (RRF-sum scale, derived from 18,360 logged shadow evaluations); the injected header now says `match score` instead of mislabeling RRF as cosine similarity.
+- **Session-start context assembly** dedupes project/global memory indexes, caps the learned-patterns and intentions sections, and orders capped sections ahead of unbounded ones so the 8KB trim can no longer evict the retrieval protocol or memory indexes. Stop-nudge thresholds raised to 512KB / 200 messages; `session-label` reads a 256KB transcript tail instead of the whole file.
+- **Refinement pipeline integrity.** The validator enforces the promised sentence-removal check (sentence-unit LCS, fenced code blocks included as opaque units), emits an upstream content hash, and `/reflect` re-reads before applying so stale decisions are dropped instead of clobbering; applied edits are provenance-stamped (source merge + wikilink).
+- **Eval honesty.** `eval-prf`/`eval-funnel` hold out the evaluated note from PPR seeds and mask its gold edges (the leak inflated the graph stage ~2.3×); the embedding model download is pinned to a revision.
+- **CI matrix.** The Node suite runs on ubuntu/macos/windows (windows `continue-on-error` pending triage); binary-gated suites assert non-skip; lefthook runs cargo test on `native/**` changes.
+- **`/ingest` worklist redesign.** The routing subagent returns a structured vault worklist and the driver fans out note-writer (subagents cannot spawn subagents), with artefact rows written directly by the driver, per-row failure reconciliation, and hook replay seeded from reported paths.
+- Onboarding accuracy: install.sh fails closed on platforms without prebuilt binaries (with a documented source-build path), federation skill §C matches the keyring-first identity contract, doctor/health-check fix commands run verbatim, and the cross-platform smoke tests work on installed machines.
+
 ### Removed
 
-- **NLI contradiction-edge subsystem removed.** The DeBERTa-backed `challenges_rebuttal` / `nli_supports` edge types and their promotion-gate buckets have been fully removed after an audit showed 12% precision and zero recorded outcomes. Counter-argument detection now relies exclusively on the regex `challenges_*` classifier and embedding-similarity signals, which were already the primary path. Existing installs should run `node plugin/scripts/nli-cleanup.mjs` to purge residual `source_graph='nli'` rows from `edges.db`, drop unused NLI-bucket columns from `promotion_log`, and strip `nli_qualified_by` / `nli_resolved` / `nli_tension*` frontmatter fields from vault notes. **MIGRATION**
+- **`/inbox --skip-nli` flag** (meaningless after the NLI removal below).
+- **`/doctor` no longer auto-fixes `nli-socket-fresh`.** The fix row was removed with the NLI subsystem. A stale `nli.sock` file left by a pre-upgrade install must be removed manually: `rm <PLUGIN_DATA>/nli.sock`, then restart `ll-watch`.
+- **NLI contradiction-edge subsystem removed.** The DeBERTa-backed `challenges_rebuttal` / `nli_supports` edge types and their promotion-gate buckets have been fully removed after an audit showed 12% precision and zero recorded outcomes. Counter-argument detection now relies exclusively on the regex `challenges_*` classifier and embedding-similarity signals, which were already the primary path. Existing installs should run `node PLUGIN/scripts/nli-cleanup.mjs` (where `PLUGIN` is the installed plugin directory — see `guide/troubleshooting.md`) to purge residual `source_graph='nli'` rows from `edges.db`, drop unused NLI-bucket columns from `promotion_log`, and strip `nli_qualified_by` / `nli_resolved` / `nli_tension*` frontmatter fields from vault notes. **MIGRATION**
 
 ## v1.27.3
 
