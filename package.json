@@ -1,6 +1,6 @@
 {
   "name": "learning-loop",
-  "version": "1.28.2",
+  "version": "1.28.3",
   "private": true,
   "engines": {
     "node": ">=22"

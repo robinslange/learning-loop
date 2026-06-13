@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.28.3
+
 ### Fixed
 
 - **CI binary-gated guard no longer flaky.** The "must not skip" step re-ran the binary-gated suites in a second process that could resolve the ll-search binary differently from the main run, blocking releases on a non-bug. The pinned binary is now installed _before_ `npm test` (Linux) so the gated suites execute in the normal run, with a direct `hasBinary()` assertion replacing the second TAP parse.
