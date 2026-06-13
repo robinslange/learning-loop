@@ -802,18 +802,29 @@ test(
         ctx.includes('GLOBAL-MEM-SENTINEL'),
         'global memory index lines must survive: capped indexes must be assembled ahead of patterns/intentions bulk',
       );
-      // The oversized patterns section itself must be capped (pointer marker),
-      // not injected wholesale.
+      // The oversized patterns section is the lowest-priority bulk: it must be
+      // assembled AFTER the memory indexes (so it, not they, absorbs the tail
+      // trim). When it survives, its content must be the byte-capped form (its
+      // own pointer), never injected wholesale. But because three 3KB-capped
+      // sections plus the protocol exceed the 8KB stdout budget by design, the
+      // patterns section is the expected casualty of the final tail trim — so
+      // its cap-pointer only has to survive when the section itself wasn't the
+      // trimmed tail.
       const patternsAt = ctx.indexOf('## Learned Patterns');
       if (patternsAt !== -1) {
         assert.ok(
           ctx.indexOf('## Auto-memory index for this project') < patternsAt,
           'memory indexes must be assembled before learned patterns',
         );
-        assert.ok(
-          ctx.includes('[truncated — full file at'),
-          'oversized learned patterns must be byte-capped with a pointer to the full file',
-        );
+        const patternsIsTrimmedTail = ctx.trimEnd().endsWith('…[truncated]')
+          ? ctx.lastIndexOf('…[truncated]') > patternsAt
+          : false;
+        if (!patternsIsTrimmedTail) {
+          assert.ok(
+            ctx.includes('[truncated — full file at'),
+            'an intact learned-patterns section must carry its own byte-cap pointer',
+          );
+        }
       }
     } finally {
       r.cleanup();
