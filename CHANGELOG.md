@@ -17,6 +17,14 @@ All notable changes to this project are documented here. The format is based on 
   no claims (`stats.gatherMode` records which path ran). This is the wiring that
   turns the engine into actual token savings — the built-in `/deep-research`
   cannot call the engine on its own.
+- **Research engine reports which path ran.** `/learning-loop:research` returns a
+  top-level `engine`/`gatherMode` field and logs a prominent live banner
+  (librarian vs Claude-fallback), so a silent fallback can't masquerade as a
+  successful offload.
+- **Research engine fetches sources concurrently.** Fetch is parallelized (I/O-
+  bound); extraction stays serial because Ollama serializes concurrent requests to
+  one local model. Output order is guaranteed structurally (a projection of a
+  `Promise.all` index-aligned array), not by convention.
 - **Single consolidated librarian model.** Daemon triage and research share one
   model (`librarian.model`, default `gemma3:12b`) on the same Ollama server with a
   long `keep_alive` (`librarian.keep_alive`, default `30m`) so it stays resident

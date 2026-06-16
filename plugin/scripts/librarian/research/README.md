@@ -58,8 +58,8 @@ thrash). The model tier is chosen at `/init` from system RAM.
 Research needs real recall. On the e2b tier (16–32GB machines) the CLI refuses
 (`researchModelOk` is false below 12b) and exits 3 with a message; triage still
 runs and `/deep-research` falls back to its Claude-native path. The benchmark
-(`bench.mjs`) showed e2b produces schema-valid output but misses substantive
-claims, which is why the gate exists.
+(dev-only `bench/librarian-research.mjs`) showed e2b produces schema-valid output
+but misses substantive claims, which is why the gate exists.
 
 ## Architecture
 

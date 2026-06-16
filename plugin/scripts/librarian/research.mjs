@@ -69,24 +69,40 @@ export async function runResearch(question, opts = {}) {
   }
   const picked = urls.slice(0, maxFetch);
 
-  const sources = [];
-  const claims = [];
-  const skipped = [];
-  for (const r of picked) {
-    const fetched = await fetchTextFn(r.url);
-    if (!fetched.ok) {
-      skipped.push({ url: r.url, reason: fetched.reason });
+  // Fetch is I/O-bound: fetch all picked URLs concurrently. Promise.all keeps the
+  // result array index-aligned to `picked` regardless of completion order.
+  const fetched = await Promise.all(picked.map((r) => fetchTextFn(r.url)));
+
+  // Extraction is GPU-bound on one local model — Ollama serializes concurrent
+  // requests, so parallel extracts only add overhead. Extract serially, but write
+  // each picked URL's result into its OWN slot. The output is a projection of this
+  // index-aligned array, so output order is the `picked` order by construction —
+  // there is no completion-ordered accumulator that could diverge from it.
+  const results = new Array(picked.length);
+  for (let i = 0; i < picked.length; i++) {
+    const r = picked[i];
+    const f = fetched[i];
+    if (!f.ok) {
+      results[i] = { skipped: { url: r.url, reason: f.reason } };
       continue;
     }
-    const { sourceQuality, claims: cs } = await extractFn(fetched.text, question, {
+    const { sourceQuality, claims: cs } = await extractFn(f.text, question, {
       model,
       keepAlive,
     });
-    sources.push({ url: r.url, title: r.title, sourceQuality, fetchOk: true });
-    for (const c of cs) claims.push({ ...c, url: r.url });
+    results[i] = {
+      source: { url: r.url, title: r.title, sourceQuality, fetchOk: true },
+      claims: cs.map((c) => ({ ...c, url: r.url })),
+    };
   }
 
-  return { question, angles, sources, claims, skipped };
+  return {
+    question,
+    angles,
+    sources: results.filter((x) => x.source).map((x) => x.source),
+    claims: results.flatMap((x) => x.claims ?? []),
+    skipped: results.filter((x) => x.skipped).map((x) => x.skipped),
+  };
 }
 
 function parseArgs(argv) {

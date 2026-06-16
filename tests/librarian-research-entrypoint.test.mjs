@@ -88,6 +88,55 @@ describe('runResearch', () => {
     assert.equal(bundle.sources.length, 3);
   });
 
+  it('fetches sources concurrently but extracts serially', async () => {
+    const angles = [{ label: 'a', query: 'q' }];
+    const searchFn = async () =>
+      Array.from({ length: 4 }, (_, i) => ({ url: 'https://s' + i + '.com', title: '', snippet: '' }));
+
+    let fetchInFlight = 0;
+    let maxFetchConcurrency = 0;
+    const fetchTextFn = async () => {
+      fetchInFlight++;
+      maxFetchConcurrency = Math.max(maxFetchConcurrency, fetchInFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      fetchInFlight--;
+      return { text: 'body', ok: true, reason: 'ok' };
+    };
+
+    let extractInFlight = 0;
+    let maxExtractConcurrency = 0;
+    const extractFn = async () => {
+      extractInFlight++;
+      maxExtractConcurrency = Math.max(maxExtractConcurrency, extractInFlight);
+      await new Promise((r) => setTimeout(r, 20));
+      extractInFlight--;
+      return { sourceQuality: 'blog', claims: [] };
+    };
+
+    await runResearch('q?', { angles, searchFn, fetchTextFn, extractFn });
+    // Fetches overlap (I/O-bound); extracts never overlap (Ollama serializes a single model).
+    assert.ok(maxFetchConcurrency > 1, `expected concurrent fetch, saw max ${maxFetchConcurrency}`);
+    assert.equal(maxExtractConcurrency, 1, `expected serial extract, saw max ${maxExtractConcurrency}`);
+  });
+
+  it('preserves source/claim order regardless of fetch completion order', async () => {
+    const angles = [{ label: 'a', query: 'q' }];
+    const searchFn = async () =>
+      Array.from({ length: 3 }, (_, i) => ({ url: 'https://s' + i + '.com', title: '', snippet: '' }));
+    // s0 resolves slowest, s2 fastest — output must still be s0, s1, s2.
+    const delays = { 'https://s0.com': 30, 'https://s1.com': 15, 'https://s2.com': 1 };
+    const fetchTextFn = async (url) => {
+      await new Promise((r) => setTimeout(r, delays[url]));
+      return { text: 'body', ok: true, reason: 'ok' };
+    };
+    const extractFn = async (_t, _q, _o) => ({ sourceQuality: 'blog', claims: [] });
+    const bundle = await runResearch('q?', { angles, searchFn, fetchTextFn, extractFn });
+    assert.deepEqual(
+      bundle.sources.map((s) => s.url),
+      ['https://s0.com', 'https://s1.com', 'https://s2.com'],
+    );
+  });
+
   it('defaults to a single angle from the question when none given', async () => {
     let seenQuery;
     const searchFn = async (q) => {

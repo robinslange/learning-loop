@@ -1,17 +1,17 @@
-// plugin/scripts/librarian/research/bench.mjs : Phase 0 model benchmark.
+// bench/librarian-research.mjs : Phase 0 model benchmark.
 //
 // Runs the EXTRACT prompt against candidate models on fixture sources and prints
-// results side by side. Not part of the shipped pipeline; selects the extraction
-// model from evidence. Run manually:
-//   node plugin/scripts/librarian/research/bench.mjs "<research question>"
+// results side by side. Dev-only (lives outside plugin/ so it never ships);
+// selects the extraction model from evidence. Run manually:
+//   node bench/librarian-research.mjs "<research question>"
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { EXTRACT_PROMPT, EXTRACT_FORMAT } from './extract.mjs';
-import { DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+import { EXTRACT_PROMPT, EXTRACT_FORMAT } from '../plugin/scripts/librarian/research/extract.mjs';
+import { DEFAULT_OLLAMA_URL } from '../plugin/scripts/lib/defaults.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const FIXTURES = join(HERE, 'fixtures');
+const FIXTURES = join(HERE, 'research-fixtures');
 const MODELS = ['gemma4:e2b', 'gemma3:12b', 'gemma3:27b'];
 const QUESTION =
   process.argv[2] || 'What does the evidence say about caffeine half-life in adults?';

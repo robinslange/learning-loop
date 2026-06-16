@@ -241,6 +241,7 @@ if (bundle && bundleClaims.length > 0) {
     byUrl.get(c.url).claims.push({ claim: c.claim, quote: c.quote, importance: c.importance })
   }
   allSources = [...byUrl.values()].map(normalizeSource)
+  log("✅ ENGINE: local librarian — search/fetch/extract ran OFF-Claude (token savings active)")
   log("librarian: " + allSources.length + " sources → " + bundleClaims.length + " claims" +
       (bundle.skipped && bundle.skipped.length ? " (" + bundle.skipped.length + " skipped)" : ""))
 } else {
@@ -251,7 +252,7 @@ if (bundle && bundleClaims.length > 0) {
     : probe
       ? "librarian unavailable (exit " + probe.exitCode + (probe.stderr ? ": " + probe.stderr.trim() : "") + ")"
       : "librarian probe returned no result"
-  log("Falling back to Claude WebSearch — " + librarianNote)
+  log("⚠️  ENGINE: Claude WebSearch FALLBACK — librarian NOT used (" + librarianNote + "). No token savings this run.")
 
   const SEARCH_PROMPT = (angle) =>
     "## Web Searcher: " + angle.label + "\n\n" +
@@ -412,6 +413,10 @@ if (!report) {
 
 return {
   question: QUESTION,
+  gatherMode,
+  engine: gatherMode === "librarian"
+    ? "local librarian (gemma) — search/fetch/extract ran off-Claude"
+    : "Claude WebSearch fallback — librarian NOT used (" + (librarianNote || "unknown reason") + ")",
   ...report,
   refuted: killed.map(c => ({ claim: c.claim, vote: (c.verdicts.length - c.refutedVotes) + "-" + c.refutedVotes, source: c.sourceUrl })),
   sources: allSources.map(s => ({ url: s.url, quality: s.sourceQuality, angle: s.angle, claimCount: s.claims.length })),
@@ -433,6 +438,12 @@ function shellQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
 
 ## Notes
 
+- **Always report which engine ran.** When you present the result, state the
+  `gatherMode`/`engine` field to the user up front — `librarian` (offload worked,
+  token savings active) vs `claude-fallback` (librarian NOT used + the reason). A
+  silent fallback otherwise looks identical to a successful offload; surfacing it
+  is the only way the user can tell. See
+  [[feedback_graceful_fallback_masks_offload_failure]].
 - **The win is the Gather phase.** In librarian mode, source prose never enters
   Claude's context — only one-line claims with quotes. Scope is one agent call;
   Verify and Synthesize run over claims, not documents.
