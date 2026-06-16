@@ -7,6 +7,11 @@ import {
   EXTRACT_PROMPT,
 } from '../plugin/scripts/librarian/research/extract.mjs';
 
+const fakeFetch = (obj) => async (_url, _opts) => ({
+  ok: true,
+  json: async () => ({ message: { content: JSON.stringify(obj) } }),
+});
+
 describe('extract constants', () => {
   it('exports EXTRACT_FORMAT and EXTRACT_PROMPT for reuse', () => {
     assert.equal(EXTRACT_FORMAT.type, 'object');
@@ -77,7 +82,7 @@ describe('extractClaims', () => {
   it('returns empty bundle on HTTP error', async () => {
     const fetchOverride = async () => ({ ok: false, status: 500, json: async () => ({}) });
     const out = await extractClaims('t', 'q', { fetchOverride });
-    assert.deepEqual(out, { sourceQuality: 'unreliable', claims: [] });
+    assert.deepEqual(out, { sourceQuality: 'unreliable', sourceId: null, claims: [] });
   });
 
   it('returns empty bundle on unparseable content', async () => {
@@ -86,7 +91,7 @@ describe('extractClaims', () => {
       json: async () => ({ message: { content: 'not json' } }),
     });
     const out = await extractClaims('t', 'q', { fetchOverride });
-    assert.deepEqual(out, { sourceQuality: 'unreliable', claims: [] });
+    assert.deepEqual(out, { sourceQuality: 'unreliable', sourceId: null, claims: [] });
   });
 
   it('returns empty bundle on network throw', async () => {
@@ -94,6 +99,35 @@ describe('extractClaims', () => {
       throw new Error('boom');
     };
     const out = await extractClaims('t', 'q', { fetchOverride });
-    assert.deepEqual(out, { sourceQuality: 'unreliable', claims: [] });
+    assert.deepEqual(out, { sourceQuality: 'unreliable', sourceId: null, claims: [] });
+  });
+
+  it('captures sourceId for an academic source', async () => {
+    const res = await extractClaims('PubMed page text', 'q', {
+      fetchOverride: fakeFetch({
+        sourceQuality: 'primary',
+        sourceId: { kind: 'pmid', id: '37541198', author: 'Smith', year: 2023 },
+        claims: [{ claim: 'X', quote: 'X', importance: 'central' }],
+      }),
+    });
+    assert.deepEqual(res.sourceId, { kind: 'pmid', id: '37541198', author: 'Smith', year: 2023 });
+  });
+
+  it('returns sourceId null for a non-academic source', async () => {
+    const res = await extractClaims('blog text', 'q', {
+      fetchOverride: fakeFetch({
+        sourceQuality: 'blog',
+        sourceId: null,
+        claims: [{ claim: 'Y', quote: 'Y', importance: 'supporting' }],
+      }),
+    });
+    assert.equal(res.sourceId, null);
+  });
+
+  it('defaults sourceId to null when the field is absent', async () => {
+    const res = await extractClaims('text', 'q', {
+      fetchOverride: fakeFetch({ sourceQuality: 'secondary', claims: [] }),
+    });
+    assert.equal(res.sourceId, null);
   });
 });
