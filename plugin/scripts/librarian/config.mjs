@@ -67,6 +67,7 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
     tagPrompt: libCfg.tag_prompt || TAG_PROMPT,
     duplicatePrompt: libCfg.duplicate_prompt || DUPLICATE_PROMPT,
     structuralTags: new Set(libCfg.structural_tags || DEFAULT_STRUCTURAL_TAGS),
+    keepAlive: libCfg.keep_alive || '30m',
   });
 
   _cache = result;
@@ -84,6 +85,14 @@ export function __test_resetCache() {
 
 // Expose for tests without a named export collision
 export const __test__ = { resetCache: __test_resetCache };
+
+// Research extraction needs real recall; e2b passed Phase 0's schema check but
+// missed substantive claims. Gate research on model size (12b+).
+const RESEARCH_CAPABLE = /:(?:e)?(\d+)b$/i;
+export function researchModelOk(model) {
+  const m = RESEARCH_CAPABLE.exec(model || '');
+  return m ? Number(m[1]) >= 12 : false;
+}
 
 const DEFAULT_STRUCTURAL_TAGS = ['literature', 'counterpoint', 'synthesis', 'excalidraw'];
 
