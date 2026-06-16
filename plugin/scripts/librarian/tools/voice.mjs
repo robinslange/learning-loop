@@ -9,6 +9,7 @@
 import { basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState } from '../queue.mjs';
 import { logError } from '../../lib/log.mjs';
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
 
 /**
  * Classify a note title as "claim" or "topic" using ollama structured output.
@@ -26,8 +27,8 @@ import { logError } from '../../lib/log.mjs';
 export async function voiceCheck(notePath, deps = {}) {
   const title = basename(notePath, '.md');
   const {
-    ollamaUrl = 'http://localhost:11434',
-    model = 'gemma4:e2b',
+    ollamaUrl = DEFAULT_OLLAMA_URL,
+    model = DEFAULT_MODEL,
     voicePrompt,
     fetchOverride,
     logFn,

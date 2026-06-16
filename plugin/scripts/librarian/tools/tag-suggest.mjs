@@ -9,6 +9,7 @@
 import { basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState } from '../queue.mjs';
 import { logError } from '../../lib/log.mjs';
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
 
 const DEFAULT_TAG_PROMPT = `You add tags to an Obsidian note. The tags must come from the supplied vocabulary list.
 
@@ -39,8 +40,8 @@ Tags like "cognition", "design", or "psychology" are usually too broad. Prefer n
  */
 export async function tagCheck(notePath, deps = {}) {
   const {
-    ollamaUrl = 'http://localhost:11434',
-    model = 'gemma4:e2b',
+    ollamaUrl = DEFAULT_OLLAMA_URL,
+    model = DEFAULT_MODEL,
     tagPrompt = DEFAULT_TAG_PROMPT,
     bodyOverride,
     existingTagsOverride,
@@ -134,7 +135,7 @@ export async function tagCheck(notePath, deps = {}) {
       target: notePath,
       suggested_tags: cleaned,
       existing_tags: existingTags,
-      reason: 'tag classifier (gemma4:e2b structured output)',
+      reason: 'tag classifier (structured output)',
     });
   } catch (err) {
     log('tagCheck parse error for ' + notePath + ': ' + err.message + '\n');

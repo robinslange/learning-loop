@@ -8,13 +8,14 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EXTRACT_PROMPT, EXTRACT_FORMAT } from './extract.mjs';
+import { DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, 'fixtures');
 const MODELS = ['gemma4:e2b', 'gemma3:12b', 'gemma3:27b'];
 const QUESTION =
   process.argv[2] || 'What does the evidence say about caffeine half-life in adults?';
-const OLLAMA = process.env.OLLAMA_URL || 'http://localhost:11434';
+const OLLAMA = process.env.OLLAMA_URL || DEFAULT_OLLAMA_URL;
 
 async function extract(model, text) {
   const t0 = Date.now();

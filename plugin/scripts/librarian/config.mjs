@@ -13,6 +13,7 @@ import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { getConfig, getPluginData, resetConfigCache } from '../lib/config.mjs';
 import { env } from '../lib/env.mjs';
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../lib/defaults.mjs';
 import { logError } from '../lib/log.mjs';
 
 let _cache = null;
@@ -54,11 +55,11 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
 
   const result = Object.freeze({
     enabled: libCfg.enabled !== false,
-    model: libCfg.model || env.MODEL || 'gemma4:e2b',
+    model: libCfg.model || env.MODEL || DEFAULT_MODEL,
     paceMs: (libCfg.pace_seconds || 2) * 1000,
     queueCap: libCfg.queue_cap || 200,
     // env.OLLAMA_URL takes precedence over libCfg.ollama_url (semantic widening: PR note)
-    ollamaUrl: env.OLLAMA_URL || libCfg.ollama_url || 'http://localhost:11434',
+    ollamaUrl: env.OLLAMA_URL || libCfg.ollama_url || DEFAULT_OLLAMA_URL,
     pauseOnBattery: libCfg.pause_on_battery !== false,
     batteryPollMs: (libCfg.battery_poll_seconds || 60) * 1000,
     linkPrompt: libCfg.link_prompt || LINK_PROMPT,
