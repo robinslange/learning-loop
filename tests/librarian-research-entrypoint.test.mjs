@@ -1,7 +1,22 @@
 // tests/librarian-research-entrypoint.test.mjs : runResearch orchestration.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { runResearch } from '../plugin/scripts/librarian/research.mjs';
+import { runResearch, resolveModel } from '../plugin/scripts/librarian/research.mjs';
+
+describe('resolveModel', () => {
+  it('prefers an explicit model arg over config', () => {
+    assert.deepEqual(resolveModel('gemma3:27b', 'gemma3:12b'), { model: 'gemma3:27b', ok: true });
+  });
+
+  it('falls back to the config model when no arg', () => {
+    assert.deepEqual(resolveModel(undefined, 'gemma3:12b'), { model: 'gemma3:12b', ok: true });
+  });
+
+  it('reports ok:false when the resolved model is below the research tier', () => {
+    assert.deepEqual(resolveModel(undefined, 'gemma4:e2b'), { model: 'gemma4:e2b', ok: false });
+    assert.deepEqual(resolveModel('gemma3:1b', 'gemma3:12b'), { model: 'gemma3:1b', ok: false });
+  });
+});
 
 describe('runResearch', () => {
   it('dedups URLs across angles, fetches, extracts, builds bundle', async () => {

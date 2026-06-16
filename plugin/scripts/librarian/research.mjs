@@ -15,8 +15,23 @@ import { pathToFileURL } from 'node:url';
 import { search as braveSearch } from './research/brave.mjs';
 import { fetchText as defaultFetchText } from './research/fetch.mjs';
 import { extractClaims } from './research/extract.mjs';
+import { loadLibrarianConfig, researchModelOk } from './config.mjs';
 
 const DEFAULT_MAX_FETCH = 15;
+
+/**
+ * Resolve which model the CLI should use: an explicit --model wins, else the
+ * configured librarian.model. Returns { model, ok } where ok gates whether the
+ * model is research-capable (12b+). The orchestrator stays model-agnostic; the
+ * tier gate lives here at the CLI edge so research refuses on the e2b tier
+ * instead of silently producing thin claims.
+ * @param {string|undefined} argModel
+ * @param {string} cfgModel
+ */
+export function resolveModel(argModel, cfgModel) {
+  const model = argModel || cfgModel;
+  return { model, ok: researchModelOk(model) };
+}
 
 /**
  * @param {string} question
@@ -90,10 +105,18 @@ async function main() {
     );
     process.exit(2);
   }
+  const { model, ok } = resolveModel(args.model, loadLibrarianConfig().model);
+  if (!ok) {
+    process.stderr.write(
+      `research: model "${model}" is below the research tier (needs 12b+). ` +
+        `Set librarian.model to gemma3:12b, or let /deep-research use its Claude-native path.\n`,
+    );
+    process.exit(3);
+  }
   const bundle = await runResearch(args.question, {
     angles: args.angles,
     maxFetch: args.maxFetch,
-    model: args.model,
+    model,
   });
   if (args.json) {
     process.stdout.write(JSON.stringify(bundle, null, 2));
