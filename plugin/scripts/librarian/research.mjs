@@ -39,6 +39,7 @@ export function resolveModel(argModel, cfgModel) {
  *   angles?: {label:string, query:string}[],
  *   maxFetch?: number,
  *   model?: string,
+ *   keepAlive?: string,
  *   searchFn?: (q:string)=>Promise<{url:string,title:string,snippet:string}[]>,
  *   fetchTextFn?: (url:string)=>Promise<{text:string,ok:boolean,reason:string}>,
  *   extractFn?: (text:string,q:string,opts:object)=>Promise<{sourceQuality:string,claims:object[]}>,
@@ -49,9 +50,10 @@ export async function runResearch(question, opts = {}) {
     angles = [{ label: 'general', query: question }],
     maxFetch = DEFAULT_MAX_FETCH,
     model,
+    keepAlive,
     searchFn = (q) => braveSearch(q),
     fetchTextFn = (url) => defaultFetchText(url),
-    extractFn = (text, q) => extractClaims(text, q, { model }),
+    extractFn = (text, q, o) => extractClaims(text, q, o),
   } = opts;
 
   const searchResults = await Promise.all(angles.map((a) => searchFn(a.query)));
@@ -76,7 +78,10 @@ export async function runResearch(question, opts = {}) {
       skipped.push({ url: r.url, reason: fetched.reason });
       continue;
     }
-    const { sourceQuality, claims: cs } = await extractFn(fetched.text, question, { model });
+    const { sourceQuality, claims: cs } = await extractFn(fetched.text, question, {
+      model,
+      keepAlive,
+    });
     sources.push({ url: r.url, title: r.title, sourceQuality, fetchOk: true });
     for (const c of cs) claims.push({ ...c, url: r.url });
   }
@@ -105,7 +110,8 @@ async function main() {
     );
     process.exit(2);
   }
-  const { model, ok } = resolveModel(args.model, loadLibrarianConfig().model);
+  const cfg = loadLibrarianConfig();
+  const { model, ok } = resolveModel(args.model, cfg.model);
   if (!ok) {
     process.stderr.write(
       `research: model "${model}" is below the research tier (needs 12b+). ` +
@@ -117,6 +123,7 @@ async function main() {
     angles: args.angles,
     maxFetch: args.maxFetch,
     model,
+    keepAlive: cfg.keepAlive,
   });
   if (args.json) {
     process.stdout.write(JSON.stringify(bundle, null, 2));

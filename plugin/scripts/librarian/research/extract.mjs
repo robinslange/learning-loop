@@ -47,35 +47,38 @@ const EMPTY = { sourceQuality: 'unreliable', claims: [] };
  * Extract claims from one source's text via local Ollama structured output. Never throws.
  * @param {string} text
  * @param {string} question
- * @param {{ ollamaUrl?: string, model?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
+ * @param {{ ollamaUrl?: string, model?: string, keepAlive?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
  * @returns {Promise<{ sourceQuality: string, claims: object[] }>}
  */
 export async function extractClaims(text, question, opts = {}) {
   const {
     ollamaUrl = DEFAULT_OLLAMA_URL,
     model = DEFAULT_MODEL,
+    keepAlive,
     timeoutMs = 120000,
     fetchOverride,
   } = opts;
   const fetchFn = fetchOverride || globalThis.fetch;
+  const body = {
+    model,
+    messages: [
+      { role: 'system', content: EXTRACT_PROMPT },
+      {
+        role: 'user',
+        content: 'Question: ' + question + '\n\nSource:\n' + text.slice(0, 12000),
+      },
+    ],
+    format: EXTRACT_FORMAT,
+    options: { temperature: 0 },
+    stream: false,
+  };
+  if (keepAlive !== undefined) body.keep_alive = keepAlive;
   let resp;
   try {
     resp = await fetchFn(`${ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: EXTRACT_PROMPT },
-          {
-            role: 'user',
-            content: 'Question: ' + question + '\n\nSource:\n' + text.slice(0, 12000),
-          },
-        ],
-        format: EXTRACT_FORMAT,
-        options: { temperature: 0 },
-        stream: false,
-      }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {

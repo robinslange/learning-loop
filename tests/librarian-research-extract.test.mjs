@@ -44,6 +44,36 @@ describe('extractClaims', () => {
     assert.equal(capturedBody.stream, false);
   });
 
+  it('includes keep_alive in the request body when provided', async () => {
+    let capturedBody;
+    const fetchOverride = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: JSON.stringify({ sourceQuality: 'blog', claims: [] }) },
+        }),
+      };
+    };
+    await extractClaims('t', 'q', { keepAlive: '30m', fetchOverride });
+    assert.equal(capturedBody.keep_alive, '30m');
+  });
+
+  it('omits keep_alive when not provided', async () => {
+    let capturedBody;
+    const fetchOverride = async (url, opts) => {
+      capturedBody = JSON.parse(opts.body);
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: JSON.stringify({ sourceQuality: 'blog', claims: [] }) },
+        }),
+      };
+    };
+    await extractClaims('t', 'q', { fetchOverride });
+    assert.equal('keep_alive' in capturedBody, false);
+  });
+
   it('returns empty bundle on HTTP error', async () => {
     const fetchOverride = async () => ({ ok: false, status: 500, json: async () => ({}) });
     const out = await extractClaims('t', 'q', { fetchOverride });

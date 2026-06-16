@@ -55,6 +55,19 @@ describe('runResearch', () => {
     assert.equal(bundle.question, 'does q?');
   });
 
+  it('threads keepAlive through to extractFn', async () => {
+    let seenOpts;
+    const angles = [{ label: 'a', query: 'q' }];
+    const searchFn = async () => [{ url: 'https://x.com', title: 'X', snippet: '' }];
+    const fetchTextFn = async () => ({ text: 'body', ok: true, reason: 'ok' });
+    const extractFn = async (_text, _q, opts) => {
+      seenOpts = opts;
+      return { sourceQuality: 'blog', claims: [] };
+    };
+    await runResearch('q?', { angles, keepAlive: '30m', searchFn, fetchTextFn, extractFn });
+    assert.equal(seenOpts.keepAlive, '30m');
+  });
+
   it('respects maxFetch', async () => {
     const angles = [{ label: 'a', query: 'q' }];
     const searchFn = async () =>
