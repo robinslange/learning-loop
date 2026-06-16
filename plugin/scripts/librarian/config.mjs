@@ -11,10 +11,59 @@
 
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { getConfig, getPluginData, resetConfigCache } from '../lib/config.mjs';
 import { env } from '../lib/env.mjs';
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../lib/defaults.mjs';
 import { logError } from '../lib/log.mjs';
+
+/** Read an API key from the macOS Keychain by service name (account=$USER),
+ *  matching the brave.mjs pattern. Null on any failure. */
+function keychainKey(ref) {
+  try {
+    return execFileSync(
+      'security',
+      ['find-generic-password', '-a', process.env.USER, '-s', ref, '-w'],
+      { encoding: 'utf-8', timeout: 5000 },
+    ).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the model provider from librarian config. Back-compat: with no
+ * `provider` block (or one without `kind`), synthesize the existing Ollama
+ * behavior from ollamaUrl+model. With `provider.kind === 'openai'`, build an
+ * OpenAI-compatible provider and resolve its key from the Keychain by
+ * `api_key_ref` (injectable as keyResolver for tests). The api key is omitted
+ * from the object when there's no ref or it doesn't resolve.
+ *
+ * @param {object} libCfg - the raw `librarian` config block
+ * @param {{ ollamaUrl?: string, model?: string, keyResolver?: (ref:string)=>string|null }} [ctx]
+ * @returns {{ kind: 'ollama'|'openai', baseUrl: string, model: string, apiKey?: string }}
+ */
+export function resolveProvider(libCfg = {}, ctx = {}) {
+  const { ollamaUrl = DEFAULT_OLLAMA_URL, model = DEFAULT_MODEL, keyResolver = keychainKey } = ctx;
+  const p = libCfg.provider;
+
+  if (!p || p.kind !== 'openai') {
+    return {
+      kind: 'ollama',
+      baseUrl: p?.base_url || ollamaUrl,
+      model: p?.model || model,
+    };
+  }
+
+  const provider = {
+    kind: 'openai',
+    baseUrl: p.base_url,
+    model: p.model,
+  };
+  const key = p.api_key_ref ? keyResolver(p.api_key_ref) : null;
+  if (key) provider.apiKey = key;
+  return provider;
+}
 
 let _cache = null;
 let _cacheKey = '';
@@ -53,13 +102,19 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
   const cfg = getConfig();
   const libCfg = cfg.librarian || {};
 
+  const model = libCfg.model || env.MODEL || DEFAULT_MODEL;
+  const ollamaUrl = env.OLLAMA_URL || libCfg.ollama_url || DEFAULT_OLLAMA_URL;
+
   const result = Object.freeze({
     enabled: libCfg.enabled !== false,
-    model: libCfg.model || env.MODEL || DEFAULT_MODEL,
+    model,
     paceMs: (libCfg.pace_seconds || 2) * 1000,
     queueCap: libCfg.queue_cap || 200,
     // env.OLLAMA_URL takes precedence over libCfg.ollama_url (semantic widening: PR note)
-    ollamaUrl: env.OLLAMA_URL || libCfg.ollama_url || DEFAULT_OLLAMA_URL,
+    ollamaUrl,
+    // Resolved model provider: ollama (default/back-compat) or an OpenAI-compatible
+    // remote (GLM/DeepSeek via Fireworks etc.). One surface for all model calls.
+    provider: resolveProvider(libCfg, { ollamaUrl, model }),
     pauseOnBattery: libCfg.pause_on_battery !== false,
     batteryPollMs: (libCfg.battery_poll_seconds || 60) * 1000,
     linkPrompt: libCfg.link_prompt || LINK_PROMPT,

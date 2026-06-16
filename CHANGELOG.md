@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Added
 
+- **Provider-agnostic model surface (`lib/model-client.mjs`).** A single
+  `chatJSON()` entry point for structured-output model calls that targets either
+  a local Ollama (`/api/chat`, `format`) or any OpenAI-compatible endpoint
+  (`/v1/chat/completions`, `response_format`, bearer auth) — e.g. GLM/DeepSeek via
+  Fireworks. The librarian's claim-extraction and triage tools (voice, tags,
+  duplicate) route through it. Configure via a `librarian.provider` block
+  (`{ kind, base_url, api_key_ref, model }`); absent it, behavior is unchanged
+  (synthesized local Ollama provider). API keys resolve from the macOS Keychain by
+  `api_key_ref`, never stored in config. `base_url` points at a cloud host now and
+  a self-hosted box later with no code change.
+
 - **Local research engine (`scripts/librarian/research.mjs`).** Brave search →
   fetch → local-Gemma claim extraction, emitting a JSON claims bundle. Distils
   ~15 source documents to one-line cited claims before anything reaches Claude.

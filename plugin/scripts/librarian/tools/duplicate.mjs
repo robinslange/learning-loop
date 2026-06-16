@@ -17,6 +17,7 @@ import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 import { getVaultPath } from '../../lib/config.mjs';
 import { logError } from '../../lib/log.mjs';
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+import { chatJSON } from '../../lib/model-client.mjs';
 
 const DEFAULT_DUPLICATE_PROMPT = `You compare an Obsidian note against its nearest neighbour to detect duplicates.
 
@@ -63,8 +64,8 @@ export async function duplicateCheck(notePath, deps = {}) {
     readNoteBodyFn,
     logFn,
   } = deps;
+  const provider = deps.provider || { kind: 'ollama', baseUrl: ollamaUrl, model };
 
-  const fetchFn = fetchOverride || globalThis.fetch;
   const log = logFn || (() => {});
   const readBody = readNoteBodyFn || defaultReadNoteBody;
 
@@ -108,67 +109,45 @@ export async function duplicateCheck(notePath, deps = {}) {
   const userContent =
     'Note (path ' + notePath + '): "' + title + '"\n' + body + '\n\n' + neighbourBlocks;
 
-  let resp;
+  let parsed;
   try {
-    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: duplicatePrompt },
-          { role: 'user', content: userContent },
-        ],
-        format: {
-          type: 'object',
-          properties: {
-            relationship: {
-              type: 'string',
-              enum: ['duplicate', 'same_topic', 'unrelated'],
-            },
-            duplicate_of: { type: ['string', 'null'] },
-          },
-          required: ['relationship', 'duplicate_of'],
+    parsed = await chatJSON({
+      provider,
+      model: provider.model || model,
+      system: duplicatePrompt,
+      user: userContent,
+      schema: {
+        type: 'object',
+        properties: {
+          relationship: { type: 'string', enum: ['duplicate', 'same_topic', 'unrelated'] },
+          duplicate_of: { type: ['string', 'null'] },
         },
-        options: { temperature: 0 },
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(15000),
+        required: ['relationship', 'duplicate_of'],
+      },
+      options: { temperature: 0 },
+      timeoutMs: 15000,
+      fetchOverride,
     });
   } catch (err) {
-    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'error';
     log('duplicateCheck ' + kind + ' for ' + notePath + ': ' + err.message + '\n');
     return;
   }
-  if (!resp.ok) {
-    log('duplicateCheck HTTP ' + resp.status + ' for ' + notePath + '\n');
+  if (parsed.relationship !== 'duplicate') return;
+  const claimed = parsed.duplicate_of;
+  const match = neighbours.find((n) => n.path === claimed || basename(n.path, '.md') === claimed);
+  if (!match) {
+    log(
+      'duplicateCheck: model named non-neighbour ' + claimed + ' for ' + notePath + ', skipping\n',
+    );
     return;
   }
-  try {
-    const { message } = await resp.json();
-    const parsed = JSON.parse(message.content);
-    if (parsed.relationship !== 'duplicate') return;
-    const claimed = parsed.duplicate_of;
-    const match = neighbours.find((n) => n.path === claimed || basename(n.path, '.md') === claimed);
-    if (!match) {
-      log(
-        'duplicateCheck: model named non-neighbour ' +
-          claimed +
-          ' for ' +
-          notePath +
-          ', skipping\n',
-      );
-      return;
-    }
-    await submitDuplicateFlag({
-      target: notePath,
-      duplicate_of: match.path,
-      similarity: match.score,
-      reason: 'duplicate classifier (structured output)',
-    });
-  } catch (err) {
-    log('duplicateCheck parse error for ' + notePath + ': ' + err.message + '\n');
-  }
+  await submitDuplicateFlag({
+    target: notePath,
+    duplicate_of: match.path,
+    similarity: match.score,
+    reason: 'duplicate classifier (structured output)',
+  });
 }
 
 /**

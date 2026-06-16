@@ -10,6 +10,7 @@ import { basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState } from '../queue.mjs';
 import { logError } from '../../lib/log.mjs';
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+import { chatJSON } from '../../lib/model-client.mjs';
 
 /**
  * Classify a note title as "claim" or "topic" using ollama structured output.
@@ -33,55 +34,40 @@ export async function voiceCheck(notePath, deps = {}) {
     fetchOverride,
     logFn,
   } = deps;
+  const provider = deps.provider || { kind: 'ollama', baseUrl: ollamaUrl, model };
 
   const VOICE_PROMPT =
     voicePrompt ||
     'Classify this Obsidian note title as "claim" (states an assertion that could be true or false) or "topic" (names a domain, concept, or entity without stating a relationship). A claim contains a verb or claim connective; a topic is a noun phrase without one. When in doubt, answer "claim".';
 
-  const fetchFn = fetchOverride || globalThis.fetch;
   const log = logFn || (() => {});
 
-  let resp;
+  let label;
   try {
-    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: VOICE_PROMPT },
-          { role: 'user', content: 'Title: ' + title + '\nClassify:' },
-        ],
-        format: {
-          type: 'object',
-          properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
-          required: ['label'],
-        },
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
+    ({ label } = await chatJSON({
+      provider,
+      model: provider.model || model,
+      system: VOICE_PROMPT,
+      user: 'Title: ' + title + '\nClassify:',
+      schema: {
+        type: 'object',
+        properties: { label: { type: 'string', enum: ['claim', 'topic'] } },
+        required: ['label'],
+      },
+      timeoutMs: 15000,
+      fetchOverride,
+    }));
   } catch (err) {
-    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'error';
     log('voiceCheck ' + kind + ' for ' + notePath + ': ' + err.message + '\n');
     return;
   }
-  if (!resp.ok) {
-    log('voiceCheck HTTP ' + resp.status + ' for ' + notePath + '\n');
-    return;
-  }
-  try {
-    const { message } = await resp.json();
-    const { label } = JSON.parse(message.content);
-    if (label === 'topic') {
-      await submitVoiceFlag({
-        target: notePath,
-        current_title: title,
-        reason: 'topic-style title (structured-output classifier)',
-      });
-    }
-  } catch (err) {
-    log('voiceCheck parse error for ' + notePath + ': ' + err.message + '\n');
+  if (label === 'topic') {
+    await submitVoiceFlag({
+      target: notePath,
+      current_title: title,
+      reason: 'topic-style title (structured-output classifier)',
+    });
   }
 }
 

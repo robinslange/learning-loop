@@ -10,6 +10,7 @@ import { basename } from 'node:path';
 import { appendItem, newItemId, loadState, saveState } from '../queue.mjs';
 import { logError } from '../../lib/log.mjs';
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+import { chatJSON } from '../../lib/model-client.mjs';
 
 const DEFAULT_TAG_PROMPT = `You add tags to an Obsidian note. The tags must come from the supplied vocabulary list.
 
@@ -51,8 +52,8 @@ export async function tagCheck(notePath, deps = {}) {
     readNoteBody,
     logFn,
   } = deps;
+  const provider = deps.provider || { kind: 'ollama', baseUrl: ollamaUrl, model };
 
-  const fetchFn = fetchOverride || globalThis.fetch;
   const log = logFn || (() => {});
 
   const body =
@@ -84,62 +85,41 @@ export async function tagCheck(notePath, deps = {}) {
     '\n\nVocabulary (tags you may use, nothing else): ' +
     vocabulary.join(', ');
 
-  let resp;
+  let parsed;
   try {
-    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: 'system', content: tagPrompt },
-          { role: 'user', content: userContent },
-        ],
-        format: {
-          type: 'object',
-          properties: {
-            suggested_tags: {
-              type: 'array',
-              items: { type: 'string' },
-              maxItems: 2,
-            },
-          },
-          required: ['suggested_tags'],
+    parsed = await chatJSON({
+      provider,
+      model: provider.model || model,
+      system: tagPrompt,
+      user: userContent,
+      schema: {
+        type: 'object',
+        properties: {
+          suggested_tags: { type: 'array', items: { type: 'string' }, maxItems: 2 },
         },
-        options: { temperature: 0 },
-        stream: false,
-      }),
-      signal: AbortSignal.timeout(15000),
+        required: ['suggested_tags'],
+      },
+      options: { temperature: 0 },
+      timeoutMs: 15000,
+      fetchOverride,
     });
   } catch (err) {
-    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'network';
+    const kind = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'error';
     log('tagCheck ' + kind + ' for ' + notePath + ': ' + err.message + '\n');
     return;
   }
-  if (!resp.ok) {
-    log('tagCheck HTTP ' + resp.status + ' for ' + notePath + '\n');
-    return;
-  }
-  try {
-    const { message } = await resp.json();
-    const parsed = JSON.parse(message.content);
-    const existingSet = new Set(existingTags.split(' ').filter(Boolean));
-    const vocabSet = new Set(vocabulary);
-    const cleaned = [
-      ...new Set(
-        (parsed.suggested_tags || []).filter((t) => vocabSet.has(t) && !existingSet.has(t)),
-      ),
-    ].slice(0, 2);
-    if (cleaned.length === 0) return;
-    await submitTagSuggestion({
-      target: notePath,
-      suggested_tags: cleaned,
-      existing_tags: existingTags,
-      reason: 'tag classifier (structured output)',
-    });
-  } catch (err) {
-    log('tagCheck parse error for ' + notePath + ': ' + err.message + '\n');
-  }
+  const existingSet = new Set(existingTags.split(' ').filter(Boolean));
+  const vocabSet = new Set(vocabulary);
+  const cleaned = [
+    ...new Set((parsed.suggested_tags || []).filter((t) => vocabSet.has(t) && !existingSet.has(t))),
+  ].slice(0, 2);
+  if (cleaned.length === 0) return;
+  await submitTagSuggestion({
+    target: notePath,
+    suggested_tags: cleaned,
+    existing_tags: existingTags,
+    reason: 'tag classifier (structured output)',
+  });
 }
 
 /**

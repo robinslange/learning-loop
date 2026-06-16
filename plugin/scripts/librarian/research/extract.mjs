@@ -5,6 +5,7 @@
 // added in a later task.
 
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+import { chatJSON } from '../../lib/model-client.mjs';
 
 export const EXTRACT_PROMPT = `You extract falsifiable claims from a source document, to answer a research question.
 
@@ -44,10 +45,12 @@ export const EXTRACT_FORMAT = {
 const EMPTY = { sourceQuality: 'unreliable', claims: [] };
 
 /**
- * Extract claims from one source's text via local Ollama structured output. Never throws.
+ * Extract claims from one source's text via structured output. Never throws.
+ * Provider-agnostic: pass `provider` to target any model surface, or pass
+ * `ollamaUrl`/`model` (back-compat) to synthesize a local Ollama provider.
  * @param {string} text
  * @param {string} question
- * @param {{ ollamaUrl?: string, model?: string, keepAlive?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
+ * @param {{ provider?: object, ollamaUrl?: string, model?: string, keepAlive?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
  * @returns {Promise<{ sourceQuality: string, claims: object[] }>}
  */
 export async function extractClaims(text, question, opts = {}) {
@@ -56,38 +59,20 @@ export async function extractClaims(text, question, opts = {}) {
     model = DEFAULT_MODEL,
     keepAlive,
     timeoutMs = 120000,
-    fetchOverride,
   } = opts;
-  const fetchFn = fetchOverride || globalThis.fetch;
-  const body = {
-    model,
-    messages: [
-      { role: 'system', content: EXTRACT_PROMPT },
-      {
-        role: 'user',
-        content: 'Question: ' + question + '\n\nSource:\n' + text.slice(0, 12000),
-      },
-    ],
-    format: EXTRACT_FORMAT,
-    options: { temperature: 0 },
-    stream: false,
-  };
-  if (keepAlive !== undefined) body.keep_alive = keepAlive;
-  let resp;
+  const provider = opts.provider || { kind: 'ollama', baseUrl: ollamaUrl, model };
   try {
-    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(timeoutMs),
+    const parsed = await chatJSON({
+      provider,
+      model: provider.model || model,
+      system: EXTRACT_PROMPT,
+      user: 'Question: ' + question + '\n\nSource:\n' + text.slice(0, 12000),
+      schema: EXTRACT_FORMAT,
+      options: { temperature: 0 },
+      keepAlive,
+      timeoutMs,
+      fetchOverride: opts.fetchOverride,
     });
-  } catch {
-    return { ...EMPTY };
-  }
-  if (!resp.ok) return { ...EMPTY };
-  try {
-    const { message } = await resp.json();
-    const parsed = JSON.parse(message.content);
     return {
       sourceQuality: parsed.sourceQuality || 'unreliable',
       claims: Array.isArray(parsed.claims) ? parsed.claims : [],
