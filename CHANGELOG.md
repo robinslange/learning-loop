@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Local research engine (`scripts/librarian/research.mjs`).** Brave search →
+  fetch → local-Gemma claim extraction, emitting a JSON claims bundle. Distils
+  ~15 source documents to one-line cited claims before anything reaches Claude.
+  Search/fetch/extract run locally; verify and synthesis stay on Claude.
+- **`/learning-loop:research` skill.** Deep research that offloads the
+  token-heavy middle (Search + Fetch + Extract) to the local librarian, keeping
+  Scope, 3-vote adversarial Verify, and Synthesize on Claude. Falls back to
+  Claude-native WebSearch when the librarian is unavailable, sub-tier, or returns
+  no claims (`stats.gatherMode` records which path ran). This is the wiring that
+  turns the engine into actual token savings — the built-in `/deep-research`
+  cannot call the engine on its own.
+- **Single consolidated librarian model.** Daemon triage and research share one
+  model (`librarian.model`, default `gemma3:12b`) on the same Ollama server with a
+  long `keep_alive` (`librarian.keep_alive`, default `30m`) so it stays resident
+  across both — no cold-boot thrash. `researchModelOk()` gates research to 12b+.
+- **RAM-tiered model selection at `/init`.** `/init` picks the librarian model
+  from system RAM (skip <16GB; `gemma4:e2b` triage-only for 16–32GB;
+  `gemma3:12b` triage+research for ≥32GB) and writes `librarian.model`.
+
+### Changed
+
+- **MIGRATION:** model/Ollama defaults hoisted to `lib/defaults.mjs`
+  (`DEFAULT_MODEL='gemma3:12b'`, `DEFAULT_OLLAMA_URL`), the single source of truth
+  for daemon and research CLI. `env.MODEL` is now a pure override, not a shadowing
+  default. Existing installs whose `librarian.model` was written by a pre-tiering
+  `/init` (e.g. `gemma4:e2b` on a ≥32GB machine) should re-run `/init` so research
+  is enabled on capable hardware.
+
 ## v1.28.3
 
 ### Fixed
