@@ -4,6 +4,8 @@
 // pipeline grade/use the same prompt. The extractClaims() runtime function is
 // added in a later task.
 
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
+
 export const EXTRACT_PROMPT = `You extract falsifiable claims from a source document, to answer a research question.
 
 For each claim:
@@ -38,3 +40,56 @@ export const EXTRACT_FORMAT = {
     },
   },
 };
+
+const EMPTY = { sourceQuality: 'unreliable', claims: [] };
+
+/**
+ * Extract claims from one source's text via local Ollama structured output. Never throws.
+ * @param {string} text
+ * @param {string} question
+ * @param {{ ollamaUrl?: string, model?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
+ * @returns {Promise<{ sourceQuality: string, claims: object[] }>}
+ */
+export async function extractClaims(text, question, opts = {}) {
+  const {
+    ollamaUrl = DEFAULT_OLLAMA_URL,
+    model = DEFAULT_MODEL,
+    timeoutMs = 120000,
+    fetchOverride,
+  } = opts;
+  const fetchFn = fetchOverride || globalThis.fetch;
+  let resp;
+  try {
+    resp = await fetchFn(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: EXTRACT_PROMPT },
+          {
+            role: 'user',
+            content: 'Question: ' + question + '\n\nSource:\n' + text.slice(0, 12000),
+          },
+        ],
+        format: EXTRACT_FORMAT,
+        options: { temperature: 0 },
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch {
+    return { ...EMPTY };
+  }
+  if (!resp.ok) return { ...EMPTY };
+  try {
+    const { message } = await resp.json();
+    const parsed = JSON.parse(message.content);
+    return {
+      sourceQuality: parsed.sourceQuality || 'unreliable',
+      claims: Array.isArray(parsed.claims) ? parsed.claims : [],
+    };
+  } catch {
+    return { ...EMPTY };
+  }
+}
