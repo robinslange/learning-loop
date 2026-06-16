@@ -16,6 +16,7 @@ import { DB_PATH } from '../../lib/constants.mjs';
 import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 import { getVaultPath } from '../../lib/config.mjs';
 import { logError } from '../../lib/log.mjs';
+import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../../lib/defaults.mjs';
 
 const DEFAULT_DUPLICATE_PROMPT = `You compare an Obsidian note against its nearest neighbour to detect duplicates.
 
@@ -53,8 +54,8 @@ function defaultReadNoteBody(notePath, maxChars = 500) {
  */
 export async function duplicateCheck(notePath, deps = {}) {
   const {
-    ollamaUrl = 'http://localhost:11434',
-    model = 'gemma4:e2b',
+    ollamaUrl = DEFAULT_OLLAMA_URL,
+    model = DEFAULT_MODEL,
     duplicatePrompt = DEFAULT_DUPLICATE_PROMPT,
     bodyOverride,
     neighboursOverride,
@@ -163,7 +164,7 @@ export async function duplicateCheck(notePath, deps = {}) {
       target: notePath,
       duplicate_of: match.path,
       similarity: match.score,
-      reason: 'duplicate classifier (gemma4:e2b structured output)',
+      reason: 'duplicate classifier (structured output)',
     });
   } catch (err) {
     log('duplicateCheck parse error for ' + notePath + ': ' + err.message + '\n');

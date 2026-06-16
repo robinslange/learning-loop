@@ -73,6 +73,7 @@ export async function waitForOllama({ url, maxAttempts, intervalMs, logFn } = {}
  *   tools?: object[],
  *   logprobs?: boolean,
  *   top_logprobs?: number,
+ *   keepAlive?: string,
  *   signalTimeoutMs?: number,
  * }} params
  * @returns {Promise<object>}
@@ -86,6 +87,7 @@ export async function chat({
   tools,
   logprobs,
   top_logprobs,
+  keepAlive,
   signalTimeoutMs,
 }) {
   const base = url || DEFAULTS.url;
@@ -97,6 +99,7 @@ export async function chat({
   if (tools !== undefined) body.tools = tools;
   if (logprobs !== undefined) body.logprobs = logprobs;
   if (top_logprobs !== undefined) body.top_logprobs = top_logprobs;
+  if (keepAlive !== undefined) body.keep_alive = keepAlive;
 
   const res = await fetch(`${base}/api/chat`, {
     method: 'POST',

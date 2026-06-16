@@ -151,6 +151,7 @@ export async function investigateNote(notePath, task, cfg, db, log) {
           options: { temperature: 0, num_predict: 1000 },
           logprobs: true,
           top_logprobs: 20,
+          keep_alive: cfg.keepAlive,
           stream: false,
         }),
         signal: controller.signal,

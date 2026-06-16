@@ -16,21 +16,21 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA
 
 Now render the dashboard, mapping each check id to its dashboard row. Use these mappings:
 
-| Dashboard row | Check id |
-|---|---|
-| Platform | (compute from `process.platform`, `process.arch` — not in library) |
-| Vault | `vault-path` (path) + `vault-folders` (count) |
-| Folders | `vault-folders` |
-| System files | `vault-system-files` |
-| Binary | `binary-exists` + `binary-runs` |
-| Dependencies | `episodic-memory-installed` + `learning-loop-installed` |
-| Search index | `search-index-exists` |
-| Federation | (computed inline — see below) |
-| Hub sync | (computed inline — see below) |
-| CLAUDE.md | `claudemd-section-present` + `claudemd-section-current` |
-| Librarian | (computed inline — see below) |
-| Shims | `shims-exist` + `local-bin-on-path` |
-| Model notes | (computed inline — see below) |
+| Dashboard row | Check id                                                           |
+| ------------- | ------------------------------------------------------------------ |
+| Platform      | (compute from `process.platform`, `process.arch` — not in library) |
+| Vault         | `vault-path` (path) + `vault-folders` (count)                      |
+| Folders       | `vault-folders`                                                    |
+| System files  | `vault-system-files`                                               |
+| Binary        | `binary-exists` + `binary-runs`                                    |
+| Dependencies  | `episodic-memory-installed` + `learning-loop-installed`            |
+| Search index  | `search-index-exists`                                              |
+| Federation    | (computed inline — see below)                                      |
+| Hub sync      | (computed inline — see below)                                      |
+| CLAUDE.md     | `claudemd-section-present` + `claudemd-section-current`            |
+| Librarian     | (computed inline — see below)                                      |
+| Shims         | `shims-exist` + `local-bin-on-path`                                |
+| Model notes   | (computed inline — see below)                                      |
 
 For rows marked "computed inline" below, the federation/hub-sync/librarian/model-notes detection is init-specific and remains in this phase. Do NOT add those to the health library — they're init-time decisions, not runtime health.
 
@@ -46,7 +46,7 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Cache health statusline:** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 
-**Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), whether Gemma 4 E2B is pulled (`ollama list | grep gemma4:e2b`), and librarian config from `config.json` (`librarian.enabled`).
+**Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), and librarian config from `config.json` (`librarian.enabled`, `librarian.model`). Derive the model **tier** from RAM: ≥32GB → `gemma3:12b` (triage + research); 16–32GB → `gemma4:e2b` (triage only, research uses Claude); <16GB → skip. Footprints are measured at ~7.2GB resident (e2b) and ~8.9GB (12b). Check whether the tier's model is pulled (`ollama list | grep <tier model>`).
 
 **Watch daemon status (init view):** If `ll-watch` shim exists, run `ll-watch status` to check if the watcher is running (this complements the library's `watch-daemon-status` check by surfacing the user-facing status output).
 
@@ -73,8 +73,9 @@ Everything looks good. Nothing to set up.
 
 **Librarian status values:**
 
-- `enabled (ollama running, gemma4:e2b loaded)`: librarian is enabled and working
-- `available (ollama installed, XGB RAM)`: hardware capable but not enabled
+- `enabled (ollama running, <model> loaded)`: librarian is enabled and working
+- `available 12b tier (ollama installed, <RAM>GB — triage + research)`: ≥32GB, capable of local research, not yet enabled
+- `available e2b tier (ollama installed, <RAM>GB — triage only)`: 16–32GB, triage but research uses Claude, not yet enabled
 - `skipped (requires ollama + 16GB+ RAM)`: hardware insufficient
 - `skipped (ollama not installed)`: ollama missing
 

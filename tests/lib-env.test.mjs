@@ -39,7 +39,10 @@ test('env is frozen', () => {
 test('env exposes documented defaults when env vars absent (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       delete process.env.LL_HOOK_DEBUG;
       delete process.env.LEARNING_LOOP_INJECTION_THRESHOLD;
       delete process.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS;
@@ -56,7 +59,8 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
         repo: m.env.LL_REPO,
         forceError: m.env.LEARNING_LOOP_INJECTION_FORCE_ERROR,
       }));
-    `],
+    `,
+    ],
     {
       env: {
         ...process.env,
@@ -76,7 +80,7 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
   assert.equal(parsed.threshold, 0.3);
   assert.equal(parsed.raceCap, 1500);
   assert.equal(parsed.ollama, 'http://localhost:11434');
-  assert.equal(parsed.model, 'gemma4:e2b');
+  assert.equal(parsed.model, null);
   assert.equal(parsed.repo, 'robinslange/learning-loop');
   assert.equal(parsed.forceError, false);
 });
@@ -84,14 +88,18 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
 test('env reflects overrides from process.env (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(JSON.stringify({
         debug: m.env.LL_HOOK_DEBUG,
         threshold: m.env.LEARNING_LOOP_INJECTION_THRESHOLD,
         mode: m.env.LEARNING_LOOP_INJECTION_MODE,
       }));
-    `],
+    `,
+    ],
     {
       env: {
         ...process.env,
@@ -111,11 +119,15 @@ test('env reflects overrides from process.env (subprocess)', () => {
 test('env.HOME falls back to os.homedir() when HOME unset (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const { homedir } = await import('node:os');
       const m = await import(${MOD});
       console.log(JSON.stringify({ home: m.env.HOME, expected: homedir() }));
-    `],
+    `,
+    ],
     { env: { ...process.env, HOME: undefined, USERPROFILE: undefined } },
   );
   assert.equal(out.status, 0, out.stderr.toString());
@@ -126,10 +138,14 @@ test('env.HOME falls back to os.homedir() when HOME unset (subprocess)', () => {
 test('env.VAULT_PATH is null when not set (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(JSON.stringify({ vp: m.env.VAULT_PATH }));
-    `],
+    `,
+    ],
     { env: { ...process.env, VAULT_PATH: undefined } },
   );
   assert.equal(out.status, 0, out.stderr.toString());
@@ -140,10 +156,14 @@ test('env.VAULT_PATH is null when not set (subprocess)', () => {
 test('env.CLAUDE_PROJECT_DIR defaults to empty string (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(JSON.stringify({ cpd: m.env.CLAUDE_PROJECT_DIR }));
-    `],
+    `,
+    ],
     { env: { ...process.env, CLAUDE_PROJECT_DIR: undefined } },
   );
   assert.equal(out.status, 0, out.stderr.toString());

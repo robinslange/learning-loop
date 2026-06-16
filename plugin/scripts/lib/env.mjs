@@ -13,6 +13,7 @@
 // read from process.env by the plugin itself.
 
 import { homedir } from 'node:os';
+import { DEFAULT_OLLAMA_URL } from './defaults.mjs';
 
 /**
  * Returns true for the canonical truthy env-var strings.
@@ -101,8 +102,8 @@ export const env = Object.freeze({
   LL_BENCH_REAL_ONNX: isTruthy(process.env.LL_BENCH_REAL_ONNX),
 
   // --- Ollama / model ---
-  OLLAMA_URL: pick('OLLAMA_URL', 'http://localhost:11434'),
-  MODEL: pick('MODEL', 'gemma4:e2b'),
+  OLLAMA_URL: pick('OLLAMA_URL', DEFAULT_OLLAMA_URL),
+  MODEL: pick('MODEL', null),
 
   // --- Cascade-detection sentinels ---
   // True only when the var was explicitly set in the environment (not defaulted).
