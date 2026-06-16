@@ -149,4 +149,20 @@ describe('runResearch', () => {
     assert.equal(bundle.claims.length, 0);
     assert.equal(bundle.angles.length, 1);
   });
+
+  it('stamps sourceId onto bundle source and each claim', async () => {
+    const bundle = await runResearch('q', {
+      angles: [{ label: 'a', query: 'a' }],
+      searchFn: async () => [{ url: 'http://x', title: 'X', snippet: '' }],
+      fetchTextFn: async () => ({ text: 'body', ok: true, reason: 'ok' }),
+      extractFn: async () => ({
+        sourceQuality: 'primary',
+        sourceId: { kind: 'pmid', id: '1', author: 'A', year: 2020 },
+        claims: [{ claim: 'c', quote: 'q', importance: 'central' }],
+      }),
+      maxFetch: 1,
+    });
+    assert.deepEqual(bundle.sources[0].sourceId, { kind: 'pmid', id: '1', author: 'A', year: 2020 });
+    assert.deepEqual(bundle.claims[0].sourceId, { kind: 'pmid', id: '1', author: 'A', year: 2020 });
+  });
 });

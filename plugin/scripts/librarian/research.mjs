@@ -42,7 +42,7 @@ export function resolveModel(argModel, cfgModel) {
  *   keepAlive?: string,
  *   searchFn?: (q:string)=>Promise<{url:string,title:string,snippet:string}[]>,
  *   fetchTextFn?: (url:string)=>Promise<{text:string,ok:boolean,reason:string}>,
- *   extractFn?: (text:string,q:string,opts:object)=>Promise<{sourceQuality:string,claims:object[]}>,
+ *   extractFn?: (text:string,q:string,opts:object)=>Promise<{sourceQuality:string,sourceId?:object,claims:object[]}>,
  * }} [opts]
  */
 export async function runResearch(question, opts = {}) {
@@ -86,13 +86,23 @@ export async function runResearch(question, opts = {}) {
       results[i] = { skipped: { url: r.url, reason: f.reason } };
       continue;
     }
-    const { sourceQuality, claims: cs } = await extractFn(f.text, question, {
+    const {
+      sourceQuality,
+      sourceId,
+      claims: cs,
+    } = await extractFn(f.text, question, {
       model,
       keepAlive,
     });
     results[i] = {
-      source: { url: r.url, title: r.title, sourceQuality, fetchOk: true },
-      claims: cs.map((c) => ({ ...c, url: r.url })),
+      source: {
+        url: r.url,
+        title: r.title,
+        sourceQuality,
+        sourceId: sourceId ?? null,
+        fetchOk: true,
+      },
+      claims: cs.map((c) => ({ ...c, url: r.url, sourceId: sourceId ?? null })),
     };
   }
 
