@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.0
+
 ### Added
 
 - **Provider-agnostic model surface (`lib/model-client.mjs`).** A single
