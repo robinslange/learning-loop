@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.1
+
 ### Fixed
 
 - **Research honors a custom Ollama host.** `research.mjs` never threaded

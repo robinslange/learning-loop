@@ -1,6 +1,6 @@
 [package]
 name = "ll-search"
-version = "1.29.0"
+version = "1.29.1"
 edition.workspace = true
 description = "Learning loop search binary -- SQLite + ONNX embeddings"
 
