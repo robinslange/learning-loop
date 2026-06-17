@@ -380,16 +380,24 @@ if (bundle && bundleClaims.length > 0) {
       (bundle.skipped && bundle.skipped.length ? ' (' + bundle.skipped.length + ' skipped)' : ''),
   );
 } else {
-  // Fallback: Claude-native WebSearch + WebFetch (the built-in /deep-research path).
+  // Fallback: Claude-native WebSearch + WebFetch (the same path the built-in
+  // /deep-research uses). Distinguish "librarian unavailable" from "librarian ran
+  // cleanly but extracted nothing" — exit 0 with zero claims is a degraded-extraction
+  // signal (all sources paywalled/timed out, or a misconfigured host), NOT an outage.
   gatherMode = 'claude-fallback';
   librarianNote = !PLUGIN_ROOT
     ? 'no pluginRoot passed — librarian not located'
-    : probe
-      ? 'librarian unavailable (exit ' +
-        probe.exitCode +
-        (probe.stderr ? ': ' + probe.stderr.trim() : '') +
-        ')'
-      : 'librarian probe returned no result';
+    : bundle
+      ? 'librarian ran but extracted 0 claims from ' +
+        (bundle.sources ? bundle.sources.length : 0) +
+        ' sources' +
+        (bundle.skipped && bundle.skipped.length ? ' (' + bundle.skipped.length + ' skipped)' : '')
+      : probe
+        ? 'librarian unavailable (exit ' +
+          probe.exitCode +
+          (probe.stderr ? ': ' + probe.stderr.trim() : '') +
+          ')'
+        : 'librarian probe returned no result';
   log(
     '⚠️  ENGINE: Claude WebSearch FALLBACK — librarian NOT used (' +
       librarianNote +

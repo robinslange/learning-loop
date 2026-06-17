@@ -5,7 +5,7 @@ Background agent that continuously maintains your vault locally via ollama (free
 The model is chosen by **tier** from system RAM, so one resident model serves both triage and research without cold-boot thrash:
 
 - **≥32GB RAM → `gemma3:12b`** (~8.9GB resident): triage **and** local research.
-- **16–32GB RAM → `gemma4:e2b`** (~7.2GB resident): triage only; research falls back to `/deep-research`'s Claude-native path.
+- **16–32GB RAM → `gemma4:e2b`** (~7.2GB resident): triage only; `/learning-loop:research` runs but its Verify/Synthesize stay on Claude and, below the research tier, it routes to its own Claude-native WebSearch fallback.
 - **<16GB RAM →** librarian skipped.
 
 ## 7a: Detect
@@ -25,7 +25,7 @@ Present (substitute the detected tier and RAM):
 > - Finds orphan notes that should be linked to their neighbors
 > - Flags topic-style titles in inbox notes
 > - Marks potentially stale claims for investigation
-> - (12b tier only) Runs local web research for `/deep-research`, keeping it off your Claude token budget
+> - (12b tier only) Runs local web research for `/learning-loop:research`, keeping search/fetch/extract off your Claude token budget
 >
 > Detected <RAM>GB → recommended model: **<tier model>**. It runs locally via ollama
 > (free, private), stays resident across triage + research, and starts automatically
