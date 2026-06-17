@@ -54,8 +54,30 @@ describe('chatJSON — ollama provider', () => {
 
   it('includes keep_alive for ollama', async () => {
     const fetchOverride = captureFetch({ message: { content: '{"label":"topic"}' } });
-    await chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, keepAlive: '30m', fetchOverride });
+    await chatJSON({
+      provider,
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      keepAlive: '30m',
+      fetchOverride,
+    });
     assert.equal(fetchOverride.calls[0].body.keep_alive, '30m');
+  });
+
+  it('passes options (e.g. temperature) through in the ollama options bag', async () => {
+    const fetchOverride = captureFetch({ message: { content: '{"label":"topic"}' } });
+    await chatJSON({
+      provider,
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      options: { temperature: 0 },
+      fetchOverride,
+    });
+    assert.deepEqual(fetchOverride.calls[0].body.options, { temperature: 0 });
   });
 });
 
@@ -91,9 +113,36 @@ describe('chatJSON — openai provider', () => {
   });
 
   it('drops keep_alive for openai (not a valid field)', async () => {
-    const fetchOverride = captureFetch({ choices: [{ message: { content: '{"label":"topic"}' } }] });
-    await chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, keepAlive: '30m', fetchOverride });
+    const fetchOverride = captureFetch({
+      choices: [{ message: { content: '{"label":"topic"}' } }],
+    });
+    await chatJSON({
+      provider,
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      keepAlive: '30m',
+      fetchOverride,
+    });
     assert.equal(fetchOverride.calls[0].body.keep_alive, undefined);
+  });
+
+  it("lifts options.temperature to the openai body top-level (so a 0 isn't silently dropped)", async () => {
+    const fetchOverride = captureFetch({
+      choices: [{ message: { content: '{"label":"topic"}' } }],
+    });
+    await chatJSON({
+      provider,
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      options: { temperature: 0 },
+      fetchOverride,
+    });
+    assert.equal(fetchOverride.calls[0].body.temperature, 0);
+    assert.equal(fetchOverride.calls[0].body.options, undefined); // openai doesn't take Ollama's options bag
   });
 });
 
@@ -103,7 +152,8 @@ describe('chatJSON — errors', () => {
   it('throws on non-2xx HTTP', async () => {
     const fetchOverride = captureFetch({}, 500);
     await assert.rejects(
-      () => chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, fetchOverride }),
+      () =>
+        chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, fetchOverride }),
       /HTTP 500/,
     );
   });

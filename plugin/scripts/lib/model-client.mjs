@@ -61,8 +61,16 @@ export async function chatJSON({
       response_format: { type: 'json_schema', json_schema: { name: 'response', schema } },
       stream: false,
     };
-    // OpenAI-compatible providers don't accept Ollama's `options`/`keep_alive`;
-    // temperature etc. ride in at the top level if a caller needs them later.
+    // OpenAI-compatible providers don't accept Ollama's `options` bag or `keep_alive`,
+    // but sampling params belong at the top level. Lift the ones a caller commonly
+    // sets so the same `options:{temperature}` contract is honored on both providers
+    // (otherwise a `temperature:0` is silently dropped and the call runs at the
+    // server default — a confound for any controlled comparison).
+    if (options) {
+      for (const k of ['temperature', 'top_p', 'top_k', 'max_tokens', 'seed']) {
+        if (options[k] !== undefined) body[k] = options[k];
+      }
+    }
   } else {
     throw new Error(`unknown provider kind: ${provider.kind}`);
   }
