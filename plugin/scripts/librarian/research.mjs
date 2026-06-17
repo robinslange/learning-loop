@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 import { search as braveSearch } from './research/brave.mjs';
 import { fetchText as defaultFetchText } from './research/fetch.mjs';
 import { extractClaims } from './research/extract.mjs';
+import { sourceIdFromUrl } from './research/source-id.mjs';
 import { loadLibrarianConfig, researchModelOk } from './config.mjs';
 
 const DEFAULT_MAX_FETCH = 15;
@@ -94,15 +95,19 @@ export async function runResearch(question, opts = {}) {
       model,
       keepAlive,
     });
+    // The URL carries the identifier deterministically; the model is unreliable
+    // at finding it in chrome-heavy page text (PubMed strips the PMID). Prefer the
+    // URL-derived id, fall back to the model's, null if neither.
+    const resolvedSourceId = sourceIdFromUrl(r.url) ?? sourceId ?? null;
     results[i] = {
       source: {
         url: r.url,
         title: r.title,
         sourceQuality,
-        sourceId: sourceId ?? null,
+        sourceId: resolvedSourceId,
         fetchOk: true,
       },
-      claims: cs.map((c) => ({ ...c, url: r.url, sourceId: sourceId ?? null })),
+      claims: cs.map((c) => ({ ...c, url: r.url, sourceId: resolvedSourceId })),
     };
   }
 

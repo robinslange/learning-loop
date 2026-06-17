@@ -91,7 +91,11 @@ describe('runResearch', () => {
   it('fetches sources concurrently but extracts serially', async () => {
     const angles = [{ label: 'a', query: 'q' }];
     const searchFn = async () =>
-      Array.from({ length: 4 }, (_, i) => ({ url: 'https://s' + i + '.com', title: '', snippet: '' }));
+      Array.from({ length: 4 }, (_, i) => ({
+        url: 'https://s' + i + '.com',
+        title: '',
+        snippet: '',
+      }));
 
     let fetchInFlight = 0;
     let maxFetchConcurrency = 0;
@@ -116,13 +120,21 @@ describe('runResearch', () => {
     await runResearch('q?', { angles, searchFn, fetchTextFn, extractFn });
     // Fetches overlap (I/O-bound); extracts never overlap (Ollama serializes a single model).
     assert.ok(maxFetchConcurrency > 1, `expected concurrent fetch, saw max ${maxFetchConcurrency}`);
-    assert.equal(maxExtractConcurrency, 1, `expected serial extract, saw max ${maxExtractConcurrency}`);
+    assert.equal(
+      maxExtractConcurrency,
+      1,
+      `expected serial extract, saw max ${maxExtractConcurrency}`,
+    );
   });
 
   it('preserves source/claim order regardless of fetch completion order', async () => {
     const angles = [{ label: 'a', query: 'q' }];
     const searchFn = async () =>
-      Array.from({ length: 3 }, (_, i) => ({ url: 'https://s' + i + '.com', title: '', snippet: '' }));
+      Array.from({ length: 3 }, (_, i) => ({
+        url: 'https://s' + i + '.com',
+        title: '',
+        snippet: '',
+      }));
     // s0 resolves slowest, s2 fastest — output must still be s0, s1, s2.
     const delays = { 'https://s0.com': 30, 'https://s1.com': 15, 'https://s2.com': 1 };
     const fetchTextFn = async (url) => {
@@ -162,7 +174,61 @@ describe('runResearch', () => {
       }),
       maxFetch: 1,
     });
-    assert.deepEqual(bundle.sources[0].sourceId, { kind: 'pmid', id: '1', author: 'A', year: 2020 });
+    assert.deepEqual(bundle.sources[0].sourceId, {
+      kind: 'pmid',
+      id: '1',
+      author: 'A',
+      year: 2020,
+    });
     assert.deepEqual(bundle.claims[0].sourceId, { kind: 'pmid', id: '1', author: 'A', year: 2020 });
+  });
+
+  it('derives sourceId from a PubMed URL when the model extracted none', async () => {
+    const bundle = await runResearch('q', {
+      angles: [{ label: 'a', query: 'a' }],
+      searchFn: async () => [
+        { url: 'https://pubmed.ncbi.nlm.nih.gov/39070254/', title: 'X', snippet: '' },
+      ],
+      fetchTextFn: async () => ({
+        text: 'chrome-heavy body with no visible PMID',
+        ok: true,
+        reason: 'ok',
+      }),
+      extractFn: async () => ({
+        sourceQuality: 'primary',
+        sourceId: null,
+        claims: [{ claim: 'c', quote: 'q', importance: 'central' }],
+      }),
+      maxFetch: 1,
+    });
+    assert.deepEqual(bundle.sources[0].sourceId, {
+      kind: 'pmid',
+      id: '39070254',
+      author: null,
+      year: null,
+    });
+    assert.deepEqual(bundle.claims[0].sourceId, {
+      kind: 'pmid',
+      id: '39070254',
+      author: null,
+      year: null,
+    });
+  });
+
+  it('prefers the URL-derived sourceId over the model-extracted one', async () => {
+    const bundle = await runResearch('q', {
+      angles: [{ label: 'a', query: 'a' }],
+      searchFn: async () => [
+        { url: 'https://pubmed.ncbi.nlm.nih.gov/39070254/', title: 'X', snippet: '' },
+      ],
+      fetchTextFn: async () => ({ text: 'body', ok: true, reason: 'ok' }),
+      extractFn: async () => ({
+        sourceQuality: 'primary',
+        sourceId: { kind: 'pmid', id: '99999999', author: 'Wrong', year: 1999 },
+        claims: [{ claim: 'c', quote: 'q', importance: 'central' }],
+      }),
+      maxFetch: 1,
+    });
+    assert.equal(bundle.sources[0].sourceId.id, '39070254');
   });
 });
