@@ -63,7 +63,7 @@ const EMPTY = { sourceQuality: 'unreliable', sourceId: null, claims: [] };
  * `ollamaUrl`/`model` (back-compat) to synthesize a local Ollama provider.
  * @param {string} text
  * @param {string} question
- * @param {{ provider?: object, ollamaUrl?: string, model?: string, keepAlive?: string, timeoutMs?: number, fetchOverride?: typeof fetch }} [opts]
+ * @param {{ provider?: object, ollamaUrl?: string, model?: string, keepAlive?: string, timeoutMs?: number, throwOnError?: boolean, fetchOverride?: typeof fetch }} [opts]
  * @returns {Promise<{ sourceQuality: string, sourceId: object|null, claims: object[] }>}
  */
 export async function extractClaims(text, question, opts = {}) {
@@ -72,6 +72,7 @@ export async function extractClaims(text, question, opts = {}) {
     model = DEFAULT_MODEL,
     keepAlive,
     timeoutMs = 120000,
+    throwOnError = false,
   } = opts;
   const provider = opts.provider || { kind: 'ollama', baseUrl: ollamaUrl, model };
   try {
@@ -91,7 +92,10 @@ export async function extractClaims(text, question, opts = {}) {
       sourceId: parsed.sourceId ?? null,
       claims: Array.isArray(parsed.claims) ? parsed.claims : [],
     };
-  } catch {
+  } catch (err) {
+    // Production swallows so one bad source never aborts a run; a benchmark opts in
+    // to throwOnError so a provider failure surfaces instead of looking like 0 claims.
+    if (throwOnError) throw err;
     return { ...EMPTY };
   }
 }

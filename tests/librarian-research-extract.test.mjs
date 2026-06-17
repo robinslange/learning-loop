@@ -102,6 +102,16 @@ describe('extractClaims', () => {
     assert.deepEqual(out, { sourceQuality: 'unreliable', sourceId: null, claims: [] });
   });
 
+  it('re-raises the error when throwOnError is set (so a benchmark sees real failures)', async () => {
+    const fetchOverride = async () => {
+      throw new Error('boom');
+    };
+    await assert.rejects(
+      () => extractClaims('t', 'q', { fetchOverride, throwOnError: true }),
+      /boom/,
+    );
+  });
+
   it('captures sourceId for an academic source', async () => {
     const res = await extractClaims('PubMed page text', 'q', {
       fetchOverride: fakeFetch({
