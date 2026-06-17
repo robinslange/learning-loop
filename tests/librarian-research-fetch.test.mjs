@@ -14,6 +14,12 @@ describe('htmlToText', () => {
     assert.doesNotMatch(text, /var a=1/);
     assert.doesNotMatch(text, /color:red/);
   });
+
+  it('drops an unclosed script/style block (no matching end tag)', () => {
+    const text = htmlToText('<p>Keep this.</p><script>leaked = "secret"; while(1){}');
+    assert.match(text, /Keep this\./);
+    assert.doesNotMatch(text, /leaked/);
+  });
 });
 
 describe('fetchText', () => {
@@ -55,4 +61,61 @@ describe('fetchText', () => {
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'fetch_error');
   });
+
+  it('sends Accept: text/html so servers prefer an HTML representation', async () => {
+    let seenHeaders;
+    const fetchOverride = async (_url, init) => {
+      seenHeaders = init.headers;
+      return { ok: true, status: 200, headers: hdrs(), text: async () => '<p>x</p>' };
+    };
+    await fetchText('https://good.com', { fetchOverride });
+    assert.match(seenHeaders.Accept || seenHeaders.accept || '', /text\/html/);
+  });
+
+  it('short-circuits a non-text Content-Type to ok:false reason:non_html (no body read)', async () => {
+    let bodyRead = false;
+    const fetchOverride = async () => ({
+      ok: true,
+      status: 200,
+      headers: hdrs({ 'content-type': 'application/pdf' }),
+      text: async () => {
+        bodyRead = true;
+        return 'PDFBYTES';
+      },
+    });
+    const out = await fetchText('https://x.com/paper.pdf', { fetchOverride });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'non_html');
+    assert.equal(bodyRead, false, 'must not buffer a binary body');
+  });
+
+  it('rejects an oversized body by Content-Length before reading it', async () => {
+    let bodyRead = false;
+    const fetchOverride = async () => ({
+      ok: true,
+      status: 200,
+      headers: hdrs({ 'content-type': 'text/html', 'content-length': String(50 * 1024 * 1024) }),
+      text: async () => {
+        bodyRead = true;
+        return 'x';
+      },
+    });
+    const out = await fetchText('https://x.com/huge', { fetchOverride, maxBytes: 5 * 1024 * 1024 });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'too_large');
+    assert.equal(bodyRead, false);
+  });
+
+  it('still works when the mock provides no headers (back-compat)', async () => {
+    const fetchOverride = async () => ({ ok: true, status: 200, text: async () => '<p>Hi.</p>' });
+    const out = await fetchText('https://good.com', { fetchOverride });
+    assert.equal(out.ok, true);
+    assert.match(out.text, /Hi\./);
+  });
 });
+
+// Minimal Headers-like stub: case-insensitive get(), matching the WHATWG shape.
+function hdrs(map = {}) {
+  const lower = Object.fromEntries(Object.entries(map).map(([k, v]) => [k.toLowerCase(), v]));
+  return { get: (k) => lower[k.toLowerCase()] ?? null };
+}
