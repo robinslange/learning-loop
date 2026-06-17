@@ -32,6 +32,20 @@ All notable changes to this project are documented here. The format is based on 
   top-level `engine`/`gatherMode` field and logs a prominent live banner
   (librarian vs Claude-fallback), so a silent fallback can't masquerade as a
   successful offload.
+- **Provenance-routed Verify phase.** `/learning-loop:research` now routes each
+  claim at verification: a claim carrying a resolvable academic identifier
+  (`sourceId`, captured during extraction) is checked deterministically against
+  PubMed/CrossRef (no LLM, no tokens); every other claim runs a 3-vote adversarial
+  check on GLM-5.2 off Claude, with Claude 3-vote as the fallback when no
+  GLM provider is configured or it errors. The deterministic branch is
+  positive-evidence-only: it kills only on a resolved record with a high-severity
+  mismatch and defers every ambiguous result (not-found, transient API error) to
+  GLM rather than killing a real claim on a database hiccup. A survivor-biased
+  Claude audit re-checks a sample of GLM's survivors (log-only, GLM's verdict
+  ships) to watch for drift. `stats.verify` reports the per-engine counts plus the
+  audit, and a top-level `verifyEngine` field surfaces which engine ran so a silent
+  fallback stays visible. With no `librarian.provider` openai block, the phase runs
+  on Claude exactly as before.
 - **Research engine fetches sources concurrently.** Fetch is parallelized (I/O-
   bound); extraction stays serial because Ollama serializes concurrent requests to
   one local model. Output order is guaranteed structurally (a projection of a
