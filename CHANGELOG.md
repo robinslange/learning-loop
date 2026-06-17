@@ -57,6 +57,11 @@ All notable changes to this project are documented here. The format is based on 
 - **RAM-tiered model selection at `/init`.** `/init` picks the librarian model
   from system RAM (skip <16GB; `gemma4:e2b` triage-only for 16–32GB;
   `gemma3:12b` triage+research for ≥32GB) and writes `librarian.model`.
+- **`/init` can configure the GLM Verify-offload provider (Phase 7d).** Optional,
+  opt-in step that stores a Fireworks (or any OpenAI-compatible) API key in the
+  macOS Keychain and writes a `librarian.provider` block, so `/learning-loop:research`
+  runs its Verify phase off the Claude budget. `/init` Phase 1 now also detects an
+  existing provider. With no provider, Verify falls back to Claude — unchanged default.
 
 ### Changed
 

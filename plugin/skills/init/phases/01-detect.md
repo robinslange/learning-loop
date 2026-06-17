@@ -48,6 +48,8 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), and librarian config from `config.json` (`librarian.enabled`, `librarian.model`). Derive the model **tier** from RAM: ≥32GB → `gemma3:12b` (triage + research); 16–32GB → `gemma4:e2b` (triage only, research uses Claude); <16GB → skip. Footprints are measured at ~7.2GB resident (e2b) and ~8.9GB (12b). Check whether the tier's model is pulled (`ollama list | grep <tier model>`).
 
+**Verify-offload provider (optional):** Also read `librarian.provider` from `config.json`. If `provider.kind === 'openai'`, a cloud model (e.g. GLM via Fireworks) is configured to run the `/learning-loop:research` Verify phase off the Claude token budget. Note whether it's present so Phase 7 can offer to set it up if absent. This is independent of the local Ollama tier — it powers Verify, not triage/extract.
+
 **Watch daemon status (init view):** If `ll-watch` shim exists, run `ll-watch status` to check if the watcher is running (this complements the library's `watch-daemon-status` check by surfacing the user-facing status output).
 
 Present a dashboard:

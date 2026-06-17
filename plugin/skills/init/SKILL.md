@@ -28,7 +28,7 @@ Read each phase file in order and execute its instructions. After Phase 1's dash
 4. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/04-federation.md`** -- single yes/no, hands off to `/learning-loop:federation` for the full flow.
 5. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/05-claudemd.md`** -- CLAUDE.md integration.
 6. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/06-cache-health.md`** -- optional cache-health statusline.
-7. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/07-librarian.md`** -- optional librarian background agent.
+7. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/07-librarian.md`** -- optional librarian background agent (incl. 7d: optional GLM Verify-offload provider for `/learning-loop:research`).
 8. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/08-seed-restore.md`** -- restore a seed bundle if present and seed the harvest deny-list.
 
 After all phases complete, present the summary below.
