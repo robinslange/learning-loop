@@ -37,7 +37,6 @@ const src = [
   extractFn('auditOutcome'),
   'return { computeSurvives, normalizeMechanical, normalizeGlm, auditOutcome };',
 ].join('\n');
-// eslint-disable-next-line no-new-func
 const inline = new Function(src)();
 
 test('SKILL.md declares the same VOTES_PER_CLAIM / REFUTATIONS_REQUIRED', () => {
