@@ -68,6 +68,25 @@ describe('runResearch', () => {
     assert.equal(seenOpts.keepAlive, '30m');
   });
 
+  it('threads ollamaUrl through to extractFn so a custom host is honored', async () => {
+    let seenOpts;
+    const angles = [{ label: 'a', query: 'q' }];
+    const searchFn = async () => [{ url: 'https://x.com', title: 'X', snippet: '' }];
+    const fetchTextFn = async () => ({ text: 'body', ok: true, reason: 'ok' });
+    const extractFn = async (_text, _q, opts) => {
+      seenOpts = opts;
+      return { sourceQuality: 'blog', claims: [] };
+    };
+    await runResearch('q?', {
+      angles,
+      ollamaUrl: 'http://gpu-box:11434',
+      searchFn,
+      fetchTextFn,
+      extractFn,
+    });
+    assert.equal(seenOpts.ollamaUrl, 'http://gpu-box:11434');
+  });
+
   it('respects maxFetch', async () => {
     const angles = [{ label: 'a', query: 'q' }];
     const searchFn = async () =>

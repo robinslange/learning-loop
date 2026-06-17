@@ -41,6 +41,7 @@ export function resolveModel(argModel, cfgModel) {
  *   maxFetch?: number,
  *   model?: string,
  *   keepAlive?: string,
+ *   ollamaUrl?: string,
  *   searchFn?: (q:string)=>Promise<{url:string,title:string,snippet:string}[]>,
  *   fetchTextFn?: (url:string)=>Promise<{text:string,ok:boolean,reason:string}>,
  *   extractFn?: (text:string,q:string,opts:object)=>Promise<{sourceQuality:string,sourceId?:object,claims:object[]}>,
@@ -52,6 +53,7 @@ export async function runResearch(question, opts = {}) {
     maxFetch = DEFAULT_MAX_FETCH,
     model,
     keepAlive,
+    ollamaUrl,
     searchFn = (q) => braveSearch(q),
     fetchTextFn = (url) => defaultFetchText(url),
     extractFn = (text, q, o) => extractClaims(text, q, o),
@@ -94,6 +96,7 @@ export async function runResearch(question, opts = {}) {
     } = await extractFn(f.text, question, {
       model,
       keepAlive,
+      ollamaUrl,
     });
     // The URL carries the identifier deterministically; the model is unreliable
     // at finding it in chrome-heavy page text (PubMed strips the PMID). Prefer the
@@ -159,6 +162,7 @@ async function main() {
     maxFetch: args.maxFetch,
     model,
     keepAlive: cfg.keepAlive,
+    ollamaUrl: cfg.ollamaUrl,
   });
   if (args.json) {
     process.stdout.write(JSON.stringify(bundle, null, 2));

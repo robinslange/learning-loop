@@ -22,6 +22,16 @@ describe('librarian consolidation config', () => {
     assert.equal(researchModelOk('gemma3:1b'), false);
     assert.equal(researchModelOk('qwen3:0.6b'), false);
   });
+
+  it('researchModelOk accepts capable models with quant/variant tag suffixes', () => {
+    assert.equal(researchModelOk('llama3.3:70b-instruct-q4_K_M'), true);
+    assert.equal(researchModelOk('qwen2.5:14b-instruct'), true);
+    assert.equal(researchModelOk('phi4:14b-q8_0'), true);
+    assert.equal(researchModelOk('deepseek-r1:32b-qwen-distill-q4'), true);
+    // still rejects sub-tier models even with suffixes
+    assert.equal(researchModelOk('gemma3:1b-instruct'), false);
+    assert.equal(researchModelOk('llama3.2:3b-instruct-q4_0'), false);
+  });
 });
 
 describe('resolveProvider', () => {

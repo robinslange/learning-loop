@@ -143,7 +143,10 @@ export const __test__ = { resetCache: __test_resetCache };
 
 // Research extraction needs real recall; e2b passed Phase 0's schema check but
 // missed substantive claims. Gate research on model size (12b+).
-const RESEARCH_CAPABLE = /:(?:e)?(\d+)b$/i;
+// Size sits right after the `:` tag separator; allow a quant/variant suffix
+// after it (`70b-instruct-q4_K_M`, `14b-q8_0`), so the boundary is end-of-string
+// OR a separator, not strictly `$`.
+const RESEARCH_CAPABLE = /:(?:e)?(\d+)b(?:[-_.]|$)/i;
 export function researchModelOk(model) {
   const m = RESEARCH_CAPABLE.exec(model || '');
   return m ? Number(m[1]) >= 12 : false;
