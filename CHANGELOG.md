@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Research honors a custom Ollama host.** `research.mjs` never threaded
+  `librarian.ollama_url`/`OLLAMA_URL` into extraction, so a user on a remote or
+  custom-port Ollama got connection-refused, swallowed to an empty bundle, and a
+  silent Claude fallback. The configured host is now used end to end.
+- **Research model gate accepts quantized/variant tags.** `researchModelOk` only
+  matched a bare `:<N>b` suffix, so capable models like
+  `llama3.3:70b-instruct-q4_K_M`, `qwen2.5:14b-instruct`, and `phi4:14b-q8_0` were
+  rejected with a misleading "below the research tier" exit. It now allows a
+  separator after the size.
+- **Fetch caps body size and rejects non-HTML.** `fetchText` buffered arbitrary
+  response bodies in full before slicing; it now sends `Accept: text/html`,
+  short-circuits a non-text `Content-Type`, rejects an over-budget `Content-Length`
+  (~5MB), and drops an unclosed `<script>`/`<style>` block that previously leaked
+  its body as text.
+- **Research reports zero-claim runs distinctly.** A librarian run that exited 0 but
+  extracted no claims was reported as "librarian unavailable (exit 0)"; it now says
+  "librarian ran but extracted 0 claims from N sources" — a degraded-extraction
+  signal, not an outage.
+- **`chatJSON` honors `options` sampling params on the openai path.** `temperature`
+  (and `top_p`/`top_k`/`max_tokens`/`seed`) passed in `options` were silently
+  dropped for OpenAI-compatible providers, so a `temperature: 0` ran at the server
+  default. They are now lifted to the request body.
+- **`extractClaims` can surface failures (`throwOnError`).** New opt-in flag
+  (default off — production still swallows) so tooling can distinguish a provider
+  failure from a genuine zero-claim result.
+- **Docs name `/learning-loop:research`** as the research entry point and describe
+  its Claude fallback as internal, rather than attributing it to `/deep-research`.
+
 ## v1.29.0
 
 ### Added
