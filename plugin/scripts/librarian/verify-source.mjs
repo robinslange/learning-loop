@@ -96,7 +96,7 @@ async function readStdin() {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   readStdin()
-    .then(({ claim, sourceId }) => verifyClaimSource(claim, sourceId, defaultDeps))
+    .then(({ claim }) => verifyClaimSource(claim, claim.sourceId, defaultDeps))
     .then((r) => {
       console.log(JSON.stringify(r));
       process.exit(0);
