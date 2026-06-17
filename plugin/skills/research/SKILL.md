@@ -605,8 +605,40 @@ const ROUTE_SCHEMA = {
   },
 };
 
+// ── Verify decision logic — kept byte-faithful to plugin/scripts/librarian/verify-route.mjs
+// (the Workflow sandbox can't import it; a contract test asserts the copy matches). Two
+// invariants: never trust a transcribed survives scalar — recompute it from the verdicts;
+// and treat fewer-than-quorum valid votes as INCONCLUSIVE, never as an adversarial kill.
+function computeSurvives(validVotes) {
+  const votes = validVotes || [];
+  if (votes.length < REFUTATIONS_REQUIRED) return { survives: null, inconclusive: true };
+  const refuted = votes.filter((v) => v.refuted).length;
+  return { survives: refuted < REFUTATIONS_REQUIRED, inconclusive: false };
+}
+function normalizeMechanical(out) {
+  const r = out && out.exitCode === 0 ? out.result : null;
+  if (r && (r.verdict === 'pass' || r.verdict === 'kill') && typeof r.survives === 'boolean') {
+    return { shortCircuit: true, survives: r.survives, verdict: r.verdict, evidence: r.evidence };
+  }
+  return { shortCircuit: false };
+}
+function normalizeGlm(out) {
+  const r = out && out.exitCode === 0 ? out.result : null;
+  const verdicts = (r && r.verdicts) || [];
+  if (verdicts.length === 0) return { ok: false };
+  const { survives, inconclusive } = computeSurvives(verdicts.filter(Boolean));
+  return { ok: true, survives, verdicts, inconclusive };
+}
+function auditOutcome(glmSurvives, claudeValidVotes) {
+  const { survives, inconclusive } = computeSurvives(claudeValidVotes);
+  if (inconclusive) return { status: 'inconclusive', claudeSurvives: null };
+  return { status: glmSurvives === survives ? 'agreed' : 'disagreed', claudeSurvives: survives };
+}
+
 // One claim → a normalized verdict { claim, survives, evidence, mode }.
-// Router: sourceId(pass|kill) → mechanical; else/defer/error → GLM; GLM exit≠0 → Claude 3-vote.
+// Router: sourceId(pass|kill) → mechanical; defer/malformed/error → GLM; GLM exit≠0 → Claude 3-vote.
+// A claim whose verifier could not reach quorum is carried as inconclusive (survives=null),
+// reported separately, and never counted as an adversarial refutation.
 async function routeClaim(claim) {
   const stdin = JSON.stringify({ question: QUESTION, claim });
 
@@ -623,12 +655,13 @@ async function routeClaim(claim) {
         'On non-zero: return exitCode and stderr, no result. Do not retry or fall back yourself. Structured output only.',
       { label: 'verify-source:' + claim.sourceId.kind, phase: 'Verify', schema: ROUTE_SCHEMA },
     );
-    if (out && out.exitCode === 0 && out.result && out.result.verdict !== 'defer') {
+    const m = normalizeMechanical(out);
+    if (m.shortCircuit) {
       return {
         ...claim,
-        survives: out.result.survives,
-        evidence: out.result.evidence || '',
-        vote: out.result.verdict,
+        survives: m.survives,
+        evidence: m.evidence || '',
+        vote: m.verdict,
         mode: 'mechanical',
       };
     }
@@ -647,14 +680,15 @@ async function routeClaim(claim) {
         'On exit 3 (no GLM) or 1 (provider down): return exitCode and stderr, no result. Structured output only.',
       { label: 'verify-glm', phase: 'Verify', schema: ROUTE_SCHEMA },
     );
-    if (out && out.exitCode === 0 && out.result) {
-      const v = out.result;
-      const vs = v.verdicts || [];
+    const g = normalizeGlm(out);
+    if (g.ok) {
+      const vs = g.verdicts;
       const refuted = vs.filter((x) => x.refuted).length;
       const best = vs.filter((x) => !x.refuted)[0] || vs[0] || {};
       return {
         ...claim,
-        survives: v.survives,
+        survives: g.survives,
+        inconclusive: g.inconclusive,
         verdicts: vs,
         evidence: best.evidence || '',
         vote: vs.length - refuted + '-' + refuted,
@@ -678,25 +712,41 @@ async function routeClaim(claim) {
     )
   ).filter(Boolean);
   const refuted = verdicts.filter((x) => x.refuted).length;
-  const survives = verdicts.length >= REFUTATIONS_REQUIRED && refuted < REFUTATIONS_REQUIRED;
+  // Verifier failure (fewer than quorum valid votes) is inconclusive, not a refutation:
+  // a 429 cascade nulling the votes must not ship a well-sourced claim as adversarially killed.
+  const { survives, inconclusive } = computeSurvives(verdicts);
   const best = verdicts.filter((x) => !x.refuted)[0] || verdicts[0] || {};
   return {
     ...claim,
     survives,
+    inconclusive,
     verdicts,
     evidence: best.evidence || '',
-    vote: verdicts.length - refuted + '-' + refuted,
+    vote: inconclusive
+      ? verdicts.length + '/' + VOTES_PER_CLAIM + ' votes (inconclusive)'
+      : verdicts.length - refuted + '-' + refuted,
     mode: 'claude-fallback',
   };
 }
 
 const routed = (await parallel(rankedClaims.map((c) => () => routeClaim(c)))).filter(Boolean);
 routed.forEach((r) =>
-  log('"' + r.claim.slice(0, 50) + '…": ' + (r.survives ? '✓' : '✗') + ' [' + r.mode + ']'),
+  log(
+    '"' +
+      r.claim.slice(0, 50) +
+      '…": ' +
+      (r.inconclusive ? '?' : r.survives ? '✓' : '✗') +
+      ' [' +
+      r.mode +
+      ']',
+  ),
 );
 
-const confirmed = routed.filter((c) => c.survives);
-const killed = routed.filter((c) => !c.survives);
+// Three buckets, not two: survives===true confirmed, survives===false killed,
+// survives===null inconclusive (the verifier could not reach quorum — never a refutation).
+const confirmed = routed.filter((c) => c.survives === true);
+const killed = routed.filter((c) => c.survives === false);
+const inconclusive = routed.filter((c) => c.survives == null);
 
 const verifyEngine = routed.some((c) => c.mode === 'glm')
   ? 'GLM-5.2 (verification ran off-Claude) + ' +
@@ -710,10 +760,11 @@ const verifyEngine = routed.some((c) => c.mode === 'glm')
 const glmClaims = routed.filter((c) => c.mode === 'glm');
 const auditDisagreed = [];
 let auditSampled = 0,
-  auditAgreed = 0;
+  auditAgreed = 0,
+  auditInconclusive = 0;
 if (glmClaims.length > 0) {
-  const survivors = glmClaims.filter((c) => c.survives);
-  const kills = glmClaims.filter((c) => !c.survives);
+  const survivors = glmClaims.filter((c) => c.survives === true);
+  const kills = glmClaims.filter((c) => c.survives === false);
   const sampleSize = Math.ceil(0.2 * glmClaims.length);
   const stride = Math.max(1, Math.floor(survivors.length / Math.max(1, sampleSize)));
   const picked = [];
@@ -736,16 +787,20 @@ if (glmClaims.length > 0) {
           ),
         ).then((vs) => {
           const valid = vs.filter(Boolean);
-          const refuted = valid.filter((x) => x.refuted).length;
-          const claudeSurvives =
-            valid.length >= REFUTATIONS_REQUIRED && refuted < REFUTATIONS_REQUIRED;
-          return { claim: c.claim, glm: c.survives, claude: claudeSurvives };
+          // <quorum Claude votes is inconclusive (the audit couldn't run), NOT a Claude
+          // disagreement — otherwise a transient agent failure inflates "disagreed".
+          const { status, claudeSurvives } = auditOutcome(c.survives, valid);
+          return { claim: c.claim, glm: c.survives, claude: claudeSurvives, status };
         }),
     ),
   );
   for (const a of audits.filter(Boolean)) {
+    if (a.status === 'inconclusive') {
+      auditInconclusive++;
+      continue;
+    }
     auditSampled++;
-    if (a.glm === a.claude) auditAgreed++;
+    if (a.status === 'agreed') auditAgreed++;
     else
       auditDisagreed.push({
         claim: a.claim,
@@ -760,7 +815,8 @@ if (glmClaims.length > 0) {
       auditAgreed +
       ' agreed, ' +
       auditDisagreed.length +
-      ' disagreed',
+      ' disagreed' +
+      (auditInconclusive ? ', ' + auditInconclusive + ' inconclusive (audit could not run)' : ''),
   );
 }
 
@@ -771,18 +827,43 @@ log(
     confirmed.length +
     ' confirmed, ' +
     killed.length +
-    ' killed',
+    ' killed' +
+    (inconclusive.length ? ', ' + inconclusive.length + ' inconclusive' : ''),
 );
 
+const verifyStats = () => ({
+  mechanical: routed.filter((c) => c.mode === 'mechanical').length,
+  glm: routed.filter((c) => c.mode === 'glm').length,
+  claudeFallback: routed.filter((c) => c.mode === 'claude-fallback').length,
+  inconclusive: inconclusive.length,
+  audit: {
+    sampled: auditSampled,
+    agreed: auditAgreed,
+    disagreed: auditDisagreed,
+    inconclusive: auditInconclusive,
+  },
+});
+
 if (confirmed.length === 0) {
+  // Separate a genuine all-refuted result from one where the verifier itself could not
+  // run: the latter is not evidence against the claims, so don't report it as refutation.
+  const summary =
+    killed.length > 0
+      ? killed.length +
+        ' of ' +
+        routed.length +
+        ' claims refuted by adversarial verification' +
+        (inconclusive.length ? '; ' + inconclusive.length + ' inconclusive (verifier unavailable)' : '') +
+        '. Research inconclusive.'
+      : 'No claims could be verified: all ' +
+        routed.length +
+        ' verification attempts were inconclusive (verifier unavailable). Research inconclusive — rerun when the verifier is reachable.';
   return {
     question: QUESTION,
-    summary:
-      'All ' +
-      routed.length +
-      ' claims refuted by adversarial verification. Research inconclusive.',
+    summary,
     findings: [],
     refuted: killed.map((c) => ({ claim: c.claim, vote: c.vote, source: c.sourceUrl })),
+    inconclusive: inconclusive.map((c) => ({ claim: c.claim, vote: c.vote, source: c.sourceUrl })),
     sources: allSources.map((s) => ({
       url: s.url,
       quality: s.sourceQuality,
@@ -796,12 +877,7 @@ if (confirmed.length === 0) {
       verified: routed.length,
       confirmed: 0,
       killed: killed.length,
-      verify: {
-        mechanical: routed.filter((c) => c.mode === 'mechanical').length,
-        glm: routed.filter((c) => c.mode === 'glm').length,
-        claudeFallback: routed.filter((c) => c.mode === 'claude-fallback').length,
-        audit: { sampled: auditSampled, agreed: auditAgreed, disagreed: auditDisagreed },
-      },
+      verify: verifyStats(),
     },
     verifyEngine,
   };
@@ -929,13 +1005,9 @@ return {
     claimsVerified: routed.length,
     confirmed: confirmed.length,
     killed: killed.length,
+    inconclusive: inconclusive.length,
     afterSynthesis: report.findings.length,
-    verify: {
-      mechanical: routed.filter((c) => c.mode === 'mechanical').length,
-      glm: routed.filter((c) => c.mode === 'glm').length,
-      claudeFallback: routed.filter((c) => c.mode === 'claude-fallback').length,
-      audit: { sampled: auditSampled, agreed: auditAgreed, disagreed: auditDisagreed },
-    },
+    verify: verifyStats(),
   },
 };
 

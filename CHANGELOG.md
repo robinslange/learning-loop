@@ -67,6 +67,31 @@ All notable changes to this project are documented here. The format is based on 
   `/init` (e.g. `gemma4:e2b` on a ≥32GB machine) should re-run `/init` so research
   is enabled on capable hardware.
 
+### Fixed
+
+- **`/research` Verify no longer ships verifier failures as refutations.** The
+  router/audit treated a verifier that could not reach quorum (a rate-limit/outage
+  nulling its votes) identically to an adversarial refutation, silently shipping
+  well-sourced claims as "refuted" with a `0-0` vote. Verification now has a third
+  outcome — _inconclusive_ (`survives=null`) — reported separately from confirmed
+  and refuted; an all-inconclusive run says the verifier was unavailable rather than
+  claiming the research was refuted.
+- **`/research` Verify recomputes survival from the votes, never trusts a
+  transcribed scalar.** A subagent dropping `verdict`/`survives` from a verify-source
+  or verify-glm result (the loose result schema permits it) previously short-circuited
+  to a silent kill. The mechanical branch now requires a recognized verdict plus a
+  boolean `survives` before it can short-circuit; the GLM branch recomputes `survives`
+  from the verdicts array. Logic extracted to `scripts/librarian/verify-route.mjs`
+  with a contract test pinning the SKILL.md inline copy.
+- **`/research` source ids trim publisher view-qualifier suffixes.** Wiley legacy
+  `/doi/<DOI>/full|/abstract|/pdf` URLs no longer yield an unresolvable DOI that 404s
+  at CrossRef and drops the claim out of the free deterministic check.
+- **`/research` mechanical verification keeps the citation author/year.** The
+  URL-derived id retains the model's claimed author/year so a citation mismatch is
+  surfaced as a flag (carried into the evidence), instead of being discarded; a
+  mismatch flags rather than kills, since the claimed author comes from the same
+  chrome-heavy text the id parse was deliberately moved off.
+
 ## v1.28.3
 
 ### Fixed
