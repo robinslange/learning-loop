@@ -19,6 +19,12 @@ const PATTERNS = [
   { kind: 'doi', re: /(?:doi\.org\/|\/doi\/(?:full\/|abs\/)?)(10\.\d{4,}\/[^\s?#]+)/i },
 ];
 
+// Publisher article URLs append a view qualifier as a trailing path segment
+// (Wiley's /doi/<DOI>/full, /abstract, /pdf, /epdf, /references). The DOI itself
+// never ends in one of these words, so trimming a trailing /<qualifier> recovers
+// the resolvable id without touching a DOI whose own path contains slashes.
+const DOI_PATH_SUFFIX = /\/(full|abstract|abs|pdf|epdf|references|metrics|citedby)\/?$/i;
+
 /**
  * Parse a verifiable identifier out of a source URL. Returns a sourceId object
  * `{ kind, id, author: null, year: null }` or `null` when the URL carries no
@@ -30,7 +36,11 @@ export function sourceIdFromUrl(url) {
   if (!url || typeof url !== 'string') return null;
   for (const { kind, re } of PATTERNS) {
     const m = re.exec(url);
-    if (m) return { kind, id: m[1].replace(/\/$/, ''), author: null, year: null };
+    if (m) {
+      let id = m[1].replace(/\/$/, '');
+      if (kind === 'doi') id = id.replace(DOI_PATH_SUFFIX, '');
+      return { kind, id, author: null, year: null };
+    }
   }
   return null;
 }

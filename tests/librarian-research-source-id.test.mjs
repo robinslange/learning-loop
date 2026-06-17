@@ -26,6 +26,24 @@ test('parses a DOI from a publisher /doi/ path', () => {
   assert.equal(r.id, '10.3390/nu16081192');
 });
 
+test('strips a Wiley legacy /full path suffix from the DOI', () => {
+  const r = sourceIdFromUrl('https://onlinelibrary.wiley.com/doi/10.1002/hep.31884/full');
+  assert.equal(r.kind, 'doi');
+  assert.equal(r.id, '10.1002/hep.31884');
+});
+
+test('strips /abstract, /pdf, /epdf, /references DOI path suffixes', () => {
+  for (const suffix of ['abstract', 'pdf', 'epdf', 'references']) {
+    const r = sourceIdFromUrl(`https://onlinelibrary.wiley.com/doi/10.1002/hep.31884/${suffix}`);
+    assert.equal(r.id, '10.1002/hep.31884', `suffix /${suffix}`);
+  }
+});
+
+test('does not over-strip a DOI whose own path contains slashes', () => {
+  const r = sourceIdFromUrl('https://doi.org/10.1016/j.cell.2020.01.001');
+  assert.equal(r.id, '10.1016/j.cell.2020.01.001');
+});
+
 test('parses an arXiv id, stripping the version suffix', () => {
   assert.deepEqual(sourceIdFromUrl('https://arxiv.org/abs/2310.06825v2'), {
     kind: 'arxiv',
