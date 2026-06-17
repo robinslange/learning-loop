@@ -97,8 +97,12 @@ export async function runResearch(question, opts = {}) {
     });
     // The URL carries the identifier deterministically; the model is unreliable
     // at finding it in chrome-heavy page text (PubMed strips the PMID). Prefer the
-    // URL-derived id, fall back to the model's, null if neither.
-    const resolvedSourceId = sourceIdFromUrl(r.url) ?? sourceId ?? null;
+    // URL-derived id, but keep the model's claimed author/year (read from the
+    // document body, not chrome) so the resolver can flag a citation mismatch.
+    const urlId = sourceIdFromUrl(r.url);
+    const resolvedSourceId = urlId
+      ? { ...urlId, author: sourceId?.author ?? null, year: sourceId?.year ?? null }
+      : (sourceId ?? null);
     results[i] = {
       source: {
         url: r.url,

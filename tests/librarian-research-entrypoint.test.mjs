@@ -215,7 +215,7 @@ describe('runResearch', () => {
     });
   });
 
-  it('prefers the URL-derived sourceId over the model-extracted one', async () => {
+  it('prefers the URL-derived id but keeps the model author/year for the citation check', async () => {
     const bundle = await runResearch('q', {
       angles: [{ label: 'a', query: 'a' }],
       searchFn: async () => [
@@ -224,11 +224,25 @@ describe('runResearch', () => {
       fetchTextFn: async () => ({ text: 'body', ok: true, reason: 'ok' }),
       extractFn: async () => ({
         sourceQuality: 'primary',
-        sourceId: { kind: 'pmid', id: '99999999', author: 'Wrong', year: 1999 },
+        sourceId: { kind: 'pmid', id: '99999999', author: 'Smith', year: 2020 },
         claims: [{ claim: 'c', quote: 'q', importance: 'central' }],
       }),
       maxFetch: 1,
     });
-    assert.equal(bundle.sources[0].sourceId.id, '39070254');
+    // The URL is authoritative for the id (the model is unreliable in chrome-heavy
+    // text), but the claimed author/year come from the document body and are kept so
+    // the resolver can flag a citation mismatch.
+    assert.deepEqual(bundle.sources[0].sourceId, {
+      kind: 'pmid',
+      id: '39070254',
+      author: 'Smith',
+      year: 2020,
+    });
+    assert.deepEqual(bundle.claims[0].sourceId, {
+      kind: 'pmid',
+      id: '39070254',
+      author: 'Smith',
+      year: 2020,
+    });
   });
 });

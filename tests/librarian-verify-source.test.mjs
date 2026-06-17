@@ -28,7 +28,7 @@ test('pmid resolves + author match -> pass/survives', async () => {
   assert.equal(r.mode, 'mechanical');
 });
 
-test('pmid resolves + author MISMATCH (high severity) -> kill', async () => {
+test('pmid resolves + author MISMATCH -> pass but flagged (mismatch is not a kill)', async () => {
   const r = await verifyClaimSource(
     claim,
     { kind: 'pmid', id: '1', author: 'Jones', year: 2023 },
@@ -40,8 +40,29 @@ test('pmid resolves + author MISMATCH (high severity) -> kill', async () => {
       }),
     }),
   );
-  assert.equal(r.verdict, 'kill');
-  assert.equal(r.survives, false);
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.survives, true);
+  assert.ok(
+    r.issues.some((i) => i.type === 'wrong_author'),
+    'the mismatch is surfaced to synthesis, not silently dropped',
+  );
+});
+
+test('year MISMATCH is likewise surfaced as a flag, not a kill', async () => {
+  const r = await verifyClaimSource(
+    claim,
+    { kind: 'doi', id: '10.1/x', author: null, year: 1999 },
+    deps({
+      verifyDoi: async () => ({
+        verified: false,
+        issues: [{ type: 'wrong_year', severity: 'high', claimed: 1999, actual: 2023 }],
+        metadata: {},
+      }),
+    }),
+  );
+  assert.equal(r.verdict, 'pass');
+  assert.equal(r.survives, true);
+  assert.ok(r.issues.some((i) => i.type === 'wrong_year'));
 });
 
 test('null author -> pass, author_not_checked issue', async () => {
