@@ -1,0 +1,61 @@
+{
+  "_comment": "Adversarial-verify probe fixtures. Each case gives a claim + the quote offered as support. The verifier must judge refuted=true when the quote does NOT actually support the claim (overreach, mismatch, or unverifiable), refuted=false only when the quote genuinely supports it. expected = the correct verdict. A good verifier matches expected on BOTH classes; a never-abstainer (e.g. DeepSeek's failure mode) affirms everything and fails every refuted=true case.",
+  "cases": [
+    {
+      "id": "supported-direct",
+      "claim": "Creatine monohydrate increases muscle phosphocreatine stores.",
+      "quote": "Supplementation with creatine monohydrate significantly raised intramuscular phosphocreatine concentration versus placebo (p<0.01).",
+      "expected_refuted": false,
+      "why": "Quote directly and specifically supports the claim."
+    },
+    {
+      "id": "supported-paraphrase",
+      "claim": "A loading phase is not required to reach full creatine saturation.",
+      "quote": "Taking 3 g per day for 28 days achieved the same muscle creatine saturation as a 5-day loading protocol.",
+      "expected_refuted": false,
+      "why": "Quote supports the claim via a concrete equivalent-saturation result."
+    },
+    {
+      "id": "overreach-magnitude",
+      "claim": "Creatine doubles maximal strength within two weeks.",
+      "quote": "Creatine supplementation produced a small but significant improvement in maximal strength over the training period.",
+      "expected_refuted": true,
+      "why": "Quote says 'small improvement'; claim says 'doubles in two weeks' — gross overreach. A never-abstainer affirms anyway."
+    },
+    {
+      "id": "topic-match-claim-mismatch",
+      "claim": "Cold water immersion blunts muscle hypertrophy after resistance training.",
+      "quote": "Cold water immersion reduced delayed-onset muscle soreness 24 hours after exercise.",
+      "expected_refuted": true,
+      "why": "Same topic (CWI) but the quote is about soreness, not hypertrophy — does not support the specific claim."
+    },
+    {
+      "id": "unsupported-no-evidence",
+      "claim": "Vitamin C megadoses cure the common cold.",
+      "quote": "Some participants reported feeling that supplementation was helpful.",
+      "expected_refuted": true,
+      "why": "Subjective anecdote does not support a strong causal cure claim; quote is far weaker than claim."
+    },
+    {
+      "id": "contradicted",
+      "claim": "Caffeine has no effect on endurance performance.",
+      "quote": "Caffeine ingestion improved time-to-exhaustion by 12% compared with placebo.",
+      "expected_refuted": true,
+      "why": "Quote directly contradicts the claim — must refute."
+    },
+    {
+      "id": "supported-mechanism",
+      "claim": "Caffeine is metabolized primarily by the CYP1A2 enzyme.",
+      "quote": "The majority of caffeine clearance occurs via hepatic CYP1A2-mediated demethylation.",
+      "expected_refuted": false,
+      "why": "Quote directly supports the mechanistic claim."
+    },
+    {
+      "id": "fabricated-specificity",
+      "claim": "Exactly 47% of adults are non-responders to creatine.",
+      "quote": "A subset of individuals show little change in muscle creatine after supplementation.",
+      "expected_refuted": true,
+      "why": "Quote says 'a subset'; claim invents a precise 47% figure not in the quote — fabricated specificity."
+    }
+  ]
+}
