@@ -226,7 +226,13 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
 
   const seed = (pluginDataDir, sandboxRoot) => {
     mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
-    writeFileSync(join(pluginDataDir, 'markers', `memory-snapshot-${sid}`), '[]');
+    // This session's own write log records three memory files (post-tool
+    // appends here on each Write/Edit into the memory dir). The count is
+    // sourced from this log, not a directory diff.
+    writeFileSync(
+      join(pluginDataDir, 'markers', `memory-writes-${sid}`),
+      JSON.stringify(['a.md', 'b.md', 'c.md']),
+    );
     const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
     mkdirSync(memDir, { recursive: true });
     for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
@@ -304,6 +310,83 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
   }
 });
 
+// Regression: a session that wrote NO memory files must not be nudged, even
+// when many memory files appeared in the shared dir from CONCURRENT sessions.
+// The old code diffed the whole memory dir against a session-start snapshot,
+// so a read-only session left open while siblings wrote got blamed for their
+// writes ("this session created 31 new memory files" with zero of its own).
+// The count must come from this session's own write log.
+test('dream nudge ignores concurrent sessions writes — only this session count', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-concurrent-'));
+  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const sid = 'test-readonly-session';
+
+  const r = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed: (pluginDataDir, sandboxRoot) => {
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      // This session's write log is empty: it wrote nothing.
+      writeFileSync(join(pluginDataDir, 'markers', `memory-writes-${sid}`), '[]');
+      // Also seed an empty session-start snapshot — the OLD code keyed its
+      // dir-diff on this, so its presence is what made the bug fire. Seeding
+      // it ensures this test bites the old implementation (which would count
+      // the 30 peer files and nudge) and passes the new one (write-log = 0).
+      writeFileSync(join(pluginDataDir, 'markers', `memory-snapshot-${sid}`), '[]');
+      // The shared memory dir is full of OTHER sessions' files.
+      const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+      mkdirSync(memDir, { recursive: true });
+      for (let i = 0; i < 30; i++) writeFileSync(join(memDir, `other-${i}.md`), '# from a peer');
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(
+      r.stdout.trim(),
+      '',
+      "a session that wrote nothing must not be nudged for peers' files",
+    );
+  } finally {
+    r.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+// Regression: the count is the size of this session's write log intersected
+// with files still on disk — a file this session wrote then deleted (or that a
+// later dream archived) must not be counted. Two real writes, one since-removed,
+// plus an unrelated peer file present: count is 2, under the >=3 gate → no nudge.
+test('dream nudge counts only this session writes still present on disk', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-presence-'));
+  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const sid = 'test-presence';
+
+  const r = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir },
+    stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    seed: (pluginDataDir, sandboxRoot) => {
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      // Logged three writes, but 'gone.md' was removed since.
+      writeFileSync(
+        join(pluginDataDir, 'markers', `memory-writes-${sid}`),
+        JSON.stringify(['kept-1.md', 'kept-2.md', 'gone.md']),
+      );
+      const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
+      mkdirSync(memDir, { recursive: true });
+      writeFileSync(join(memDir, 'kept-1.md'), '# x');
+      writeFileSync(join(memDir, 'kept-2.md'), '# x');
+      writeFileSync(join(memDir, 'peer.md'), '# from a peer');
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.equal(r.stdout.trim(), '', 'two present own-writes are under the >=3 gate → no nudge');
+  } finally {
+    r.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 // Regression (W5/6d): when the once-guard marker write FAILS, the dream
 // nudge must be suppressed, not emitted. Emitting without a persisted guard
 // re-nudges on every later stop of the session (the guard never exists). The
@@ -325,11 +408,14 @@ test(
       seed: (pluginDataDir, sandboxRoot) => {
         const markersDir = join(pluginDataDir, 'markers');
         mkdirSync(markersDir, { recursive: true });
-        writeFileSync(join(markersDir, `memory-snapshot-${sid}`), '[]');
+        writeFileSync(
+          join(markersDir, `memory-writes-${sid}`),
+          JSON.stringify(['a.md', 'b.md', 'c.md']),
+        );
         const memDir = join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory');
         mkdirSync(memDir, { recursive: true });
         for (const n of ['a.md', 'b.md', 'c.md']) writeFileSync(join(memDir, n), '# x');
-        // Read-only markers dir: the snapshot read still works, but the
+        // Read-only markers dir: the write-log read still works, but the
         // once-guard writeMarker fails with EACCES.
         chmodSync(markersDir, 0o555);
       },

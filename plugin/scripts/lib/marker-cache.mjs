@@ -29,12 +29,29 @@ export const MARKER_PATHS = {
   lastReflect: (pluginData) => join(DATA_PATHS.markers(pluginData), 'last-reflect'),
   dreamLock: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-lock'),
   dreamNudged: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-nudged'),
-  memorySnapshot: (pluginData, sessionId) =>
+  // Session-scoped log of memory files THIS session wrote (post-tool appends
+  // on each Write/Edit into the auto-memory dir). stop-nudge counts this,
+  // intersected with files still on disk — never a diff of the shared dir,
+  // which conflated concurrent sessions' writes and blamed one session for
+  // another's files.
+  memoryWrites: (pluginData, sessionId) =>
     join(
       DATA_PATHS.markers(pluginData),
-      sessionId ? `memory-snapshot-${sessionId}` : 'memory-snapshot',
+      sessionId ? `memory-writes-${sessionId}` : 'memory-writes',
     ),
 };
+
+// Append a basename to the session-scoped memory-writes log, de-duplicated.
+// Fire-and-forget: a failed read or write costs at most one uncounted file in
+// the dream nudge, never a thrown error on the PostToolUse hot path.
+export function appendMemoryWrite(pluginData, sessionId, basename) {
+  const path = MARKER_PATHS.memoryWrites(pluginData, sessionId);
+  const existing = readMarker(path, { ttlMs: Infinity });
+  const set = new Set(Array.isArray(existing) ? existing : []);
+  if (set.has(basename)) return;
+  set.add(basename);
+  writeMarker(path, [...set]);
+}
 
 export function readMarker(path, { ttlMs = MARKER_TTL_MS } = {}) {
   let stat;

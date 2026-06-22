@@ -23,6 +23,7 @@ import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
 import { DATA_FILES, DATA_PATHS } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
+import { spawnEnv } from '../../scripts/lib/env.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
@@ -127,9 +128,14 @@ export async function run(ctx) {
     if (installed === running) return;
     const downloader = join(ctx.pluginDir, 'scripts', 'download-binary.mjs');
     if (!existsSync(downloader)) return;
+    // Pass the resolved environment explicitly: the child's getPluginData()
+    // must see CLAUDE_PLUGIN_DATA. Relying on default inheritance is implicit
+    // and a future spawn-option change could silently drop it, re-creating the
+    // stuck-auto-update loop (the child throws on null plugin-data).
     const child = spawn(process.execPath, [downloader], {
       detached: true,
       stdio: 'ignore',
+      env: spawnEnv({ CLAUDE_PLUGIN_DATA: pluginData }),
     });
     child.on('error', () => {});
     child.unref();

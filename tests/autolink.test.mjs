@@ -79,8 +79,18 @@ function writeStdin(vault, relPath, content) {
   };
 }
 
-function run(stdin, vault, seed) {
-  return runHook(HOOK, { stdin, env: { VAULT_PATH: vault }, seed });
+// mlTimeoutMs overrides autolink's similarity-exec wall-clock timeout. Default
+// is generous: the 1s production budget is the right fail-open value, but under
+// a contended full-suite run the stubbed similarity exec can exceed it before
+// returning, dropping the appended links and flaking the similarity test. The
+// timeout-containment test passes the production 1000ms explicitly, since the
+// short budget firing is exactly what it asserts. Production default unchanged.
+function run(stdin, vault, seed, { mlTimeoutMs = 30000 } = {}) {
+  return runHook(HOOK, {
+    stdin,
+    env: { VAULT_PATH: vault, LL_AUTOLINK_ML_TIMEOUT_MS: String(mlTimeoutMs) },
+    seed,
+  });
 }
 
 test(
@@ -391,13 +401,17 @@ test(
     writeFileSync(join(vault, '.vault-search', 'vault-index.db'), '');
     const content = 'See [[sleep]].\n';
     const stdin = writeStdin(vault, '0-inbox/new-note.md', content);
-    // AUTOLINK_ML_TIMEOUT_MS is 1000; a 3s stub must be killed by the
+    // Pin the production 1000ms ML timeout; a 3s stub must be killed by the
     // execFileSync timeout and swallowed inside the module.
-    const r = run(stdin, vault, (pd) =>
-      stubBinary(pd, {
-        similarJson: '[{"path":"3-permanent/circadian.md","score":0.9}]',
-        sleepSecs: 3,
-      }),
+    const r = run(
+      stdin,
+      vault,
+      (pd) =>
+        stubBinary(pd, {
+          similarJson: '[{"path":"3-permanent/circadian.md","score":0.9}]',
+          sleepSecs: 3,
+        }),
+      { mlTimeoutMs: 1000 },
     );
     try {
       assert.equal(r.exitCode, 0, `stderr: ${r.stderr}`);

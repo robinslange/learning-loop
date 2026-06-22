@@ -168,7 +168,10 @@ function reapRecordedChildren(pidFile) {
  *
  * @param {string} hookPath   Absolute path to the hook .js file.
  * @param {object} opts
- *   stdin        {string|object}  Hook stdin. Objects are JSON.stringify'd.
+ *   stdin        {string|object|function}  Hook stdin. Objects are
+ *                                 JSON.stringify'd. A function is called as
+ *                                 (sandboxRoot, pluginDataDir) => object|string
+ *                                 for payloads whose paths depend on the sandbox.
  *   env          {Record<string,string>}  Extra env vars (merged on top of minimal set).
  *   cwd          {string}         Working directory for the child process.
  *   timeoutMs    {number}         Kill timeout (default 8000).
@@ -251,7 +254,10 @@ export function runHook(hookPath, opts = {}) {
 
   const childPidFile = join(sandboxRoot, '.child-pids');
 
-  const stdinStr = typeof stdin === 'string' ? stdin : JSON.stringify(stdin);
+  // stdin may be a builder (sandboxRoot, pluginDataDir) => object|string, for
+  // payloads whose file_path depends on the per-call sandbox root.
+  const stdinValue = typeof stdin === 'function' ? stdin(sandboxRoot, pluginDataDir) : stdin;
+  const stdinStr = typeof stdinValue === 'string' ? stdinValue : JSON.stringify(stdinValue);
 
   const result = spawnSync(process.execPath, [hookPath], {
     input: stdinStr,

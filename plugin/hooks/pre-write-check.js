@@ -15,7 +15,7 @@ import { checkFilenameStyle } from './lib/filename-style.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
-import { spawnEnv } from '../scripts/lib/env.mjs';
+import { spawnEnv, env, coerceNumber } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
@@ -24,6 +24,15 @@ import { emitJson } from './lib/io.mjs';
 // The hook's outer deadline (hooks.json timeout) starts when the process
 // does; the duplicate gate budgets its subprocess fallback from what's left.
 const HOOK_START_MS = Date.now();
+
+// Default mirrors the hooks.json deadline (pinned by lib-hook-config.test).
+// LL_PRE_WRITE_BUDGET_MS lets a contended test harness extend the wall-clock
+// budget so the subprocess fallback is exercised deterministically under load
+// — the production default is unchanged.
+const PRE_WRITE_BUDGET_MS = coerceNumber(
+  env.LL_PRE_WRITE_BUDGET_MS,
+  HookConfig.PRE_WRITE_HOOK_BUDGET_MS,
+);
 
 // Distinguishable error code for a duplicate-gate timeout (socket or
 // subprocess). /doctor's duplicate-gate-health check scans the monthly
@@ -252,8 +261,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
     if (!binary) return null;
 
     const elapsedMs = Date.now() - HOOK_START_MS;
-    const remainingMs =
-      HookConfig.PRE_WRITE_HOOK_BUDGET_MS - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    const remainingMs = PRE_WRITE_BUDGET_MS - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
     if (remainingMs < HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS) {
       logDuplicateGateIssue(
         pluginData,
@@ -417,7 +425,7 @@ runHook(async ({ tool, input }) => {
   const isNewFile = !existsSync(filePath);
   const elapsedForStyle = Date.now() - HOOK_START_MS;
   const budgetOkForStyle =
-    HookConfig.PRE_WRITE_HOOK_BUDGET_MS - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    PRE_WRITE_BUDGET_MS - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
   const styleAdvisory = checkFilenameStyle(
     filePath,
     vaultRoot,

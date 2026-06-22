@@ -151,6 +151,17 @@ async function main() {
   const version = getVersion();
   const repo = getRepo();
   const pluginData = getPluginData();
+  // No plugin-data resolves (env unset AND no saved path marker) when the
+  // detached session-start spawn runs in a stripped environment. Without it
+  // there is nowhere to install the binary or write .version. Fail loudly with
+  // exit 1 rather than throwing a cryptic join(null) into ignored stdio, which
+  // left .version unwritten and the next session re-spawning forever.
+  if (!pluginData) {
+    console.error(
+      '  download-binary: CLAUDE_PLUGIN_DATA not set and no saved data path — cannot install.',
+    );
+    process.exit(1);
+  }
   const binDir = join(pluginData, 'bin');
   const binaryName = platform() === 'win32' ? 'll-search.exe' : 'll-search';
   const binaryPath = join(binDir, binaryName);

@@ -503,7 +503,7 @@ test(
 // ---------------------------------------------------------------------------
 // M4: the stdin hook payload's session_id is the canonical key — it must win
 // over $CLAUDE_CODE_SESSION_ID and land in both the plugin-data session id and
-// the memory-snapshot marker that stop-nudge diffs against.
+// the retrieval access log keyed by that id.
 // ---------------------------------------------------------------------------
 test(
   'session-start prefers the stdin payload session_id and stamps it everywhere — M4',
@@ -534,16 +534,21 @@ test(
         'payload-id-wins',
         'plugin-data session id must carry the payload id',
       );
-      assert.ok(
-        existsSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-payload-id-wins')),
-        'memory snapshot must be keyed by the payload id in plugin-data',
+      const accessMonth = new Date().toISOString().slice(0, 7);
+      const accessLog = join(r.pluginDataDir, 'retrieval', `access-${accessMonth}.jsonl`);
+      assert.ok(existsSync(accessLog), 'retrieval access log must be written');
+      const lastEntry = JSON.parse(
+        readFileSync(accessLog, 'utf8').trim().split('\n').filter(Boolean).pop(),
+      );
+      assert.equal(
+        lastEntry.session_id,
+        'payload-id-wins',
+        'access log must be keyed by the payload id',
       );
       assert.deepEqual(
-        JSON.parse(
-          readFileSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-payload-id-wins'), 'utf8'),
-        ),
+        lastEntry.memories,
         ['a.md'],
-        'snapshot content must be the bare files array (stop-nudge reads via Array.isArray)',
+        'access log records the memory files present at session start',
       );
     } finally {
       r.cleanup();

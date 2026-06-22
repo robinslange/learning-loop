@@ -29,10 +29,10 @@ test('MARKER_PATHS resolves all five W2 markers under plugin-data', () => {
   assert.equal(MARKER_PATHS.dreamLock(PD), join(PD, 'markers', 'dream-lock'));
   assert.equal(MARKER_PATHS.dreamNudged(PD), join(PD, 'markers', 'dream-nudged'));
   assert.equal(
-    MARKER_PATHS.memorySnapshot(PD, 'abc123'),
-    join(PD, 'markers', 'memory-snapshot-abc123'),
+    MARKER_PATHS.memoryWrites(PD, 'abc123'),
+    join(PD, 'markers', 'memory-writes-abc123'),
   );
-  assert.equal(MARKER_PATHS.memorySnapshot(PD, ''), join(PD, 'markers', 'memory-snapshot'));
+  assert.equal(MARKER_PATHS.memoryWrites(PD, ''), join(PD, 'markers', 'memory-writes'));
 });
 
 test('readMarker ttlMs override lets a 26h-old marker survive', () => {

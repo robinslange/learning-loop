@@ -58,16 +58,20 @@ if (pluginData) {
 const projectDir = env.CLAUDE_PROJECT_DIR;
 
 if (pluginData && projectDir) {
-  const snapshotArr = readMarker(MARKER_PATHS.memorySnapshot(pluginData, sessionId), {
+  // Count what THIS session wrote (post-tool's per-session write log),
+  // intersected with files still on disk. Never a diff of the shared memory
+  // dir: that conflated concurrent sessions and blamed one session for
+  // another's writes ("this session created 31 new memory files" with zero
+  // of its own).
+  const writesArr = readMarker(MARKER_PATHS.memoryWrites(pluginData, sessionId), {
     ttlMs: Infinity,
   });
-  if (Array.isArray(snapshotArr)) {
+  if (Array.isArray(writesArr)) {
     const encodedPath = projectDir.replace(/[/\\]/g, '-');
     const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     try {
-      const snapshot = new Set(snapshotArr);
-      const currentFiles = readdirSync(memoryDir).filter((f) => f.endsWith('.md'));
-      const newMemoryCount = currentFiles.filter((f) => !snapshot.has(f)).length;
+      const onDisk = new Set(readdirSync(memoryDir).filter((f) => f.endsWith('.md')));
+      const newMemoryCount = new Set(writesArr.filter((f) => onDisk.has(f))).size;
 
       if (newMemoryCount >= 3) {
         // Skip if dream ran recently (last DREAM_COOLDOWN_SECS).

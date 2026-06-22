@@ -1,5 +1,5 @@
 // hooks/session-start/vault-snapshot.mjs : federation backfill, session ID
-// stamping, memory snapshot, and stale-marker TTL sweeps.
+// stamping, memory access log, and stale-marker TTL sweeps.
 
 import { writeFileSync, existsSync, readdirSync, lstatSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -11,7 +11,6 @@ import { logError } from '../../scripts/lib/log.mjs';
 import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { env } from '../../scripts/lib/env.mjs';
-import { writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 
 export async function run(ctx) {
   // Federation seed-meta backfill (one-shot for existing federations).
@@ -70,7 +69,9 @@ export async function run(ctx) {
     try {
       const files = readdirSync(memDir).filter((f) => f.endsWith('.md'));
       if (ctx.pluginData) {
-        writeMarker(MARKER_PATHS.memorySnapshot(ctx.pluginData, sessionId), files);
+        // Retrieval access log only. The dream nudge no longer diffs a
+        // session-start snapshot of this dir (it counts post-tool's per-session
+        // write log instead), so no memory-snapshot marker is written here.
         const retrievalDir = DATA_PATHS.retrieval(ctx.pluginData);
         mkdirSync(retrievalDir, { recursive: true });
         const entry = {
@@ -84,7 +85,7 @@ export async function run(ctx) {
         );
       }
     } catch (err) {
-      logError('session-start.vault-snapshot.memorySnapshot', err);
+      logError('session-start.vault-snapshot.memoryAccessLog', err);
     }
   }
 
@@ -118,7 +119,8 @@ export async function run(ctx) {
 
   // TTL sweeps. One pass, three targets:
   //   (a) retrieval/session-dedupe + markers/ entries older than 7 days
-  //       (memory-snapshot-<sid> accumulates one file per session);
+  //       (memory-writes-<sid> accumulates one file per session, as did the
+  //       now-removed memory-snapshot-<sid> — both reaped here);
   //   (b) edges.db.<pid>.tmp orphans (crash between saveDb's write and
   //       rename) older than 1 hour;
   //   (c) tmp per-session/legacy markers older than 7 days — stop-nudged

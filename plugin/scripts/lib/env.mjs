@@ -73,6 +73,23 @@ export const env = Object.freeze({
   // sandbox. Unset in production.
   LL_CHILD_PID_FILE: pick('LL_CHILD_PID_FILE', ''),
 
+  // --- Test seam ---
+  // Overrides the pre-write-check wall-clock budget (default mirrors the
+  // hooks.json deadline via HookConfig.PRE_WRITE_HOOK_BUDGET_MS). A contended
+  // full-suite run can burn the 3s budget on cold Node startup before the
+  // duplicate-gate subprocess fallback runs, flaking the fallback tests; they
+  // set this to a generous value. Unset in production.
+  LL_PRE_WRITE_BUDGET_MS: pick('LL_PRE_WRITE_BUDGET_MS', ''),
+
+  // --- Test seam ---
+  // Overrides autolink's similarity-exec wall-clock timeout (default
+  // HookConfig.AUTOLINK_ML_TIMEOUT_MS, 1s). The 1s cap is the right production
+  // fail-open budget but makes the autolink similarity test time-dependent: a
+  // contended full-suite run can exceed it before the stubbed exec returns,
+  // dropping the appended links. The test sets a generous value. Unset in
+  // production.
+  LL_AUTOLINK_ML_TIMEOUT_MS: pick('LL_AUTOLINK_ML_TIMEOUT_MS', ''),
+
   // --- Reflect new-notes handshake ---
   // Explicit session id for the /reflect new-notes marker. Set by the reflect
   // skill (and sweep-hook-replay, which forwards it) so a replayed Write appends

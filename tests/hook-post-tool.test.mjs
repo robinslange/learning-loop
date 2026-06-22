@@ -3,8 +3,17 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+  mkdtempSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = new URL('../plugin/hooks/post-tool.js', import.meta.url).pathname;
@@ -114,6 +123,71 @@ test('post-tool module order: load-bearing before enrichment, autolink before ed
   assert.ok(idx('runProvenance') < idx('runAutolink'), 'provenance must run before autolink');
   assert.ok(idx('runReflectTrack') < idx('runAutolink'), 'reflect-track must run before autolink');
   assert.ok(idx('runAutolink') < idx('runEdgeInfer'), 'autolink must run before edge-infer');
+});
+
+// A Write into the auto-memory dir must be recorded against this session's
+// write log (memory-writes-<sid>) so stop-nudge counts this session's own
+// writes rather than diffing the shared dir. The memory dir is
+// ~/.claude/projects/<encoded-project-dir>/memory; the harness redirects HOME
+// to the sandbox root.
+test('post-tool Write into the memory dir records a session-scoped write-log entry', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-pt-mem-proj-'));
+  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const sid = 'pt-mem-session';
+  // The harness redirects HOME to sandboxRoot, so the memory dir path is
+  // deterministic from sandboxRoot + the encoded project dir.
+  const memFileFor = (sandboxRoot) =>
+    join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory', 'feedback_thing.md');
+  const r = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir, CLAUDE_CODE_SESSION_ID: sid },
+    seed: (_pluginDataDir, sandboxRoot) => {
+      const memFile = memFileFor(sandboxRoot);
+      mkdirSync(join(memFile, '..'), { recursive: true });
+      writeFileSync(memFile, '# a memory');
+    },
+    stdin: (sandboxRoot) => ({
+      tool_name: 'Write',
+      tool_input: { file_path: memFileFor(sandboxRoot), content: '# a memory' },
+      tool_response: { success: true },
+    }),
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    const logPath = join(r.pluginDataDir, 'markers', `memory-writes-${sid}`);
+    assert.ok(existsSync(logPath), 'memory write log must be created');
+    assert.deepEqual(
+      JSON.parse(readFileSync(logPath, 'utf8')),
+      ['feedback_thing.md'],
+      'the written memory basename must be recorded',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+// A Write into the VAULT (not the auto-memory dir) must NOT touch the memory
+// write log — only auto-memory files count toward the dream nudge.
+test('post-tool Write into the vault does not record a memory-write entry', () => {
+  const sid = 'pt-vault-session';
+  const notePath = join(VAULT, '0-inbox', 'new-note.md');
+  const r = runHook(HOOK, {
+    env: { VAULT_PATH: VAULT, CLAUDE_CODE_SESSION_ID: sid },
+    stdin: {
+      tool_name: 'Write',
+      tool_input: { file_path: notePath, content: '---\ntags: [test]\n---\nBody.' },
+      tool_response: { success: true },
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(
+      !existsSync(join(r.pluginDataDir, 'markers', `memory-writes-${sid}`)),
+      'a vault write must not create a memory write log',
+    );
+  } finally {
+    r.cleanup();
+  }
 });
 
 test('post-tool malformed stdin: exits 0, nothing written', () => {

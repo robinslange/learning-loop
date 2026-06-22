@@ -4,6 +4,33 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The /dream nudge no longer counts other sessions' memory writes.** The Stop
+  hook computed "new memory files this session" by diffing the whole auto-memory
+  dir against a session-start snapshot, so a session left open while concurrent
+  sessions wrote got blamed for their files ("this session created 31 new memory
+  files" with zero of its own — and a push toward a destructive /dream on false
+  pretenses). The count now comes from a session-scoped write log that post-tool
+  appends to on each Write/Edit into the memory dir, intersected with files still
+  on disk. The `memory-snapshot-<sid>` marker is replaced by `memory-writes-<sid>`
+  (both reaped by the existing 7-day marker sweep).
+- **Binary auto-update fails loudly instead of looping silently.** When the
+  detached session-start download spawn ran in a stripped environment with no
+  resolvable plugin-data, `download-binary.mjs` threw `join(null, …)` into ignored
+  stdio, leaving `.version` unwritten so every later session re-spawned the
+  download forever. It now exits 1 with a clear message, and the spawn passes the
+  resolved `CLAUDE_PLUGIN_DATA` explicitly so the child can't lose it.
+
+### Internal
+
+- **De-flaked the pre-write-check duplicate-gate tests.** Under a contended
+  full-suite run the 3s production hook budget could be spent on cold Node startup
+  before the duplicate-gate subprocess fallback ran, failing a different fallback
+  assertion each run. The budget is now overridable via `LL_PRE_WRITE_BUDGET_MS`
+  (a test seam; production default unchanged and still pinned to the hooks.json
+  deadline), and the fallback tests set a generous value.
+
 ## v1.29.1
 
 ### Fixed

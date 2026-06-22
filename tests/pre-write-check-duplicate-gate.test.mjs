@@ -131,12 +131,17 @@ function runWithStub(
   { allowStderrError = false, tool = 'Write', toolInput = null } = {},
 ) {
   const r = runHook(HOOK, {
+    timeoutMs: 30000,
     stdin: {
       hook_event_name: 'PreToolUse',
       tool_name: tool,
       tool_input: toolInput ?? { file_path: filePath, content: NOTE },
     },
-    env: { VAULT_PATH: VAULT },
+    // Generous wall-clock budget: under a contended full-suite run the 3s
+    // production default can be consumed by cold Node startup before the gate's
+    // subprocess fallback runs, flaking these fallback assertions. The
+    // production default is unchanged; this seam only affects the test process.
+    env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
     seed: (pluginDataDir) => {
       const binDir = join(pluginDataDir, 'bin');
       mkdirSync(binDir, { recursive: true });
@@ -177,12 +182,16 @@ function envelopeStub(similarity, path, title) {
 function runWithSocket(serverMode, filePath, { stubScript, allowStderrError = false } = {}) {
   let server = null;
   const r = runHook(HOOK, {
+    timeoutMs: 30000,
     stdin: {
       hook_event_name: 'PreToolUse',
       tool_name: 'Write',
       tool_input: { file_path: filePath, content: NOTE },
     },
-    env: { VAULT_PATH: VAULT },
+    // Generous wall-clock budget so the daemon attempt plus subprocess fallback
+    // complete deterministically under a contended full-suite run. Production
+    // default unchanged; this seam only affects the test process.
+    env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
     seed: (pluginDataDir) => {
       const binDir = join(pluginDataDir, 'bin');
       mkdirSync(binDir, { recursive: true });
@@ -343,12 +352,14 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     // the distinct stale-daemon code and still fall back to the subprocess.
     let server = null;
     const r = runHook(HOOK, {
+      timeoutMs: 30000,
       stdin: {
         hook_event_name: 'PreToolUse',
         tool_name: 'Write',
         tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
       },
-      env: { VAULT_PATH: VAULT },
+      // Generous budget so the subprocess fallback completes under load.
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
       seed: (pluginDataDir) => {
         const binDir = join(pluginDataDir, 'bin');
         mkdirSync(binDir, { recursive: true });

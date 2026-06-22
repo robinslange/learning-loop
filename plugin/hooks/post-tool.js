@@ -5,8 +5,8 @@
 // (provenance, reflect-track, autolink, edge-infer). One stdin read, one snapshot load,
 // fixed module order, per-module timeout isolation.
 
-import { join } from 'node:path';
-import { readStdin, resolveVaultPath } from './lib/common.mjs';
+import { basename, join } from 'node:path';
+import { home, readStdin, resolveVaultPath, getSessionId } from './lib/common.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
@@ -14,9 +14,33 @@ import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
+import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
+
+// Record a Write/Edit into the auto-memory dir against THIS session's write
+// log, so stop-nudge can count what this session actually wrote rather than
+// diffing the shared memory dir (which conflates concurrent sessions). The
+// memory dir is ~/.claude/projects/<encoded-project-dir>/memory. Fail-open:
+// any error here must not disturb the enrichment modules below.
+function recordMemoryWriteIfApplicable(filePath) {
+  try {
+    if (!filePath || !filePath.endsWith('.md')) return;
+    const projectDir = env.CLAUDE_PROJECT_DIR;
+    if (!projectDir) return;
+    const pluginData = getPluginData();
+    if (!pluginData) return;
+    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
+    if (filePath !== join(memoryDir, basename(filePath))) return;
+    let sid = getSessionId();
+    if (sid === 'unknown') sid = '';
+    appendMemoryWrite(pluginData, sid, basename(filePath));
+  } catch (err) {
+    logError('post-tool.recordMemoryWrite', err);
+  }
+}
 
 function logHookError(moduleName, err) {
   const pluginData = getPluginData();
@@ -72,6 +96,9 @@ const ctx = {
 };
 
 const isWriteEdit = ctx.tool === 'Write' || ctx.tool === 'Edit';
+if (isWriteEdit) {
+  recordMemoryWriteIfApplicable(ctx.input.file_path);
+}
 if (isWriteEdit && ctx.vaultRoot) {
   ctx.snapshot = loadVaultSnapshot(ctx.vaultRoot);
 }
