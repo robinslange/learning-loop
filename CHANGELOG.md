@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.2
+
 ### Fixed
 
 - **The /dream nudge no longer counts other sessions' memory writes.** The Stop
