@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.3
+
 ### Security
 
 Dependency and supply-chain hardening for deployment in regulated / corporate-IT
