@@ -88,8 +88,37 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}.*
 
+  # Machine-readable SBOMs (CycloneDX) for the Rust binary and the npm tree,
+  # published as release assets for procurement intake (NTIA / EO 14028).
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate Rust SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          (cd native && cargo cyclonedx --format json --all)
+          mkdir -p sbom
+          find native/crates -name '*.cdx.json' -exec cp {} sbom/ \;
+
+      - name: Generate npm SBOM
+        run: |
+          npx --yes @cyclonedx/cyclonedx-npm@latest --output-format JSON \
+            --output-file sbom/npm.cdx.json || \
+          echo "npm SBOM skipped (no production deps)"
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
   release:
-    needs: build
+    needs: [build, sbom]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -107,5 +136,6 @@ jobs:
           files: |
             **/*.tar.gz
             **/*.zip
+            sbom/*.json
             SHA256SUMS
           generate_release_notes: true

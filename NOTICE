@@ -5,3 +5,35 @@ This product is built and maintained by omit.nz (https://omit.nz).
 
 Licensed under the Apache License, Version 2.0 (the "License");
 see the LICENSE file for the full text.
+
+================================================================================
+THIRD-PARTY COMPONENTS
+================================================================================
+
+This product redistributes the following third-party components. Each is
+covered by its own license; copies are kept alongside the vendored files.
+
+Vendored JavaScript libraries
+-----------------------------
+- wink-nlp 2.4.0 — MIT — https://github.com/winkjs/wink-nlp
+  License: plugin/scripts/lib/vendor/wink-nlp/LICENSE
+- wink-eng-lite-web-model 1.8.1 — MIT — https://github.com/winkjs/wink-eng-lite-web-model
+  License: plugin/scripts/lib/vendor/wink-eng-lite-web-model/LICENSE
+- sql.js (sql-wasm.js, sql-wasm.wasm) — MIT — https://github.com/sql-js/sql.js
+  Bundles SQLite (public domain). License: plugin/vendor/LICENSE
+
+On-device ONNX models
+---------------------
+The search binary downloads and embeds three ONNX models. Their sources,
+revisions, licenses, and integrity hashes are recorded in:
+  provenance/models.json
+
+- bge-small-en-v1.5 (embeddings) — MIT
+- ms-marco-MiniLM-L-6-v2 (reranker) — Apache-2.0
+- DeBERTa-v3-base-mnli-fever-anli (NLI, build-time optional) — MIT
+
+Rust dependencies
+-----------------
+The Rust binary's dependency graph is gated by native/deny.toml (license
+allowlist + advisory + crates.io-only source checks). A full machine-readable
+SBOM is published with each release; see provenance/ and the release assets.

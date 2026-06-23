@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Security
+
+Dependency and supply-chain hardening for deployment in regulated / corporate-IT
+environments (informed by a full dependency security review).
+
+- **Model integrity.** The reranker model is now pinned to an immutable commit
+  (was `resolve/main`) and verified by SHA-256 + size on both download and cache
+  hit before it is embedded into the binary; an `LL_RERANKER_MODEL_PATH` escape
+  lets air-gapped builds pre-stage it. The bge-small embedding model gains the
+  same SHA-256/size verification (was trust-on-first-download) and an
+  `LL_MODELS_DIR` override for offline pre-staging.
+- **Federation egress.** The hub client refuses any non-`wss://` endpoint before
+  connecting (loopback `ws://` still allowed for local/test) and pins the hub
+  public key against config when provided. Frontmatter visibility detection
+  handles BOM/CRLF, and an empty/unknown default visibility tier now fails closed
+  to `private`.
+- **Seed storage.** A legacy plaintext signing seed is auto-migrated to a strong
+  backend and shredded when one is available (mode repaired to 0600 otherwise);
+  read-path secrets are wrapped in `Zeroizing`.
+- **Supply-chain gates.** Added `native/deny.toml` and a `security-audit` CI job
+  (cargo-deny: advisories, license allowlist, crates.io-only sources, banned
+  crates). All CI cargo invocations now run `--locked`. The binary downloader
+  fails closed when a release ships no `SHA256SUMS` rather than installing
+  unverified.
+- **Licensing & provenance.** `ll-core`/`ll-search` carry explicit `Apache-2.0`
+  license fields (resolving a prior MIT/none contradiction). `NOTICE` enumerates
+  the vendored libraries; `plugin/vendor/LICENSE` covers sql.js;
+  `provenance/models.json` records each ONNX model's source, revision, license,
+  and SHA-256; CycloneDX SBOMs are generated and published with each release
+  (committed snapshots in `provenance/`).
+
 ## v1.29.2
 
 ### Fixed

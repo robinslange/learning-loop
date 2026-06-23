@@ -1,0 +1,47 @@
+{
+  "$comment": "Provenance + integrity manifest for the ONNX models the search binary fetches and embeds. SHA-256 hashes are enforced at build time (reranker, ll-core/build.rs) and runtime (bge-small, model/loader.rs). To upgrade a model, bump its revision, recompute the sha256, and re-run the relevant quality eval before committing.",
+  "models": [
+    {
+      "id": "bge-small-en-v1.5",
+      "role": "embeddings",
+      "source": "https://huggingface.co/Xenova/bge-small-en-v1.5",
+      "revision": "ea104dacec62c0de699686887e3f920caeb4f3e3",
+      "license": "MIT",
+      "upstream": "BAAI/bge-small-en-v1.5 (ONNX export by Xenova)",
+      "fetch": "runtime",
+      "verified_in": "native/crates/ll-search/src/model/loader.rs",
+      "artifacts": {
+        "model_quantized.onnx": "6c9c6101a956d62dfb5e7190c538226c0c5bb9cb27b651234b6df063ee7dbfe4",
+        "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      }
+    },
+    {
+      "id": "ms-marco-MiniLM-L-6-v2",
+      "role": "cross-encoder reranker",
+      "source": "https://huggingface.co/Xenova/ms-marco-MiniLM-L-6-v2",
+      "revision": "a09144355adeed5f58c8ed011d209bf8ee5a1fec",
+      "license": "Apache-2.0",
+      "upstream": "cross-encoder/ms-marco-MiniLM-L-6-v2 (ONNX export by Xenova)",
+      "fetch": "build-time (include_bytes!)",
+      "verified_in": "native/crates/ll-core/build.rs",
+      "artifacts": {
+        "model_quantized.onnx": "e9d8ebf845c413e981c175bfe49a3bfa9b3dcce2a3ba54875ee5df5a58639fbe",
+        "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
+      }
+    },
+    {
+      "id": "DeBERTa-v3-base-mnli-fever-anli",
+      "role": "NLI faithfulness classifier (build-time optional, `nli` cargo feature)",
+      "source": "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli",
+      "revision": "main",
+      "license": "MIT",
+      "upstream": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli (ONNX export by Xenova)",
+      "fetch": "build-time when `nli` feature enabled (currently disabled)",
+      "verified_in": "native/crates/ll-search/build.rs",
+      "artifacts": {
+        "model_quantized.onnx": "ab9da76bb06054ea6b921560c1ecf5683a9e4d96f0ea73d78d3b4a8990aea882",
+        "tokenizer.json": "a86f883318afa11c8c10466f1bf4efaeb6ded28a52cbe57217a8fa0d0a2a87df"
+      }
+    }
+  ]
+}
