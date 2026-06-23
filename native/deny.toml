@@ -1,0 +1,52 @@
+[advisories]
+version = 2
+yanked = "deny"
+ignore = [
+  # instant 0.1.x (unmaintained WASM-time shim) reaches us via notify 7; no
+  # active vuln, native-only build. Cleared when notify is bumped past the
+  # web-time migration.
+  "RUSTSEC-2024-0384",
+  # paste 1.0.x (archived build-time proc-macro) reaches us via tokenizers
+  # 0.21; build-time only, nil runtime radius. Cleared when tokenizers drops it.
+  "RUSTSEC-2024-0436",
+  # rand 0.8 unsoundness only triggers with a custom logger that calls
+  # rand::rng(); we have none. Load-bearing use is CSPRNG-backed thread_rng.
+  "RUSTSEC-2026-0097",
+]
+
+[licenses]
+version = 2
+# Allowlist of licenses present in the dependency graph. New deps with a license
+# outside this set fail the gate — a deliberate review point for gov intake.
+allow = [
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "MIT",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Zlib",
+  # notify pulls in a CC0-1.0 (public-domain-equivalent) crate;
+  # redistribution-safe.
+  "CC0-1.0",
+  # webpki-roots / webpki-root-certs ship the Mozilla CA set under CDLA;
+  # redistribution-safe data license. Scanners flag it, so it is allowlisted
+  # explicitly with this rationale.
+  "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+# An RC/alpha/beta in the production dep tree is a posture risk (no SemVer
+# stability). ort is currently 2.0.0-rc.x and is exempted here until a stable
+# 2.x ships (tracked by workstream F); any OTHER pre-release dep should be
+# caught in review.
+allow = []
+
+[sources]
+# Every crate must come from the official registry. A git or alternate-registry
+# source is a supply-chain red flag and fails the gate.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

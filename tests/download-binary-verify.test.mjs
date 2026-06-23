@@ -6,7 +6,10 @@
 //   2. SUMS-404 race (dist review F4): releases >= v1.27.0 always ship
 //      SHA256SUMS, so a 404 on SUMS for those tags means the release is
 //      mid-build — retry next session (exit 0, no stamp), never install
-//      unverified. Fail-open stays only for pre-1.27 / non-semver tags.
+//      unverified.
+//   3. Fail closed: a 404 on SUMS for a tag that does NOT meet sumsRequired
+//      (pre-1.27 / non-semver / 'latest') now REFUSES the install (exit 1)
+//      rather than installing an unverified binary.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -36,7 +39,7 @@ test('verifyAgainstSums skips (returns false) only for a null sumsText', () => {
   assert.equal(verifyAgainstSums('/nonexistent', 'a.tar.gz', null), false);
 });
 
-test('sumsRequired: >= 1.27.0 tags require SUMS; pre-1.27 and non-semver tags fail open', () => {
+test('sumsRequired: >= 1.27.0 tags require SUMS; pre-1.27 and non-semver tags do not', () => {
   assert.equal(sumsRequired('v1.27.0'), true);
   assert.equal(sumsRequired('v1.27.1'), true);
   assert.equal(sumsRequired('v2.0.0'), true);
@@ -44,6 +47,24 @@ test('sumsRequired: >= 1.27.0 tags require SUMS; pre-1.27 and non-semver tags fa
   assert.equal(sumsRequired('v1.26.99'), false);
   assert.equal(sumsRequired('latest'), false);
   assert.equal(sumsRequired(''), false);
+});
+
+test('main() fails closed on a missing SUMS: a 404 for a non-required tag refuses, never installs unverified', () => {
+  const src = readFileSync(DL_PATH, 'utf8');
+  const sumsStart = src.indexOf('const sumsUrl');
+  assert.ok(sumsStart > -1, 'main() must fetch a SHA256SUMS url');
+  const branch = src.slice(sumsStart, sumsStart + 900);
+  assert.match(
+    branch,
+    /Refusing to install/,
+    'the non-required 404 path must refuse the install, not warn-and-skip verification',
+  );
+  assert.match(branch, /process\.exit\(1\)/, 'refusing to install must exit non-zero');
+  assert.doesNotMatch(
+    branch,
+    /skipping verification/,
+    'the fail-open "skipping verification" path must be gone',
+  );
 });
 
 test('main() wires the verify pipeline: verifyAgainstSums before extraction, sumsRequired on the 404 branch', () => {

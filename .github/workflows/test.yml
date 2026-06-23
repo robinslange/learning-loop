@@ -93,7 +93,7 @@ jobs:
           key: cargo-test-${{ hashFiles('native/Cargo.lock') }}
 
       - name: Run cargo test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   # Retrieval-quality regression gate: runs ll-search eval-funnel against a
   # seeded fixture vault and hard-fails on a >3% absolute drop in recall@10 /
@@ -135,7 +135,7 @@ jobs:
 
       - name: Build release binary
         working-directory: native
-        run: cargo build --release -p ll-search
+        run: cargo build --release --locked -p ll-search
 
       - name: Retrieval quality gate
         run: |
@@ -150,6 +150,19 @@ jobs:
           name: quality-metrics-${{ github.run_id }}
           path: /tmp/quality-result.json
           retention-days: 30
+
+  # Supply-chain gate: advisories (RUSTSEC), license allowlist, crates.io-only
+  # sources, and duplicate/banned crates. Config lives in native/deny.toml.
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cargo-deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          manifest-path: native/Cargo.toml
+          command: check advisories bans licenses sources
 
   lint:
     runs-on: ubuntu-latest

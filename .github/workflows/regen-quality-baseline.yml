@@ -44,7 +44,7 @@ jobs:
 
       - name: Build release binary
         working-directory: native
-        run: cargo build --release -p ll-search
+        run: cargo build --release --locked -p ll-search
 
       - name: Regenerate quality baseline
         run: node bench/bench.mjs --quality-only --save-quality-baseline

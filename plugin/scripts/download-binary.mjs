@@ -218,8 +218,11 @@ async function main() {
         process.exit(0);
       }
       console.error(
-        '  Warning: release has no SHA256SUMS (pre-1.27 release) — skipping verification',
+        `  Refusing to install ${version}: no SHA256SUMS published, cannot verify the binary.`,
       );
+      console.error('  Pin a released semver tag (>= v1.27.0) that ships SHA256SUMS.');
+      unlinkSync(tmpPath);
+      process.exit(1);
     } else {
       console.error(`Failed to fetch SHA256SUMS: ${sumsErr.message}`);
       console.error('Check your network connection and try again.');
