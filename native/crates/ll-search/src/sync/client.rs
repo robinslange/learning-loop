@@ -50,6 +50,40 @@ type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
+/// Enforce wss:// for hub connections. Cleartext `ws://` (and any other
+/// scheme) is rejected so the vault index never streams unencrypted, EXCEPT
+/// for loopback hosts (127.0.0.1 / ::1 / localhost) where ws:// is allowed for
+/// local testing and same-host hub development.
+fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
+    let rest = endpoint.trim();
+    if let Some(after) = rest.strip_prefix("wss://") {
+        let _ = after;
+        return Ok(());
+    }
+    if let Some(after) = rest.strip_prefix("ws://") {
+        let authority = after
+            .split(|c| c == '/' || c == '?' || c == '#')
+            .next()
+            .unwrap_or("");
+        let host = if let Some(rest) = authority.strip_prefix('[') {
+            rest.split(']').next().unwrap_or("")
+        } else {
+            authority.split(':').next().unwrap_or("")
+        };
+        if host == "127.0.0.1" || host == "::1" || host == "localhost" {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "refusing cleartext ws:// connection to non-loopback hub {endpoint:?}; \
+             federation requires wss://"
+        );
+    }
+    let scheme = rest.split("://").next().unwrap_or(rest);
+    anyhow::bail!(
+        "unsupported hub scheme {scheme:?} in {endpoint:?}; federation requires wss://"
+    )
+}
+
 fn is_safe_peer_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -202,6 +236,7 @@ async fn connect_and_authenticate(
     model_id: &str,
 ) -> anyhow::Result<(WsStream, u32)> {
     let hub_url = &config.hub.endpoint;
+    check_hub_scheme(hub_url)?;
     let connect_url = if hub_url.ends_with("/ws") {
         hub_url.clone()
     } else {
@@ -224,6 +259,15 @@ async fn connect_and_authenticate(
     let negotiated_protocol: u32 = match challenge {
         HubMessage::SyncReject { reason } => anyhow::bail!("hub rejected: {reason}"),
         HubMessage::AuthChallenge { nonce, hub_pubkey } => {
+            match config.hub.pubkey.as_deref() {
+                Some(pinned) if pinned == hub_pubkey => {}
+                Some(pinned) => anyhow::bail!(
+                    "hub pubkey mismatch: pinned {pinned:?} but hub presented {hub_pubkey:?}"
+                ),
+                None => eprintln!(
+                    "warning: no hub pubkey pinned in config; the hub is unauthenticated (MITM-vulnerable)"
+                ),
+            }
             let sig = auth::sign_challenge(seed, &nonce, peer_id, &hub_pubkey)?;
             send_json(&mut ws, &ClientMessage::AuthResponse { signature: sig }).await?;
 
@@ -859,6 +903,27 @@ fn ensure_peer_embeddings(db_path: &Path, peer_id: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn check_hub_scheme_accepts_wss() {
+        assert!(check_hub_scheme("wss://hub.example.com/ws").is_ok());
+        assert!(check_hub_scheme("wss://hub.example.com").is_ok());
+    }
+
+    #[test]
+    fn check_hub_scheme_rejects_cleartext_ws_to_remote() {
+        let err = check_hub_scheme("ws://hub.example.com/ws").unwrap_err().to_string();
+        assert!(err.contains("ws://"), "error should name the scheme: {err}");
+        assert!(check_hub_scheme("http://hub.example.com").is_err());
+        assert!(check_hub_scheme("hub.example.com").is_err());
+    }
+
+    #[test]
+    fn check_hub_scheme_allows_loopback_ws() {
+        assert!(check_hub_scheme("ws://127.0.0.1:8080/ws").is_ok());
+        assert!(check_hub_scheme("ws://localhost:9000").is_ok());
+        assert!(check_hub_scheme("ws://[::1]:8080/ws").is_ok());
+    }
 
     #[test]
     fn is_safe_peer_id_accepts_valid() {

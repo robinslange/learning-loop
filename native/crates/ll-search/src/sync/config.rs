@@ -35,6 +35,8 @@ pub struct VisibilityRule {
 #[derive(Clone, Deserialize)]
 pub struct HubEndpoint {
     pub endpoint: String,
+    #[serde(default)]
+    pub pubkey: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -92,7 +94,7 @@ pub fn load_config_with_override(
                 default: String::from("private"),
                 rules: vec![],
             },
-            hub: HubEndpoint { endpoint: endpoint.to_string() },
+            hub: HubEndpoint { endpoint: endpoint.to_string(), pubkey: None },
             peers: vec![],
             graph: false,
         });

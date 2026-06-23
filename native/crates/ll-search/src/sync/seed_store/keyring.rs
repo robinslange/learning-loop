@@ -25,7 +25,7 @@ pub fn read_keyring(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
     let entry = ::keyring::Entry::new(KEYRING_SERVICE, &user)
         .context("failed to create keyring entry")?;
     match entry.get_password() {
-        Ok(hex_str) => return Ok(Some(decode_seed_hex(&hex_str)?)),
+        Ok(hex_str) => return Ok(Some(decode_seed_hex(&Zeroizing::new(hex_str))?)),
         Err(::keyring::Error::NoEntry) => {}
         Err(e) => {
             if is_platform_unavailable(&e) {
@@ -46,7 +46,7 @@ pub fn write_keyring(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()> {
     let user = keyring_user(config_dir);
     let entry = ::keyring::Entry::new(KEYRING_SERVICE, &user)
         .context("failed to create keyring entry")?;
-    let hex_str = hex::encode(seed);
+    let hex_str = Zeroizing::new(hex::encode(seed));
     entry.set_password(&hex_str).context("failed to write seed to keyring")
 }
 
@@ -90,12 +90,12 @@ fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Res
     use base64::Engine as _;
     let legacy = ::keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
         .context("failed to create legacy keyring entry")?;
-    let hex_str = match legacy.get_password() {
+    let hex_str = Zeroizing::new(match legacy.get_password() {
         Ok(s) => s,
         Err(::keyring::Error::NoEntry) => return Ok(None),
         Err(e) if is_platform_unavailable(&e) => return Ok(None),
         Err(e) => return Err(anyhow::anyhow!("legacy keyring read error: {e}")),
-    };
+    });
 
     let seed = decode_seed_hex(&hex_str)?;
 

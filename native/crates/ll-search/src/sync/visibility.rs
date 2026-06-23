@@ -16,8 +16,12 @@ impl VisibilityEngine {
                 Some((set, tier.clone()))
             })
             .collect();
+        let default_tier = match default_tier.trim() {
+            "public" | "listed" | "private" => default_tier.trim().to_string(),
+            _ => "private".to_string(),
+        };
         VisibilityEngine {
-            default_tier: default_tier.to_string(),
+            default_tier,
             rules: compiled,
         }
     }
@@ -62,6 +66,18 @@ mod tests {
     #[test]
     fn default_tier() {
         let engine = VisibilityEngine::new("private", &[]);
+        assert_eq!(engine.evaluate("any/path.md", None), "private");
+    }
+
+    #[test]
+    fn empty_default_resolves_private() {
+        let engine = VisibilityEngine::new("", &[]);
+        assert_eq!(engine.evaluate("any/path.md", None), "private");
+    }
+
+    #[test]
+    fn unknown_default_resolves_private() {
+        let engine = VisibilityEngine::new("bogus-tier", &[]);
         assert_eq!(engine.evaluate("any/path.md", None), "private");
     }
 

@@ -249,11 +249,12 @@ pub fn export_index(
 fn read_frontmatter_visibility(vault_path: &Path, rel_path: &str) -> Option<String> {
     let full_path = vault_path.join(rel_path);
     let raw = std::fs::read_to_string(full_path).ok()?;
-    if !raw.starts_with("---\n") {
-        return None;
-    }
-    let end = raw[4..].find("\n---")?;
-    let fm = &raw[4..4 + end];
+    let raw = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
+    let after_open = raw
+        .strip_prefix("---\n")
+        .or_else(|| raw.strip_prefix("---\r\n"))?;
+    let end = after_open.find("\n---")?;
+    let fm = &after_open[..end];
     for line in fm.lines() {
         let trimmed = line.trim();
         if let Some(val) = trimmed.strip_prefix("visibility:") {
@@ -364,6 +365,26 @@ mod tests {
         let name = f.path().file_name().unwrap().to_str().unwrap();
         let result = read_frontmatter_visibility(dir, name);
         assert_eq!(result.as_deref(), Some("public"));
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_handles_bom() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "\u{FEFF}---\nvisibility: private\n---\n\nBody.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result.as_deref(), Some("private"));
+    }
+
+    #[test]
+    fn read_frontmatter_visibility_handles_crlf() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "---\r\nvisibility: private\r\n---\r\n\r\nBody.").unwrap();
+        let dir = f.path().parent().unwrap();
+        let name = f.path().file_name().unwrap().to_str().unwrap();
+        let result = read_frontmatter_visibility(dir, name);
+        assert_eq!(result.as_deref(), Some("private"));
     }
 
     #[test]

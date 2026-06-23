@@ -32,12 +32,12 @@ const ENC_NONCE_LEN: usize = 12;
 const ENC_TOTAL_LEN: usize = 64;
 
 /// Derive the AEAD key from the machine ID using HKDF-SHA256.
-fn derive_enc_key() -> anyhow::Result<[u8; 32]> {
+fn derive_enc_key() -> anyhow::Result<Zeroizing<[u8; 32]>> {
     let machine_id = machine_uid::get()
         .map_err(|e| anyhow::anyhow!("failed to read machine-id: {e}"))?;
     let hk = Hkdf::<Sha256>::new(Some(b"ll-search-seed-v1"), machine_id.as_bytes());
-    let mut prk = [0u8; 32];
-    hk.expand(b"federation-signing-seed", &mut prk)
+    let mut prk = Zeroizing::new([0u8; 32]);
+    hk.expand(b"federation-signing-seed", prk.as_mut())
         .map_err(|_| anyhow::anyhow!("HKDF expand failed"))?;
     Ok(prk)
 }
@@ -63,15 +63,18 @@ pub fn read_encrypted(config_dir: &Path) -> anyhow::Result<Option<[u8; 32]>> {
     let ciphertext = &data[4 + ENC_NONCE_LEN..];
 
     let enc_key = derive_enc_key()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&enc_key)
+    let cipher = ChaCha20Poly1305::new_from_slice(enc_key.as_ref())
         .map_err(|e| anyhow::anyhow!("cipher init failed: {e}"))?;
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let plaintext = cipher
-        .decrypt(nonce, ciphertext)
-        .map_err(|_| anyhow::anyhow!("encrypted seed decryption failed (corrupt file or wrong machine-id)"))?;
+    let plaintext: Zeroizing<Vec<u8>> = Zeroizing::new(
+        cipher
+            .decrypt(nonce, ciphertext)
+            .map_err(|_| anyhow::anyhow!("encrypted seed decryption failed (corrupt file or wrong machine-id)"))?,
+    );
 
     let seed: [u8; 32] = plaintext
+        .as_slice()
         .try_into()
         .map_err(|_| anyhow::anyhow!("decrypted seed must be exactly 32 bytes"))?;
 
@@ -88,7 +91,7 @@ pub fn write_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()>
     }
 
     let enc_key = derive_enc_key()?;
-    let cipher = ChaCha20Poly1305::new_from_slice(&enc_key)
+    let cipher = ChaCha20Poly1305::new_from_slice(enc_key.as_ref())
         .map_err(|e| anyhow::anyhow!("cipher init failed: {e}"))?;
 
     let mut nonce_bytes = [0u8; ENC_NONCE_LEN];

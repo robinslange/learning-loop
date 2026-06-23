@@ -145,6 +145,10 @@ pub fn load_only(config_dir: &Path) -> anyhow::Result<Option<LoadResult>> {
 pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
     let force = std::env::var("LL_SEED_BACKEND").ok();
 
+    if let Some(result) = auto_migrate_plaintext(config_dir)? {
+        return Ok(result);
+    }
+
     if let Some(ref f) = force {
         match f.as_str() {
             "" => {}
@@ -164,11 +168,6 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
     if let Some(seed) = read_encrypted(config_dir)? {
         let key = SigningKey::from_bytes(&seed);
         return Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: false });
-    }
-    if let Some(seed) = read_plaintext_legacy(config_dir)? {
-        eprintln!("learning-loop: legacy plaintext seed detected; run `ll-search migrate-seed` to upgrade");
-        let key = SigningKey::from_bytes(&seed);
-        return Ok(LoadResult { signing_key: key, backend: SeedBackend::PlaintextLegacy, created: false });
     }
 
     let mut raw = Zeroizing::new([0u8; 32]);
@@ -224,6 +223,57 @@ pub fn write_seed_meta(
     let tmp = path.with_extension("json.tmp");
     atomic_write(&tmp, &path, meta.to_string().as_bytes())?;
     Ok(())
+}
+
+/// Auto-migrate a legacy plaintext seed off cleartext disk before any other
+/// backend selection. Reuses [`super::seed_migrate::migrate`]'s fail-closed
+/// migrate-verify-shred logic; the migration target backend is chosen there
+/// (keyring first, encrypted fallback, or forced by `LL_SEED_BACKEND`).
+///
+/// Returns `Ok(Some(..))` when a plaintext seed was found and handled — either
+/// migrated to a strong backend, or (if no strong backend is available) left in
+/// place with a warning and its mode repaired to 0600. Returns `Ok(None)` when
+/// no plaintext seed exists.
+fn auto_migrate_plaintext(config_dir: &Path) -> anyhow::Result<Option<LoadResult>> {
+    let Some(seed) = read_plaintext_legacy(config_dir)? else {
+        return Ok(None);
+    };
+    match super::seed_migrate::migrate(config_dir) {
+        Ok(res) => {
+            eprintln!("learning-loop: auto-migrated legacy plaintext seed to {} backend", res.to);
+            Ok(Some(LoadResult {
+                signing_key: SigningKey::from_bytes(&seed),
+                backend: res.to,
+                created: false,
+            }))
+        }
+        Err(e) => {
+            eprintln!("learning-loop: legacy plaintext seed detected but auto-migration failed ({e}); run `ll-search migrate-seed` to upgrade");
+            repair_plaintext_mode(config_dir);
+            Ok(Some(LoadResult {
+                signing_key: SigningKey::from_bytes(&seed),
+                backend: SeedBackend::PlaintextLegacy,
+                created: false,
+            }))
+        }
+    }
+}
+
+/// Ensure the legacy plaintext seed file is at least 0600 when no strong
+/// backend is available to migrate it to. Best-effort; never fails the load.
+fn repair_plaintext_mode(config_dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = super::config::seed_path(config_dir);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            if meta.permissions().mode() & 0o777 != 0o600 {
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = config_dir;
 }
 
 /// Atomic write: write to a `.tmp` sibling, then rename over the target.
@@ -285,6 +335,31 @@ mod tests {
         let pk1 = super::super::auth::pubkey_b64(&r1.signing_key);
         let pk2 = super::super::auth::pubkey_b64(&r2.signing_key);
         assert_eq!(pk1, pk2, "same key must be returned on second load");
+    }
+
+    #[test]
+    fn load_or_create_auto_migrates_plaintext_and_shreds_it() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        let fed = tmp.path().join("federation");
+        std::fs::create_dir_all(&fed).unwrap();
+        let legacy_path = fed.join(".seed");
+        std::fs::write(&legacy_path, [13u8; 32]).unwrap();
+
+        let result = load_or_create(tmp.path()).unwrap();
+
+        assert_ne!(result.backend, SeedBackend::PlaintextLegacy,
+            "auto-migrate must move off the plaintext backend");
+        assert!(!legacy_path.exists(), "plaintext seed must be shredded after auto-migrate");
+
+        use ed25519_dalek::Signer;
+        let migrated = SigningKey::from_bytes(&[13u8; 32]);
+        let msg = b"auto-migrate identity check";
+        assert_eq!(
+            result.signing_key.sign(msg).to_bytes(),
+            migrated.sign(msg).to_bytes(),
+            "auto-migrate must preserve the signing identity",
+        );
     }
 
     // NOTE: `keyring_roundtrip_when_available` removed. It wrote `[11u8; 32]`

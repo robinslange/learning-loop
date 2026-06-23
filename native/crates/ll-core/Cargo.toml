@@ -11,6 +11,10 @@ readme = "README.md"
 keywords = ["search", "embeddings", "rag", "onnx", "sqlite"]
 categories = ["database", "science"]
 
+[build-dependencies]
+sha2 = "0.10"
+hex = "0.4"
+
 [dependencies]
 thiserror = "1"
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite"] }
