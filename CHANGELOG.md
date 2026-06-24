@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Security
+
+- **ONNX Runtime supply chain.** `ll-search`/`ll-core` now build `ort` with the
+  `load-dynamic` feature instead of `download-binaries`. This removes `openssl`,
+  `native-tls`, and `ureq` from the build graph and drops the `cdn.pyke.io`
+  native-library fetch — the published CycloneDX SBOM no longer lists them. The
+  binary instead loads an official Microsoft `libonnxruntime` (v1.24.2, the
+  version `ort` pins), fetched and SHA-256-verified at runtime into
+  `~/.learning-loop/lib`, overridable with `ORT_DYLIB_PATH` (operator-supplied
+  library) or `LL_ORT_DIR` (pre-staged directory) for air-gapped installs. A
+  missing `ORT_DYLIB_PATH` fails with a clear error instead of hanging on a
+  loader search. Per-target hashes are recorded in `provenance/runtime.json` and
+  pinned in code; `native/docs/OFFLINE_INSTALL.md` documents offline staging.
+- **No-RC posture made enforceable.** cargo-deny has no global pre-release ban,
+  so a CI step now greps `Cargo.lock` and fails on any pre-release dependency
+  outside the `ort`/`ort-sys` allowlist (kept until a stable `ort` 2.x ships).
+
 ## v1.29.3
 
 ### Security

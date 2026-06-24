@@ -1,0 +1,44 @@
+{
+  "$comment": "Provenance + integrity manifest for the ONNX Runtime native library the search binary loads at runtime (ort load-dynamic). Under Opt-1 of the dependency-security hardening, ll-search/ll-core build with ort's load-dynamic feature instead of download-binaries: this removes openssl/native-tls/ureq and the cdn.pyke.io fetch from the build graph, and the runtime dynamically loads an official Microsoft libonnxruntime. The library is fetched and SHA-256-verified at runtime (native/crates/ll-search/src/model/dylib.rs), staged under ~/.learning-loop/lib, or supplied by the operator via ORT_DYLIB_PATH. To upgrade, bump the ort crate, set version to the version ort pins (ort-sys dist.txt `ms@<version>`), and refresh the per-target SHA-256 hashes from the GitHub release.",
+  "runtime": {
+    "id": "onnxruntime",
+    "role": "ONNX inference engine (loaded via ort load-dynamic)",
+    "version": "1.24.2",
+    "source": "https://github.com/microsoft/onnxruntime/releases/tag/v1.24.2",
+    "license": "MIT",
+    "upstream": "microsoft/onnxruntime (official release binaries)",
+    "fetch": "runtime",
+    "verified_in": "native/crates/ll-search/src/model/dylib.rs",
+    "url_base": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2",
+    "targets": {
+      "aarch64-apple-darwin": {
+        "asset": "onnxruntime-osx-arm64-1.24.2.tgz",
+        "sha256": "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+        "lib": "libonnxruntime.1.24.2.dylib"
+      },
+      "x86_64-unknown-linux-gnu": {
+        "asset": "onnxruntime-linux-x64-1.24.2.tgz",
+        "sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+        "lib": "libonnxruntime.so.1.24.2"
+      },
+      "aarch64-unknown-linux-gnu": {
+        "asset": "onnxruntime-linux-aarch64-1.24.2.tgz",
+        "sha256": "6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e",
+        "lib": "libonnxruntime.so.1.24.2"
+      },
+      "x86_64-pc-windows-msvc": {
+        "asset": "onnxruntime-win-x64-1.24.2.zip",
+        "sha256": "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+        "lib": "onnxruntime.dll"
+      },
+      "aarch64-pc-windows-msvc": {
+        "asset": "onnxruntime-win-arm64-1.24.2.zip",
+        "sha256": "dd8180d98e5a0ead7ead99029acc80b86a8b905b9aba4cc978e388039bb5823b",
+        "lib": "onnxruntime.dll"
+      }
+    },
+    "unsupported": {
+      "x86_64-apple-darwin": "Microsoft ships no osx-x64 binary for 1.24.2 (Intel macOS dropped). Such a host must set ORT_DYLIB_PATH to a self-provided libonnxruntime."
+    }
+  }
+}

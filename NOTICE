@@ -32,6 +32,14 @@ revisions, licenses, and integrity hashes are recorded in:
 - ms-marco-MiniLM-L-6-v2 (reranker) — Apache-2.0
 - DeBERTa-v3-base-mnli-fever-anli (NLI, build-time optional) — MIT
 
+ONNX Runtime
+------------
+The search binary loads the ONNX Runtime native library dynamically at runtime
+(official Microsoft release binaries). Per-target sources and integrity hashes
+are recorded in provenance/runtime.json.
+
+- onnxruntime 1.24.2 — MIT — https://github.com/microsoft/onnxruntime
+
 Rust dependencies
 -----------------
 The Rust binary's dependency graph is gated by native/deny.toml (license

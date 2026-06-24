@@ -11,7 +11,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.32", features = ["bundled", "modern_sqlite", "session"] }
-ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["load-dynamic", "ndarray", "tracing", "api-24"] }
 tokenizers = { version = "0.21", default-features = false, features = ["fancy-regex"] }
 anyhow = "1"
 dirs-next = "2"

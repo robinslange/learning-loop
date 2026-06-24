@@ -18,6 +18,8 @@
 #![warn(missing_docs)]
 
 pub mod config;
+/// ONNX Runtime shared-library resolution for `ort`'s `load-dynamic` feature.
+pub mod dylib;
 pub mod embed;
 pub mod error;
 pub mod graph;

@@ -164,6 +164,25 @@ jobs:
           manifest-path: native/Cargo.toml
           command: check advisories bans licenses sources
 
+      # cargo-deny has no global pre-release ban, so the no-RC posture is
+      # enforced here: fail if any crate resolves to a pre-release version
+      # except the explicitly-allowed ones (ort/ort-sys, until a stable ort 2.x
+      # ships — see native/deny.toml [bans]). A new rc/alpha/beta dep fails CI.
+      - name: No unexpected pre-release crates
+        run: |
+          allowed='^(ort|ort-sys)$'
+          offenders=$(awk '
+            /^name = /{n=$3}
+            /^version = "[0-9]+\.[0-9]+\.[0-9]+-/{gsub(/"/,"",n); print n}
+          ' native/Cargo.lock | grep -Ev "$allowed" || true)
+          if [ -n "$offenders" ]; then
+            echo "Pre-release crates not on the allowlist:"
+            echo "$offenders"
+            echo "Pin a stable release, or add to the allowlist with a rationale."
+            exit 1
+          fi
+          echo "No unexpected pre-release crates."
+
   lint:
     runs-on: ubuntu-latest
     steps:

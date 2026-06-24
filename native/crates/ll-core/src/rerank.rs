@@ -36,6 +36,7 @@ static STATE: OnceLock<RerankState> = OnceLock::new();
 
 fn state() -> &'static RerankState {
     STATE.get_or_init(|| {
+        crate::dylib::ensure_dylib().expect("locating ONNX Runtime");
         let session = Session::builder()
             .expect("session builder")
             .with_execution_providers([ep::CPU::default().build()])

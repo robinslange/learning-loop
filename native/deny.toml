@@ -39,9 +39,11 @@ confidence-threshold = 0.9
 
 [bans]
 # An RC/alpha/beta in the production dep tree is a posture risk (no SemVer
-# stability). ort is currently 2.0.0-rc.x and is exempted here until a stable
-# 2.x ships (tracked by workstream F); any OTHER pre-release dep should be
-# caught in review.
+# stability). ort/ort-sys are 2.0.0-rc.x and stay until a stable ort 2.x ships
+# (there is none on crates.io yet). cargo-deny has no global pre-release ban, so
+# the no-RC posture is enforced by the "No unexpected pre-release crates" CI
+# step (.github/workflows/test.yml), which greps Cargo.lock and fails on any
+# pre-release outside the ort/ort-sys allowlist. Keep that allowlist in sync.
 allow = []
 
 [sources]

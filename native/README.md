@@ -38,16 +38,36 @@ All commands output JSON to stdout, errors to stderr. Exit 0 on success, 1 on er
 
 ## CI
 
-GitHub Actions builds 4 targets on tag push (`v*`):
+GitHub Actions builds 3 targets on tag push (`v*`):
 
 | Target | Runner | Artifact |
 |--------|--------|----------|
 | aarch64-apple-darwin | macos-latest | ll-search-darwin-arm64.tar.gz |
-| x86_64-apple-darwin | macos-latest | ll-search-darwin-x64.tar.gz |
 | x86_64-unknown-linux-gnu | ubuntu-latest | ll-search-linux-x64.tar.gz |
 | x86_64-pc-windows-msvc | windows-latest | ll-search-windows-x64.zip |
 
-Each artifact contains the binary + ONNX Runtime sidecar dylib.
+Each artifact contains the binary. The ONNX Runtime native library is loaded
+dynamically at runtime (see below), not bundled into the tarball.
+
+## ONNX Runtime (load-dynamic) and offline install
+
+The binary builds `ort` with the `load-dynamic` feature, so it loads an official
+Microsoft `libonnxruntime` (v1.24.2, the version `ort` pins) at runtime rather
+than statically linking it. On a networked machine the library is fetched and
+SHA-256-verified into `~/.learning-loop/lib` on first use — no setup needed.
+
+For air-gapped or IT-controlled hosts, supply the library yourself:
+
+- `ORT_DYLIB_PATH` — absolute path to a `libonnxruntime` shared library (an
+  IT-provisioned or system runtime). A missing path fails immediately with a
+  clear error instead of hanging on a loader search.
+- `LL_ORT_DIR` — a directory to stage the library into (default
+  `~/.learning-loop/lib`); pre-place the correct per-target file there.
+
+The ONNX models pre-stage the same way via `LL_MODELS_DIR`. Per-target hashes
+live in `provenance/runtime.json` (runtime) and `provenance/models.json`
+(models). Intel macOS (`x86_64-apple-darwin`) is unsupported — Microsoft ships
+no `osx-x64` binary for the pinned version; set `ORT_DYLIB_PATH` on such a host.
 
 ## Module Structure
 

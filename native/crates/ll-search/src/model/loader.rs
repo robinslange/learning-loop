@@ -154,6 +154,7 @@ pub fn ensure_model(model: &KnownModel) -> Result<(PathBuf, PathBuf)> {
 }
 
 pub fn load_provider(model: &KnownModel) -> Result<Box<dyn EmbeddingProvider>> {
+    ll_core::dylib::ensure_dylib().context("locating ONNX Runtime")?;
     let (model_path, tokenizer_path) = ensure_model(model)?;
     match model {
         KnownModel::BgeSmallEnV15 => {
