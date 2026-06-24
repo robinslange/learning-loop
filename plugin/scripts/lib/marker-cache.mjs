@@ -39,6 +39,10 @@ export const MARKER_PATHS = {
       DATA_PATHS.markers(pluginData),
       sessionId ? `memory-writes-${sessionId}` : 'memory-writes',
     ),
+  // Timestamp of the last stale-marker TTL sweep. Gates the sweep to once a
+  // day: the read side already filters stale entries by mtime, so deferring
+  // the rm pass is behavior-preserving and saves a per-session stat-walk.
+  lastSweep: (pluginData) => join(DATA_PATHS.markers(pluginData), 'last-sweep'),
 };
 
 // Append a basename to the session-scoped memory-writes log, de-duplicated.

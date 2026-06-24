@@ -502,11 +502,10 @@ test(
 
 // ---------------------------------------------------------------------------
 // M4: the stdin hook payload's session_id is the canonical key — it must win
-// over $CLAUDE_CODE_SESSION_ID and land in both the plugin-data session id and
-// the retrieval access log keyed by that id.
+// over $CLAUDE_CODE_SESSION_ID and land in the plugin-data session id.
 // ---------------------------------------------------------------------------
 test(
-  'session-start prefers the stdin payload session_id and stamps it everywhere — M4',
+  'session-start prefers the stdin payload session_id and stamps it in plugin-data — M4',
   { timeout: 12000 },
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-proj-'));
@@ -533,22 +532,6 @@ test(
         readFileSync(join(r.pluginDataDir, 'session', 'id'), 'utf8').trim(),
         'payload-id-wins',
         'plugin-data session id must carry the payload id',
-      );
-      const accessMonth = new Date().toISOString().slice(0, 7);
-      const accessLog = join(r.pluginDataDir, 'retrieval', `access-${accessMonth}.jsonl`);
-      assert.ok(existsSync(accessLog), 'retrieval access log must be written');
-      const lastEntry = JSON.parse(
-        readFileSync(accessLog, 'utf8').trim().split('\n').filter(Boolean).pop(),
-      );
-      assert.equal(
-        lastEntry.session_id,
-        'payload-id-wins',
-        'access log must be keyed by the payload id',
-      );
-      assert.deepEqual(
-        lastEntry.memories,
-        ['a.md'],
-        'access log records the memory files present at session start',
       );
     } finally {
       r.cleanup();

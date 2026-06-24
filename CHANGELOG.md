@@ -4,6 +4,38 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Performance
+
+- **post-tool snapshot gate.** PostToolUse now loads the vault snapshot only for
+  Write/Edit to actual vault notes. Previously every code save (the common case
+  while a vault is configured) read and parsed the multi-hundred-KB snapshot,
+  then threw it away in autolink/edge-infer's non-vault early-return.
+- **TTL sweeps gated to once per 24h.** The session-dedupe / marker / tmp-legacy
+  stale-file sweeps ran on every SessionStart and usually deleted nothing; they
+  are now gated by a `last-sweep` marker. Reads already filter stale entries by
+  mtime, so the deferral is behavior-preserving (edges.db tmp-orphan reaping
+  widens from 1h to ≤24h — harmless for tiny crash artifacts).
+
+### Token efficiency
+
+- **Compact retrieval JSON.** `vault-search` emits unindented JSON; the 2-space
+  indent was ~16-30% pure overhead on every skill/agent-driven retrieval that
+  reaches the model context.
+- **Score precision trimmed.** `ll-search` serializes result scores at 4dp
+  instead of full f64; the model only ranks on score, and filtering/sorting
+  already ran on the full-precision value.
+- **Oversized memory index becomes a pointer.** When a project/global auto-memory
+  index overflows the injection cap, SessionStart now injects a one-line pointer
+  (entry count + path) instead of an unranked ~1%-of-file byte prefix, saving
+  ~720 tokens/session of near-zero-signal content. Indexes that fit are still
+  injected whole.
+
+### Removed
+
+- **Dead memory access log.** SessionStart no longer appends the per-session
+  `retrieval/access-*.jsonl` record (the full memory filename list); nothing read
+  it and it grew ~10MB/month.
+
 ## v1.29.4
 
 ### Security

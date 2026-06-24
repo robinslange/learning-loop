@@ -28,6 +28,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { run as runCacheCleanup } from '../plugin/hooks/session-start/cache-cleanup.mjs';
+import { run } from '../plugin/hooks/session-start/vault-snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 
@@ -203,6 +204,45 @@ test(
     }
   },
 );
+
+test('TTL sweep is gated to once per 24h — a stale marker survives a same-day second run', async () => {
+  const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
+  const fx = makeFixture();
+  const markers = join(fx.ctx.pluginData, 'markers');
+  mkdirSync(markers, { recursive: true });
+
+  // A common ctx for both runs; tmp points at an isolated dir so the legacy
+  // tmp sweep has somewhere harmless to scan.
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-gate-tmp-'));
+  const baseCtx = {
+    ...fx.ctx,
+    tmp: isolatedTmp,
+    projectDir: null,
+    memoryDir: join(fx.sandbox, 'memdir'),
+    payloadSessionId: 'gate-test-sid',
+  };
+
+  await withSandbox(fx, async () => {
+    // First run: no last-sweep marker → sweeps and stamps the marker.
+    const stale1 = join(markers, 'memory-snapshot-stale-1');
+    writeFileSync(stale1, '[]');
+    utimesSync(stale1, eightDaysAgo, eightDaysAgo);
+    await run({ ...baseCtx });
+    assert.equal(existsSync(stale1), false, 'first run sweeps the stale marker');
+    assert.ok(existsSync(join(markers, 'last-sweep')), 'first run stamps the last-sweep marker');
+
+    // Second run, same day: gate sees the fresh marker → must NOT sweep.
+    const stale2 = join(markers, 'memory-snapshot-stale-2');
+    writeFileSync(stale2, '[]');
+    utimesSync(stale2, eightDaysAgo, eightDaysAgo);
+    await run({ ...baseCtx });
+    assert.ok(
+      existsSync(stale2),
+      'second same-day run is gated — the stale marker survives',
+    );
+  });
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
 
 test('sweep: no-ops cleanly when bin/ and convergence/ are absent', async () => {
   const fx = makeFixture();

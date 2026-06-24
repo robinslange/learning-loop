@@ -33,6 +33,7 @@ test('MARKER_PATHS resolves all five W2 markers under plugin-data', () => {
     join(PD, 'markers', 'memory-writes-abc123'),
   );
   assert.equal(MARKER_PATHS.memoryWrites(PD, ''), join(PD, 'markers', 'memory-writes'));
+  assert.equal(MARKER_PATHS.lastSweep(PD), join(PD, 'markers', 'last-sweep'));
 });
 
 test('readMarker ttlMs override lets a 26h-old marker survive', () => {

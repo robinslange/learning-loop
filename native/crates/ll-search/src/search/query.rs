@@ -22,9 +22,19 @@ use super::federation::{add_peer_rrf_scores, load_title_federated};
 use super::store::EmbeddingStore;
 use super::context::SearchContext;
 
+// The model only ranks on score; full f64 precision (~18 chars) is wasted
+// context tokens. Filtering and sorting already ran on the full-precision
+// value in Rust, so rounding at serialization cannot change results — it
+// only trims the emitted JSON. Applied via serialize_with so every
+// SearchResult construction site shares one rounding rule.
+fn serialize_score_4dp<S: serde::Serializer>(score: &f64, s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_f64((score * 1e4).round() / 1e4)
+}
+
 #[derive(Serialize)]
 pub struct SearchResult {
     pub path: String,
+    #[serde(serialize_with = "serialize_score_4dp")]
     pub score: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -425,6 +435,21 @@ mod tests {
     use super::*;
     use super::super::test_helpers::helpers::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn search_result_score_serializes_at_four_dp() {
+        let r = SearchResult {
+            path: "a.md".to_string(),
+            score: 0.2773399014778325,
+            title: None,
+            mtime: None,
+        };
+        let json = serde_json::to_string(&r).unwrap();
+        // Full f64 precision (0.2773399014778325) must not reach the wire; the
+        // model only ranks on score, so it is rounded to 4dp at serialization.
+        assert!(json.contains("\"score\":0.2773"), "got {json}");
+        assert!(!json.contains("0.2773399014778325"), "score not rounded: {json}");
+    }
 
     #[test]
     fn test_hybrid_query_inner_returns_results() {

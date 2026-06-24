@@ -84,7 +84,10 @@ function stripFlags(from, ...flags) {
 }
 
 function out(data) {
-  console.log(JSON.stringify(data, null, 2));
+  // Compact — this JSON goes straight into the model's context on every
+  // skill/agent-driven retrieval; the 2-space indent was ~16% pure overhead
+  // and the model parses unindented JSON identically.
+  console.log(JSON.stringify(data));
 }
 
 function logRetrieval(command, query, results) {

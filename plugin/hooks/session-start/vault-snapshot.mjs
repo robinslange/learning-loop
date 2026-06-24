@@ -1,16 +1,19 @@
 // hooks/session-start/vault-snapshot.mjs : federation backfill, session ID
-// stamping, memory access log, and stale-marker TTL sweeps.
+// stamping, and stale-marker TTL sweeps.
 
 import { writeFileSync, existsSync, readdirSync, lstatSync, rmSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
+import { readMarker, writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { env } from '../../scripts/lib/env.mjs';
+
+// Sweep at most once per 24h regardless of session cadence.
+const SWEEP_GATE_MS = 24 * 60 * 60 * 1000;
 
 export async function run(ctx) {
   // Federation seed-meta backfill (one-shot for existing federations).
@@ -62,32 +65,6 @@ export async function run(ctx) {
     (resolved !== 'unknown' ? resolved : '') ||
     randomBytes(4).toString('hex');
   ctx.sessionId = sessionId;
-
-  if (ctx.projectDir) {
-    const encodedPath = ctx.projectDir.replace(/[/\\]/g, '-');
-    const memDir = join(ctx.memoryDir, encodedPath, 'memory');
-    try {
-      const files = readdirSync(memDir).filter((f) => f.endsWith('.md'));
-      if (ctx.pluginData) {
-        // Retrieval access log only. The dream nudge no longer diffs a
-        // session-start snapshot of this dir (it counts post-tool's per-session
-        // write log instead), so no memory-snapshot marker is written here.
-        const retrievalDir = DATA_PATHS.retrieval(ctx.pluginData);
-        mkdirSync(retrievalDir, { recursive: true });
-        const entry = {
-          ts: new Date().toISOString(),
-          session_id: sessionId,
-          memories: files,
-        };
-        appendJsonlLine(
-          join(retrievalDir, `access-${new Date().toISOString().slice(0, 7)}.jsonl`),
-          entry,
-        );
-      }
-    } catch (err) {
-      logError('session-start.vault-snapshot.memoryAccessLog', err);
-    }
-  }
 
   // Session ID — single env-independent stamp in plugin-data. getSessionId()
   // reads the unsuffixed `id` (after the harness var) from any subprocess. We
@@ -146,25 +123,36 @@ export async function run(ctx) {
     }
   }
 
-  const weekCutoff = Date.now() - HookConfig.SESSION_SWEEP_TTL_MS;
-  if (ctx.pluginData) {
-    sweepDir(DATA_PATHS.retrievalSessionDedupe(ctx.pluginData), () => true, weekCutoff);
-    sweepDir(DATA_PATHS.markers(ctx.pluginData), () => true, weekCutoff);
-    sweepDir(
-      ctx.pluginData,
-      (f) => /^edges\.db\..+\.tmp$/.test(f),
-      Date.now() - HookConfig.EDGES_TMP_ORPHAN_TTL_MS,
-    );
+  // Once per day, not per session. The reaped targets are reaped by mtime, and
+  // every read side already filters stale entries by mtime — so deferring the
+  // rm pass changes nothing a consumer can observe, it only spares each session
+  // a stat-walk over the dedupe/marker dirs that usually deletes nothing. The
+  // edges.db tmp-orphan TTL widens from 1h to ≤24h as a side effect; those
+  // orphans are tiny crash artifacts, so the looser bound is harmless.
+  const sweepMarker = ctx.pluginData ? MARKER_PATHS.lastSweep(ctx.pluginData) : null;
+  const sweptToday = sweepMarker && readMarker(sweepMarker, { ttlMs: SWEEP_GATE_MS }) !== null;
+  if (!sweptToday) {
+    const weekCutoff = Date.now() - HookConfig.SESSION_SWEEP_TTL_MS;
+    if (ctx.pluginData) {
+      sweepDir(DATA_PATHS.retrievalSessionDedupe(ctx.pluginData), () => true, weekCutoff);
+      sweepDir(DATA_PATHS.markers(ctx.pluginData), () => true, weekCutoff);
+      sweepDir(
+        ctx.pluginData,
+        (f) => /^edges\.db\..+\.tmp$/.test(f),
+        Date.now() - HookConfig.EDGES_TMP_ORPHAN_TTL_MS,
+      );
+    }
+    const TMP_SWEEP_PATTERNS = [
+      /^learning-loop-stop-nudged-/,
+      /^claude-session-label-.+\.txt$/,
+      /^learning-loop-memory-snapshot/,
+      /^learning-loop-session-start-/,
+      /^learning-loop-last-dream$/,
+      /^learning-loop-last-reflect$/,
+      /^learning-loop-dream-nudged$/,
+      /^learning-loop-dream-lock$/,
+    ];
+    sweepDir(ctx.tmp, (f) => TMP_SWEEP_PATTERNS.some((re) => re.test(f)), weekCutoff);
+    if (sweepMarker) writeMarker(sweepMarker, { ts: new Date().toISOString() });
   }
-  const TMP_SWEEP_PATTERNS = [
-    /^learning-loop-stop-nudged-/,
-    /^claude-session-label-.+\.txt$/,
-    /^learning-loop-memory-snapshot/,
-    /^learning-loop-session-start-/,
-    /^learning-loop-last-dream$/,
-    /^learning-loop-last-reflect$/,
-    /^learning-loop-dream-nudged$/,
-    /^learning-loop-dream-lock$/,
-  ];
-  sweepDir(ctx.tmp, (f) => TMP_SWEEP_PATTERNS.some((re) => re.test(f)), weekCutoff);
 }

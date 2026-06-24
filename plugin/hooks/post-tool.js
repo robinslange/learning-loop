@@ -6,7 +6,7 @@
 // fixed module order, per-module timeout isolation.
 
 import { basename, join } from 'node:path';
-import { home, readStdin, resolveVaultPath, getSessionId } from './lib/common.mjs';
+import { home, readStdin, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
@@ -99,7 +99,11 @@ const isWriteEdit = ctx.tool === 'Write' || ctx.tool === 'Edit';
 if (isWriteEdit) {
   recordMemoryWriteIfApplicable(ctx.input.file_path);
 }
-if (isWriteEdit && ctx.vaultRoot) {
+// Only autolink + edge-infer consume the snapshot, and both early-return on
+// non-vault files. Gating the load on the same predicate keeps every non-vault
+// Write/Edit — the common case while a vault is configured — from reading and
+// parsing the multi-hundred-KB snapshot just to throw it away.
+if (isWriteEdit && ctx.vaultRoot && isVaultNote(ctx.input.file_path, ctx.vaultRoot)) {
   ctx.snapshot = loadVaultSnapshot(ctx.vaultRoot);
 }
 
