@@ -228,7 +228,10 @@ fn extract_member(archive: &Path, member: &str, dest: &Path) -> Result<()> {
     fs::remove_dir_all(&staging).ok();
     fs::create_dir_all(&staging).context("creating extraction staging dir")?;
 
-    let status = if TARGET.asset.ends_with(".zip") {
+    let is_zip = archive
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("zip"));
+    let status = if is_zip {
         Command::new("unzip")
             .args(["-oq"])
             .arg(archive)
@@ -309,6 +312,116 @@ mod tests {
         assert!(verified(f.path(), &actual));
         // a path that does not exist is not "verified".
         assert!(!verified(std::path::Path::new("/no/such/lib"), &actual));
+    }
+
+    /// `find_member` must match the full `lib/<file>` suffix, so the identically
+    /// named file inside a macOS `.dSYM` debug bundle is NOT picked. Build the
+    /// exact tree the real osx-arm64 archive unpacks to and prove the right one
+    /// wins regardless of which directory the walk visits first.
+    #[test]
+    fn find_member_skips_dsym_decoy() {
+        use std::io::Write;
+        let root = tempfile::tempdir().unwrap();
+        let top = root.path().join("onnxruntime-osx-arm64-1.24.2");
+        let lib_dir = top.join("lib");
+        let dsym = lib_dir.join("libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/DWARF");
+        fs::create_dir_all(&dsym).unwrap();
+
+        // The decoy (debug symbols) shares the basename but lives under .dSYM.
+        let mut decoy = fs::File::create(dsym.join("libonnxruntime.1.24.2.dylib")).unwrap();
+        decoy.write_all(b"DEBUG SYMBOLS, not the library").unwrap();
+        // The real library, at <top>/lib/<file>.
+        let real = lib_dir.join("libonnxruntime.1.24.2.dylib");
+        fs::File::create(&real).unwrap().write_all(b"REAL LIBRARY").unwrap();
+
+        let found = find_member(root.path(), "lib/libonnxruntime.1.24.2.dylib").unwrap();
+        assert_eq!(
+            fs::read(&found).unwrap(),
+            b"REAL LIBRARY",
+            "find_member picked the .dSYM decoy instead of the real library"
+        );
+    }
+
+    #[test]
+    fn find_member_errors_when_absent() {
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir_all(root.path().join("some/dir")).unwrap();
+        let err = find_member(root.path(), "lib/libonnxruntime.so.1.24.2").unwrap_err();
+        assert!(err.to_string().contains("no entry ending in"), "{err}");
+    }
+
+    /// End-to-end of the portable extraction: a real `.tar.gz` with a
+    /// version-named top directory and a `.dSYM` decoy unpacks and yields the
+    /// correct library. This is the path that BSD-tar-only `*/member` globbing
+    /// silently broke on GNU tar; extracting the whole archive works on both.
+    #[test]
+    fn extract_member_tar_roundtrip() {
+        use std::io::Write;
+        let work = tempfile::tempdir().unwrap();
+        let src = work.path().join("onnxruntime-osx-arm64-1.24.2");
+        let dsym = src.join("lib/libonnxruntime.1.24.2.dylib.dSYM/Contents/Resources/DWARF");
+        fs::create_dir_all(&dsym).unwrap();
+        fs::File::create(dsym.join("libonnxruntime.1.24.2.dylib"))
+            .unwrap()
+            .write_all(b"decoy")
+            .unwrap();
+        fs::File::create(src.join("lib/libonnxruntime.1.24.2.dylib"))
+            .unwrap()
+            .write_all(b"the real bytes")
+            .unwrap();
+
+        let archive = work.path().join("bundle.tgz");
+        let status = Command::new("tar")
+            .arg("czf")
+            .arg(&archive)
+            .arg("-C")
+            .arg(work.path())
+            .arg("onnxruntime-osx-arm64-1.24.2")
+            .status()
+            .unwrap();
+        assert!(status.success(), "building the test archive failed");
+
+        let dest = work.path().join("staged.dylib");
+        extract_member(&archive, "lib/libonnxruntime.1.24.2.dylib", &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"the real bytes");
+        assert!(
+            !dest.with_extension("unpack").exists(),
+            "staging dir should be cleaned up"
+        );
+    }
+
+    /// The Windows path: extraction now dispatches on the archive's own
+    /// extension, so the `.zip`/`unzip` branch is exercisable on any host that
+    /// has `unzip` (CI does). Skips cleanly where the tool is absent.
+    #[test]
+    fn extract_member_zip_roundtrip() {
+        use std::io::Write;
+        if Command::new("zip").arg("-v").output().is_err() {
+            eprintln!("skipping: `zip` not available");
+            return;
+        }
+        let work = tempfile::tempdir().unwrap();
+        let src = work.path().join("onnxruntime-win-x64-1.24.2");
+        fs::create_dir_all(src.join("lib")).unwrap();
+        fs::File::create(src.join("lib/onnxruntime.dll"))
+            .unwrap()
+            .write_all(b"windows lib bytes")
+            .unwrap();
+
+        let archive = work.path().join("bundle.zip");
+        // zip stores paths relative to its cwd; run it from the work dir.
+        let status = Command::new("zip")
+            .args(["-rq"])
+            .arg(&archive)
+            .arg("onnxruntime-win-x64-1.24.2")
+            .current_dir(work.path())
+            .status()
+            .unwrap();
+        assert!(status.success(), "building the test zip failed");
+
+        let dest = work.path().join("staged.dll");
+        extract_member(&archive, "lib/onnxruntime.dll", &dest).unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"windows lib bytes");
     }
 
     #[test]
