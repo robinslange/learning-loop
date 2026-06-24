@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.4
+
 ### Security
 
 - **ONNX Runtime supply chain.** `ll-search`/`ll-core` now build `ort` with the
