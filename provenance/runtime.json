@@ -1,5 +1,5 @@
 {
-  "$comment": "Provenance + integrity manifest for the ONNX Runtime native library the search binary loads at runtime (ort load-dynamic). Under Opt-1 of the dependency-security hardening, ll-search/ll-core build with ort's load-dynamic feature instead of download-binaries: this removes openssl/native-tls/ureq and the cdn.pyke.io fetch from the build graph, and the runtime dynamically loads an official Microsoft libonnxruntime. The library is fetched and SHA-256-verified at runtime (native/crates/ll-search/src/model/dylib.rs), staged under ~/.learning-loop/lib, or supplied by the operator via ORT_DYLIB_PATH. To upgrade, bump the ort crate, set version to the version ort pins (ort-sys dist.txt `ms@<version>`), and refresh the per-target SHA-256 hashes from the GitHub release.",
+  "$comment": "Provenance + integrity manifest for the ONNX Runtime native library the search binary loads at runtime (ort load-dynamic). Under Opt-1 of the dependency-security hardening, ll-search/ll-core build with ort's load-dynamic feature instead of download-binaries: this removes openssl/native-tls/ureq and the cdn.pyke.io fetch from the build graph, and the runtime dynamically loads an official Microsoft libonnxruntime. The library is fetched and SHA-256-verified at runtime (native/crates/ll-core/src/dylib.rs), staged under ~/.learning-loop/lib, or supplied by the operator via ORT_DYLIB_PATH. To upgrade, bump the ort crate, set version to the version ort pins (ort-sys dist.txt `ms@<version>`), and refresh the per-target SHA-256 hashes from the GitHub release.",
   "runtime": {
     "id": "onnxruntime",
     "role": "ONNX inference engine (loaded via ort load-dynamic)",
@@ -8,33 +8,38 @@
     "license": "MIT",
     "upstream": "microsoft/onnxruntime (official release binaries)",
     "fetch": "runtime",
-    "verified_in": "native/crates/ll-search/src/model/dylib.rs",
+    "verified_in": "native/crates/ll-core/src/dylib.rs",
     "url_base": "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2",
     "targets": {
       "aarch64-apple-darwin": {
         "asset": "onnxruntime-osx-arm64-1.24.2.tgz",
-        "sha256": "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
-        "lib": "libonnxruntime.1.24.2.dylib"
+        "archive_sha256": "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+        "lib": "libonnxruntime.1.24.2.dylib",
+        "lib_sha256": "87df6f94dd559ea958748adc80fd4c46d91c52bc025771f513291d155539590a"
       },
       "x86_64-unknown-linux-gnu": {
         "asset": "onnxruntime-linux-x64-1.24.2.tgz",
-        "sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
-        "lib": "libonnxruntime.so.1.24.2"
+        "archive_sha256": "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+        "lib": "libonnxruntime.so.1.24.2",
+        "lib_sha256": "ffc84d48e845cf0b562ba4ea5ca32aaafc0d4069019fef4f63095b307d0270ad"
       },
       "aarch64-unknown-linux-gnu": {
         "asset": "onnxruntime-linux-aarch64-1.24.2.tgz",
-        "sha256": "6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e",
-        "lib": "libonnxruntime.so.1.24.2"
+        "archive_sha256": "6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e",
+        "lib": "libonnxruntime.so.1.24.2",
+        "lib_sha256": "e18fe095919d8613ead3a31ff78212bde4fad929418a9b48f49d61c829ed5c82"
       },
       "x86_64-pc-windows-msvc": {
         "asset": "onnxruntime-win-x64-1.24.2.zip",
-        "sha256": "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
-        "lib": "onnxruntime.dll"
+        "archive_sha256": "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+        "lib": "onnxruntime.dll",
+        "lib_sha256": "114947d633e6844ce3c4b51ef6678f776628571d08a5763859c61642c8dcca9c"
       },
       "aarch64-pc-windows-msvc": {
         "asset": "onnxruntime-win-arm64-1.24.2.zip",
-        "sha256": "dd8180d98e5a0ead7ead99029acc80b86a8b905b9aba4cc978e388039bb5823b",
-        "lib": "onnxruntime.dll"
+        "archive_sha256": "dd8180d98e5a0ead7ead99029acc80b86a8b905b9aba4cc978e388039bb5823b",
+        "lib": "onnxruntime.dll",
+        "lib_sha256": "d4c4d939c8bd1e93a86bc5a45b37a1fdd08dce34d8231db014a7e4a023923f5a"
       }
     },
     "unsupported": {

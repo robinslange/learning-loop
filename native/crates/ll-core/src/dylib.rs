@@ -20,11 +20,14 @@ const ORT_VERSION: &str = "1.24.2";
 
 const BASE_URL: &str = "https://github.com/microsoft/onnxruntime/releases/download/v1.24.2";
 
-/// One bundled target: the release archive name, its SHA-256, the path of the
-/// shared library inside the archive, and the file name to stage it under.
+/// One bundled target: the release archive name, the SHA-256 of the archive
+/// (verified on download) and of the extracted library (verified on every load,
+/// so a swapped or truncated staged file is caught), the path of the shared
+/// library inside the archive, and the file name to stage it under.
 struct Target {
     asset: &'static str,
-    sha256: &'static str,
+    archive_sha256: &'static str,
+    lib_sha256: &'static str,
     /// Path identifying the library entry inside the archive listing.
     lib_member: &'static str,
     staged_name: &'static str,
@@ -37,7 +40,8 @@ struct Target {
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 const TARGET: Target = Target {
     asset: "onnxruntime-osx-arm64-1.24.2.tgz",
-    sha256: "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+    archive_sha256: "0af4fa503e8ea285245b47ee42d0a7461b8156a81270857da0c1d4ecf858abde",
+    lib_sha256: "87df6f94dd559ea958748adc80fd4c46d91c52bc025771f513291d155539590a",
     lib_member: "lib/libonnxruntime.1.24.2.dylib",
     staged_name: "libonnxruntime.1.24.2.dylib",
 };
@@ -45,7 +49,8 @@ const TARGET: Target = Target {
 #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 const TARGET: Target = Target {
     asset: "onnxruntime-linux-x64-1.24.2.tgz",
-    sha256: "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+    archive_sha256: "43725474ba5663642e17684717946693850e2005efbd724ac72da278fead25e6",
+    lib_sha256: "ffc84d48e845cf0b562ba4ea5ca32aaafc0d4069019fef4f63095b307d0270ad",
     lib_member: "lib/libonnxruntime.so.1.24.2",
     staged_name: "libonnxruntime.so.1.24.2",
 };
@@ -53,7 +58,8 @@ const TARGET: Target = Target {
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 const TARGET: Target = Target {
     asset: "onnxruntime-linux-aarch64-1.24.2.tgz",
-    sha256: "6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e",
+    archive_sha256: "6715b3d19965a2a6981e78ed4ba24f17a8c30d2d26420dbed10aac7ceca0085e",
+    lib_sha256: "e18fe095919d8613ead3a31ff78212bde4fad929418a9b48f49d61c829ed5c82",
     lib_member: "lib/libonnxruntime.so.1.24.2",
     staged_name: "libonnxruntime.so.1.24.2",
 };
@@ -61,7 +67,8 @@ const TARGET: Target = Target {
 #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 const TARGET: Target = Target {
     asset: "onnxruntime-win-x64-1.24.2.zip",
-    sha256: "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+    archive_sha256: "8e3e9c826375352e29cb2614fe44f3d7a4b0ff7b8028ad7a456af9d949a7e8b0",
+    lib_sha256: "114947d633e6844ce3c4b51ef6678f776628571d08a5763859c61642c8dcca9c",
     lib_member: "lib/onnxruntime.dll",
     staged_name: "onnxruntime.dll",
 };
@@ -69,7 +76,8 @@ const TARGET: Target = Target {
 #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
 const TARGET: Target = Target {
     asset: "onnxruntime-win-arm64-1.24.2.zip",
-    sha256: "dd8180d98e5a0ead7ead99029acc80b86a8b905b9aba4cc978e388039bb5823b",
+    archive_sha256: "dd8180d98e5a0ead7ead99029acc80b86a8b905b9aba4cc978e388039bb5823b",
+    lib_sha256: "d4c4d939c8bd1e93a86bc5a45b37a1fdd08dce34d8231db014a7e4a023923f5a",
     lib_member: "lib/onnxruntime.dll",
     staged_name: "onnxruntime.dll",
 };
@@ -122,11 +130,30 @@ pub fn ensure_dylib() -> Result<PathBuf> {
 
     let dir = ort_dir();
     let lib_path = dir.join(TARGET.staged_name);
-    if !lib_path.is_file() {
+    // Verify on every run, not just first stage: a pre-staged file (LL_ORT_DIR
+    // air-gap path) has never been hashed, and a previously-staged file may have
+    // been swapped or truncated. Trust the file's bytes, not its presence —
+    // mirrors the model loader's `verified()`. Only re-download when missing or
+    // failing; a passing hash skips the network.
+    if !verified(&lib_path, TARGET.lib_sha256) {
+        if lib_path.exists() {
+            anyhow::bail!(
+                "{} failed its expected SHA-256 ({}); refusing to load a tampered \
+                 or mismatched ONNX Runtime. Remove it to re-fetch the pinned \
+                 library, or point ORT_DYLIB_PATH at a known-good one",
+                lib_path.display(),
+                TARGET.lib_sha256
+            );
+        }
         stage_bundle(&dir, &lib_path)?;
     }
     std::env::set_var("ORT_DYLIB_PATH", &lib_path);
     Ok(lib_path)
+}
+
+/// True when `path` exists and its contents hash to `expected_sha256`.
+fn verified(path: &Path, expected_sha256: &str) -> bool {
+    path.is_file() && matches!(sha256_hex(path), Ok(actual) if actual == expected_sha256)
 }
 
 /// A caller-set `ORT_DYLIB_PATH` is trusted as the operator's explicit choice,
@@ -152,7 +179,7 @@ fn validate_override(raw: &str) -> Result<PathBuf> {
 fn stage_bundle(dir: &Path, lib_path: &Path) -> Result<()> {
     let url = format!("{BASE_URL}/{}", TARGET.asset);
     let archive = dir.join(TARGET.asset);
-    download_verified(&url, &archive, MIN_ARCHIVE_BYTES, TARGET.sha256)
+    download_verified(&url, &archive, MIN_ARCHIVE_BYTES, TARGET.archive_sha256)
         .with_context(|| format!("fetching ONNX Runtime {ORT_VERSION} bundle"))?;
     extract_member(&archive, TARGET.lib_member, lib_path)
         .with_context(|| format!("extracting {} from {}", TARGET.lib_member, TARGET.asset))?;
@@ -190,49 +217,62 @@ fn download_verified(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &s
     Ok(())
 }
 
-/// Extract a single member from a `.tgz` (mac/linux) or `.zip` (windows)
-/// archive to `dest`, shelling out to the platform's standard tool — same
-/// no-new-crate stance as the `curl` download path.
+/// Extract the library at `member` (a `<top>/lib/<file>` path inside the
+/// archive) to `dest`. The whole archive is unpacked into a staging dir, then
+/// the file whose path ends with `member` is taken — member globbing on the
+/// command line is not portable (BSD tar rejects `--wildcards`, GNU tar needs
+/// it), so we avoid it and match by path suffix instead, which also rejects the
+/// same-named file inside the `.dSYM` debug bundle.
 fn extract_member(archive: &Path, member: &str, dest: &Path) -> Result<()> {
     let staging = dest.with_extension("unpack");
-    fs::create_dir_all(&staging).ok();
+    fs::remove_dir_all(&staging).ok();
+    fs::create_dir_all(&staging).context("creating extraction staging dir")?;
 
-    if TARGET.asset.ends_with(".zip") {
-        let status = Command::new("unzip")
-            .args(["-o", "-j"])
+    let status = if TARGET.asset.ends_with(".zip") {
+        Command::new("unzip")
+            .args(["-oq"])
             .arg(archive)
-            .arg(format!("*/{member}"))
             .arg("-d")
             .arg(&staging)
             .status()
-            .context("failed to run unzip")?;
-        if !status.success() {
-            anyhow::bail!("unzip failed with status {status}");
-        }
+            .context("failed to run unzip")?
     } else {
-        let status = Command::new("tar")
+        Command::new("tar")
             .args(["xzf"])
             .arg(archive)
-            .args(["--strip-components", "2", "-C"])
+            .arg("-C")
             .arg(&staging)
-            .arg(format!("*/{member}"))
             .status()
-            .context("failed to run tar")?;
-        if !status.success() {
-            anyhow::bail!("tar failed with status {status}");
-        }
+            .context("failed to run tar")?
+    };
+    if !status.success() {
+        anyhow::bail!("archive extraction failed with status {status}");
     }
 
-    let file_name = Path::new(member)
-        .file_name()
-        .context("library member has no file name")?;
-    let extracted = staging.join(file_name);
-    if !extracted.is_file() {
-        anyhow::bail!("archive did not contain {member}");
-    }
+    let extracted = find_member(&staging, member)
+        .with_context(|| format!("archive did not contain a */{member} entry"))?;
     fs::rename(&extracted, dest).context("failed to move extracted library into place")?;
     fs::remove_dir_all(&staging).ok();
     Ok(())
+}
+
+/// Find the single file under `root` whose path ends with `/{member}`. Matching
+/// the full `lib/<file>` suffix (not just the basename) skips the identically
+/// named file inside macOS `.dSYM` debug bundles.
+fn find_member(root: &Path, member: &str) -> Result<PathBuf> {
+    let suffix = format!("/{member}");
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
+            let path = entry?.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.to_string_lossy().ends_with(&suffix) {
+                return Ok(path);
+            }
+        }
+    }
+    anyhow::bail!("no entry ending in {suffix} under {}", root.display())
 }
 
 #[cfg(test)]
@@ -256,15 +296,32 @@ mod tests {
     }
 
     #[test]
+    fn verified_rejects_wrong_contents_and_accepts_right_ones() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(b"not the real library").unwrap();
+        f.flush().unwrap();
+        // empty-string SHA never matches → a staged file with the wrong bytes is
+        // rejected, which is what stops a swapped/truncated dylib from loading.
+        assert!(!verified(f.path(), TARGET.lib_sha256));
+        // the file's actual hash is accepted, so a good staged file skips re-fetch.
+        let actual = sha256_hex(f.path()).unwrap();
+        assert!(verified(f.path(), &actual));
+        // a path that does not exist is not "verified".
+        assert!(!verified(std::path::Path::new("/no/such/lib"), &actual));
+    }
+
+    #[test]
     fn target_url_and_pin_agree_on_version() {
         assert!(BASE_URL.ends_with(&format!("v{ORT_VERSION}")));
         assert!(TARGET.asset.contains(ORT_VERSION));
         assert!(TARGET.staged_name.starts_with("lib") || TARGET.staged_name.ends_with(".dll"));
     }
 
-    /// The SHA-256 the binary enforces for THIS build target must match the
-    /// provenance manifest, so the published SBOM/provenance can never claim a
-    /// hash the code does not actually verify.
+    /// Both SHA-256 hashes the binary enforces for THIS build target — the
+    /// archive (download) and the library (every load) — must match the
+    /// provenance manifest, so the published provenance can never claim a hash
+    /// the code does not actually verify.
     #[test]
     fn target_sha_matches_provenance_manifest() {
         let triple = current_target_triple();
@@ -277,15 +334,19 @@ mod tests {
             .split(&format!("\"{triple}\""))
             .nth(1)
             .unwrap_or_else(|| panic!("runtime.json has no entry for {triple}"));
-        let sha_line = block
-            .lines()
-            .find(|l| l.contains("\"sha256\""))
-            .expect("target block has a sha256");
-        assert!(
-            sha_line.contains(TARGET.sha256),
-            "runtime.json sha for {triple} ({sha_line:?}) != dylib.rs TARGET.sha256 ({})",
-            TARGET.sha256
-        );
+        for (key, expected) in [
+            ("archive_sha256", TARGET.archive_sha256),
+            ("lib_sha256", TARGET.lib_sha256),
+        ] {
+            let line = block
+                .lines()
+                .find(|l| l.contains(&format!("\"{key}\"")))
+                .unwrap_or_else(|| panic!("{triple} block has no {key}"));
+            assert!(
+                line.contains(expected),
+                "runtime.json {key} for {triple} ({line:?}) != dylib.rs ({expected})"
+            );
+        }
     }
 
     fn current_target_triple() -> &'static str {

@@ -2,9 +2,9 @@
   "bomFormat": "CycloneDX",
   "specVersion": "1.3",
   "version": 1,
-  "serialNumber": "urn:uuid:96b62bfd-01c7-4a1c-9f74-cc9cb1de1f0c",
+  "serialNumber": "urn:uuid:0b5f3e58-802d-4faa-aefb-a5192347c7f8",
   "metadata": {
-    "timestamp": "2026-06-24T00:40:29.375171000Z",
+    "timestamp": "2026-06-24T01:23:00.449682000Z",
     "tools": [
       {
         "vendor": "CycloneDX",
@@ -6834,6 +6834,7 @@
       "ref": "path+file:///Users/robin/brain/learning-loop/native/crates/ll-core#0.1.4",
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#anyhow@1.0.102",
+        "registry+https://github.com/rust-lang/crates.io-index#dirs-next@2.0.0",
         "registry+https://github.com/rust-lang/crates.io-index#hex@0.4.3",
         "registry+https://github.com/rust-lang/crates.io-index#ort@2.0.0-rc.12",
         "registry+https://github.com/rust-lang/crates.io-index#rusqlite@0.32.1",
