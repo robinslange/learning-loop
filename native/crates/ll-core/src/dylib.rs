@@ -438,11 +438,14 @@ mod tests {
     #[test]
     fn target_sha_matches_provenance_manifest() {
         let triple = current_target_triple();
-        let manifest = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../provenance/runtime.json"
-        ))
-        .expect("provenance/runtime.json must exist");
+        // The manifest lives at the workspace root, outside this crate, so it is
+        // absent when ll-core is consumed as a packaged crates.io crate. Skip
+        // there rather than fail — the check is a workspace-repo invariant.
+        let manifest_path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../../provenance/runtime.json");
+        let Ok(manifest) = std::fs::read_to_string(manifest_path) else {
+            eprintln!("skipping: {manifest_path} not present (packaged crate)");
+            return;
+        };
         let block = manifest
             .split(&format!("\"{triple}\""))
             .nth(1)
