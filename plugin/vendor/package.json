@@ -1,1 +1,7 @@
-{"type":"commonjs"}
+{
+  "type": "commonjs",
+  "name": "sql.js-vendored",
+  "version": "1.14.1",
+  "description": "Vendored sql.js WASM (MIT). Pinned; see README.md for upstream SHA256.",
+  "license": "MIT"
+}

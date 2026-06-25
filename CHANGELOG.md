@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+- Pinned vendored sql.js to v1.14.1 with recorded SHA256 digests (vendor/README.md) so operators can verify the bundled WASM artefact (Foster Moore audit Domain 05).
+
 ## v1.29.5
 
 ### Performance
