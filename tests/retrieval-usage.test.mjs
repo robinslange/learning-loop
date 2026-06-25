@@ -3,13 +3,13 @@ import assert from 'node:assert';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const REPORT = join(SCRIPTS, 'retrieval-report.mjs');
 const { sessionSurfaced, usageReport, loadNoteUsageEvents } = await import(
-  join(SCRIPTS, 'lib', 'retrieval-usage.mjs')
+  pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
 );
 
 const NOW = new Date('2026-06-12T00:00:00Z').getTime();

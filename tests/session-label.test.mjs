@@ -5,6 +5,7 @@ import { writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync, existsSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { skipOnWindows } from './helpers/platform.mjs';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.js');
 // mkdtemp, not a fixed name: parallel test runs sharing one dir flake when
@@ -319,115 +320,50 @@ describe('session-label stdout contract', () => {
   });
 });
 
-describe('session-label dedupe levels across prompts', () => {
-  // Regression: a note surfaced only as a one-line "Related notes" POINTER on
-  // prompt 1 must still get its BODY injected when it is the best match on
-  // prompt 2. Pre-fix, pointer paths were persisted into the dedupe state
-  // indistinguishably from body-injected paths and filtered out wholesale for
-  // the whole DEDUPE_WINDOW_MS.
-  it('pointer-only note from prompt 1 is body-injected on prompt 2', () => {
-    const base = mkdtempSync(join(tmpdir(), 'll-live-dedupe-'));
-    try {
-      const vault = join(base, 'vault');
-      const pluginData = join(base, 'plugin-data');
-      const home = join(base, 'home');
-      const stubBin = join(pluginData, 'bin');
-      mkdirSync(join(vault, 'notes'), { recursive: true });
-      mkdirSync(home, { recursive: true });
-      mkdirSync(stubBin, { recursive: true });
+describe(
+  'session-label dedupe levels across prompts',
+  {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  },
+  () => {
+    // Regression: a note surfaced only as a one-line "Related notes" POINTER on
+    // prompt 1 must still get its BODY injected when it is the best match on
+    // prompt 2. Pre-fix, pointer paths were persisted into the dedupe state
+    // indistinguishably from body-injected paths and filtered out wholesale for
+    // the whole DEDUPE_WINDOW_MS.
+    it('pointer-only note from prompt 1 is body-injected on prompt 2', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-dedupe-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
 
-      writeFileSync(
-        join(vault, 'notes', 'alpha.md'),
-        'Alpha note body about hook injection ordering and budgets.\n',
-      );
-      writeFileSync(
-        join(vault, 'notes', 'beta.md'),
-        'Beta note body about dedupe windows and pointer suppression.\n',
-      );
+        writeFileSync(
+          join(vault, 'notes', 'alpha.md'),
+          'Alpha note body about hook injection ordering and budgets.\n',
+        );
+        writeFileSync(
+          join(vault, 'notes', 'beta.md'),
+          'Beta note body about dedupe windows and pointer suppression.\n',
+        );
 
-      // Stub returns the same two above-threshold hits on both prompts.
-      const hits = JSON.stringify([
-        { path: 'notes/alpha.md', title: 'alpha', score: 0.99 },
-        { path: 'notes/beta.md', title: 'beta', score: 0.9 },
-      ]);
-      writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
-        mode: 0o755,
-      });
-
-      const sid = randomUUID();
-      const env = {
-        ...process.env,
-        HOME: home,
-        TMPDIR: base,
-        CLAUDE_PLUGIN_DATA: pluginData,
-        VAULT_PATH: vault,
-        LEARNING_LOOP_INJECTION_MODE: 'live',
-        LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-        LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
-      };
-      const runPrompt = (prompt) =>
-        execFileSync('node', [HOOK], {
-          input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env,
+        // Stub returns the same two above-threshold hits on both prompts.
+        const hits = JSON.stringify([
+          { path: 'notes/alpha.md', title: 'alpha', score: 0.99 },
+          { path: 'notes/beta.md', title: 'beta', score: 0.9 },
+        ]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
+          mode: 0o755,
         });
 
-      const out1 = runPrompt('tell me about hook injection ordering and budgets');
-      assert.ok(out1.includes('Alpha note body'), 'prompt 1 must body-inject the top hit');
-      assert.ok(out1.includes('notes/beta.md'), 'prompt 1 must list beta as a pointer');
-      assert.ok(!out1.includes('Beta note body'), 'prompt 1 must not inject the pointer body');
-
-      const out2 = runPrompt('now drill into dedupe windows and pointer suppression');
-      assert.ok(
-        out2.includes('Beta note body'),
-        `pointer-seen note must be body-injected on the follow-up prompt; got: ${out2}`,
-      );
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('session-label live injection scrubbing', () => {
-  it('live mode scrubs secrets from injected context (parity with shadow)', () => {
-    const base = mkdtempSync(join(tmpdir(), 'll-live-scrub-'));
-    try {
-      const vault = join(base, 'vault');
-      const pluginData = join(base, 'plugin-data');
-      const home = join(base, 'home');
-      const stubBin = join(pluginData, 'bin');
-      mkdirSync(join(vault, 'notes'), { recursive: true });
-      mkdirSync(home, { recursive: true });
-      mkdirSync(stubBin, { recursive: true });
-
-      writeFileSync(
-        join(vault, 'notes', 'aws-key-rotation.md'),
-        'The deploy key AKIAIOSFODNN7EXAMPLE must be rotated quarterly. Keep the rotation runbook current.\n',
-      );
-
-      // Stub ll-search in <pluginData>/bin — findBinary()'s first slot, so it
-      // beats a locally built native/target/release binary and any PATH entry.
-      // It emits one above-threshold hit without a body, so the hook enriches
-      // it by reading the vault note (which holds the secret).
-      const hit = JSON.stringify([
-        { path: 'notes/aws-key-rotation.md', title: 'aws-key-rotation', score: 0.99 },
-      ]);
-      writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
-        mode: 0o755,
-      });
-
-      const input = JSON.stringify({
-        session_id: randomUUID(),
-        prompt: 'how should we rotate the AWS deploy key for the worker',
-        transcript_path: '',
-        cwd: '/tmp',
-      });
-      const out = execFileSync('node', [HOOK], {
-        input,
-        encoding: 'utf-8',
-        timeout: 30000,
-        env: {
+        const sid = randomUUID();
+        const env = {
           ...process.env,
           HOME: home,
           TMPDIR: base,
@@ -435,20 +371,101 @@ describe('session-label live injection scrubbing', () => {
           VAULT_PATH: vault,
           LEARNING_LOOP_INJECTION_MODE: 'live',
           LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-          // Generous race cap: under full-suite load the 1500ms default can
-          // abort the stub backend before it answers, failing the gate.
           LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
-        },
-      });
+        };
+        const runPrompt = (prompt) =>
+          execFileSync('node', [HOOK], {
+            input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
+            encoding: 'utf-8',
+            timeout: 30000,
+            env,
+          });
 
-      assert.ok(
-        out.length > 0,
-        'gate did not pass — stub arrangement broken, fix before judging the scrub',
-      );
-      assert.ok(!out.includes('AKIAIOSFODNN7EXAMPLE'), 'AWS key leaked into live injection');
-      assert.ok(out.includes('[REDACTED]'));
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
-  });
-});
+        const out1 = runPrompt('tell me about hook injection ordering and budgets');
+        assert.ok(out1.includes('Alpha note body'), 'prompt 1 must body-inject the top hit');
+        assert.ok(out1.includes('notes/beta.md'), 'prompt 1 must list beta as a pointer');
+        assert.ok(!out1.includes('Beta note body'), 'prompt 1 must not inject the pointer body');
+
+        const out2 = runPrompt('now drill into dedupe windows and pointer suppression');
+        assert.ok(
+          out2.includes('Beta note body'),
+          `pointer-seen note must be body-injected on the follow-up prompt; got: ${out2}`,
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+describe(
+  'session-label live injection scrubbing',
+  {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  },
+  () => {
+    it('live mode scrubs secrets from injected context (parity with shadow)', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-scrub-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(
+          join(vault, 'notes', 'aws-key-rotation.md'),
+          'The deploy key AKIAIOSFODNN7EXAMPLE must be rotated quarterly. Keep the rotation runbook current.\n',
+        );
+
+        // Stub ll-search in <pluginData>/bin — findBinary()'s first slot, so it
+        // beats a locally built native/target/release binary and any PATH entry.
+        // It emits one above-threshold hit without a body, so the hook enriches
+        // it by reading the vault note (which holds the secret).
+        const hit = JSON.stringify([
+          { path: 'notes/aws-key-rotation.md', title: 'aws-key-rotation', score: 0.99 },
+        ]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+          mode: 0o755,
+        });
+
+        const input = JSON.stringify({
+          session_id: randomUUID(),
+          prompt: 'how should we rotate the AWS deploy key for the worker',
+          transcript_path: '',
+          cwd: '/tmp',
+        });
+        const out = execFileSync('node', [HOOK], {
+          input,
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: base,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_INJECTION_MODE: 'live',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            // Generous race cap: under full-suite load the 1500ms default can
+            // abort the stub backend before it answers, failing the gate.
+            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+          },
+        });
+
+        assert.ok(
+          out.length > 0,
+          'gate did not pass — stub arrangement broken, fix before judging the scrub',
+        );
+        assert.ok(!out.includes('AKIAIOSFODNN7EXAMPLE'), 'AWS key leaked into live injection');
+        assert.ok(out.includes('[REDACTED]'));
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  },
+);

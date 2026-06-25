@@ -68,8 +68,18 @@ test('concurrent appends produce parseable lines (no byte interleave)', async ()
 });
 
 test('appendJsonlLineSafe returns false on unwritable path instead of throwing', () => {
-  const result = appendJsonlLineSafe('/this/path/cannot/exist/ever.jsonl', { a: 1 });
-  assert.strictEqual(result, false);
+  // A regular file used as a parent directory: mkdir/open under it fails on
+  // every platform (an absolute path under '/' is creatable on Windows, so it
+  // can't stand in for "unwritable").
+  const dir = mkdtempSync(join(tmpdir(), 'll-jsonl-'));
+  try {
+    const file = join(dir, 'not-a-dir');
+    writeFileSync(file, 'x');
+    const result = appendJsonlLineSafe(join(file, 'child.jsonl'), { a: 1 });
+    assert.strictEqual(result, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 async function withTempDirAsync(fn) {

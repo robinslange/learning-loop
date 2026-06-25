@@ -7,17 +7,16 @@ on:
 
 jobs:
   # The plugin ships a Windows binary and win32 code paths, so the Node suite
-  # runs on all three OSes. macOS and Linux are blocking; Windows is
-  # continue-on-error until its failures are triaged green (flip it to
-  # blocking then — a red-but-ignored lane decays fast). ygrep is a
-  # Linux-only install: its tests skip when the binary is absent.
+  # runs on all three OSes, all blocking. A handful of tests that can only be
+  # exercised with a POSIX shell stub of ll-search skip on win32 via
+  # skipOnWindows(); ygrep is a Linux-only install whose tests skip when the
+  # binary is absent.
   node:
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v4
 

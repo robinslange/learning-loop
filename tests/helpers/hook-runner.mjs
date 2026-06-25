@@ -3,7 +3,17 @@
 // Each invocation gets a fresh temp sandbox for HOME and plugin-data.
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync, statSync, symlinkSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -191,13 +201,7 @@ function reapRecordedChildren(pidFile) {
  * }}
  */
 export function runHook(hookPath, opts = {}) {
-  const {
-    stdin = '',
-    env = {},
-    cwd,
-    timeoutMs = 8000,
-    seed,
-  } = opts;
+  const { stdin = '', env = {}, cwd, timeoutMs = 8000, seed } = opts;
 
   // Allocate per-call sandbox so nothing leaks across tests.
   const sandboxRoot = mkdtempSync(join(tmpdir(), 'll-hook-sb-'));
@@ -280,6 +284,10 @@ export function runHook(hookPath, opts = {}) {
       LL_CHILD_PID_FILE: childPidFile,
       // Consumer-provided overrides (VAULT_PATH, CLAUDE_PROJECT_DIR, etc.).
       ...env,
+      // os.tmpdir() reads $TMPDIR on POSIX but %TEMP%/%TMP% on Windows. Mirror
+      // a consumer TMPDIR override onto both so tmp redirection works on every
+      // platform (otherwise the hook scans the real Temp the test never seeded).
+      ...(env.TMPDIR ? { TEMP: env.TMPDIR, TMP: env.TMPDIR } : {}),
     },
   });
 
