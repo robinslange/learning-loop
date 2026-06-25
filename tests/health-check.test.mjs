@@ -20,6 +20,7 @@ import {
   checkSearchIndexExists,
   checkNliSocketFresh,
   checkDuplicateGateHealth,
+  checkHookErrors,
   checkInjectionShadowGate,
   checkAbiDrift,
   recentUtcMonths,
@@ -54,6 +55,7 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'search-index-exists',
     'nli-socket-fresh',
     'duplicate-gate-health',
+    'hook-errors',
     'injection-shadow-gate',
     'abi-drift',
   ];
@@ -500,6 +502,88 @@ test('recentUtcMonths: wraps year boundary correctly (Jan -> prev Dec)', () => {
   const now = new Date('2026-01-15T00:00:00Z');
   const months = recentUtcMonths(now);
   assert.deepEqual(months, ['2026-01', '2025-12']);
+});
+
+// --- checkHookErrors ---
+
+test('checkHookErrors: ok when no hook-errors log present', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-hookerr-'));
+  const result = checkHookErrors({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /no hook errors logged/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkHookErrors: ok with no pluginData (skipped)', () => {
+  const result = checkHookErrors({});
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /skipped/);
+});
+
+test('checkHookErrors: warns when error count exceeds threshold', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-hookerr-warn-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [];
+  for (let i = 0; i < 6; i++) {
+    lines.push(
+      JSON.stringify({
+        ts: `2026-06-12T0${i}:00:00.000Z`,
+        module: `mod-${i}`,
+        message: `error message ${i}`,
+      }),
+    );
+  }
+  // A corrupt line must not throw or count.
+  lines.push('not-json{{{');
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkHookErrors({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /6 hook errors/);
+  // Latest ts wins — last entry is i=5 (ts 05:00)
+  assert.match(result.detail, /mod-5/);
+  assert.match(result.detail, /error message 5/);
+  assert.match(result.fix, /hook-errors/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkHookErrors: ok when count is at or under threshold', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-hookerr-under-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(5)
+    .fill(null)
+    .map((_, i) =>
+      JSON.stringify({ ts: `2026-06-12T0${i}:00:00.000Z`, module: 'x', message: 'err' }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+  const result = checkHookErrors({ pluginData: dir, now });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /under threshold/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkHookErrors: counts across current and previous UTC month', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-hookerr-months-'));
+  const now = new Date('2026-06-01T00:30:00Z');
+  const curMonth = '2026-06';
+  const prevMonth = '2026-05';
+  // 3 in current month + 3 in previous = 6 total (> threshold of 5)
+  const makeLines = (month, count) =>
+    Array(count)
+      .fill(null)
+      .map((_, i) =>
+        JSON.stringify({ ts: `${month}-10T0${i}:00:00.000Z`, module: 'mod', message: 'err' }),
+      )
+      .join('\n') + '\n';
+  writeFileSync(join(dir, `hook-errors-${curMonth}.jsonl`), makeLines(curMonth, 3));
+  writeFileSync(join(dir, `hook-errors-${prevMonth}.jsonl`), makeLines(prevMonth, 3));
+  const result = checkHookErrors({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /6 hook errors/);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 // --- checkInjectionShadowGate ---

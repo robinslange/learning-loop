@@ -740,6 +740,77 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
   });
 }
 
+// --- General hook-error summary ---
+// Counts every well-formed JSON line in the hook-errors monthly logs (all
+// error events, regardless of code) and surfaces the most recent one. Distinct
+// from checkDuplicateGateHealth which counts only specific gate-failure codes.
+const HOOK_ERROR_WARN_THRESHOLD = 5;
+
+function readHookErrorLines(path) {
+  if (!existsSync(path)) return [];
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return [];
+  }
+  const result = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      result.push(JSON.parse(line));
+    } catch {
+      // Skip corrupt line — keep counting the rest.
+    }
+  }
+  return result;
+}
+
+export function checkHookErrors({ pluginData, now = new Date() } = {}) {
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['hook-errors'],
+      name: 'Hook errors',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available — skipped',
+      fix: null,
+    });
+  }
+  const months = recentUtcMonths(now);
+  let totalCount = 0;
+  let latest = null;
+  for (const month of months) {
+    const lines = readHookErrorLines(join(pluginData, `hook-errors-${month}.jsonl`));
+    totalCount += lines.length;
+    for (const obj of lines) {
+      if (!latest || (obj.ts && obj.ts > latest.ts)) latest = obj;
+    }
+  }
+  if (totalCount > HOOK_ERROR_WARN_THRESHOLD) {
+    const latestSummary = latest
+      ? `${latest.module ?? 'unknown'} @ ${latest.ts ?? '?'} — ${String(latest.message ?? '').slice(0, 80)}`
+      : 'unknown';
+    return makeCheck({
+      id: CHECK_IDS['hook-errors'],
+      name: 'Hook errors',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `${totalCount} hook errors in the last 2 months; latest: ${latestSummary}`,
+      fix: `Check ~/.claude/plugins/data/.../hook-errors-*.jsonl to identify which hook/module is failing`,
+    });
+  }
+  return makeCheck({
+    id: CHECK_IDS['hook-errors'],
+    name: 'Hook errors',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail:
+      totalCount === 0 ? 'no hook errors logged' : `${totalCount} hook error(s) (under threshold)`,
+    fix: null,
+  });
+}
+
 // --- Injection shadow gate (injection_mode flip readiness) ---
 // Mirrors the go/no-go verdict in scripts/review-shadow.mjs: with >=100
 // healthy shadow evaluations, >=20 gate passes, and a >=5% healthy pass rate,
