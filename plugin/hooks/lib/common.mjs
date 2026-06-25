@@ -92,6 +92,7 @@ export function vaultRelPath(filePath, vaultPath) {
 }
 
 export function isVaultNote(filePath, vaultRoot) {
+  if (!filePath) return false;
   const prefix = vaultRoot + sep;
   if (!filePath.startsWith(prefix)) return false;
   if (!filePath.endsWith('.md')) return false;

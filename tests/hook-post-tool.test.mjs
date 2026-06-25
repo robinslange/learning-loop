@@ -3,6 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import {
   readFileSync,
   readdirSync,
@@ -16,8 +17,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../plugin/hooks/post-tool.js', import.meta.url).pathname;
-const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/post-tool.js', import.meta.url));
+const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 
 // Read all provenance JSONL lines from pluginData.
 function readProvenance(pluginDataDir) {
@@ -204,6 +205,27 @@ test('post-tool malformed stdin: exits 0, nothing written', () => {
 
     const errors = readHookErrors(r.pluginDataDir);
     assert.deepEqual(errors, [], `malformed stdin should produce no hook errors`);
+  } finally {
+    r.cleanup();
+  }
+});
+
+// A Write/Edit event with valid JSON but no file_path must not crash the
+// dispatcher. The snapshot gate classifies the path via isVaultNote, hoisted
+// above the per-module try/catch. Without isVaultNote's null guard,
+// isVaultNote(undefined, vaultRoot) throws at top level — exit 1, and the
+// load-bearing provenance + reflect-track modules never run. This hook is
+// fail-open by contract (cf. the malformed-stdin test above): bad input must
+// degrade to a clean exit 0 with no logged hook error, never a crash.
+test('post-tool Write with no file_path: exits 0, does not crash', () => {
+  const r = runHook(HOOK, {
+    stdin: { tool_name: 'Write', tool_input: {} },
+    env: { VAULT_PATH: VAULT },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    const errors = readHookErrors(r.pluginDataDir);
+    assert.deepEqual(errors, [], 'missing file_path must not produce a hook error');
   } finally {
     r.cleanup();
   }
