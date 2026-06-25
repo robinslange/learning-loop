@@ -50,6 +50,27 @@ claude plugin install learning-loop@learning-loop-marketplace
 
 - **episodic-memory** (required). Provides semantic recall over past Claude Code conversations, which retrieval, `/discovery`, `/reflect`, and `/refresh` depend on. Install via `/plugin install episodic-memory@superpowers-marketplace` (lives in `obra/superpowers-marketplace`).
 
+## Uninstall
+
+Full removal (or run `/learning-loop:uninstall` for a guided version):
+
+```
+/plugin                                    # remove via marketplace UI
+claude mcp remove episodic-memory          # remove the dependent MCP
+rm -rf ~/.claude/plugins/data/learning-loop-learning-loop-marketplace/  # purge captured indexes
+```
+
+### Disabling parts without uninstalling
+
+To keep commands but silence the hooks, use `"disableAllHooks": true` in
+`~/.claude/settings.json`. This is a blunt instrument — it disables every
+plugin's hooks, not just learning-loop's — but it's the mechanism Claude Code
+exposes for hook suppression. Claude Code's `permissions.deny` array accepts
+tool-name rules (`Bash(...)`, `Read(...)`, `WebFetch`, etc.); there is no
+documented per-hook deny matcher at this Claude Code version. See the
+[permissions documentation](https://docs.anthropic.com/en/docs/claude-code/settings)
+for the current syntax if you want finer control.
+
 ## What it looks like
 
 **Researching a topic you've partially explored.**
@@ -66,31 +87,31 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 
 ## Skills
 
-| Command                 | What it does                                                         |
-| ----------------------- | -------------------------------------------------------------------- |
-| `/discovery "topic"`    | Research with web search and vault context                           |
-| `/research "question"`  | Deep research with the local librarian doing the token-heavy middle  |
-| `/doctor`               | Diagnose and fix your learning-loop install (read-mostly, per-fix consent) |
-| `/quick "question"`     | Fast verified answer with auto-capture                               |
-| `/quick-note "insight"` | Capture to inbox without breaking flow                               |
-| `/deepen "note"`        | Strengthen a note with research, sources, links                      |
-| `/literature <URL>`     | Capture an external source as a literature note                      |
-| `/verify`               | Check note quality and source integrity                              |
-| `/gaps "topic"`         | Surface thin ice, tensions, and blindspots                           |
-| `/inbox`                | Batch triage inbox notes, promote mature ones                        |
-| `/reflect`              | End-of-session consolidation                                         |
-| `/dream`                | Auto-memory consolidation between sessions                           |
-| `/refresh "topic"`      | See what you already know (no web research)                          |
-| `/rewrite "old" "new"`  | Retract a belief across vault, auto-memory, and episodic history     |
-| `/health`               | Vault health dashboard                                               |
-| `/health --librarian`   | Review librarian observations                                        |
-| `/ingest`               | Pull from Linear, repos, or any content Claude can read              |
+| Command                 | What it does                                                                  |
+| ----------------------- | ----------------------------------------------------------------------------- |
+| `/discovery "topic"`    | Research with web search and vault context                                    |
+| `/research "question"`  | Deep research with the local librarian doing the token-heavy middle           |
+| `/doctor`               | Diagnose and fix your learning-loop install (read-mostly, per-fix consent)    |
+| `/quick "question"`     | Fast verified answer with auto-capture                                        |
+| `/quick-note "insight"` | Capture to inbox without breaking flow                                        |
+| `/deepen "note"`        | Strengthen a note with research, sources, links                               |
+| `/literature <URL>`     | Capture an external source as a literature note                               |
+| `/verify`               | Check note quality and source integrity                                       |
+| `/gaps "topic"`         | Surface thin ice, tensions, and blindspots                                    |
+| `/inbox`                | Batch triage inbox notes, promote mature ones                                 |
+| `/reflect`              | End-of-session consolidation                                                  |
+| `/dream`                | Auto-memory consolidation between sessions                                    |
+| `/refresh "topic"`      | See what you already know (no web research)                                   |
+| `/rewrite "old" "new"`  | Retract a belief across vault, auto-memory, and episodic history              |
+| `/health`               | Vault health dashboard                                                        |
+| `/health --librarian`   | Review librarian observations                                                 |
+| `/ingest`               | Pull from Linear, repos, or any content Claude can read                       |
 | `/seed [--for-job]`     | Build a portable starter slice for a fresh instance (new job, second machine) |
-| `/harvest [--all]`      | Carry opt-in, IP-scrubbed insights from a work instance back home    |
-| `/diagram "concept"`    | Generate Excalidraw diagram                                          |
-| `/init`                 | First-time setup: vault path, persona, binary, optional integrations |
-| `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync   |
-| `/help`                 | Show all commands with usage details                                 |
+| `/harvest [--all]`      | Carry opt-in, IP-scrubbed insights from a work instance back home             |
+| `/diagram "concept"`    | Generate Excalidraw diagram                                                   |
+| `/init`                 | First-time setup: vault path, persona, binary, optional integrations          |
+| `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync            |
+| `/help`                 | Show all commands with usage details                                          |
 
 All commands are prefixed with `/learning-loop:` (e.g., `/learning-loop:discovery "caffeine"`).
 
