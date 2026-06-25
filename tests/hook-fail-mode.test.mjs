@@ -79,7 +79,6 @@ describe('pre-write-check fail-mode wiring', { skip: SKIP }, () => {
   });
 
   function runWithFailMode(failMode, filePath) {
-    const config = { pre_write_fail_mode: failMode };
     const r = runHook(HOOK, {
       timeoutMs: 30000,
       stdin: {
