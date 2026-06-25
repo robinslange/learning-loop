@@ -2,6 +2,7 @@
 name: ingest-repo
 description: Scans a repository and extracts architecture, stack, patterns, and project context as insights.
 model: haiku
+tools: Read, Bash, Glob, Grep
 ---
 
 # Ingest Repo

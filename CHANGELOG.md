@@ -36,6 +36,49 @@ All notable changes to this project are documented here. The format is based on 
   `retrieval/access-*.jsonl` record (the full memory filename list); nothing read
   it and it grew ~10MB/month.
 
+### Fixed
+
+- **ONNX Runtime resolution under the `$BIN_DIR` convention.** The plugin's
+  spawner code and CLI shims set `ORT_DYLIB_PATH` to the binary's directory, but
+  the hardened resolver (workstream F) required `ORT_DYLIB_PATH` to be a file, so
+  a directory was rejected as "does not exist" and embedding failed. Two-sided
+  fix: (1) `ll-core`'s resolver now accepts a directory `ORT_DYLIB_PATH` by
+  resolving the pinned library within it, and rewrites the env var to the
+  resolved file so `ort` never hands the macOS loader a bare directory (which
+  hangs); (2) the JS spawners and shims now point `ORT_DYLIB_PATH` at the bin
+  directory only when a runtime library is actually staged there, otherwise
+  leaving it unset so the binary self-resolves (`~/.learning-loop/lib`) or honors
+  an operator-set override. Centralized the eight duplicated injection sites into
+  one `ortSpawnEnv()` helper.
+- **Ingest agents now run on their declared model.** `ingest-context`,
+  `ingest-linear`, and `ingest-repo` were dispatched as `general-purpose`, so
+  their `model: haiku` frontmatter was ignored. They are now dispatched by
+  `subagent_type` (with explicit `tools:` allowlists added), so the cheap-model
+  intent applies. The dispatch prompts still resolve `${CLAUDE_PLUGIN_ROOT}` to a
+  literal before spawn, so each agent can still load its shared `_skills/`
+  contracts (`extract-insights`, `vault-io`) at runtime.
+
+### Documentation
+
+- **ARCHITECTURE.md: librarian-research offload.** Added the data-flow section for
+  `/research` (Scope on Claude, then Search/Fetch/Extract on the local model, then
+  adversarial Verify + Synthesize), the `verify-route.mjs` invariants, and the
+  provider-agnostic `model-client.mjs` surface.
+- **ARCHITECTURE.md: ONNX Runtime is `load-dynamic`, not static.** Corrected the
+  dependency story to the runtime-resolved, SHA-pinned dylib (ORT 1.24.2 via
+  `dylib.rs`, `ORT_DYLIB_PATH` injection), including the x86_64-macOS caveat.
+  Also refreshed the librarian repo-map/topology rows and dated the stale
+  2026-05-11 refactor-baseline section.
+- **Guides: RAM-tiered librarian model.** `agents.md`, `configuration.md`, and
+  `resource-usage.md` now describe the tier (`gemma3:12b` on 32GB+, `gemma4:e2b`
+  on 16-32GB, skipped under 16GB) instead of a flat `gemma4:e2b` default. Fixed the
+  config table (`keep_alive` default `30m`, added `pause_on_battery` and
+  `battery_poll_seconds`, documented the remote `provider` surface).
+- **`/research` documented.** Added to the README skills table and the workflows
+  research-patterns section.
+- **CONTRIBUTING.md.** Lint is four checks (added the eslint custom-rules step);
+  corrected the test glob and the `cargo test --locked` invocation.
+
 ## v1.29.4
 
 ### Security

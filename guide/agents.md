@@ -35,7 +35,7 @@ Twenty working agents.
 
 ## Vault librarian (local, optional)
 
-A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`) uses Gemma 4 E2B via ollama for continuous background classification. It dispatches up to four model tasks per visited note (one tool-use loop plus three single-call structured-output classifiers), and additionally runs a heuristic staleness check that needs no model call.
+A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`, delegating to `scripts/librarian/daemon.mjs`) uses a local Ollama model, chosen by RAM tier (`gemma3:12b` on 32GB+, `gemma4:e2b` on 16-32GB; see [resource-usage.md](resource-usage.md)), for continuous background classification. It dispatches up to four model tasks per visited note (one tool-use loop plus three single-call structured-output classifiers), and additionally runs a heuristic staleness check that needs no model call. The benchmark numbers below were measured on the `gemma4:e2b` tier.
 
 | Task | Mode | Trigger | Output |
 |---|---|---|---|
@@ -55,10 +55,10 @@ All five task types write observations to `PLUGIN_DATA/librarian/queue.jsonl` wi
 
 | Agent | Engine | Tasks | Speed |
 |---|---|---|---|
-| librarian | Gemma 4 E2B (ollama, local) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note |
+| librarian | Local Ollama model, RAM-tiered (`gemma3:12b` / `gemma4:e2b`) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note |
 | Claude (on-demand) | Opus or Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
 
-E2B is good at classification with evidence (90% link accuracy, voice gate F1 0.78, tag suggester precision 0.78 to 0.84, duplicate detector ~3% false-positive with body context) and weak at open-ended investigation. The architecture splits accordingly.
+The small local models are good at classification with evidence (measured on `gemma4:e2b`: 90% link accuracy, voice gate F1 0.78, tag suggester precision 0.78 to 0.84, duplicate detector ~3% false-positive with body context) and weak at open-ended investigation. The architecture splits accordingly. On a 32GB+ machine the `gemma3:12b` tier additionally powers local web research for `/learning-loop:research`.
 
 ## Model selection
 

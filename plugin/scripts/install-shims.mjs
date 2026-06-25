@@ -138,8 +138,13 @@ for %%F in ("!BIN!") do set "BIN_DIR=%%~dpF"
 rem Strip trailing backslash that %%~dpF appends.
 if "!BIN_DIR:~-1!"=="\\" set "BIN_DIR=!BIN_DIR:~0,-1!"
 
-set "ORT_DYLIB_PATH=!BIN_DIR!"
-set "ORT_LIB_LOCATION=!BIN_DIR!"
+rem Point ORT at BIN_DIR only when the runtime library is co-located there.
+rem Otherwise leave it unset so ll-search self-resolves (~/.learning-loop/lib)
+rem or honors an operator-set ORT_DYLIB_PATH; an empty dir would error.
+if exist "!BIN_DIR!\\onnxruntime.dll" (
+  set "ORT_DYLIB_PATH=!BIN_DIR!"
+  set "ORT_LIB_LOCATION=!BIN_DIR!"
+)
 "!BIN!" %*
 endlocal
 `;
@@ -222,7 +227,14 @@ if [ -z "\$BIN" ]; then
 fi
 
 BIN_DIR="\$(dirname "\$BIN")"
-exec env ORT_DYLIB_PATH="\$BIN_DIR" ORT_LIB_LOCATION="\$BIN_DIR" "\$BIN" "\$@"
+# Point ORT at BIN_DIR only when the runtime library is co-located there.
+# Otherwise leave it unset so ll-search self-resolves (~/.learning-loop/lib) or
+# honors an operator-set ORT_DYLIB_PATH; an empty dir would error, not fall back.
+if ls "\$BIN_DIR"/libonnxruntime* >/dev/null 2>&1; then
+  exec env ORT_DYLIB_PATH="\$BIN_DIR" ORT_LIB_LOCATION="\$BIN_DIR" "\$BIN" "\$@"
+else
+  exec "\$BIN" "\$@"
+fi
 `;
 
   writeFileSync(llWatchPath, llWatchShim);

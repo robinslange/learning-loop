@@ -78,7 +78,9 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 
 ## Vault librarian
 
-An optional background agent that uses Gemma 4 E2B via ollama to continuously maintain vault hygiene. Disabled by default; enable via `/init` Phase 7 or by setting `librarian.enabled: true` in config.
+An optional background agent that uses a local Ollama model to continuously maintain vault hygiene. Disabled by default; enable via `/init` Phase 7 or by setting `librarian.enabled: true` in config.
+
+The model is chosen by **RAM tier** so one resident model serves everything: `gemma3:12b` on ≥32GB (triage **and** local research), `gemma4:e2b` on 16–32GB (triage only), skipped under 16GB. `/init` detects RAM and sets `model` accordingly. The shipped default below is the conservative `gemma4:e2b` tier; `/init` upgrades it to `gemma3:12b` on a 32GB+ machine. See [resource-usage.md](resource-usage.md).
 
 ```json
 {
@@ -87,24 +89,50 @@ An optional background agent that uses Gemma 4 E2B via ollama to continuously ma
     "model": "gemma4:e2b",
     "pace_seconds": 2,
     "queue_cap": 200,
-    "ollama_url": "http://localhost:11434"
+    "ollama_url": "http://localhost:11434",
+    "keep_alive": "30m",
+    "pause_on_battery": true,
+    "battery_poll_seconds": 60
   }
 }
 ```
 
-| Key            | Default                  | Purpose                                                                                                      |
-| -------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `enabled`      | `false`                  | Opt-in. Set `true` to start the librarian with `ll-watch`.                                                   |
-| `model`        | `gemma4:e2b`             | Ollama model for classification. E2B is validated; E4B is a future upgrade path.                             |
-| `pace_seconds` | `2`                      | Delay between note investigations. Higher values reduce resource pressure.                                   |
-| `queue_cap`    | `200`                    | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited. |
-| `ollama_url`   | `http://localhost:11434` | Ollama API endpoint.                                                                                         |
+| Key                    | Default                  | Purpose                                                                                                       |
+| ---------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `enabled`              | `false`                  | Opt-in. Set `true` to start the librarian with `ll-watch`.                                                    |
+| `model`                | `gemma4:e2b`             | Ollama model for classification. RAM-tiered by `/init` (`gemma3:12b` on 32GB+); research needs the 12b tier. |
+| `pace_seconds`         | `2`                      | Delay between note investigations. Higher values reduce resource pressure.                                    |
+| `queue_cap`            | `200`                    | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited.  |
+| `ollama_url`           | `http://localhost:11434` | Ollama API endpoint.                                                                                          |
+| `keep_alive`           | `30m`                    | How long ollama keeps the model resident after idle. Set lower to free RAM sooner, higher to avoid reloads.   |
+| `pause_on_battery`     | `true`                   | Suspend the librarian while the machine is on battery power (polled).                                         |
+| `battery_poll_seconds` | `60`                     | How often to re-check power state when `pause_on_battery` is on.                                              |
+
+### Remote model provider (advanced)
+
+The librarian can route its model calls to an OpenAI-compatible remote instead of local ollama (e.g. GLM, DeepSeek, or Qwen via Fireworks). Add a `provider` block to `librarian`:
+
+```json
+{
+  "librarian": {
+    "enabled": true,
+    "provider": {
+      "kind": "openai",
+      "base_url": "https://api.fireworks.ai/inference",
+      "model": "accounts/fireworks/models/...",
+      "api_key_ref": "<keyring reference resolved at runtime>"
+    }
+  }
+}
+```
+
+With no `provider` block (the default), calls go to local ollama using `model` + `ollama_url`. All model calls (daemon classifiers and the `/research` engine) go through one provider-agnostic client (`scripts/lib/model-client.mjs`), so the same code runs against a local or remote model.
 
 The librarian spawns as a child process of the watcher (started via `ll-watch`). It runs continuously, picking random unvisited notes and dispatching multiple tasks per note. Mechanical: staleness regex. Ollama tool-use loop: link investigation for orphans. Ollama structured-output classifiers: voice gate (topic-style titles in inbox/fleeting notes), tag suggestion (under-tagged notes with vocabulary-bounded picks from the vault's existing tags), duplicate detection (3-way enum against three nearest neighbours with body context). Each task writes its observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field (`link_suggestion`, `voice_flag`, `tag_suggestion`, `duplicate_flag`, `staleness_suspect`). A separate `state.json` tracks visited notes and resets after a full pass.
 
 Review queued observations with `/health --librarian`. The librarian observes; humans and Claude act.
 
-**Requirements:** ollama installed, 16GB+ system RAM, Gemma 4 E2B pulled (`ollama pull gemma4:e2b`). E2B Q4 uses ~5GB active memory. `keep_alive: 5m` in ollama auto-unloads the model after idle.
+**Requirements:** ollama installed, 16GB+ system RAM, and the tier model pulled (`ollama pull gemma4:e2b` on 16–32GB, `ollama pull gemma3:12b` on 32GB+). Resident footprint is ~7.2GB (e2b) / ~8.9GB (12b). `keep_alive` (default `30m`) controls how long ollama keeps the model loaded after idle.
 
 ## Cache health statusline
 

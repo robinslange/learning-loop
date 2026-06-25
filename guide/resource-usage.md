@@ -12,7 +12,15 @@ The `ll-search` binary (~60MB) bundles two quantized models (BGE-small-en-v1.5 f
 
 ## Librarian (optional)
 
-If enabled via `/init` Phase 7, the vault librarian runs Gemma 4 E2B (~5GB active RAM) via ollama as a child of `ll-watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed and 16GB+ system RAM.
+If enabled via `/init` Phase 7, the vault librarian runs a local Ollama model as a child of `ll-watch`. It investigates notes at ~15s each, writing observations to a local queue. No API calls, no cloud costs. Requires ollama installed.
+
+The model is chosen by **RAM tier** so one resident model serves everything:
+
+- **≥32GB RAM → `gemma3:12b`** (~8.9GB resident): triage **and** local web research for `/learning-loop:research`.
+- **16–32GB RAM → `gemma4:e2b`** (~7.2GB resident): triage only; `/research` falls back to its Claude-native path.
+- **<16GB RAM →** librarian skipped.
+
+`/init` detects your RAM and recommends the tier; you can override it. The shipped `config.json` default is `gemma4:e2b` (the conservative tier), which `/init` upgrades to `gemma3:12b` on a 32GB+ machine.
 
 ## What we do to keep costs down
 

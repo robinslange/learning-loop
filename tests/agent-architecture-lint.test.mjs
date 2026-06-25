@@ -81,6 +81,9 @@ const ALLOWLISTED = [
   'ingest-mapper-stack',
   'ingest-mapper-state',
   'ingest-synthesizer',
+  'ingest-context',
+  'ingest-linear',
+  'ingest-repo',
 ];
 
 test('allowlisted agents declare tools: frontmatter (M14)', () => {

@@ -69,6 +69,7 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | Command                 | What it does                                                         |
 | ----------------------- | -------------------------------------------------------------------- |
 | `/discovery "topic"`    | Research with web search and vault context                           |
+| `/research "question"`  | Deep research with the local librarian doing the token-heavy middle  |
 | `/doctor`               | Diagnose and fix your learning-loop install (read-mostly, per-fix consent) |
 | `/quick "question"`     | Fast verified answer with auto-capture                               |
 | `/quick-note "insight"` | Capture to inbox without breaking flow                               |

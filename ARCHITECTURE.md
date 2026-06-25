@@ -33,8 +33,16 @@ learning-loop/
       post-search-tracking.js -- episodic-memory search query tracking
 
     scripts/            -- CLI utilities and long-running daemons
-      lib/              -- shared primitives (env, config, file-lock, log, etc.)
-      librarian.mjs     -- librarian daemon: tag suggest, duplicate detect
+      lib/              -- shared primitives (env, config, file-lock, log, model-client, etc.)
+      librarian.mjs     -- ~66 LOC CLI entry; delegates to librarian/daemon.mjs
+      librarian/        -- librarian daemon + local research engine
+        daemon.mjs      -- main loop + investigateNote (voice_gate, tag_suggest,
+                           duplicate_check, agentic link_check)
+        config.mjs      -- librarian config + provider resolution + research tier gate
+        research.mjs    -- local research engine (Search -> Fetch -> Extract)
+        research/       -- brave, fetch, extract, source-id
+        verify*.mjs     -- verify-route/-source decision logic (the /research Verify step)
+      verify/           -- claim/note verification CLIs (check-claims, verify-note)
       vault-search.mjs  -- ll-search query wrapper
       watch.mjs         -- file watcher daemon
       edges-cli.mjs     -- graph edge management CLI
@@ -137,6 +145,30 @@ flowchart LR
 
 Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from a synchronous thread in v1.19.0). Authentication uses ed25519 signatures; the seed lives in the OS keyring (macOS Keychain, Linux Secret Service) or an encrypted-at-rest file on headless installs, with a plaintext-legacy fallback for un-migrated installs. The wire format negotiates `protocol_version` on `SyncHello`/`SyncReady`: v2 hubs receive length-prefixed envelopes (`u32 size + 32-byte SHA256 + body`) validated before allocation, with a 50 MB hub-side cap on uploads.
 
+### research-offload path
+
+`/learning-loop:research` keeps the token-heavy middle of deep research off Claude's context. Claude does the cheap ends (**Scope** -- decompose the question into search angles -- and the adversarial **Verify + Synthesize**) while the local librarian model (Ollama, 12b+) does the expensive middle: **Search -> dedup -> Fetch -> Extract**. Roughly 15 source documents are distilled to one-line claims locally before anything reaches Claude.
+
+```mermaid
+flowchart LR
+  A["/research question"] --> B[Scope on Claude<br/>angles JSON]
+  B --> C[research.mjs runResearch]
+  C --> D[research/brave.mjs search]
+  D --> E[dedup URLs]
+  E --> F[research/fetch.mjs]
+  F --> G[research/extract.mjs<br/>local Gemma claim extraction]
+  G --> H[claims bundle<br/>temp file or --json]
+  H --> I[Verify router on Claude]
+  I --> J[verify-route.mjs decision logic]
+  J --> K[Synthesize on Claude<br/>cited report]
+```
+
+`scripts/librarian/research.mjs` (`runResearch`) drives Search -> dedup -> Fetch -> Extract and emits a claims bundle (`{question, angles, sources, claims, skipped}`). Collaborators (`searchFn`/`fetchTextFn`/`extractFn`) are injected with live defaults from `research/{brave,fetch,extract,source-id}.mjs`, so orchestration is testable without the network. The model-size tier gate lives at the CLI edge (`resolveModel` + `researchModelOk`): research **refuses on the e2b tier (exit 3)** rather than producing thin claims, and the `/research` skill falls back to Claude-native WebSearch when the librarian is unavailable or sub-tier.
+
+The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier *failure* (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
+
+All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provider-agnostic structured-output client. It normalizes the two provider shapes the librarian targets: `ollama` (`POST {base}/api/chat`, `format: schema`) and `openai`-compatible remotes (DeepSeek/GLM/Qwen via Fireworks etc.; `POST {base}/v1/chat/completions`, `response_format: json_schema`, bearer auth). The provider is resolved from the `librarian` config block (`scripts/librarian/config.mjs:resolveProvider`), so the same Search/Extract/Verify code runs against a local model or a remote one without branching.
+
 ---
 
 ## module ownership
@@ -153,6 +185,7 @@ Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from
 | Plugin shared primitives   | `scripts/lib/`                                           | `docs/baseline/plugin.md`        | `.planning/inventory/plugin-patterns.md`    |
 | Hooks                      | `hooks/`                                                 | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md` |
 | Provenance                 | `provenance/`, `scripts/provenance*.mjs`                 | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md`    |
+| Librarian + research offload | `scripts/librarian/`, `scripts/lib/model-client.mjs`   | `docs/baseline/plugin.md`        | `scripts/librarian/research/README.md`      |
 
 ---
 
@@ -207,7 +240,7 @@ A running learning-loop deployment has three long-lived processes and several tr
 | Process          | Binary / script                                                        | Lifecycle                                                                                                                                                                                                                        |
 | ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
-| librarian daemon | `scripts/librarian.mjs`                                                | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); processes background tasks; exits with the watcher                                                                  |
+| librarian daemon | `scripts/librarian.mjs` -> `scripts/librarian/daemon.mjs`               | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); investigates notes needing attention via the local Ollama model (`voice_gate`, `tag_suggest`, `duplicate_check`, and an agentic `link_check` loop); exits with the watcher. The on-demand `/research` engine is separate (CLI shell-out, not a daemon task). |
 | UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only. |
 | Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
 
@@ -237,8 +270,8 @@ Claude Code
   |           +-- [execFileSync] ll-search <subcommand> (per-call subprocess)
   |                   |
   |                   +-- native/crates/ll-core  (scoring, graph, embeddings)
-  |                   +-- SQLite (notes, embeddings, links)
-  |                   +-- ONNX runtime (BGE-small model)
+  |                   +-- SQLite (notes, embeddings, links; bundled)
+  |                   +-- ONNX Runtime (BGE-small embed + reranker; load-dynamic dylib)
   |
   +-- ll-search watch     (long-running; spawned at SessionStart by watch-daemon.mjs)
   |     |
@@ -248,7 +281,7 @@ Claude Code
   +-- scripts/*.mjs       (CLI utilities; also use scripts/lib/ and ll-search)
 ```
 
-ll-core is a Rust library crate. ll-search links it statically. There is no separate ll-core process.
+ll-core is a Rust library crate. ll-search links it statically (one binary, no separate ll-core process). The one runtime dependency that is **not** statically linked is the ONNX Runtime: both crates build `ort` with the `load-dynamic` feature, so the runtime is resolved from a shared library at startup rather than compiled in. See "ONNX Runtime (load-dynamic)" below.
 
 ---
 
@@ -261,6 +294,12 @@ The BGE-small ONNX model is 70 MB and takes ~800 ms to initialize. Loading it on
 **Why SQLite rather than a separate vector database?**
 
 SQLite bundles into the binary (`rusqlite` with `bundled` feature), requires no external service, and handles the combined FTS + metadata + graph queries in a single transaction. A separate vector DB would add an operational dependency without meaningful performance benefit at the 10k-50k note scale. The trade-off is reviewed at 100k+ notes.
+
+**Why ONNX Runtime is `load-dynamic` rather than statically linked?**
+
+Both inference paths (the bge-small embedder in ll-search and the cross-encoder reranker in ll-core) build `ort` (`2.0.0-rc.12`) with `default-features = false` and the `load-dynamic` feature. The ONNX Runtime is therefore not compiled into the binary; it is loaded from a shared library at startup. The version is pinned in `native/crates/ll-core/src/dylib.rs` (`ORT_VERSION = "1.24.2"`, matching what `ort 2.0.0-rc.12` expects). `ensure_dylib` resolves the library before the first `ort::Session` is built: it downloads the official Microsoft CPU bundle for the host target on first run, verifies the SHA-256 of both the archive and the extracted library (so a swapped or truncated staged file is caught on every load), and stages it. The plugin also points the binary at a co-located library by injecting `ORT_DYLIB_PATH`/`ORT_LIB_LOCATION` when it spawns `ll-search` (`scripts/lib/binary.mjs:66,84`).
+
+This replaced static linking via `ort`'s `download-binaries` build feature (workstream F), which dropped the openssl/ureq build-time dependencies and made the runtime fetch explicit, pinned, and checksummed. Caveat: there is no `osx-x64` ONNX Runtime asset for 1.24.2 (Microsoft dropped Intel macOS), so x86_64 macOS is intentionally unsupported under `load-dynamic` (such a host must set `ORT_DYLIB_PATH` to a self-provided `libonnxruntime`).
 
 **Why Arc<[f32]> for embeddings?**
 
@@ -371,6 +410,8 @@ Each subcommand writes compact JSON to stdout. The `--pretty` flag (planned for 
 ---
 
 ## known structural issues (baseline 2026-05-11)
+
+> This table and the "phase 2 / track 0G/1E/…" vocabulary below are a snapshot from the 2026-05-11 refactor baseline. They predate the later security and research workstreams (provenance/SBOM, ONNX Runtime `load-dynamic`, the librarian-research offload). Treat counts and track labels as historical; verify against the current tree before acting on them.
 
 These are tracked issues, not defects -- the code works, but the structure is not yet at the target.
 

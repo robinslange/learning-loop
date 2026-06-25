@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, statSync, existsSync, rmSync } from 'node:
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
-import { spawnEnv } from '../../scripts/lib/env.mjs';
+import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 
@@ -168,7 +168,7 @@ export async function run(ctx) {
           detached: true,
           stdio: 'ignore',
           windowsHide: true,
-          env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
+          env: ortSpawnEnv(binary.binDir),
         });
         child.unref();
         recordDetachedChild(child.pid);

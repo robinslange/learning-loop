@@ -15,7 +15,8 @@ import { checkFilenameStyle } from './lib/filename-style.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
-import { spawnEnv, env, coerceNumber } from '../scripts/lib/env.mjs';
+import { env, coerceNumber } from '../scripts/lib/env.mjs';
+import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
@@ -278,7 +279,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       {
         encoding: 'utf-8',
         timeout: Math.min(HookConfig.QUERY_TIMEOUT_MS, remainingMs),
-        env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
+        env: ortSpawnEnv(binary.binDir),
       },
     );
     return interpretScanResult(JSON.parse(out), filePath, vaultRoot);

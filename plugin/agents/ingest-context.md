@@ -2,6 +2,7 @@
 name: ingest-context
 description: Extracts atomic insights from any content Claude can read: text, PDFs, images, code, conversations, docs, or any other format.
 model: haiku
+tools: Read, Bash
 ---
 
 # Ingest Context

@@ -61,19 +61,19 @@ Parse remaining args as source-specific parameters.
 
 Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders). Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID`; when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
-**Linear:** Spawn a `general-purpose` agent with prompt:
+**Linear:** Spawn a `learning-loop:ingest-linear` agent (the `subagent_type` matches the agent name, so its `model: haiku` and `tools:` allowlist apply). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders), so the agent can read its shared `_skills/` contracts:
 
 ```
-Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-linear.md and follow it exactly.
+Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-linear.md and follow it exactly.
 
 Scope: {scope}
 State filter: {state_filter or "none"}
 ```
 
-**Context:** Spawn a `general-purpose` agent with prompt:
+**Context:** Spawn a `learning-loop:ingest-context` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch:
 
 ```
-Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-context.md and follow it exactly.
+Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-context.md and follow it exactly.
 
 Source label: {source_label or "pasted text"}
 Text:
@@ -130,10 +130,10 @@ REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.s
 
 #### Step 2.4a: tier=single → existing single-pass flow
 
-Spawn a `general-purpose` agent with prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders):
+Spawn a `learning-loop:ingest-repo` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders), so the agent can read its shared `_skills/` contracts:
 
 ```
-Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-repo.md and follow it exactly.
+Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-repo.md and follow it exactly.
 
 Repo path: {repo_path}
 ```

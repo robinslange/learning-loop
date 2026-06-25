@@ -11,7 +11,8 @@ import { findBinary, isVaultNote } from '../lib/common.mjs';
 import { buildNoteMapFromSnapshot, maybeSplice, removeFromSnapshot } from '../lib/snapshot.mjs';
 import { extractWikilinks, stripFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
-import { spawnEnv, env, coerceNumber } from '../../scripts/lib/env.mjs';
+import { env, coerceNumber } from '../../scripts/lib/env.mjs';
+import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 
 const SIMILARITY_THRESHOLD = 0.65;
@@ -90,7 +91,7 @@ export async function runAutolink(ctx) {
     const out = execFileSync(binary.bin, ['similar', dbPath, relativePath, '--top', '5'], {
       encoding: 'utf-8',
       timeout: coerceNumber(env.LL_AUTOLINK_ML_TIMEOUT_MS, HookConfig.AUTOLINK_ML_TIMEOUT_MS),
-      env: spawnEnv({ ORT_DYLIB_PATH: binary.binDir, ORT_LIB_LOCATION: binary.binDir }),
+      env: ortSpawnEnv(binary.binDir),
     });
     similar = JSON.parse(out);
   } catch (err) {

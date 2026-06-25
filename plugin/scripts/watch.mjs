@@ -14,7 +14,7 @@ import { existsSync, openSync, readFileSync, unlinkSync } from 'fs';
 import { setTimeout as delay } from 'timers/promises';
 import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
-import { spawnEnv } from './lib/env.mjs';
+import { ortSpawnEnv } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 
@@ -131,7 +131,7 @@ if (existsSync(librarianScript)) {
 
 const foreground = command === '--foreground';
 
-const ortEnv = spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) });
+const ortEnv = ortSpawnEnv(dirname(bin));
 
 if (foreground) {
   const child = spawn(bin, args, { stdio: 'inherit', env: ortEnv });

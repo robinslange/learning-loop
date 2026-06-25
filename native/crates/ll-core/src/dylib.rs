@@ -125,7 +125,12 @@ fn ort_dir() -> PathBuf {
 ///    the single library extracted to `~/.learning-loop/lib`.
 pub fn ensure_dylib() -> Result<PathBuf> {
     if let Some(raw) = std::env::var("ORT_DYLIB_PATH").ok().filter(|p| !p.is_empty()) {
-        return validate_override(&raw);
+        let resolved = validate_override(&raw)?;
+        // `ort` reads ORT_DYLIB_PATH itself, so rewrite it to the resolved file.
+        // A directory override (the plugin's `$BIN_DIR` convention) would otherwise
+        // reach `ort` as a directory and hang the macOS loader on a bare-name scan.
+        std::env::set_var("ORT_DYLIB_PATH", &resolved);
+        return Ok(resolved);
     }
 
     let dir = ort_dir();
@@ -162,14 +167,24 @@ fn verified(path: &Path, expected_sha256: &str) -> bool {
 /// turns that hang into an immediate, actionable error.
 fn validate_override(raw: &str) -> Result<PathBuf> {
     let path = PathBuf::from(raw);
-    if !path.is_file() {
+    // The plugin's spawner code and install shims set ORT_DYLIB_PATH to the
+    // binary's directory (the `$BIN_DIR` convention), so accept a directory by
+    // resolving the pinned library inside it. Either way we end at a real file
+    // or fail loudly — `ort` must never be handed a bare name that makes the
+    // macOS loader scan default paths and hang.
+    let resolved = if path.is_dir() {
+        path.join(TARGET.staged_name)
+    } else {
+        path
+    };
+    if !resolved.is_file() {
         anyhow::bail!(
             "ORT_DYLIB_PATH points at {} which does not exist; \
              unset it to use the bundled ONNX Runtime, or fix the path",
-            path.display()
+            resolved.display()
         );
     }
-    Ok(path)
+    Ok(resolved)
 }
 
 /// Download the pinned archive, verify its SHA-256, and extract the one library
@@ -296,6 +311,52 @@ mod tests {
         let f = tempfile::NamedTempFile::new().unwrap();
         let resolved = validate_override(f.path().to_str().unwrap()).unwrap();
         assert_eq!(resolved, f.path());
+    }
+
+    #[test]
+    fn override_to_directory_resolves_to_the_library_within() {
+        // The plugin's spawner code and install shims set ORT_DYLIB_PATH to the
+        // binary's directory (the `$BIN_DIR` convention), not the file. A dir
+        // override must resolve to <dir>/<staged_name> when that file exists,
+        // so the established convention loads instead of failing as "not a file".
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join(TARGET.staged_name);
+        fs::File::create(&lib).unwrap().write_all(b"x").unwrap();
+        let resolved = validate_override(dir.path().to_str().unwrap()).unwrap();
+        assert_eq!(resolved, lib);
+    }
+
+    #[test]
+    fn override_to_directory_without_library_errors_clearly() {
+        // A directory that does NOT contain the library must still fail loudly
+        // (not fall through to a bare-name loader scan that hangs macOS).
+        let dir = tempfile::tempdir().unwrap();
+        let err = validate_override(dir.path().to_str().unwrap())
+            .expect_err("a dir without the library must fail, not hang the loader");
+        let msg = err.to_string();
+        assert!(msg.contains("ORT_DYLIB_PATH"), "message was: {msg}");
+    }
+
+    #[test]
+    fn ensure_dylib_rewrites_directory_override_to_the_resolved_file() {
+        // ensure_dylib must leave ORT_DYLIB_PATH pointing at the resolved FILE,
+        // not the directory it was given. `ort` reads ORT_DYLIB_PATH itself; if
+        // it still holds a directory, the macOS loader does a bare-name scan and
+        // hangs — the exact failure this resolver exists to prevent.
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let lib = dir.path().join(TARGET.staged_name);
+        fs::File::create(&lib).unwrap().write_all(b"x").unwrap();
+        std::env::set_var("ORT_DYLIB_PATH", dir.path());
+        let resolved = ensure_dylib().unwrap();
+        assert_eq!(resolved, lib);
+        assert_eq!(
+            std::env::var("ORT_DYLIB_PATH").unwrap(),
+            lib.to_str().unwrap(),
+            "ORT_DYLIB_PATH must be rewritten to the resolved file so ort loads it directly"
+        );
+        std::env::remove_var("ORT_DYLIB_PATH");
     }
 
     #[test]

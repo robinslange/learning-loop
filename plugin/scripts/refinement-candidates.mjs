@@ -24,7 +24,7 @@ import { resolve, basename, dirname, relative, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { spawnEnv } from './lib/env.mjs';
+import { ortSpawnEnv } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
 
@@ -80,7 +80,7 @@ function readStdinPaths() {
 function querySimilar(bin, dbPath, vaultRoot, noteRel) {
   const result = spawnSync(bin, ['similar', '--top', String(TOP_K), dbPath, noteRel], {
     encoding: 'utf-8',
-    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
+    env: ortSpawnEnv(dirname(bin)),
     timeout: 5000,
   });
   if (result.status !== 0) return [];

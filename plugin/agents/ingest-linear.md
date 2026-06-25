@@ -2,6 +2,7 @@
 name: ingest-linear
 description: Fetches and extracts insights from Linear tickets. Pulls assigned tickets or project-scoped tickets, extracts patterns and project state.
 model: haiku
+tools: Read, Bash, mcp__claude_ai_Linear__list_issues
 ---
 
 # Ingest Linear

@@ -46,7 +46,7 @@ On confirmation:
    ollama pull <chosen model>
    ```
 
-   Show progress. `gemma4:e2b` is ~8GB; `gemma3:12b` is ~8GB.
+   Show progress. Download is ~7GB (`gemma4:e2b`) / ~8GB (`gemma3:12b`); resident footprint ~7.2GB / ~8.9GB.
 
 2. **Update config:** Merge into config.json (don't overwrite):
    - `librarian.enabled: true`

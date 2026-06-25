@@ -28,6 +28,18 @@ Discovery tells you what you know and what's new. Gaps tells you what you haven'
 
 Run this cycle twice if the first pass produces many new notes. The second gaps pass operates on a richer vault and finds different weaknesses.
 
+### Token-light deep research with the local librarian
+
+When you want a deep, multi-source, cited report but don't want to spend Claude tokens on the search/fetch/extract grind:
+
+```
+/learning-loop:research "what is the evidence that creatine improves cognition?"
+```
+
+Claude does the cheap ends (decomposing the question into search angles, then the adversarial Verify + Synthesize) while the local librarian model (Ollama, 12b tier) does the token-heavy middle: search, fetch ~15 sources, and distill them to one-line claims before anything reaches Claude's context. It falls back to Claude-native web search when the librarian is unavailable or below the 12b research tier (see [resource-usage.md](resource-usage.md) for the tier requirement).
+
+Use `/research` over `/discovery` when the goal is a verified report on a specific question and you want to keep token cost down; use `/discovery` when you want an interactive, vault-aware exploration that grows notes as you go.
+
 ### Quick answer with auto-capture
 
 For questions that don't need a full discovery session:
@@ -145,6 +157,7 @@ Skills are composable. Some useful chains beyond the standard research cycle:
 | `/learning-loop:gaps` then `/learning-loop:deepen` | Find the weakest note on a topic, then strengthen it |
 | `/learning-loop:verify` then `/learning-loop:gaps` | Fix sources first, then look for conceptual gaps |
 | `/learning-loop:ingest repo` then `/learning-loop:gaps` | Onboard to a codebase, then find what's missing from your understanding |
+| `/learning-loop:research` then `/learning-loop:deepen` | Pull a token-light cited report, then fold the best of it into a permanent note |
 
 ## Context injection
 

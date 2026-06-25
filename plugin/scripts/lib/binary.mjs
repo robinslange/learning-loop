@@ -1,9 +1,35 @@
 import { execFileSync } from 'child_process';
 import { join, resolve, dirname } from 'path';
-import { existsSync } from 'fs';
+import { existsSync, readdirSync } from 'fs';
 import { getPluginData } from './config.mjs';
 import { warnOnce } from './warn-once.mjs';
 import { spawnEnv } from './env.mjs';
+
+// True when an ONNX Runtime shared library is staged in `dir`. Keyed on the
+// library name prefix (not a version-pinned filename) so it never drifts from
+// the Rust-side pin in ll-core/src/dylib.rs.
+function hasOrtLibrary(dir) {
+  try {
+    return readdirSync(dir).some(
+      (f) => /^libonnxruntime/.test(f) || /^onnxruntime.*\.dll$/i.test(f),
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Build the spawn env for a child ll-search. Point ORT_DYLIB_PATH/ORT_LIB_LOCATION
+// at the binary's directory ONLY when a runtime library is actually staged there
+// (the co-located-install convention). Otherwise inject nothing, so the binary
+// self-resolves (~/.learning-loop/lib) or honors an operator-set ORT_DYLIB_PATH /
+// LL_ORT_DIR flowing through the ambient env. Injecting an empty directory would
+// clobber that resolution and turn a working install into a load failure.
+export function ortSpawnEnv(binDir) {
+  if (binDir && hasOrtLibrary(binDir)) {
+    return spawnEnv({ ORT_DYLIB_PATH: binDir, ORT_LIB_LOCATION: binDir });
+  }
+  return spawnEnv({});
+}
 
 const BINARY_NAME = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
 
@@ -63,7 +89,7 @@ export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const stdout = execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
+    env: ortSpawnEnv(dirname(bin)),
   });
   return JSON.parse(stdout);
 }
@@ -81,6 +107,6 @@ export function runRaw(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   return execFileSync(bin, args, {
     encoding: 'utf-8',
     maxBuffer,
-    env: spawnEnv({ ORT_DYLIB_PATH: dirname(bin), ORT_LIB_LOCATION: dirname(bin) }),
+    env: ortSpawnEnv(dirname(bin)),
   });
 }
