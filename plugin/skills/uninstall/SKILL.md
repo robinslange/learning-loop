@@ -13,8 +13,9 @@ dir. This skill walks the full removal with operator confirmation.
 
 1. **Confirm intent.** Ask the operator to confirm they want to fully remove
    learning-loop, including all captured indexes (backlinks, justification
-   index, session labels). If they only want hooks off, point them at the
-   `permissions.deny` pattern in the README instead and stop.
+   index, session labels). If they only want hooks off, point them at the `disableAllHooks: true` guidance in
+   the README's "Disabling parts without uninstalling" section instead and
+   stop.
 
 2. **Remove the plugin.** Tell the operator to run `/plugin` and remove
    learning-loop via the marketplace UI. (Claude cannot drive the marketplace

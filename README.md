@@ -56,7 +56,7 @@ Full removal (or run `/learning-loop:uninstall` for a guided version):
 
 ```
 /plugin                                    # remove via marketplace UI
-claude mcp remove episodic-memory          # remove the dependent MCP
+claude mcp remove episodic-memory          # only if no other plugin uses it — check first: claude mcp list
 rm -rf ~/.claude/plugins/data/learning-loop-learning-loop-marketplace/  # purge captured indexes
 ```
 
