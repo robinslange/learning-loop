@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.29.5
+
 ### Performance
 
 - **post-tool snapshot gate.** PostToolUse now loads the vault snapshot only for
