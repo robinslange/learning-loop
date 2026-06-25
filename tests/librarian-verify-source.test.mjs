@@ -2,8 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { verifyClaimSource } from '../plugin/scripts/librarian/verify-source.mjs';
+import { fileURLToPath } from 'node:url';
 
-const CLI = new URL('../plugin/scripts/librarian/verify-source.mjs', import.meta.url).pathname;
+const CLI = fileURLToPath(
+  new URL('../plugin/scripts/librarian/verify-source.mjs', import.meta.url),
+);
 
 const claim = { claim: 'c', quote: 'q', url: 'u' };
 const deps = (over = {}) => ({

@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { hasBinary } from '../plugin/scripts/lib/binary.mjs';
+import { fileURLToPath } from 'node:url';
 
-const SCRIPT = new URL('../plugin/scripts/convergence-check.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/convergence-check.mjs', import.meta.url));
 
 function runCheck(...args) {
   return execFileSync('node', [SCRIPT, ...args], { encoding: 'utf-8' });

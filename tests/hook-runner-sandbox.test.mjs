@@ -8,12 +8,21 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, utimesSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  utimesSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook, sweepStaleSandboxes } from './helpers/hook-runner.mjs';
+import { fileURLToPath } from 'node:url';
 
-const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-write-check.js', import.meta.url));
 const PKG = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
 // A non-Write tool makes pre-write-check exit immediately — cheapest real hook.

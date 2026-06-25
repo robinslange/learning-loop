@@ -6,6 +6,16 @@ export function home() {
   return env.HOME || env.USERPROFILE || homedir();
 }
 
+// Encode a project directory into its ~/.claude/projects/<slug> segment.
+// Claude Code replaces every path separator AND every '.' and ':' with '-',
+// so /Users/x/.claude/p -> -Users-x--claude-p and C:\Users\x -> C--Users-x.
+// The ':' replacement is load-bearing on Windows: a drive colon left in the
+// slug is an illegal filename char and mkdir fails. Match CC exactly so we
+// resolve the dir CC actually created.
+export function encodeProjectDir(projectDir) {
+  return projectDir.replace(/[/\\.:]/g, '-');
+}
+
 export function tmp() {
   return tmpdir();
 }

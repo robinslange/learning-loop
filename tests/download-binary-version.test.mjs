@@ -13,18 +13,23 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const MOD_PATH = fileURLToPath(new URL('../plugin/scripts/download-binary.mjs', import.meta.url));
-const MOD = JSON.stringify(MOD_PATH);
+const MOD_URL = new URL('../plugin/scripts/download-binary.mjs', import.meta.url);
+const MOD_PATH = fileURLToPath(MOD_URL);
+const MOD = JSON.stringify(MOD_URL.href);
 
 // Spawned so argv is controlled (getVersion short-circuits on process.argv[2])
 // and so an unguarded top-level main() can't run inside the test process.
 function getVersionInSubprocess(root, env = {}) {
   return spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(m.getVersion(${JSON.stringify(root)}));
-    `],
+    `,
+    ],
     { encoding: 'utf-8', env: { ...process.env, ...env } },
   );
 }

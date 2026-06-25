@@ -5,8 +5,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot.mjs';
+import { fileURLToPath } from 'node:url';
 
-const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-write-check.js', import.meta.url));
 let VAULT;
 let NON_VAULT;
 

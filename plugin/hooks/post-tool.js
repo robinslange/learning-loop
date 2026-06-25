@@ -13,6 +13,7 @@ import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
+import { encodeProjectDir } from '../scripts/lib/paths.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
@@ -31,7 +32,7 @@ function recordMemoryWriteIfApplicable(filePath) {
     if (!projectDir) return;
     const pluginData = getPluginData();
     if (!pluginData) return;
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const encodedPath = encodeProjectDir(projectDir);
     const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     if (filePath !== join(memoryDir, basename(filePath))) return;
     let sid = getSessionId();

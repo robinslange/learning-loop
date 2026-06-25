@@ -9,8 +9,9 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
-const CLI = new URL('../plugin/scripts/seed-select.mjs', import.meta.url).pathname;
+const CLI = fileURLToPath(new URL('../plugin/scripts/seed-select.mjs', import.meta.url));
 let memDir;
 
 function runCli(args) {
@@ -47,7 +48,11 @@ test('defaults to type=feedback when no types arg is given', () => {
 
 test('comma-split types arg widens the selection', () => {
   const { kept } = runCli([memDir, 'feedback,project']);
-  assert.deepEqual(kept.sort(), ['feedback_acme_notes.md', 'feedback_clean.md', 'project_thing.md']);
+  assert.deepEqual(kept.sort(), [
+    'feedback_acme_notes.md',
+    'feedback_clean.md',
+    'project_thing.md',
+  ]);
 });
 
 test('comma-split deny arg drops on word-boundary name match', () => {
@@ -59,7 +64,11 @@ test('comma-split deny arg drops on word-boundary name match', () => {
 
 test('whitespace around commas is tolerated', () => {
   const { kept } = runCli([memDir, ' feedback , project ']);
-  assert.deepEqual(kept.sort(), ['feedback_acme_notes.md', 'feedback_clean.md', 'project_thing.md']);
+  assert.deepEqual(kept.sort(), [
+    'feedback_acme_notes.md',
+    'feedback_clean.md',
+    'project_thing.md',
+  ]);
 });
 
 test('missing memDir exits 2 with usage on stderr', () => {

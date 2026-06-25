@@ -1,13 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { isTruthy, coerceNumber, env } from '../plugin/scripts/lib/env.mjs';
 
-const MOD = JSON.stringify(
-  fileURLToPath(new URL('../plugin/scripts/lib/env.mjs', import.meta.url)),
-);
+const MOD = JSON.stringify(new URL('../plugin/scripts/lib/env.mjs', import.meta.url).href);
 
 test('isTruthy accepts canonical truthy strings', () => {
   for (const v of ['1', 'true', 'yes', 'on']) {

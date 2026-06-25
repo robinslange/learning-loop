@@ -1,17 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  rmSync,
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  utimesSync,
-} from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import { acquireLock, releaseLock, withLock } from '../plugin/scripts/lib/file-lock.mjs';
 
@@ -102,7 +94,10 @@ test('withLock releases lock when fn throws', () => {
   withTempDir((dir) => {
     const target = join(dir, 'wl-throw.json');
     assert.throws(
-      () => withLock(target, {}, () => { throw new Error('boom'); }),
+      () =>
+        withLock(target, {}, () => {
+          throw new Error('boom');
+        }),
       /boom/,
     );
     assert.equal(existsSync(target + '.lock'), false);
@@ -132,12 +127,12 @@ test('releaseLock is idempotent on null/undefined handle', () => {
 });
 
 test('cross-process race: both children terminate cleanly (mutual exclusion holds)', async () => {
-  const flockPath = fileURLToPath(new URL('../plugin/scripts/lib/file-lock.mjs', import.meta.url));
+  const flockUrl = new URL('../plugin/scripts/lib/file-lock.mjs', import.meta.url).href;
   const dir = mkdtempSync(join(tmpdir(), 'll-flock-race-'));
   try {
     const target = join(dir, 'race.json');
     const code = `
-import { acquireLock, releaseLock } from ${JSON.stringify(flockPath)};
+import { acquireLock, releaseLock } from ${JSON.stringify(flockUrl)};
 const h = acquireLock(${JSON.stringify(target)}, { retries: 2, retryDelayMs: 10 });
 if (h) {
   const buf = new Int32Array(new SharedArrayBuffer(4));
@@ -150,7 +145,9 @@ if (h) {
 `;
     const spawnChild = () =>
       new Promise((r) => {
-        const c = spawn(process.execPath, ['--input-type=module'], { stdio: ['pipe', 'pipe', 'pipe'] });
+        const c = spawn(process.execPath, ['--input-type=module'], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
         c.stdin.end(code);
         c.on('close', (exitCode) => r(exitCode));
       });

@@ -12,8 +12,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 
-const DREAM_GATE = new URL('../plugin/hooks/lib/dream-gate.js', import.meta.url).pathname;
+const DREAM_GATE = fileURLToPath(new URL('../plugin/hooks/lib/dream-gate.js', import.meta.url));
 
 function runGate(pluginData, { home, env = {} } = {}) {
   return spawnSync(process.execPath, [DREAM_GATE, '--session-start-refresh'], {
@@ -42,32 +43,29 @@ test(
       // Use a sandboxed HOME so memory-dir stat calls don't touch the real home.
       const sandboxHome = mkdtempSync(join(tmpdir(), 'll-dg-home-'));
       try {
-        const result = spawnSync(
-          process.execPath,
-          [DREAM_GATE, '--session-start-refresh'],
-          {
-            encoding: 'utf8',
-            timeout: 10000,
-            env: {
-              PATH: process.env.PATH,
-              NODE_PATH: process.env.NODE_PATH || '',
-              CLAUDE_PLUGIN_DATA: tmpPluginData,
-              // Omit CLAUDE_PROJECT_DIR so gate 3 fires and script exits early,
-              // which still exercises writeMarkerIfNeeded(null).
-              HOME: sandboxHome,
-              USERPROFILE: sandboxHome,
-            },
+        const result = spawnSync(process.execPath, [DREAM_GATE, '--session-start-refresh'], {
+          encoding: 'utf8',
+          timeout: 10000,
+          env: {
+            PATH: process.env.PATH,
+            NODE_PATH: process.env.NODE_PATH || '',
+            CLAUDE_PLUGIN_DATA: tmpPluginData,
+            // Omit CLAUDE_PROJECT_DIR so gate 3 fires and script exits early,
+            // which still exercises writeMarkerIfNeeded(null).
+            HOME: sandboxHome,
+            USERPROFILE: sandboxHome,
           },
-        );
+        });
 
-        assert.ok(
-          result.signal === null,
-          `dream-gate killed by signal ${result.signal}`,
-        );
+        assert.ok(result.signal === null, `dream-gate killed by signal ${result.signal}`);
 
         // The script exits 0 on the "first run" path (writes DREAM_MARKER then exits)
         // or on "no CLAUDE_PROJECT_DIR" path — both should write the cache marker.
-        assert.equal(result.status, 0, `dream-gate exited ${result.status}\nstderr: ${result.stderr}`);
+        assert.equal(
+          result.status,
+          0,
+          `dream-gate exited ${result.status}\nstderr: ${result.stderr}`,
+        );
 
         const markerPath = join(tmpPluginData, 'session-start-cache', 'dream-gate.json');
         assert.ok(
@@ -86,7 +84,11 @@ test(
           `marker must have a "nudge" field; got: ${JSON.stringify(parsed)}`,
         );
         // On an early-exit path the nudge is null (no consolidation needed).
-        assert.equal(parsed.nudge, null, `nudge should be null on early-exit path; got: ${parsed.nudge}`);
+        assert.equal(
+          parsed.nudge,
+          null,
+          `nudge should be null on early-exit path; got: ${parsed.nudge}`,
+        );
       } finally {
         rmSync(sandboxHome, { recursive: true, force: true });
       }
@@ -112,7 +114,10 @@ test(
       const cacheDir = join(tmpPluginData, 'session-start-cache');
       mkdirSync(cacheDir, { recursive: true });
       const markerPath = join(cacheDir, 'dream-gate.json');
-      writeFileSync(markerPath, JSON.stringify({ nudge: 'Auto-memory has 9 files modified. Run /dream to consolidate.' }));
+      writeFileSync(
+        markerPath,
+        JSON.stringify({ nudge: 'Auto-memory has 9 files modified. Run /dream to consolidate.' }),
+      );
       // /dream just succeeded: last-dream stamp is 1 hour old.
       mkdirSync(join(tmpPluginData, 'retrieval'), { recursive: true });
       writeFileSync(
@@ -121,7 +126,11 @@ test(
       );
 
       const result = runGate(tmpPluginData, { home: sandboxHome });
-      assert.equal(result.status, 0, `dream-gate exited ${result.status}\nstderr: ${result.stderr}`);
+      assert.equal(
+        result.status,
+        0,
+        `dream-gate exited ${result.status}\nstderr: ${result.stderr}`,
+      );
 
       const parsed = JSON.parse(readFileSync(markerPath, 'utf8'));
       assert.equal(
@@ -159,7 +168,11 @@ test(
       );
 
       const result = runGate(tmpPluginData, { home: sandboxHome });
-      assert.equal(result.status, 0, `dream-gate exited ${result.status}\nstderr: ${result.stderr}`);
+      assert.equal(
+        result.status,
+        0,
+        `dream-gate exited ${result.status}\nstderr: ${result.stderr}`,
+      );
 
       const parsed = JSON.parse(readFileSync(markerPath, 'utf8'));
       assert.equal(

@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 import {
   pluginRoot,
@@ -12,9 +11,7 @@ import {
   cacheDir,
 } from '../plugin/scripts/lib/plugin-meta.mjs';
 
-const MOD = JSON.stringify(
-  fileURLToPath(new URL('../plugin/scripts/lib/plugin-meta.mjs', import.meta.url)),
-);
+const MOD = JSON.stringify(new URL('../plugin/scripts/lib/plugin-meta.mjs', import.meta.url).href);
 
 test('pluginRoot resolves to the plugin root', () => {
   const root = pluginRoot();
@@ -39,10 +36,14 @@ test('pluginId formats as name@version', () => {
 test('dataDir honours CLAUDE_PLUGIN_DATA env var (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(m.dataDir());
-    `],
+    `,
+    ],
     { env: { ...process.env, CLAUDE_PLUGIN_DATA: '/tmp/llcustom' } },
   );
   assert.equal(out.status, 0, out.stderr.toString());
@@ -52,10 +53,14 @@ test('dataDir honours CLAUDE_PLUGIN_DATA env var (subprocess)', () => {
 test('dataDir defaults to ~/.claude/plugins/data/learning-loop (subprocess)', () => {
   const out = spawnSync(
     process.execPath,
-    ['--input-type=module', '-e', `
+    [
+      '--input-type=module',
+      '-e',
+      `
       const m = await import(${MOD});
       console.log(m.dataDir());
-    `],
+    `,
+    ],
     { env: { ...process.env, CLAUDE_PLUGIN_DATA: undefined } },
   );
   assert.equal(out.status, 0, out.stderr.toString());

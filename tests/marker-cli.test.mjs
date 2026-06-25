@@ -7,11 +7,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  utimesSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const CLI = new URL('../plugin/scripts/marker.mjs', import.meta.url).pathname;
+const CLI = fileURLToPath(new URL('../plugin/scripts/marker.mjs', import.meta.url));
 
 function run(args, pluginData) {
   return spawnSync(process.execPath, [CLI, ...args], {
@@ -57,7 +66,11 @@ test('stamp last-dream clears a stale dream-gate nudge so the next session does 
     const r = run(['stamp', 'last-dream'], pd);
     assert.equal(r.status, 0, r.stderr);
     const gate = JSON.parse(readFileSync(gatePath, 'utf8'));
-    assert.equal(gate.nudge, null, 'dream-gate cache must read {nudge: null} after a successful stamp');
+    assert.equal(
+      gate.nudge,
+      null,
+      'dream-gate cache must read {nudge: null} after a successful stamp',
+    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }

@@ -15,12 +15,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { skipOnWindows } from './helpers/platform.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
+import { fileURLToPath } from 'node:url';
+import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 
-const HOOK = new URL('../plugin/hooks/stop-nudge.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/stop-nudge.js', import.meta.url));
 
-// On macOS, the hook child uses /tmp (the symlink) as its tmpdir().
-// Use this consistent path for pre-seeded markers and cleanup.
-const HOOK_TMP = '/tmp';
+// Mirror the hook child's tmpdir() so pre-seeded markers and transcript
+// fixtures land where the hook resolves them on every platform.
+const HOOK_TMP = tmpdir();
 
 // Write a transcript of exactly `size` bytes to `path`.
 function writeTranscript(path, size) {
@@ -221,7 +223,7 @@ test('reflect cooldown read from plugin-data suppresses the nudge — M2', () =>
 
 test('dream nudge fires on >=3 new memories, then respects its once-guard — M3/M4', () => {
   const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-proj-'));
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const encodedPath = encodeProjectDir(projectDir);
   const sid = 'test-dream-nudge';
 
   const seed = (pluginDataDir, sandboxRoot) => {
@@ -318,7 +320,7 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
 // The count must come from this session's own write log.
 test('dream nudge ignores concurrent sessions writes — only this session count', () => {
   const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-concurrent-'));
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const encodedPath = encodeProjectDir(projectDir);
   const sid = 'test-readonly-session';
 
   const r = runHook(HOOK, {
@@ -358,7 +360,7 @@ test('dream nudge ignores concurrent sessions writes — only this session count
 // plus an unrelated peer file present: count is 2, under the >=3 gate → no nudge.
 test('dream nudge counts only this session writes still present on disk', () => {
   const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-presence-'));
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const encodedPath = encodeProjectDir(projectDir);
   const sid = 'test-presence';
 
   const r = runHook(HOOK, {
@@ -399,7 +401,7 @@ test(
   { skip: skipOnWindows('chmod semantics: read-only dirs not enforced on win32') },
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-sn-guardfail-'));
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const encodedPath = encodeProjectDir(projectDir);
     const sid = 'test-guard-fail';
 
     const r = runHook(HOOK, {

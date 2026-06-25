@@ -15,8 +15,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb } from '../plugin/scripts/lib/edges.mjs';
 import { runEdgeInfer } from '../plugin/hooks/modules/edge-infer.mjs';
+import { fileURLToPath } from 'node:url';
 
-const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
+const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 
 // Note lives in 0-inbox so isVaultNote() accepts it.
 const NOTE_REL = '0-inbox/rebuttal-note.md';

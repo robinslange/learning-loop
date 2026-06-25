@@ -10,7 +10,7 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
-import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
+import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
 import { recordDetachedChild } from '../lib/common.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
@@ -154,7 +154,7 @@ export async function run(ctx) {
   // instead of the index lines.
   let projectMemoryIndex = null;
   if (projectDir) {
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const encodedPath = encodeProjectDir(projectDir);
     projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
     if (existsSync(projectMemoryIndex) && memoryIsFresh(projectMemoryIndex)) {
       try {
@@ -172,7 +172,7 @@ export async function run(ctx) {
   // parent both keys resolve to the same MEMORY.md — skip the global section
   // rather than injecting the identical index twice.
   const vaultParent = resolve(vaultRoot, '..');
-  const encodedVaultParent = vaultParent.replace(/[/\\]/g, '-');
+  const encodedVaultParent = encodeProjectDir(vaultParent);
   const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
   if (
     globalMemory !== projectMemoryIndex &&

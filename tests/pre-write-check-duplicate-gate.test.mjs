@@ -6,6 +6,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import {
   mkdirSync,
   writeFileSync,
@@ -25,8 +26,8 @@ import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { DUPLICATE_GATE_STALE_DAEMON_CODE } from '../plugin/hooks/pre-write-check.js';
 
-const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
-const UDS_SERVER = new URL('./helpers/uds-reflect-server.mjs', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-write-check.js', import.meta.url));
+const UDS_SERVER = fileURLToPath(new URL('./helpers/uds-reflect-server.mjs', import.meta.url));
 
 const SKIP = skipOnWindows('UDS socket: filesystem sockets not supported on win32');
 let VAULT;

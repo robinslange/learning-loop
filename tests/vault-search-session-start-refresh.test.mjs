@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   mkdtempSync,
   mkdirSync,
@@ -18,7 +19,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { skipOnWindows } from './helpers/platform.mjs';
 
-const VAULT_SEARCH = new URL('../plugin/scripts/vault-search.mjs', import.meta.url).pathname;
+const VAULT_SEARCH = fileURLToPath(new URL('../plugin/scripts/vault-search.mjs', import.meta.url));
 
 // Create a minimal stub ll-search binary that emits an empty JSON array and
 // exits 0. Without a discoverable binary, vault-search.mjs exits early (code 2)

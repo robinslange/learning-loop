@@ -5,6 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 import {
   writeFileSync,
   readFileSync,
@@ -20,8 +22,8 @@ import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../plugin/hooks/session-start.js', import.meta.url).pathname;
-const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/session-start.js', import.meta.url));
+const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 
 // Seed update-check.json with a fresh timestamp so the hook does NOT spawn
 // the background update-check child that would hit api.github.com.
@@ -298,7 +300,7 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-stale' },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        const encoded = '/tmp/test-project-stale'.replace(/[/\\]/g, '-');
+        const encoded = encodeProjectDir('/tmp/test-project-stale');
         const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
         mkdirSync(memDir, { recursive: true });
         const memPath = join(memDir, 'MEMORY.md');
@@ -326,7 +328,7 @@ test('session-start memory: injects MEMORY.md when mtime within 7 days', { timeo
     env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-fresh' },
     seed: (pd, sb) => {
       seedUpdateCheck(pd);
-      const encoded = '/tmp/test-project-fresh'.replace(/[/\\]/g, '-');
+      const encoded = encodeProjectDir('/tmp/test-project-fresh');
       const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
       mkdirSync(memDir, { recursive: true });
       const memPath = join(memDir, 'MEMORY.md');
@@ -360,7 +362,7 @@ test(
       },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        const encoded = '/tmp/test-project-override'.replace(/[/\\]/g, '-');
+        const encoded = encodeProjectDir('/tmp/test-project-override');
         const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
         mkdirSync(memDir, { recursive: true });
         const memPath = join(memDir, 'MEMORY.md');
@@ -394,7 +396,7 @@ test(
         // Arrange: oversized GLOBAL memory index, mtime fresh (now). Line-oriented
         // content so the cap cuts on a newline. The global memory path keys on the
         // vault PARENT, mirroring context-assembly.mjs.
-        const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
+        const encodedVaultParent = encodeProjectDir(resolve(VAULT, '..'));
         const globalMemoryPath = join(
           sb,
           '.claude',
@@ -510,7 +512,7 @@ test(
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-proj-'));
     const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-ss-m4-'));
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const encodedPath = encodeProjectDir(projectDir);
     const r = runHook(HOOK, {
       env: {
         VAULT_PATH: VAULT,
@@ -694,7 +696,7 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: vaultParent },
       seed: (pd, sb) => {
         seedUpdateCheck(pd);
-        const encoded = vaultParent.replace(/[/\\]/g, '-');
+        const encoded = encodeProjectDir(vaultParent);
         const memDir = join(sb, '.claude', 'projects', encoded, 'memory');
         mkdirSync(memDir, { recursive: true });
         // Single occurrence of the marker per injection (a [x](x) link would
@@ -744,11 +746,11 @@ test(
         // lines at the END of each — if either index is even partially
         // trimmed, its sentinel dies.
         const memFiller = ('- [n](n.md) — ' + 'y'.repeat(80) + '\n').repeat(10);
-        const encodedProject = projectDir.replace(/[/\\]/g, '-');
+        const encodedProject = encodeProjectDir(projectDir);
         const projMemDir = join(sb, '.claude', 'projects', encodedProject, 'memory');
         mkdirSync(projMemDir, { recursive: true });
         writeFileSync(join(projMemDir, 'MEMORY.md'), memFiller + '- PROJECT-MEM-SENTINEL\n');
-        const encodedVaultParent = resolve(VAULT, '..').replace(/[/\\]/g, '-');
+        const encodedVaultParent = encodeProjectDir(resolve(VAULT, '..'));
         const globalMemDir = join(sb, '.claude', 'projects', encodedVaultParent, 'memory');
         mkdirSync(globalMemDir, { recursive: true });
         writeFileSync(join(globalMemDir, 'MEMORY.md'), memFiller + '- GLOBAL-MEM-SENTINEL\n');

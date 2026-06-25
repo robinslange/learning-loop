@@ -7,8 +7,9 @@ import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
+import { fileURLToPath } from 'node:url';
 
-const HOOK = new URL('../plugin/hooks/pre-compact.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-compact.js', import.meta.url));
 
 // -- helpers --
 
@@ -45,7 +46,11 @@ test('pre-compact stdin ignored: output identical regardless of stdin content', 
   try {
     assert.equal(r1.exitCode, 0);
     assert.equal(r2.exitCode, 0);
-    assert.equal(r1.stdout.trim(), r2.stdout.trim(), 'output must be identical regardless of stdin');
+    assert.equal(
+      r1.stdout.trim(),
+      r2.stdout.trim(),
+      'output must be identical regardless of stdin',
+    );
   } finally {
     r1.cleanup();
     r2.cleanup();

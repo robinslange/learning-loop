@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { home, resolvePluginData, readStdin, getSessionId } from './lib/common.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
+import { encodeProjectDir } from '../scripts/lib/paths.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
@@ -67,7 +68,7 @@ if (pluginData && projectDir) {
     ttlMs: Infinity,
   });
   if (Array.isArray(writesArr)) {
-    const encodedPath = projectDir.replace(/[/\\]/g, '-');
+    const encodedPath = encodeProjectDir(projectDir);
     const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     try {
       const onDisk = new Set(readdirSync(memoryDir).filter((f) => f.endsWith('.md')));

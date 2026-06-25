@@ -11,9 +11,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const CLI = new URL('../plugin/scripts/marker.mjs', import.meta.url).pathname;
-const STOP_HOOK = new URL('../plugin/hooks/stop-nudge.js', import.meta.url).pathname;
+const CLI = fileURLToPath(new URL('../plugin/scripts/marker.mjs', import.meta.url));
+const STOP_HOOK = fileURLToPath(new URL('../plugin/hooks/stop-nudge.js', import.meta.url));
 
 test('last-reflect stamped under one $TMPDIR suppresses stop-nudge under another', () => {
   const pd = mkdtempSync(join(tmpdir(), 'll-pair-pd-'));
@@ -30,7 +31,11 @@ test('last-reflect stamped under one $TMPDIR suppresses stop-nudge under another
 
     const r = spawnSync(process.execPath, [STOP_HOOK], {
       encoding: 'utf8',
-      input: JSON.stringify({ session_id: 'pair-test', transcript_path: transcript, stop_hook_active: false }),
+      input: JSON.stringify({
+        session_id: 'pair-test',
+        transcript_path: transcript,
+        stop_hook_active: false,
+      }),
       env: {
         PATH: process.env.PATH,
         CLAUDE_PLUGIN_DATA: pd,

@@ -1,9 +1,18 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, utimesSync, mkdtempSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  utimesSync,
+  mkdtempSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'lib', 'dream-gate.js');
 const tmp = tmpdir();
@@ -17,7 +26,7 @@ const DREAM_LOCK = join(PLUGIN_DATA, 'markers', 'dream-lock');
 // out of the real ~/.claude/projects and lets parallel runs coexist.
 const FAKE_PROJECT_DIR = mkdtempSync(join(tmp, 'll-test-dream-project-'));
 const FAKE_HOME = mkdtempSync(join(tmp, 'll-test-dream-home-'));
-const encodedPath = FAKE_PROJECT_DIR.replace(/[/\\]/g, '-');
+const encodedPath = encodeProjectDir(FAKE_PROJECT_DIR);
 const memoryDir = join(FAKE_HOME, '.claude', 'projects', encodedPath, 'memory');
 
 function run() {
@@ -137,7 +146,9 @@ describe('dream-gate', () => {
     rmSync(DREAM_MARKER, { force: true });
     const stampedPath = execFileSync('node', [CLI, 'stamp', 'last-dream'], {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
-    }).toString().trim();
+    })
+      .toString()
+      .trim();
     assert.equal(stampedPath, DREAM_MARKER, 'stamp must land where the gate reads');
     assert.ok(existsSync(DREAM_MARKER), 'stamp must exist before the gate runs');
     const out = run();

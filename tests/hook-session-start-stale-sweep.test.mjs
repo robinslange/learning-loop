@@ -14,6 +14,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import {
   mkdtempSync,
   mkdirSync,
@@ -32,8 +33,8 @@ import { run } from '../plugin/hooks/session-start/vault-snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 
-const HOOK = new URL('../plugin/hooks/session-start.js', import.meta.url).pathname;
-const VAULT = new URL('./fixtures/vault-small', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/session-start.js', import.meta.url));
+const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 
 function makeFixture({ version = '1.25.1' } = {}) {
   const sb = mkdtempSync(join(tmpdir(), 'll-sweep-'));
@@ -76,11 +77,9 @@ function ageFile(path, ms) {
 
 test('sweep: removes orphaned ll-search.*-bak binaries', async () => {
   const fx = makeFixture();
-  const baks = [
-    'll-search.preDelta-bak',
-    'll-search.preDelta2-bak',
-    'll-search.preDelta3-bak',
-  ].map((n) => join(fx.binDir, n));
+  const baks = ['ll-search.preDelta-bak', 'll-search.preDelta2-bak', 'll-search.preDelta3-bak'].map(
+    (n) => join(fx.binDir, n),
+  );
   for (const p of baks) writeFileSync(p, 'stale-binary-bytes');
 
   await withSandbox(fx, async () => {
@@ -183,10 +182,7 @@ test(
         existsSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-fresh')),
         'fresh marker kept',
       );
-      assert.ok(
-        !existsSync(join(r.pluginDataDir, 'edges.db.12345.tmp')),
-        'edges tmp orphan swept',
-      );
+      assert.ok(!existsSync(join(r.pluginDataDir, 'edges.db.12345.tmp')), 'edges tmp orphan swept');
       assert.deepEqual(
         readdirSync(isolatedTmp).sort(),
         ['learning-loop-session-id'],
@@ -236,10 +232,7 @@ test('TTL sweep is gated to once per 24h — a stale marker survives a same-day 
     writeFileSync(stale2, '[]');
     utimesSync(stale2, eightDaysAgo, eightDaysAgo);
     await run({ ...baseCtx });
-    assert.ok(
-      existsSync(stale2),
-      'second same-day run is gated — the stale marker survives',
-    );
+    assert.ok(existsSync(stale2), 'second same-day run is gated — the stale marker survives');
   });
   rmSync(isolatedTmp, { recursive: true, force: true });
 });

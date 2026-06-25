@@ -1,7 +1,7 @@
 // scripts/lib/memory-paths.mjs : resolve the auto-memory dir and list its note files.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { home } from './paths.mjs';
+import { home, encodeProjectDir } from './paths.mjs';
 
 // Files in the memory dir that are NOT individual memories.
 const NON_MEMORY = new Set(['MEMORY.md', '_dream_log.md']);
@@ -15,7 +15,7 @@ const NON_MEMORY = new Set(['MEMORY.md', '_dream_log.md']);
  */
 export function resolveMemoryDir(projectDir, homeDir = home()) {
   if (!projectDir) return null;
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const encodedPath = encodeProjectDir(projectDir);
   return join(homeDir, '.claude', 'projects', encodedPath, 'memory');
 }
 

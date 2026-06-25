@@ -4,7 +4,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 const tmpPluginData = mkdtempSync(join(tmpdir(), 'll-snap-race-pd-'));
 const tmpVault = mkdtempSync(join(tmpdir(), 'll-snap-race-vault-'));
@@ -15,7 +14,7 @@ mkdirSync(join(tmpVault, '0-inbox'), { recursive: true });
 writeFileSync(join(tmpVault, '0-inbox', 'seed.md'), 'seed\n');
 
 const snapshotPath = join(tmpPluginData, 'vault-snapshot.json');
-const snapshotMjsPath = fileURLToPath(new URL('../plugin/hooks/lib/snapshot.mjs', import.meta.url));
+const snapshotMjsUrl = new URL('../plugin/hooks/lib/snapshot.mjs', import.meta.url).href;
 
 const mod = await import('../plugin/hooks/lib/snapshot.mjs');
 const { rebuildVaultSnapshot } = mod;
@@ -25,7 +24,7 @@ rebuildVaultSnapshot(tmpVault);
 function runWorker(relPath) {
   return new Promise((resolve, reject) => {
     const code = `
-import { loadVaultSnapshot, maybeSplice } from ${JSON.stringify(snapshotMjsPath)};
+import { loadVaultSnapshot, maybeSplice } from ${JSON.stringify(snapshotMjsUrl)};
 const snap = loadVaultSnapshot(${JSON.stringify(tmpVault)});
 maybeSplice(snap, {
   folder: '0-inbox',

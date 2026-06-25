@@ -12,11 +12,11 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 
-const WORKER = new URL(
-  '../plugin/hooks/session-start/update-check-worker.mjs',
-  import.meta.url,
-).pathname;
+const WORKER = fileURLToPath(
+  new URL('../plugin/hooks/session-start/update-check-worker.mjs', import.meta.url),
+);
 
 function runWorkerSync(cacheFile, installed, apiUrl, timeoutMs) {
   const args = [WORKER, cacheFile, installed, apiUrl];

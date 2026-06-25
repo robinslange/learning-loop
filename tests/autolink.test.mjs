@@ -6,6 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import {
   mkdtempSync,
   mkdirSync,
@@ -22,7 +23,7 @@ import { skipOnWindows } from './helpers/platform.mjs';
 
 const SKIP = skipOnWindows('shebang stub + chmod semantics: not supported on win32');
 
-const HOOK = new URL('../plugin/hooks/post-tool.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/post-tool.js', import.meta.url));
 
 const SLEEP_NOTE = '---\ntags: [sleep]\n---\n\nPermanent note on sleep science.\n';
 const CIRCADIAN_NOTE = '---\ntags: [circadian]\n---\n\nPermanent note on circadian rhythm.\n';

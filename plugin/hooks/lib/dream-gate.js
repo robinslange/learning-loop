@@ -9,6 +9,7 @@ import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { home, resolvePluginData } from './common.mjs';
 import { env } from '../../scripts/lib/env.mjs';
+import { encodeProjectDir } from '../../scripts/lib/paths.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import {
   writeMarker,
@@ -88,7 +89,7 @@ if (!projectDir) {
   process.exit(0);
 }
 
-const encodedPath = projectDir.replace(/[/\\]/g, '-');
+const encodedPath = encodeProjectDir(projectDir);
 const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
 
 // Gate 4: Memory dir must exist.

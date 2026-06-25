@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 // The Verify router lives inline in skills/research/SKILL.md (the Workflow sandbox
 // can't import a module). verify-route.mjs is the tested source of truth; this test
 // extracts the inline copies from SKILL.md and asserts they behave identically, so the
 // two can't silently drift.
 
-const SKILL = new URL('../plugin/skills/research/SKILL.md', import.meta.url).pathname;
+const SKILL = fileURLToPath(new URL('../plugin/skills/research/SKILL.md', import.meta.url));
 const md = readFileSync(SKILL, 'utf8');
 
 function extractFn(name) {

@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 import {
   readFileSync,
   readdirSync,
@@ -133,7 +134,7 @@ test('post-tool module order: load-bearing before enrichment, autolink before ed
 // to the sandbox root.
 test('post-tool Write into the memory dir records a session-scoped write-log entry', () => {
   const projectDir = mkdtempSync(join(tmpdir(), 'll-pt-mem-proj-'));
-  const encodedPath = projectDir.replace(/[/\\]/g, '-');
+  const encodedPath = encodeProjectDir(projectDir);
   const sid = 'pt-mem-session';
   // The harness redirects HOME to sandboxRoot, so the memory dir path is
   // deterministic from sandboxRoot + the encoded project dir.
