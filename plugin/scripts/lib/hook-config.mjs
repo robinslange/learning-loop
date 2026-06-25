@@ -142,3 +142,15 @@ export const HookConfig = Object.freeze({
 // criteria then reset automatically to post-change data.
 // Set 2026-06-12: 0.35 -> 0.30 threshold + BM25 OR-mode for long queries.
 export const INJECTION_CALIBRATION_EPOCH = '2026-06-12T00:00:00.000Z';
+
+/**
+ * Read the pre_write_fail_mode setting from a loaded config object.
+ * Returns 'closed' only when explicitly set; all other values (including
+ * absent, null, or any invalid string) fall back to 'open'.
+ *
+ * @param {object|null|undefined} config
+ * @returns {'open'|'closed'}
+ */
+export function preWriteFailMode(config) {
+  return config?.hooks?.pre_write_fail_mode === 'closed' ? 'closed' : 'open';
+}

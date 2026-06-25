@@ -22,5 +22,8 @@
     "ollama_url": "http://localhost:11434",
     "pause_on_battery": true,
     "battery_poll_seconds": 60
+  },
+  "hooks": {
+    "pre_write_fail_mode": "open"
   }
 }

@@ -14,7 +14,8 @@ import {
 import { checkFilenameStyle } from './lib/filename-style.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { HookConfig, preWriteFailMode } from '../scripts/lib/hook-config.mjs';
+import { getConfig } from '../scripts/lib/config.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
 import { logError } from '../scripts/lib/log.mjs';
@@ -47,6 +48,12 @@ export const DUPLICATE_GATE_TIMEOUT_CODE = 'duplicate-gate-timeout';
 // until the daemon is restarted, and /doctor misdiagnoses any resulting
 // timeout as "daemon not running".
 export const DUPLICATE_GATE_STALE_DAEMON_CODE = 'duplicate-gate-stale-daemon';
+
+// Sentinel returned by checkDuplicateNote when the scan infrastructure failed
+// (timeout, binary error, daemon error). Distinct from null ("scan ran cleanly,
+// no duplicate above threshold") so the call site can gate on fail-mode without
+// conflating a clean no-match with an infrastructure failure.
+export const SCAN_FAILED = Symbol('SCAN_FAILED');
 
 function logDuplicateGateIssue(pluginData, code, source, detail) {
   if (!pluginData) return;
@@ -259,7 +266,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   // computed warnings), which is strictly worse than skipping the scan.
   try {
     const binary = findBinaryShared();
-    if (!binary) return null;
+    if (!binary) return SCAN_FAILED;
 
     const elapsedMs = Date.now() - HOOK_START_MS;
     const remainingMs = PRE_WRITE_BUDGET_MS - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
@@ -270,7 +277,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         'budget',
         `no budget for subprocess fallback (${elapsedMs}ms elapsed)`,
       );
-      return null;
+      return SCAN_FAILED;
     }
 
     const out = execFileSync(
@@ -295,7 +302,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       );
     }
     logError('pre-write-check.checkDuplicateNote', err);
-    return null;
+    return SCAN_FAILED;
   }
 }
 
@@ -450,9 +457,17 @@ runHook(async ({ tool, input }) => {
 
   const titleMatch = content.match(/^#\s+(.+)$/m);
   const title = titleMatch ? titleMatch[1].trim() : null;
-  const dupeWarning = title ? await checkDuplicateNote(filePath, title, vaultRoot) : null;
-  if (dupeWarning) {
-    warnings.push(dupeWarning);
+  const dupeResult = title ? await checkDuplicateNote(filePath, title, vaultRoot) : null;
+  if (dupeResult === SCAN_FAILED) {
+    if (preWriteFailMode(getConfig()) === 'closed') {
+      deny(
+        'Duplicate scan failed and pre_write_fail_mode is "closed"; blocking write. ' +
+          'Re-run when the scan infrastructure is available, or set pre_write_fail_mode to "open" to allow writes on scan failure.',
+      );
+      return;
+    }
+  } else if (dupeResult) {
+    warnings.push(dupeResult);
   }
 
   if (warnings.length > 0) {
