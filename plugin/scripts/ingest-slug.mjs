@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { basename, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export function computeSlug(repoPath, gitOrigin) {
   const base = basename(resolve(repoPath));
@@ -8,7 +9,7 @@ export function computeSlug(repoPath, gitOrigin) {
   return `${base}-${hash}`;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const repoPath = process.argv[2];
   const gitOrigin = process.argv[3] || null;
   if (!repoPath) {

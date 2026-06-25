@@ -9,10 +9,11 @@ import { homedir } from 'node:os';
 import { env } from './lib/env.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { buildAbiDrift, satisfiesVersion } from './check-deps-impl.mjs';
+import { pathToFileURL } from 'node:url';
 
 export { detectAbiDrift } from './check-deps-impl.mjs';
 
-const isMain = import.meta.url === new URL(`file://${process.argv[1]}`).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
   const PLUGIN_DIR = resolve(import.meta.dirname, '..');

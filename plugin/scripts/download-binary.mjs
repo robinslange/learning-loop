@@ -19,6 +19,7 @@ import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
 import { semverCmp, isPlainSemver } from './lib/semver.mjs';
+import { pathToFileURL } from 'node:url';
 
 function detectArtifact() {
   const p = platform();
@@ -279,6 +280,6 @@ async function main() {
   writeFileSync(versionFile, version + '\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main();
 }

@@ -8,6 +8,7 @@
 
 import { basename } from 'node:path';
 import { denyTermRegExp } from './lib/deny-match.mjs';
+import { pathToFileURL } from 'node:url';
 
 /**
  * @param {{path:string,text:string}[]} notes
@@ -56,7 +57,7 @@ export function scrubNotes(notes, opts) {
   return { blocked, tripwire, clean };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // CLI: harvest-scrub.mjs <denylistFile> <pluginData> [note-path...]  -> JSON report.
   // Note paths come from argv (small sets) OR, when none are passed, from stdin
   // (one per line) so a large bulk-marked set never exceeds ARG_MAX.

@@ -2,6 +2,7 @@
 // Does NOT mutate notes — the portable marker is preserved; the log handles dedup.
 import { readFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /** @returns {string[]} previously harvested paths */
 export function readHarvested(logPath) {
@@ -31,7 +32,7 @@ export function appendHarvested(logPath, paths) {
   appendFileSync(logPath, paths.join('\n') + '\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // CLI: harvest-dedup.mjs <logPath> [--all]  (candidate paths on stdin, one per line)
   // prints the unharvested subset. Does not append — appending happens after the
   // operator confirms the carry set (the skill calls appendHarvested separately).

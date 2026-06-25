@@ -5,6 +5,7 @@
 // "feedback_ai_research.md" but not "feedback_maintain.md".
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { denyTermMatches } from './lib/deny-match.mjs';
+import { pathToFileURL } from 'node:url';
 
 /**
  * @param {{name: string, text: string}[]} files
@@ -32,7 +33,7 @@ export function selectSeedMemories(files, opts) {
   return { kept, dropped };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   // CLI: seed-select.mjs <memDir> <comma-types> [comma-deny]
   const { listMemoryFiles, readMemoryFile } = await import('./lib/memory-paths.mjs');
   const [memDir, typesArg, denyArg] = process.argv.slice(2);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { join, isAbsolute, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import {
@@ -14,13 +14,13 @@ import {
 const MOD = JSON.stringify(new URL('../plugin/scripts/lib/plugin-meta.mjs', import.meta.url).href);
 
 test('pluginRoot resolves to the plugin root', () => {
-  const root = pluginRoot();
+  const root = pluginRoot().replace(/\\/g, '/');
   // Should end with /learning-loop/plugin (direct checkout or worktree under .worktrees/ or .claude/worktrees/).
   assert.match(root, /learning-loop(\/(\.claude\/)?\.?worktrees\/[^/]+)?\/plugin$/);
 });
 
 test('pluginRoot is an absolute path', () => {
-  assert.ok(pluginRoot().startsWith('/'));
+  assert.ok(isAbsolute(pluginRoot()));
 });
 
 test('pluginVersion reads version from .claude-plugin/plugin.json', () => {
@@ -64,7 +64,10 @@ test('dataDir defaults to ~/.claude/plugins/data/learning-loop (subprocess)', ()
     { env: { ...process.env, CLAUDE_PLUGIN_DATA: undefined } },
   );
   assert.equal(out.status, 0, out.stderr.toString());
-  assert.match(out.stdout.toString().trim(), /\.claude\/plugins\/data\/learning-loop$/);
+  assert.match(
+    out.stdout.toString().trim().replace(/\\/g, '/'),
+    /\.claude\/plugins\/data\/learning-loop$/,
+  );
 });
 
 test('cacheDir is dataDir + /cache', () => {
@@ -80,6 +83,6 @@ test('cacheDir is dataDir + /cache', () => {
 test('cacheDir ends with /cache', () => {
   const c = cacheDir();
   if (c !== null) {
-    assert.ok(c.endsWith('/cache'));
+    assert.equal(basename(c), 'cache');
   }
 });

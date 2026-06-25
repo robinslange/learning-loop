@@ -1,0 +1,14 @@
+# Normalise line endings to LF on checkout across platforms. The Node suite
+# (and the plugin's own markdown/bash parsers) match `\n`, so a Windows CRLF
+# checkout breaks frontmatter and fenced-block regexes. Force LF for all text.
+* text=auto eol=lf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.gz binary
+*.zip binary
+*.wasm binary
+*.node binary

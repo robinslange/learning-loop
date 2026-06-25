@@ -20,6 +20,7 @@ import { detectAbiDrift } from './check-deps-impl.mjs';
 import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
+import { pathToFileURL } from 'node:url';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
 
@@ -213,7 +214,7 @@ function formatText({ checks }) {
 }
 
 // CLI entry
-const isMain = import.meta.url === new URL(`file://${process.argv[1]}`).href;
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const args = process.argv.slice(2);
   const wantFull = args.includes('--full');

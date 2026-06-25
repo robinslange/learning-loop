@@ -1,6 +1,7 @@
 // scripts/federation-active.mjs : is this instance federated? (mechanical guard)
 import { safeLoad } from './lib/safe-load.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
+import { pathToFileURL } from 'node:url';
 
 /**
  * @param {string} pluginData  plugin-data dir
@@ -12,7 +13,7 @@ export function isFederationActive(pluginData) {
   return Boolean(parsed && parsed.identity && parsed.identity.pubkey);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const { getPluginData } = await import('./lib/config.mjs');
   const pd = process.argv[2] || getPluginData();
   const active = isFederationActive(pd);

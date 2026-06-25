@@ -28,7 +28,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
-import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
+import { DATA_PATHS, toForwardSlash } from '../../scripts/lib/paths.mjs';
 
 export { resolvePluginData, getSessionId };
 export const resolveVaultPath = getVaultPath;
@@ -86,7 +86,7 @@ export function recordDetachedChild(pid) {
 export function vaultRelPath(filePath, vaultPath) {
   const prefix = vaultPath + sep;
   if (filePath && filePath.startsWith(prefix)) {
-    return filePath.slice(prefix.length);
+    return toForwardSlash(filePath.slice(prefix.length));
   }
   return null;
 }

@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 export function buildGatePrompt(profile) {
   return `You decide whether to fan out 4 deep-mapper agents (~15x token cost) or use the surface profile as-is for a personal second-brain ingest.
 
@@ -33,7 +34,7 @@ export function parseGateResponse(text) {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const cmd = process.argv[2];
   if (cmd === 'build-prompt') {
     const profileJson = process.argv[3];

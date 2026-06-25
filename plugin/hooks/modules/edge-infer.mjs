@@ -4,7 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { resolvePluginData, isVaultNote } from '../lib/common.mjs';
+import { resolvePluginData, isVaultNote, vaultRelPath } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import {
@@ -26,10 +26,6 @@ const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   challenges_undercutting: 'undercuts',
   challenges_rebuttal: 'rebuts',
 };
-
-function vaultRelPath(filePath, vaultRoot) {
-  return filePath.slice(vaultRoot.length + 1);
-}
 
 function parseInlineArray(value) {
   const m = value.match(/^\[(.*)\]$/);
