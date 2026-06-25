@@ -784,7 +784,7 @@ export function checkHookErrors({ pluginData, now = new Date() } = {}) {
     const lines = readHookErrorLines(join(pluginData, `hook-errors-${month}.jsonl`));
     totalCount += lines.length;
     for (const obj of lines) {
-      if (!latest || (obj.ts && obj.ts > latest.ts)) latest = obj;
+      if (!latest || !latest.ts || (obj.ts && obj.ts > latest.ts)) latest = obj;
     }
   }
   if (totalCount > HOOK_ERROR_WARN_THRESHOLD) {

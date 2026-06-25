@@ -586,6 +586,33 @@ test('checkHookErrors: counts across current and previous UTC month', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkHookErrors: ts-less first line is displaced by later line with ts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-hookerr-tsless-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [];
+  // First line has no ts — must not become the permanent "latest"
+  lines.push(JSON.stringify({ module: 'ts-less-module', message: 'ts-less error' }));
+  // Subsequent lines have ts and should displace the ts-less line
+  for (let i = 1; i <= 5; i++) {
+    lines.push(
+      JSON.stringify({
+        ts: `2026-06-12T0${i}:00:00.000Z`,
+        module: `real-module-${i}`,
+        message: `real error ${i}`,
+      }),
+    );
+  }
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkHookErrors({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  // The ts-bearing latest (i=5, ts 05:00) must appear in detail, not the ts-less first line
+  assert.match(result.detail, /real-module-5/);
+  assert.doesNotMatch(result.detail, /ts-less-module/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 // --- checkInjectionShadowGate ---
 
 function writeShadowLog(dir, month, entries) {
