@@ -9,6 +9,7 @@ import { warnOnce } from './lib/warn-once.mjs';
 import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
+import { wrapRetrieval } from './lib/origin-envelope.mjs';
 
 const FEDERATION_CONFIG = FEDERATION_PATHS.config(PLUGIN_DATA);
 
@@ -83,11 +84,9 @@ function stripFlags(from, ...flags) {
   });
 }
 
-function out(data) {
-  // Compact — this JSON goes straight into the model's context on every
-  // skill/agent-driven retrieval; the 2-space indent was ~16% pure overhead
-  // and the model parses unindented JSON identically.
-  console.log(JSON.stringify(data));
+function out(data, kind = 'meta') {
+  const payload = kind === 'retrieval' ? wrapRetrieval(data) : data;
+  console.log(JSON.stringify(payload));
 }
 
 function logRetrieval(command, query, results) {
@@ -133,7 +132,7 @@ try {
           ...federationArgs(),
         ]);
         logRetrieval('rerank', text, results);
-        out(results);
+        out(results, 'retrieval');
       } else {
         const response = run([
           'query',
@@ -146,7 +145,7 @@ try {
           ...federationArgs(),
         ]);
         logRetrieval('query', text, response.results || response);
-        out(response);
+        out(response, 'retrieval');
       }
       break;
     }
@@ -169,7 +168,7 @@ try {
           ...federationArgs(),
         ]);
         logRetrieval('rerank', keywords, results);
-        out(results);
+        out(results, 'retrieval');
       } else {
         const response = run([
           'query',
@@ -182,7 +181,7 @@ try {
           ...federationArgs(),
         ]);
         logRetrieval('query', keywords, response.results || response);
-        out(response);
+        out(response, 'retrieval');
       }
       break;
     }
@@ -192,7 +191,7 @@ try {
       const topN = parseFlag('--top', '10');
       const results = run(['similar', DB_PATH, args[1], '--top', topN]);
       logRetrieval('similar', args[1], results);
-      out(results);
+      out(results, 'retrieval');
       break;
     }
 
@@ -336,7 +335,7 @@ try {
       for (const q of results.queries || []) {
         logRetrieval('reflect-scan', q.query, q.results);
       }
-      out(results);
+      out(results, 'retrieval');
       break;
     }
 
