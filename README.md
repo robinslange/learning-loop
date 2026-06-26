@@ -89,7 +89,7 @@ The edges database (`edges.db`) stores note-to-note relationships (backlinks, in
 
 ### Hook scope
 
-The `PostToolUse: Write|Edit|Agent|Skill` matcher is intentionally broad. For `Write` and `Edit` events the handler runs the full vault-enrichment pipeline (autolink, edge inference, reflect tracking). For `Agent` and `Skill` events it runs only lightweight provenance tracking — no vault read, no snapshot load. The matcher breadth is the feature: agent-spawn and skill-invoke events are recorded for auditability, cheaply, by the same dispatcher. This was verified in `plugin/hooks/post-tool.js` (`isWriteEdit` gate at line 98).
+The `PostToolUse: Write|Edit|Agent|Skill` matcher is intentionally broad. For `Write` and `Edit` events the handler runs the full vault-enrichment pipeline (autolink, edge inference, reflect tracking). For `Agent` and `Skill` events it runs only lightweight provenance tracking — no vault read, no snapshot load. The matcher breadth is the feature: agent-spawn and skill-invoke events are recorded for auditability, cheaply, by the same dispatcher.
 
 To disable hook tracking entirely without uninstalling, see [Disabling parts without uninstalling](#disabling-parts-without-uninstalling).
 
