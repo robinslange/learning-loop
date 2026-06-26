@@ -75,13 +75,13 @@ for the current syntax if you want finer control.
 
 learning-loop persists derived indexes locally. What it reads and writes:
 
-| Location                                                          | Content                                                                                                                                      |
-| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `~/brain/brain` (your vault)                                      | Notes you author; read on retrieval, written by capture skills                                                                               |
-| `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/` | Edges database (backlinks, justification graph, supersession index), provenance logs, retrieval query logs, hook-error logs, session markers |
-| `~/.claude/projects/<project>/memory/`                            | Auto-memory files (preferences, project context) written when you approve a capture                                                          |
+| Location                                                                     | Content                                                                                                                                      |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| your vault path (configured via `/learning-loop:init`, e.g. `~/brain/brain`) | Notes you author; read on retrieval, written by capture skills                                                                               |
+| `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/`            | Edges database (backlinks, justification graph, supersession index), provenance logs, retrieval query logs, hook-error logs, session markers |
+| `~/.claude/projects/<project>/memory/`                                       | Auto-memory files (preferences, project context) written when you approve a capture                                                          |
 
-The edges database (`edges.db`) stores note-to-note relationships (backlinks, inferred semantic links, supersessions). The `retrieval/` subdirectory holds JSONL logs of every vault and episodic search query. The `provenance/` subdirectory records agent-spawn, skill-invoke, and vault-write events. Hook errors land in `hook-errors-<YYYY-MM>.jsonl` at the plugin data root. These paths were verified against `plugin/scripts/lib/paths.mjs` and `plugin/hooks/post-tool.js`.
+The edges database (`edges.db`) stores note-to-note relationships (backlinks, inferred semantic links, supersessions). The `retrieval/` subdirectory holds JSONL logs of every vault and episodic search query. The `provenance/` subdirectory records agent-spawn, skill-invoke, and vault-write events. Hook errors land in `hook-errors-<YYYY-MM>.jsonl` at the plugin data root.
 
 **Trust posture.** Captured artefacts inherit the trust of their source tools. If a secret is pasted into chat or returned by a misbehaving tool, it can land in plugin data or auto-memory. Run `/learning-loop:doctor --redact` to scan for likely secrets. Do not paste credentials into chat.
 
