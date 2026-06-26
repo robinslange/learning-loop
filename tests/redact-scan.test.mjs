@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -27,6 +27,22 @@ test('does not flag ordinary prose', () => {
 test('flags sk- and xoxb- prefixes', () => {
   assert.ok(scanForSecrets('sk-abcd1234abcd1234abcd1234').some((h) => h.kind === 'openai-key'));
   assert.ok(scanForSecrets('xoxb-111-222-aaaaaaaaaaaa').some((h) => h.kind === 'slack-token'));
+});
+
+test('flags modern sk-proj- and sk-svcacct- OpenAI key formats', () => {
+  assert.ok(
+    scanForSecrets('sk-proj-abcdefghijklmnop').some((h) => h.kind === 'openai-key'),
+    'sk-proj- key not detected',
+  );
+  assert.ok(
+    scanForSecrets('sk-svcacct-abcdefghijklmnop').some((h) => h.kind === 'openai-key'),
+    'sk-svcacct- key not detected',
+  );
+  assert.equal(
+    scanForSecrets('sk-short').filter((h) => h.kind === 'openai-key').length,
+    0,
+    'short sk- must not flag',
+  );
 });
 
 test('CLI: reports findings with masked match and does not print full secret', () => {
