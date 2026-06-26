@@ -71,6 +71,28 @@ documented per-hook deny matcher at this Claude Code version. See the
 [permissions documentation](https://docs.anthropic.com/en/docs/claude-code/settings)
 for the current syntax if you want finer control.
 
+## Capture surface & trust model
+
+learning-loop persists derived indexes locally. What it reads and writes:
+
+| Location                                                          | Content                                                                                                                                      |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `~/brain/brain` (your vault)                                      | Notes you author; read on retrieval, written by capture skills                                                                               |
+| `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/` | Edges database (backlinks, justification graph, supersession index), provenance logs, retrieval query logs, hook-error logs, session markers |
+| `~/.claude/projects/<project>/memory/`                            | Auto-memory files (preferences, project context) written when you approve a capture                                                          |
+
+The edges database (`edges.db`) stores note-to-note relationships (backlinks, inferred semantic links, supersessions). The `retrieval/` subdirectory holds JSONL logs of every vault and episodic search query. The `provenance/` subdirectory records agent-spawn, skill-invoke, and vault-write events. Hook errors land in `hook-errors-<YYYY-MM>.jsonl` at the plugin data root. These paths were verified against `plugin/scripts/lib/paths.mjs` and `plugin/hooks/post-tool.js`.
+
+**Trust posture.** Captured artefacts inherit the trust of their source tools. If a secret is pasted into chat or returned by a misbehaving tool, it can land in plugin data or auto-memory. Run `/learning-loop:doctor --redact` to scan for likely secrets. Do not paste credentials into chat.
+
+**Vault as trust boundary.** Retrieved note content is re-emitted into agent context wrapped as untrusted data (Domain 06), so a prompt-injection attempt in a note cannot silently execute. However, operators who let third parties write to their vault inherit prompt-injection risk at the source — the wrapping only contains the blast radius.
+
+### Hook scope
+
+The `PostToolUse: Write|Edit|Agent|Skill` matcher is intentionally broad. For `Write` and `Edit` events the handler runs the full vault-enrichment pipeline (autolink, edge inference, reflect tracking). For `Agent` and `Skill` events it runs only lightweight provenance tracking — no vault read, no snapshot load. The matcher breadth is the feature: agent-spawn and skill-invoke events are recorded for auditability, cheaply, by the same dispatcher. This was verified in `plugin/hooks/post-tool.js` (`isWriteEdit` gate at line 98).
+
+To disable hook tracking entirely without uninstalling, see [Disabling parts without uninstalling](#disabling-parts-without-uninstalling).
+
 ## What it looks like
 
 **Researching a topic you've partially explored.**
