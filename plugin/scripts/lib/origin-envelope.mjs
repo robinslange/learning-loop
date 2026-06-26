@@ -1,6 +1,8 @@
 function rowsOf(payload) {
   if (Array.isArray(payload)) return payload;
   if (payload && Array.isArray(payload.results)) return payload.results;
+  if (payload && Array.isArray(payload.queries))
+    return payload.queries.flatMap((q) => q.results ?? []);
   return [];
 }
 

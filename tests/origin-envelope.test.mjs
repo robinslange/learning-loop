@@ -30,3 +30,16 @@ test('handles a bare array payload (rerank returns an array)', () => {
   assert.equal(env.local_count, 1);
   assert.deepEqual(env.results, raw);
 });
+
+test('counts rows across a reflect-scan {queries:[{results}]} payload', () => {
+  const raw = {
+    queries: [
+      { query: 'q1', results: [{ path: 'a.md' }, { path: 'peer:t/b.md' }] },
+      { query: 'q2', results: [{ path: 'c.md' }] },
+    ],
+  };
+  const env = wrapRetrieval(raw);
+  assert.equal(env.local_count, 2);
+  assert.equal(env.peer_count, 1);
+  assert.deepEqual(env.results, raw);
+});
