@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 
 import { readFileSync } from 'node:fs';
+import { extname } from 'node:path';
+
+const TEXT_EXTENSIONS = new Set(['.jsonl', '.json', '.md', '.log', '.txt']);
 
 const PATTERNS = [
   { kind: 'github-pat', re: /\bghp_[A-Za-z0-9]{30,}\b/g },
@@ -35,6 +38,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   }
   let found = false;
   for (const p of paths) {
+    if (!TEXT_EXTENSIONS.has(extname(p).toLowerCase())) {
+      process.stderr.write(`redact-scan: skipping binary file ${p}\n`);
+      continue;
+    }
     let text;
     try {
       text = readFileSync(p, 'utf-8');

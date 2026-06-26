@@ -62,6 +62,34 @@ test('does not flag sk- prefixed hyphenated prose (false-positive guard)', () =>
   );
 });
 
+test('CLI: skips binary .db files and scans .jsonl files in the same invocation', () => {
+  const secret = 'ghp_' + randomBytes(20).toString('hex').slice(0, 30);
+  const prefix = randomBytes(4).toString('hex');
+  const tmpText = join(tmpdir(), `redact-scan-test-${prefix}.jsonl`);
+  const tmpDb = join(tmpdir(), `redact-scan-test-${prefix}.db`);
+  try {
+    writeFileSync(tmpText, JSON.stringify({ token: secret }) + '\n');
+    writeFileSync(tmpDb, `eyJhbGciOiJIUzI1NiIseyJhbGciOiJIUzI1Ni ${secret}\n`);
+    let out = '';
+    let stderr = '';
+    try {
+      out = execFileSync('node', [SCRIPT, tmpText, tmpDb], { encoding: 'utf-8' });
+    } catch (err) {
+      out = err.stdout ?? '';
+      stderr = err.stderr ?? '';
+    }
+    assert.ok(out.includes('github-pat'), 'expected .jsonl hit in output');
+    assert.ok(!out.includes(tmpDb), '.db path must not appear in findings output');
+    assert.ok(stderr.includes('skipping binary file'), 'expected skip notice for .db on stderr');
+  } finally {
+    for (const f of [tmpText, tmpDb]) {
+      try {
+        unlinkSync(f);
+      } catch {}
+    }
+  }
+});
+
 test('CLI: reports findings with masked match and does not print full secret', () => {
   const secret = 'ghp_' + randomBytes(20).toString('hex').slice(0, 30);
   const tmp = join(tmpdir(), `redact-scan-test-${randomBytes(4).toString('hex')}.txt`);

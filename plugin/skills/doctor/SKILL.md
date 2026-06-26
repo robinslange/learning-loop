@@ -1,11 +1,13 @@
 ---
 name: doctor
-description: 'Diagnose your learning-loop installation. Runs health checks, presents issues, offers per-fix remediation, re-runs each check after the fix to confirm. Safe to run anytime; only makes changes you approve.'
+description: 'Diagnose your learning-loop installation. Runs health checks, presents issues, offers per-fix remediation, re-runs each check after the fix to confirm. Safe to run anytime; only makes changes you approve. Pass --redact to scan plugin data files for leaked credentials instead.'
 ---
 
 # /learning-loop:doctor
 
 A read-mostly diagnostic. Runs the health-check library, presents the result, and walks you through fixes one at a time.
+
+If invoked with `--redact`, skip the normal health-check steps and run the **Redact mode** section instead.
 
 ## Paths
 
@@ -143,7 +145,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA
 
 ## Redact mode (--redact)
 
-Scans persisted plugin-data files for likely credentials. I walk every file under `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/`, run `scanForSecrets` (from `plugin/scripts/redact-scan.mjs`) on each, and report any hits.
+Scans persisted plugin-data text files for likely credentials. Only text files are scanned: `.jsonl`, `.json`, `.md`, `.log`, `.txt`. Binary databases (`*.db`, including `edges.db` and any federation `index.db` files) and other binary files are **never read as text or rewritten** — skip them unconditionally.
 
 ### Step 1: Locate plugin data
 
@@ -151,15 +153,15 @@ Scans persisted plugin-data files for likely credentials. I walk every file unde
 node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
 ```
 
-Note the `PLUGIN_DATA` path. Files to scan live there recursively.
+Note the `PLUGIN_DATA` path. Recursively collect files under that path, then filter to those whose extension is in the text allowlist (`.jsonl`, `.json`, `.md`, `.log`, `.txt`). Skip everything else, including any `.db` files.
 
 ### Step 2: Scan for secrets
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/redact-scan.mjs <file...>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/redact-scan.mjs <text-files...>
 ```
 
-For each file with hits, the script prints one line per finding:
+Pass only the text-allowlisted files. The script will also skip any non-text file passed to it (printing a notice to stderr). For each file with hits, the script prints one line per finding:
 
 ```
 <path>: <kind> <MASKED>
@@ -186,11 +188,13 @@ If no hits are found across all files, print `✓ No credentials found in plugin
 
 ### Step 4: Offer per-file scrub
 
-For each file with hits, ask via `AskUserQuestion`:
+For each text file with hits, ask via `AskUserQuestion`:
 
 - Option A: `Scrub this file — replace matching secrets with [REDACTED]`
 - Option B: `Skip this file`
 - Option C: `Stop`
+
+Binary files (`.db`, `.wasm`, extensionless binaries) are never offered for scrub — they were excluded in Step 1. Scrub only runs on text-allowlisted files.
 
 On choice A, replace each hit in the file content with `[REDACTED]` and write the file back. Re-run the scan on the file to confirm zero hits remain, then report:
 
