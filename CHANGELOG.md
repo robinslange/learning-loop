@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format is based on 
 ## Unreleased
 
 - Pinned vendored sql.js to v1.14.1 with recorded SHA256 digests (vendor/README.md) so operators can verify the bundled WASM artefact (Foster Moore audit Domain 05).
+- **Foster Moore security audit remediation.** Closes all six findings from the FM ai-tools governance review:
+  - **Domain 06 (prompt injection).** Vault retrieval is now wrapped in a data-origin envelope (`{origin, trust: "untrusted-data", note, local_count, peer_count, results}`) at the single emission choke point, so re-emitted note content — including federated peer notes — is distinguishable from operator instructions. Episodic-memory results and external ingest (`/ingest`, `/literature`) are framed as untrusted data in their consuming prompts.
+  - **Domain 09 (uninstall hygiene).** New `/learning-loop:uninstall` skill walks marketplace removal, dependent-MCP removal, and captured-index purge with per-step confirmation; README documents the manual sequence and how to silence hooks via `disableAllHooks` without uninstalling.
+  - **Domain 04 (hook robustness).** New opt-in `hooks.pre_write_fail_mode: "closed"` lets operators make the vault-write duplicate gate fail closed (block) instead of fail open on internal scan failure; default remains `open`. `/learning-loop:doctor` now surfaces a hook-error count and the latest error.
+  - **Domain 07 (data exposure).** New `/learning-loop:doctor --redact` scans plugin data for likely secrets (GitHub PAT, OpenAI `sk-`/`sk-proj-`/`sk-svcacct-`, Slack, JWT) and offers per-file scrub with masked output; README documents the full capture surface and trust model.
+  - **Domain 02 (hook scope).** README documents that the broad `PostToolUse: Write|Edit|Agent|Skill` matcher is intentional — Agent/Skill events run lightweight provenance only.
 
 ## v1.29.5
 
