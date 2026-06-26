@@ -141,9 +141,73 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA
 - Use UTF-8 indicators (`✓`, `⚠`, `✗`, `→`). No ASCII fallback.
 - Exit code 0 even if some issues remain — the doctor's job is to inform + offer, not gate.
 
+## Redact mode (--redact)
+
+Scans persisted plugin-data files for likely credentials. I walk every file under `~/.claude/plugins/data/learning-loop-learning-loop-marketplace/`, run `scanForSecrets` (from `plugin/scripts/redact-scan.mjs`) on each, and report any hits.
+
+### Step 1: Locate plugin data
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
+```
+
+Note the `PLUGIN_DATA` path. Files to scan live there recursively.
+
+### Step 2: Scan for secrets
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/redact-scan.mjs <file...>
+```
+
+For each file with hits, the script prints one line per finding:
+
+```
+<path>: <kind> <MASKED>
+```
+
+where `<MASKED>` shows the first 4 and last 2 characters with the middle replaced by `*` (e.g. `ghp_****************************3z`). The full secret is never printed.
+
+Detection patterns:
+
+| kind          | matches                                                        |
+| ------------- | -------------------------------------------------------------- |
+| `github-pat`  | `ghp_` followed by 30+ alphanumeric characters                 |
+| `openai-key`  | `sk-` followed by 16+ alphanumeric characters                  |
+| `slack-token` | `xox[baprs]-` followed by 8+ alphanumeric or hyphen characters |
+| `jwt`         | `eyJ` followed by 8+ base64url characters                      |
+
+Detection is intentionally conservative — the patterns target known credential prefixes to avoid alarm fatigue from false positives.
+
+### Step 3: Present findings
+
+List each file with hits, showing `kind` and the masked match. Files with no hits are not listed.
+
+If no hits are found across all files, print `✓ No credentials found in plugin data.` and exit.
+
+### Step 4: Offer per-file scrub
+
+For each file with hits, ask via `AskUserQuestion`:
+
+- Option A: `Scrub this file — replace matching secrets with [REDACTED]`
+- Option B: `Skip this file`
+- Option C: `Stop`
+
+On choice A, replace each hit in the file content with `[REDACTED]` and write the file back. Re-run the scan on the file to confirm zero hits remain, then report:
+
+- `✓ Scrubbed <path> — N secrets replaced`
+- `✗ Still has hits after scrub: <path>` (surface the remaining masked matches; do not loop)
+
+### Rules
+
+- Never auto-scrub. Every file scrub requires explicit per-file consent.
+- Never print a full secret — always mask (first 4 + last 2 chars, rest `*`).
+- Never delete files. Scrub means in-place replacement with `[REDACTED]`.
+- Exit code 0 even when hits are found — this is a report, not a gate.
+
 ## When to use
 
 - After running `install.sh`, to verify setup
 - When session-start shows `⚠ learning-loop: N issues — run /learning-loop:doctor`
 - Before opening a support issue ("paste me your doctor output")
 - As a habitual health check after a Claude Code update or plugin reinstall
+- Before sharing plugin data with a third party (`/learning-loop:doctor --redact` first)
