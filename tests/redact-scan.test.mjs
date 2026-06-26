@@ -45,6 +45,23 @@ test('flags modern sk-proj- and sk-svcacct- OpenAI key formats', () => {
   );
 });
 
+test('does not flag sk- prefixed hyphenated prose (false-positive guard)', () => {
+  assert.equal(
+    scanForSecrets('sk-this-is-a-hyphenated-phrase-that-is-long').filter(
+      (h) => h.kind === 'openai-key',
+    ).length,
+    0,
+    'hyphenated prose must not flag as openai-key',
+  );
+  assert.equal(
+    scanForSecrets('the sk-learning-rate-was-set-to-low value').filter(
+      (h) => h.kind === 'openai-key',
+    ).length,
+    0,
+    'sk- prefixed hyphenated sentence must not flag',
+  );
+});
+
 test('CLI: reports findings with masked match and does not print full secret', () => {
   const secret = 'ghp_' + randomBytes(20).toString('hex').slice(0, 30);
   const tmp = join(tmpdir(), `redact-scan-test-${randomBytes(4).toString('hex')}.txt`);
