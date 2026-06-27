@@ -2,6 +2,7 @@
 
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const TEXT_EXTENSIONS = new Set(['.jsonl', '.json', '.md', '.log', '.txt']);
 
@@ -30,7 +31,7 @@ function maskSecret(s) {
   return s.slice(0, 4) + '*'.repeat(s.length - 6) + s.slice(-2);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const paths = process.argv.slice(2);
   if (paths.length === 0) {
     process.stderr.write('usage: redact-scan.mjs <file...>\n');

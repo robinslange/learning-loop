@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import { preWriteFailMode } from '../plugin/scripts/lib/hook-config.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
@@ -51,7 +52,7 @@ describe('preWriteFailMode()', () => {
 
 // --- Integration tests: fail-mode wiring in pre-write-check.js ---
 
-const HOOK = new URL('../plugin/hooks/pre-write-check.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-write-check.js', import.meta.url));
 const SKIP = skipOnWindows('UDS socket / subprocess: skipped on win32');
 
 // A Write payload with a title (triggers the duplicate gate) and no

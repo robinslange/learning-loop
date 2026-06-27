@@ -5,9 +5,10 @@ import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { scanForSecrets } from '../plugin/scripts/redact-scan.mjs';
 
-const SCRIPT = new URL('../plugin/scripts/redact-scan.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/redact-scan.mjs', import.meta.url));
 
 test('flags known credential prefixes (github-pat)', () => {
   const hits = scanForSecrets('token=ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789 done');
