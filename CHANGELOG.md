@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.31.0
+
 - **`LL_OFFLINE` air-gap / update-control switch.** Setting `LL_OFFLINE=1` suppresses every plugin-initiated network call through a single `isOffline()` chokepoint: the SessionStart GitHub update poll, the binary auto-update download (including the manual `/init` and `/doctor` fetch paths), and all external web-research fetches (`/verify`, `/deep-research`, `/discovery`, source-resolver, claim-checker) — which now short-circuit cleanly instead of attempting a request and timing out. Localhost (Ollama) is never gated, so an air-gapped box keeps its local model. `/doctor` surfaces an "Offline mode: ON" line so operators can confirm the suppression is engaged. This closes the deployment gap left by the v1.30.0 Foster Moore audit remediation: the plugin can now run in an update-controlled or fully air-gapped enterprise environment.
 
 ## v1.30.0
