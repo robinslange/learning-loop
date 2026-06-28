@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.32.0
+
 - **Eliminated 19 phantom full-privilege agents (Foster Moore audit, second CRITICAL).** The shared agent-instruction docs lived in `plugin/agents/_skills/`; any `.md` under `agents/` auto-registers as a dispatchable subagent, and a frontmatter-less one gets the default "All tools" grant. The 19 docs (which agents only ever `Read()`, never dispatch) were registering as `learning-loop:_skills:<name> (All tools)` phantom agents — a security-review blocker and dispatch-noise for the real agents. Moved them to a sibling `plugin/agents-shared/` directory the harness does not scan, and rewrote every `${CLAUDE_PLUGIN_ROOT}/agents/_skills/...` reference across 28 agent/skill/guide files. New `M16` architecture-lint test fails the build if any frontmatter-less `.md` reappears under `agents/`.
 
 ## v1.31.0
