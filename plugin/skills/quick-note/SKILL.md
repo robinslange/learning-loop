@@ -58,7 +58,7 @@ printf '%s\n' "$NOTE_PATH" \
   | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
-Where `$NOTE_PATH` is the absolute path built from the `Written:` line in the agent's response — never reconstructed from the requested destination. See `skills/_shared/hook-replay.md` for context.
+Where `$NOTE_PATH` is the absolute path built from the `Written:` line in the agent's response — never reconstructed from the requested destination. See `skills-shared/hook-replay.md` for context.
 
 ### Step 3: Report
 

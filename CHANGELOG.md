@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+- **Fixed the plugin-load error from a phantom skill directory.** `plugin/skills/_shared/` held a shared instruction doc (`hook-replay.md`) but no `SKILL.md`, so the harness tried to register `_shared` as a skill and errored on every load ("1 error during load"). Same anti-pattern as the v1.32.0 agents/_skills phantoms: a shared-doc dir inside a harness-scanned tree. Moved it to a sibling `plugin/skills-shared/` and rewrote the 6 referencing skill files. New `M17` architecture-lint test fails the build if any `skills/` subdirectory lacks a `SKILL.md`.
+
 ## v1.32.0
 
 - **Eliminated 19 phantom full-privilege agents (Foster Moore audit, second CRITICAL).** The shared agent-instruction docs lived in `plugin/agents/_skills/`; any `.md` under `agents/` auto-registers as a dispatchable subagent, and a frontmatter-less one gets the default "All tools" grant. The 19 docs (which agents only ever `Read()`, never dispatch) were registering as `learning-loop:_skills:<name> (All tools)` phantom agents — a security-review blocker and dispatch-noise for the real agents. Moved them to a sibling `plugin/agents-shared/` directory the harness does not scan, and rewrote every `${CLAUDE_PLUGIN_ROOT}/agents/_skills/...` reference across 28 agent/skill/guide files. New `M16` architecture-lint test fails the build if any frontmatter-less `.md` reappears under `agents/`.

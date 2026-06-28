@@ -78,7 +78,7 @@ The agent cannot spawn note-writer (subagents cannot spawn subagents). It return
 
 Resolve all path placeholders in each prompt to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
 
-When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant):
+When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills-shared/hook-replay.md`, targeted variant):
 
 ```bash
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \

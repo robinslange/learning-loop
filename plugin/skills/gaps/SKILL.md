@@ -176,7 +176,7 @@ Based on user choices:
 
 ### Step 4.5: Replay Post-Write Hooks
 
-If Step 4 launched any `note-writer` subagents (counterpoints, rewrites, or blindspot stubs), their Write/Edit calls bypassed PostToolUse: backlinks and edge inference didn't run. Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; seed the candidate list with the note paths the `note-writer` agents returned, then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe even if Step 4 wrote nothing.
+If Step 4 launched any `note-writer` subagents (counterpoints, rewrites, or blindspot stubs), their Write/Edit calls bypassed PostToolUse: backlinks and edge inference didn't run. Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills-shared/hook-replay.md` (read it and execute; seed the candidate list with the note paths the `note-writer` agents returned, then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe even if Step 4 wrote nothing.
 
 Skip if Step 4 took no actions. Report failures in Step 6.
 

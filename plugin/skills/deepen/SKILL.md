@@ -58,7 +58,7 @@ If no note name was provided, pass no note_path: the agent will auto-pick from `
 
 The `note-deepener` is a subagent. Its Write/Edit tool calls bypass PostToolUse, so the deepened note (and any split note in `0-inbox/`) misses the `hooks/post-tool.js` dispatcher (autolink + edge-infer modules).
 
-Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; seed the candidate list with the destination path — and any split-note paths — from the agent's report, then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
+Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills-shared/hook-replay.md` (read it and execute; seed the candidate list with the destination path — and any split-note paths — from the agent's report, then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
 Report failures in Step 2 if any.
 

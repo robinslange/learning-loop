@@ -291,7 +291,7 @@ Split the worklist by the `artefact` flag:
 
 When the fan-out completes, reconcile before replaying: match each insight row to a written path in the note-writer reports. Retry any unmatched row (agent failed, errored, or returned no path) once with a fresh note-writer dispatch. Rows still unwritten after the retry must not be dropped silently — a user-approved insight with no note is a data loss — carry each one's insight title and a one-line body into Step 6 as "failed to write — re-capture manually".
 
-Then replay the PostToolUse hook chain on every path note-writer reported — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
+Then replay the PostToolUse hook chain on every path note-writer reported — subagent Writes bypass it (see `skills-shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
 
 ```bash
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
@@ -306,7 +306,7 @@ First, for repo parallel-tier runs, append the provenance run entry (see "Proven
 
 The routing agent in Step 5 is a subagent whose own Write/Edit calls (auto-memory, project index) bypass PostToolUse, and Step 5a's targeted replay covers only the paths note-writer reported. This sweep is the backfill safety net for anything missed.
 
-Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills/_shared/hook-replay.md` (read it and execute; seed the candidate list with any subagent-written paths not already replayed in Step 5a — e.g. the routing agent's project-index writes detected via git — then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
+Run the unlinked-body sweep from `${CLAUDE_PLUGIN_ROOT}/skills-shared/hook-replay.md` (read it and execute; seed the candidate list with any subagent-written paths not already replayed in Step 5a — e.g. the routing agent's project-index writes detected via git — then it backfills via the unlinked-body walk and replays the hook chain on each). Idempotent: safe on already-hooked notes.
 
 Report any failures in Step 6. Typical cost: <1s per file, usually 0–5 candidates per batch.
 

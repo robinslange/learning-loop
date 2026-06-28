@@ -118,4 +118,4 @@ PostToolUse hooks do not fire on Write or Edit calls made inside a subagent. Not
 
 Skills that dispatch write-capable subagents replay the hook chain explicitly via `scripts/sweep-hook-replay.mjs`. The script accepts vault paths on stdin or as positional args, runs the post-tool module chain against each, and emits a JSON summary. Modules are idempotent, so replaying on already-hooked notes is safe.
 
-The canonical patterns (an unlinked-body filter for end-of-skill sweeps and a targeted variant for known paths) live in `skills/_shared/hook-replay.md`. Skills like `/reflect`, `/ingest`, `/quick`, and `/literature` reference that snippet rather than reimplementing it.
+The canonical patterns (an unlinked-body filter for end-of-skill sweeps and a targeted variant for known paths) live in `skills-shared/hook-replay.md`. Skills like `/reflect`, `/ingest`, `/quick`, and `/literature` reference that snippet rather than reimplementing it.

@@ -107,7 +107,7 @@ printf '%s\n' "$NOTE_PATH" \
   | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
-Skip this step if Step 4 didn't capture (novelty/substance gate failed). See `skills/_shared/hook-replay.md` for the full pattern.
+Skip this step if Step 4 didn't capture (novelty/substance gate failed). See `skills-shared/hook-replay.md` for the full pattern.
 
 ### Step 5: Report
 

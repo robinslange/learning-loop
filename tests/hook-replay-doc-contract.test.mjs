@@ -12,7 +12,7 @@ import { join } from 'node:path';
 // and counterpoints never get edge inference.
 
 const DOC = readFileSync(
-  join(import.meta.dirname, '..', 'plugin', 'skills', '_shared', 'hook-replay.md'),
+  join(import.meta.dirname, '..', 'plugin', 'skills-shared', 'hook-replay.md'),
   'utf8',
 );
 

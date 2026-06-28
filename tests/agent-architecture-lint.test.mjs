@@ -63,6 +63,29 @@ test('every .md under agents/ has frontmatter (no phantom full-privilege agents)
   );
 });
 
+test('every directory under skills/ has a SKILL.md (no phantom skills) (M17)', () => {
+  // A subdirectory of skills/ with no SKILL.md is a phantom skill: the harness
+  // tries to register it and errors on load. Shared instruction docs the skills
+  // Read() must live OUTSIDE skills/ (skills-shared/). Sibling of the agents/
+  // phantom-agent rule (M16).
+  const offenders = readdirSync(join(ROOT, 'skills'), { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .filter((name) => {
+      try {
+        readFileSync(join(ROOT, 'skills', name, 'SKILL.md'));
+        return false;
+      } catch {
+        return true;
+      }
+    });
+  assert.deepEqual(
+    offenders,
+    [],
+    'a skills/ subdir without SKILL.md errors on plugin load; move shared docs to skills-shared/',
+  );
+});
+
 test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
   const offenders = [];
   for (const rel of [...mdFiles('agents'), ...mdFiles('skills')]) {
