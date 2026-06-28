@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.30.0
+
 - Pinned vendored sql.js to v1.14.1 with recorded SHA256 digests (vendor/README.md) so operators can verify the bundled WASM artefact (Foster Moore audit Domain 05).
 - **Foster Moore security audit remediation.** Closes all six findings from the FM ai-tools governance review:
   - **Domain 06 (prompt injection).** Vault retrieval is now wrapped in a data-origin envelope (`{origin, trust: "untrusted-data", note, local_count, peer_count, results}`) at the single emission choke point, so re-emitted note content — including federated peer notes — is distinguishable from operator instructions. Episodic-memory results and external ingest (`/ingest`, `/literature`) are framed as untrusted data in their consuming prompts.
