@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.33.0
+
 - **Fixed the plugin-load error from a phantom skill directory.** `plugin/skills/_shared/` held a shared instruction doc (`hook-replay.md`) but no `SKILL.md`, so the harness tried to register `_shared` as a skill and errored on every load ("1 error during load"). Same anti-pattern as the v1.32.0 agents/_skills phantoms: a shared-doc dir inside a harness-scanned tree. Moved it to a sibling `plugin/skills-shared/` and rewrote the 6 referencing skill files. New `M17` architecture-lint test fails the build if any `skills/` subdirectory lacks a `SKILL.md`.
 
 ## v1.32.0
