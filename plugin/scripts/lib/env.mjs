@@ -118,6 +118,14 @@ export const env = Object.freeze({
   LL_REPO: pick('LL_REPO', 'robinslange/learning-loop'),
   LL_BENCH_REAL_ONNX: isTruthy(process.env.LL_BENCH_REAL_ONNX),
 
+  // --- Distribution / offline ---
+  // Air-gap / update-control switch. When truthy, every plugin-INITIATED network
+  // call is suppressed: the GitHub update poll, the binary auto-update download,
+  // and all external web-research fetches (source-resolver, /verify, /deep-research).
+  // Localhost (Ollama) is unaffected — an air-gapped box still runs its local model.
+  // Gate every call site through isOffline(), not by reading this field directly.
+  LL_OFFLINE: isTruthy(process.env.LL_OFFLINE),
+
   // --- Ollama / model ---
   OLLAMA_URL: pick('OLLAMA_URL', DEFAULT_OLLAMA_URL),
   MODEL: pick('MODEL', null),
@@ -140,4 +148,16 @@ export const env = Object.freeze({
  */
 export function spawnEnv(overrides = {}) {
   return { ...process.env, ...overrides };
+}
+
+/**
+ * True when the plugin must make zero outbound network calls (air-gap /
+ * update-control). The single source of truth for the offline decision: every
+ * plugin-initiated egress site (update poll, binary download, web-research
+ * fetch leaves) gates on this rather than reading env.LL_OFFLINE directly.
+ * Localhost (Ollama) is never gated by this.
+ * @returns {boolean}
+ */
+export function isOffline() {
+  return env.LL_OFFLINE;
 }

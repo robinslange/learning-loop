@@ -1,4 +1,5 @@
 import { warnOnce } from '../warn-once.mjs';
+import { isOffline } from '../env.mjs';
 
 export const WEB_FETCH_BLOCKLIST = [
   /sciencedirect\.com/i,
@@ -16,6 +17,7 @@ export function isBlockedFetch(url) {
 }
 
 export async function fetchPageText(url) {
+  if (isOffline()) return { ok: false, kind: 'offline' };
   let res;
   try {
     res = await fetch(url, {

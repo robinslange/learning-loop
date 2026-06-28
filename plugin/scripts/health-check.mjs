@@ -20,6 +20,7 @@ import { detectAbiDrift } from './check-deps-impl.mjs';
 import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
+import { isOffline } from './lib/env.mjs';
 import { pathToFileURL } from 'node:url';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
@@ -159,6 +160,7 @@ export async function runFullChecks(ctx = {}) {
     }),
     full.checkBinaryRuns({ binaryVersionOutput, exitCode: binaryExitCode }),
     full.checkWatchDaemon({ pidfileExists, pidIsAlive, pid }),
+    full.checkOfflineMode({ offline: isOffline() }),
   ];
 
   return {

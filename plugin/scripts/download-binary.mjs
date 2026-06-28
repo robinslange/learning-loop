@@ -13,7 +13,7 @@ import { join } from 'path';
 import { platform, arch } from 'os';
 import { execFileSync, spawnSync } from 'child_process';
 import { getPluginData } from './lib/config.mjs';
-import { env } from './lib/env.mjs';
+import { env, isOffline } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
@@ -142,6 +142,10 @@ function extractZip(zipPath, destDir) {
 }
 
 async function main() {
+  if (isOffline()) {
+    console.error('  download-binary: LL_OFFLINE set — skipping binary fetch.');
+    process.exit(0);
+  }
   const artifact = detectArtifact();
   if (!artifact) {
     console.error(`Unsupported platform: ${platform()} ${arch()}`);

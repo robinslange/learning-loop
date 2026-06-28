@@ -8,9 +8,11 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { recordDetachedChild } from '../lib/common.mjs';
+import { isOffline } from '../../scripts/lib/env.mjs';
 
 export async function run(ctx) {
   if (!ctx.updateCacheFile) return;
+  if (isOffline()) return;
 
   let shouldCheck = true;
   try {

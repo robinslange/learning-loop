@@ -23,7 +23,7 @@ import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
 import { DATA_FILES, DATA_PATHS } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
-import { spawnEnv } from '../../scripts/lib/env.mjs';
+import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
@@ -118,6 +118,7 @@ export async function run(ctx) {
   // ran on /learning-loop:init. Robin's machine sat on v1.20.2 for five
   // releases this way until the v1.25 retrieval/reflect-scan path tripped
   // the pre-fix leak shape and surfaced the gap.
+  if (isOffline()) return;
   try {
     const pluginData = resolvePluginData();
     if (!pluginData) return;

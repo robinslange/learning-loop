@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-import { isTruthy, coerceNumber, env } from '../plugin/scripts/lib/env.mjs';
+import { isTruthy, coerceNumber, env, isOffline } from '../plugin/scripts/lib/env.mjs';
 
 const MOD = JSON.stringify(new URL('../plugin/scripts/lib/env.mjs', import.meta.url).href);
 
@@ -24,6 +24,54 @@ test('coerceNumber coerces numeric strings, falls back otherwise', () => {
   assert.equal(coerceNumber('not-a-number', 7), 7);
   assert.equal(coerceNumber('NaN', 7), 7);
   assert.equal(coerceNumber('0', 7), 0);
+});
+
+test('isOffline reflects LL_OFFLINE truthy coercion (subprocess)', () => {
+  for (const [val, expected] of [
+    ['1', true],
+    ['true', true],
+    ['yes', true],
+    ['on', true],
+    ['0', false],
+    ['false', false],
+    ['', false],
+  ]) {
+    const out = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+        const m = await import(${MOD});
+        console.log(JSON.stringify({ flag: m.env.LL_OFFLINE, helper: m.isOffline() }));
+      `,
+      ],
+      { env: { ...process.env, LL_OFFLINE: val } },
+    );
+    assert.equal(out.status, 0, out.stderr.toString());
+    const { flag, helper } = JSON.parse(out.stdout.toString());
+    assert.equal(flag, expected, `LL_OFFLINE=${JSON.stringify(val)} -> env.LL_OFFLINE`);
+    assert.equal(helper, expected, `LL_OFFLINE=${JSON.stringify(val)} -> isOffline()`);
+  }
+});
+
+test('isOffline defaults to false when LL_OFFLINE unset (subprocess)', () => {
+  const out = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `
+      const m = await import(${MOD});
+      console.log(JSON.stringify({ flag: m.env.LL_OFFLINE, helper: m.isOffline() }));
+    `,
+    ],
+    { env: { ...process.env, LL_OFFLINE: undefined } },
+  );
+  assert.equal(out.status, 0, out.stderr.toString());
+  const { flag, helper } = JSON.parse(out.stdout.toString());
+  assert.equal(flag, false);
+  assert.equal(helper, false);
 });
 
 test('env is frozen', () => {

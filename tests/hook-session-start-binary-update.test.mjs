@@ -19,9 +19,14 @@ import {
   rmSync,
   readFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { run as runCacheCleanup } from '../plugin/hooks/session-start/cache-cleanup.mjs';
+
+const CLEANUP_MOD = JSON.stringify(
+  new URL('../plugin/hooks/session-start/cache-cleanup.mjs', import.meta.url).href,
+);
 
 // Poll for an async side effect (detached spawn lands its file asynchronously).
 async function waitForFile(path, timeoutMs = 1500) {
@@ -116,6 +121,40 @@ test('cache-cleanup: missing .version file DOES spawn downloader (fresh install)
   } finally {
     if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
     else process.env.CLAUDE_PLUGIN_DATA = prev;
+    fx.cleanup();
+  }
+});
+
+test('cache-cleanup: LL_OFFLINE suppresses the downloader despite a lagging version', async () => {
+  // The lagging-version fixture would normally fire the downloader (see the
+  // "DOES spawn" test). With LL_OFFLINE the binary auto-update must not spawn.
+  // env.mjs snapshots process.env at import, so the flag has to be set in a
+  // child process before cache-cleanup is imported.
+  const fx = makeFixture({ installedVersion: 'v1.20.2', runningVersion: '1.25.1' });
+  try {
+    const out = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+        const m = await import(${CLEANUP_MOD});
+        await m.run(${JSON.stringify(fx.ctx)});
+        const { existsSync } = await import('node:fs');
+        const start = Date.now();
+        while (Date.now() - start < 1500) {
+          if (existsSync(${JSON.stringify(fx.sentinel)})) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        console.log(JSON.stringify({ fired: existsSync(${JSON.stringify(fx.sentinel)}) }));
+      `,
+      ],
+      { env: { ...process.env, LL_OFFLINE: '1', CLAUDE_PLUGIN_DATA: fx.ctx.pluginData } },
+    );
+    assert.equal(out.status, 0, out.stderr.toString());
+    const { fired } = JSON.parse(out.stdout.toString());
+    assert.equal(fired, false, 'offline: binary auto-update must not spawn the downloader');
+  } finally {
     fx.cleanup();
   }
 });

@@ -31,6 +31,7 @@ import {
   checkPluginInstalled,
   checkBinaryRuns,
   checkWatchDaemon,
+  checkOfflineMode,
 } from '../plugin/scripts/lib/health-checks/full.mjs';
 import {
   readHealthCache,
@@ -66,10 +67,27 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'learning-loop-installed',
     'binary-runs',
     'watch-daemon-status',
+    'offline-mode',
   ];
   for (const id of [...quick, ...full]) {
     assert.ok(CHECK_IDS[id] === id, `missing id: ${id}`);
   }
+});
+
+test('checkOfflineMode: ok status, ON detail when offline', () => {
+  const c = checkOfflineMode({ offline: true });
+  assert.equal(c.id, 'offline-mode');
+  assert.equal(c.status, SEVERITIES.ok);
+  assert.match(c.detail, /^ON —/);
+  assert.match(c.detail, /update checks/);
+  assert.equal(c.fix, null);
+});
+
+test('checkOfflineMode: ok status, off detail when not offline', () => {
+  const c = checkOfflineMode({ offline: false });
+  assert.equal(c.status, SEVERITIES.ok);
+  assert.match(c.detail, /off/);
+  assert.equal(c.fix, null);
 });
 
 test('SEVERITIES has ok, warn, fail', () => {

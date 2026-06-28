@@ -87,6 +87,18 @@ The edges database (`edges.db`) stores note-to-note relationships (backlinks, in
 
 **Vault as trust boundary.** Retrieved note content is re-emitted into agent context wrapped as untrusted data (Domain 06), so a prompt-injection attempt in a note cannot silently execute. However, operators who let third parties write to their vault inherit prompt-injection risk at the source — the wrapping only contains the blast radius.
 
+### Air-gapped / update-controlled deployment
+
+Set `LL_OFFLINE=1` to suppress every network call the plugin initiates on its own. With it set:
+
+- the SessionStart GitHub update poll (`api.github.com`) does not fire;
+- the binary auto-update download (`github.com/<repo>/releases/...`) does not run — including the manual `/init` and `/doctor` fetch paths;
+- web-research source fetches (`/verify`, `/deep-research`, `/discovery`, the source-resolver and claim-checker) short-circuit cleanly instead of attempting an external request and timing out.
+
+Localhost is never gated — the Ollama daemon I use for local offload still works, so an air-gapped box keeps its local model. `/doctor` reports an **Offline mode: ON** line so I can confirm the suppression is actually engaged rather than silently skipped.
+
+`LL_OFFLINE` is orthogonal to `LL_REPO` (which only repoints the binary download mirror and matters when *not* offline). One caveat: if I deliberately configure the librarian to use a remote OpenAI-compatible provider (`provider.kind: "openai"` with a `base_url`), that is an explicit opt-in egress and is not gated by `LL_OFFLINE` — the default librarian provider is localhost Ollama, which stays local.
+
 ### Hook scope
 
 The `PostToolUse: Write|Edit|Agent|Skill` matcher is intentionally broad. For `Write` and `Edit` events the handler runs the full vault-enrichment pipeline (autolink, edge inference, reflect tracking). For `Agent` and `Skill` events it runs only lightweight provenance tracking — no vault read, no snapshot load. The matcher breadth is the feature: agent-spawn and skill-invoke events are recorded for auditability, cheaply, by the same dispatcher.

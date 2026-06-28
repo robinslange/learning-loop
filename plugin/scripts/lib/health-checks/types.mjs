@@ -32,6 +32,7 @@ export const CHECK_IDS = Object.freeze({
   'learning-loop-installed': 'learning-loop-installed',
   'binary-runs': 'binary-runs',
   'watch-daemon-status': 'watch-daemon-status',
+  'offline-mode': 'offline-mode',
 });
 
 /**

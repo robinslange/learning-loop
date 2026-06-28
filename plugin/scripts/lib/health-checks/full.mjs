@@ -172,3 +172,19 @@ export function checkWatchDaemon({ pidfileExists, pidIsAlive, pid } = {}) {
     fix: 'Remove the stale pidfile, then run: ll-watch (no arguments)',
   });
 }
+
+// Reports LL_OFFLINE as an ACTIVE state, not a fault — an operator who set it
+// for an air-gapped/update-controlled deployment can confirm the egress
+// suppression is actually engaged rather than silently skipped.
+export function checkOfflineMode({ offline } = {}) {
+  return makeCheck({
+    id: CHECK_IDS['offline-mode'],
+    name: 'Offline mode',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail: offline
+      ? 'ON — update checks, binary auto-update, and web research suppressed'
+      : 'off (LL_OFFLINE unset)',
+    fix: null,
+  });
+}
