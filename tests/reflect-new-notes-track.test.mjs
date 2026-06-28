@@ -51,7 +51,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'SKILL.md');
 // Step 4.6's bash blocks live in the extracted step file; the handshake
 // contract (canonical resolvers, no tmp anchors) covers both files.
-const REFINEMENT_STEP_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'steps', 'refinement.md');
+const REFINEMENT_STEP_PATH = join(
+  __dirname,
+  '..',
+  'plugin',
+  'skills',
+  'reflect',
+  'steps',
+  'refinement.md',
+);
 
 // Extract the ```bash fence containing the given marker substring on any
 // line inside its body. Returns the block contents without the fences.
@@ -214,17 +222,16 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
-    it('every fence referencing the reflect scratch prefix carries BOTH canonical resolvers', () => {
-      // Per-fence, not aggregate: an aggregate count (>=4 resolver snippets
-      // across the whole file) stays green when ONE fence hardcodes LL_SID or
-      // inherits LL_SCRATCH from a previous fence — bash fences run in separate
-      // shells, so each must resolve its own. A drifted fence re-splits the
-      // hook/shell handshake for exactly the steps that fence drives.
-      const PREFIX = '${LL_SCRATCH}/ll-${LL_SID}-reflect';
-      const SID_RESOLVER =
-        'LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)';
-      const SCRATCH_RESOLVER =
-        'LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)';
+    it('every fence referencing the reflect scratch prefix resolves its own paths via --sh', () => {
+      // Per-fence, not aggregate: bash fences run in separate shells, so each
+      // fence that builds the reflect scratch prefix must resolve its own paths
+      // — a hardcoded or inherited session id / scratch dir re-splits the
+      // hook/shell handshake for exactly the steps that fence drives. The
+      // canonical resolver is one `eval "$(resolve-paths.mjs --sh)"` per fence,
+      // which exports SESSION_ID + REFLECT_SCRATCH (among others) from a single
+      // spawn; the prefix is then built from those.
+      const PREFIX = '${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect';
+      const SH_RESOLVER = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh';
       let found = 0;
       for (const { file, path } of [
         { file: 'SKILL.md', path: SKILL_PATH },
@@ -234,70 +241,63 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
           if (!fence.body.includes(PREFIX)) continue;
           found++;
           assert.ok(
-            fence.body.includes(SID_RESOLVER),
+            fence.body.includes(SH_RESOLVER),
             `${file}: the bash fence starting at line ${fence.startLine} references the ` +
-              `reflect scratch prefix but does not resolve LL_SID via the canonical ` +
-              `resolve-paths.mjs SESSION_ID snippet — a hardcoded or inherited LL_SID ` +
-              `re-splits the handshake for that fence.`,
-          );
-          assert.ok(
-            fence.body.includes(SCRATCH_RESOLVER),
-            `${file}: the bash fence starting at line ${fence.startLine} references the ` +
-              `reflect scratch prefix but does not resolve LL_SCRATCH via the canonical ` +
-              `resolve-paths.mjs REFLECT_SCRATCH snippet.`,
+              `reflect scratch prefix but does not resolve its paths via the canonical ` +
+              `resolve-paths.mjs --sh snippet — a hardcoded or inherited SESSION_ID/` +
+              `REFLECT_SCRATCH re-splits the handshake for that fence.`,
           );
         }
       }
       assert.ok(
         found >= 3,
         `expected at least 3 bash fences referencing the reflect scratch prefix ` +
-          `(init, 4.6.a, 4.6.c/g); found ${found}`,
+          `(4.6.a, 4.6.c, 4.6.g); found ${found}`,
       );
     });
 
-    it('runs the Step 4.4 sweep replay with LL_REFLECT_SID set to LL_SID', () => {
+    it('runs the Step 4.4 sweep replay with LL_REFLECT_SID set to SESSION_ID', () => {
       // The subagent-backfill fix: the replay must carry the calling session's
       // id so reflect-track appends to THIS marker (concurrency-safe). If a
       // future edit drops the env var, sub-agent notes silently stop reaching
       // the marker again and Step 4.6 refinement goes quiet.
       assert.match(
         skill,
-        /LL_REFLECT_SID="\$LL_SID"\s+node\s+"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/sweep-hook-replay\.mjs"/,
-        'Step 4.4 must invoke sweep-hook-replay.mjs with LL_REFLECT_SID="$LL_SID" so ' +
+        /LL_REFLECT_SID="\$SESSION_ID"\s+node\s+"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/sweep-hook-replay\.mjs"/,
+        'Step 4.4 must invoke sweep-hook-replay.mjs with LL_REFLECT_SID="$SESSION_ID" so ' +
           'replayed sub-agent writes append to the calling session marker.',
       );
     });
 
-    it("selects sweep candidates by this session's reflect_sid, not just link-less notes", () => {
-      // The candidate union must include notes carrying reflect_sid == LL_SID.
-      // Pinning this prevents a regression back to the link-less-only filter
-      // that dropped every well-formed (linked) sub-agent note.
+    it("selects sweep candidates by this session's reflect_sid via --scan-vault", () => {
+      // The candidate union (link-less OR reflect_sid==session) now lives in
+      // sweep-hook-replay.mjs --scan-vault (unit-tested in
+      // sweep-scan-vault.test.mjs, including the 4-projects exclusion). The skill
+      // must invoke that mode with the session id so well-formed (linked)
+      // sub-agent notes are still swept by their stamp.
       assert.match(
         skill,
-        /reflect_sid:\\s\*\[\\"'\]\?"\s*\+\s*re\.escape\(sid\)/,
-        'the Step 4.4 candidate scan must match frontmatter reflect_sid against the ' +
-          'session id, so sub-agent notes that already have [[links]] are still swept.',
+        /--scan-vault "\$VAULT" --sid "\$SESSION_ID"/,
+        'Step 4.4 must invoke sweep-hook-replay.mjs --scan-vault with --sid "$SESSION_ID".',
       );
       // And the skill must instruct stamping reflect_sid on written notes.
       assert.match(
         skill,
-        /Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note/,
+        /Stamp `reflect_sid: <SESSION_ID>` in the frontmatter of every note/,
         'Step 4 must tell the agent to stamp reflect_sid on every note it writes.',
       );
     });
 
-    it('resolves LL_SID via the canonical getSessionId() resolver, not a cat of the id file', () => {
+    it('resolves session paths via the canonical resolve-paths.mjs --sh resolver, not a cat of the id file', () => {
       // Both sides must run the SAME resolver. The skill shells to
-      // resolve-paths.mjs SESSION_ID (which calls getSessionId()); the hook
-      // calls getSessionId() directly. Pin the exact snippet so a future edit
-      // can't drop back to `cat`-ing the id file under an env-dependent path.
-      // Per-fence coverage of the resolver lives in the dedicated fence test
-      // above; here pin only that the canonical snippet is present at all and
-      // the legacy patterns are gone.
-      const snippet = 'LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)';
+      // resolve-paths.mjs --sh (whose SESSION_ID calls getSessionId(),
+      // REFLECT_SCRATCH mirrors reflectScratchDir()); the hook calls those
+      // directly. Pin the exact snippet so a future edit can't drop back to
+      // `cat`-ing the id file under an env-dependent path.
+      const snippet = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh';
       assert.ok(
         skill.includes(snippet),
-        'expected the canonical LL_SID resolver snippet somewhere in the reflect skill',
+        'expected the canonical resolve-paths.mjs --sh resolver snippet somewhere in the reflect skill',
       );
       // The old env-dependent cat-of-the-id-file pattern must be gone entirely.
       assert.doesNotMatch(
@@ -632,7 +632,9 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // the unsuffixed plugin-data id). The fix must ignore this and key off
       // LL_REFLECT_SID instead.
       writeFileSync(sidFileBare, 'other-concurrent-session');
-      const mod = await import('../plugin/hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now());
+      const mod = await import(
+        '../plugin/hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now()
+      );
       runReflectTrack = mod.runReflectTrack;
       reflectNewNotesPath = mod.reflectNewNotesPath;
     });

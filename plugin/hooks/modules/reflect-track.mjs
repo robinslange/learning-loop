@@ -1,13 +1,15 @@
 // hooks/modules/reflect-track.mjs : per-write tracking for /reflect Step 4.
 //
 // Handshake with skills/reflect/SKILL.md Step 4:
-//   - Step 4 init creates an empty marker file at the session-keyed path
-//     ${TMPDIR:-/tmp}/ll-${LL_SID:-session}-reflect-new-notes.txt, where LL_SID
-//     is read from the plugin's own ${TMPDIR:-/tmp}/learning-loop-session-id
-//     file (written once at SessionStart). The skill's bash reads that file via
-//     `cat`; this hook reads the same file (see reflectNewNotesPath below) so
-//     the two sides resolve the identical path regardless of which harness env
-//     vars a given subprocess happens to inherit.
+//   - Step 4 init creates an empty marker file in the reflect-scratch dir
+//     (plugin-data/reflect-scratch via reflectScratchDir(); tmp only when
+//     plugin-data can't be resolved), keyed by session id as
+//     ll-${sid}-reflect-new-notes.txt. The session id comes from the canonical
+//     getSessionId() ($CLAUDE_CODE_SESSION_ID, then plugin-data, then a legacy
+//     tmp file). The skill's bash resolves BOTH the dir and the id via
+//     scripts/resolve-paths.mjs (REFLECT_SCRATCH / SESSION_ID), the same
+//     resolvers this hook uses, so the two sides resolve the identical path
+//     across the $TMPDIR-split hook/shell boundary (see reflectNewNotesPath).
 //   - For every vault Write/Edit that fires during the marker's lifetime,
 //     this module appends the absolute file path + newline.
 //   - Step 4.6.g `rm -f` deletes the marker, ending the tracking window.

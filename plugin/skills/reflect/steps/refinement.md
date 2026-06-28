@@ -6,18 +6,20 @@ When a new vault note touches a claim already in the vault, the existing claim s
 
 ## 4.6.a: Build candidate pairs
 
+Each refinement.md bash block runs in its own shell (variables do not persist across Bash tool calls), so resolve the paths once at the top of the block with `--sh` — one spawn for all of SESSION_ID/REFLECT_SCRATCH/PLUGIN_DATA, not three:
+
 ```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
 Then drain the deferred queue left by a capped `/ingest --refine` run (ingest Step 5.6.b writes overflow pairs there as JSONL). Merge queued pairs into the pairs file, dedupe on `(new_note, candidate)`, reassign ids (the validator matches decisions to pairs by `id`; deferred entries carry stale ids from their original run), and truncate the queue:
 
 ```bash
-DATA_DIR="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
-DEFERRED="$DATA_DIR/refinement-deferred.jsonl"
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
+DEFERRED="$PLUGIN_DATA/refinement-deferred.jsonl"
 if [ -s "$DEFERRED" ]; then
   node -e "
     const fs = require('fs');
@@ -39,11 +41,11 @@ if [ -s "$DEFERRED" ]; then
 fi
 ```
 
-If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip the rest of 4.6.
+If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip 4.6.b through 4.6.f. Still run **4.6.g cleanup** — the session wrote notes (the pairs were empty because none matched an upstream claim, not because no notes exist), so their `reflect_sid` stamps must still be stripped and the marker removed. Skipping 4.6.g here would leak `reflect_sid` into the vault permanently and leave the marker for a later same-session /reflect to re-sweep.
 
 ## 4.6.b: Dispatch refinement-proposer agent
 
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders):
+Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders):
 
 ```
 Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/refinement-proposer.md and follow it exactly.
@@ -54,14 +56,13 @@ vault_path: {{VAULT}}/
 Return the JSON response only, no commentary, no markdown fences.
 ```
 
-Capture the agent's stdout response. Write it to `${LL_TMP_PREFIX}-refinement-agent-output.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-agent-output.json`, resolving `LL_SCRATCH`/`LL_SID` via `resolve-paths.mjs` as in the blocks above).
+Capture the agent's stdout response. Write it to `${LL_TMP_PREFIX}-refinement-agent-output.json` (i.e. `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect-refinement-agent-output.json`, resolving the prefix via `resolve-paths.mjs --sh` as in the blocks above).
 
 ## 4.6.c: Validate
 
 ```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
@@ -69,7 +70,7 @@ The validator strips em-dashes, computes sentence delta, rejects any edit that d
 
 ## 4.6.d: Present batch for confirmation
 
-Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json` (i.e. `${LL_SCRATCH}/ll-${LL_SID}-reflect-refinement-validated.json`). Build a preview-format table from the `decisions` array:
+Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json` (i.e. `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect-refinement-validated.json`). Build a preview-format table from the `decisions` array:
 
 ```markdown
 ## Refinement Proposals (N total)
@@ -133,26 +134,17 @@ For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `
 ## 4.6.g: Cleanup
 
 ```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 
 # Strip the transient reflect_sid stamp from every note this session tracked
 # (the marker holds their absolute paths). Removing it here keeps the field
 # from leaking into the permanent vault while still having served its Step 4.4
-# attribution purpose. Idempotent: notes without the line are left untouched.
+# attribution purpose. strip-reflect-sid.mjs is FRONTMATTER-scoped (a body line
+# starting with reflect_sid: is left intact), idempotent, and write-only-if-
+# changed; it skips missing paths. One node pass for the whole list.
 if [ -f "${LL_TMP_PREFIX}-new-notes.txt" ]; then
-  while IFS= read -r note; do
-    [ -f "$note" ] || continue
-    LL_NOTE="$note" python3 - <<'PY'
-import os, re
-p = os.environ["LL_NOTE"]
-text = open(p).read()
-new = re.sub(r"^reflect_sid:[^\n]*\n", "", text, count=1, flags=re.MULTILINE)
-if new != text:
-    open(p, "w").write(new)
-PY
-  done < "${LL_TMP_PREFIX}-new-notes.txt"
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/strip-reflect-sid.mjs" --stdin < "${LL_TMP_PREFIX}-new-notes.txt"
 fi
 
 rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"

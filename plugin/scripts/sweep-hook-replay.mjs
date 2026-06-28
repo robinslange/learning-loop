@@ -14,19 +14,72 @@
 // Usage:
 //   sweep-hook-replay.mjs <file> [<file> ...]
 //   sweep-hook-replay.mjs --stdin                 # read newline-separated paths
+//   sweep-hook-replay.mjs --scan-vault <root> --sid <sid>
+//                                                 # compute the /reflect 4.4
+//                                                 # candidate union, then replay
 //
 // The dispatcher's modules are idempotent (autolink checks for existing
 // [[links]] before appending; edge-infer removes outgoing edges before
 // re-adding), so running on already-hooked notes is safe.
 
-import { readFileSync, existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { resolve, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOOK_PATH = resolve(__dirname, '..', 'hooks', 'post-tool.js');
 const PER_FILE_TIMEOUT_MS = 15000;
+
+// /reflect Step 4.4 candidate folders — an explicit ALLOWLIST. Do NOT swap this
+// for lib/vault-walk.mjs#listVaultNotes: that is a denylist (excludes only
+// _archive/_archived/Excalidraw) and would sweep 4-projects free-form index
+// notes the python walk deliberately skipped, mis-attributing them.
+const SWEEP_FOLDERS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '5-maps'];
+
+// Candidate union for the 4.4 sweep, mirroring the old python walk exactly:
+//   (1) notes whose BODY has no [[wikilink]]  -> autolink/edge-infer backfill
+//   (2) notes whose frontmatter reflect_sid == this session's sid
+//         -> marker backfill for sub-agent writes the live hook missed
+// A note matching either set is emitted once. Returns absolute paths.
+export function scanVaultCandidates(vaultRoot, sid) {
+  const seen = new Set();
+  const sidRe = sid
+    ? new RegExp(
+        `^reflect_sid:\\s*["']?${sid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?\\s*$`,
+        'm',
+      )
+    : null;
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+      } else if (e.isFile() && e.name.endsWith('.md') && !seen.has(p)) {
+        let text;
+        try {
+          text = readFileSync(p, 'utf-8');
+        } catch {
+          continue;
+        }
+        const fmMatch = /^---\n([\s\S]*?)\n---\n/.exec(text);
+        const fm = fmMatch ? fmMatch[1] : '';
+        const body = fmMatch ? text.slice(fmMatch[0].length) : text;
+        const unlinked = !/\[\[[^\]]+\]\]/.test(body);
+        const mine = sidRe ? sidRe.test(fm) : false;
+        if (unlinked || mine) seen.add(p);
+      }
+    }
+  };
+  for (const folder of SWEEP_FOLDERS) walk(join(vaultRoot, folder));
+  return [...seen];
+}
 
 function readStdinPaths() {
   const raw = readFileSync(0, 'utf-8');
@@ -98,10 +151,19 @@ success, 1 if any file failed, 2 on usage error.
   }
 
   let paths;
-  if (args.includes('--stdin')) {
+  if (args.includes('--scan-vault')) {
+    const root = args[args.indexOf('--scan-vault') + 1];
+    const sidIdx = args.indexOf('--sid');
+    const sid = sidIdx >= 0 ? args[sidIdx + 1] : '';
+    if (!root) {
+      process.stderr.write('--scan-vault requires a vault root path\n');
+      process.exit(2);
+    }
+    paths = scanVaultCandidates(resolve(root), sid);
+  } else if (args.includes('--stdin')) {
     paths = readStdinPaths();
   } else {
-    paths = args;
+    paths = args.filter((a) => !a.startsWith('--'));
   }
 
   if (paths.length === 0) {
@@ -132,4 +194,6 @@ success, 1 if any file failed, 2 on usage error.
   process.exit(failures.length > 0 ? 1 : 0);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}

@@ -34,7 +34,15 @@ const fields = {
 };
 
 const arg = process.argv[2];
-if (arg && Object.hasOwn(fields, arg)) {
+if (arg === '--sh') {
+  // Emit `KEY='value'` lines for `eval "$(resolve-paths.mjs --sh)"`. The script
+  // owns the single-quote escaping so skill bash blocks can carry every
+  // run-invariant path from ONE spawn instead of re-resolving per field.
+  const shQuote = (s) => `'${String(s ?? '').replace(/'/g, `'\\''`)}'`;
+  for (const [k, v] of Object.entries(fields)) {
+    console.log(`${k}=${shQuote(v)}`);
+  }
+} else if (arg && Object.hasOwn(fields, arg)) {
   console.log(fields[arg] ?? '');
 } else {
   console.log(JSON.stringify(fields));

@@ -12,8 +12,8 @@ All commands run silently.
 ## 4.7.a: Gather surfaced notes
 
 ```bash
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs" --session-surfaced "$LL_SID"
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs" --session-surfaced "$SESSION_ID"
 ```
 
 Output is a JSON array of `{path, via, level?}`:

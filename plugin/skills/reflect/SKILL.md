@@ -25,10 +25,7 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-start"}'
 ```
 
-**At session end:**
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
-```
+The session-end emit runs in Step 6, coalesced with the completion marker stamp (one final Bash block instead of two).
 
 The PostToolUse hook handles both provenance emission and the per-write tracking that Step 4.6 (Upstream Refinement) consumes. Step 4 only needs to create the new-notes marker once; the hook appends every vault Write/Edit to it until Step 4.6.g removes the marker.
 
@@ -61,9 +58,19 @@ Identify what was learned. Categories:
 | **Cross-project connection** | "Same caching problem exists in Acme and Widget-Co" | Obsidian vault + links | - |
 | **Implicit pattern** | User always runs tests before committing (observed 3+ times, never stated) | Auto-memory (feedback) | weak |
 
-List each learning as a single line.
+List each learning as a single line. When a learning could fit more than one row, the table's one-destination-per-row is the default, not a hard partition; apply the Route-correctly test (Key Principles) to decide.
+
+Before finalizing, explicitly check the three categories that hide in a fast pass: corrections received mid-session, project-context shifts, and behavior repeated 3+ times but never stated. State present or absent for each. Do NOT invent a weak pattern to fill a slot; "absent" is valid and common.
 
 ### Step 2.5: Batch Retrieval
+
+If any subagent (note-writer, discovery-researcher, literature-capturer) wrote vault notes *earlier in this session*, the search index may not cover them yet, so the dedup below would miss them. Refresh the index first (incremental; embeds only new or mtime-changed notes):
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs" index
+```
+
+Skip this index refresh if no subagent wrote notes this session (a pure-conversation session). It is also re-run in Step 4.4 after this step's own writes; both passes are incremental and cheap.
 
 Run a single retrieval call for all learnings identified in Step 2. Pass each learning summary as a query:
 
@@ -73,10 +80,14 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs reflect-scan "learning 1 sum
 
 **MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; if you call the raw binary, always pass the db path explicitly — a missing DB arg silently corrupts results.
 
+The Step 2.5 reflect-scan and the Step 2.75 episodic search are independent — you MAY issue both in the same turn. Only Step 2.5's output is required before Step 3.
+
 Parse the JSON result. For each query:
-- `top_match_similarity > 0.90`: likely duplicate. Read the existing note and update it instead of creating a new one.
-- `top_match_similarity 0.70-0.90`: related note exists. Consider linking rather than duplicating.
-- `top_match_similarity < 0.70`: no existing coverage. Create a new note.
+- `top_match_similarity > 0.85`: likely duplicate. Read the existing note and update it instead of creating a new one.
+- `top_match_similarity 0.74-0.85`: related note exists. Consider linking rather than duplicating.
+- `top_match_similarity < 0.74`: no existing coverage. Create a new note.
+
+This score is raw cosine between a short learning summary and a full note, so even a true duplicate rarely scores ~0.95; a 0.85 hit is already strong. (0.85 is the live duplicate gate's `SIMILARITY_THRESHOLD`, 0.74 is its `COSINE_MIN`, both from `scripts/lib/hook-config.mjs`.)
 
 Review `confusable_pairs` in the result. If any pairs are found, flag them for the user as potential MERGE or SHARPEN candidates in the Step 5 report.
 
@@ -87,8 +98,8 @@ If the episodic memory MCP tool is available (`mcp__plugin_episodic-memory_episo
 ### Step 3: Duplicate Check
 
 Using the reflect-scan results from Step 2.5:
-- For learnings with `top_match_similarity > 0.90`, read the matched note. If the existing note already captures the insight, skip creating a new one.
-- For auto-memory items, search existing auto-memories by reading MEMORY.md and checking for overlap. Update rather than duplicate.
+- For learnings with `top_match_similarity > 0.85`, read the matched note. If the existing note already captures the insight, skip creating a new one.
+- For auto-memory items: grep the memory dir filenames and the MEMORY.md index lines for the learning's key terms. If 1-3 files match, read those in full and judge on their bodies. If a match states the same rule, edit it and bump its date rather than adding a second file. If grep returns nothing, write the new memory.
 
 ### Step 4: Write to Stores
 
@@ -110,84 +121,63 @@ Using the reflect-scan results from Step 2.5:
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
-- **Stamp `reflect_sid: <LL_SID>` in the frontmatter of every note you write this session** (where `LL_SID` is resolved as in the Step 4 init block below). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
-- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: resolve the session id via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID` and the marker dir via `resolve-paths.mjs REFLECT_SCRATCH` (as in the init block below), the same resolvers the hook uses, so writer and reader stay in lockstep.
+- **Stamp `reflect_sid: <SESSION_ID>` in the frontmatter of every note you write this session** (where `SESSION_ID` is resolved as in the Step 4 init block below). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
+- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: resolve the session id and marker dir via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh` (exports `SESSION_ID` and `REFLECT_SCRATCH`, as in the init block below), the same resolvers the hook uses, so writer and reader stay in lockstep.
 
 ```bash
-# Step 4 init: truncate the new-notes file (the hook handshake marker).
+# Step 4 init: truncate the new-notes file (the hook handshake marker), after
+# resolving the run-invariant paths ONCE via --sh.
+#
 # Run this ONCE, before any vault Writes in this step. Do not re-run per
 # Write — the post-tool hook does the per-write appends automatically while
 # this file exists. Step 4.6.g removes it to end the tracking window.
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-mkdir -p "$LL_SCRATCH"
-LL_TMP_PREFIX="${LL_SCRATCH}/ll-${LL_SID}-reflect"
+#
+# One resolve-paths.mjs --sh call exports every value this whole step (and
+# 4.4/4.6/4.7) needs: SESSION_ID, REFLECT_SCRATCH, PLUGIN_DATA, VAULT, plus
+# LAST_REFLECT etc. Because bash fences run in separate shells, each later
+# fence re-runs this same --sh eval; within a fence the exported names are used
+# directly (no aliasing). The marker dir/key MUST stay the values
+# resolve-paths.mjs returns: the hook computes the same path independently via
+# reflectScratchDir()+getSessionId(), so writer and reader stay in lockstep
+# across the $TMPDIR-split hook/shell boundary. Never hardcode a tmp path or
+# change the ll-${SESSION_ID}-reflect prefix shape.
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+mkdir -p "$REFLECT_SCRATCH"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
 ```
 
-If a vault Write happens via a sub-agent (note-writer, discovery-researcher, literature-capturer), PostToolUse hooks don't fire on it directly, so its path never reaches the marker through the live hook. Step 4.4's sweep recovers those notes: it finds every note carrying this session's `reflect_sid`, then replays the hook chain via `sweep-hook-replay.mjs` with `LL_REFLECT_SID=$LL_SID` set. That env var flows into the replayed `reflect-track.mjs` as the explicit session override (see `hooks/post-tool.js`), so each replayed Write appends to *this* session's marker even when another `/reflect` is running concurrently. End result: every new note in this `/reflect` invocation lands in the file regardless of which thread wrote it.
+Sub-agent writes (note-writer, discovery-researcher, literature-capturer) don't fire PostToolUse hooks, so their paths never reach the marker live; Step 4.4's sweep recovers them via the `reflect_sid` stamp (see that step for the mechanism).
 
 ### Step 4.4: Post-Batch Sweep
 
 Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed the `hooks/post-tool.js` dispatcher entirely (no suggested backlinks or typed edges), **and** never reached the reflect new-notes marker (so Step 4.6 refinement would skip them).
 
-Replay the hook chain on two candidate sets, unioned: (1) notes missing structural backlinks (autolink/edge-infer backfill), and (2) every note carrying *this session's* `reflect_sid` (the marker backfill — these are the sub-agent notes whose paths the live hook never captured). The replay runs with `LL_REFLECT_SID=$LL_SID`, which routes each replayed Write to this session's marker even under concurrent `/reflect` runs. Idempotent: safe to run on already-hooked notes (autolink checks for existing links; reflect-track de-dups paths on read in Step 4.6.a).
+Replay the hook chain on two candidate sets, unioned: (1) notes missing structural backlinks (autolink/edge-infer backfill), and (2) every note carrying *this session's* `reflect_sid` (the marker backfill — these are the sub-agent notes whose paths the live hook never captured). The replay runs with `LL_REFLECT_SID=$SESSION_ID`, which routes each replayed Write to this session's marker even under concurrent `/reflect` runs. Idempotent: safe to run on already-hooked notes (autolink checks for existing links; reflect-track de-dups paths on read in Step 4.6.a).
 
 ```bash
-# Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
-# installed by /init or the SessionStart hook) handles binary location and ORT
-# env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
-LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
+# This fence runs in its own shell, so re-resolve via --sh. The ll-search shim
+# (~/.local/bin/ll-search, installed by /init or the SessionStart hook) handles
+# binary location and ORT env vars itself.
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
 # Incremental by default; only embeds notes that are new or mtime-changed.
-ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
+ll-search index "$VAULT" "$VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 
-LL_SID=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" SESSION_ID)
-LL_SCRATCH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" REFLECT_SCRATCH)
-mkdir -p "$LL_SCRATCH"
-SWEEP_CANDIDATES="${LL_SCRATCH}/ll-${LL_SID}-sweep-candidates.txt"
-
-# Candidate union (exclude 4-projects: free-form indexes):
+# Candidate union, then replay, in one node pass (--scan-vault). The walk uses an
+# explicit 5-folder ALLOWLIST that excludes 4-projects (free-form indexes), and
+# emits each matching note once:
 #   (1) notes with no [[links]] in the body  -> autolink/edge-infer backfill
-#   (2) notes whose frontmatter reflect_sid == this session's LL_SID
+#   (2) notes whose frontmatter reflect_sid == this session's SESSION_ID
 #         -> marker backfill for sub-agent writes the live hook missed
-# A note matching either set is emitted once (dedup via a set).
-LL_VAULT="$LL_VAULT" LL_SID="$LL_SID" python3 - <<'PY' > "$SWEEP_CANDIDATES"
-import os, re
-root = os.environ["LL_VAULT"]
-sid = os.environ["LL_SID"]
-seen = set()
-for d in ["0-inbox", "1-fleeting", "2-literature", "3-permanent", "5-maps"]:
-    for dirpath, _, files in os.walk(os.path.join(root, d)):
-        for f in files:
-            if not f.endswith(".md"): continue
-            p = os.path.join(dirpath, f)
-            if p in seen: continue
-            try:
-                text = open(p).read()
-            except Exception:
-                continue
-            m = re.match(r"^---\n(.*?)\n---\n", text, flags=re.DOTALL)
-            fm = m.group(1) if m else ""
-            body = text[m.end():] if m else text
-            unlinked = not re.search(r"\[\[[^\]]+\]\]", body)
-            mine = bool(sid) and re.search(
-                r"^reflect_sid:\s*[\"']?" + re.escape(sid) + r"[\"']?\s*$", fm, flags=re.MULTILINE
-            )
-            if unlinked or mine:
-                seen.add(p)
-                print(p)
-PY
-
-if [ -s "$SWEEP_CANDIDATES" ]; then
-  LL_REFLECT_SID="$LL_SID" node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
-fi
-rm -f "$SWEEP_CANDIDATES"
+# LL_REFLECT_SID=$SESSION_ID routes each replayed Write to THIS session's marker
+# even under concurrent /reflect runs (see hooks/post-tool.js).
+LL_REFLECT_SID="$SESSION_ID" node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" \
+  --scan-vault "$VAULT" --sid "$SESSION_ID"
 ```
 
-Expected output is a JSON summary `{processed, ok, failed, failures}`. Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
+Expected output is a JSON summary `{processed, ok, failed, failures}` (and `{processed:0,...}` when no candidates). Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
 
 ### Step 4.5: Intention Extraction
 
@@ -207,7 +197,7 @@ This ensures new notes with intentions appear in the next session's intention su
 
 ### Step 4.6: Upstream Refinement
 
-**Trigger**: the reflect new-notes file (`${LL_SCRATCH}/ll-${LL_SID}-reflect-new-notes.txt`, where `LL_SCRATCH` comes from `resolve-paths.mjs REFLECT_SCRATCH` and `LL_SID` from `resolve-paths.mjs SESSION_ID`) exists and is non-empty.
+**Trigger**: the reflect new-notes marker created in Step 4 (`${LL_TMP_PREFIX}-new-notes.txt`) exists and is non-empty. refinement.md 4.6.a re-resolves the prefix in its own shell.
 
 Read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` and execute it (sub-steps 4.6.a through 4.6.g: candidate pairs + deferred-queue drain, proposer dispatch, validation, confirmation, apply, provenance, cleanup).
 
@@ -235,13 +225,14 @@ Keep it to 2-4 lines. The user can see the diffs if they want details.
 
 ### Step 6: Mark Reflection Complete
 
-Write a timestamp so the Stop hook knows reflection already happened:
+Emit the session-end provenance event and write the completion timestamp in one final block. Substitute the real counts for the `N`s (vault notes written, auto-memories written this session). Emit first, stamp last:
 
 ```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
 node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-reflect
 ```
 
-Run this via the Bash tool at the end of every /reflect invocation. The marker lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote. A non-zero exit here is non-fatal: surface the stderr message but do not re-run /reflect.
+Run this at the end of **every** /reflect invocation, unconditionally — both lines always run, regardless of whether any notes were written or surfaced. The `last-reflect` marker is what tells the Stop hook reflection already happened; it lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote. A non-zero exit on either line is non-fatal: surface the stderr message but do not re-run /reflect.
 
 ## Subagent Usage
 
@@ -255,7 +246,7 @@ Retrieval itself stays main-thread: it is handled by the `reflect-scan` binary c
 
 - **Not every session needs reflection.** Quick sessions get a quick "Nothing notable to capture."
 - **Update over create.** Always check for existing notes/memories first.
-- **Route correctly.** Behavioral stuff → auto-memory. Knowledge → vault. Don't mix them.
+- **Route correctly.** Per learning: does it change how I should behave next session (rule, preference, correction, live project fact)? Route to auto-memory. Is it a durable claim about the world, true regardless of who acts? Route to the vault. When both fire (e.g. a decision with an ongoing behavioral implication), route the dominant facet and split only if each facet is separately useful to a different audience. Never write the same sentence to both stores; there is no cross-store dedup.
 - **Voice matters.** Vault notes follow the persona. Short, sharp, linked.
 - **Ask before restructuring.** Never promote, move, or edit notes outside `0-inbox/` without permission.
 - **Cross-project transfer is the superpower.** The most valuable captures are patterns that apply beyond their origin project.

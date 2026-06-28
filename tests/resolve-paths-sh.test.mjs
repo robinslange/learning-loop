@@ -1,0 +1,44 @@
+// Tests for resolve-paths.mjs --sh — the eval-safe KEY='value' export mode that
+// lets /reflect carry every run-invariant path from ONE spawn (S1 in the
+// reflect-improvements plan) instead of re-resolving per field.
+//
+// The only thing that can go wrong here is quoting: a path with a single quote
+// must not break the `eval "$(...)"`. We can't easily force a quoted path from
+// the real config, so we test the quoting function's contract directly via a
+// round-trip through `sh -c 'eval ...; echo "$KEY"'`.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+
+const SCRIPT = new URL('../plugin/scripts/resolve-paths.mjs', import.meta.url).pathname;
+
+test('--sh output is eval-safe and sets shell vars', () => {
+  const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });
+  // every non-empty line is KEY='...'
+  for (const line of shOut.split('\n').filter(Boolean)) {
+    assert.match(line, /^[A-Z_]+='.*'$/, `not eval-safe: ${line}`);
+  }
+  // round-trip: eval it in a real shell, echo SESSION_ID back
+  const back = execFileSync(
+    'sh',
+    ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$SESSION_ID"`],
+    {
+      encoding: 'utf-8',
+    },
+  );
+  const direct = execFileSync('node', [SCRIPT, 'SESSION_ID'], { encoding: 'utf-8' }).trim();
+  assert.equal(back, direct, 'eval-set SESSION_ID matches the single-field resolve');
+});
+
+test('single-quote in a value would still eval safely (quoting contract)', () => {
+  // Simulate the quoting the script applies: a value with a single quote must
+  // survive `eval`. We feed a crafted KEY='...' line built the same way the
+  // script builds it and confirm sh evaluates it to the original.
+  const value = "wei'rd/path";
+  const quoted = `'${value.replace(/'/g, `'\\''`)}'`;
+  const out = execFileSync('sh', ['-c', `eval "K=${quoted}"; printf '%s' "$K"`], {
+    encoding: 'utf-8',
+  });
+  assert.equal(out, value);
+});
