@@ -22,10 +22,10 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/overlap-check.md`: check if existing knowledge already covers this topic
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/decision-gates.md`: checkpoints between research phases
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: how to verify sources
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/overlap-check.md`: check if existing knowledge already covers this topic
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/cross-validation.md`: compare findings against existing vault knowledge
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/decision-gates.md`: checkpoints between research phases
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md`: how to verify sources
 
 ## Process
 
@@ -117,9 +117,9 @@ Run confidence gate (decision-gates):
 
 ## Diagram Generation
 
-After drafting findings, apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` to decide whether the findings warrant an Excalidraw diagram.
+After drafting findings, apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents-shared/diagram-rules.md` to decide whether the findings warrant an Excalidraw diagram.
 
-Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `${CLAUDE_PLUGIN_ROOT}/agents-shared/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 **In the research brief**, include a `### Diagram` section with:
 - The diagram filename (e.g., `glutamate-inflammation-loop.excalidraw.md`)
@@ -199,7 +199,7 @@ For academic sources, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mj
 
 **Never re-fetch a URL you already fetched.** If you fetched a URL during research, its content is already in your context.
 
-**Cap WebFetch at 10 calls per session.** If you've hit 10, stop fetching and mark remaining URLs as `unfetched` in the verified sources table. See `_skills/source-verification.md#webfetch-budget` for the canonical cap.
+**Cap WebFetch at 10 calls per session.** If you've hit 10, stop fetching and mark remaining URLs as `unfetched` in the verified sources table. See `agents-shared/source-verification.md#webfetch-budget` for the canonical cap.
 
 ## Rules
 

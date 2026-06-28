@@ -39,7 +39,7 @@ Launch the `inbox-organiser` agent with:
 - **vault_path**: `{{VAULT}}/`
 - **scope**: `all` (or `topic:<name>` if the user specified a topic filter)
 
-The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/inbox-organiser.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
+The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/inbox-organiser.md` (resolve to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders).
 
 Use `subagent_type: "learning-loop:inbox-organiser"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
 
@@ -76,7 +76,7 @@ The agent cannot spawn note-writer (subagents cannot spawn subagents). It return
 - **related_notes**: from the worklist row
 - the worklist `reason` as rewrite context
 
-Resolve all path placeholders in each prompt to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
+Resolve all path placeholders in each prompt to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
 
 When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills/_shared/hook-replay.md`, targeted variant):
 
@@ -124,7 +124,7 @@ Limbo notes the skill edits here join the hook-replay scope: pipe them through t
 
 ## Key Principles
 
-- **The skill is thin on judgment, not on execution.** Triage logic lives in the `inbox-organiser` agent and its `_skills/`; note-writer fan-out and gated-action execution live here, because subagents cannot spawn subagents.
+- **The skill is thin on judgment, not on execution.** Triage logic lives in the `inbox-organiser` agent and its `agents-shared/`; note-writer fan-out and gated-action execution live here, because subagents cannot spawn subagents.
 - **Promotions are autonomous.** No approval needed.
 - **Destructive actions are gated.** Merges, deletes, inbox archival, and fleeting archival need explicit user approval.
 - **Closed notes leave triage.** A `status: resolved` note (closed in limbo triage) is skipped from gating/clustering, and once untouched ≥30 days the agent returns it as an inbox-archival candidate (gated, 2b) — it never recirculates through every run. This closes the inbox ratchet.

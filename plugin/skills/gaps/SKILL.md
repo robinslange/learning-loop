@@ -108,7 +108,7 @@ Determine depth from vault scout results:
 
 Spawn the **Gap Analyser** (`gap-analyser`):
 - Pass: notes (full content from vault scout), research (from adversarial researcher), domain_survey (from domain survey researcher), scope, depth
-- The analyser reads its skills from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/`
+- The analyser reads its skills from `${CLAUDE_PLUGIN_ROOT}/agents-shared/`
 - Returns: structured report with thin ice, tensions, absences, and blindspots
 - **Context budget**: for clusters of 20+ notes, pass note titles + first 5 lines of body instead of full content. Full content on 20+ notes risks degraded retrieval in long contexts. For clusters under 20 notes, pass full content as normal.
 
@@ -239,7 +239,7 @@ Strongest domain: [cluster with fewest findings]
 ### gap-analyser
 - Launch at Step 2 after both Step 1 agents complete
 - Consumes notes + research
-- Reads its own skills from `agents/_skills/`
+- Reads its own skills from `agents-shared/`
 - Returns structured analysis
 
 ### note-writer

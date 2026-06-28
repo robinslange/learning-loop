@@ -20,11 +20,11 @@ You will receive:
 
 Read and follow these skills during triage:
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: quality gate for folder routing and skip-rewrite detection
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect and link challenge notes
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: what belongs in the vault and note format rules
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md`: sweep 1-fleeting/ for archival candidates (Step 8)
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/promote-gate.md`: quality gate for folder routing and skip-rewrite detection
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/counter-argument-linking.md`: detect and link challenge notes
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/capture-rules.md`: what belongs in the vault and note format rules
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/fleeting-sweep.md`: sweep 1-fleeting/ for archival candidates (Step 8)
 
 ## Process
 
@@ -275,7 +275,7 @@ Include every file you Edited or mv'd this run: `mv`-promotion destinations, bot
 
 ### 8. Fleeting Sweep
 
-After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/fleeting-sweep.md` in its subagent mode: you cannot converse, so archive NOTHING. The sweep emits three TYPEs:
+After inbox processing, run the fleeting sweep per `${CLAUDE_PLUGIN_ROOT}/agents-shared/fleeting-sweep.md` in its subagent mode: you cannot converse, so archive NOTHING. The sweep emits three TYPEs:
 
 - `PROMOTED` and `STALE` are archival candidates — return them as the `fleeting archival` section of the Needs-approval block (Step 5); the skill `mv`s approved files to `_archive/1-fleeting/` after you return.
 - `NEEDS-DEEPEN` is a **repair recommendation, never archival** — these are the gate-demoted notes (verification markers or `source: unverified`) that promote-gate routes to `1-fleeting/` and whose documented repair path is `/deepen`. Return them in a separate `fleeting repair` section (path, reason, detail). The skill surfaces these as a `/deepen` suggestion; nothing destructive happens and no approval is needed.

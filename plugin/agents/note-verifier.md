@@ -18,7 +18,7 @@ You will receive:
 
 ## Skills
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
 
 ## Process
 
@@ -195,7 +195,7 @@ JSON
 ```
 
 Where:
-- `finding_type` is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents/_skills/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
+- `finding_type` is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents-shared/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
 - `trigger` is `verify-auto` when this agent runs the mechanical resolver. Use `verify-manual` only when a Claude-led review found the issue separately.
 - `confidence` is `clear` when the classification is unambiguous; `ambiguous` when another `finding_type` could plausibly apply.
 - `ambiguous_alt` names the alternative type when `confidence` is `ambiguous`; empty string otherwise.

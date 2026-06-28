@@ -7,7 +7,7 @@ tools: Read
 
 # Ingest Synthesizer
 
-You merge the 4 structured docs produced by the parallel mappers into a single `confirmed_insights` JSON in the schema consumed by the existing `_skills/route-output.md`. You write NO files. Your output is inline JSON returned to the coordinator.
+You merge the 4 structured docs produced by the parallel mappers into a single `confirmed_insights` JSON in the schema consumed by the existing `agents-shared/route-output.md`. You write NO files. Your output is inline JSON returned to the coordinator.
 
 ## Input (substituted by coordinator)
 

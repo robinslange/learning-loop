@@ -20,7 +20,7 @@ function gateMarkers() {
   return markers;
 }
 
-const CANON = 'agents/_skills/capture-rules.md';
+const CANON = 'agents-shared/capture-rules.md';
 
 test('capture-rules.md documents every promotion-blocking marker (canonical vocabulary)', () => {
   const canon = read(CANON);

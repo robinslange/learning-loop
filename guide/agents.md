@@ -66,7 +66,7 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 19 skills in `agents/_skills/` that standardize quality decisions:
+Agents share 19 skills in `agents-shared/` that standardize quality decisions:
 
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs
@@ -92,7 +92,7 @@ Agents share 19 skills in `agents/_skills/` that standardize quality decisions:
 
 Two layers run on every note the `note-writer` agent emits: a write-time shape check against the prose, and a post-write resolver pass against the cited source.
 
-The shape check lives in `agents/_skills/capture-rules.md` under "Claim Shapes Requiring Verbatim Anchoring". Four shapes account for ~94% of overclaim findings in vault audits:
+The shape check lives in `agents-shared/capture-rules.md` under "Claim Shapes Requiring Verbatim Anchoring". Four shapes account for ~94% of overclaim findings in vault audits:
 
 1. **Numerical figures** -- any "X%", "X billion", "<X", ">X", "X ms", "X-fold". Must match the source phrasing including hedges. Strengthening "roughly 65%" into ">65%" fails the check.
 2. **Universal claims** -- "no X does Y", "X is the only Y", "every X". Require a survey-style citation or softening to a first-person evidence claim.
@@ -110,7 +110,7 @@ The four inline markers are documented in `capture-rules.md` under "Verification
 - `[not in abstract]` -- figure absent from the academic abstract; may be in full text.
 - `[not in source]` -- figure absent from a fetched non-academic page; check manually or soften.
 
-See `agents/_skills/capture-rules.md` for the full shape rules and `agents/note-writer.md` Pass 1 for the write-time procedure.
+See `agents-shared/capture-rules.md` for the full shape rules and `agents/note-writer.md` Pass 1 for the write-time procedure.
 
 ## Subagent writes and hook replay
 

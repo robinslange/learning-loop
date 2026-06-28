@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+- **Eliminated 19 phantom full-privilege agents (Foster Moore audit, second CRITICAL).** The shared agent-instruction docs lived in `plugin/agents/_skills/`; any `.md` under `agents/` auto-registers as a dispatchable subagent, and a frontmatter-less one gets the default "All tools" grant. The 19 docs (which agents only ever `Read()`, never dispatch) were registering as `learning-loop:_skills:<name> (All tools)` phantom agents — a security-review blocker and dispatch-noise for the real agents. Moved them to a sibling `plugin/agents-shared/` directory the harness does not scan, and rewrote every `${CLAUDE_PLUGIN_ROOT}/agents/_skills/...` reference across 28 agent/skill/guide files. New `M16` architecture-lint test fails the build if any frontmatter-less `.md` reappears under `agents/`.
+
 ## v1.31.0
 
 - **`LL_OFFLINE` air-gap / update-control switch.** Setting `LL_OFFLINE=1` suppresses every plugin-initiated network call through a single `isOffline()` chokepoint: the SessionStart GitHub update poll, the binary auto-update download (including the manual `/init` and `/doctor` fetch paths), and all external web-research fetches (`/verify`, `/deep-research`, `/discovery`, source-resolver, claim-checker) — which now short-circuit cleanly instead of attempting a request and timing out. Localhost (Ollama) is never gated, so an air-gapped box keeps its local model. `/doctor` surfaces an "Offline mode: ON" line so operators can confirm the suppression is engaged. This closes the deployment gap left by the v1.30.0 Foster Moore audit remediation: the plugin can now run in an update-controlled or fully air-gapped enterprise environment.

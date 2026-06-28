@@ -41,7 +41,7 @@ JSON
 ```
 
 Where:
-- **finding_type** is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents/_skills/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
+- **finding_type** is one of: `url-fabrication`, `author-swap`, `number-reassignment`, `overclaim`, `source-missing`, `stale`, `logical-gap`, `conflation`. See `agents-shared/capture-rules.md → Finding-Type Discriminator` for the source-missing vs logical-gap boundary rule.
 - **trigger** is one of: `verify-auto` (URL/source check), `verify-manual` (human review), `cross-note` (pattern across notes), `retrieval` (found during search), `stale-scan` (date check)
 - **confidence** is `clear` (obvious classification) or `ambiguous` (could be another type)
 - **ambiguous_alt** is the alternative type considered when confidence is `ambiguous`, empty string when `clear`
@@ -130,7 +130,7 @@ For the `permanent` and `fleeting` scopes (and `"topic"` scopes that surface syn
 
 **Skip-if-fresh:** Before running the audit on a note, read its `synthesis_validated` frontmatter field. If the field is present and the note's file `mtime` is not newer than that date, the verdict is fresh — skip the audit for that note and count it as passing (the body is unchanged since the last judgment). This prevents `/verify` and the inbox organiser from diverging on notes that neither of them has changed.
 
-Run the canonical procedure from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md` → "Synthesis-tag re-validation" for notes that are not skipped: scan each synthesis note's body (outside fenced blocks) for bare factual signals (a number with a unit/comparator, a named study or author+year, an effect size, a "research shows" attribution) that are **not** backed by a grounding `[[wikilink]]`. After the audit, apply the verdict stamp per the canonical procedure (stamp `synthesis_validated: <today>` on pass; remove the field on demote).
+Run the canonical procedure from `${CLAUDE_PLUGIN_ROOT}/agents-shared/promote-gate.md` → "Synthesis-tag re-validation" for notes that are not skipped: scan each synthesis note's body (outside fenced blocks) for bare factual signals (a number with a unit/comparator, a named study or author+year, an effect size, a "research shows" attribution) that are **not** backed by a grounding `[[wikilink]]`. After the audit, apply the verdict stamp per the canonical procedure (stamp `synthesis_validated: <today>` on pass; remove the field on demote).
 
 For each note where the audit fires, flag it in the report as `synthesis exemption misapplied` — high priority, same tier as a fabricated source, because the note bypassed Sourcing and Source Integrity it should have faced:
 
@@ -298,7 +298,7 @@ Agent (subagent_type: "learning-loop:note-verifier"):
 
 ## Verification Markers
 
-Notes may carry inline markers from write-time verification (e.g. `[unresolved]`, `[not in source]`, `[partial]`). The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents/_skills/capture-rules.md` → Verification Markers. Read that section; do not rely on a local list (local copies drift).
+Notes may carry inline markers from write-time verification (e.g. `[unresolved]`, `[not in source]`, `[partial]`). The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents-shared/capture-rules.md` → Verification Markers. Read that section; do not rely on a local list (local copies drift).
 
 When reporting, include counts for every marker in that vocabulary in the summary. Markers indicate the write-time check already ran: focus verification effort on resolving the markers rather than re-checking what already passed.
 

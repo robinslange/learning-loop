@@ -42,7 +42,7 @@ If the episodic memory MCP tools are unavailable (`mcp__plugin_episodic-memory_e
 
 After completing the search and before compiling the output:
 
-1. Read the discrimination skill: `${CLAUDE_PLUGIN_ROOT}/agents/_skills/discrimination.md`
+1. Read the discrimination skill: `${CLAUDE_PLUGIN_ROOT}/agents-shared/discrimination.md`
 2. Collect all note paths found during search
 3. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs discriminate <paths>`
    - Pass the note paths as space-separated arguments
@@ -79,8 +79,8 @@ Return a knowledge map:
 
 ## Skills
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/discrimination.md`: confusable pair detection and assessment rules
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/discrimination.md`: confusable pair detection and assessment rules
 
 ## Rules
 

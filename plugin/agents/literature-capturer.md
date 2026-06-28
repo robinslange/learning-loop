@@ -26,13 +26,13 @@ You will receive:
 
 Read and follow these skills during work:
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: note format and what belongs in the vault
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: how to verify sources
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the source's claims challenge existing vault notes
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/overlap-check.md`: check if source's ideas are already covered in the vault
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/cross-validation.md`: compare source claims against existing vault knowledge
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/decision-gates.md`: checkpoints between capture phases
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/capture-rules.md`: note format and what belongs in the vault
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md`: how to verify sources
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/counter-argument-linking.md`: detect if the source's claims challenge existing vault notes
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/overlap-check.md`: check if source's ideas are already covered in the vault
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/cross-validation.md`: compare source claims against existing vault knowledge
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/decision-gates.md`: checkpoints between capture phases
 
 ## Process
 

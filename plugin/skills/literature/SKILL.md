@@ -37,7 +37,7 @@ Launch the `literature-capturer` agent with:
 - **source**: The URL, title, or citation provided by the user
 - **vault_path**: `{{VAULT}}/`
 
-The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/literature-capturer.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
+The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/literature-capturer.md` (resolve to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders).
 
 ### Step 2: Handle Backlink Offers
 
@@ -60,7 +60,7 @@ The agent returns a structured report with the captured note, connections, count
 
 ## Key Principles
 
-- **The skill is thin.** All logic lives in the `literature-capturer` agent and its `_skills/`.
+- **The skill is thin.** All logic lives in the `literature-capturer` agent and its `agents-shared/`.
 - **Literature captures the source, not commentary.** Reactions go in separate notes.
 - **Backlink edits need approval.** Never modify notes outside `2-literature/` without asking.
 - **Update over create.** If a literature note already exists for this source, update it.

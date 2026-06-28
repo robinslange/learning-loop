@@ -111,7 +111,7 @@ Run this after EVERY `discovery-researcher` return — orientation and every loo
 
 1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with:
    - **note_content**: the full research brief, verbatim (including the Verified Sources table)
-     Resolve all path placeholders in the prompt to literal absolute paths first (see `agents/_skills/vault-io.md` → Placeholders). Track the verification round number across spawns; stop after round 3.
+     Resolve all path placeholders in the prompt to literal absolute paths first (see `agents-shared/vault-io.md` → Placeholders). Track the verification round number across spawns; stop after round 3.
 2. Branch on the verifier's top-level `### Status:`
    - **PASS**: proceed to presentation.
    - **PARTIAL** (no contradicted claims, but some scored 1-2): proceed to presentation, but carry the verifier's per-claim flags through — mark affected claims `[partial]` in the brief and mention them when presenting.

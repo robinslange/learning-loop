@@ -13,8 +13,8 @@ You are a quality assessment agent for an Obsidian Zettelkasten vault. Your job 
 
 Read and follow this skill: it defines your scoring criteria:
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: criteria definitions, scoring scale, and maturity tiers
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/promote-gate.md`: criteria definitions, scoring scale, and maturity tiers
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
 
 ## Input
 

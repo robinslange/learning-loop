@@ -19,7 +19,7 @@ You will receive:
 If no note_path is provided, auto-pick the note most in need of work, considering two pools together:
 
 1. **`0-inbox/`** — the shallowest note (lowest promote-gate score).
-2. **`1-fleeting/`** — notes the promote-gate demoted and whose documented repair path is `/deepen`: those carrying a blocking verification marker (`agents/_skills/capture-rules.md` → Verification Markers) or `source: unverified`. Without this, those notes have no resurfacing path and sit forever (the gate demotes them in, nothing pulls them out).
+2. **`1-fleeting/`** — notes the promote-gate demoted and whose documented repair path is `/deepen`: those carrying a blocking verification marker (`agents-shared/capture-rules.md` → Verification Markers) or `source: unverified`. Without this, those notes have no resurfacing path and sit forever (the gate demotes them in, nothing pulls them out).
 
 Prefer a marker-bearing `1-fleeting/` note that is older (by mtime) over a fresh inbox note: a demoted note with a stuck citation marker is a concrete, fixable gap, whereas a shallow inbox note may just be a thin seed. If both pools are empty, say so and stop.
 
@@ -27,14 +27,14 @@ Prefer a marker-bearing `1-fleeting/` note that is older (by mtime) over a fresh
 
 Read and follow these skills during work:
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: assess note quality and determine destination folder
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing claim
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: note format and what belongs in the vault
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: how to verify sources
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/overlap-check.md`: check if note's topic is already covered elsewhere
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/cross-validation.md`: compare findings against existing vault knowledge
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/decision-gates.md`: checkpoints between research phases
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/promote-gate.md`: assess note quality and determine destination folder
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/counter-argument-linking.md`: detect if the note challenges an existing claim
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/capture-rules.md`: note format and what belongs in the vault
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md`: how to verify sources
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/overlap-check.md`: check if note's topic is already covered elsewhere
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/cross-validation.md`: compare findings against existing vault knowledge
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/decision-gates.md`: checkpoints between research phases
 
 ## Process
 

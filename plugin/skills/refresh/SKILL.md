@@ -91,7 +91,7 @@ Based on what was found:
 
 If the vault scout's discrimination report found confusable pairs in this topic:
 
-1. Read the discrimination skill: `${CLAUDE_PLUGIN_ROOT}/agents/_skills/discrimination.md`
+1. Read the discrimination skill: `${CLAUDE_PLUGIN_ROOT}/agents-shared/discrimination.md`
 2. Follow the **Interactive Mode** instructions from the skill
 3. Present pairs one at a time (max 3 rounds)
 4. Use folder-based difficulty:

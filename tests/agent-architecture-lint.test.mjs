@@ -36,14 +36,30 @@ test('no agent file instructs spawning another agent (M13)', () => {
       .forEach((line, i) => {
         if (SPAWN_RE.test(line) || SPAWN_REV_RE.test(line))
           offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
-        if (!rel.includes('_skills/') && line.includes('subagent_type'))
-          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (line.includes('subagent_type')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
   }
   assert.deepEqual(
     offenders,
     [],
     'subagents cannot spawn subagents; fan-out belongs in the calling skill',
+  );
+});
+
+test('every .md under agents/ has frontmatter (no phantom full-privilege agents) (M16)', () => {
+  // Any frontmatter-less .md under agents/ auto-registers as a dispatchable
+  // subagent with the default "All tools" grant. Shared instruction docs the
+  // agents Read() must live OUTSIDE agents/ (agents-shared/), or they become
+  // phantom full-privilege agents in the namespace. Regression guard for the
+  // Foster Moore enterprise blocker.
+  const offenders = mdFiles('agents').filter((rel) => {
+    const src = readFileSync(join(ROOT, rel), 'utf8');
+    return !/^---\n[\s\S]*?\n---/.test(src);
+  });
+  assert.deepEqual(
+    offenders,
+    [],
+    'frontmatter-less .md under agents/ registers as an All-tools phantom agent; move shared docs to agents-shared/',
   );
 });
 
@@ -59,7 +75,7 @@ test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
   assert.deepEqual(
     offenders,
     [],
-    'use ${CLAUDE_PLUGIN_ROOT}/ (see agents/_skills/vault-io.md Placeholders)',
+    'use ${CLAUDE_PLUGIN_ROOT}/ (see agents-shared/vault-io.md Placeholders)',
   );
 });
 

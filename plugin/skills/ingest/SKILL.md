@@ -59,9 +59,9 @@ Parse remaining args as source-specific parameters.
 
 ### Step 2: Launch Source Agent
 
-Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders). Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID`; when passing paths into agent prompts or other tools, substitute the resolved literal value.
+Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders). Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID`; when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
-**Linear:** Spawn a `learning-loop:ingest-linear` agent (the `subagent_type` matches the agent name, so its `model: haiku` and `tools:` allowlist apply). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders), so the agent can read its shared `_skills/` contracts:
+**Linear:** Spawn a `learning-loop:ingest-linear` agent (the `subagent_type` matches the agent name, so its `model: haiku` and `tools:` allowlist apply). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
 
 ```
 Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-linear.md and follow it exactly.
@@ -130,7 +130,7 @@ REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.s
 
 #### Step 2.4a: tier=single → existing single-pass flow
 
-Spawn a `learning-loop:ingest-repo` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents/_skills/vault-io.md` → Placeholders), so the agent can read its shared `_skills/` contracts:
+Spawn a `learning-loop:ingest-repo` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
 
 ```
 Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-repo.md and follow it exactly.
@@ -242,7 +242,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m =>
 
 Take the insights JSON returned by the agent.
 
-Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/preview-format.md` and format the preview accordingly.
+Read `${CLAUDE_PLUGIN_ROOT}/agents-shared/preview-format.md` and format the preview accordingly.
 
 Display the preview to the user. Wait for confirmation via `AskUserQuestion`:
 
@@ -264,10 +264,10 @@ Determine the project name:
 - Repo: derive from the repo directory name
 - Context: ask via `AskUserQuestion` if not obvious
 
-Spawn a `general-purpose` agent with prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders):
+Spawn a `general-purpose` agent with prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders):
 
 ```
-Read the agent skill at ${CLAUDE_PLUGIN_ROOT}/agents/_skills/route-output.md and follow it exactly.
+Read the agent skill at ${CLAUDE_PLUGIN_ROOT}/agents-shared/route-output.md and follow it exactly.
 
 Project name: {project_name}
 Vault path: {{VAULT}}/
@@ -287,7 +287,7 @@ Split the worklist by the `artefact` flag:
 
 **Artefact rows (`artefact: true`)** are project documents (interview prep, client briefs, evidence bundles), not atomic insights — vault voice and promote-gate grading add nothing, so they do NOT go through note-writer. Write each one yourself with the `Write` tool: destination is the row's `4-projects/<slug>/` folder, filename a kebab-case slug of the insight title, content the row's research body under the insight as the `#` title. Main-thread Writes fire the PostToolUse hooks natively — do not include these paths in the hook replay below.
 
-**Insight rows (`artefact: false`)**: for each, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents/_skills/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel.
+**Insight rows (`artefact: false`)**: for each, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel.
 
 When the fan-out completes, reconcile before replaying: match each insight row to a written path in the note-writer reports. Retry any unmatched row (agent failed, errored, or returned no path) once with a fresh note-writer dispatch. Rows still unwritten after the retry must not be dropped silently — a user-approved insight with no note is a data loss — carry each one's insight title and a one-line body into Step 6 as "failed to write — re-capture manually".
 

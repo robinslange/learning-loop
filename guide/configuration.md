@@ -230,7 +230,7 @@ learning-loop/
   plugin/                           The installed plugin (marketplace source)
     .claude-plugin/                 Plugin manifest
     agents/                         Specialized agent definitions
-    agents/_skills/                 Shared agent skills
+    agents-shared/                  Shared agent instruction docs (not dispatchable)
     skills/                         User-invocable skills (slash commands)
     scripts/                        Vault search, provenance, source-resolver,
                                     injection review, cache-health, binary download,

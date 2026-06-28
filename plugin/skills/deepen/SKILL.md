@@ -50,7 +50,7 @@ Launch the `note-deepener` agent with:
 - **note_path**: Path to the target note (resolve via `Glob` if only a name was given)
 - **vault_path**: `{{VAULT}}/`
 
-The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/note-deepener.md` (resolve to a literal path before dispatch — see `agents/_skills/vault-io.md` → Placeholders).
+The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/note-deepener.md` (resolve to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders).
 
 If no note name was provided, pass no note_path: the agent will auto-pick from `0-inbox/` (shallowest) and `1-fleeting/` (gate-demoted marker-bearing notes), preferring an older stuck fleeting note over a thin inbox seed.
 
@@ -70,11 +70,11 @@ If the agent flagged uncaptured sources, suggest `/literature` for each.
 
 ## Resolving Verification Markers
 
-If the note contains verification markers, prioritize resolving them. The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents/_skills/capture-rules.md` → Verification Markers. Read that section rather than relying on a local list; restated copies drift. For `[unverified]`, the inspection command is `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>`. Remove each marker only once its resolution rule is satisfied.
+If the note contains verification markers, prioritize resolving them. The canonical marker vocabulary — which markers exist, which block promotion, and how each resolves — lives in `agents-shared/capture-rules.md` → Verification Markers. Read that section rather than relying on a local list; restated copies drift. For `[unverified]`, the inspection command is `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <path>`. Remove each marker only once its resolution rule is satisfied.
 
 ## Key Principles
 
-- **The skill is thin.** All logic lives in the `note-deepener` agent and its `_skills/`.
+- **The skill is thin.** All logic lives in the `note-deepener` agent and its `agents-shared/`.
 - **Scale effort to need.** The agent handles this automatically via promote-gate assessment.
 - **Promotions are autonomous.** The agent promotes based on quality: no approval needed.
 - **Splits go to inbox.** If the agent found two ideas, the second lands in `0-inbox/`.

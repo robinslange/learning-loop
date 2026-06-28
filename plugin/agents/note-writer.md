@@ -32,12 +32,12 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Skills
 
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/promote-gate.md`: assess note quality and determine the correct destination folder. **Override the requested destination if quality warrants it — UNLESS `destination_locked: true` was passed** (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead, but only when the destination is not locked). Hub-shaped synthesis notes route to `5-maps/`. Caller destinations of `2-literature/` and `5-maps/` are always respected (no override), as is any destination when `destination_locked` is set.
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/counter-argument-linking.md`: detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`: post-write source and claim verification against public APIs
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/vault-io.md`: how to read/write vault files
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md`: canonical note format constraints (title, body, tags, links, frontmatter)
-- `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md`: when to diagram + Excalidraw format spec
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/promote-gate.md`: assess note quality and determine the correct destination folder. **Override the requested destination if quality warrants it — UNLESS `destination_locked: true` was passed** (e.g., a note requested for `0-inbox/` that passes all 6 criteria goes to `3-permanent/` instead, but only when the destination is not locked). Hub-shaped synthesis notes route to `5-maps/`. Caller destinations of `2-literature/` and `5-maps/` are always respected (no override), as is any destination when `destination_locked` is set.
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/counter-argument-linking.md`: detect if the note challenges an existing vault claim. If so, add bidirectional links per the skill's process.
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md`: post-write source and claim verification against public APIs
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/vault-io.md`: how to read/write vault files
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/capture-rules.md`: canonical note format constraints (title, body, tags, links, frontmatter)
+- `${CLAUDE_PLUGIN_ROOT}/agents-shared/diagram-rules.md`: when to diagram + Excalidraw format spec
 
 ## Voice
 
@@ -45,7 +45,7 @@ If none of these apply, use `source: unverified`. An honest "unverified" is bett
 
 ## Capture Rules
 
-Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/capture-rules.md` and follow it for every note — it is canonical; do not work from memory of it. Two constraints bite hardest here: the title states the insight (not the topic), and `status:` is reserved for intention tracking (`intentioned | resolved | limbo`) — never write `status: inbox/permanent/fleeting`, the folder IS the maturity status.
+Read `${CLAUDE_PLUGIN_ROOT}/agents-shared/capture-rules.md` and follow it for every note — it is canonical; do not work from memory of it. Two constraints bite hardest here: the title states the insight (not the topic), and `status:` is reserved for intention tracking (`intentioned | resolved | limbo`) — never write `status: inbox/permanent/fleeting`, the folder IS the maturity status.
 
 ## Output Format
 
@@ -98,9 +98,9 @@ If `existing_note` is provided:
 
 ## Diagram Generation
 
-Apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` — it is canonical; do not restate it from memory.
+Apply the "When to Diagram" trigger from `${CLAUDE_PLUGIN_ROOT}/agents-shared/diagram-rules.md` — it is canonical; do not restate it from memory.
 
-Read `${CLAUDE_PLUGIN_ROOT}/agents/_skills/diagram-rules.md` for the full format spec, visual style, and construction rules.
+Read `${CLAUDE_PLUGIN_ROOT}/agents-shared/diagram-rules.md` for the full format spec, visual style, and construction rules.
 
 Write the diagram to `{{VAULT}}/Excalidraw/{insight-slug}.excalidraw.md` and embed it in the note with `![[{insight-slug}]]`.
 
@@ -127,7 +127,7 @@ If a shape check fires and you can't resolve it (no verbatim, no survey, no fetc
 
 ### Pass 2: API verification
 
-Run the full verification procedure per `${CLAUDE_PLUGIN_ROOT}/agents/_skills/source-verification.md`, using `source-resolver.mjs verify-note` and `check-claims`. Fix what the resolver catches (wrong author, wrong year). Mark unresolvable issues with inline markers (`[unresolved]`, `[unverified]`, `[not in abstract]`). Max 2 verify-note calls (initial + one retry).
+Run the full verification procedure per `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md`, using `source-resolver.mjs verify-note` and `check-claims`. Fix what the resolver catches (wrong author, wrong year). Mark unresolvable issues with inline markers (`[unresolved]`, `[unverified]`, `[not in abstract]`). Max 2 verify-note calls (initial + one retry).
 
 ### Emit provenance
 
