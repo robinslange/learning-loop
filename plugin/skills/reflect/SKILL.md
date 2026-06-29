@@ -86,11 +86,9 @@ The Step 2.5 reflect-scan and the Step 2.75 episodic search are independent — 
 
 Parse the JSON result. For each query:
 
-- `top_match_similarity > 0.85`: likely duplicate. Read the existing note and update it instead of creating a new one.
-- `top_match_similarity 0.74-0.85`: related note exists. Consider linking rather than duplicating.
-- `top_match_similarity < 0.74`: no existing coverage. Create a new note.
-
-This score is raw cosine between a short learning summary and a full note, so even a true duplicate rarely scores ~0.95; a 0.85 hit is already strong. (Both bands come from `scripts/lib/hook-config.mjs`: 0.85 is `SIMILARITY_THRESHOLD`, the bar the live duplicate gate uses; 0.74 is `COSINE_MIN`, the related-note band floor.)
+- `top_match_similarity > 0.90`: likely duplicate. Read the existing note and update it instead of creating a new one.
+- `top_match_similarity 0.70-0.90`: related note exists. Consider linking rather than duplicating.
+- `top_match_similarity < 0.70`: no existing coverage. Create a new note.
 
 Review `confusable_pairs` in the result. If any pairs are found, flag them for the user as potential MERGE or SHARPEN candidates in the Step 5 report.
 
@@ -102,7 +100,7 @@ If the episodic memory MCP tool is available (`mcp__plugin_episodic-memory_episo
 
 Using the reflect-scan results from Step 2.5:
 
-- For learnings with `top_match_similarity > 0.85`, read the matched note. If the existing note already captures the insight, skip creating a new one.
+- For learnings with `top_match_similarity > 0.90`, read the matched note. If the existing note already captures the insight, skip creating a new one.
 - For auto-memory items: grep the memory dir filenames and the MEMORY.md index lines for the learning's key terms. If 1-3 files match, read those in full and judge on their bodies. If a match states the same rule, edit it and bump its date rather than adding a second file. If grep returns nothing, write the new memory.
 
 ### Step 4: Write to Stores

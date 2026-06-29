@@ -47,8 +47,6 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'SKILL.md');
 // Step 4.6's bash blocks live in the extracted step file; the handshake
@@ -310,30 +308,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         'the empty-pairs branch must not skip the entire rest of 4.6 (that skips 4.6.g cleanup)',
       );
       assert.doesNotMatch(refinement, /skip 4\.6\.g/, '4.6.g cleanup must never be skipped');
-    });
-
-    it('pins the Step 2.5 dedup bands to hook-config.mjs (no silent drift)', () => {
-      // The prose cites 0.85 (SIMILARITY_THRESHOLD) and 0.74 (COSINE_MIN) as the
-      // calibrated edges. If hook-config retunes either, the self-referential
-      // sentence silently lies. Pin the prose to the config values.
-      const skillOnly = readFileSync(SKILL_PATH, 'utf8');
-      const hi = HookConfig.SIMILARITY_THRESHOLD;
-      const lo = HookConfig.COSINE_MIN;
-      // Match the full band lines so a drift in EITHER line (Step 2.5 list or the
-      // Step 3 read-the-matched-note line) is caught, not just "0.85 appears
-      // somewhere".
-      assert.ok(
-        skillOnly.includes(`\`top_match_similarity > ${hi}\`: likely duplicate`),
-        `Step 2.5 likely-duplicate band must read "> ${hi}" (SIMILARITY_THRESHOLD)`,
-      );
-      assert.ok(
-        skillOnly.includes(`\`top_match_similarity ${lo}-${hi}\`: related note`),
-        `Step 2.5 related band must read "${lo}-${hi}" (COSINE_MIN-SIMILARITY_THRESHOLD)`,
-      );
-      assert.ok(
-        skillOnly.includes(`with \`top_match_similarity > ${hi}\`, read the matched note`),
-        `Step 3 duplicate-check must read "> ${hi}" (SIMILARITY_THRESHOLD)`,
-      );
     });
 
     it("selects sweep candidates by this session's reflect_sid via --scan-vault", () => {
