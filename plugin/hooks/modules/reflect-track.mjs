@@ -45,12 +45,14 @@ import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
 // marker file), so both sides meet. Only when plugin-data can't be resolved
 // (bare CLI/test) do we fall back to tmpdir() — acceptable since the skill isn't
 // running there. Both sides resolve the dir the same way: this hook via
-// reflectScratchDir(), the skill's bash via resolve-paths.mjs PLUGIN_DATA.
+// reflectScratchDir(), the skill's bash via resolve-paths.mjs --sh
+// (which exports REFLECT_SCRATCH = reflectScratchDir()'s value).
 //
 // Session id keys the file within that dir, via the canonical getSessionId()
-// (the same resolver the skill runs through resolve-paths.mjs SESSION_ID). An
-// explicit `sessionId` arg still wins for tests/direct callers; getSessionId()
-// returns the 'unknown' sentinel outside a Claude Code session.
+// (the same resolver the skill runs through resolve-paths.mjs --sh, whose
+// SESSION_ID is getSessionId()'s value). An explicit `sessionId` arg still wins
+// for tests/direct callers; getSessionId() returns the 'unknown' sentinel
+// outside a Claude Code session.
 export function reflectScratchDir() {
   const pd = resolvePluginData();
   return pd ? DATA_PATHS.reflectScratch(pd) : tmpdir();
@@ -72,7 +74,8 @@ export function runReflectTrack(ctx) {
 
   // sessionId is honored only as an explicit override (tests/direct callers);
   // in production it is undefined here so the path resolves from getSessionId()
-  // — the same resolver the skill's bash runs via resolve-paths.mjs SESSION_ID.
+  // — the same resolver the skill's bash runs via resolve-paths.mjs --sh
+  // (SESSION_ID).
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
 

@@ -133,6 +133,10 @@ function main() {
   if (args.length === 0 || wantsHelp) {
     const helpText = `sweep-hook-replay.mjs <file> [<file> ...]
 sweep-hook-replay.mjs --stdin                 Read newline-separated paths from stdin
+sweep-hook-replay.mjs --scan-vault <root> --sid <sid>
+                                              Compute the /reflect 4.4 candidate
+                                              union (link-less OR reflect_sid==sid,
+                                              5-folder allowlist) then replay
 
 Invokes the post-tool dispatcher (hooks/post-tool.js) on one or more vault
 notes, running provenance + reflect-track + autolink + edge-infer in fixed
@@ -155,8 +159,12 @@ success, 1 if any file failed, 2 on usage error.
     const root = args[args.indexOf('--scan-vault') + 1];
     const sidIdx = args.indexOf('--sid');
     const sid = sidIdx >= 0 ? args[sidIdx + 1] : '';
-    if (!root) {
-      process.stderr.write('--scan-vault requires a vault root path\n');
+    if (!root || root.startsWith('--')) {
+      process.stderr.write('--scan-vault requires a vault root path (got none or a flag)\n');
+      process.exit(2);
+    }
+    if (sidIdx >= 0 && (!sid || sid.startsWith('--'))) {
+      process.stderr.write('--sid requires a session id (got none or a flag)\n');
       process.exit(2);
     }
     paths = scanVaultCandidates(resolve(root), sid);

@@ -47,6 +47,8 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SKILL_PATH = join(__dirname, '..', 'plugin', 'skills', 'reflect', 'SKILL.md');
 // Step 4.6's bash blocks live in the extracted step file; the handshake
@@ -269,6 +271,71 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
+    it('the Step 4.4 --scan-vault fence resolves its own paths via --sh', () => {
+      // The 4.4 fence runs in its own shell and reads $VAULT/$SESSION_ID (and
+      // sets LL_REFLECT_SID=$SESSION_ID). It does NOT build the reflect-scratch
+      // prefix, so the per-fence-prefix test above never visits it. Pin its
+      // resolver directly: dropping the `eval "$(...--sh)"` would leave $VAULT
+      // and $SESSION_ID empty in this separate shell — the sweep would abort
+      // (empty root) or run blind, sub-agent notes would stop reaching the
+      // marker, and Step 4.6 refinement would go silent, all with green CI.
+      const fence = extractFence(readFileSync(SKILL_PATH, 'utf8'), '--scan-vault "$VAULT"');
+      assert.ok(fence, 'could not find the Step 4.4 --scan-vault bash fence');
+      assert.ok(
+        fence.body.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh'),
+        'the Step 4.4 --scan-vault fence must resolve $VAULT/$SESSION_ID via ' +
+          'resolve-paths.mjs --sh in its own shell — a dropped resolver silently ' +
+          'unresolves the sweep and breaks the marker handshake + LL_REFLECT_SID routing.',
+      );
+    });
+
+    it('runs 4.6.g cleanup even on the 0-candidate path (no permanent reflect_sid leak)', () => {
+      // The leak fix: when refinement-pairs is [], the skill must skip 4.6.b-f
+      // but STILL run 4.6.g (strip reflect_sid, remove the marker). The pre-fix
+      // wording was "skip the rest of 4.6", which left every note's transient
+      // reflect_sid stamp in the vault permanently on no-candidate runs. Pin the
+      // corrected contract so a prose revert can't silently reintroduce the leak.
+      const refinement = readFileSync(REFINEMENT_STEP_PATH, 'utf8');
+      assert.match(
+        refinement,
+        /0 candidates in band[^\n]*Still run \*\*4\.6\.g cleanup\*\*/,
+        'the empty-pairs branch must explicitly still run 4.6.g cleanup',
+      );
+      // The naive "skip the rest of 4.6" / "skip 4.6.g" must NOT reappear. Scope
+      // the negative narrowly: the corrected prose legitimately says "skip
+      // 4.6.b through 4.6.f", which must stay allowed.
+      assert.doesNotMatch(
+        refinement,
+        /skip the rest of 4\.6\b/,
+        'the empty-pairs branch must not skip the entire rest of 4.6 (that skips 4.6.g cleanup)',
+      );
+      assert.doesNotMatch(refinement, /skip 4\.6\.g/, '4.6.g cleanup must never be skipped');
+    });
+
+    it('pins the Step 2.5 dedup bands to hook-config.mjs (no silent drift)', () => {
+      // The prose cites 0.85 (SIMILARITY_THRESHOLD) and 0.74 (COSINE_MIN) as the
+      // calibrated edges. If hook-config retunes either, the self-referential
+      // sentence silently lies. Pin the prose to the config values.
+      const skillOnly = readFileSync(SKILL_PATH, 'utf8');
+      const hi = HookConfig.SIMILARITY_THRESHOLD;
+      const lo = HookConfig.COSINE_MIN;
+      // Match the full band lines so a drift in EITHER line (Step 2.5 list or the
+      // Step 3 read-the-matched-note line) is caught, not just "0.85 appears
+      // somewhere".
+      assert.ok(
+        skillOnly.includes(`\`top_match_similarity > ${hi}\`: likely duplicate`),
+        `Step 2.5 likely-duplicate band must read "> ${hi}" (SIMILARITY_THRESHOLD)`,
+      );
+      assert.ok(
+        skillOnly.includes(`\`top_match_similarity ${lo}-${hi}\`: related note`),
+        `Step 2.5 related band must read "${lo}-${hi}" (COSINE_MIN-SIMILARITY_THRESHOLD)`,
+      );
+      assert.ok(
+        skillOnly.includes(`with \`top_match_similarity > ${hi}\`, read the matched note`),
+        `Step 3 duplicate-check must read "> ${hi}" (SIMILARITY_THRESHOLD)`,
+      );
+    });
+
     it("selects sweep candidates by this session's reflect_sid via --scan-vault", () => {
       // The candidate union (link-less OR reflect_sid==session) now lives in
       // sweep-hook-replay.mjs --scan-vault (unit-tested in
@@ -332,12 +399,31 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
 
       const resolvePaths = join(__dirname, '..', 'plugin', 'scripts', 'resolve-paths.mjs');
       const childEnv = { ...process.env, TMPDIR: join(tmpRoot, 'child-sees-a-different-tmpdir') };
-      const run = (field) =>
-        execFileSync('node', [resolvePaths, field], { encoding: 'utf8', env: childEnv }).trim();
 
-      // Skill side: build the marker exactly as SKILL.md's bash does.
-      const skillSid = run('SESSION_ID');
-      const skillScratch = run('REFLECT_SCRATCH');
+      // Skill side: build the marker exactly as SKILL.md's bash does — via the
+      // --sh export the fences run (`eval "$(resolve-paths.mjs --sh)"`), parsing
+      // SESSION_ID/REFLECT_SCRATCH out of it, NOT the single-field mode.
+      const shOut = execFileSync('node', [resolvePaths, '--sh'], {
+        encoding: 'utf8',
+        env: childEnv,
+      });
+      const sh = Object.fromEntries(
+        shOut
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const eq = line.indexOf('=');
+            return [
+              line.slice(0, eq),
+              line
+                .slice(eq + 1)
+                .replace(/^'|'$/g, '')
+                .replace(/'\\''/g, "'"),
+            ];
+          }),
+      );
+      const skillSid = sh.SESSION_ID;
+      const skillScratch = sh.REFLECT_SCRATCH;
       const skillMarker = join(skillScratch, `ll-${skillSid}-reflect-new-notes.txt`);
 
       // Hook side: reflectNewNotesPath() in THIS process (its own $TMPDIR).

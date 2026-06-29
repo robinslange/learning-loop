@@ -21,6 +21,7 @@ Structured checkpoint that extracts what was learned in this session and persist
 This skill emits provenance events for pipeline observability. Run each Bash command silently.
 
 **At session start:**
+
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-start"}'
 ```
@@ -36,6 +37,7 @@ Work through these steps in order. Be concise throughout: the vault voice is Hem
 ### Step 1: Session Review
 
 Silently review the conversation. Identify:
+
 - **Domain**: What area of work/knowledge was this? (project name, topic area)
 - **Nature**: Was this building, debugging, researching, deciding, learning, discussing?
 - **Substance**: Rate the session: was it routine or did genuine learning happen?
@@ -46,17 +48,17 @@ If the session was purely routine (config change, typo fix, quick lookup), say s
 
 Identify what was learned. Categories:
 
-| Category | Example | Destination | Confidence |
-|---|---|---|---|
-| **Correction received** | "Don't mock the DB in these tests" | Auto-memory (feedback) | strong |
-| **Preference revealed** | "I prefer X approach over Y" | Auto-memory (user/feedback) | strong |
-| **Decision made** | "We chose Postgres over SQLite because..." | Obsidian vault | - |
-| **Problem solved** | "The build failed because X, fixed by Y" | Obsidian vault | - |
-| **Pattern discovered** | "This pagination pattern works across projects" | Obsidian vault | - |
-| **Domain insight** | "Resto Druid HoT uptime benchmarks are..." | Obsidian vault | - |
-| **Project context** | "Auth rewrite is driven by compliance, not tech debt" | Auto-memory (project) | medium |
-| **Cross-project connection** | "Same caching problem exists in Acme and Widget-Co" | Obsidian vault + links | - |
-| **Implicit pattern** | User always runs tests before committing (observed 3+ times, never stated) | Auto-memory (feedback) | weak |
+| Category                     | Example                                                                    | Destination                 | Confidence |
+| ---------------------------- | -------------------------------------------------------------------------- | --------------------------- | ---------- |
+| **Correction received**      | "Don't mock the DB in these tests"                                         | Auto-memory (feedback)      | strong     |
+| **Preference revealed**      | "I prefer X approach over Y"                                               | Auto-memory (user/feedback) | strong     |
+| **Decision made**            | "We chose Postgres over SQLite because..."                                 | Obsidian vault              | -          |
+| **Problem solved**           | "The build failed because X, fixed by Y"                                   | Obsidian vault              | -          |
+| **Pattern discovered**       | "This pagination pattern works across projects"                            | Obsidian vault              | -          |
+| **Domain insight**           | "Resto Druid HoT uptime benchmarks are..."                                 | Obsidian vault              | -          |
+| **Project context**          | "Auth rewrite is driven by compliance, not tech debt"                      | Auto-memory (project)       | medium     |
+| **Cross-project connection** | "Same caching problem exists in Acme and Widget-Co"                        | Obsidian vault + links      | -          |
+| **Implicit pattern**         | User always runs tests before committing (observed 3+ times, never stated) | Auto-memory (feedback)      | weak       |
 
 List each learning as a single line. When a learning could fit more than one row, the table's one-destination-per-row is the default, not a hard partition; apply the Route-correctly test (Key Principles) to decide.
 
@@ -64,7 +66,7 @@ Before finalizing, explicitly check the three categories that hide in a fast pas
 
 ### Step 2.5: Batch Retrieval
 
-If any subagent (note-writer, discovery-researcher, literature-capturer) wrote vault notes *earlier in this session*, the search index may not cover them yet, so the dedup below would miss them. Refresh the index first (incremental; embeds only new or mtime-changed notes):
+If any subagent (note-writer, discovery-researcher, literature-capturer) wrote vault notes _earlier in this session_, the search index may not cover them yet, so the dedup below would miss them. Refresh the index first (incremental; embeds only new or mtime-changed notes):
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs" index
@@ -83,11 +85,12 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs reflect-scan "learning 1 sum
 The Step 2.5 reflect-scan and the Step 2.75 episodic search are independent — you MAY issue both in the same turn. Only Step 2.5's output is required before Step 3.
 
 Parse the JSON result. For each query:
+
 - `top_match_similarity > 0.85`: likely duplicate. Read the existing note and update it instead of creating a new one.
 - `top_match_similarity 0.74-0.85`: related note exists. Consider linking rather than duplicating.
 - `top_match_similarity < 0.74`: no existing coverage. Create a new note.
 
-This score is raw cosine between a short learning summary and a full note, so even a true duplicate rarely scores ~0.95; a 0.85 hit is already strong. (0.85 is the live duplicate gate's `SIMILARITY_THRESHOLD`, 0.74 is its `COSINE_MIN`, both from `scripts/lib/hook-config.mjs`.)
+This score is raw cosine between a short learning summary and a full note, so even a true duplicate rarely scores ~0.95; a 0.85 hit is already strong. (Both bands come from `scripts/lib/hook-config.mjs`: 0.85 is `SIMILARITY_THRESHOLD`, the bar the live duplicate gate uses; 0.74 is `COSINE_MIN`, the related-note band floor.)
 
 Review `confusable_pairs` in the result. If any pairs are found, flag them for the user as potential MERGE or SHARPEN candidates in the Step 5 report.
 
@@ -98,12 +101,14 @@ If the episodic memory MCP tool is available (`mcp__plugin_episodic-memory_episo
 ### Step 3: Duplicate Check
 
 Using the reflect-scan results from Step 2.5:
+
 - For learnings with `top_match_similarity > 0.85`, read the matched note. If the existing note already captures the insight, skip creating a new one.
 - For auto-memory items: grep the memory dir filenames and the MEMORY.md index lines for the learning's key terms. If 1-3 files match, read those in full and judge on their bodies. If a match states the same rule, edit it and bump its date rather than adding a second file. If grep returns nothing, write the new memory.
 
 ### Step 4: Write to Stores
 
 **For auto-memory items:**
+
 - Follow the auto-memory format (frontmatter with name, description, type + content)
 - Set `confidence` in frontmatter based on signal strength:
   - `strong`: user explicitly stated the preference or correction ("I always want...", "Don't ever...", "No, do it this way")
@@ -116,6 +121,7 @@ Using the reflect-scan results from Step 2.5:
 - Update MEMORY.md index
 
 **For Obsidian vault items:**
+
 - Write to `{{VAULT}}/0-inbox/` using the `Write` tool
 - Follow capture-rules.md: one idea per note, title states the insight, body 3-10 lines, max 3 tags, at least one link
 - Follow persona.md voice: Hemingway + Musashi + Lao Tzu. No filler.
@@ -132,11 +138,11 @@ Using the reflect-scan results from Step 2.5:
 # Write — the post-tool hook does the per-write appends automatically while
 # this file exists. Step 4.6.g removes it to end the tracking window.
 #
-# One resolve-paths.mjs --sh call exports every value this whole step (and
-# 4.4/4.6/4.7) needs: SESSION_ID, REFLECT_SCRATCH, PLUGIN_DATA, VAULT, plus
-# LAST_REFLECT etc. Because bash fences run in separate shells, each later
-# fence re-runs this same --sh eval; within a fence the exported names are used
-# directly (no aliasing). The marker dir/key MUST stay the values
+# One resolve-paths.mjs --sh call exports the values this step and 4.4/4.6/4.7
+# use: SESSION_ID, REFLECT_SCRATCH (and PLUGIN_DATA/VAULT where a fence needs
+# them). Because bash fences run in separate shells, each later fence re-runs
+# this same --sh eval; within a fence the exported names are used directly (no
+# aliasing). The marker dir/key MUST stay the values
 # resolve-paths.mjs returns: the hook computes the same path independently via
 # reflectScratchDir()+getSessionId(), so writer and reader stay in lockstep
 # across the $TMPDIR-split hook/shell boundary. Never hardcode a tmp path or
@@ -153,7 +159,7 @@ Sub-agent writes (note-writer, discovery-researcher, literature-capturer) don't 
 
 Subagent Write/Edit tool calls bypass PostToolUse hooks. Notes written earlier in this session by `note-writer`, `discovery-researcher`, `literature-capturer`, or any other subagent may have missed the `hooks/post-tool.js` dispatcher entirely (no suggested backlinks or typed edges), **and** never reached the reflect new-notes marker (so Step 4.6 refinement would skip them).
 
-Replay the hook chain on two candidate sets, unioned: (1) notes missing structural backlinks (autolink/edge-infer backfill), and (2) every note carrying *this session's* `reflect_sid` (the marker backfill — these are the sub-agent notes whose paths the live hook never captured). The replay runs with `LL_REFLECT_SID=$SESSION_ID`, which routes each replayed Write to this session's marker even under concurrent `/reflect` runs. Idempotent: safe to run on already-hooked notes (autolink checks for existing links; reflect-track de-dups paths on read in Step 4.6.a).
+Replay the hook chain on two candidate sets, unioned: (1) notes missing structural backlinks (autolink/edge-infer backfill), and (2) every note carrying _this session's_ `reflect_sid` (the marker backfill — these are the sub-agent notes whose paths the live hook never captured). The replay runs with `LL_REFLECT_SID=$SESSION_ID`, which routes each replayed Write to this session's marker even under concurrent `/reflect` runs. Idempotent: safe to run on already-hooked notes (autolink checks for existing links; reflect-track de-dups paths on read in Step 4.6.a).
 
 ```bash
 # This fence runs in its own shell, so re-resolve via --sh. The ll-search shim
@@ -182,14 +188,16 @@ Expected output is a JSON summary `{processed, ok, failed, failures}` (and `{pro
 ### Step 4.5: Intention Extraction
 
 After writing new vault captures, scan each new note's body for intention patterns:
+
 - "when working on X" / "when designing X" / "when building X"
 - "use this for X" / "reference this for X"
 - "apply to X" / "relevant to X"
 
 If an intention pattern is found, extract to frontmatter:
+
 ```yaml
 intentions:
-  - "<extracted project/topic>: <the full intention sentence>"
+  - '<extracted project/topic>: <the full intention sentence>'
 status: intentioned
 ```
 
@@ -236,8 +244,8 @@ Run this at the end of **every** /reflect invocation, unconditionally — both l
 
 ## Subagent Usage
 
-| Agent | Where | Role |
-|-------|-------|------|
+| Agent               | Where                                                                 | Role                                                                    |
+| ------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | refinement-proposer | Step 4.6.b (conditional: only when the session wrote new vault notes) | Classifies new-note → upstream-note pairs and proposes refinement edits |
 
 Retrieval itself stays main-thread: it is handled by the `reflect-scan` binary command, not a subagent.

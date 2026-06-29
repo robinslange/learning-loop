@@ -77,23 +77,23 @@ Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json` (i.e. `$
 
 ### Edits ({edit_ok} ok, {edit_oversized} oversized warnings, {edit_auto_rejected} auto-rejected)
 
-| # | upstream | type | Δ% | summary |
-|---|----------|------|----|---------|
-| 1 | websocket-has-no-built-in-reconnection | extends | 12% | Added Vercel/CF/AWS proxy timeout numbers |
-| 2 | (warn) digital-signatures-prove-authorship | qualifies | 28% | Added challenge-response gap discussion |
+| #   | upstream                                   | type      | Δ%  | summary                                   |
+| --- | ------------------------------------------ | --------- | --- | ----------------------------------------- |
+| 1   | websocket-has-no-built-in-reconnection     | extends   | 12% | Added Vercel/CF/AWS proxy timeout numbers |
+| 2   | (warn) digital-signatures-prove-authorship | qualifies | 28% | Added challenge-response gap discussion   |
 
 ### Counterpoints ({counterpoint_ok})
 
-| # | upstream | reason |
-|---|----------|--------|
-| 3 | concept-creep-and-diagnostic-bracket-creep | new note disputes the bracket-vs-vertical distinction |
+| #   | upstream                                   | reason                                                |
+| --- | ------------------------------------------ | ----------------------------------------------------- |
+| 3   | concept-creep-and-diagnostic-bracket-creep | new note disputes the bracket-vs-vertical distinction |
 
 ### Auto-rejected ({edit_auto_rejected})
 
-| # | upstream | Δ% | reason |
-|---|----------|----|--------|
-| 4 | ... | 73% | exceeded 50% body change ceiling |
-| 5 | ... | 4% | removed 2 original sentences (edits must be additive) |
+| #   | upstream | Δ%  | reason                                                |
+| --- | -------- | --- | ----------------------------------------------------- |
+| 4   | ...      | 73% | exceeded 50% body change ceiling                      |
+| 5   | ...      | 4%  | removed 2 original sentences (edits must be additive) |
 
 **Actions**: type `apply all` to apply every ok + oversized item, `apply ok` to apply only `ok` items, `apply N M` for specific IDs, `diff N` to print the unified diff for one item, or `none` to cancel.
 ```
@@ -115,7 +115,7 @@ For each decision in the approved set:
   2. **Provenance stamp.** The agent is forbidden from touching frontmatter or citing itself (refinement-proposer RULE 4); the driver owns provenance because the driver does the Write. Modify the validated `proposed_body` before writing:
      - Merge the new note's `source:` frontmatter entries into the upstream frontmatter's `source:` list: create the key if absent, keep the upstream's existing entries first, skip entries already present.
      - Append ` ([[<new-note-stem>]])` to the end of the paragraph the edit touched (the lines that differ from the upstream), unless the body already wikilinks the new note.
-     These additions happen after validation, so they cannot trip the validator's frontmatter or sentence checks. Never re-run `refinement-validate.mjs` on a stamped body — it would flag the driver's own additions as violations.
+       These additions happen after validation, so they cannot trip the validator's frontmatter or sentence checks. Never re-run `refinement-validate.mjs` on a stamped body — it would flag the driver's own additions as violations.
   3. **Write** the stamped body to `upstream_path` using the `Write` tool. The post-write hook chain re-fires (autolink, edge-infer, provenance).
 - **counterpoint**: append `new_note_link_text` to the new note's body via `Edit`, and append `upstream_link_text` to the upstream's body via `Edit`. Do NOT modify the upstream's claim. Both edits should append to the body, not modify existing lines. Skip if a link with the same target already exists in either file.
 - **auto_rejected**: never apply. Log only.

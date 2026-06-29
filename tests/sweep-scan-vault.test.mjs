@@ -14,7 +14,19 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { scanVaultCandidates } from '../plugin/scripts/sweep-hook-replay.mjs';
+
+const SCRIPT = new URL('../plugin/scripts/sweep-hook-replay.mjs', import.meta.url).pathname;
+
+function runCli(args) {
+  try {
+    const stdout = execFileSync('node', [SCRIPT, ...args], { encoding: 'utf-8' });
+    return { status: 0, stdout };
+  } catch (err) {
+    return { status: err.status ?? 1, stdout: err.stdout || '', stderr: err.stderr || '' };
+  }
+}
 
 function setupVault() {
   const root = mkdtempSync(join(tmpdir(), 'scan-vault-'));
@@ -31,17 +43,20 @@ function setupVault() {
   return root;
 }
 
-test('flags an unlinked-body note in an allowlisted folder', () => {
-  const root = setupVault();
-  try {
-    const p = join(root, '0-inbox', 'unlinked.md');
-    writeFileSync(p, '---\nname: unlinked\n---\n\nNo wikilinks here.\n');
-    const got = scanVaultCandidates(root, 'sess-1');
-    assert.deepEqual(got, [p]);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+// Every allowlisted folder must be walked — not just a sampled few. A regression
+// that drops 1-fleeting or 5-maps from SWEEP_FOLDERS would otherwise pass CI.
+for (const folder of ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '5-maps']) {
+  test(`flags an unlinked-body note in the ${folder} allowlist folder`, () => {
+    const root = setupVault();
+    try {
+      const p = join(root, folder, 'unlinked.md');
+      writeFileSync(p, '---\nname: unlinked\n---\n\nNo wikilinks here.\n');
+      assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
 
 test('does NOT flag a linked note that is not this session', () => {
   const root = setupVault();
@@ -105,4 +120,43 @@ test('emits each matching note once even if it satisfies both sets', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// End-to-end CLI dispatch (the path Step 4.4 actually invokes), not just the
+// exported function — covers arg parsing, the replay handoff, and the guards.
+test('--scan-vault CLI scans, replays, and reports a JSON summary', () => {
+  const root = setupVault();
+  try {
+    writeFileSync(join(root, '0-inbox', 'note.md'), '---\nname: note\n---\n\nUnlinked.\n');
+    const { status, stdout } = runCli(['--scan-vault', root, '--sid', 'sess-1']);
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.processed, 1, 'the one unlinked note is processed');
+    // replay runs hooks/post-tool.js per note; status is 0 (ok) or 1 (a hook
+    // failed) but the candidate selection + dispatch must have run.
+    assert.ok(status === 0 || status === 1, `unexpected exit ${status}`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--scan-vault rejects a flag where the root should be (exit 2)', () => {
+  // Guards the arg-parse hole: `--scan-vault --sid x` must NOT treat "--sid" as
+  // the root and silently print {processed:0} exit 0.
+  const r = runCli(['--scan-vault', '--sid', 'sess-1']);
+  assert.equal(r.status, 2, 'a flag-as-root must be a usage error, not a silent empty scan');
+});
+
+test('--scan-vault with a dangling --sid is a usage error (exit 2)', () => {
+  const root = setupVault();
+  try {
+    const r = runCli(['--scan-vault', root, '--sid']);
+    assert.equal(r.status, 2, 'a --sid with no value must be a usage error');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--help lists the --scan-vault mode', () => {
+  const { stdout } = runCli(['--help']);
+  assert.match(stdout, /--scan-vault <root> --sid <sid>/, '--help must document --scan-vault');
 });
