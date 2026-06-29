@@ -155,7 +155,11 @@ export function checkBinaryExists({ pluginData } = {}) {
       fix: 'Run /learning-loop:init to download the binary',
     });
   }
-  const binPath = join(pluginData, 'bin', 'll-search');
+  const binPath = join(
+    pluginData,
+    'bin',
+    process.platform === 'win32' ? 'll-search.exe' : 'll-search',
+  );
   if (!existsSync(binPath)) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
@@ -168,7 +172,7 @@ export function checkBinaryExists({ pluginData } = {}) {
   }
   try {
     const stat = statSync(binPath);
-    if (!(stat.mode & 0o111)) {
+    if (process.platform !== 'win32' && !(stat.mode & 0o111)) {
       return makeCheck({
         id: CHECK_IDS['binary-exists'],
         name: 'll-search binary',
@@ -271,13 +275,17 @@ export function checkShimsExist({ home } = {}) {
       fix: 'Set $HOME',
     });
   }
+  const isWin = process.platform === 'win32';
+  const shimExt = isWin ? '.cmd' : '';
   const missing = [];
   for (const s of ['ll-watch', 'll-search']) {
-    const p = join(home, '.local/bin', s);
+    const p = join(home, '.local/bin', s + shimExt);
     if (!existsSync(p)) {
       missing.push(s);
       continue;
     }
+    // Windows .cmd shims carry no POSIX exec bit; existence is sufficient.
+    if (isWin) continue;
     try {
       const stat = statSync(p);
       if (!(stat.mode & 0o111)) missing.push(`${s} (not executable)`);

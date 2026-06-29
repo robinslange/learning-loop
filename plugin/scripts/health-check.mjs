@@ -31,6 +31,9 @@ function safeExec(cmd, args, opts = {}) {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
       timeout: 3000,
+      // Windows: execFileSync does not honor PATHEXT, so bare 'claude'/'node'
+      // miss their .cmd shims and read as "not found". Route through cmd.exe.
+      shell: process.platform === 'win32',
       ...opts,
     }).trim();
   } catch {
@@ -110,7 +113,8 @@ export async function runFullChecks(ctx = {}) {
     return data?.plugins || data || {};
   })();
 
-  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', 'll-search') : null;
+  const binaryName = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
+  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', binaryName) : null;
   let binaryVersionOutput = null;
   let binaryExitCode = 127;
   if (binaryPath && existsSync(binaryPath)) {
