@@ -1,7 +1,6 @@
 import { search } from '../../librarian/research/brave.mjs';
 
 async function query(q, opts = {}) {
-  if ('apiKey' in opts && !opts.apiKey) return [];
   const results = await search(q, opts);
   return results.map((r) => ({
     url: r.url,
