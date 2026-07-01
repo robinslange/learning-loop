@@ -12,11 +12,11 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { search as braveSearch } from './research/brave.mjs';
-import { fetchText as defaultFetchText } from './research/fetch.mjs';
 import { extractClaims } from './research/extract.mjs';
 import { sourceIdFromUrl } from './research/source-id.mjs';
 import { loadLibrarianConfig, researchModelOk } from './config.mjs';
+import { resolveSlot } from '../lib/sources/registry.mjs';
+import { loadSourcesConfig } from '../lib/sources/config.mjs';
 
 const DEFAULT_MAX_FETCH = 15;
 
@@ -48,16 +48,23 @@ export function resolveModel(argModel, cfgModel) {
  * }} [opts]
  */
 export async function runResearch(question, opts = {}) {
+  const cfg = loadSourcesConfig();
+  const searchInjected = typeof opts.searchFn === 'function';
+  const fetchInjected = typeof opts.fetchTextFn === 'function';
   const {
     angles = [{ label: 'general', query: question }],
     maxFetch = DEFAULT_MAX_FETCH,
     model,
     keepAlive,
     ollamaUrl,
-    searchFn = (q) => braveSearch(q),
-    fetchTextFn = (url) => defaultFetchText(url),
+    searchFn = (q) => resolveSlot('web_search', { cfg }).query(q),
+    fetchTextFn = (url) => resolveSlot('fetch', { cfg }).fetch(url),
     extractFn = (text, q, o) => extractClaims(text, q, o),
   } = opts;
+  const source_used = {
+    search: searchInjected ? 'injected' : cfg.web_search,
+    fetch: fetchInjected ? 'injected' : cfg.fetch,
+  };
 
   const searchResults = await Promise.all(angles.map((a) => searchFn(a.query)));
   const seen = new Set();
@@ -124,6 +131,7 @@ export async function runResearch(question, opts = {}) {
     sources: results.filter((x) => x.source).map((x) => x.source),
     claims: results.flatMap((x) => x.claims ?? []),
     skipped: results.filter((x) => x.skipped).map((x) => x.skipped),
+    source_used,
   };
 }
 
