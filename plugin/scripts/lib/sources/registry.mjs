@@ -1,5 +1,8 @@
 import { sleep } from './http.mjs';
 import { bestAuthorMatch } from './author-match.mjs';
+import braveSource from './web-search.mjs';
+import rawFetch from './fetch-source.mjs';
+import { loadSourcesConfig } from './config.mjs';
 import pubmed from './adapters/pubmed.mjs';
 import europepmc from './adapters/europepmc.mjs';
 import arxiv from './adapters/arxiv.mjs';
@@ -41,6 +44,20 @@ const SOURCES = ADAPTERS.filter((a) => Array.isArray(a.capabilities) && a.capabi
 
 export function sourcesWith(capability) {
   return SOURCES.filter((s) => s.capabilities.includes(capability));
+}
+
+const SOURCES_BY_ID = { brave: braveSource, raw: rawFetch };
+// Sentinel only — special-cased by id in the gateway, never dispatched by capability,
+// so it carries NO capabilities field ('research' is not in the CAPABILITIES set).
+const RESEARCH_PLACEHOLDER = { id: 'librarian' };
+
+export function resolveSlot(slot, { cfg, sourcesById = SOURCES_BY_ID } = {}) {
+  const resolved = cfg || loadSourcesConfig();
+  const id = resolved[slot];
+  if (slot === 'research' && id === 'librarian') return RESEARCH_PLACEHOLDER;
+  const src = sourcesById[id];
+  if (!src) throw new Error(`unknown source id "${id}" for slot "${slot}"`);
+  return src;
 }
 
 function extractAuthorFromQuery(query) {
