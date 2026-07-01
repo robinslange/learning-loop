@@ -98,4 +98,11 @@ async function verify(src) {
   return { verified: issues.length === 0, issues, metadata: data };
 }
 
-export default { id: 'arxiv', matches, search, fetchById, verify };
+export default {
+  id: 'arxiv',
+  capabilities: ['query', 'verify'],
+  matches,
+  search,
+  fetchById,
+  verify,
+};

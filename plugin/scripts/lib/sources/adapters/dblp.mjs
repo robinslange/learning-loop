@@ -35,4 +35,4 @@ async function search(query, maxResults = 5) {
   });
 }
 
-export default { id: 'dblp', search };
+export default { id: 'dblp', capabilities: ['query'], search };

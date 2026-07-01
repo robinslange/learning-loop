@@ -134,4 +134,4 @@ async function verify(src) {
 }
 
 export { verifyDoi };
-export default { id: 'crossref', matches, search, verify };
+export default { id: 'crossref', capabilities: ['query', 'verify'], matches, search, verify };

@@ -27,4 +27,4 @@ async function search(query, limit = 5) {
   }));
 }
 
-export default { id: 'semantic_scholar', search };
+export default { id: 'semantic_scholar', capabilities: ['query'], search };

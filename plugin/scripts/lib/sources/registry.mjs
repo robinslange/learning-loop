@@ -35,6 +35,14 @@ export function findAdapter(src) {
   return ADAPTERS.find((a) => a.matches && a.matches(src)) || null;
 }
 
+// Registered sources are the adapters that declare capabilities. biorxiv/chembl/
+// unpaywall have none (private enrichers) and are excluded by construction.
+const SOURCES = ADAPTERS.filter((a) => Array.isArray(a.capabilities) && a.capabilities.length);
+
+export function sourcesWith(capability) {
+  return SOURCES.filter((s) => s.capabilities.includes(capability));
+}
+
 function extractAuthorFromQuery(query) {
   const m = query.match(/^([A-Za-zÀ-ɏ-]+(?:\s+et\s+al\.?)?)/);
   return m ? m[1].replace(/\s+et\s+al\.?/, '') : null;

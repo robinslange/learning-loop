@@ -75,4 +75,4 @@ async function verify(src) {
   };
 }
 
-export default { id: 'pmc', matches, verify };
+export default { id: 'pmc', capabilities: ['verify'], matches, verify };

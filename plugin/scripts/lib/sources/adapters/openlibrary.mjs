@@ -58,4 +58,4 @@ async function verify(src) {
   return { verified: issues.length === 0, issues, metadata: data };
 }
 
-export default { id: 'openlibrary', matches, fetchByIsbn, verify };
+export default { id: 'openlibrary', capabilities: ['verify'], matches, fetchByIsbn, verify };
