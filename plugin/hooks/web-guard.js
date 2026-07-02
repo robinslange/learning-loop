@@ -1,0 +1,29 @@
+import { runHook } from './lib/common.mjs';
+import { emitJson } from './lib/io.mjs';
+
+const BLOCKED = new Set(['WebSearch', 'WebFetch']);
+
+/**
+ * Deny raw web tools in researcher subagents; route them through the source
+ * gateway instead. Returns the PreToolUse deny payload for a blocked tool, else
+ * null (pass-through). Pure — no stdin/process, so it is unit-testable.
+ */
+export function webGuardDecision(tool) {
+  if (!BLOCKED.has(tool)) return null;
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason:
+        tool +
+        ' is disabled for research in this plugin. Route web access through the source ' +
+        'gateway instead: node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<query>" --json ' +
+        '(or fetch --url <url>, or research --q "<question>"). This keeps every source config-selected and logged.',
+    },
+  };
+}
+
+runHook(async ({ tool }) => {
+  const decision = webGuardDecision(tool);
+  if (decision) emitJson(decision);
+});
