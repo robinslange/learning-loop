@@ -9,8 +9,8 @@ description: 'Deep research with the local librarian doing the token-heavy middl
 
 Same shape as the built-in `/deep-research` — Scope → Search → Fetch → Extract →
 3-vote adversarial Verify → Synthesize — but the **middle three phases run on the
-local librarian** (`scripts/librarian/research.mjs`: Brave search + fetch + local
-Gemma claim extraction). Roughly 15 source documents are distilled to one-line
+local librarian** (via `bin/source-gateway.mjs research`: Brave search + fetch +
+local Gemma claim extraction). Roughly 15 source documents are distilled to one-line
 cited claims _before anything reaches Claude_. Scope, Verify, and Synthesize stay
 on Claude — Verify is the step most likely to expose a small model's reasoning
 gap, and it runs over cheap one-line claims, not prose.
@@ -269,9 +269,9 @@ let probe = null;
 if (PLUGIN_ROOT) {
   const shellCmd =
     'node ' +
-    shellQuote(PLUGIN_ROOT + '/scripts/librarian/research.mjs') +
-    ' ' +
-    '--question ' +
+    shellQuote(PLUGIN_ROOT + '/bin/source-gateway.mjs') +
+    ' research ' +
+    '--q ' +
     shellQuote(QUESTION) +
     ' ' +
     '--angles ' +
