@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveOrigin, flattenRows } from '../plugin/scripts/lib/row-origin.mjs';
+import { deriveOrigin, flattenRows, stripPointerContent } from '../plugin/scripts/lib/row-origin.mjs';
 
 describe('deriveOrigin', () => {
   it('derives peer + peer id from a peer: path', () => {
@@ -14,6 +14,26 @@ describe('deriveOrigin', () => {
     assert.equal(deriveOrigin({ id: 'peer:p/x' }).origin, 'peer');
     assert.equal(deriveOrigin({}).origin, 'local');
     assert.equal(deriveOrigin(null).origin, 'local');
+  });
+});
+
+describe('stripPointerContent', () => {
+  it('strips content and text from a peer row', () => {
+    const row = { path: 'peer:thomas/b.md', score: 0.8, title: 'B', content: 'SECRET', text: 'more' };
+    const stripped = stripPointerContent(row);
+    assert.equal('content' in stripped, false);
+    assert.equal('text' in stripped, false);
+    assert.equal(stripped.path, 'peer:thomas/b.md');
+    assert.equal(stripped.title, 'B');
+    assert.equal(stripped.score, 0.8);
+  });
+  it('returns a local row with content unchanged (same reference)', () => {
+    const row = { path: 'local.md', score: 0.9, content: 'local body stays' };
+    assert.strictEqual(stripPointerContent(row), row);
+  });
+  it('returns a content-free peer row as same reference (no-op)', () => {
+    const row = { path: 'peer:x/b.md', score: 0.8 };
+    assert.strictEqual(stripPointerContent(row), row);
   });
 });
 

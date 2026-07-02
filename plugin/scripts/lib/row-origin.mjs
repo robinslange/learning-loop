@@ -12,6 +12,17 @@ export function deriveOrigin(row) {
   return { origin: 'local', sourceId: null };
 }
 
+// Awareness-only guard: a peer/pointers row shares its pointer (path/title/score)
+// but never its body. Strip content/text from peer-origin rows before they leave
+// the Node boundary. Local rows pass through untouched.
+export function stripPointerContent(row) {
+  if (deriveOrigin(row).origin !== 'peer') return row;
+  if (row == null || typeof row !== 'object') return row;
+  if (!('content' in row) && !('text' in row)) return row;
+  const { content: _c, text: _t, ...rest } = row;
+  return rest;
+}
+
 // Flatten a retrieval payload to its flat row list, across the three shapes the
 // ll-search retrieval commands emit: a bare array, { results: [...] }, and
 // reflect-scan's { queries: [{ results: [...] }] }. Returns [] for anything else.
