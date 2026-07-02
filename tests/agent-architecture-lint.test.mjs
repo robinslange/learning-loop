@@ -96,7 +96,7 @@ test('allowlisted agents declare tools: frontmatter (M14)', () => {
 });
 
 test('researcher agents do not list raw WebSearch/WebFetch (routed via source gateway)', () => {
-  const routed = ['discovery-researcher', 'literature-capturer', 'note-deepener'];
+  const routed = ['discovery-researcher', 'literature-capturer', 'note-deepener', 'note-verifier', 'note-writer'];
   for (const name of routed) {
     const src = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
     const fm = src.match(/^---\n([\s\S]*?)\n---/);
