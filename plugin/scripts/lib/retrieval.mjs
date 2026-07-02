@@ -17,6 +17,7 @@ import { appendJsonlLine } from './jsonl.mjs';
 import { getSessionId } from './session.mjs';
 import { logError } from './log.mjs';
 import { DATA_PATHS } from './paths.mjs';
+import { deriveOrigin } from './row-origin.mjs';
 
 function monthStr() {
   const now = new Date();
@@ -51,10 +52,9 @@ export function writeRetrieval(opts) {
     if (!pluginData) return;
     const dir = DATA_PATHS.retrieval(pluginData);
     mkdirSync(dir, { recursive: true });
-    const topPaths = Array.isArray(results)
-      ? results.slice(0, 10).map((r) => r.path || r.note_a || '')
-      : [];
-    const peerCount = topPaths.filter((p) => typeof p === 'string' && p.startsWith('peer:')).length;
+    const topRows = Array.isArray(results) ? results.slice(0, 10) : [];
+    const topPaths = topRows.map((r) => r.path || r.note_a || '');
+    const peerCount = topRows.filter((r) => deriveOrigin(r).origin === 'peer').length;
     const record = {
       ts: new Date().toISOString(),
       session_id: getSessionId(),

@@ -95,3 +95,32 @@ test('writeRetrieval top_paths uses note_a fallback when path absent', () => {
     rmSync(sb, { recursive: true, force: true });
   }
 });
+
+test('writeRetrieval counts peer rows via derived origin (peer: prefix retained in top_paths)', () => {
+  const sb = mkdtempSync(join(tmpdir(), 'll-retrieval-'));
+  try {
+    writeRetrieval({
+      pluginData: sb,
+      prefix: 'queries',
+      command: 'query',
+      query: 'fed',
+      results: [
+        { path: 'local.md' },
+        { path: 'peer:thomas_kirk/a.md' },
+        { path: 'peer:thomas_kirk/b.md' },
+      ],
+    });
+    const month = new Date().toISOString().slice(0, 7);
+    const record = JSON.parse(
+      readFileSync(join(sb, 'retrieval', `queries-${month}.jsonl`), 'utf8').trim(),
+    );
+    assert.equal(record.peer_results, 2);
+    assert.deepEqual(record.top_paths, [
+      'local.md',
+      'peer:thomas_kirk/a.md',
+      'peer:thomas_kirk/b.md',
+    ]);
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
