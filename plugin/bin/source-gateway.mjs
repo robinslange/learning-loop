@@ -2,15 +2,13 @@
 import { pathToFileURL } from 'node:url';
 import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/registry.mjs';
 import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
+import { getSessionId } from '../scripts/lib/session.mjs';
+import { getPluginData } from '../scripts/lib/config.mjs';
+import { readCount, bumpCount } from '../scripts/lib/fetch-budget.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
 
 const DEFAULT_FETCH_BUDGET = Number(process.env.LL_GATEWAY_FETCH_BUDGET) || 10;
-let fetchCount = 0;
-
-export function __resetFetchCount() {
-  fetchCount = 0;
-}
 
 export function parseArgs(argv) {
   const out = { verb: argv[0] };
@@ -28,7 +26,14 @@ export function parseArgs(argv) {
 class UsageError extends Error {}
 
 export async function runGateway(argv, deps = {}) {
-  const { resolveSlot = defaultResolveSlot, orchestrateResearch = defaultOrchestrateResearch, fetchBudget } = deps;
+  const {
+    resolveSlot = defaultResolveSlot,
+    orchestrateResearch = defaultOrchestrateResearch,
+    fetchBudget,
+    budgetStore,
+    sessionId,
+    pluginData,
+  } = deps;
   const args = parseArgs(argv);
   if (!VERBS.has(args.verb)) {
     throw new UsageError(`unknown verb "${args.verb ?? ''}" (expected: ${[...VERBS].join(', ')})`);
@@ -56,12 +61,33 @@ export async function runGateway(argv, deps = {}) {
   if (!args.url) throw new UsageError('fetch requires --url <url>');
   const budget = fetchBudget ?? DEFAULT_FETCH_BUDGET;
   const source = resolveSlot('fetch');
-  if (fetchCount >= budget) {
-    return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
+  // Budget enforcement via injected store (tests) or file-backed per-session counter (production).
+  // Graceful degrade: when sessionId is empty or pluginData is null, store is absent and no
+  // enforcement happens — fetch never throws from a missing data dir.
+  const store = budgetStore ?? buildFileStore(sessionId, pluginData);
+  if (store) {
+    if (store.n >= budget) {
+      return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
+    }
+    store.bump();
   }
-  fetchCount += 1;
   const doc = await source.fetch(args.url);
   return { doc, source_used: source.id };
+}
+
+function buildFileStore(sid, pd) {
+  // Resolve production session/pluginData when not injected by tests.
+  const resolvedSid = sid !== undefined ? sid : getSessionId();
+  const resolvedPd = pd !== undefined ? pd : getPluginData();
+  if (!resolvedPd || !resolvedSid || resolvedSid === 'unknown') return null;
+  return {
+    get n() {
+      return readCount(resolvedSid, resolvedPd);
+    },
+    bump() {
+      bumpCount(resolvedSid, resolvedPd);
+    },
+  };
 }
 
 export { UsageError };

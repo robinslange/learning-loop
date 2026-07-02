@@ -47,14 +47,10 @@ export function sourcesWith(capability) {
 }
 
 const SOURCES_BY_ID = { brave: braveSource, raw: rawFetch };
-// Sentinel only — special-cased by id in the gateway, never dispatched by capability,
-// so it carries NO capabilities field ('research' is not in the CAPABILITIES set).
-const RESEARCH_PLACEHOLDER = { id: 'librarian' };
 
 export function resolveSlot(slot, { cfg, sourcesById = SOURCES_BY_ID } = {}) {
   const resolved = cfg || loadSourcesConfig();
   const id = resolved[slot];
-  if (slot === 'research' && id === 'librarian') return RESEARCH_PLACEHOLDER;
   const src = sourcesById[id];
   if (!src) throw new Error(`unknown source id "${id}" for slot "${slot}"`);
   return src;

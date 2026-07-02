@@ -184,7 +184,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery-res
 
 ## Fetch Discipline
 
-Prefer gateway `search` over `fetch`: search returns fast snippets; only `fetch` a URL when you need to verify a specific claim against the page content. The gateway enforces a per-process fetch budget (default 10) and returns `{ doc: { ok:false, reason:'fetch_budget_exceeded' } }` once you exceed it — when you see that, stop fetching and mark remaining URLs as `unfetched` in the verified-sources table.
+Prefer gateway `search` over `fetch`: search returns fast snippets; only `fetch` a URL when you need to verify a specific claim against the page content. The gateway enforces a per-session fetch budget (default 10) and returns `{ doc: { ok:false, reason:'fetch_budget_exceeded' } }` once you exceed it — when you see that, stop fetching and mark remaining URLs as `unfetched` in the verified-sources table.
 
 **Avoid fetching these domains** (paywalled, bot-blocking, or redirect chains that hang): `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org`, `springer.com`, `link.springer.com`, `tandfonline.com`, `ieeexplore.ieee.org`, `eprints.*.ac.uk`, `*.edu` thesis PDFs, and any `.pdf` URL. For academic sources use `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" resolve "Author Year Topic"` instead — it hits PubMed/Semantic Scholar/CrossRef, which respond reliably.
 
