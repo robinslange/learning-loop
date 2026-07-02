@@ -42,23 +42,36 @@ describe('gateway unknown verb', () => {
   });
 });
 
-describe('gateway research verb', () => {
-  it('distills the runResearch bundle to claims/sources/source_used', async () => {
+describe('gateway research verb (full bundle)', () => {
+  it('returns the full runResearch bundle and passes angles/maxFetch through', async () => {
+    let seen;
     const fakeBundle = {
       question: 'q',
-      angles: [],
-      sources: [{ url: 'u', title: 't' }],
-      claims: [{ claim: 'c', url: 'u' }],
-      skipped: [],
+      angles: [{ label: 'a', query: 'a' }],
+      sources: [{ url: 'u' }],
+      claims: [{ claim: 'c' }],
+      skipped: [{ url: 's', reason: 'non_html' }],
       source_used: { search: 'brave', fetch: 'raw' },
     };
-    const out = await runGateway(['research', '--q', 'rust traits'], {
-      runResearch: async () => fakeBundle,
-    });
-    assert.deepEqual(out.claims, fakeBundle.claims);
-    assert.deepEqual(out.sources, fakeBundle.sources);
-    assert.deepEqual(out.source_used, { search: 'brave', fetch: 'raw' });
-    assert.equal(out.question, undefined); // distilled, not the whole bundle
+    const orchestrateResearch = async (q, opts) => {
+      seen = { q, ...opts };
+      return { bundle: fakeBundle, exitCode: 0 };
+    };
+    const out = await runGateway(
+      ['research', '--q', 'rust', '--angles', JSON.stringify([{ label: 'a', query: 'a' }]), '--max-fetch', '5'],
+      { orchestrateResearch },
+    );
+    assert.deepEqual(out, fakeBundle);
+    assert.equal(seen.q, 'rust');
+    assert.deepEqual(seen.angles, [{ label: 'a', query: 'a' }]);
+    assert.equal(seen.maxFetch, 5);
+  });
+  it('exits 3-signal when the model is below the research tier', async () => {
+    const orchestrateResearch = async () => ({ bundle: null, exitCode: 3, model: 'gemma3:e2b' });
+    await assert.rejects(
+      () => runGateway(['research', '--q', 'x'], { orchestrateResearch }),
+      (e) => e.exitCode === 3,
+    );
   });
   it('throws UsageError when research has no --q', async () => {
     await assert.rejects(() => runGateway(['research'], {}), UsageError);

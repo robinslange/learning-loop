@@ -135,6 +135,29 @@ export async function runResearch(question, opts = {}) {
   };
 }
 
+/**
+ * Orchestrate a full research run the way the CLI does: load librarian config,
+ * gate on model tier, run research. Returns { bundle, exitCode, model } — exitCode 0 on
+ * success, 3 when the model is below the research tier (bundle is null). Both the
+ * CLI main() and the source-gateway research verb call this so the tier gate and
+ * bundle shape live in ONE place.
+ * @param {string} question
+ * @param {{ angles?: object[], maxFetch?: number, argModel?: string }} [opts]
+ */
+export async function orchestrateResearch(question, { angles, maxFetch, argModel } = {}) {
+  const cfg = loadLibrarianConfig();
+  const { model, ok } = resolveModel(argModel, cfg.model);
+  if (!ok) return { bundle: null, exitCode: 3, model };
+  const bundle = await runResearch(question, {
+    angles,
+    maxFetch,
+    model,
+    keepAlive: cfg.keepAlive,
+    ollamaUrl: cfg.ollamaUrl,
+  });
+  return { bundle, exitCode: 0, model };
+}
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
@@ -156,22 +179,18 @@ async function main() {
     );
     process.exit(2);
   }
-  const cfg = loadLibrarianConfig();
-  const { model, ok } = resolveModel(args.model, cfg.model);
-  if (!ok) {
+  const { bundle, exitCode, model } = await orchestrateResearch(args.question, {
+    angles: args.angles,
+    maxFetch: args.maxFetch,
+    argModel: args.model,
+  });
+  if (exitCode === 3) {
     process.stderr.write(
       `research: model "${model}" is below the research tier (needs 12b+). ` +
         `Set librarian.model to gemma3:12b, or let /deep-research use its Claude-native path.\n`,
     );
     process.exit(3);
   }
-  const bundle = await runResearch(args.question, {
-    angles: args.angles,
-    maxFetch: args.maxFetch,
-    model,
-    keepAlive: cfg.keepAlive,
-    ollamaUrl: cfg.ollamaUrl,
-  });
   if (args.json) {
     process.stdout.write(JSON.stringify(bundle, null, 2));
   } else {

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from 'node:url';
 import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/registry.mjs';
-import { runResearch as defaultRunResearch } from '../scripts/librarian/research.mjs';
+import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
 
@@ -19,6 +19,8 @@ export function parseArgs(argv) {
     if (a === '--json') out.json = true;
     else if (a === '--q') out.q = argv[++i];
     else if (a === '--url') out.url = argv[++i];
+    else if (a === '--angles') out.angles = JSON.parse(argv[++i]);
+    else if (a === '--max-fetch') out.maxFetch = Number(argv[++i]);
   }
   return out;
 }
@@ -26,7 +28,7 @@ export function parseArgs(argv) {
 class UsageError extends Error {}
 
 export async function runGateway(argv, deps = {}) {
-  const { resolveSlot = defaultResolveSlot, runResearch = defaultRunResearch, fetchBudget } = deps;
+  const { resolveSlot = defaultResolveSlot, orchestrateResearch = defaultOrchestrateResearch, fetchBudget } = deps;
   const args = parseArgs(argv);
   if (!VERBS.has(args.verb)) {
     throw new UsageError(`unknown verb "${args.verb ?? ''}" (expected: ${[...VERBS].join(', ')})`);
@@ -39,8 +41,16 @@ export async function runGateway(argv, deps = {}) {
   }
   if (args.verb === 'research') {
     if (!args.q) throw new UsageError('research requires --q <question>');
-    const bundle = await runResearch(args.q);
-    return { claims: bundle.claims, sources: bundle.sources, source_used: bundle.source_used };
+    const { bundle, exitCode, model } = await orchestrateResearch(args.q, {
+      angles: args.angles,
+      maxFetch: args.maxFetch,
+    });
+    if (exitCode === 3) {
+      const e = new Error(`model "${model}" is below the research tier (needs 12b+)`);
+      e.exitCode = 3;
+      throw e;
+    }
+    return bundle;
   }
   // fetch
   if (!args.url) throw new UsageError('fetch requires --url <url>');
@@ -67,6 +77,10 @@ async function main() {
         `Usage: source-gateway.mjs <search|fetch|research> [--q <query>|--url <url>] [--json]\n${err.message}\n`,
       );
       process.exit(2);
+    }
+    if (err.exitCode) {
+      process.stderr.write('source-gateway: ' + err.message + '\n');
+      process.exit(err.exitCode);
     }
     process.stderr.write('source-gateway failed: ' + err.message + '\n');
     process.exit(1);
