@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveSlot } from '../../plugin/scripts/lib/sources/registry.mjs';
 
-const cfg = (over) => ({ web_search: 'brave', fetch: 'raw', research: 'librarian', providers: {}, ...over });
+const cfg = (over) => ({ web_search: 'brave', fetch: 'raw', providers: {}, ...over });
 
 describe('resolveSlot', () => {
   it('resolves web_search default to the brave source', () => {

@@ -3,7 +3,6 @@ import { getConfig } from '../config.mjs';
 export const SLOT_DEFAULTS = Object.freeze({
   web_search: 'brave',
   fetch: 'raw',
-  research: 'librarian',
 });
 
 export function loadSourcesConfig({ getConfigFn = getConfig } = {}) {

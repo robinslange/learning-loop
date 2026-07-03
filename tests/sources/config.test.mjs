@@ -7,7 +7,6 @@ describe('loadSourcesConfig', () => {
     const c = loadSourcesConfig({ getConfigFn: () => ({}) });
     assert.equal(c.web_search, 'brave');
     assert.equal(c.fetch, 'raw');
-    assert.equal(c.research, 'librarian');
     assert.deepEqual(c.providers, {});
   });
   it('a configured slot overrides its default', () => {
