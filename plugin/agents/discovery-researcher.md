@@ -54,13 +54,11 @@ Repeat:
 
 2. **Search the web** for the query. Run the source gateway via Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "your query" --json` — it returns `{ hits: [{url,title,snippet}], source_used }`. Read the top hits' snippets; when you need a page's full content, fetch it via `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json` (returns `{ doc: {text,ok,reason} }`). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" search-pubmed "topic" --mesh`.
 
-   *Optional shortcut:* if `mgrep` is installed, `mgrep --web --answer "query"` returns a pre-synthesized summary you can use directly. Don't require it.
-
 3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
 
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/scripts/convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
-   [paste the full search result text here, verbatim — your synthesis or the mgrep output]
+   [paste the full search result text here, verbatim — your synthesis]
    LL_RESULT_EOF
    ```
 

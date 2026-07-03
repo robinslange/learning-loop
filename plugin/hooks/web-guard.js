@@ -18,7 +18,7 @@ export function webGuardDecision(tool) {
         tool +
         ' is disabled for research in this plugin. Route web access through the source ' +
         'gateway instead: node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<query>" --json ' +
-        '(or fetch --url <url>, or research --q "<question>"). This keeps every source config-selected and logged.',
+        '(or fetch --url <url>, or research --q "<question>"). This keeps every source config-selected.',
     },
   };
 }
