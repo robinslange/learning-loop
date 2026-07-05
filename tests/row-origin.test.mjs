@@ -1,10 +1,17 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { deriveOrigin, flattenRows, stripPointerContent } from '../plugin/scripts/lib/row-origin.mjs';
+import {
+  deriveOrigin,
+  flattenRows,
+  stripPointerContent,
+} from '../plugin/scripts/lib/row-origin.mjs';
 
 describe('deriveOrigin', () => {
   it('derives peer + peer id from a peer: path', () => {
-    assert.deepEqual(deriveOrigin({ path: 'peer:thomas_kirk/note.md' }), { origin: 'peer', sourceId: 'thomas_kirk' });
+    assert.deepEqual(deriveOrigin({ path: 'peer:thomas_kirk/note.md' }), {
+      origin: 'peer',
+      sourceId: 'thomas_kirk',
+    });
   });
   it('derives local for a plain path (and null sourceId)', () => {
     assert.deepEqual(deriveOrigin({ path: 'a.md' }), { origin: 'local', sourceId: null });
@@ -19,7 +26,13 @@ describe('deriveOrigin', () => {
 
 describe('stripPointerContent', () => {
   it('strips content and text from a peer row', () => {
-    const row = { path: 'peer:thomas/b.md', score: 0.8, title: 'B', content: 'SECRET', text: 'more' };
+    const row = {
+      path: 'peer:thomas/b.md',
+      score: 0.8,
+      title: 'B',
+      content: 'SECRET',
+      text: 'more',
+    };
     const stripped = stripPointerContent(row);
     assert.equal('content' in stripped, false);
     assert.equal('text' in stripped, false);

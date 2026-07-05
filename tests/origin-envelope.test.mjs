@@ -61,7 +61,13 @@ test('pointers guard strips content/text from a peer row, keeps local rows and p
   const raw = {
     results: [
       { path: 'local.md', score: 0.9, content: 'local body stays' },
-      { path: 'peer:thomas/b.md', score: 0.8, title: 'B', content: 'SECRET peer body', text: 'more body' },
+      {
+        path: 'peer:thomas/b.md',
+        score: 0.8,
+        title: 'B',
+        content: 'SECRET peer body',
+        text: 'more body',
+      },
     ],
   };
   const env = wrapRetrieval(raw);
@@ -77,14 +83,21 @@ test('pointers guard strips content/text from a peer row, keeps local rows and p
 });
 
 test('pointers guard is a no-op on content-free rows (existing verbatim contract holds)', () => {
-  const raw = { results: [{ path: 'a.md', score: 0.9 }, { path: 'peer:x/b.md', score: 0.8 }] };
+  const raw = {
+    results: [
+      { path: 'a.md', score: 0.9 },
+      { path: 'peer:x/b.md', score: 0.8 },
+    ],
+  };
   const env = wrapRetrieval(raw);
   assert.deepEqual(env.results, raw);
 });
 
 test('pointers guard drops an unknown body field a future binary might add (allowlist)', () => {
   const raw = {
-    results: [{ path: 'peer:thomas/b.md', score: 0.8, title: 'B', snippet: 'SECRET match context' }],
+    results: [
+      { path: 'peer:thomas/b.md', score: 0.8, title: 'B', snippet: 'SECRET match context' },
+    ],
   };
   const env = wrapRetrieval(raw);
   const peerRow = env.results.results[0];
