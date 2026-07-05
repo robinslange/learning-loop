@@ -27,12 +27,27 @@ describe('stripPointerContent', () => {
     assert.equal(stripped.title, 'B');
     assert.equal(stripped.score, 0.8);
   });
+  it('drops an UNKNOWN body-bearing field (allowlist, not denylist)', () => {
+    const row = { path: 'peer:thomas/b.md', score: 0.8, snippet: 'LEAK', excerpt: 'also leak' };
+    const stripped = stripPointerContent(row);
+    assert.equal('snippet' in stripped, false);
+    assert.equal('excerpt' in stripped, false);
+    assert.equal(stripped.path, 'peer:thomas/b.md');
+    assert.equal(stripped.score, 0.8);
+  });
+  it('keeps mtime and index (real binary pointer fields)', () => {
+    const row = { path: 'peer:x/b.md', score: 0.8, title: 'B', mtime: 123, index: 2, body: 'drop' };
+    const stripped = stripPointerContent(row);
+    assert.equal(stripped.mtime, 123);
+    assert.equal(stripped.index, 2);
+    assert.equal('body' in stripped, false);
+  });
   it('returns a local row with content unchanged (same reference)', () => {
     const row = { path: 'local.md', score: 0.9, content: 'local body stays' };
     assert.strictEqual(stripPointerContent(row), row);
   });
-  it('returns a content-free peer row as same reference (no-op)', () => {
-    const row = { path: 'peer:x/b.md', score: 0.8 };
+  it('returns a pointer-only peer row as same reference (verbatim no-op)', () => {
+    const row = { path: 'peer:x/b.md', score: 0.8, title: 'B', mtime: 5 };
     assert.strictEqual(stripPointerContent(row), row);
   });
 });

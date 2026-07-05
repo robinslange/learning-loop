@@ -68,3 +68,15 @@ test('pointers guard is a no-op on content-free rows (existing verbatim contract
   const env = wrapRetrieval(raw);
   assert.deepEqual(env.results, raw);
 });
+
+test('pointers guard drops an unknown body field a future binary might add (allowlist)', () => {
+  const raw = {
+    results: [{ path: 'peer:thomas/b.md', score: 0.8, title: 'B', snippet: 'SECRET match context' }],
+  };
+  const env = wrapRetrieval(raw);
+  const peerRow = env.results.results[0];
+  assert.equal('snippet' in peerRow, false);
+  assert.equal(peerRow.path, 'peer:thomas/b.md');
+  assert.equal(peerRow.title, 'B');
+  assert.equal(peerRow.score, 0.8);
+});

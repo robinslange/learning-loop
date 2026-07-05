@@ -12,15 +12,23 @@ export function deriveOrigin(row) {
   return { origin: 'local', sourceId: null };
 }
 
-// Awareness-only guard: a peer/pointers row shares its pointer (path/title/score)
-// but never its body. Strip content/text from peer-origin rows before they leave
-// the Node boundary. Local rows pass through untouched.
+// Awareness-only guard: a peer/pointers row shares its pointer but never its body.
+// Allowlist the known pointer fields the ll-search binary emits (SearchResult:
+// path/score/title/mtime, RerankResult adds index) and drop everything else from
+// peer-origin rows before they leave the Node boundary. Allowlist not denylist, so
+// a future body-bearing field (snippet/excerpt/...) cannot cross by being unlisted.
+// Local rows pass through untouched, and a peer row already carrying only pointer
+// fields returns the same reference (verbatim contract for content-free rows).
+const POINTER_FIELDS = new Set(['path', 'score', 'title', 'mtime', 'index']);
+
 export function stripPointerContent(row) {
   if (deriveOrigin(row).origin !== 'peer') return row;
   if (row == null || typeof row !== 'object') return row;
-  if (!('content' in row) && !('text' in row)) return row;
-  const { content: _c, text: _t, ...rest } = row;
-  return rest;
+  const extraneous = Object.keys(row).filter((k) => !POINTER_FIELDS.has(k));
+  if (extraneous.length === 0) return row;
+  const kept = {};
+  for (const k of Object.keys(row)) if (POINTER_FIELDS.has(k)) kept[k] = row[k];
+  return kept;
 }
 
 // Flatten a retrieval payload to its flat row list, across the three shapes the
