@@ -14,12 +14,13 @@ export function deriveOrigin(row) {
 
 // Awareness-only guard: a peer/pointers row shares its pointer but never its body.
 // Allowlist the known pointer fields the ll-search binary emits (SearchResult:
-// path/score/title/mtime, RerankResult adds index) and drop everything else from
-// peer-origin rows before they leave the Node boundary. Allowlist not denylist, so
-// a future body-bearing field (snippet/excerpt/...) cannot cross by being unlisted.
-// Local rows pass through untouched, and a peer row already carrying only pointer
-// fields returns the same reference (verbatim contract for content-free rows).
-const POINTER_FIELDS = new Set(['path', 'score', 'title', 'mtime', 'index']);
+// path/score/title/mtime, RerankResult adds index, SimilarResult adds tags) plus the
+// note/id locator keys deriveOrigin trusts, and drop everything else from peer-origin
+// rows before they leave the Node boundary. Allowlist not denylist, so a future
+// body-bearing field (snippet/excerpt/...) cannot cross by being unlisted. Local rows
+// pass through untouched, and a peer row already carrying only pointer fields returns
+// the same reference (verbatim contract for content-free rows).
+const POINTER_FIELDS = new Set(['path', 'note', 'id', 'score', 'title', 'mtime', 'index', 'tags']);
 
 export function stripPointerContent(row) {
   if (deriveOrigin(row).origin !== 'peer') return row;

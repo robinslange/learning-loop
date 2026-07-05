@@ -5,6 +5,7 @@
 // (account=$USER service="brave-search-api-key") to match the Brave MCP wrapper;
 // it never lives in config. fetchOverride is injected for tests (network boundary).
 import { resolveSecret } from '../../lib/secret.mjs';
+import { isOffline } from '../../lib/env.mjs';
 
 const ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 
@@ -18,6 +19,7 @@ export function getApiKey() {
  * @param {{ count?: number, apiKey?: string, fetchOverride?: typeof fetch }} [opts]
  */
 export async function search(query, opts = {}) {
+  if (isOffline()) return [];
   const { count = 6, fetchOverride } = opts;
   const apiKey = opts.apiKey ?? getApiKey();
   if (!apiKey) return [];

@@ -55,6 +55,16 @@ describe('stripPointerContent', () => {
     assert.equal(stripped.index, 2);
     assert.equal('body' in stripped, false);
   });
+  it('keeps tags (real SimilarResult pointer field) as a verbatim no-op', () => {
+    const row = { path: 'peer:x/b.md', score: 0.8, tags: 'a,b' };
+    assert.strictEqual(stripPointerContent(row), row);
+  });
+  it('keeps note/id locator keys deriveOrigin trusts', () => {
+    const row = { note: 'peer:p/x', score: 0.5, content: 'drop' };
+    const stripped = stripPointerContent(row);
+    assert.equal(stripped.note, 'peer:p/x');
+    assert.equal('content' in stripped, false);
+  });
   it('returns a local row with content unchanged (same reference)', () => {
     const row = { path: 'local.md', score: 0.9, content: 'local body stays' };
     assert.strictEqual(stripPointerContent(row), row);

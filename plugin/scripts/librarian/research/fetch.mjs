@@ -5,6 +5,8 @@
 // single bad source never aborts a research run. htmlToText() strips scripts,
 // styles, and markup to plain prose. fetchOverride is injected for tests.
 
+import { isOffline } from '../../lib/env.mjs';
+
 const DROP_BLOCKS = /<(script|style|noscript|nav|footer|header|aside)[\s\S]*?<\/\1>/gi;
 // An unclosed script/style (no end tag) would otherwise survive the balanced pass
 // and leak its body as text; drop from the opening tag to end-of-string.
@@ -40,6 +42,7 @@ const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
  * @returns {Promise<{ text: string, ok: boolean, reason: string }>}
  */
 export async function fetchText(url, opts = {}) {
+  if (isOffline()) return { text: '', ok: false, reason: 'offline' };
   const { timeoutMs = 15000, maxBytes = DEFAULT_MAX_BYTES, fetchOverride } = opts;
   const fetchFn = fetchOverride || globalThis.fetch;
   let resp;

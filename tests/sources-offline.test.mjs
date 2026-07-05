@@ -1,21 +1,31 @@
 // tests/sources-offline.test.mjs : LL_OFFLINE gates the web-research fetch leaves.
 //
 // All ~14 source adapters route through fetchJSON/fetchXML (sources/http.mjs)
-// and page text goes through fetchPageText (sources/web-fetch.mjs). Gating the
-// leaves covers every adapter. We assert the leaves short-circuit WITHOUT
-// calling fetch (a tripwire fetch throws), and that the pubmed adapter — which
-// imports fetchJSON — inherits the gate.
+// and page text goes through fetchPageText (sources/web-fetch.mjs). The source
+// gateway's search/fetch verbs route through two further leaves that call fetch
+// directly: web-search.mjs (brave) and fetch-source.mjs (raw). Gating all four
+// leaves covers every egress path. We assert each short-circuits WITHOUT calling
+// fetch (a tripwire fetch throws), and that the pubmed adapter, which imports
+// fetchJSON, inherits the gate.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
-const HTTP = JSON.stringify(new URL('../plugin/scripts/lib/sources/http.mjs', import.meta.url).href);
+const HTTP = JSON.stringify(
+  new URL('../plugin/scripts/lib/sources/http.mjs', import.meta.url).href,
+);
 const WEBFETCH = JSON.stringify(
   new URL('../plugin/scripts/lib/sources/web-fetch.mjs', import.meta.url).href,
 );
 const PUBMED = JSON.stringify(
   new URL('../plugin/scripts/lib/sources/adapters/pubmed.mjs', import.meta.url).href,
+);
+const FETCHSRC = JSON.stringify(
+  new URL('../plugin/scripts/lib/sources/fetch-source.mjs', import.meta.url).href,
+);
+const WEBSEARCH = JSON.stringify(
+  new URL('../plugin/scripts/lib/sources/web-search.mjs', import.meta.url).href,
 );
 
 // Run a snippet in a child with LL_OFFLINE set and a tripwire fetch installed
@@ -70,4 +80,25 @@ test('pubmed adapter inherits the offline gate via the shared leaf', () => {
   `);
   assert.equal(r.threw, false, 'adapter must not throw on the tripwire fetch when offline');
   assert.equal(r.isNullish, true, 'offline adapter fetch yields no metadata');
+});
+
+// The source-gateway's search/fetch verbs resolve to these two web leaves; they call
+// globalThis.fetch directly (not the shared http.mjs leaf), so they need their own gate.
+test('gateway fetch source returns {ok:false, reason:"offline"} without calling fetch', () => {
+  const r = offline(`
+    const rawFetch = (await import(${FETCHSRC})).default;
+    const doc = await rawFetch.fetch('https://example.com/page');
+    console.log(JSON.stringify(doc));
+  `);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'offline');
+});
+
+test('gateway brave search returns [] without calling fetch when offline', () => {
+  const r = offline(`
+    const brave = (await import(${WEBSEARCH})).default;
+    const hits = await brave.query('anything', { apiKey: 'x' });
+    console.log(JSON.stringify({ hits }));
+  `);
+  assert.deepEqual(r.hits, []);
 });
