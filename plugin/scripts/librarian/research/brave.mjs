@@ -4,20 +4,12 @@
 // { url, title, snippet }. The API key is read from the macOS Keychain
 // (account=$USER service="brave-search-api-key") to match the Brave MCP wrapper;
 // it never lives in config. fetchOverride is injected for tests (network boundary).
-import { execFileSync } from 'node:child_process';
+import { resolveSecret } from '../../lib/secret.mjs';
 
 const ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
 
 export function getApiKey() {
-  try {
-    return execFileSync(
-      'security',
-      ['find-generic-password', '-a', process.env.USER, '-s', 'brave-search-api-key', '-w'],
-      { encoding: 'utf-8', timeout: 5000 },
-    ).trim();
-  } catch {
-    return null;
-  }
+  return resolveSecret('brave-search-api-key');
 }
 
 /**

@@ -11,25 +11,11 @@
 
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { getConfig, getPluginData, resetConfigCache } from '../lib/config.mjs';
+import { resolveSecret } from '../lib/secret.mjs';
 import { env } from '../lib/env.mjs';
 import { DEFAULT_MODEL, DEFAULT_OLLAMA_URL } from '../lib/defaults.mjs';
 import { logError } from '../lib/log.mjs';
-
-/** Read an API key from the macOS Keychain by service name (account=$USER),
- *  matching the brave.mjs pattern. Null on any failure. */
-function keychainKey(ref) {
-  try {
-    return execFileSync(
-      'security',
-      ['find-generic-password', '-a', process.env.USER, '-s', ref, '-w'],
-      { encoding: 'utf-8', timeout: 5000 },
-    ).trim();
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolve the model provider from librarian config. Back-compat: with no
@@ -44,7 +30,11 @@ function keychainKey(ref) {
  * @returns {{ kind: 'ollama'|'openai', baseUrl: string, model: string, apiKey?: string }}
  */
 export function resolveProvider(libCfg = {}, ctx = {}) {
-  const { ollamaUrl = DEFAULT_OLLAMA_URL, model = DEFAULT_MODEL, keyResolver = keychainKey } = ctx;
+  const {
+    ollamaUrl = DEFAULT_OLLAMA_URL,
+    model = DEFAULT_MODEL,
+    keyResolver = (ref) => resolveSecret(ref),
+  } = ctx;
   const p = libCfg.provider;
 
   if (!p || p.kind !== 'openai') {

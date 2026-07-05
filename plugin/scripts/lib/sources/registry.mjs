@@ -1,5 +1,8 @@
 import { sleep } from './http.mjs';
 import { bestAuthorMatch } from './author-match.mjs';
+import braveSource from './web-search.mjs';
+import rawFetch from './fetch-source.mjs';
+import { loadSourcesConfig } from './config.mjs';
 import pubmed from './adapters/pubmed.mjs';
 import europepmc from './adapters/europepmc.mjs';
 import arxiv from './adapters/arxiv.mjs';
@@ -33,6 +36,24 @@ export const ADAPTERS = [
 
 export function findAdapter(src) {
   return ADAPTERS.find((a) => a.matches && a.matches(src)) || null;
+}
+
+// Registered sources are the adapters that declare capabilities. biorxiv/chembl/
+// unpaywall have none (private enrichers) and are excluded by construction.
+const SOURCES = ADAPTERS.filter((a) => Array.isArray(a.capabilities) && a.capabilities.length);
+
+export function sourcesWith(capability) {
+  return SOURCES.filter((s) => s.capabilities.includes(capability));
+}
+
+const SOURCES_BY_ID = { brave: braveSource, raw: rawFetch };
+
+export function resolveSlot(slot, { cfg, sourcesById = SOURCES_BY_ID } = {}) {
+  const resolved = cfg || loadSourcesConfig();
+  const id = resolved[slot];
+  const src = sourcesById[id];
+  if (!src) throw new Error(`unknown source id "${id}" for slot "${slot}"`);
+  return src;
 }
 
 function extractAuthorFromQuery(query) {

@@ -3,7 +3,7 @@ name: discovery-researcher
 description: Web researcher for /discovery journeys. Searches iteratively until mechanical convergence detection signals saturation.
 model: sonnet
 effort: xhigh
-tools: Read, Bash, WebSearch, WebFetch
+tools: Read, Bash
 ---
 
 # Discovery Researcher
@@ -52,15 +52,13 @@ Repeat:
 
 1. **Formulate a query** based on the topic, angle, and what you've found so far.
 
-2. **Search the web** for the query. Use the `WebSearch` tool, then read the top results (via `WebFetch` if you need full content). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs search-pubmed "topic" --mesh`.
-
-   *Optional shortcut:* if `mgrep` is installed, `mgrep --web --answer "query"` returns a pre-synthesized summary you can use directly. Don't require it.
+2. **Search the web** for the query. Run the source gateway via Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "your query" --json` — it returns `{ hits: [{url,title,snippet}], source_used }`. Read the top hits' snippets; when you need a page's full content, fetch it via `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json` (returns `{ doc: {text,ok,reason} }`). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" search-pubmed "topic" --mesh`.
 
 3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
 
    ```bash
    node ${CLAUDE_PLUGIN_ROOT}/scripts/convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
-   [paste the full search result text here, verbatim — your synthesis or the mgrep output]
+   [paste the full search result text here, verbatim — your synthesis]
    LL_RESULT_EOF
    ```
 
@@ -155,7 +153,7 @@ Return a structured brief:
 Reference findings by ID: "Microglia prune synapses via complement [S1]"
 
 **Rules for this table:**
-- Only include URLs you actually fetched in this session (WebFetch or WebSearch result URLs)
+- Only include URLs you actually fetched in this session (from a gateway `search` hit or `fetch` call)
 - The URL must be copied from your tool call result, not reconstructed from memory
 - If you cited a source but never fetched its URL, list it with status: `unfetched` -- the note-writer will use `source: unverified` for these
 - This table is the contract between researcher and writer. What is verified here stays verified downstream.
@@ -182,24 +180,13 @@ After compiling the research brief, emit a summary event:
 node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
 ```
 
-## WebFetch Discipline
+## Fetch Discipline
 
-WebFetch has no timeout parameter. A single hanging fetch can stall the entire agent for hours.
+Prefer gateway `search` over `fetch`: search returns fast snippets; only `fetch` a URL when you need to verify a specific claim against the page content. The gateway enforces a per-session fetch budget (default 10) and returns `{ doc: { ok:false, reason:'fetch_budget_exceeded' } }` once you exceed it — when you see that, stop fetching and mark remaining URLs as `unfetched` in the verified-sources table.
 
-**Prefer WebSearch over WebFetch.** WebSearch returns fast. Only use WebFetch when you need to verify a specific claim against the page content.
+**Avoid fetching these domains** (paywalled, bot-blocking, or redirect chains that hang): `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org`, `springer.com`, `link.springer.com`, `tandfonline.com`, `ieeexplore.ieee.org`, `eprints.*.ac.uk`, `*.edu` thesis PDFs, and any `.pdf` URL. For academic sources use `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" resolve "Author Year Topic"` instead — it hits PubMed/Semantic Scholar/CrossRef, which respond reliably.
 
-**Never WebFetch these domains** (paywalled, bot-blocking, or redirect chains that hang):
-- `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org` (redirect chain)
-- `springer.com`, `link.springer.com`
-- `tandfonline.com`, `ieeexplore.ieee.org`
-- `eprints.*.ac.uk`, `*.edu` thesis PDFs
-- Any URL ending in `.pdf` (binary, WebFetch can't read it anyway)
-
-For academic sources, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"` instead. It hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably.
-
-**Never re-fetch a URL you already fetched.** If you fetched a URL during research, its content is already in your context.
-
-**Cap WebFetch at 10 calls per session.** If you've hit 10, stop fetching and mark remaining URLs as `unfetched` in the verified sources table. See `agents-shared/source-verification.md#webfetch-budget` for the canonical cap.
+**Never re-fetch a URL you already fetched** — its content is already in your context.
 
 ## Rules
 

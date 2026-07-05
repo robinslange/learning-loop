@@ -29,4 +29,4 @@ async function search(query, pageSize = 5) {
   }));
 }
 
-export default { id: 'europepmc', search };
+export default { id: 'europepmc', capabilities: ['query'], search };

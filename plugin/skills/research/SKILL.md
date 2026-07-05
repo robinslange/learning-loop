@@ -9,8 +9,8 @@ description: 'Deep research with the local librarian doing the token-heavy middl
 
 Same shape as the built-in `/deep-research` — Scope → Search → Fetch → Extract →
 3-vote adversarial Verify → Synthesize — but the **middle three phases run on the
-local librarian** (`scripts/librarian/research.mjs`: Brave search + fetch + local
-Gemma claim extraction). Roughly 15 source documents are distilled to one-line
+local librarian** (via `bin/source-gateway.mjs research`: Brave search + fetch +
+local Gemma claim extraction). Roughly 15 source documents are distilled to one-line
 cited claims _before anything reaches Claude_. Scope, Verify, and Synthesize stay
 on Claude — Verify is the step most likely to expose a small model's reasoning
 gap, and it runs over cheap one-line claims, not prose.
@@ -269,9 +269,9 @@ let probe = null;
 if (PLUGIN_ROOT) {
   const shellCmd =
     'node ' +
-    shellQuote(PLUGIN_ROOT + '/scripts/librarian/research.mjs') +
-    ' ' +
-    '--question ' +
+    shellQuote(PLUGIN_ROOT + '/bin/source-gateway.mjs') +
+    ' research ' +
+    '--q ' +
     shellQuote(QUESTION) +
     ' ' +
     '--angles ' +
@@ -404,6 +404,11 @@ if (bundle && bundleClaims.length > 0) {
       '). No token savings this run.',
   );
 
+  // ${CLAUDE_PLUGIN_ROOT} is NOT exported into subagent shells, so bake the
+  // resolved gateway path into the prompt. The gateway's search/fetch verbs use
+  // Brave + raw fetch and do NOT require the librarian tier, so they run on this
+  // fallback path.
+  const GATEWAY = PLUGIN_ROOT ? PLUGIN_ROOT + '/bin/source-gateway.mjs' : 'source-gateway.mjs';
   const SEARCH_PROMPT = (angle) =>
     '## Web Searcher: ' +
     angle.label +
@@ -419,7 +424,14 @@ if (bundle && bundleClaims.length > 0) {
     'Search query: `' +
     angle.query +
     '`\n\n' +
-    '## Task\nUse WebSearch with the query above (or a refined version). Return the top 4-6 most relevant results.\n' +
+    '## Task\nRun the source gateway search verb via the Bash tool:\n' +
+    '`node "' +
+    GATEWAY +
+    '" search --q "' +
+    angle.query +
+    '" --json` (refine the query if needed).\n' +
+    'It returns `{ hits: [{url,title,snippet}], source_used }`. Read the hits and return the ' +
+    'top 4-6 most relevant results (url, title, snippet).\n' +
     'Rank by relevance to the ORIGINAL question, not just the search query. Skip obvious SEO spam/content farms.\n' +
     'Include a short snippet capturing why each result is relevant.\n\nStructured output only.';
   const FETCH_PROMPT = (source, angle) =>
@@ -435,7 +447,13 @@ if (bundle && bundleClaims.length > 0) {
     '\n**Found via:** ' +
     angle +
     ' search\n\n' +
-    '## Task\n1. Use WebFetch to retrieve the page content.\n' +
+    '## Task\n1. Retrieve the page via the source gateway fetch verb with the Bash tool:\n' +
+    '`node "' +
+    GATEWAY +
+    '" fetch --url "' +
+    source.url +
+    '" --json`. It returns `{ doc: {text, ok, reason} }` — `doc.text` is the content; ' +
+    '`doc.ok` false with `doc.reason` signals failure.\n' +
     '2. Assess source quality: primary research/institution? secondary reporting? blog/opinion? forum? unreliable?\n' +
     '3. Extract 2-5 FALSIFIABLE claims that bear on the research question. Each claim must:\n' +
     '   - be a concrete, checkable statement (not vague generalities)\n' +
@@ -591,7 +609,9 @@ const VERIFY_PROMPT = (claim, v) =>
   '"\n\n' +
   '## Checklist\n' +
   '1. Is the claim actually supported by the quote, or is it an overreach/misread?\n' +
-  '2. WebSearch for contradicting evidence — does any credible source dispute or heavily qualify this?\n' +
+  '2. Search for contradicting evidence via the source gateway with the Bash tool: `node "' +
+  (PLUGIN_ROOT ? PLUGIN_ROOT + '/bin/source-gateway.mjs' : 'source-gateway.mjs') +
+  '" search --q "<contradicting-evidence query>" --json` — does any credible source dispute or heavily qualify this?\n' +
   "3. Is the source quality sufficient for the claim's strength? (extraordinary claims need primary sources)\n" +
   '4. Is the claim outdated? (check dates — old claims about fast-moving fields are suspect)\n' +
   '5. Is this a marketing claim / press release / cherry-picked benchmark / forum speculation?\n\n' +

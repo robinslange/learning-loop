@@ -12,11 +12,11 @@ import { writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { search as braveSearch } from './research/brave.mjs';
-import { fetchText as defaultFetchText } from './research/fetch.mjs';
 import { extractClaims } from './research/extract.mjs';
 import { sourceIdFromUrl } from './research/source-id.mjs';
 import { loadLibrarianConfig, researchModelOk } from './config.mjs';
+import { resolveSlot } from '../lib/sources/registry.mjs';
+import { loadSourcesConfig } from '../lib/sources/config.mjs';
 
 const DEFAULT_MAX_FETCH = 15;
 
@@ -48,16 +48,23 @@ export function resolveModel(argModel, cfgModel) {
  * }} [opts]
  */
 export async function runResearch(question, opts = {}) {
+  const cfg = loadSourcesConfig();
+  const searchInjected = typeof opts.searchFn === 'function';
+  const fetchInjected = typeof opts.fetchTextFn === 'function';
   const {
     angles = [{ label: 'general', query: question }],
     maxFetch = DEFAULT_MAX_FETCH,
     model,
     keepAlive,
     ollamaUrl,
-    searchFn = (q) => braveSearch(q),
-    fetchTextFn = (url) => defaultFetchText(url),
+    searchFn = (q) => resolveSlot('web_search', { cfg }).query(q),
+    fetchTextFn = (url) => resolveSlot('fetch', { cfg }).fetch(url),
     extractFn = (text, q, o) => extractClaims(text, q, o),
   } = opts;
+  const source_used = {
+    search: searchInjected ? 'injected' : cfg.web_search,
+    fetch: fetchInjected ? 'injected' : cfg.fetch,
+  };
 
   const searchResults = await Promise.all(angles.map((a) => searchFn(a.query)));
   const seen = new Set();
@@ -124,7 +131,31 @@ export async function runResearch(question, opts = {}) {
     sources: results.filter((x) => x.source).map((x) => x.source),
     claims: results.flatMap((x) => x.claims ?? []),
     skipped: results.filter((x) => x.skipped).map((x) => x.skipped),
+    source_used,
   };
+}
+
+/**
+ * Orchestrate a full research run the way the CLI does: load librarian config,
+ * gate on model tier, run research. Returns { bundle, exitCode, model } — exitCode 0 on
+ * success, 3 when the model is below the research tier (bundle is null). Both the
+ * CLI main() and the source-gateway research verb call this so the tier gate and
+ * bundle shape live in ONE place.
+ * @param {string} question
+ * @param {{ angles?: object[], maxFetch?: number, argModel?: string }} [opts]
+ */
+export async function orchestrateResearch(question, { angles, maxFetch, argModel } = {}) {
+  const cfg = loadLibrarianConfig();
+  const { model, ok } = resolveModel(argModel, cfg.model);
+  if (!ok) return { bundle: null, exitCode: 3, model };
+  const bundle = await runResearch(question, {
+    angles,
+    maxFetch,
+    model,
+    keepAlive: cfg.keepAlive,
+    ollamaUrl: cfg.ollamaUrl,
+  });
+  return { bundle, exitCode: 0, model };
 }
 
 function parseArgs(argv) {
@@ -148,22 +179,18 @@ async function main() {
     );
     process.exit(2);
   }
-  const cfg = loadLibrarianConfig();
-  const { model, ok } = resolveModel(args.model, cfg.model);
-  if (!ok) {
+  const { bundle, exitCode, model } = await orchestrateResearch(args.question, {
+    angles: args.angles,
+    maxFetch: args.maxFetch,
+    argModel: args.model,
+  });
+  if (exitCode === 3) {
     process.stderr.write(
       `research: model "${model}" is below the research tier (needs 12b+). ` +
         `Set librarian.model to gemma3:12b, or let /deep-research use its Claude-native path.\n`,
     );
     process.exit(3);
   }
-  const bundle = await runResearch(args.question, {
-    angles: args.angles,
-    maxFetch: args.maxFetch,
-    model,
-    keepAlive: cfg.keepAlive,
-    ollamaUrl: cfg.ollamaUrl,
-  });
   if (args.json) {
     process.stdout.write(JSON.stringify(bundle, null, 2));
   } else {

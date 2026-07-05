@@ -28,4 +28,4 @@ async function search(query, perPage = 5) {
   });
 }
 
-export default { id: 'openalex', search };
+export default { id: 'openalex', capabilities: ['query'], search };

@@ -3,7 +3,7 @@ name: note-verifier
 description: Verifies note claims against cited sources. Checks source URLs are reachable, claims are supported, and no references are fabricated. Returns 4-level ordinal confidence per claim (strong/partial/no source/contradicted) with specific issues.
 model: sonnet
 effort: xhigh
-tools: Read, Bash, WebFetch
+tools: Read, Bash
 ---
 
 # Note Verifier
@@ -65,7 +65,7 @@ The resolver returns:
 - **metadata**: actual authors, title, year, journal, abstract, study type, species, sample size, funding
 
 **For sources without PMID/DOI** (web pages, blog posts, framework docs):
-1. Fetch the URL using web fetch tools
+1. Fetch the URL via the gateway: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json` (run with Bash) — the returned `doc.text` is the page content, `doc.ok`/`doc.reason` tell you if it failed
 2. Check: does the page exist? Does the content match what's cited?
 3. Flag dead links or content mismatches
 
@@ -202,27 +202,25 @@ Where:
 
 Emit before returning the report. If emission fails (script not found, plugin root missing), continue silently — provenance is observability, not correctness.
 
-## WebFetch Discipline
+## Fetch Discipline
 
-WebFetch has no timeout parameter. A single hanging fetch can stall verification for hours.
-
-**Never WebFetch paywalled or bot-blocking domains:**
+**Avoid fetching these domains** (paywalled/bot-blocking/redirect-hang):
 - `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org` (redirect chain)
 - `springer.com`, `link.springer.com`
 - `tandfonline.com`, `ieeexplore.ieee.org`
 - `eprints.*.ac.uk`, `*.edu` thesis PDFs
 - Any URL ending in `.pdf`
 
-For these, use `source-resolver.mjs verify-pmid/verify-doi` instead. Mark the URL as `unfetched (paywalled)` in the source checks table -- this is not a failure, it is a known constraint.
+For these, use `source-resolver.mjs verify-pmid/verify-doi` instead and mark the URL `unfetched (paywalled)` — a known constraint, not a failure.
 
 **If you already have the page content in your context** (e.g., from a research brief passed as input, or from an earlier fetch in this session), do not re-fetch. Check claims against what you already have.
 
-**Cap WebFetch at 10 calls per verification session.** After 10, mark remaining URLs as `unfetched (budget)` and move on.
+**The gateway enforces a per-session fetch budget (default 10)** — when a fetch returns `reason:'fetch_budget_exceeded'`, mark remaining URLs `unfetched (budget)` and move on.
 
 ## Rules
 
 - **Verify, don't rewrite.** Your job is to flag issues, not fix them. Return findings so other agents can act.
 - **Be specific.** "Source doesn't support claim" is useless. Say what the source actually says.
 - **Don't over-flag.** Common knowledge doesn't need a citation. Only flag claims that are specific enough to require sourcing.
-- **URL checks use source-resolver first, WebFetch second.** For academic sources with PMID/DOI, the resolver is authoritative. Only WebFetch non-academic URLs (blogs, docs, specs) and only if not already in context.
+- **URL checks use source-resolver first, gateway `fetch` second.** For academic sources with PMID/DOI, the resolver is authoritative. Only gateway-`fetch` non-academic URLs (blogs, docs, specs) and only if not already in context.
 - **Missing URLs are issues.** If a source is cited by name but has no URL, that's a finding: include the correct URL if you can find it.

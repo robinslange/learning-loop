@@ -56,4 +56,4 @@ async function verify(src) {
   return { verified: issues.length === 0, issues, metadata: data };
 }
 
-export default { id: 'rfc', matches, fetchById, verify };
+export default { id: 'rfc', capabilities: ['verify'], matches, fetchById, verify };

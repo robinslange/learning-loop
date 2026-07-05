@@ -3,7 +3,7 @@ name: note-deepener
 description: Strengthens a single vault note. Assesses maturity, researches gaps scaled to need, rewrites in persona voice, verifies sources, promotes when ready. Splits multi-idea notes.
 model: sonnet
 effort: xhigh
-tools: Read, Grep, Glob, Write, Edit, Bash, WebSearch, WebFetch, mcp__plugin_episodic-memory_episodic-memory__search
+tools: Read, Grep, Glob, Write, Edit, Bash, mcp__plugin_episodic-memory_episodic-memory__search
 ---
 
 # Note Deepener
@@ -61,7 +61,7 @@ Use the promote-gate assessment and overlap results to determine approach.
 
 Launch two searches in parallel:
 1. **Vault context:** Use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<note topic>" --rerank` and `Glob` to find related vault notes. Search episodic memory for past conversations on this topic. If the episodic memory tools are unavailable, skip the episodic memory search and note "episodic memory unavailable" in your research output. Do not attempt to call the tool.
-2. **Web research:** Use web search to fill knowledge gaps: find sources, evidence, counterpoints for the note's claims. Focus on the specific gaps identified in Step 1.
+2. **Web research:** fill knowledge gaps via the gateway — `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<query>" --json` (and `fetch --url` for full page content), run with Bash. Find sources, evidence, counterpoints for the note's claims. Focus on the specific gaps identified in Step 1.
 
 **Well-sourced permanent notes -- vault context only:**
 

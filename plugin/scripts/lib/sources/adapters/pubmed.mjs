@@ -165,4 +165,11 @@ async function verify(src) {
   return { verified: issues.length === 0, issues, metadata: data };
 }
 
-export default { id: 'pubmed', matches, search, fetchById: pubmedFetch, verify };
+export default {
+  id: 'pubmed',
+  capabilities: ['query', 'verify'],
+  matches,
+  search,
+  fetchById: pubmedFetch,
+  verify,
+};

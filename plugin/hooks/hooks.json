@@ -44,6 +44,16 @@
             "timeout": 3
           }
         ]
+      },
+      {
+        "matcher": "WebSearch|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/web-guard.js\"",
+            "timeout": 3
+          }
+        ]
       }
     ],
     "PostToolUse": [
