@@ -26,7 +26,10 @@ describe('gateway fetch verb', () => {
       capabilities: ['fetch'],
       fetch: async () => ({ text: 'body', ok: true, reason: 'ok' }),
     };
-    const out = await runGateway(['fetch', '--url', 'https://x'], { resolveSlot: () => fakeSource });
+    const out = await runGateway(['fetch', '--url', 'https://x'], {
+      resolveSlot: () => fakeSource,
+      budgetStore: makeBudgetStore(),
+    });
     assert.equal(out.source_used, 'raw');
     assert.equal(out.doc.ok, true);
     assert.equal(out.doc.text, 'body');
@@ -58,7 +61,15 @@ describe('gateway research verb (full bundle)', () => {
       return { bundle: fakeBundle, exitCode: 0 };
     };
     const out = await runGateway(
-      ['research', '--q', 'rust', '--angles', JSON.stringify([{ label: 'a', query: 'a' }]), '--max-fetch', '5'],
+      [
+        'research',
+        '--q',
+        'rust',
+        '--angles',
+        JSON.stringify([{ label: 'a', query: 'a' }]),
+        '--max-fetch',
+        '5',
+      ],
       { orchestrateResearch },
     );
     assert.deepEqual(out, fakeBundle);
@@ -82,7 +93,14 @@ describe('gateway research verb (full bundle)', () => {
 // Shared across runGateway calls = same-session, different-process.
 function makeBudgetStore() {
   let n = 0;
-  return { get n() { return n; }, bump() { n += 1; } };
+  return {
+    get n() {
+      return n;
+    },
+    bump() {
+      n += 1;
+    },
+  };
 }
 
 describe('gateway fetch budget', () => {
@@ -90,7 +108,11 @@ describe('gateway fetch budget', () => {
     // Two runGateway calls with the SAME budgetStore model two separate node processes
     // within one session. Budget 1 → first succeeds, second is refused.
     const store = makeBudgetStore();
-    const fakeSource = { id: 'raw', capabilities: ['fetch'], fetch: async () => ({ text: 'x', ok: true, reason: 'ok' }) };
+    const fakeSource = {
+      id: 'raw',
+      capabilities: ['fetch'],
+      fetch: async () => ({ text: 'x', ok: true, reason: 'ok' }),
+    };
     const deps = { resolveSlot: () => fakeSource, fetchBudget: 1, budgetStore: store };
     const first = await runGateway(['fetch', '--url', 'https://a'], deps);
     assert.equal(first.doc.ok, true);
@@ -102,7 +124,11 @@ describe('gateway fetch budget', () => {
   it('does not consume budget on search/research verbs', async () => {
     const store = makeBudgetStore();
     const fakeQuery = { id: 'brave', query: async () => [] };
-    await runGateway(['search', '--q', 'x'], { resolveSlot: () => fakeQuery, fetchBudget: 1, budgetStore: store });
+    await runGateway(['search', '--q', 'x'], {
+      resolveSlot: () => fakeQuery,
+      fetchBudget: 1,
+      budgetStore: store,
+    });
     // budget untouched by search -> a subsequent fetch still succeeds
     const fakeFetch = { id: 'raw', fetch: async () => ({ text: 'y', ok: true, reason: 'ok' }) };
     const out = await runGateway(['fetch', '--url', 'https://a'], {
