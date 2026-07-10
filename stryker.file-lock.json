@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test --test-force-exit tests/lib-file-lock.test.mjs tests/lib-file-lock-error-surface.test.mjs"
+  },
+  "mutate": ["plugin/scripts/lib/file-lock.mjs"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/file-lock.json" },
+  "concurrency": 4,
+  "timeoutMS": 20000,
+  "coverageAnalysis": "off",
+  "tempDirName": ".stryker-tmp"
+}

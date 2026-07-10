@@ -1,0 +1,9 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": { "command": "node --test --test-force-exit tests/lib-shadow-gate.test.mjs" },
+  "mutate": ["plugin/scripts/lib/shadow-gate.mjs"],
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/shadow-gate.json" },
+  "concurrency": 4, "timeoutMS": 20000, "coverageAnalysis": "off", "tempDirName": ".stryker-tmp"
+}

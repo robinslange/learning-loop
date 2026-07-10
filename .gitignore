@@ -64,3 +64,7 @@ native/crates/ll-search/src/sync/test_write.txt
 
 # Local Claude Code state (worktrees, agents, settings)
 .claude/
+
+# Mutation testing (StrykerJS)
+/reports/
+.stryker-tmp/

@@ -12,9 +12,11 @@
     "lint": "eslint .",
     "bench": "node bench/bench.mjs",
     "bench:quick": "node bench/bench.mjs --quick",
-    "bench:baseline": "node bench/bench.mjs --save-baseline"
+    "bench:baseline": "node bench/bench.mjs --save-baseline",
+    "test:mutation": "stryker run stryker.file-lock.json && stryker run stryker.deny-match.json && stryker run stryker.shadow-gate.json && stryker run stryker.cite-extract.json"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "^9.6.1",
     "eslint": "^9.39.4",
     "prettier": "3.8.3"
   }
