@@ -14,6 +14,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join, basename, sep } from 'path';
+import { pathToFileURL } from 'url';
 import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
@@ -83,6 +84,35 @@ function countOrphanEdges(db, orphanFromPaths) {
   return total;
 }
 
+// A from_path is an orphan only when the walk that produced walkedSourceRels
+// covered the WHOLE vault. On a scoped run (--folder or --limit) the un-walked
+// set is not the orphaned set, so there are no orphans to remove.
+export function findOrphanFromPaths(db, walkedSourceRels, { scoped }) {
+  if (scoped) return [];
+  const res = db.exec('SELECT DISTINCT from_path FROM edges');
+  const allFromPaths = res[0] ? res[0].values.map((r) => r[0]) : [];
+  return allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
+}
+
+// Removes edges whose source note no longer exists in a full vault walk.
+// No-ops on a scoped run — see findOrphanFromPaths. Never touches archived edges.
+export function removeOrphanEdges(db, walkedSourceRels, { scoped }) {
+  const orphanFromPaths = findOrphanFromPaths(db, walkedSourceRels, { scoped });
+  let removed = 0;
+  for (const orphan of orphanFromPaths) {
+    const countRes = db.exec(
+      "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
+      [orphan],
+    );
+    const count = countRes[0] ? countRes[0].values[0][0] : 0;
+    if (count > 0) {
+      db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
+      removed += count;
+    }
+  }
+  return { removed, orphanCount: orphanFromPaths.length };
+}
+
 async function main() {
   if (!VAULT_PATH) {
     console.error('VAULT_PATH not configured');
@@ -91,6 +121,7 @@ async function main() {
 
   const folders = folderFilter ? [folderFilter] : VAULT_DIRS;
   const files = walkVault(VAULT_PATH, folders, limit);
+  const scoped = Boolean(folderFilter) || limit > 0;
   console.error(`Scanning ${files.length} notes from ${folders.join(', ')}...`);
 
   console.error('Building vault index for link resolution...');
@@ -168,31 +199,15 @@ async function main() {
     }
 
     if (db) {
-      const allFromPathsRes = db.exec('SELECT DISTINCT from_path FROM edges');
-      const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
-      const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
-      let orphansRemoved = 0;
-      for (const orphan of orphanFromPaths) {
-        const countRes = db.exec(
-          "SELECT COUNT(*) FROM edges WHERE from_path = ? AND source_graph != 'archived'",
-          [orphan],
-        );
-        const count = countRes[0] ? countRes[0].values[0][0] : 0;
-        if (count > 0) {
-          db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [orphan]);
-          orphansRemoved += count;
-        }
-      }
-      stats.orphans_removed = orphansRemoved;
-      stats.orphan_from_paths = orphanFromPaths.length;
+      const { removed, orphanCount } = removeOrphanEdges(db, walkedSourceRels, { scoped });
+      stats.orphans_removed = removed;
+      stats.orphan_from_paths = orphanCount;
       saveDb(db, DB_FILE);
       db.close();
     } else {
       const dryDb = await openEdgeDb(DB_FILE);
       try {
-        const allFromPathsRes = dryDb.exec('SELECT DISTINCT from_path FROM edges');
-        const allFromPaths = allFromPathsRes[0] ? allFromPathsRes[0].values.map((r) => r[0]) : [];
-        const orphanFromPaths = allFromPaths.filter((fp) => !walkedSourceRels.has(fp));
+        const orphanFromPaths = findOrphanFromPaths(dryDb, walkedSourceRels, { scoped });
         stats.orphans_would_remove = countOrphanEdges(dryDb, orphanFromPaths);
         stats.orphan_from_paths = orphanFromPaths.length;
       } finally {
@@ -206,7 +221,9 @@ async function main() {
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
 }
 
-main().catch((err) => {
-  console.error(err.stack || err.message);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err.stack || err.message);
+    process.exit(1);
+  });
+}
