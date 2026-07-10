@@ -78,20 +78,10 @@ export function isProcessAlive(pid) {
  * @returns {boolean} true if the lock was removed and the caller may retry.
  */
 export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync } = {}) {
-  try {
-    const raw = readFileSync(lockPath, 'utf8').trim();
-    const pid = parseInt(raw, 10);
-    if (Number.isFinite(pid) && !isProcessAlive(pid)) {
-      unlinkSync(lockPath);
-      return true;
-    }
-    // PID is alive — do not remove.
-    return false;
-    // eslint-disable-next-line learning-loop/no-empty-catch
-  } catch {
-    // Intentional silent catch: documented fallback path. readFileSync may
-    // throw because the lockfile vanished mid-read or contains an unreadable
-    // PID; either way the staleness check below decides what to do.
+  // mtime backstop: used whenever the PID can't prove the owner is alive —
+  // whether the read threw, or it succeeded but held an empty/garbage PID.
+  // An unreadable-but-fresh lock is left alone; only an old one is reclaimed.
+  const removeIfMtimeStale = () => {
     try {
       const { mtimeMs } = statFn(lockPath);
       if (Date.now() - mtimeMs > staleMs) {
@@ -99,15 +89,34 @@ export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync } = {}) 
         return true;
       }
     } catch (err) {
-      // ENOENT here means the lockfile was unlinked between our readFileSync
-      // (which threw) and our statFn (which then threw because the file
-      // vanished). Expected race, not a failure. Anything else is genuinely
-      // unusual — a race after a readFileSync failure that stat *also* can't
-      // recover from — and worth surfacing.
+      // ENOENT means the lockfile vanished (a concurrent recovery). Expected
+      // race, not a failure. Anything else is genuinely unusual — worth
+      // surfacing.
       if (err.code !== 'ENOENT') logError('file-lock.mtimeFallback', err, { lockPath });
     }
     return false;
+  };
+
+  let raw;
+  try {
+    raw = readFileSync(lockPath, 'utf8').trim();
+  } catch {
+    // Read failed (vanished mid-read, permissions). Let mtime decide.
+    return removeIfMtimeStale();
   }
+
+  const pid = parseInt(raw, 10);
+  if (Number.isFinite(pid) && pid > 0) {
+    if (!isProcessAlive(pid)) {
+      unlinkSync(lockPath);
+      return true;
+    }
+    // Owner is alive — do not remove.
+    return false;
+  }
+  // Empty or non-numeric PID: the owner is unknowable, so fall back to mtime
+  // instead of assuming the lock is live (which would wedge it forever).
+  return removeIfMtimeStale();
 }
 
 /**
@@ -127,22 +136,48 @@ export function acquireLock(path, opts = {}) {
   const retries = opts.retries ?? DEFAULT_RETRIES;
   const delayMs = opts.retryDelayMs ?? DEFAULT_DELAY_MS;
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
+  const writeFn = opts.writeFn ?? writeFileSync;
 
   for (let i = 0; i < retries; i++) {
-    try {
-      const fd = openSync(
-        lockPath,
-        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY,
-      );
-      writeFileSync(fd, String(process.pid));
-      return { lockPath, fd };
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-      if (tryRemoveIfStale(lockPath, staleMs)) continue;
-      if (i < retries - 1) syncSleep(delayMs);
+    // Each iteration may open once, and — if it displaces a stale lock — open
+    // again immediately, so a stale lock cleared on the final iteration is
+    // still re-acquired rather than falling through to null.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return openLockFile(lockPath, writeFn);
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+        // Only retry within this iteration if we actually removed a stale lock.
+        if (!tryRemoveIfStale(lockPath, staleMs)) break;
+      }
     }
+    if (i < retries - 1) syncSleep(delayMs);
   }
   return null;
+}
+
+// Atomically create the lockfile and record the owner PID. If the PID write
+// fails after the file is created, close the fd and unlink the empty lockfile
+// so a transient write error (ENOSPC/EIO/NFS) doesn't leak an fd or orphan an
+// empty lock that mtime-recovery would then have to time out.
+export function openLockFile(lockPath, writeFn = writeFileSync) {
+  const fd = openSync(lockPath, fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY);
+  try {
+    writeFn(fd, String(process.pid));
+  } catch (err) {
+    try {
+      closeSync(fd);
+    } catch {
+      // fd already gone; nothing to clean up.
+    }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      // lockfile already gone; nothing to clean up.
+    }
+    throw err;
+  }
+  return { lockPath, fd };
 }
 
 /**

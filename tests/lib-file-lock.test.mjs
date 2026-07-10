@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 
-import { acquireLock, releaseLock, withLock } from '../plugin/scripts/lib/file-lock.mjs';
+import {
+  acquireLock,
+  releaseLock,
+  withLock,
+  tryRemoveIfStale,
+} from '../plugin/scripts/lib/file-lock.mjs';
 
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'll-flock-'));
@@ -124,6 +129,72 @@ test('releaseLock is idempotent on null/undefined handle', () => {
   assert.equal(releaseLock(null), false);
   assert.equal(releaseLock(undefined), false);
   assert.equal(releaseLock({}), false);
+});
+
+// #2: an empty/garbage lockfile parses to NaN, so the PID branch can't remove
+// it. The mtime staleness backstop must still apply, or the lock wedges forever.
+test('empty stale lockfile is reclaimed via mtime staleness', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'empty.json');
+    writeFileSync(target + '.lock', ''); // 0 bytes: parseInt('') === NaN
+    const old = new Date(Date.now() - 5 * 60_000);
+    utimesSync(target + '.lock', old, old);
+    const removed = tryRemoveIfStale(target + '.lock', 60_000);
+    assert.equal(removed, true, 'old empty lockfile must be reclaimed by mtime');
+    assert.equal(existsSync(target + '.lock'), false);
+  });
+});
+
+test('garbage (non-numeric) fresh lockfile is NOT reclaimed by mtime', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'garbage.json');
+    writeFileSync(target + '.lock', 'not-a-pid'); // parseInt -> NaN, but fresh
+    const removed = tryRemoveIfStale(target + '.lock', 60_000);
+    assert.equal(removed, false, 'a fresh unreadable lock is not yet stale');
+    assert.equal(existsSync(target + '.lock'), true);
+  });
+});
+
+test('acquireLock recovers an empty stale lock (full path, not just tryRemoveIfStale)', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'acq-empty.json');
+    writeFileSync(target + '.lock', '');
+    const old = new Date(Date.now() - 5 * 60_000);
+    utimesSync(target + '.lock', old, old);
+    const h = acquireLock(target, { retries: 2, retryDelayMs: 5, staleMs: 60_000 });
+    assert.ok(h, 'empty stale lock must be reclaimable by acquireLock');
+    releaseLock(h);
+  });
+});
+
+// #5: a stale lock that only becomes removable on the FINAL retry iteration
+// must still be re-acquired, not fall through to null.
+test('stale lock cleared on the final retry is still acquired (retries:1)', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'final.json');
+    writeFileSync(target + '.lock', '99999999'); // dead PID
+    const h = acquireLock(target, { retries: 1, retryDelayMs: 5 });
+    assert.ok(h, 'retries:1 must reclaim a dead-PID stale lock on the first (final) pass');
+    releaseLock(h);
+  });
+});
+
+// #7: a PID-write failure must not leak the fd or orphan an empty lockfile.
+test('write failure after open cleans up the lockfile (no orphan)', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'wfail.json');
+    const boom = () => {
+      const e = new Error('disk full');
+      e.code = 'ENOSPC';
+      throw e;
+    };
+    assert.throws(
+      () => acquireLock(target, { retries: 1, writeFn: boom }),
+      /disk full/,
+      'the write error propagates',
+    );
+    assert.equal(existsSync(target + '.lock'), false, 'no empty lockfile left behind');
+  });
 });
 
 test('cross-process race: both children terminate cleanly (mutual exclusion holds)', async () => {
