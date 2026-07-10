@@ -42,6 +42,7 @@ export function resolveModel(argModel, cfgModel) {
  *   model?: string,
  *   keepAlive?: string,
  *   ollamaUrl?: string,
+ *   provider?: object,
  *   searchFn?: (q:string)=>Promise<{url:string,title:string,snippet:string}[]>,
  *   fetchTextFn?: (url:string)=>Promise<{text:string,ok:boolean,reason:string}>,
  *   extractFn?: (text:string,q:string,opts:object)=>Promise<{sourceQuality:string,sourceId?:object,claims:object[]}>,
@@ -57,6 +58,7 @@ export async function runResearch(question, opts = {}) {
     model,
     keepAlive,
     ollamaUrl,
+    provider,
     searchFn = (q) => resolveSlot('web_search', { cfg }).query(q),
     fetchTextFn = (url) => resolveSlot('fetch', { cfg }).fetch(url),
     extractFn = (text, q, o) => extractClaims(text, q, o),
@@ -104,6 +106,7 @@ export async function runResearch(question, opts = {}) {
       model,
       keepAlive,
       ollamaUrl,
+      provider,
     });
     // The URL carries the identifier deterministically; the model is unreliable
     // at finding it in chrome-heavy page text (PubMed strips the PMID). Prefer the
@@ -154,6 +157,7 @@ export async function orchestrateResearch(question, { angles, maxFetch, argModel
     model,
     keepAlive: cfg.keepAlive,
     ollamaUrl: cfg.ollamaUrl,
+    provider: cfg.provider,
   });
   return { bundle, exitCode: 0, model };
 }

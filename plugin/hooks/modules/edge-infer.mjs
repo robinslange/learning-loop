@@ -202,8 +202,9 @@ export async function runEdgeInfer(ctx) {
     );
     return;
   }
-  const db = await openEdgeDb(dbPath);
+  let db = null;
   try {
+    db = await openEdgeDb(dbPath);
     removeOutgoingEdges(db, sourceRel);
     for (const edge of edges) {
       addEdge(db, {
@@ -217,7 +218,7 @@ export async function runEdgeInfer(ctx) {
 
     saveDb(db, dbPath);
   } finally {
-    db.close();
+    db?.close();
     releaseLock(dbPath);
   }
 

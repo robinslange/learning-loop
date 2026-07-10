@@ -87,6 +87,24 @@ describe('runResearch', () => {
     assert.equal(seenOpts.ollamaUrl, 'http://gpu-box:11434');
   });
 
+  it('threads provider through to extractFn so a configured OpenAI provider is honored', async () => {
+    let seenOpts;
+    const angles = [{ label: 'a', query: 'q' }];
+    const searchFn = async () => [{ url: 'https://x.com', title: 'X', snippet: '' }];
+    const fetchTextFn = async () => ({ text: 'body', ok: true, reason: 'ok' });
+    const extractFn = async (_text, _q, opts) => {
+      seenOpts = opts;
+      return { sourceQuality: 'blog', claims: [] };
+    };
+    const provider = { kind: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o' };
+    await runResearch('q?', { angles, provider, searchFn, fetchTextFn, extractFn });
+    assert.deepEqual(
+      seenOpts.provider,
+      provider,
+      'a configured provider must reach extraction, not be dropped for the Ollama default',
+    );
+  });
+
   it('respects maxFetch', async () => {
     const angles = [{ label: 'a', query: 'q' }];
     const searchFn = async () =>
