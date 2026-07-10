@@ -5,20 +5,20 @@ use serde::Serialize;
 
 #[cfg(test)]
 use crate::config::{PAGERANK_DAMPING, PAGERANK_ITERS, PRF_ALPHA, PRF_BETA, PRF_K, TOP_K_FTS, TOP_K_INITIAL, TOP_K_VEC};
-use crate::config::{PHASE_SIGMA_DIVISOR, RECENCY_BOOST_SCALAR, SECS_PER_DAY, TOP_K_FEDERATION};
+use crate::config::{PHASE_SIGMA_DIVISOR, RECENCY_BOOST_SCALAR, SECS_PER_DAY};
 use crate::db::load_all_embeddings;
 use crate::embed::embed_query;
 
-use super::scoring::{add_ranked_rrf, fts_bm25_query, finalize_rrf};
+use super::scoring::finalize_rrf;
 #[cfg(test)]
 use super::graph::tag_expand;
 #[cfg(test)]
 use super::graph::personalized_pagerank;
 #[cfg(test)]
-use super::scoring::{collect_seeds, dot_product, rocchio_prf_with, PrfParams};
+use super::scoring::{add_ranked_rrf, collect_seeds, dot_product, fts_bm25_query, rocchio_prf_with, PrfParams};
 #[cfg(test)]
 use rayon::prelude::*;
-use super::federation::{add_peer_rrf_scores, load_title_federated};
+use super::federation::{add_peer_rrf_scores_guarded, load_title_federated};
 use super::store::EmbeddingStore;
 use super::context::SearchContext;
 
@@ -208,25 +208,9 @@ pub(crate) fn hybrid_query_federated_with_ctx_inner(
 ) -> Vec<SearchResult> {
     let mut rrf = ctx.local_rrf_scores(conn, query_vec, query_text);
 
-    let local_dim = query_vec.len();
-
     for (peer_id, peer_conn) in peers {
         let peer_embeddings = load_all_embeddings(peer_conn);
-        let peer_dim = peer_embeddings.first().map(|(_, _, e)| e.len()).unwrap_or(0);
-
-        if peer_dim == local_dim && peer_dim > 0 {
-            add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
-        } else {
-            let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
-            add_ranked_rrf(
-                &mut rrf,
-                peer_fts.iter()
-                    .map(|(_, path, _)| format!("peer:{peer_id}/{path}"))
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|s| s.as_str()),
-            );
-        }
+        add_peer_rrf_scores_guarded(&mut rrf, peer_id, peer_conn, query_vec, query_text, &peer_embeddings);
     }
 
     if temporal.has_any() {

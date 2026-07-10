@@ -10,7 +10,7 @@ use crate::embed::embed_query;
 
 use super::scoring::{dot_product, finalize_rrf};
 use super::query::{SearchResult, load_titles_map};
-use super::federation::{add_peer_rrf_scores, batch_load_bodies, batch_load_bodies_federated};
+use super::federation::{add_peer_rrf_scores_guarded, batch_load_bodies, batch_load_bodies_federated};
 use super::cluster::discriminate_pairs;
 use super::store::EmbeddingStore;
 use super::context::SearchContext;
@@ -183,11 +183,8 @@ pub fn reflect_scan_federated(
                 .find(|(id, _, _)| *id == peer_id.as_str())
                 .map(|(_, e, _)| e);
 
-            if let Some(embs) = peer_embs {
-                add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, &query_vec, query_text, embs);
-            } else {
-                add_peer_rrf_scores(&mut rrf, peer_id, peer_conn, &query_vec, query_text, &[]);
-            }
+            let embs: &[(i64, String, Vec<f32>)] = peer_embs.map(|e| e.as_slice()).unwrap_or(&[]);
+            add_peer_rrf_scores_guarded(&mut rrf, peer_id, peer_conn, &query_vec, query_text, embs);
         }
 
         let candidate_results: Vec<SearchResult> = finalize_rrf(rrf, candidates_n)

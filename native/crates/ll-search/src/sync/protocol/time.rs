@@ -20,8 +20,10 @@ impl PeerTimestamp {
             return Err(bad());
         }
 
-        // Minimum: YYYY-MM-DDTHH:MM:SS (19 chars).
-        if s.len() < 19 {
+        // Minimum: YYYY-MM-DDTHH:MM:SS (19 bytes). A valid header is pure ASCII,
+        // so byte 19 must be a char boundary — a multibyte char straddling it is
+        // invalid input, not a panic (this value is peer-controlled).
+        if s.len() < 19 || !s.is_char_boundary(19) {
             return Err(bad());
         }
 
@@ -92,5 +94,31 @@ impl PeerTimestamp {
             return Err(bad());
         }
         Ok(PeerTimestamp(total_secs as u64))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_basic_utc() {
+        assert!(PeerTimestamp::parse("2026-07-10T12:00:00Z").is_ok());
+    }
+
+    #[test]
+    fn rejects_multibyte_char_at_byte_boundary_without_panic() {
+        // 18 ASCII bytes + 'é' (2 bytes) => byte 19 falls inside the char.
+        // The peer-controlled value must be rejected, not panic the daemon.
+        let s = "2026-07-10T12:00:0é";
+        assert_eq!(s.len(), 20); // 18 + 2
+        assert!(!s.is_char_boundary(19));
+        assert!(PeerTimestamp::parse(s).is_err());
+    }
+
+    #[test]
+    fn rejects_leading_multibyte() {
+        // A multibyte string that is >= 19 bytes but garbage.
+        assert!(PeerTimestamp::parse("日本語日本語日本語日本語").is_err());
     }
 }

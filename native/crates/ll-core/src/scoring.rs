@@ -325,6 +325,9 @@ pub fn rocchio_prf_with(
         .iter()
         .take(params.k)
         .filter_map(|(path, _)| emb_map.get(path.as_str()).copied())
+        // A dimension-drifted or truncated stored embedding would panic the
+        // `v[d]` pooling loop below; skip anything not matching the query dim.
+        .filter(|v| v.len() == dim)
         .collect();
 
     if feedback_vecs.is_empty() {
@@ -541,5 +544,30 @@ mod tests {
         }
         let results = finalize_rrf(scores, 5);
         assert_eq!(results.len(), 5);
+    }
+
+    #[test]
+    fn test_rocchio_skips_dimension_mismatched_feedback() {
+        // A stored embedding shorter than the query dim previously panicked the
+        // `v[d]` pooling loop (index out of bounds). It must now be skipped.
+        let query = vec![1.0f32, 0.0, 0.0];
+        let top = vec![("short.md".to_string(), 0.9), ("ok.md".to_string(), 0.8)];
+        let all = vec![
+            (1i64, "short.md".to_string(), vec![1.0f32, 0.0]), // wrong dim: len 2
+            (2i64, "ok.md".to_string(), vec![0.0f32, 1.0, 0.0]),
+        ];
+        let params = PrfParams::default();
+        // Must not panic, and must still produce results from the valid vec.
+        let out = rocchio_prf_with(&query, &top, &all, &params);
+        assert!(!out.is_empty(), "valid feedback vec still drives expansion");
+    }
+
+    #[test]
+    fn test_rocchio_all_feedback_mismatched_returns_empty() {
+        let query = vec![1.0f32, 0.0, 0.0];
+        let top = vec![("short.md".to_string(), 0.9)];
+        let all = vec![(1i64, "short.md".to_string(), vec![1.0f32, 0.0])];
+        let out = rocchio_prf_with(&query, &top, &all, &PrfParams::default());
+        assert!(out.is_empty(), "no valid feedback → empty, not a panic");
     }
 }

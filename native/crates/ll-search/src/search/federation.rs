@@ -48,6 +48,39 @@ pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String
     peers
 }
 
+/// Score a peer into the RRF map, guarding the vector path on dimension match.
+///
+/// `dot_product` zips to the shorter vector, so a dimension-mismatched peer
+/// would silently mis-rank on the embedding leg. When the peer's embedding dim
+/// doesn't match the local query dim (or the peer has no embeddings), fall back
+/// to BM25-only — the same policy the hybrid search path enforces. Both the
+/// hybrid and reflect paths call this so the check lives in one place.
+pub(crate) fn add_peer_rrf_scores_guarded(
+    rrf_scores: &mut HashMap<String, f64>,
+    peer_id: &str,
+    peer_conn: &Connection,
+    query_vec: &[f32],
+    query_text: &str,
+    peer_embeddings: &[(i64, String, Vec<f32>)],
+) {
+    let local_dim = query_vec.len();
+    let peer_dim = peer_embeddings.first().map(|(_, _, e)| e.len()).unwrap_or(0);
+    if peer_dim == local_dim && peer_dim > 0 {
+        add_peer_rrf_scores(rrf_scores, peer_id, peer_conn, query_vec, query_text, peer_embeddings);
+    } else {
+        let peer_fts = fts_bm25_query(peer_conn, query_text, TOP_K_FEDERATION);
+        add_ranked_rrf(
+            rrf_scores,
+            peer_fts
+                .iter()
+                .map(|(_, path, _)| format!("peer:{peer_id}/{path}"))
+                .collect::<Vec<_>>()
+                .iter()
+                .map(|s| s.as_str()),
+        );
+    }
+}
+
 pub(crate) fn add_peer_rrf_scores(
     rrf_scores: &mut HashMap<String, f64>,
     peer_id: &str,
@@ -275,5 +308,50 @@ mod tests {
         let bodies = batch_load_bodies_federated(&local, &peers, &paths);
         assert_eq!(bodies.len(), 1);
         assert!(bodies.contains_key("local.md"));
+    }
+
+    #[test]
+    fn guarded_matched_dim_uses_vector_path() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let peer = create_peer_db(&[("p.md", "p", "sticky positioning", &emb)]);
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let mut rrf = HashMap::new();
+        add_peer_rrf_scores_guarded(
+            &mut rrf,
+            "eve",
+            &peer,
+            &query_vec,
+            "sticky",
+            &[(1, "p.md".to_string(), emb.clone())],
+        );
+        assert!(rrf.contains_key("peer:eve/p.md"), "matched-dim peer scored");
+    }
+
+    #[test]
+    fn guarded_mismatched_dim_falls_back_to_bm25_without_panic() {
+        // Peer embedding has dim 2, query has dim 3. The vector path would
+        // silently mis-rank via dot_product's zip; the guard must route to
+        // BM25 instead. FTS still finds the note by its body text.
+        let peer = create_peer_db(&[("p.md", "p", "sticky positioning breaks", &norm(&[1.0, 0.0, 0.0]))]);
+        let query_vec = norm(&[1.0, 0.0, 0.0]); // dim 3
+        let mismatched = vec![(1i64, "p.md".to_string(), vec![1.0f32, 0.0])]; // dim 2
+        let mut rrf = HashMap::new();
+        add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "sticky", &mismatched);
+        assert!(
+            rrf.contains_key("peer:eve/p.md"),
+            "mismatched-dim peer scored via BM25 fallback"
+        );
+    }
+
+    #[test]
+    fn guarded_empty_embeddings_falls_back_to_bm25() {
+        let peer = create_peer_db(&[("p.md", "p", "sticky positioning", &norm(&[1.0, 0.0, 0.0]))]);
+        let query_vec = norm(&[1.0, 0.0, 0.0]);
+        let mut rrf = HashMap::new();
+        add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "sticky", &[]);
+        assert!(
+            rrf.contains_key("peer:eve/p.md"),
+            "empty-embedding peer scored via BM25"
+        );
     }
 }
