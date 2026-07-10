@@ -179,6 +179,57 @@ test('stale lock cleared on the final retry is still acquired (retries:1)', () =
   });
 });
 
+// Boundary: the mtime staleness threshold is strict (>), so a lock aged
+// exactly staleMs is NOT yet stale; one ms older is.
+test('mtime staleness boundary is strict (age == staleMs is not stale)', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'boundary.json');
+    writeFileSync(target + '.lock', ''); // empty -> mtime path
+    const now = Date.now();
+    // statFn injected so the age is exact, independent of filesystem clock.
+    const atThreshold = tryRemoveIfStale(target + '.lock', 1000, {
+      statFn: () => ({ mtimeMs: now - 1000 }),
+    });
+    assert.equal(atThreshold, false, 'age exactly staleMs must not be reclaimed');
+    assert.equal(existsSync(target + '.lock'), true);
+
+    const pastThreshold = tryRemoveIfStale(target + '.lock', 1000, {
+      statFn: () => ({ mtimeMs: now - 1001 }),
+    });
+    assert.equal(pastThreshold, true, 'age staleMs+1 must be reclaimed');
+    assert.equal(existsSync(target + '.lock'), false);
+  });
+});
+
+// A non-positive PID must route to the mtime backstop, not be handed to the
+// liveness probe as if it were a real process id.
+test('non-positive PID uses the mtime backstop (fresh => not removed)', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'zeropid.json');
+    writeFileSync(target + '.lock', '0'); // pid 0 is not a valid owner
+    const removed = tryRemoveIfStale(target + '.lock', 60_000, {
+      statFn: () => ({ mtimeMs: Date.now() }), // fresh
+    });
+    assert.equal(removed, false, 'fresh pid-0 lock is not reclaimed');
+    assert.equal(existsSync(target + '.lock'), true);
+  });
+});
+
+// #5 precision: the stale lock is re-acquired within a SINGLE retry iteration,
+// so retries:1 suffices and the inner re-open runs exactly once.
+test('final-iteration re-open acquires without consuming a second retry', () => {
+  withTempDir((dir) => {
+    const target = join(dir, 'reopen.json');
+    writeFileSync(target + '.lock', '99999999'); // dead pid, removable immediately
+    // retries:1 means the ONLY chance is the in-iteration re-open.
+    const h = acquireLock(target, { retries: 1, retryDelayMs: 5 });
+    assert.ok(h, 'in-iteration re-open must acquire on the single retry');
+    // The lock we now hold is our own.
+    assert.equal(readFileSync(target + '.lock', 'utf8').trim(), String(process.pid));
+    releaseLock(h);
+  });
+});
+
 // #7: a PID-write failure must not leak the fd or orphan an empty lockfile.
 test('write failure after open cleans up the lockfile (no orphan)', () => {
   withTempDir((dir) => {
