@@ -128,5 +128,32 @@ Tooling wired (`@stryker-mutator/core` 9.6.1, `npm run test:mutation`, per-modul
 
 ### Deferred follow-up (documented, not done)
 
-- **`edge-classifier.mjs`** — mutation baseline **34.66%** (164 survivors); the audit's "relational-only" verdict confirmed (the one direction test asserts only `.flip`). Raising this needs ~20-30 classification-path tests — a separate, sizeable effort, lower marginal value than the security modules above. Baseline captured; recommend a dedicated session.
 - **Medium/low test gaps** from the audit (adapter fixtures for `pmc`/`openlibrary` verify gates, `europepmc`/`semantic-scholar`/etc. parsers) — real but lower-blast-radius; worth a follow-up pass.
+
+---
+
+## Phase 2: adversarial pass over the fixes + edge-classifier mutation follow-up (2026-07-11)
+
+The 9 fixes were per-task TDD'd but never got a whole-branch adversarial pass. A 6-dimension review (regression, backfill scope-gate, file-lock loop, RRF parity, edge-infer leak, test integrity) over the `main..HEAD` diff, each finding verified by 3 refute-biased skeptics (majority-refute kills), raised **10 findings, 3 survived**.
+
+**3 survivors, all fixed (red-proven, atomic commits):**
+
+- 🟠 **HIGH: negative `--limit` reintroduced the edge-graph wipe** (`backfill-edges.mjs`). The scope gate `Boolean(folderFilter) || limit > 0` disagreed with `walkVault`, which truncates on any truthy limit (`if (max)`). `--limit -5` truncates the walk to one file but reads as a full unscoped run, so orphan removal deletes every other note's edges: the exact bug finding #1 was created to fix. Fixed by extracting `isScopedRun` and mirroring walkVault's truthiness (`Boolean(limit)`). The branch's own tests passed `scoped` in directly and never exercised the gate. *(commit `23ffe88`)*
+- 🟠 **HIGH: the federated RRF guard tests pinned nothing** (`federation.rs`). All three `guarded_*` tests asserted only `rrf.contains_key(peer key)`, which the vector path *and* the BM25 fallback both satisfy (the vector path runs `fts_bm25_query` internally and emits the same key). Confirmed empirically: the tests pass under both `if true` and `if false`. Fixed with a vector-only discriminator (a note matching by embedding but not by query text) so matched-dim must score it and mismatched/empty must not. Now fails under both mutants. *(commit `2be90a5`)*
+- 🟡 **MEDIUM: fix #8 (edge-infer lock-leak) had no test.** Added a regression test that forces `openEdgeDb` to throw at the filesystem boundary (edges.db as a directory, so EISDIR) and asserts the lock is released. Red-proven against the pre-fix open-above-try structure. *(commit `f23f4e5`)*
+
+**7 refuted (3-0 each),** good news for the fixes: the `db.close()`-throws-in-finally leak was refuted (fix #8 sound), the symlinked-`main()` guard concern was refuted, the file-lock two-attempt "double-sleep" is a bounded latency shift under contention with no wrong result, and the reflect/#6/deny-match/shadow-gate "untested" claims were mistaken.
+
+### edge-classifier.mjs mutation follow-up
+
+Baseline **34.66%** (87/251 killed) confirmed: its one test asserts only `.flip` (relational-only). Added 42 classification kill-tests (every edge type at both confidence tiers, high-beats-medium plus array-order precedence, sentence-boundary window trimming, link extraction, `classifyNoteEdges` guards, `detectFlip` AND-not-OR). Result: **34.66% to 54.58%** (137/251, +50 mutants killed). *(commit `bae759e`)*
+
+Remaining 114 survivors are genuine near-equivalents, not gaps worth chasing:
+- **~68 PATTERNS regex whitespace/verb-form variants:** `\s+` mutated to `\s` and `\S+` both still match a single space, so the real inputs (`"proves"`, `"builds on"`) don't discriminate; killing them needs pathological multi-space strings, i.e. tautological.
+- **~30 `buildVaultIndex`:** filesystem-coupled (folder-priority resolution); needs directory fixtures, low blast radius.
+- **3 `detectFlip` L173:** *provably equivalent*. The first `if (verbInBefore && !verbInAfter) return false` is redundant with the trailing `return false`; only the second `if` changes behavior, so no test can kill those three. (A latent one-line simplification, out of scope here.)
+- Config also gained `ignorePatterns: ["native/target", ...]`. The 4.6GB Rust build dir was being copied into the Stryker sandbox each run and a concurrent build racing the copy crashed it. Worth porting to the other stryker configs.
+
+### Phase 2 final state
+
+JS **1237 tests green** (was 1180), all Rust binaries green. Tree clean. Branch ready for merge decision.
