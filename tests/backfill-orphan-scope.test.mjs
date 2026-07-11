@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { openEdgeDb, addEdge, saveDb, getEdgesFrom } from '../plugin/scripts/lib/edges.mjs';
-import { removeOrphanEdges } from '../plugin/scripts/backfill-edges.mjs';
+import { removeOrphanEdges, isScopedRun } from '../plugin/scripts/backfill-edges.mjs';
 
 const PLUGIN_DATA = join(tmpdir(), `ll-test-backfill-orphan-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
@@ -65,6 +65,31 @@ describe('backfill-edges orphan removal scope', () => {
     assert.equal(getEdgesFrom(db, '4-projects/d.md').length, 0, 'orphan edge removed');
     assert.equal(getEdgesFrom(db, '0-inbox/c.md').length, 1, 'walked note keeps its edge');
     db.close();
+  });
+
+  // The gate that decides whether a run is "scoped" (and therefore skips orphan
+  // removal) must agree with walkVault's own truncation, which triggers for ANY
+  // truthy limit — `if (max && out.length >= max)`. A limit of -5 truncates the
+  // walk to one file, so it MUST be treated as scoped; otherwise a one-file walk
+  // is mistaken for a full vault and orphan removal wipes the whole edge graph.
+  it('treats a negative --limit as scoped (walkVault truncates on any truthy limit)', () => {
+    assert.equal(isScopedRun({ folderFilter: null, limit: -5 }), true);
+    assert.equal(isScopedRun({ folderFilter: null, limit: -1 }), true);
+  });
+
+  it('treats a positive --limit as scoped', () => {
+    assert.equal(isScopedRun({ folderFilter: null, limit: 10 }), true);
+  });
+
+  it('treats a --folder run as scoped regardless of limit', () => {
+    assert.equal(isScopedRun({ folderFilter: '3-permanent', limit: 0 }), true);
+  });
+
+  it('treats a full run (no folder, no/zero/NaN limit) as unscoped', () => {
+    // parseInt('' || '0') === 0, parseInt('abc') === NaN — both mean "no limit",
+    // and walkVault does not truncate (0 and NaN are falsy), so the run is full.
+    assert.equal(isScopedRun({ folderFilter: null, limit: 0 }), false);
+    assert.equal(isScopedRun({ folderFilter: null, limit: Number.NaN }), false);
   });
 
   it('archived edges are never removed even on an unscoped run', async () => {

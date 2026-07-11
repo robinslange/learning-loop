@@ -113,6 +113,15 @@ export function removeOrphanEdges(db, walkedSourceRels, { scoped }) {
   return { removed, orphanCount: orphanFromPaths.length };
 }
 
+// A run is scoped (walked only part of the vault) when a --folder is given, or
+// when --limit truncated the walk. walkVault truncates on any TRUTHY limit
+// (`if (max && ...)`), so this must too — Boolean(limit) is true for a negative
+// limit and false only for 0/NaN. A positive-only check would mis-flag a
+// negative-limit one-file walk as a full run and wipe the edge graph on removal.
+export function isScopedRun({ folderFilter, limit }) {
+  return Boolean(folderFilter) || Boolean(limit);
+}
+
 async function main() {
   if (!VAULT_PATH) {
     console.error('VAULT_PATH not configured');
@@ -121,7 +130,7 @@ async function main() {
 
   const folders = folderFilter ? [folderFilter] : VAULT_DIRS;
   const files = walkVault(VAULT_PATH, folders, limit);
-  const scoped = Boolean(folderFilter) || limit > 0;
+  const scoped = isScopedRun({ folderFilter, limit });
   console.error(`Scanning ${files.length} notes from ${folders.join(', ')}...`);
 
   console.error('Building vault index for link resolution...');
