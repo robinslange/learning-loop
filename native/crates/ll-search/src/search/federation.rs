@@ -310,10 +310,16 @@ mod tests {
         assert!(bodies.contains_key("local.md"));
     }
 
+    // These tests must distinguish the vector path from the BM25 fallback. A naive
+    // `contains_key` assertion cannot: the vector path (add_peer_rrf_scores) ALSO
+    // runs fts_bm25_query and emits the same key, so a text-matching note scores
+    // under both branches and the guard could be `if true`/`if false` without any
+    // test failing. The discriminator is a note that matches by VECTOR but NOT by
+    // query text ("zzzznomatch") — its key appears only when the vector path runs.
     #[test]
     fn guarded_matched_dim_uses_vector_path() {
         let emb = norm(&[1.0, 0.0, 0.0]);
-        let peer = create_peer_db(&[("p.md", "p", "sticky positioning", &emb)]);
+        let peer = create_peer_db(&[("p.md", "p", "totally unrelated prose", &emb)]);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let mut rrf = HashMap::new();
         add_peer_rrf_scores_guarded(
@@ -321,17 +327,38 @@ mod tests {
             "eve",
             &peer,
             &query_vec,
-            "sticky",
+            "zzzznomatch",
             &[(1, "p.md".to_string(), emb.clone())],
         );
-        assert!(rrf.contains_key("peer:eve/p.md"), "matched-dim peer scored");
+        assert!(
+            rrf.contains_key("peer:eve/p.md"),
+            "matched-dim peer scored via the vector path even with no text match"
+        );
     }
 
     #[test]
-    fn guarded_mismatched_dim_falls_back_to_bm25_without_panic() {
-        // Peer embedding has dim 2, query has dim 3. The vector path would
-        // silently mis-rank via dot_product's zip; the guard must route to
-        // BM25 instead. FTS still finds the note by its body text.
+    fn guarded_mismatched_dim_falls_back_to_bm25() {
+        // Same vector-only note, but the peer embedding is dim 2 vs the query's
+        // dim 3. The guard must route to BM25, which finds nothing for a no-text
+        // query — so the key must be ABSENT. Under `if true` (always vector) this
+        // note would wrongly score; its absence pins the guard condition.
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let peer = create_peer_db(&[("p.md", "p", "totally unrelated prose", &emb)]);
+        let query_vec = norm(&[1.0, 0.0, 0.0]); // dim 3
+        let mismatched = vec![(1i64, "p.md".to_string(), vec![1.0f32, 0.0])]; // dim 2
+        let mut rrf = HashMap::new();
+        add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "zzzznomatch", &mismatched);
+        assert!(
+            !rrf.contains_key("peer:eve/p.md"),
+            "mismatched-dim peer must NOT score a vector-only note (BM25 fallback)"
+        );
+    }
+
+    #[test]
+    fn guarded_mismatched_dim_still_scores_a_text_match_via_bm25() {
+        // The BM25 fallback must still work (not a silent no-op) and not panic on
+        // the dim mismatch: a note that DOES match the query text scores even
+        // though the peer's embedding dim is wrong.
         let peer = create_peer_db(&[("p.md", "p", "sticky positioning breaks", &norm(&[1.0, 0.0, 0.0]))]);
         let query_vec = norm(&[1.0, 0.0, 0.0]); // dim 3
         let mismatched = vec![(1i64, "p.md".to_string(), vec![1.0f32, 0.0])]; // dim 2
@@ -339,19 +366,29 @@ mod tests {
         add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "sticky", &mismatched);
         assert!(
             rrf.contains_key("peer:eve/p.md"),
-            "mismatched-dim peer scored via BM25 fallback"
+            "text-matching note still scored via the BM25 fallback"
         );
     }
 
     #[test]
     fn guarded_empty_embeddings_falls_back_to_bm25() {
-        let peer = create_peer_db(&[("p.md", "p", "sticky positioning", &norm(&[1.0, 0.0, 0.0]))]);
+        // No peer embeddings at all → BM25-only. A vector-only note must be absent;
+        // a text-matching note must be present. Both together pin the else branch.
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let peer = create_peer_db(&[
+            ("vec.md", "vec", "totally unrelated prose", &emb),
+            ("txt.md", "txt", "sticky positioning", &emb),
+        ]);
         let query_vec = norm(&[1.0, 0.0, 0.0]);
         let mut rrf = HashMap::new();
         add_peer_rrf_scores_guarded(&mut rrf, "eve", &peer, &query_vec, "sticky", &[]);
         assert!(
-            rrf.contains_key("peer:eve/p.md"),
-            "empty-embedding peer scored via BM25"
+            !rrf.contains_key("peer:eve/vec.md"),
+            "vector-only note must NOT score with no embeddings (BM25-only)"
+        );
+        assert!(
+            rrf.contains_key("peer:eve/txt.md"),
+            "text-matching note scored via BM25 with no embeddings"
         );
     }
 }
