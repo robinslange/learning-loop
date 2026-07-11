@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.35.1
+
 - **Integrity/stability/accuracy pass — 12 fixes across the plugin and the `ll-search` Rust crate, no API changes.** A 45-agent adversarial audit (7 dimensions, each finding 3-skeptic-verified) then a second adversarial pass over the fixes themselves.
   - **CRITICAL data-loss fix: `backfill-edges` no longer wipes the edge graph on a scoped or negative-limit run.** Orphan removal treated every `from_path` not seen in the current walk as an orphan and deleted it, so a routine `backfill-edges --folder 3-permanent` (or any `--limit N`) deleted every edge originating outside the walked subset — only `archived` edges survived. Orphan removal is now gated on a full unscoped walk via `isScopedRun`, which mirrors `walkVault`'s own truthiness (`Boolean(limit)`): a partial walk — including a negative `--limit` that truncates to one file — is never mistaken for a full vault and can no longer trigger deletion.
   - **`ll-search` crash and mis-ranking hardening against untrusted/drifted input.** A peer-controlled `updated_at` whose 19th byte fell inside a multibyte UTF-8 char panicked the watch daemon for every consumer (`PeerTimestamp::parse` now guards `is_char_boundary`); a dimension-drifted stored embedding shorter than the query panicked the rocchio PRF pooling loop (feedback vectors are now filtered to the query dim); and the federated reflect scan skipped the `peer_dim == local_dim` guard the hybrid path enforces, silently mis-ranking a mismatched-dim peer. The dim check is now factored into one `add_peer_rrf_scores_guarded` helper both federated paths call, so a mismatched or empty-embedding peer falls back to BM25 in both.
