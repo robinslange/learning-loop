@@ -1,8 +1,9 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "testRunner": "command",
-  "commandRunner": { "command": "node --test --test-force-exit tests/edge-classifier-direction.test.mjs" },
+  "commandRunner": { "command": "node --test --test-force-exit tests/edge-classifier-direction.test.mjs tests/edge-classifier-classify.test.mjs" },
   "mutate": ["plugin/scripts/lib/edge-classifier.mjs"],
+  "ignorePatterns": ["native/target", "reports", ".git", ".worktrees", ".stryker-tmp"],
   "reporters": ["clear-text", "json"],
   "jsonReporter": { "fileName": "reports/mutation/edge-classifier.json" },
   "concurrency": 4, "timeoutMS": 30000, "coverageAnalysis": "off", "tempDirName": ".stryker-tmp"
