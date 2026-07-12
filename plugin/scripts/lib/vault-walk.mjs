@@ -6,9 +6,13 @@ const EXCLUDE_DIRS = new Set(['_archive', '_archived', 'Excalidraw']);
 
 /**
  * @param {string} vaultPath
+ * @param {{ dirs?: string[] }} [opts]  `dirs` restricts the walk to these
+ *   top-level folders (an explicit allowlist); missing folders are skipped.
+ *   Default walks the whole vault. EXCLUDE_DIRS and dot-dirs are skipped at
+ *   every depth either way.
  * @returns {{ path: string }[]}  absolute paths to .md notes
  */
-export function listVaultNotes(vaultPath) {
+export function listVaultNotes(vaultPath, { dirs } = {}) {
   const out = [];
   const walk = (dir) => {
     let entries;
@@ -26,7 +30,11 @@ export function listVaultNotes(vaultPath) {
       }
     }
   };
-  walk(vaultPath);
+  if (dirs) {
+    for (const d of dirs) walk(join(vaultPath, d));
+  } else {
+    walk(vaultPath);
+  }
   return out;
 }
 

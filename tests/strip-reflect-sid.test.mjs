@@ -93,6 +93,22 @@ test('skips missing files without throwing', () => {
   }
 });
 
+test('strips the stamp from a CRLF note and preserves the rest byte-for-byte', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'strip-crlf-'));
+  try {
+    const note = join(dir, 'e.md');
+    writeFileSync(
+      note,
+      '---\r\nname: e\r\nreflect_sid: sess-42\r\ntags: [x]\r\n---\r\n\r\nBody text.\r\n',
+    );
+    run(note + '\n', dir);
+    const out = readFileSync(note, 'utf-8');
+    assert.equal(out, '---\r\nname: e\r\ntags: [x]\r\n---\r\n\r\nBody text.\r\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('handles a note with no frontmatter block (body-only) without stripping', () => {
   const dir = mkdtempSync(join(tmpdir(), 'strip-nofm-'));
   try {

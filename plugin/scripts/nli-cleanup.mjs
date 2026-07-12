@@ -20,26 +20,20 @@
 // Safe to re-run: all operations are idempotent.
 // Do NOT run against the live vault until you have reviewed the dry-run output.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { openEdgeDb, saveDb } from './lib/edges.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { splitRawFrontmatter } from './lib/markdown-parse.mjs';
+import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const args = process.argv.slice(2);
 
-function hasFlag(flag) {
-  return args.includes(flag);
-}
-
-function flagValue(flag) {
-  const i = args.indexOf(flag);
-  return i >= 0 && args[i + 1] ? args[i + 1] : null;
-}
-
-const dryRun = !hasFlag('--execute');
-const dbPathOverride = flagValue('--db');
-const vaultPathOverride = flagValue('--vault');
+const dryRun = !hasFlag(args, '--execute');
+const dbPathOverride = flagValue(args, '--db');
+const vaultPathOverride = flagValue(args, '--vault');
 
 const dbPath = dbPathOverride
   ? resolve(dbPathOverride)
@@ -127,31 +121,11 @@ const NLI_FRONTMATTER_KEYS = [
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
 
-function walkVault(root, dirs) {
-  const out = [];
-  for (const dir of dirs) {
-    const full = join(root, dir);
-    if (!existsSync(full)) continue;
-    for (const entry of readdirSync(full, { withFileTypes: true })) {
-      if (entry.isFile() && entry.name.endsWith('.md')) {
-        out.push(join(full, entry.name));
-      }
-    }
-  }
-  return out;
-}
-
 function stripNliFrontmatter(content) {
-  // Normalise CRLF so Windows vault notes match the LF-only frontmatter delimiters.
-  const normalised = content.replace(/\r\n/g, '\n');
-  const fmMatch = normalised.match(/^---\n([\s\S]*?)\n---(\n?)/);
-  if (!fmMatch) return { changed: false, content };
+  const parts = splitRawFrontmatter(content);
+  if (!parts) return { changed: false, content };
 
-  const fmBody = fmMatch[1];
-  const trailingNewline = fmMatch[2];
-  const afterFm = normalised.slice(fmMatch[0].length);
-
-  const lines = fmBody.split('\n');
+  const lines = parts.fm.split(/\r?\n/);
   const filtered = lines.filter((line) => {
     const key = line.match(/^(\S+):\s*/)?.[1];
     if (!key) return true;
@@ -160,8 +134,8 @@ function stripNliFrontmatter(content) {
 
   if (filtered.length === lines.length) return { changed: false, content };
 
-  const newFm = filtered.join('\n');
-  const newContent = '---\n' + newFm + '\n---' + trailingNewline + afterFm;
+  const newContent =
+    '---' + parts.nl + filtered.join(parts.nl) + parts.nl + '---' + parts.trailing + parts.body;
   return { changed: true, content: newContent };
 }
 
@@ -176,7 +150,7 @@ if (!vaultPath) {
 } else if (!existsSync(vaultPath)) {
   console.log(`[nli-cleanup] vault: not found at ${vaultPath}; skipping frontmatter cleanup`);
 } else {
-  const notes = walkVault(vaultPath, VAULT_DIRS);
+  const notes = listVaultNotes(vaultPath, { dirs: VAULT_DIRS }).map((n) => n.path);
   notesScanned = notes.length;
 
   for (const notePath of notes) {

@@ -61,6 +61,10 @@ export const env = Object.freeze({
   // --- Diagnostics ---
   LL_HOOK_DEBUG: isTruthy(process.env.LL_HOOK_DEBUG),
 
+  // Kill switch for the session-start health detector line
+  // (hooks/session-start/health-detector.mjs).
+  LL_DISABLE_DETECTOR: isTruthy(process.env.LL_DISABLE_DETECTOR),
+
   // --- Test seam ---
   // Redirects the legacy tmp session-id file (writer in
   // hooks/session-start/vault-snapshot.mjs, reader in scripts/lib/session.mjs)

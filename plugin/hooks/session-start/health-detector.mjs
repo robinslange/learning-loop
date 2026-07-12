@@ -15,6 +15,7 @@ import {
 } from '../../scripts/lib/health-checks/cache.mjs';
 import { buildAbiDrift } from '../../scripts/check-deps-impl.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
+import { env } from '../../scripts/lib/env.mjs';
 
 const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
 
@@ -40,7 +41,7 @@ function readInstalledVersion(homeDir) {
 }
 
 export async function run(ctx) {
-  if (process.env.LL_DISABLE_DETECTOR === '1') return;
+  if (env.LL_DISABLE_DETECTOR) return;
 
   try {
     let result;
@@ -56,7 +57,7 @@ export async function run(ctx) {
         pluginData: ctx.pluginData,
         vaultRoot: ctx.vaultRoot,
         home: homeDir,
-        pathEnv: process.env.PATH || '',
+        pathEnv: env.PATH,
         installedVersion: readInstalledVersion(homeDir),
         pluginVersion: ctx.pluginVersion,
         templateVersion: readTemplateVersion(ctx.pluginDir),

@@ -13,14 +13,16 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
+import { makeCheck, SEVERITIES } from './lib/health-checks/types.mjs';
 import { detectAbiDrift } from './check-deps-impl.mjs';
 import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
-import { isOffline } from './lib/env.mjs';
+import { env, isOffline } from './lib/env.mjs';
+import { DATA_FILES } from './lib/paths.mjs';
+import { listVaultNotes } from './lib/vault-walk.mjs';
 import { pathToFileURL } from 'node:url';
 
 const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
@@ -101,6 +103,82 @@ export async function runQuickChecks(ctx = {}) {
   };
 }
 
+// Flags a justification index that has fallen behind the vault: edges.db
+// missing entirely, or present with zero edges, while the vault has notes to
+// classify. Pure formatter; the runner collects the inputs.
+export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount } = {}) {
+  if (!vaultNoteCount) {
+    return makeCheck({
+      id: 'edges-backfill',
+      name: 'Edges index',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'no vault notes to index',
+      fix: null,
+    });
+  }
+  if (!dbExists) {
+    return makeCheck({
+      id: 'edges-backfill',
+      name: 'Edges index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `edges.db missing while the vault has ${vaultNoteCount} note(s)`,
+      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
+    });
+  }
+  if (edgeCount === null) {
+    return makeCheck({
+      id: 'edges-backfill',
+      name: 'Edges index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: 'edges.db unreadable',
+      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
+    });
+  }
+  if (edgeCount === 0) {
+    return makeCheck({
+      id: 'edges-backfill',
+      name: 'Edges index',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `edges.db has zero edges while the vault has ${vaultNoteCount} note(s)`,
+      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
+    });
+  }
+  return makeCheck({
+    id: 'edges-backfill',
+    name: 'Edges index',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail: `${edgeCount} edge(s)`,
+    fix: null,
+  });
+}
+
+async function collectEdgesBackfillInputs({ pluginData, vaultRoot }) {
+  const vaultNoteCount = vaultRoot && existsSync(vaultRoot) ? listVaultNotes(vaultRoot).length : 0;
+  const dbPath = pluginData ? DATA_FILES.edgesDb(pluginData) : null;
+  const dbExists = Boolean(dbPath && existsSync(dbPath));
+  let edgeCount = null;
+  if (dbExists) {
+    try {
+      const { openEdgeDb } = await import('./lib/edges.mjs');
+      const db = await openEdgeDb(dbPath);
+      try {
+        const res = db.exec('SELECT COUNT(*) FROM edges');
+        edgeCount = res[0] ? Number(res[0].values[0][0]) : 0;
+      } finally {
+        db.close();
+      }
+    } catch {
+      edgeCount = null;
+    }
+  }
+  return { vaultNoteCount, dbExists, edgeCount };
+}
+
 export async function runFullChecks(ctx = {}) {
   const c = ctx;
   const nodeVersionOutput = safeExec('node', ['-v']);
@@ -142,6 +220,11 @@ export async function runFullChecks(ctx = {}) {
     }
   }
 
+  const edgesInputs = await collectEdgesBackfillInputs({
+    pluginData: c.pluginData,
+    vaultRoot: c.vaultRoot,
+  });
+
   const quickResult = await runQuickChecks(ctx);
   const fullChecks = [
     full.checkNodeVersion({ nodeVersionOutput, minMajor: c.minNodeMajor || 22 }),
@@ -161,6 +244,7 @@ export async function runFullChecks(ctx = {}) {
     full.checkBinaryRuns({ binaryVersionOutput, exitCode: binaryExitCode }),
     full.checkWatchDaemon({ pidfileExists, pidIsAlive, pid }),
     full.checkOfflineMode({ offline: isOffline() }),
+    checkEdgesBackfill(edgesInputs),
   ];
 
   return {
@@ -222,14 +306,14 @@ if (isMain) {
   const wantFull = args.includes('--full');
   const wantJson = args.includes('--json');
 
-  const home = process.env.HOME || homedir();
+  const home = env.HOME;
   const pluginData = resolvePluginData();
   const installedVersion = readInstalledPluginVersion(home) || '0.0.0';
   const ctx = {
     pluginData,
     vaultRoot: readVaultRoot(),
     home,
-    pathEnv: process.env.PATH || '',
+    pathEnv: env.PATH,
     installedVersion,
     pluginVersion: pluginVersion(),
     templateVersion: readTemplateVersion(),

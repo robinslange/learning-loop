@@ -24,3 +24,21 @@ test('walks .md recursively, excludes _archive/_archived/Excalidraw and dotdirs'
   rmSync(v, { recursive: true, force: true });
   assert.deepEqual(rel, ['3-permanent/a.md', 'top.md']);
 });
+
+test('dirs option restricts the walk to the given top-level folders', () => {
+  const v = join(tmpdir(), `ll-vault-${randomBytes(8).toString('hex')}`);
+  mkdirSync(join(v, '0-inbox', 'topic'), { recursive: true });
+  mkdirSync(join(v, '4-projects'), { recursive: true });
+  mkdirSync(join(v, '0-inbox', '_archive'), { recursive: true });
+  writeFileSync(join(v, '0-inbox', 'a.md'), 'x');
+  writeFileSync(join(v, '0-inbox', 'topic', 'nested.md'), 'x');
+  writeFileSync(join(v, '0-inbox', '_archive', 'old.md'), 'x');
+  writeFileSync(join(v, '4-projects', 'index.md'), 'x');
+  writeFileSync(join(v, 'top.md'), 'x');
+
+  const rel = listVaultNotes(v, { dirs: ['0-inbox', 'missing-folder'] })
+    .map((n) => n.path.slice(v.length + 1).replace(/\\/g, '/'))
+    .sort();
+  rmSync(v, { recursive: true, force: true });
+  assert.deepEqual(rel, ['0-inbox/a.md', '0-inbox/topic/nested.md']);
+});

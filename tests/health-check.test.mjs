@@ -68,6 +68,7 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'binary-runs',
     'watch-daemon-status',
     'offline-mode',
+    'edges-backfill',
   ];
   for (const id of [...quick, ...full]) {
     assert.ok(CHECK_IDS[id] === id, `missing id: ${id}`);

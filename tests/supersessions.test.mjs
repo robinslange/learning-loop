@@ -233,7 +233,7 @@ describe('loadSupersessionsCached sidecar', () => {
   });
 
   it('fresh sidecar is served without opening the db (corrupt db stays untouched)', async () => {
-    // A garbage edges.db would throw inside sql.js — returning the sidecar
+    // A garbage edges.db would throw inside sql.js; returning the sidecar
     // rows proves the warm path never boots the SQL layer.
     writeFileSync(DB_PATH, 'not a sqlite file');
     const rows = [{ old_pattern_query: 'from sidecar', superseded_date: '2026-01-01' }];

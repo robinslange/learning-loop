@@ -6,8 +6,8 @@
 //   (2) notes whose frontmatter reflect_sid == this session's sid
 // over an explicit 5-folder ALLOWLIST. The single most important guard: it must
 // NOT descend into 4-projects (free-form index notes the python deliberately
-// excluded). vault-walk.mjs#listVaultNotes is a denylist that WOULD include
-// 4-projects — this test pins that we don't regress to it.
+// excluded). The walk goes through vault-walk.mjs#listVaultNotes with its
+// `dirs` restriction; this test pins that the restriction never drops.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -105,6 +105,48 @@ test('EXCLUDES 4-projects even when the note is unlinked (the S2 trap)', () => {
     const ok = join(root, '0-inbox', 'real.md');
     writeFileSync(ok, '---\nname: real\n---\n\nUnlinked.\n');
     assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [ok]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('flags a CRLF note whose frontmatter reflect_sid matches the session', () => {
+  const root = setupVault();
+  try {
+    const p = join(root, '2-literature', 'crlf.md');
+    // linked body (set (1) does NOT catch it); only the sid stamp selects it,
+    // so an LF-only frontmatter parse silently drops the note.
+    writeFileSync(
+      p,
+      '---\r\nname: crlf\r\nreflect_sid: sess-1\r\n---\r\n\r\nLinked [[note]] body.\r\n',
+    );
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('finds an unlinked note in a SUBFOLDER of an allowlisted folder', () => {
+  const root = setupVault();
+  try {
+    mkdirSync(join(root, '0-inbox', 'topic'), { recursive: true });
+    const p = join(root, '0-inbox', 'topic', 'nested.md');
+    writeFileSync(p, '---\nname: nested\n---\n\nNo wikilinks here.\n');
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('skips _archive subfolders inside allowlisted folders', () => {
+  const root = setupVault();
+  try {
+    mkdirSync(join(root, '0-inbox', '_archive'), { recursive: true });
+    writeFileSync(
+      join(root, '0-inbox', '_archive', 'old.md'),
+      '---\nname: old\n---\n\nNo wikilinks here.\n',
+    );
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

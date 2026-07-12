@@ -12,8 +12,8 @@
 // Frontmatter sync is INTENTIONALLY off in backfill — only the post-write hook
 // touches frontmatter, so re-running backfill never mutates note content.
 
-import { readFileSync, readdirSync, statSync } from 'fs';
-import { join, basename, sep } from 'path';
+import { readFileSync } from 'fs';
+import { basename, sep } from 'path';
 import { pathToFileURL } from 'url';
 import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
@@ -27,49 +27,23 @@ import {
   releaseLock,
 } from './lib/edges.mjs';
 import { classifyNoteEdges, buildVaultIndex, makeResolver } from './lib/edge-classifier.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
 const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
 
 const args = process.argv.slice(2);
 
-function hasFlag(flag) {
-  return args.includes(flag);
-}
+const dryRun = hasFlag(args, '--dry-run');
+const folderFilter = flagValue(args, '--folder');
+const limit = parseInt(flagValue(args, '--limit') || '0', 10);
 
-function flagValue(flag) {
-  const i = args.indexOf(flag);
-  return i >= 0 && args[i + 1] ? args[i + 1] : null;
-}
-
-const dryRun = hasFlag('--dry-run');
-const folderFilter = flagValue('--folder');
-const limit = parseInt(flagValue('--limit') || '0', 10);
-
+// Truncates on any TRUTHY max, floored at one file (a negative --limit walks
+// one file, never zero); isScopedRun must agree with this predicate.
 function walkVault(root, dirs, max) {
-  const out = [];
-  for (const dir of dirs) {
-    const dirPath = join(root, dir);
-    try {
-      const entries = readdirSync(dirPath, { recursive: true });
-      for (const e of entries) {
-        const full = join(dirPath, String(e));
-        try {
-          const st = statSync(full);
-          if (!st.isFile()) continue;
-        } catch (err) {
-          logError('backfill-edges.statFile', err);
-          continue;
-        }
-        if (!String(e).endsWith('.md')) continue;
-        out.push(full);
-        if (max && out.length >= max) return out;
-      }
-    } catch (err) {
-      logError('backfill-edges.readdir', err);
-    }
-  }
-  return out;
+  const files = listVaultNotes(root, { dirs }).map((n) => n.path);
+  return max ? files.slice(0, Math.max(max, 1)) : files;
 }
 
 function countOrphanEdges(db, orphanFromPaths) {
@@ -114,10 +88,10 @@ export function removeOrphanEdges(db, walkedSourceRels, { scoped }) {
 }
 
 // A run is scoped (walked only part of the vault) when a --folder is given, or
-// when --limit truncated the walk. walkVault truncates on any TRUTHY limit
-// (`if (max && ...)`), so this must too — Boolean(limit) is true for a negative
-// limit and false only for 0/NaN. A positive-only check would mis-flag a
-// negative-limit one-file walk as a full run and wipe the edge graph on removal.
+// when --limit truncated the walk. walkVault truncates on any TRUTHY limit, so
+// this must too: Boolean(limit) is true for a negative limit and false only
+// for 0/NaN. A positive-only check would mis-flag a negative-limit one-file
+// walk as a full run and wipe the edge graph on removal.
 export function isScopedRun({ folderFilter, limit }) {
   return Boolean(folderFilter) || Boolean(limit);
 }

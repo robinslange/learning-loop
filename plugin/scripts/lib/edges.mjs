@@ -412,7 +412,7 @@ function tokenize(text) {
 }
 
 // Pure matcher over already-loaded supersession rows. The SQL layer only ever
-// feeds it SELECT * — hot-path callers (post-search-tracking) match against
+// feeds it SELECT *; hot-path callers (post-search-tracking) match against
 // the JSON sidecar instead and never boot sql.js.
 export function matchSupersessions(rows, query) {
   if (!query || !query.trim()) return [];
@@ -444,7 +444,7 @@ export function findMatchingSupersessions(db, query) {
 // mtime-keyed JSON sidecar next to edges.db: valid (sidecar newer than db)
 // means two stats + a tiny JSON parse; stale or missing means one cold
 // openEdgeDb rebuild, after which every call is cheap until edges.db changes.
-// The common case — an instance with zero supersessions — settles to parsing
+// The common case, an instance with zero supersessions, settles to parsing
 // "[]" per call instead of a WASM compile + full 1MB+ db read.
 export async function loadSupersessionsCached(dbPath) {
   if (!existsSync(dbPath)) return [];

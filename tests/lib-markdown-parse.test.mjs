@@ -5,6 +5,7 @@ import {
   stripFrontmatter,
   parseTags,
   extractWikilinks,
+  splitRawFrontmatter,
 } from '../plugin/scripts/lib/markdown-parse.mjs';
 
 test('parseFrontmatter returns empty fm + original body when no frontmatter', () => {
@@ -136,4 +137,37 @@ test('stripFrontmatter returns body only', () => {
   assert.equal(stripFrontmatter('---\ntitle: x\n---\nbody'), 'body');
   assert.equal(stripFrontmatter('no fm'), 'no fm');
   assert.equal(stripFrontmatter(''), '');
+});
+
+test('splitRawFrontmatter returns raw fm + reconstruction parts (LF)', () => {
+  const text = '---\nname: a\ntags: [x]\n---\n\nBody.\n';
+  const parts = splitRawFrontmatter(text);
+  assert.equal(parts.fm, 'name: a\ntags: [x]');
+  assert.equal(parts.nl, '\n');
+  assert.equal(parts.trailing, '\n');
+  assert.equal(parts.body, '\nBody.\n');
+  assert.equal('---' + parts.nl + parts.fm + parts.nl + '---' + parts.trailing + parts.body, text);
+});
+
+test('splitRawFrontmatter reconstructs a CRLF note byte-for-byte', () => {
+  const text = '---\r\nname: a\r\n---\r\n\r\nBody.\r\n';
+  const parts = splitRawFrontmatter(text);
+  assert.equal(parts.fm, 'name: a');
+  assert.equal(parts.nl, '\r\n');
+  assert.equal(parts.trailing, '\r\n');
+  assert.equal('---' + parts.nl + parts.fm + parts.nl + '---' + parts.trailing + parts.body, text);
+});
+
+test('splitRawFrontmatter returns null without a leading fence', () => {
+  assert.equal(splitRawFrontmatter('no frontmatter here\n'), null);
+  assert.equal(splitRawFrontmatter(''), null);
+  assert.equal(splitRawFrontmatter(null), null);
+});
+
+test('splitRawFrontmatter handles a closing fence at EOF (no trailing newline)', () => {
+  const text = '---\nname: a\n---';
+  const parts = splitRawFrontmatter(text);
+  assert.equal(parts.fm, 'name: a');
+  assert.equal(parts.trailing, '');
+  assert.equal(parts.body, '');
 });

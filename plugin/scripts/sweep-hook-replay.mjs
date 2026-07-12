@@ -22,19 +22,23 @@
 // [[links]] before appending; edge-infer removes outgoing edges before
 // re-adding), so running on already-hooked notes is safe.
 
-import { readFileSync, existsSync, readdirSync } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseFrontmatter } from './lib/markdown-parse.mjs';
+import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOOK_PATH = resolve(__dirname, '..', 'hooks', 'post-tool.js');
+const HOOK_URL = pathToFileURL(HOOK_PATH).href;
 const PER_FILE_TIMEOUT_MS = 15000;
 
-// /reflect Step 4.4 candidate folders — an explicit ALLOWLIST. Do NOT swap this
-// for lib/vault-walk.mjs#listVaultNotes: that is a denylist (excludes only
-// _archive/_archived/Excalidraw) and would sweep 4-projects free-form index
-// notes the python walk deliberately skipped, mis-attributing them.
+// /reflect Step 4.4 candidate folders: an explicit ALLOWLIST, passed to
+// lib/vault-walk.mjs#listVaultNotes as its `dirs` restriction. Do NOT drop the
+// restriction: the lib's default denylist walk would sweep 4-projects
+// free-form index notes the python walk deliberately skipped, mis-attributing
+// them.
 const SWEEP_FOLDERS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '5-maps'];
 
 // Candidate union for the 4.4 sweep, mirroring the old python walk exactly:
@@ -43,42 +47,20 @@ const SWEEP_FOLDERS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '
 //         -> marker backfill for sub-agent writes the live hook missed
 // A note matching either set is emitted once. Returns absolute paths.
 export function scanVaultCandidates(vaultRoot, sid) {
-  const seen = new Set();
-  const sidRe = sid
-    ? new RegExp(
-        `^reflect_sid:\\s*["']?${sid.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']?\\s*$`,
-        'm',
-      )
-    : null;
-  const walk = (dir) => {
-    let entries;
+  const out = [];
+  for (const { path } of listVaultNotes(vaultRoot, { dirs: SWEEP_FOLDERS })) {
+    let text;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      text = readFileSync(path, 'utf-8');
     } catch {
-      return;
+      continue;
     }
-    for (const e of entries) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) {
-        walk(p);
-      } else if (e.isFile() && e.name.endsWith('.md') && !seen.has(p)) {
-        let text;
-        try {
-          text = readFileSync(p, 'utf-8');
-        } catch {
-          continue;
-        }
-        const fmMatch = /^---\n([\s\S]*?)\n---\n/.exec(text);
-        const fm = fmMatch ? fmMatch[1] : '';
-        const body = fmMatch ? text.slice(fmMatch[0].length) : text;
-        const unlinked = !/\[\[[^\]]+\]\]/.test(body);
-        const mine = sidRe ? sidRe.test(fm) : false;
-        if (unlinked || mine) seen.add(p);
-      }
-    }
-  };
-  for (const folder of SWEEP_FOLDERS) walk(join(vaultRoot, folder));
-  return [...seen];
+    const { fm, body } = parseFrontmatter(text);
+    const unlinked = !/\[\[[^\]]+\]\]/.test(body);
+    const mine = sid ? fm.reflect_sid === sid : false;
+    if (unlinked || mine) out.push(path);
+  }
+  return out;
 }
 
 function readStdinPaths() {
@@ -89,7 +71,42 @@ function readStdinPaths() {
     .filter(Boolean);
 }
 
-function replayOne(absPath) {
+// In-process replay. hooks/post-tool.js is a stdin-fed top-level-await script,
+// not a callable module: it reads its payload from process.stdin at import
+// time. Each replay therefore swaps process.stdin for a one-shot readable
+// carrying the payload and imports a fresh (cache-busted) copy of the
+// dispatcher; its static imports stay warm in the module cache, which is the
+// whole win over one cold node spawn per note.
+//
+// LL_REFLECT_SID handshake: /reflect Step 4.4 sets LL_REFLECT_SID=$LL_SID
+// before invoking this script, and the replayed post-tool.js reads it from
+// this same process's env, so subagent-written notes reach the CALLING reflect
+// session's new-notes marker and attribution stays correct when multiple
+// /reflect runs overlap.
+
+const realStdin = Object.getOwnPropertyDescriptor(process, 'stdin');
+let replaySeq = 0;
+
+function setFakeStdin(text) {
+  Object.defineProperty(process, 'stdin', {
+    value: Readable.from([text]),
+    configurable: true,
+  });
+}
+
+function restoreStdin() {
+  if (realStdin) Object.defineProperty(process, 'stdin', realStdin);
+}
+
+function withTimeout(promise, ms) {
+  let t;
+  const timeout = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new Error(`timeout after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise.finally(() => clearTimeout(t)), timeout]);
+}
+
+async function replayOne(absPath) {
   let content;
   try {
     content = readFileSync(absPath, 'utf-8');
@@ -103,31 +120,18 @@ function replayOne(absPath) {
     tool_response: { success: true },
   });
 
-  // Forward LL_REFLECT_SID explicitly so the replayed post-tool.js appends to
-  // the CALLING reflect session's new-notes marker. spawnSync inherits env by
-  // default, but we pass it deliberately to document the handshake: /reflect
-  // Step 4.4 sets LL_REFLECT_SID=$LL_SID before invoking this script, and the
-  // replayed reflect-track.mjs uses it as the explicit session override. This is
-  // what makes subagent-written notes reach the marker, and what keeps that
-  // attribution correct when multiple /reflect runs overlap.
-  const result = spawnSync('node', [HOOK_PATH], {
-    input: stdin,
-    encoding: 'utf-8',
-    timeout: PER_FILE_TIMEOUT_MS,
-    env: process.env,
-  });
-  if (result.status !== 0) {
-    return {
-      path: absPath,
-      ok: false,
-      reason: `post-tool.js exit ${result.status}`,
-      stderr: (result.stderr || '').trim().slice(0, 500),
-    };
+  setFakeStdin(stdin);
+  try {
+    await withTimeout(import(`${HOOK_URL}?replay=${replaySeq++}`), PER_FILE_TIMEOUT_MS);
+    return { path: absPath, ok: true };
+  } catch (err) {
+    return { path: absPath, ok: false, reason: `post-tool.js failed: ${err.message}` };
+  } finally {
+    restoreStdin();
   }
-  return { path: absPath, ok: true };
 }
 
-function main() {
+async function main() {
   const args = process.argv.slice(2);
   const wantsHelp = args.includes('--help') || args.includes('-h');
   if (args.length === 0 || wantsHelp) {
@@ -187,7 +191,7 @@ success, 1 if any file failed, 2 on usage error.
       failures.push({ path: abs, reason: 'file not found' });
       continue;
     }
-    const result = replayOne(abs);
+    const result = await replayOne(abs);
     if (result.ok) ok++;
     else failures.push(result);
   }
@@ -203,5 +207,5 @@ success, 1 if any file failed, 2 on usage error.
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  await main();
 }

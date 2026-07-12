@@ -61,11 +61,11 @@ Parse remaining args as source-specific parameters.
 
 **Bundle:**
 - Path arg → use it; no path → `AskUserQuestion`: "Path to the harvest bundle directory?"
-- Handle entirely in Step 1b below. Bundle mode never reaches Step 2 — there is nothing to extract; the bundle carries finished files.
+- Handle entirely in Step 1b below. Bundle mode never reaches Step 2: there is nothing to extract; the bundle carries finished files.
 
 ### Step 1b: Bundle Restore (bundle mode only)
 
-Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on another instance you own. This is a verbatim carry, the receiving twin of harvest — not insight extraction.
+Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on another instance you own. This is a verbatim carry, the receiving twin of harvest, not insight extraction.
 
 1. **Validate.** The directory must contain `HARVEST-MANIFEST.md`; `memory/` and `notes/` are optional (either may be empty). If the manifest is missing, abort: "Not a harvest bundle (no HARVEST-MANIFEST.md)."
 2. **Confirm.** Read the manifest. Show the operator the source instance label and carried file counts, then confirm via `AskUserQuestion` before writing anything.
@@ -74,7 +74,7 @@ Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on anoth
    node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
    ```
    For each file in `memory/`: if a file with the same name already exists, skip it and record a conflict (never overwrite); otherwise copy verbatim. Append one index line per newly added file to `MEMORY.md` in the standard format (`- [filename.md](filename.md): description`, under 150 chars).
-4. **Restore notes.** For each file in `notes/`: check for an existing vault note with the same basename (Glob across the vault); if found, skip and record a conflict. Otherwise Write it to `VAULT/0-inbox/<basename>` — carried notes re-enter this instance's triage pipeline (`/inbox`, promote-gate) rather than landing directly in permanent folders. Main-thread Writes fire the PostToolUse hooks natively; no hook replay needed.
+4. **Restore notes.** For each file in `notes/`: check for an existing vault note with the same basename (Glob across the vault); if found, skip and record a conflict. Otherwise Write it to `VAULT/0-inbox/<basename>`; carried notes re-enter this instance's triage pipeline (`/inbox`, promote-gate) rather than landing directly in permanent folders. Main-thread Writes fire the PostToolUse hooks natively; no hook replay needed.
 5. **Report and stop.** Restored counts, conflicts listed for manual merge, and the reminder: run `/dream` + `/reflect` to consolidate. Do not continue to Step 2.
 
 ### Step 2: Launch Source Agent

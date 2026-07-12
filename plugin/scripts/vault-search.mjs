@@ -10,6 +10,7 @@ import { logError } from './lib/log.mjs';
 import { writeRetrieval } from './lib/retrieval.mjs';
 import { FEDERATION_PATHS } from './lib/paths.mjs';
 import { wrapRetrieval } from './lib/origin-envelope.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
 
 const FEDERATION_CONFIG = FEDERATION_PATHS.config(PLUGIN_DATA);
 
@@ -65,16 +66,6 @@ if (wantsHelp) {
   process.exit(0);
 }
 
-function parseFlag(flag, defaultVal) {
-  const idx = args.indexOf(flag);
-  if (idx < 0) return defaultVal;
-  return args[idx + 1] !== undefined ? args[idx + 1] : defaultVal;
-}
-
-function hasFlag(flag) {
-  return args.includes(flag);
-}
-
 function stripFlags(from, ...flags) {
   return args.slice(from).filter((a, i, arr) => {
     if (flags.includes(a)) return false;
@@ -117,10 +108,10 @@ try {
     case 'query': {
       ensureBinary();
       const text = stripFlags(1, '--top', '--rerank', '--candidates', '--threshold').join(' ');
-      const topN = parseFlag('--top', '10');
-      const threshold = parseFlag('--threshold', '0.15');
-      if (hasFlag('--rerank')) {
-        const candidates = parseFlag('--candidates', '20');
+      const topN = flagValue(args, '--top', '10');
+      const threshold = flagValue(args, '--threshold', '0.15');
+      if (hasFlag(args, '--rerank')) {
+        const candidates = flagValue(args, '--candidates', '20');
         const results = run([
           'rerank',
           DB_PATH,
@@ -153,10 +144,10 @@ try {
     case 'search': {
       ensureBinary();
       const keywords = stripFlags(1, '--top', '--rerank', '--candidates', '--threshold').join(' ');
-      const topN = parseFlag('--top', '20');
-      const threshold = parseFlag('--threshold', '0.15');
-      if (hasFlag('--rerank')) {
-        const candidates = parseFlag('--candidates', '40');
+      const topN = flagValue(args, '--top', '20');
+      const threshold = flagValue(args, '--threshold', '0.15');
+      if (hasFlag(args, '--rerank')) {
+        const candidates = flagValue(args, '--candidates', '40');
         const results = run([
           'rerank',
           DB_PATH,
@@ -188,7 +179,7 @@ try {
 
     case 'similar': {
       ensureBinary();
-      const topN = parseFlag('--top', '10');
+      const topN = flagValue(args, '--top', '10');
       const results = run(['similar', DB_PATH, args[1], '--top', topN]);
       logRetrieval('similar', args[1], results);
       out(results, 'retrieval');
@@ -197,14 +188,14 @@ try {
 
     case 'cluster': {
       ensureBinary();
-      const threshold = parseFlag('--threshold', '0.7');
+      const threshold = flagValue(args, '--threshold', '0.7');
       out(run(['cluster', DB_PATH, '--threshold', threshold]));
       break;
     }
 
     case 'discriminate': {
       ensureBinary();
-      const threshold = parseFlag('--threshold', String(DISCRIMINATE_THRESHOLD));
+      const threshold = flagValue(args, '--threshold', String(DISCRIMINATE_THRESHOLD));
       const notePaths = stripFlags(1, '--threshold', '--top');
       out(run(['discriminate', DB_PATH, '--threshold', threshold, ...notePaths]));
       break;
@@ -212,9 +203,9 @@ try {
 
     case 'index': {
       ensureBinary();
-      const force = hasFlag('--force');
-      const watching = hasFlag('--watch');
-      const syncing = hasFlag('--sync');
+      const force = hasFlag(args, '--force');
+      const watching = hasFlag(args, '--watch');
+      const syncing = hasFlag(args, '--sync');
 
       const runArgs = ['index', VAULT_PATH, DB_PATH];
       if (force) runArgs.push('--force');
@@ -259,10 +250,10 @@ try {
 
     case 'link-stats': {
       ensureBinary();
-      const folder = parseFlag('--folder', null);
+      const folder = flagValue(args, '--folder', null);
       const cliArgs = ['link-stats', DB_PATH];
       if (folder) cliArgs.push('--folder', folder);
-      if (hasFlag('--orphans')) cliArgs.push('--orphans');
+      if (hasFlag(args, '--orphans')) cliArgs.push('--orphans');
       out(run(cliArgs));
       break;
     }
@@ -270,7 +261,7 @@ try {
     case 'list': {
       const { openReadonly } = await import('./lib/sqljs.mjs');
       const db = await openReadonly(DB_PATH);
-      const topN = parseInt(parseFlag('--top', '0'));
+      const topN = parseInt(flagValue(args, '--top', '0'));
       const query =
         topN > 0
           ? `SELECT path, tags FROM notes ORDER BY path LIMIT ${topN}`
@@ -310,9 +301,9 @@ try {
 
     case 'reflect-scan': {
       ensureBinary();
-      const topN = parseFlag('--top', '5');
-      const candidates = parseFlag('--candidates', '20');
-      const threshold = parseFlag('--threshold', String(DISCRIMINATE_THRESHOLD));
+      const topN = flagValue(args, '--top', '5');
+      const candidates = flagValue(args, '--candidates', '20');
+      const threshold = flagValue(args, '--threshold', String(DISCRIMINATE_THRESHOLD));
       const queries = stripFlags(1, '--top', '--candidates', '--threshold');
       if (queries.length === 0) {
         console.error(

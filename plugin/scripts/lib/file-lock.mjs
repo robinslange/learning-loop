@@ -72,7 +72,7 @@ export function isProcessAlive(pid) {
  * @param {string} lockPath
  * @param {number} staleMs
  * @param {{ statFn?: (path: string) => { mtimeMs: number }, nowFn?: () => number }} [deps]
- *   Optional dependency injection — defaults to fs.statSync / Date.now. Tests
+ *   Optional dependency injection; defaults to fs.statSync / Date.now. Tests
  *   pass stubs to exercise the mtime-fallback failure path without engineering
  *   a filesystem race between readFileSync and statSync, and to pin the clock
  *   so exact-boundary assertions don't flake on wall-time drift.

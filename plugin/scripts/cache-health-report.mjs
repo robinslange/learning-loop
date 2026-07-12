@@ -8,14 +8,15 @@
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
+import { getPluginData } from './lib/config.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
 
-const pluginData =
-  env.CLAUDE_PLUGIN_DATA ||
-  join(homedir(), '.claude', 'plugins', 'data', 'learning-loop-learning-loop-marketplace');
+const pluginData = getPluginData();
+if (!pluginData) {
+  console.error('No plugin-data dir resolved (CLAUDE_PLUGIN_DATA unset, no saved marker)');
+  process.exit(1);
+}
 const dir = DATA_PATHS.retrieval(pluginData);
 
 if (!existsSync(dir)) {

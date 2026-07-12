@@ -60,9 +60,19 @@ function sessionStatePath(sid) {
 
 function resolveLogPath(configPath) {
   if (configPath) return configPath;
-  const pluginData =
-    process.env.CLAUDE_PLUGIN_DATA ||
-    join(homedir(), '.claude', 'plugins', 'data', 'learning-loop-learning-loop-marketplace');
+  // Runs standalone from ~/.claude/oh-my-claude/plugins, outside the plugin
+  // runtime, so it cannot import scripts/lib/config.mjs -- replicate its
+  // marker-file fallback inline: getPluginData() stamps the resolved data dir
+  // into ~/.claude/plugins/data/.ll-data-path on every real session.
+  let pluginData = process.env.CLAUDE_PLUGIN_DATA;
+  if (!pluginData) {
+    try {
+      const marker = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
+      const saved = readFileSync(marker, 'utf8').trim();
+      if (saved && existsSync(saved)) pluginData = saved;
+    } catch {}
+  }
+  if (!pluginData) return null;
   const dir = join(pluginData, 'retrieval');
   try { mkdirSync(dir, { recursive: true }); } catch {}
   const month = new Date().toISOString().slice(0, 7);
@@ -169,8 +179,8 @@ export function render(data, config) {
     saveSessionState(sessionId, state);
     writeDedupe(sessionId, read, create, uncached);
 
-    try {
-      const logPath = resolveLogPath(cfg.logPath);
+    const logPath = resolveLogPath(cfg.logPath);
+    if (logPath) try {
       const lifetimeTotal = state.lifetime_read + state.lifetime_create + state.lifetime_uncached;
       const lifetimeRate = lifetimeTotal > 0 ? state.lifetime_read / lifetimeTotal : 0;
       const record = {

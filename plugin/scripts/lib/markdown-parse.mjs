@@ -81,6 +81,32 @@ export function stripFrontmatter(text) {
 }
 
 /**
+ * Lossless frontmatter split for splice-editing callers. Unlike
+ * parseFrontmatter, the raw frontmatter text is returned verbatim so the file
+ * reconstructs byte-for-byte (assuming consistent line endings):
+ *   '---' + nl + fm + nl + '---' + trailing + body
+ *
+ * @param {string | null | undefined} text
+ * @returns {{ fm: string, nl: string, trailing: string, body: string } | null}
+ *   null when there is no leading frontmatter fence. `nl` is the fence newline
+ *   sequence ('\n' or '\r\n'); `trailing` is the newline after the closing
+ *   fence ('' at EOF).
+ */
+export function splitRawFrontmatter(text) {
+  if (typeof text !== 'string' || text.length === 0) return null;
+  const m = text.match(FM_RE);
+  if (!m) return null;
+  const nl = m[0].startsWith('---\r\n') ? '\r\n' : '\n';
+  const closeIdx = m[0].lastIndexOf('---');
+  return {
+    fm: m[1],
+    nl,
+    trailing: m[0].slice(closeIdx + 3),
+    body: text.slice(m[0].length),
+  };
+}
+
+/**
  * Extract the tags list from a parsed frontmatter object.
  * Supports three producer styles found in the vault:
  *   - inline array: `tags: [a, b]`

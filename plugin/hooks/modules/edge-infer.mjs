@@ -7,6 +7,7 @@ import { basename } from 'node:path';
 import { resolvePluginData, isVaultNote, vaultRelPath } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { splitRawFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -74,10 +75,11 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
   }
 
   // Round-trip splice: raw frontmatter text is preserved verbatim and written
-  // back, so this cannot go through markdown-parse's lossy parse.
-  const fmMatch = content.match(/^---\n([\s\S]*?)\n---(\n?)/);
+  // back, so this cannot go through markdown-parse's lossy parse; it uses the
+  // lib's lossless splitRawFrontmatter instead.
+  const parts = splitRawFrontmatter(content);
 
-  if (!fmMatch) {
+  if (!parts) {
     const newKeys = Object.entries(grouped)
       .map(([k, links]) => `${k}: ${formatInlineArray([...links])}`)
       .join('\n');
@@ -86,11 +88,7 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
     return true;
   }
 
-  const fmBody = fmMatch[1];
-  const trailingNewline = fmMatch[2];
-  const afterFm = content.slice(fmMatch[0].length);
-
-  let lines = fmBody.split('\n');
+  let lines = parts.fm.split(/\r?\n/);
   let changed = false;
 
   for (const [key, links] of Object.entries(grouped)) {
@@ -142,7 +140,8 @@ function syncFrontmatterEdges(filePath, highConfidenceEdges) {
 
   if (!changed) return false;
 
-  const newContent = '---\n' + lines.join('\n') + '\n---' + trailingNewline + afterFm;
+  const newContent =
+    '---' + parts.nl + lines.join(parts.nl) + parts.nl + '---' + parts.trailing + parts.body;
   writeFileSync(filePath, newContent);
   return true;
 }

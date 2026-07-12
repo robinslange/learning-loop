@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { run as runHealthDetector } from '../plugin/hooks/session-start/health-detector.mjs';
+
+const DETECTOR_PATH = fileURLToPath(
+  new URL('../plugin/hooks/session-start/health-detector.mjs', import.meta.url),
+);
 
 test('health-detector: appends single line to ctx.context when fails exist', async () => {
   const ctx = {
@@ -19,21 +25,30 @@ test('health-detector: appends single line to ctx.context when fails exist', asy
   assert.match(ctx.context, /⚠ learning-loop: \d+ issues — run \/learning-loop:doctor/);
 });
 
-test('health-detector: emits no line when LL_DISABLE_DETECTOR=1', async () => {
-  const prev = process.env.LL_DISABLE_DETECTOR;
-  process.env.LL_DISABLE_DETECTOR = '1';
-  const ctx = {
-    pluginDir: process.cwd(),
-    pluginData: null,
-    vaultRoot: null,
-    context: '',
-    depsAllSatisfied: true,
-    depsMissing: '',
-  };
-  await runHealthDetector(ctx);
-  assert.equal(ctx.context, '');
-  if (prev === undefined) delete process.env.LL_DISABLE_DETECTOR;
-  else process.env.LL_DISABLE_DETECTOR = prev;
+test('health-detector: emits no line when LL_DISABLE_DETECTOR=1', () => {
+  // The flag is read through the lib/env.mjs snapshot, which freezes at import
+  // time, so the override must be in place before the module loads: run the
+  // detector in a subprocess with the env var set.
+  const script = `
+    import { run } from ${JSON.stringify(DETECTOR_PATH)};
+    const ctx = {
+      pluginDir: process.cwd(),
+      pluginData: null,
+      vaultRoot: null,
+      context: '',
+      depsAllSatisfied: true,
+      depsMissing: '',
+    };
+    await run(ctx);
+    process.stdout.write(JSON.stringify({ context: ctx.context }));
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+    encoding: 'utf-8',
+    timeout: 20000,
+    env: { ...process.env, LL_DISABLE_DETECTOR: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).context, '');
 });
 
 test('health-detector: sets ctx.depsAllSatisfied + depsMissing for context-assembly', async () => {

@@ -33,6 +33,7 @@ export const CHECK_IDS = Object.freeze({
   'binary-runs': 'binary-runs',
   'watch-daemon-status': 'watch-daemon-status',
   'offline-mode': 'offline-mode',
+  'edges-backfill': 'edges-backfill',
 });
 
 /**

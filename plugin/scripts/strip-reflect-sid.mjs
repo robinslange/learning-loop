@@ -15,6 +15,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { splitRawFrontmatter } from './lib/markdown-parse.mjs';
 
 function readStdinPaths() {
   const raw = readFileSync(0, 'utf-8');
@@ -25,17 +26,18 @@ function readStdinPaths() {
 }
 
 // Remove `reflect_sid:` lines from the frontmatter block only. Returns the new
-// text, or the original (same reference) when nothing changed.
+// text, or the original (same reference) when nothing changed. Uses the lib's
+// lossless split so everything outside the removed lines survives
+// byte-for-byte, CRLF vaults included.
 export function stripReflectSid(text) {
-  const m = /^---\n([\s\S]*?)\n---\n/.exec(text);
-  if (!m) return text; // no frontmatter fence -> never touch the body
-  const fm = m[1];
-  const strippedFm = fm
-    .split('\n')
+  const parts = splitRawFrontmatter(text);
+  if (!parts) return text; // no frontmatter fence -> never touch the body
+  const strippedFm = parts.fm
+    .split(/\r?\n/)
     .filter((line) => !/^reflect_sid:/.test(line))
-    .join('\n');
-  if (strippedFm === fm) return text;
-  return text.slice(0, m.index) + `---\n${strippedFm}\n---\n` + text.slice(m.index + m[0].length);
+    .join(parts.nl);
+  if (strippedFm === parts.fm) return text;
+  return '---' + parts.nl + strippedFm + parts.nl + '---' + parts.trailing + parts.body;
 }
 
 function main() {

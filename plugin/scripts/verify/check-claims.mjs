@@ -1,4 +1,5 @@
 import { readFileSync } from 'fs';
+import { stripFrontmatter } from '../lib/markdown-parse.mjs';
 import { extractSourcesFromNote } from '../lib/sources/note-extract.mjs';
 import { extractNumbers, findNumberInAbstract } from '../lib/sources/claim-numbers.mjs';
 import { isBlockedFetch, fetchPageText } from '../lib/sources/web-fetch.mjs';
@@ -10,9 +11,7 @@ export async function checkClaims(notePath) {
   const content = readFileSync(notePath, 'utf-8');
   const sources = extractSourcesFromNote(content);
 
-  const bodyMatch = content.match(/^---[\s\S]*?---\s*\n([\s\S]*)$/);
-  const body = bodyMatch ? bodyMatch[1] : content;
-  const allNumbers = extractNumbers(body);
+  const allNumbers = extractNumbers(stripFrontmatter(content));
   if (allNumbers.length === 0) return [];
 
   const results = [];

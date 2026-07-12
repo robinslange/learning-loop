@@ -264,7 +264,7 @@ export async function run(ctx) {
     }
   }
 
-  // 10. Emit session-start provenance event inline — one JSONL append is
+  // 10. Emit session-start provenance event inline: one JSONL append is
   // cheaper than a detached node child (see modules/provenance.mjs, which
   // made the same call for the post-tool hot path).
   try {
