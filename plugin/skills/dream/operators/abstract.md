@@ -33,4 +33,4 @@ If approved:
   - Kept: feedback_c.md, feedback_d.md (unique detail)
 ```
 
-Emit provenance after each operation: `${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js '{"agent":"dream","action":"abstract","target":"FILENAME"}'`
+Emit provenance after each operation: `node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"abstract","target":"FILENAME"}'`

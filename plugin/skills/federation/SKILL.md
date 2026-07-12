@@ -11,7 +11,7 @@ This skill is invoked from `/init` Phase 4 when the user opts in, but is safe to
 
 ## Paths
 
-`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If not present, resolve them via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`.
+Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply).
 
 ## Process
 

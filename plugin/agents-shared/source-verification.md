@@ -10,30 +10,36 @@ A source URL is a verified artifact or it is a hallucination risk. There is no m
 
 **The contract between agents:** When a researcher passes sources to a writer, verified URLs arrive in a `Verified Sources` table. The writer copies them verbatim. If a source wasn't fetched, it's marked `unfetched` and the writer uses `source: unverified` in frontmatter. No agent should reconstruct what a prior agent already resolved.
 
-## WebFetch Discipline
+## Gateway Fetch Discipline
 
-WebFetch has no timeout parameter. Hanging fetches stall the entire agent.
+Web access runs through the source gateway, called via Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" <search|fetch|research> --json`.
 
-**Never WebFetch paywalled or bot-blocking domains:** `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org`, `springer.com`, `link.springer.com`, `tandfonline.com`, `ieeexplore.ieee.org`, `eprints.*.ac.uk`, any `.pdf` URL. For academic sources on these domains, use `source-resolver.mjs` instead -- it hits APIs that respond reliably. Mark paywalled URLs as `unfetched (paywalled)` -- this is not a failure.
+- `search --q "<query>"` returns `{ hits: [{url,title,snippet}], source_used }`. Prefer search: snippets are fast and cost no fetch budget.
+- `fetch --url "<url>"` returns `{ doc: {text,ok,reason}, source_used }`. Fetch only when a claim must be checked against full page content.
+- `research --q "<question>"` runs the librarian's multi-angle research pipeline and returns a cited source bundle.
+
+The gateway enforces the per-session fetch budget (default 10) mechanically: past the budget, `fetch` returns `{ doc: { ok: false, reason: 'fetch_budget_exceeded' } }`. Do not track a call count yourself. The discipline that remains yours: do not burn the budget on paywalled or junk sources. When the budget trips, mark remaining sources `[unfetched]` and continue.
+
+### Paywalled Domain Blocklist (canonical)
+
+This is the single canonical list. Agent files reference this section; they must not carry their own copies.
+
+**Never gateway-fetch these domains** (paywalled, bot-blocking, or redirect chains that hang): `sciencedirect.com`, `linkinghub.elsevier.com`, `doi.org`, `springer.com`, `link.springer.com`, `tandfonline.com`, `ieeexplore.ieee.org`, `eprints.*.ac.uk`, `*.edu` thesis PDFs, any `.pdf` URL. For academic sources on these domains, use `source-resolver.mjs` instead -- it hits APIs (PubMed, Semantic Scholar, CrossRef) that respond reliably. Mark paywalled URLs as `unfetched (paywalled)` -- this is not a failure.
 
 **Never re-fetch a URL already in your context.** If the research brief or prior agent already fetched it, use that content.
-
-## WebFetch budget
-
-Cap WebFetch calls at **10 per agent invocation**. After 10 fetches, mark remaining sources as `[unfetched]` and continue. This bounds session latency when sources are slow or paywalled.
 
 ## Verify Source URLs
 
 For each URL in a note or research brief:
 
-1. For academic sources (PMID, DOI, arXiv): use `source-resolver.mjs verify-pmid/verify-doi/resolve` first. Only WebFetch if the resolver cannot handle the source type.
-2. For non-academic URLs (blogs, docs, specs): fetch the URL using WebFetch, but skip domains in the blocklist above.
+1. For academic sources (PMID, DOI, arXiv): use `source-resolver.mjs verify-pmid/verify-doi/resolve` first. Only gateway-fetch if the resolver cannot handle the source type.
+2. For non-academic URLs (blogs, docs, specs): fetch via the gateway, skipping domains in the blocklist above.
 3. Check: does the page exist? Does the title/author match what's cited?
 4. If dead or mismatched, flag it.
 
 For sources cited by name without a URL:
 
-1. Search the web for the source.
+1. Search for the source via gateway `search`.
 2. If found, provide the correct URL.
 3. If not found, flag as unverifiable.
 

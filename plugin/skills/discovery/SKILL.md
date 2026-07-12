@@ -109,10 +109,12 @@ While agents work, confirm parameters with the user if any were ambiguous.
 
 Run this after EVERY `discovery-researcher` return — orientation and every loop round — before presenting findings. The researcher returns an UNVERIFIED brief; subagents cannot spawn subagents, so this loop is the only verification gate.
 
-1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with:
-   - **note_content**: the full research brief, verbatim (including the Verified Sources table)
-     Resolve all path placeholders in the prompt to literal absolute paths first (see `agents-shared/vault-io.md` → Placeholders). Track the verification round number across spawns; stop after round 3.
-2. Branch on the verifier's top-level `### Status:`
+1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with a one-note batch (the agent contract is a list of 1-5 {path, content} entries; output is one `## Verification: <note title>` section per note):
+   - **path**: a label for the brief, e.g. `brief:<topic>` (the brief is not a vault file; the label names its output section)
+   - **content**: the full research brief, verbatim (including the Verified Sources table)
+
+   Resolve all path placeholders in the prompt to literal absolute paths first (see `agents-shared/vault-io.md` → Placeholders). Track the verification round number across spawns; stop after round 3.
+2. Branch on the `### Status:` in the brief's `## Verification:` section
    - **PASS**: proceed to presentation.
    - **PARTIAL** (no contradicted claims, but some scored 1-2): proceed to presentation, but carry the verifier's per-claim flags through — mark affected claims `[partial]` in the brief and mention them when presenting.
    - **ISSUES FOUND**: revise the brief yourself — you hold the full brief and the verifier's issue list. FIRST apply the verifier's `### Corrections` section: adopt the corrected URLs and revised claim text it provides. Only remove or demote when no correction is offered:
@@ -162,7 +164,13 @@ Repeat until the user says "done", "wrap up", or similar:
    - `existing_knowledge`: vault scout findings + prior round findings
 3. **Verify**: run Step 1.5 on the returned brief
 4. **Present**: deliver findings in chosen style and tone
-5. **Capture** (if `full` mode): after each round, write an inbox note for the key insight discovered. Keep it atomic, persona voice, properly linked. Include source URLs from the researcher's findings as clickable markdown links in the note body: don't defer URL capture to the wrap-up or `/literature` step. If the researcher returned a diagram, write it to `{{VAULT}}/Excalidraw/` and embed it in the trail note with `![[diagram-name]]`.
+5. **Capture** (if `full` mode): after each round, dispatch a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) to write an inbox note for the key insight discovered. You decide WHAT the note says; note-writer does the writing (persona voice, capture-rules, atomicity). Pass:
+   - **insight**: the key insight from the round, one idea, phrased as a claim
+   - **research**: the verified brief excerpts backing it, including source URLs to include as clickable markdown links in the note body (don't defer URL capture to the wrap-up or `/literature` step)
+   - **related_notes**: vault scout hits plus trail notes from earlier rounds
+   - **destination**: `0-inbox/`
+
+   Resolve all path placeholders to literal absolute paths before dispatch (see `agents-shared/vault-io.md` → Placeholders). Record the path each note-writer reports; Step 4.5 replays hooks on them. If the researcher returned a diagram, write it yourself to `{{VAULT}}/Excalidraw/` and tell note-writer to embed it in the trail note with `![[diagram-name]]`.
 
 **Steering keywords the skill should recognize:**
 
@@ -176,14 +184,14 @@ Repeat until the user says "done", "wrap up", or similar:
 **Full capture mode:**
 
 - Individual inbox notes were written during the loop
-- Write a synthesis note that:
+- Dispatch a final `note-writer` agent for the synthesis note. You supply the content decisions; note-writer writes it. The note must:
   - Title captures the overarching insight from the journey
   - Links to all trail notes created during the session
   - Summarizes what was learned in 5-10 lines, persona voice
   - Tags with topic domain plus `synthesis`, max 3 tags
   - Sets `source: discovery` in frontmatter
   - Lists sources found
-- **Destination:**
+- **Destination** (pass it to note-writer explicitly):
   - If the synthesis links to ≥10 trail/vault notes, write directly to `5-maps/` — this is a hub note.
   - Otherwise write to `0-inbox/` and let the promote-gate decide on the next pass. (Hub-detection still applies if it later grows link density.)
   - The promote-gate's `5-maps/` rule will catch borderline cases — synthesis-tagged + link-dense + criteria-pass → `5-maps/`, even from `0-inbox/`.
@@ -192,7 +200,7 @@ Repeat until the user says "done", "wrap up", or similar:
 
 - No notes were written during the loop
 - Ask: "Want to capture anything from this journey?"
-- If yes: let the user indicate what was valuable, write selective inbox notes
+- If yes: let the user indicate what was valuable, then dispatch `note-writer` per selected insight (same dispatch as Step 3 item 5)
 - If no: end cleanly, nothing persisted
 
 **Both modes (source handoff):**
@@ -203,6 +211,17 @@ Sources worth capturing (run /literature):
 - "Source Title": why it matters
 - "Source Title": why it matters
 ```
+
+### Step 4.5: Replay Post-Write Hooks
+
+If any `note-writer` agents ran (trail notes, synthesis, or surf-mode captures), their Write calls bypassed PostToolUse: backlinks and edge inference didn't run. Replay the hook chain on every path note-writer reported (see `skills-shared/hook-replay.md`, targeted variant):
+
+```bash
+printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
+  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+```
+
+Idempotent: safe on already-hooked notes. Skip if no note-writer ran. Surface any `failures` from the JSON summary in Step 5.
 
 ### Step 5: Report
 
@@ -233,8 +252,15 @@ Sources found: N (run /literature to capture)
 ### note-verifier
 
 - Launch from Step 1.5 after every researcher return
-- Pass the full brief as `note_content`, placeholders resolved to literal paths
+- Pass a one-note batch: a list with a single {path, content} entry, the full brief as content, placeholders resolved to literal paths
 - PASS/PARTIAL/ISSUES verdicts drive Step 1.5 (max 3 rounds)
+
+### note-writer
+
+- Launch at Step 3 item 5 (trail notes), Step 4 (synthesis), and surf-mode capture
+- Pass insight, research, related_notes, destination; the skill decides content, the agent writes it
+- Follows capture-rules: persona voice, atomic, insight title
+- Record reported paths for the Step 4.5 hook replay
 
 **Always spawn agents in the same turn when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. Use a single message with multiple Agent tool calls.
 

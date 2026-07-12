@@ -1,6 +1,6 @@
 ---
 name: health
-description: 'Vault health dashboard. Usage: /learning-loop:health [--deep] [--auto]. Light mode (default) shows counts + file lists. --deep uses note-scorer for full analysis. --auto fixes safe issues without asking.'
+description: 'Vault health dashboard. Usage: /learning-loop:health [--deep] [--auto] [--provenance] [--librarian]. Light mode (default) shows counts + file lists. --deep uses note-scorer for full analysis. --auto fixes safe issues without asking. --provenance shows pipeline observability; --librarian reviews queued librarian suggestions.'
 ---
 
 # Health: Vault Health Dashboard
@@ -106,7 +106,13 @@ For each note across all content folders (0-inbox, 1-fleeting, 3-permanent), gre
 
 ### Step 5: Check: Stale Inbox
 
-For each inbox note, check file modification time using Bash: `node -e "console.log(require('fs').statSync('FILE').mtimeMs)"`. Flag notes older than 14 days.
+Check all inbox notes in one pass (single process for the whole folder, never one per note):
+
+```bash
+node -e "const fs=require('fs'),p=process.argv[1],now=Date.now();for(const f of fs.readdirSync(p)){if(!f.endsWith('.md'))continue;const d=Math.floor((now-fs.statSync(p+'/'+f).mtimeMs)/86400000);if(d>14)console.log(d+'d\t'+f)}" "{{VAULT}}/0-inbox"
+```
+
+Each output line is a stale note with its age in days.
 
 **Light:** List stale notes with age in days.
 **Deep:** Launch `note-scorer` agent(s) with stale note paths. Report maturity tier and recommend action: promote (if deep/medium), `/deepen` (if shallow but promising), or delete candidate (if shallow and empty).
@@ -128,7 +134,7 @@ Grep all `\[\[...\]\]` wikilink references across all vault notes. For each uniq
 
 ### Step 7.5: Check: Librarian Queue
 
-Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
 
 If the queue file doesn't exist or is empty, skip this step silently.
 

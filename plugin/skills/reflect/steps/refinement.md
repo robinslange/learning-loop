@@ -11,8 +11,14 @@ Each refinement.md bash block runs in its own shell (variables do not persist ac
 ```bash
 eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
+if [ -s "${LL_TMP_PREFIX}-new-notes.txt" ]; then
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
+else
+  printf '[]' > "${LL_TMP_PREFIX}-refinement-pairs.json"
+fi
 ```
+
+The marker can be missing or empty on a drain-only run (Step 4.6 fired because the deferred queue is non-empty, not because this session wrote notes); start from an empty pairs file and let the deferred merge below supply the pairs.
 
 Then drain the deferred queue left by a capped `/ingest --refine` run (ingest Step 5.6.b writes overflow pairs there as JSONL). Merge queued pairs into the pairs file, dedupe on `(new_note, candidate)`, reassign ids (the validator matches decisions to pairs by `id`; deferred entries carry stale ids from their original run), and truncate the queue:
 
@@ -41,7 +47,7 @@ if [ -s "$DEFERRED" ]; then
 fi
 ```
 
-If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip 4.6.b through 4.6.f. Still run **4.6.g cleanup** — the session wrote notes (the pairs were empty because none matched an upstream claim, not because no notes exist), so their `reflect_sid` stamps must still be stripped and the marker removed. Skipping 4.6.g here would leak `reflect_sid` into the vault permanently and leave the marker for a later same-session /reflect to re-sweep.
+If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates in band` in Step 5 and skip 4.6.b through 4.6.f. Still run **4.6.g cleanup** — the session wrote notes (the pairs were empty because none matched an upstream claim, not because no notes exist), so their `reflect_sid` stamps must still be stripped and the marker removed. Skipping 4.6.g here would leak `reflect_sid` into the vault permanently and leave the marker for a later same-session /reflect to re-sweep. (On a drain-only run with no marker, 4.6.g's `-f` guard makes the strip a no-op; running it is still safe.)
 
 ## 4.6.b: Dispatch refinement-proposer agent
 

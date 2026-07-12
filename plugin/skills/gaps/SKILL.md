@@ -1,6 +1,6 @@
 ---
 name: gaps
-description: 'Challenge vault knowledge through coverage, confidence, and counterpoint analysis. Usage: /learning-loop:gaps "topic" | /learning-loop:gaps (auto-pick) | /learning-loop:gaps --sweep. Scales depth to note maturity. Creates counterpoint notes, offers rewrites.'
+description: 'Challenge vault knowledge through coverage, confidence, and counterpoint analysis. Usage: /learning-loop:gaps "topic" | /learning-loop:gaps (auto-pick) | /learning-loop:gaps --sweep; any mode takes [--depth shallow|medium|deep] [--dry-run]. Scales depth to note maturity (--depth overrides); --dry-run shows what would be analysed without researching. Creates counterpoint notes, offers rewrites.'
 ---
 
 # Gaps: Epistemic Gap Analysis

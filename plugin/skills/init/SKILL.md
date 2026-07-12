@@ -12,11 +12,7 @@ All operations use Node.js APIs (fs, path, child_process). No bash `find`, no sh
 
 ## Paths
 
-`PLUGIN_DATA` and `VAULT` are injected by the session-start hook (see "Learning Loop Paths" in your context); the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). Use those resolved values for ALL path references in the phase files. If not present, resolve them by running:
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
-```
+Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply). Use those resolved values for ALL path references in the phase files.
 
 ## Process
 

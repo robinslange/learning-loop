@@ -87,7 +87,7 @@ Rank affected notes by impact:
 4. **low**: has alternative support, attack type is `undercutting`
 5. **noise**: `untouched`
 
-Discard `noise` from the final report unless the user asked for `--include-noise`.
+Discard `noise` from the final report.
 
 ### 5. Produce the impact map
 

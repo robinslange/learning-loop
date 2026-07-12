@@ -10,7 +10,7 @@ Produces a `seed-bundle-<date>/` an empty learning-loop instance can boot from v
 
 ## Paths
 
-`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`. Resolve the auto-memory dir mechanically (do NOT hand-construct the slug):
+Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply). Resolve the auto-memory dir mechanically (do NOT hand-construct the slug):
 ```
 node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
 ```

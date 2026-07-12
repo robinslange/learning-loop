@@ -11,11 +11,7 @@ If invoked with `--redact`, skip the normal health-check steps and run the **Red
 
 ## Paths
 
-`PLUGIN_DATA` and `VAULT` are injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line). If absent:
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
-```
+Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply).
 
 `fix` strings in the health-check JSON prefix paths with a user-facing `PLUGIN` shorthand for the plugin root (defined in `guide/troubleshooting.md`). Show them verbatim when the user will run the command; substitute `${CLAUDE_PLUGIN_ROOT}` for the leading `PLUGIN` segment when you execute it yourself via Bash.
 

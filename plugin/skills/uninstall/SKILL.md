@@ -1,6 +1,7 @@
 ---
 name: uninstall
 description: Cleanly remove learning-loop and its footprint. Usage: /learning-loop:uninstall. Walks the three steps — marketplace removal, episodic-memory MCP removal, and purging captured indexes — with confirmation before each destructive action. Does not auto-delete.
+disable-model-invocation: true
 ---
 
 # Uninstall learning-loop

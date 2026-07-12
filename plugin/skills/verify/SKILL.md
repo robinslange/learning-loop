@@ -1,6 +1,6 @@
 ---
 name: verify
-description: 'Assess note quality and verify claims against cited sources. Usage: /learning-loop:verify "note-name" | inbox | permanent | "topic" (defaults to inbox). Scores quality, checks source integrity, detects duplicates: produces fix plan.'
+description: 'Assess note quality and verify claims against cited sources. Usage: /learning-loop:verify "note-name" | inbox | fleeting | permanent | "topic" (defaults to inbox). Scores quality, checks source integrity, detects duplicates: produces fix plan.'
 ---
 
 # Verify: Note Quality and Source Integrity
@@ -85,11 +85,11 @@ Proceed immediately.
 
 ### Step 2: Gather Notes
 
-- For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`, Read it
+- For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`
 - For folder-based: `Glob` for `*.md` in the target folder (`inbox` → `0-inbox/`, `fleeting` → `1-fleeting/`, `permanent` → `3-permanent/`)
 - For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
-Read each note.
+Collect paths only; do NOT Read note bodies in the main thread here. Content is read exactly where a later step needs it: the note-scorer agents read their own batches from paths (Step 3), the synthesis-tag audit reads only synthesis-tagged notes in its scopes (Step 4.5), and Step 5 reads only the source-bearing notes it batches for note-verifier. A full-folder read here would pull the whole scope into main context and every note would be read a second time by its scoring agent.
 
 ### Step 3: Quality Scoring (Parallel Subagents)
 
@@ -118,7 +118,7 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 Embeddings find topical similarity and surface both near-duplicates and potential contradictions.
 
-For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Read the top similar notes (score > 0.7). Flag two types:
+For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Where a result scores > 0.7, read the scoped note and its top similar notes (a targeted read of the flagged pair, not a folder sweep). Flag two types:
 - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
 - **Potential contradiction** (similarity 0.7–0.85, conflicting claims): notes that look related but opposed. Recommend review.
 
@@ -126,7 +126,7 @@ Also check `edges.db` (see `scripts/lib/edges.mjs`) for `challenges_*` typed edg
 
 ### Step 4.5: Synthesis-Tag Audit (permanent + fleeting scopes)
 
-For the `permanent` and `fleeting` scopes (and `"topic"` scopes that surface synthesis-tagged notes), audit every `source: synthesis` / `synthesis`-tagged note against the factual-signals heuristic before trusting its exemption. The exemption is self-certified by the writing agent and is never otherwise re-checked, so a smuggled factual claim can sit in `3-permanent/` unaudited.
+For the `permanent` and `fleeting` scopes (and `"topic"` scopes that surface synthesis-tagged notes), audit every `source: synthesis` / `synthesis`-tagged note against the factual-signals heuristic before trusting its exemption. Identify the synthesis-tagged subset mechanically (Grep the scoped paths for `source: synthesis` or a `synthesis` tag) and Read only those notes; the rest of the scope stays unread in the main thread. The exemption is self-certified by the writing agent and is never otherwise re-checked, so a smuggled factual claim can sit in `3-permanent/` unaudited.
 
 **Skip-if-fresh:** Before running the audit on a note, read its `synthesis_validated` frontmatter field. If the field is present and the note's file `mtime` is not newer than that date, the verdict is fresh — skip the audit for that note and count it as passing (the body is unchanged since the last judgment). This prevents `/verify` and the inbox organiser from diverging on notes that neither of them has changed.
 
@@ -145,14 +145,14 @@ A synthesis note that cites numbers only via wikilinks to grounded vault notes p
 
 ### Step 5: Source Verification (Parallel Subagents)
 
-Filter notes to those with sources/citations. Skip sourceless notes (report as "no sources: skipped").
+Filter notes to those with sources/citations. Identify the source-bearing subset mechanically (Grep the scoped paths for citation signals: `http`, `source:`, `doi`). Skip sourceless notes (report as "no sources: skipped"). Read only the source-bearing notes here; their content goes straight into the agent input.
 
-Spawn `note-verifier` agent(s). When spawning multiple, dispatch them all in the same turn:
+Spawn `note-verifier` agent(s). The agent takes a batch of 1-5 notes; input: list of {path, content}; output: one `## Verification: <note title>` section per note. When spawning multiple, dispatch them all in the same turn:
 
-- **< 5 notes with sources:** Single agent with all note contents
-- **>= 5 notes with sources:** Split into batches of ~5. Spawn one agent per batch in the same turn. (Verification involves URL fetching which is slow.)
+- **1-5 notes with sources:** Single agent with the full list
+- **> 5 notes with sources:** Split into batches of up to 5. Spawn one agent per batch in the same turn. (Verification involves URL fetching which is slow.)
 
-Each agent receives the note content and returns the structured verification report (source checks, claim checks, missing citations, corrections).
+Each `## Verification:` section carries the structured verification report for its note (source checks, claim checks, missing citations, corrections).
 
 ### Step 6: Present Report
 
@@ -277,7 +277,7 @@ Agent (subagent_type: "learning-loop:note-scorer"):
 
 ### note-verifier
 
-Verifies source URLs, checks claims against cited sources, catches fabrication.
+Verifies source URLs, checks claims against cited sources, catches fabrication. Input: list of {path, content} for 1-5 notes. Output: one `## Verification: <note title>` section per note.
 
 **Launch pattern:**
 ```
@@ -289,11 +289,11 @@ Agent (subagent_type: "learning-loop:note-verifier"):
    Note 2: <path>
    <content>
 
-   Return per-note: source checks, claim checks, missing citations, corrections."
+   Return one '## Verification: <note title>' section per note: source checks, claim checks, missing citations, corrections."
 ```
 
 **Batching rules:**
-- One agent handles up to ~5 notes (URL fetching is slow)
+- One agent handles a batch of 1-5 notes (URL fetching is slow)
 - For larger sets, split evenly and launch multiple agents in parallel
 
 ## Verification Markers
@@ -305,7 +305,7 @@ When reporting, include counts for every marker in that vocabulary in the summar
 ## Key Principles
 
 - **Verify, don't rewrite.** Report issues. Fixing is `/deepen`'s job.
-- **Read every note.** No scoring from titles alone.
+- **Every note gets read, by its agent.** No scoring from titles alone; the scorer and verifier agents read full content. The main thread reads only targeted subsets (synthesis-tagged, source-bearing), never the whole scope.
 - **Skip sourceless notes for verification.** Notes with no citations have nothing to verify: still score their quality.
 - **URL checks are mandatory.** Every URL gets fetched. Dead links are high severity.
 - **Be specific.** "Source doesn't support claim" is useless. Say what the source actually says.

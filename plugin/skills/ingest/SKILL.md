@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: 'Pull external context into the second brain. Handles any format Claude can read: PDFs, images, code, conversations, docs, or raw text. Usage: /learning-loop:ingest linear ["project"], /learning-loop:ingest repo [path], /learning-loop:ingest context, /learning-loop:ingest (prompts for source).'
+description: 'Pull external context into the second brain. Handles any format Claude can read: PDFs, images, code, conversations, docs, or raw text. Usage: /learning-loop:ingest linear ["project"], /learning-loop:ingest repo [path] [--deep] (--deep forces the parallel deep-mapper tier), /learning-loop:ingest context, /learning-loop:ingest bundle <path> (restore a harvest bundle), /learning-loop:ingest (prompts for source); add --refine to any source mode to run upstream refinement after ingest.'
 ---
 
 # Ingest: External Context Import
@@ -17,6 +17,7 @@ Pulls data from external sources (Linear, repositories, or any content Claude ca
 - `/ingest repo ~/path/to/repo`: scan a repository
 - `/ingest repo`: prompt for repo path
 - `/ingest context`: provide any content (paste text, give a file path, drop an image)
+- `/ingest bundle <path>`: restore a `harvest-bundle-<date>/` carried from another instance you own (verbatim restore, no insight extraction)
 - `/ingest`: ask which source type
 - `--refine`: append to any source mode (e.g., `/ingest context --refine`) to enable Step 5.6 upstream refinement after ingest. Off by default; will move to default-on after a few validation runs.
 
@@ -34,6 +35,7 @@ Use `AskUserQuestion`:
 > - **linear**: Pull Linear tickets (my assigned, or a specific project)
 > - **repo**: Scan a repository for architecture and patterns
 > - **context**: Provide any content (text, PDF, image, code, doc) to extract insights from
+> - **bundle**: Restore a harvest bundle carried from another instance you own
 
 **Source type provided:**
 Parse remaining args as source-specific parameters.
@@ -56,6 +58,24 @@ Parse remaining args as source-specific parameters.
 - `AskUserQuestion`: "What would you like to ingest? You can paste text, provide a file path (PDF, image, code, doc), or describe what you'd like to import."
 - If a file path is given, read it with the Read tool before passing to the agent.
 - Announce: "Extracting insights..."
+
+**Bundle:**
+- Path arg → use it; no path → `AskUserQuestion`: "Path to the harvest bundle directory?"
+- Handle entirely in Step 1b below. Bundle mode never reaches Step 2 — there is nothing to extract; the bundle carries finished files.
+
+### Step 1b: Bundle Restore (bundle mode only)
+
+Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on another instance you own. This is a verbatim carry, the receiving twin of harvest — not insight extraction.
+
+1. **Validate.** The directory must contain `HARVEST-MANIFEST.md`; `memory/` and `notes/` are optional (either may be empty). If the manifest is missing, abort: "Not a harvest bundle (no HARVEST-MANIFEST.md)."
+2. **Confirm.** Read the manifest. Show the operator the source instance label and carried file counts, then confirm via `AskUserQuestion` before writing anything.
+3. **Restore memory.** Resolve the auto-memory dir mechanically:
+   ```
+   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
+   ```
+   For each file in `memory/`: if a file with the same name already exists, skip it and record a conflict (never overwrite); otherwise copy verbatim. Append one index line per newly added file to `MEMORY.md` in the standard format (`- [filename.md](filename.md): description`, under 150 chars).
+4. **Restore notes.** For each file in `notes/`: check for an existing vault note with the same basename (Glob across the vault); if found, skip and record a conflict. Otherwise Write it to `VAULT/0-inbox/<basename>` — carried notes re-enter this instance's triage pipeline (`/inbox`, promote-gate) rather than landing directly in permanent folders. Main-thread Writes fire the PostToolUse hooks natively; no hook replay needed.
+5. **Report and stop.** Restored counts, conflicts listed for manual merge, and the reminder: run `/dream` + `/reflect` to consolidate. Do not continue to Step 2.
 
 ### Step 2: Launch Source Agent
 
@@ -218,7 +238,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
     Return the confirmed_insights JSON.
     ```
 
-11. Parse synthesizer JSON. If `durable_insights.length === 0`:
+11. Parse synthesizer JSON. If `confirmed_insights` has no `type: "durable-insight"` items:
     > Use `AskUserQuestion`: "Synthesizer produced 0 durable insights from this repo. Reason given: '{synthesizer_note}'. Proceed with project-state only (auto-memory write) or abort?"
 
 12. Write `${VAULT_ROOT}/_ingested-repos/${SLUG}/METADATA.json` with all collected acks + synthesizer outcome (see spec Section "METADATA.json" for shape).
@@ -228,7 +248,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
     node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID))"
     ```
 
-14. Pass synthesizer's `confirmed_insights` JSON to Step 3 (existing preview flow).
+14. Pass the synthesizer's `confirmed_insights` array to Step 3 (existing preview flow). It uses the same item schema as `extract-insights`, so preview and route-output need no deep-mode special-casing.
 
 #### Provenance log
 
@@ -345,7 +365,7 @@ LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
 node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
-If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation (which has no batch cap) — see `skills/reflect/steps/refinement.md` 4.6.a.
+If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation, which has no batch cap: reflect's Step 4.6 gate fires whenever this queue is non-empty, even in a session that wrote no vault notes (see `skills/reflect/steps/refinement.md` 4.6.a).
 
 ```bash
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"

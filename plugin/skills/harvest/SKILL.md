@@ -6,14 +6,14 @@ disable-model-invocation: true
 
 # Harvest portable insights
 
-Collects notes/memories marked `portable: true`, scrubs them against this instance's IP deny-list, lets you review survivors, and emits a `harvest-bundle-<date>/` to carry home and absorb with `/learning-loop:ingest`.
+Collects notes/memories marked `portable: true`, scrubs them against this instance's IP deny-list, lets you review survivors, and emits a `harvest-bundle-<date>/` to carry home and absorb with `/learning-loop:ingest bundle <path>`.
 
 ## Invariants (do not violate)
 - **Whitelist only:** only `portable: true`. Never harvest by `visibility`, tag, or inference. The gate matches the exact literal lowercase `true` — `portable: True`, `yes`, or `1` are silently excluded (fail-closed, no leak), so if an operator expected a note to carry and it didn't, check the marker is exactly `portable: true`.
 - **Mechanical gate:** the deny-list block is authoritative. You may drop MORE in review; you may never un-block or add a note the gate excluded.
 
 ## Paths
-`PLUGIN_DATA` and `VAULT` injected by the session-start hook; the plugin root is `${CLAUDE_PLUGIN_ROOT}` (a real env var in Bash blocks, injected as the `PLUGIN=` context line); else `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs`. The deny-list file and dedup log are resolved mechanically, NOT hardcoded:
+Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply). The deny-list file and dedup log are resolved mechanically, NOT hardcoded:
 - deny-list: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/paths.mjs').then(m=>console.log(m.DATA_FILES.harvestDenylist(process.argv[1])))" PLUGIN_DATA`
 - dedup log: same with `DATA_FILES.harvestedLog`.
 The memory dir: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"`.
@@ -65,4 +65,4 @@ printf '%s\n' <carried-path...> | node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts
 Leave the `portable: true` markers in place — the log handles dedup; markers are never stripped.
 
 ### 8. Report
-Tell the operator the bundle path and counts, and remind: carry it to your home instance and run `/learning-loop:ingest` on it, then `/dream` + `/reflect` to consolidate.
+Tell the operator the bundle path and counts, and remind: carry it to your home instance and run `/learning-loop:ingest bundle <bundle-path>` there (the receiving flow is ingest Step 1b), then `/dream` + `/reflect` to consolidate.

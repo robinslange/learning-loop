@@ -70,7 +70,7 @@ Evaluate silently in the main thread. Do not ask the user.
 
 **Substance check:** Is the core insight a durable pattern, mechanism, or decision-relevant fact? If it's transient (today's weather, a live score, a price that will change next week), skip capture.
 
-**If both pass, verify before writing.** Run ONE round of the `note-verifier` subagent (subagent_type: `learning-loop:note-verifier`) with the draft note content as `note_content` (placeholders resolved per `agents-shared/vault-io.md`). Branch on its `### Status:`:
+**If both pass, verify before writing.** Run ONE round of the `note-verifier` subagent (subagent_type: `learning-loop:note-verifier`) with a one-note batch: a list with a single {path, content} entry, path the intended destination (e.g. `0-inbox/<slug>.md`; the file does not exist yet, the path just names the output section) and content the draft note (placeholders resolved per `agents-shared/vault-io.md`). The agent returns one `## Verification: <note title>` section per note; branch on its `### Status:`:
 - **PASS** → write as-is.
 - **PARTIAL** → write, carrying the verifier's `[partial]` claim flags into the note.
 - **ISSUES FOUND** → apply the verifier's `### Corrections` (adopt corrected URLs/claims). Contradicted (level-0) claims and fabricated references are REMOVED from the draft — never written, not even as `source: unverified` (same rule as /discovery's fabricated-reference handling). Any other claim with no surviving source moves out, or the note writes with `source: unverified`.

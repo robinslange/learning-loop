@@ -150,6 +150,23 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs super-add "<old pattern>" \
 
 This is what makes future episodic searches surface the correction inline.
 
+**Federation retraction notify (conditional, fail-soft):**
+After the supersession record, check whether this instance is federated:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/federation-active.mjs
+```
+
+If it prints `FEDERATED`, emit a retraction event for each vault note that was REWRITTEN or ARCHIVED this run, so peers holding the old version learn of the correction:
+
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/scripts/retraction-notify.mjs "<note_path>" \
+  --reason "<reason>" \
+  --replacement "<vault path of transition note or rewritten note>"
+```
+
+The script targets only peers whose index contains the note and appends the event to the federation outbox (`retractions-YYYY-MM.jsonl`); the sync daemon delivers it. If the probe prints `not-federated` (exit 1), skip silently. A notify failure is non-fatal: report it in Phase 6 and continue; it must never block or roll back the retraction itself.
+
 ### Phase 6: Report
 
 Show one final block:
@@ -161,6 +178,7 @@ Show one final block:
 - Auto-memory: <N rewrites>
 - Transition note: <path>
 - Supersession recorded: id <N>, pattern "<old>"
+- Federation: <N retraction events emitted | not federated | notify failed: <error>>
 
 Future episodic searches matching "<old>" will be annotated automatically.
 ```

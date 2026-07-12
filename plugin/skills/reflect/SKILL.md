@@ -203,11 +203,17 @@ This ensures new notes with intentions appear in the next session's intention su
 
 ### Step 4.6: Upstream Refinement
 
-**Trigger**: the reflect new-notes marker created in Step 4 (`${LL_TMP_PREFIX}-new-notes.txt`) exists and is non-empty. refinement.md 4.6.a re-resolves the prefix in its own shell.
+**Trigger**: either of two conditions fires this step: (1) the reflect new-notes marker created in Step 4 (`${LL_TMP_PREFIX}-new-notes.txt`) exists and is non-empty, or (2) the deferred refinement queue at `$PLUGIN_DATA/refinement-deferred.jsonl` is non-empty (overflow pairs parked by a capped `/ingest --refine` run; this step is their only drain). Check both with one command; refinement.md 4.6.a re-resolves the prefix in its own shell:
 
-Read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` and execute it (sub-steps 4.6.a through 4.6.g: candidate pairs + deferred-queue drain, proposer dispatch, validation, confirmation, apply, provenance, cleanup).
+```bash
+eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
+{ [ -s "${LL_TMP_PREFIX}-new-notes.txt" ] || [ -s "$PLUGIN_DATA/refinement-deferred.jsonl" ]; } && echo RUN || echo SKIP
+```
 
-Skip this entire step if the new-notes file does not exist or is empty (the session wrote no vault notes).
+On `RUN`, read `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` and execute it (sub-steps 4.6.a through 4.6.g: candidate pairs + deferred-queue drain, proposer dispatch, validation, confirmation, apply, provenance, cleanup).
+
+On `SKIP`, skip this entire step: the session wrote no vault notes AND no deferred pairs are queued. A session that wrote nothing still runs this step when the deferred queue is non-empty; otherwise deferred pairs sit indefinitely.
 
 ### Step 4.7: Retrieval Usage Provenance
 

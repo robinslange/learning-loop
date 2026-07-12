@@ -134,6 +134,85 @@ test('allowlisted agents declare tools: frontmatter (M14)', () => {
   }
 });
 
+test('durable ingest mappers self-contain the full ack schema (M19)', () => {
+  // ingest/SKILL.md Step 6 validates every durable mapper ack for focus,
+  // status, and doc_path, but each mapper is dispatched with only its own
+  // definition file. A mapper whose Return section doesn't spell out those
+  // fields is being validated against a schema it was never given (the
+  // "Same ack JSON shape as stack mapper" drift).
+  for (const focus of ['stack', 'arch', 'conventions', 'domain']) {
+    const src = readFileSync(join(ROOT, 'agents', `ingest-mapper-${focus}.md`), 'utf8');
+    for (const field of ['"focus"', '"doc_path"', '"status"']) {
+      assert.ok(
+        src.includes(field),
+        `ingest-mapper-${focus}.md must define ${field} in its ack schema; the coordinator validates it`,
+      );
+    }
+  }
+});
+
+test('ingest-synthesizer emits the extract-insights item schema (M20)', () => {
+  // The deep-ingest synthesizer feeds the SAME preview + route-output stages
+  // as single-pass extract-insights. Its output items must carry the canonical
+  // fields those stages consume (type/confidence/source_ids under a
+  // confirmed_insights array), not the drifted durable_insights/sources/tags
+  // shape that preview-format could not render.
+  const src = readFileSync(join(ROOT, 'agents', 'ingest-synthesizer.md'), 'utf8');
+  for (const needed of ['"confirmed_insights"', '"confidence"', '"source_ids"', '"type"']) {
+    assert.ok(src.includes(needed), `ingest-synthesizer.md output schema must include ${needed}`);
+  }
+  for (const banned of ['durable_insights', '"sources"', '"tags"']) {
+    assert.ok(
+      !src.includes(banned),
+      `ingest-synthesizer.md still carries drifted schema key ${banned}`,
+    );
+  }
+});
+
+test('harvest bundle handoff has a receiving side in ingest (M21)', () => {
+  // harvest tells the operator to absorb the bundle with /ingest; for a year
+  // ingest had no bundle mode, so the pointer led to a door that didn't exist.
+  const ingest = readFileSync(join(ROOT, 'skills', 'ingest', 'SKILL.md'), 'utf8');
+  assert.ok(
+    /HARVEST-MANIFEST\.md/.test(ingest),
+    'ingest must implement the harvest-bundle restore flow',
+  );
+  const harvest = readFileSync(join(ROOT, 'skills', 'harvest', 'SKILL.md'), 'utf8');
+  assert.ok(
+    /ingest bundle/.test(harvest),
+    'harvest must point the operator at the ingest bundle mode',
+  );
+});
+
+test('no skill/agent hardcodes an unsuffixed plugin-data fallback (M18)', () => {
+  // The real data dir is marketplace-suffixed (learning-loop-learning-loop-
+  // marketplace). Skills that documented "~/.claude/plugins/data/learning-loop"
+  // as the fallback read a nonexistent (or stale) dir and their own
+  // skip-silently-if-missing rules swallowed the miss. resolve-paths.mjs exists
+  // so prose never hardcodes this; the suffixed literal stays allowed only in
+  // uninstall/SKILL.md, where the operator must see the exact rm -rf target.
+  const offenders = [];
+  const dirs = ['agents', 'agents-shared', 'skills', 'skills-shared'];
+  for (const rel of dirs.flatMap(mdFiles)) {
+    readFileSync(join(ROOT, rel), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (/plugins\/data\/learning-loop(?!-learning-loop-marketplace)/.test(line))
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        if (
+          /plugins\/data\/learning-loop-learning-loop-marketplace/.test(line) &&
+          !rel.endsWith(join('uninstall', 'SKILL.md'))
+        )
+          offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+      });
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    'resolve PLUGIN_DATA via scripts/resolve-paths.mjs, never a hardcoded fallback',
+  );
+});
+
 test('researcher agents do not list raw WebSearch/WebFetch (routed via source gateway)', () => {
   const routed = ['discovery-researcher', 'literature-capturer', 'note-deepener', 'note-verifier', 'note-writer'];
   for (const name of routed) {

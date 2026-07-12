@@ -19,11 +19,11 @@ If the report includes a **Recommendations** section, present each recommendatio
 > - "all" to review all recommendations
 > - "done" to finish
 
-When user selects "pattern N", draft a positive behavior-based pattern following the format in `PLUGIN_DATA/provenance/learned-patterns.md` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`) and present for approval before writing.
+When user selects "pattern N", draft a positive behavior-based pattern following the format in `PLUGIN_DATA/provenance/learned-patterns.md` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`) and present for approval before writing.
 
 After the local report, check for peer provenance data:
 
-1. Read `PLUGIN_DATA/federation/provenance-peers.json` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env or `~/.claude/plugins/data/learning-loop`)
+1. Read `PLUGIN_DATA/federation/provenance-peers.json` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`)
 2. If exists and has peer entries, display a **Network** section:
 
 ```

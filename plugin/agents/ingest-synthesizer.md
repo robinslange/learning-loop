@@ -34,50 +34,54 @@ For each durable insight you produce:
 - **Atomic claim:** one idea, one note. Don't compress 3 ideas into one note.
 - **Vault voice:** Apply the canonical persona at `_system/persona.md`. Read it at the start of synthesis.
 - **Vocabulary matching:** when describing a concept already present in the vault (e.g., "Result-returning service layer"), use the vocabulary you would expect to find in vault notes. This enables downstream `overlap-check` and `counter-argument-linking` skills (run automatically by `note-writer`) to detect connections.
-- **Cite the structured doc** in `sources[]` - `name: "STACK.md", path: "_ingested-repos/{slug}/STACK.md"`.
+- **Cite the structured doc** in `source_ids` - e.g. `"_ingested-repos/{slug}/STACK.md"`.
+- **Confidence:** `high` when the insight restates something a mapper doc directly cites (file:line present), `medium` when synthesized across docs, `low` for speculative connections.
 - **Cap at 20 durable insights per ingest.** If you have more, consolidate to the most cross-cutting. Better fewer, stronger notes.
 - **Frame each insight as a stand-alone atomic claim.** State the choice + the reason + one consequence. Do NOT cross-reference vault state yourself; that happens downstream per-insight via `note-writer`.
 
 ### Project-state insights
 
-These route to auto-memory (not the vault). From `state_json`:
+These route to auto-memory (not the vault). Emit them as `type: "project-state"` items in the same array, built from `state_json` (skip if `state_json` is null):
 - Current branch
 - Recent themes (cluster the `recent_commits` into 1-3 themes)
 - In-flight work signal (uncommitted_files count)
 - Concerns summary (todo/fixme counts + largest-file note if >800 LOC)
 
+Include dates and numbers in the body. Confidence is `high` (direct observation).
+
 ## Output
+
+The `confirmed_insights` array uses the exact item schema of `agents-shared/extract-insights.md`, so the existing preview and route-output stages consume it unchanged:
 
 ```json
 {
-  "project_state": {
-    "current_branch": "<branch>",
-    "recent_themes": "<1-3 themes from recent commits>",
-    "uncommitted_count": <N>,
-    "concerns_summary": "<one-line>"
-  },
-  "durable_insights": [
+  "confirmed_insights": [
     {
-      "title": "kebab-case-insight-title",
-      "body": "60-200 word atomic insight in vault voice.",
+      "type": "project-state",
+      "title": "Repo is mid-migration to the v2 store",
+      "body": "Branch store-v2, 14 uncommitted files as of 2026-07-12. Recent commits cluster on migration + backfill.",
+      "confidence": "high",
+      "source_ids": []
+    },
+    {
       "type": "durable-insight",
-      "sources": [
-        { "name": "STACK.md", "url": null, "path": "_ingested-repos/{repo_slug}/STACK.md" }
-      ],
-      "tags": ["<repo_slug>", "<lang>", "<framework>"]
+      "title": "Insight title stating the claim",
+      "body": "60-200 word atomic insight in vault voice.",
+      "confidence": "high",
+      "source_ids": ["_ingested-repos/{repo_slug}/STACK.md"]
     }
-  ]
+  ],
+  "synthesizer_note": null
 }
 ```
 
 ### Zero-insight handling
 
-If you produce 0 durable insights (the repo was thin, or mapper docs are too sparse), return:
+If you produce 0 durable insights (the repo was thin, or mapper docs are too sparse), return the array with only the project-state items (or empty) and set:
 
 ```json
 {
-  "project_state": { },
-  "durable_insights": [],
+  "confirmed_insights": [],
   "synthesizer_note": "No durable insights extracted. Reason: <one-line>."
 }
 ```

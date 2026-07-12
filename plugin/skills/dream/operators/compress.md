@@ -18,4 +18,4 @@ For each flagged file:
 - `project_acme.md`: 24 lines / 1,840 chars -> 12 lines / 920 chars
 ```
 
-Emit provenance after each operation: `${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js '{"agent":"dream","action":"compress","target":"FILENAME"}'`
+Emit provenance after each operation: `node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"compress","target":"FILENAME"}'`

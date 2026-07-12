@@ -26,4 +26,4 @@ For each candidate pair:
   - Reason: both describe the same GraphQL import convention
 ```
 
-Emit provenance after each operation: `${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js '{"agent":"dream","action":"merge","target":"FILENAME"}'`
+Emit provenance after each operation: `node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"merge","target":"FILENAME"}'`
