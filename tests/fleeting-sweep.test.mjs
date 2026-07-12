@@ -84,6 +84,59 @@ test(
   },
 );
 
+test('inbound links from permanent subdirectories count toward PROMOTED', { skip: SKIP }, () => {
+  const vault = makeVault();
+  writeFileSync(join(vault, '1-fleeting', 'deep-idea.md'), 'body');
+  mkdirSync(join(vault, '3-permanent', 'sub', 'nested'), { recursive: true });
+  writeFileSync(join(vault, '3-permanent', 'sub', 'a.md'), 'see [[deep-idea]]');
+  writeFileSync(join(vault, '3-permanent', 'sub', 'nested', 'b.md'), 'also [[deep-idea]]');
+  assert.match(run(vault), /^PROMOTED\tdeep-idea\t2 permanent refs/m);
+});
+
+test('multiple links in one file count as one ref (files, not occurrences)', { skip: SKIP }, () => {
+  const vault = makeVault();
+  writeFileSync(join(vault, '1-fleeting', 'twice-in-one.md'), 'body');
+  writeFileSync(
+    join(vault, '3-permanent', 'a.md'),
+    'see [[twice-in-one]] and again [[twice-in-one]]',
+  );
+  const out = run(vault);
+  assert.doesNotMatch(out, /^PROMOTED\ttwice-in-one\t/m);
+  writeFileSync(join(vault, '3-permanent', 'b.md'), 'also [[twice-in-one]] and [[twice-in-one]]');
+  assert.match(run(vault), /^PROMOTED\ttwice-in-one\t2 permanent refs/m);
+});
+
+test('aliased wikilinks do not count as inbound links (exact literal only)', { skip: SKIP }, () => {
+  const vault = makeVault();
+  writeFileSync(join(vault, '1-fleeting', 'alias-target.md'), 'body');
+  writeFileSync(join(vault, '3-permanent', 'a.md'), 'see [[alias-target|nickname]]');
+  writeFileSync(join(vault, '3-permanent', 'b.md'), 'see [[alias-target#section]]');
+  writeFileSync(join(vault, '3-permanent', 'c.md'), 'see [[alias-target]]');
+  assert.doesNotMatch(run(vault), /^PROMOTED\talias-target\t/m);
+});
+
+test('VAULT_PATH env override wins over config vault_path', { skip: SKIP }, () => {
+  const configVault = makeVault();
+  writeFileSync(join(configVault, '1-fleeting', 'config-vault-note.md'), 'body');
+  writeFileSync(join(configVault, '3-permanent', 'a.md'), '[[config-vault-note]]');
+  writeFileSync(join(configVault, '3-permanent', 'b.md'), '[[config-vault-note]]');
+
+  const envVault = makeVault();
+  writeFileSync(join(envVault, '1-fleeting', 'env-vault-note.md'), 'body');
+  writeFileSync(join(envVault, '3-permanent', 'a.md'), '[[env-vault-note]]');
+  writeFileSync(join(envVault, '3-permanent', 'b.md'), '[[env-vault-note]]');
+
+  const pluginData = mkdtempSync(join(tmpdir(), 'll-sweep-data-'));
+  writeFileSync(join(pluginData, 'config.json'), JSON.stringify({ vault_path: configVault }));
+
+  const out = execFileSync('bash', [SCRIPT], {
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData, VAULT_PATH: envVault },
+  });
+  assert.match(out, /^PROMOTED\tenv-vault-note\t/m);
+  assert.doesNotMatch(out, /config-vault-note/);
+});
+
 const STALE_MARKER = new Date(Date.now() - 21 * 86400 * 1000); // > NEEDS_DEEPEN_DAYS, < STALE_DAYS
 
 test('old note with a blocking verification marker reports NEEDS-DEEPEN', { skip: SKIP }, () => {
