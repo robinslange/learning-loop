@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.36.0
+
 ### Changed
 
 - **Just-in-time context injection now ships live.** `injection_mode` defaults to `live` in the shipped config: the shadow experiment graduated, and full-rate shadow paid two vector-search spawns per prompt for telemetry only. `shadow` remains available for calibration; `off` disables the pipeline.
