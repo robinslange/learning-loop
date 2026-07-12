@@ -71,20 +71,21 @@ export function isProcessAlive(pid) {
  *
  * @param {string} lockPath
  * @param {number} staleMs
- * @param {{ statFn?: (path: string) => { mtimeMs: number } }} [deps]
- *   Optional dependency injection — defaults to fs.statSync. Tests pass a
- *   stub to exercise the mtime-fallback failure path without engineering
- *   a filesystem race between readFileSync and statSync.
+ * @param {{ statFn?: (path: string) => { mtimeMs: number }, nowFn?: () => number }} [deps]
+ *   Optional dependency injection — defaults to fs.statSync / Date.now. Tests
+ *   pass stubs to exercise the mtime-fallback failure path without engineering
+ *   a filesystem race between readFileSync and statSync, and to pin the clock
+ *   so exact-boundary assertions don't flake on wall-time drift.
  * @returns {boolean} true if the lock was removed and the caller may retry.
  */
-export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync } = {}) {
+export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync, nowFn = Date.now } = {}) {
   // mtime backstop: used whenever the PID can't prove the owner is alive —
   // whether the read threw, or it succeeded but held an empty/garbage PID.
   // An unreadable-but-fresh lock is left alone; only an old one is reclaimed.
   const removeIfMtimeStale = () => {
     try {
       const { mtimeMs } = statFn(lockPath);
-      if (Date.now() - mtimeMs > staleMs) {
+      if (nowFn() - mtimeMs > staleMs) {
         unlinkSync(lockPath);
         return true;
       }

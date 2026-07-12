@@ -4,10 +4,11 @@
 // it always has so external callers (e.g. session-start hook, init Phase 3)
 // keep working.
 
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { env } from './lib/env.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
+import { getConfig } from './lib/config.mjs';
 import { buildAbiDrift, satisfiesVersion } from './check-deps-impl.mjs';
 import { pathToFileURL } from 'node:url';
 
@@ -16,8 +17,6 @@ export { detectAbiDrift } from './check-deps-impl.mjs';
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isMain) {
-  const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-  const CONFIG_PATH = join(PLUGIN_DIR, 'config.json');
   const INSTALLED_PATH = join(
     env.HOME || env.USERPROFILE || homedir(),
     '.claude',
@@ -25,13 +24,7 @@ if (isMain) {
     'installed_plugins.json',
   );
 
-  const { value: config, error: configError } = safeLoad(CONFIG_PATH, { fallback: null });
-  if (configError || !config) {
-    process.stdout.write(JSON.stringify({ _abi_drift: buildAbiDrift() }));
-    process.exit(0);
-  }
-
-  const deps = config.dependencies || [];
+  const deps = getConfig().dependencies || [];
   if (deps.length === 0) {
     process.stdout.write(JSON.stringify({ _abi_drift: buildAbiDrift() }));
     process.exit(0);

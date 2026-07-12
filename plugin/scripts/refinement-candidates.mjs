@@ -20,15 +20,11 @@
 // Output: JSON array on stdout. Empty array if no candidates survive.
 
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
-import { resolve, basename, dirname, relative, sep } from 'node:path';
+import { resolve, basename, dirname, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { ortSpawnEnv } from './lib/binary.mjs';
+import { ortSpawnEnv, binaryPath } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Refinement band: empirically tuned. Existing-vs-existing claim-touching pairs
 // cluster around 0.80-0.92 (see spike 3). But fresh notes often land lower
@@ -43,14 +39,9 @@ const PER_NOTE_CAP = 5;
 const EXCLUDE_FOLDERS = ['Excalidraw', '4-projects', '6-writing'];
 
 function resolveBinary() {
-  const installed = resolve(
-    homedir(),
-    '.claude/plugins/data/learning-loop-learning-loop-marketplace/bin/ll-search',
-  );
-  if (existsSync(installed)) return installed;
-  const dev = resolve(__dirname, '..', '..', 'native/target/release/ll-search');
-  if (existsSync(dev)) return dev;
-  throw new Error('ll-search binary not found');
+  const bin = binaryPath();
+  if (!bin) throw new Error('ll-search binary not found');
+  return bin;
 }
 
 function scoreToCosine(score) {

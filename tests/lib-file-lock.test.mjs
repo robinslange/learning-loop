@@ -186,15 +186,19 @@ test('mtime staleness boundary is strict (age == staleMs is not stale)', () => {
     const target = join(dir, 'boundary.json');
     writeFileSync(target + '.lock', ''); // empty -> mtime path
     const now = Date.now();
-    // statFn injected so the age is exact, independent of filesystem clock.
+    // statFn AND nowFn injected so the age is exact: with only statFn pinned,
+    // the implementation's own Date.now() drifts under suite load and the
+    // exactly-at-threshold case flakes into past-threshold.
     const atThreshold = tryRemoveIfStale(target + '.lock', 1000, {
       statFn: () => ({ mtimeMs: now - 1000 }),
+      nowFn: () => now,
     });
     assert.equal(atThreshold, false, 'age exactly staleMs must not be reclaimed');
     assert.equal(existsSync(target + '.lock'), true);
 
     const pastThreshold = tryRemoveIfStale(target + '.lock', 1000, {
       statFn: () => ({ mtimeMs: now - 1001 }),
+      nowFn: () => now,
     });
     assert.equal(pastThreshold, true, 'age staleMs+1 must be reclaimed');
     assert.equal(existsSync(target + '.lock'), false);
