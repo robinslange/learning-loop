@@ -11,7 +11,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
-import { recordDetachedChild, emitProvenance } from '../lib/common.mjs';
+import { recordDetachedChild, emitProvenance, home } from '../lib/common.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -108,26 +108,46 @@ export async function run(ctx) {
   // plugin/skills/init/phases/05-claudemd.md is the source of truth — keep
   // command names and steps in sync with it (always the namespaced
   // /learning-loop:* forms, never bare /init or /reflect).
-  ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
-  ctx.context +=
-    "You have a learning loop active. Before responding to the user's first message:\n";
-  ctx.context +=
-    '1. Check if any auto-memory indexes (listed below, if present) are relevant to the task at hand. If so, read them.\n';
-  if (depsAllSatisfied) {
-    ctx.context +=
-      '2. Search episodic memory for relevant past conversations about this topic/project.\n';
-  } else {
-    ctx.context +=
-      '2. (Skipped — episodic memory plugin not installed. Run /learning-loop:init to set up.)\n';
+  // Skip the full protocol when the static section is installed (detected by
+  // its version marker) and deps are satisfied: re-injecting it costs ~250
+  // duplicated instruction tokens every session start. The compact pointer
+  // keeps the one dynamic piece the static section cannot carry (the resolved
+  // script path). A broken episodic install still gets the full protocol so
+  // the deps-skipped line is surfaced.
+  let staticProtocolPresent = false;
+  try {
+    staticProtocolPresent = readFileSync(join(home(), '.claude', 'CLAUDE.md'), 'utf8').includes(
+      '<!-- learning-loop v',
+    );
+  } catch {
+    // No readable CLAUDE.md: inject the full protocol.
   }
-  ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
-  ctx.context += `4. Check the intention summary below (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
-  ctx.context +=
-    "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
-  ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
-  ctx.context +=
-    '7. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
-  ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
+
+  if (staticProtocolPresent && depsAllSatisfied) {
+    ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
+    ctx.context += `Follow the Learning Loop section in your CLAUDE.md. Vault search: \`${searchCmd} search "<topic>"\`; intentions drill-in: \`${searchCmd} intentions "<context>"\`.\n`;
+  } else {
+    ctx.context += '\n## Learning Loop — Retrieval Protocol\n';
+    ctx.context +=
+      "You have a learning loop active. Before responding to the user's first message:\n";
+    ctx.context +=
+      '1. Check if any auto-memory indexes (listed below, if present) are relevant to the task at hand. If so, read them.\n';
+    if (depsAllSatisfied) {
+      ctx.context +=
+        '2. Search episodic memory for relevant past conversations about this topic/project.\n';
+    } else {
+      ctx.context +=
+        '2. (Skipped — episodic memory plugin not installed. Run /learning-loop:init to set up.)\n';
+    }
+    ctx.context += `3. Search the Obsidian vault — use \`${searchCmd} search "<topic>"\` for semantic matches, \`Grep\` for keyword matches.\n`;
+    ctx.context += `4. Check the intention summary below (if present). For relevant contexts, drill in with \`${searchCmd} intentions "<context>"\` to see specific notes and cues.\n`;
+    ctx.context +=
+      "5. Surface relevant findings in a single line prefixed with 'Recall:' or 'Transfer:'\n";
+    ctx.context += '6. When corrected, immediately save to auto-memory as feedback. No delay.\n';
+    ctx.context +=
+      '7. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
+    ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
+  }
 
   // 3. Dream gate check — read cached marker; refresh in background.
   if (pluginData) {

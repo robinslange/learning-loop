@@ -98,6 +98,74 @@ test(
 );
 
 // ---------------------------------------------------------------------------
+// Test 1b: Static CLAUDE.md protocol marker collapses the injected protocol.
+// ---------------------------------------------------------------------------
+test(
+  'session-start: CLAUDE.md with the learning-loop marker gets the compact protocol pointer',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'static-proto-001' },
+      // LL_DISABLE_DETECTOR keeps depsAllSatisfied at its default (true): the
+      // sandbox always fails some quick check, which would force the full
+      // protocol and leave the compact branch untested.
+      env: {
+        VAULT_PATH: VAULT,
+        CLAUDE_PROJECT_DIR: '/tmp/test-project-static-proto',
+        LL_DISABLE_DETECTOR: '1',
+      },
+      seed: (pd, sandboxRoot) => {
+        seedUpdateCheck(pd);
+        mkdirSync(join(sandboxRoot, '.claude'), { recursive: true });
+        writeFileSync(
+          join(sandboxRoot, '.claude', 'CLAUDE.md'),
+          '## Learning Loop\n\n<!-- learning-loop v3 -->\n\nThree stores, three purposes.\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit code: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'static-proto').additionalContext;
+      assert.match(ctx, /Retrieval Protocol/i);
+      assert.match(
+        ctx,
+        /Follow the Learning Loop section in your CLAUDE\.md/,
+        'marker present + deps satisfied must emit the compact pointer',
+      );
+      assert.ok(
+        !ctx.includes("Before responding to the user's first message"),
+        'full protocol must not be re-injected when the static section exists',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'session-start: CLAUDE.md without the marker still gets the full protocol',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'static-proto-002' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/test-project-static-proto2' },
+      seed: (pd, sandboxRoot) => {
+        seedUpdateCheck(pd);
+        mkdirSync(join(sandboxRoot, '.claude'), { recursive: true });
+        writeFileSync(join(sandboxRoot, '.claude', 'CLAUDE.md'), '# My rules\n\nNo section.\n');
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit code: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'static-proto2').additionalContext;
+      assert.match(ctx, /Before responding to the user's first message/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // Test 2: No vault — empty additionalContext, exit 0.
 // ---------------------------------------------------------------------------
 test('session-start no vault: additionalContext empty, exit 0', { timeout: 12000 }, () => {
