@@ -194,4 +194,4 @@ Sync runs automatically inside the always-on `ll-search watch` daemon (spawned a
 node scripts/retraction-notify.mjs <note_path> [--reason "<reason>"] [--replacement <new_note_path>]
 ```
 
-Emission is not yet wired into `/learning-loop:rewrite`; hooking retraction events into the rewrite flow is future federation work.
+Emission is wired into `/learning-loop:rewrite`: its execute phase (Phase 5) probes `scripts/federation-active.mjs` and, when the instance is federated, runs `retraction-notify.mjs` for each retracted vault note. The step is fail-soft; a notify failure is reported but never blocks the rewrite.

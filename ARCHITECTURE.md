@@ -26,11 +26,12 @@ learning-loop/
       session-label.js  -- just-in-time injection pipeline on each prompt
       post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
       pre-write-check.js  -- duplicate + added-dash gate before vault writes and edits
+      web-guard.js      -- global WebSearch/WebFetch deny; routes web access to the source gateway
       stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
-      pre-compact.js    -- context capture before compaction
-      pre-compact-worker.mjs  -- detached worker spawned by pre-compact.js
       post-read-retrieval.js  -- passive read telemetry
       post-search-tracking.js -- episodic-memory search query tracking
+
+    bin/                -- source-gateway.mjs (the one sanctioned web-access CLI)
 
     scripts/            -- CLI utilities and long-running daemons
       lib/              -- shared primitives (env, config, file-lock, log, model-client, etc.)
@@ -103,7 +104,7 @@ flowchart LR
   I --> J[Claude Code model]
 ```
 
-`vault-search.mjs` is a Node wrapper that resolves db/vault paths and invokes `ll-search <subcommand>` per call via `execFileSync`. There is no persistent JSON protocol between the plugin and `ll-search`. The search pipeline scores candidates via Reciprocal Rank Fusion (RRF) over vector similarity, BM25, graph PageRank, and temporal decay.
+`vault-search.mjs` is a Node wrapper that resolves db/vault paths and invokes `ll-search <subcommand>` per call via `execFileSync`. Each call is a fresh subprocess; there is no persistent JSON protocol or channel between the plugin and `ll-search`. This is the canonical statement of the invocation model; other sections reference it. The search pipeline scores candidates via Reciprocal Rank Fusion (RRF) over vector similarity, BM25, graph PageRank, and temporal decay.
 
 ### write path
 
@@ -167,6 +168,16 @@ flowchart LR
 
 The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier *failure* (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
 
+### web access path (source gateway)
+
+Raw `WebSearch`/`WebFetch` are denied globally by the `web-guard.js` PreToolUse hook (an unconditional matcher, since PreToolUse cannot scope to subagents; the deny is pure and unit-tested via `webGuardDecision`). All web access goes through one CLI, `bin/source-gateway.mjs`, with three verbs:
+
+- `search --q <query>` resolves the `web_search` slot from the unified source registry (`scripts/lib/sources/registry.mjs`) and returns hits plus `source_used`;
+- `fetch --url <url>` resolves the `fetch` slot, enforced by a per-session, file-backed fetch budget (default 10, `LL_GATEWAY_FETCH_BUDGET`) that survives the one-process-per-call pattern; budget exhaustion returns `fetch_budget_exceeded` rather than throwing;
+- `research --q <question>` runs the librarian research engine (`orchestrateResearch`) and refuses on a sub-12b model with exit 3.
+
+The point: every web call is config-selected in one place, tier-gated for `/research`, and gated by `LL_OFFLINE`. The researcher agents and the `/research` skill's Claude-native fallback all use the gateway, so the global deny never strands them.
+
 All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provider-agnostic structured-output client. It normalizes the two provider shapes the librarian targets: `ollama` (`POST {base}/api/chat`, `format: schema`) and `openai`-compatible remotes (DeepSeek/GLM/Qwen via Fireworks etc.; `POST {base}/v1/chat/completions`, `response_format: json_schema`, bearer auth). The provider is resolved from the `librarian` config block (`scripts/librarian/config.mjs:resolveProvider`), so the same Search/Extract/Verify code runs against a local model or a remote one without branching.
 
 ---
@@ -186,6 +197,7 @@ All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provid
 | Hooks                      | `hooks/`                                                 | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md` |
 | Provenance                 | `provenance/`, `scripts/provenance*.mjs`                 | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md`    |
 | Librarian + research offload | `scripts/librarian/`, `scripts/lib/model-client.mjs`   | `docs/baseline/plugin.md`        | `scripts/librarian/research/README.md`      |
+| Source gateway (web access) | `bin/source-gateway.mjs`, `scripts/lib/sources/`, `hooks/web-guard.js` | `docs/baseline/plugin.md` | `guide/configuration.md` (Web access gateway) |
 
 ---
 
@@ -219,13 +231,13 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The eight hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and pre-compact hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-pre-compact.test.mjs`) that lock down current behaviour.
+**Hook surface.** The eight hook handlers across five Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
 
 `session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
 **Search daemon.** Start from `native/crates/ll-search/src/main.rs`. The CLI dispatches to `search::query`, `db::index`, and `sync::client`. Hot-path code is in `search/{query,context,federation,graph,reflect}.rs`. The clone inventory in `.planning/inventory/rust-audit.md:251-324` explains the performance targets. The `app/` module (track 0G) exists -- `app/state.rs` defines `AppState` and `app/storage.rs` defines the `Storage` trait. The genuinely pending part is the 1E rewiring: `search/{query,reflect,store,cluster}.rs` still import `crate::db` directly instead of going through `Storage`.
 
-**ll-core.** Five modules: `embed`, `scoring`, `graph`, `rerank`, `store`. All public items are undocumented at baseline (54 items; see `.planning/inventory/ll-core-api.md:179-238`). Track 0A adds doc comments and the typed `Error`. New code follows `docs/baseline/rust.md`.
+**ll-core.** Eight modules: `embed`, `scoring`, `graph`, `rerank`, `store`, plus `dylib` (ONNX Runtime resolution), `error` (typed error), and `config`. All public items are undocumented at baseline (54 items; see `.planning/inventory/ll-core-api.md:179-238`). Track 0A adds doc comments and the typed `Error`. New code follows `docs/baseline/rust.md`.
 
 No public enums exist in ll-core at baseline -- only structs, a trait, type aliases, constants, and functions. The structs with public fields that are candidates for `#[non_exhaustive]` are `ModelConfig` and `FtsConfig`.
 
@@ -250,7 +262,7 @@ Transient:
 - `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes incrementally as notes change.
 - `scripts/watch.mjs` can run as an optional background file watcher (user-invoked via `ll-watch`).
 
-`vault-search.mjs` invokes `ll-search` per call via `execFileSync`. Each call is a fresh subprocess invocation with positional args and flags; there is no persistent channel between the plugin and the binary.
+Queries go through `vault-search.mjs`, one `ll-search` subprocess per call (see "read path" above for the canonical statement).
 
 The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) for the wire protocol.
 
@@ -297,7 +309,7 @@ SQLite bundles into the binary (`rusqlite` with `bundled` feature), requires no 
 
 **Why ONNX Runtime is `load-dynamic` rather than statically linked?**
 
-Both inference paths (the bge-small embedder in ll-search and the cross-encoder reranker in ll-core) build `ort` (`2.0.0-rc.12`) with `default-features = false` and the `load-dynamic` feature. The ONNX Runtime is therefore not compiled into the binary; it is loaded from a shared library at startup. The version is pinned in `native/crates/ll-core/src/dylib.rs` (`ORT_VERSION = "1.24.2"`, matching what `ort 2.0.0-rc.12` expects). `ensure_dylib` resolves the library before the first `ort::Session` is built: it downloads the official Microsoft CPU bundle for the host target on first run, verifies the SHA-256 of both the archive and the extracted library (so a swapped or truncated staged file is caught on every load), and stages it. The plugin also points the binary at a co-located library by injecting `ORT_DYLIB_PATH`/`ORT_LIB_LOCATION` when it spawns `ll-search` (`scripts/lib/binary.mjs:66,84`).
+Both inference paths (the bge-small embedder in ll-search and the cross-encoder reranker in ll-core) build `ort` (`2.0.0-rc.12`) with `default-features = false` and the `load-dynamic` feature. The ONNX Runtime is therefore not compiled into the binary; it is loaded from a shared library at startup. The version is pinned in `native/crates/ll-core/src/dylib.rs` (`ORT_VERSION = "1.24.2"`, matching what `ort 2.0.0-rc.12` expects). `ensure_dylib` resolves the library before the first `ort::Session` is built: it downloads the official Microsoft CPU bundle for the host target on first run, verifies the SHA-256 of both the archive and the extracted library (so a swapped or truncated staged file is caught on every load), and stages it. The plugin also points the binary at a co-located library by injecting `ORT_DYLIB_PATH`/`ORT_LIB_LOCATION` when it spawns `ll-search` (`ortSpawnEnv` in `scripts/lib/binary.mjs:29`).
 
 This replaced static linking via `ort`'s `download-binaries` build feature (workstream F), which dropped the openssl/ureq build-time dependencies and made the runtime fetch explicit, pinned, and checksummed. Caveat: there is no `osx-x64` ONNX Runtime asset for 1.24.2 (Microsoft dropped Intel macOS), so x86_64 macOS is intentionally unsupported under `load-dynamic` (such a host must set `ORT_DYLIB_PATH` to a self-provided `libonnxruntime`).
 
@@ -305,9 +317,9 @@ This replaced static linking via `ort`'s `download-binaries` build feature (work
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why eight hook handlers across six event types?**
+**Why eight hook handlers across five event types?**
 
-Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 
@@ -325,9 +337,10 @@ On session open, hooks fire in this order:
 4. On each Write/Edit/Agent/Skill tool use:
    - Before (Write|Edit): `pre-write-check.js` -- near-duplicate and added-dash gate
    - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the provenance, reflect-track, autolink, and edge-infer modules (`hooks/modules/`) in that fixed order (cheap load-bearing first), on Agent/Skill it runs provenance only
-5. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
-6. On each episodic-memory tool use: `post-search-tracking.js`
-7. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
+5. On each WebSearch/WebFetch attempt: `web-guard.js` -- denies the raw tool and points the agent at `bin/source-gateway.mjs`
+6. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
+7. On each episodic-memory tool use: `post-search-tracking.js`
+8. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
 Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races both vault search and episodic memory against `HookConfig.INJECTION_RACE_CAP_MS` and emits results for whichever finishes within the cap.
 
@@ -347,7 +360,7 @@ Both `watch.mjs` and `watch-daemon.mjs` check for an existing live watcher befor
 
 ## ll-search CLI interface
 
-`ll-search` is a `clap` CLI binary. `scripts/vault-search.mjs` resolves db/vault paths and invokes it per call via `execFileSync`. Each invocation is a fresh subprocess; there is no persistent JSON protocol.
+`ll-search` is a `clap` CLI binary, invoked one subprocess per call through `scripts/vault-search.mjs` (see "read path").
 
 The subcommand surface (from `native/crates/ll-search/src/main.rs`):
 
@@ -400,7 +413,7 @@ ll-search version
 
 **Long-running (spawned once at SessionStart)**
 ```
-ll-search watch <vault> <db> [--sync-interval SECS] [--pid-file PATH]
+ll-search watch <vault> <db> [--sync-interval SECS] [--config-dir DIR] [--pid-file PATH] [--librarian-script PATH]
 ```
 
 `ll-search watch` is the only process that runs continuously. It is spawned and supervised by `hooks/session-start/watch-daemon.mjs`. It incrementally reindexes notes on fs-watch events and hosts the UDS duplicate-scan daemon alongside the watcher loop.
@@ -467,7 +480,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs:145-161`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs:164-180`:
 
 ```json
 {
@@ -501,7 +514,7 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
 
 ### shadow injection log
 
-`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js:250-266`):
+`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js:261-277`):
 
 ```json
 {

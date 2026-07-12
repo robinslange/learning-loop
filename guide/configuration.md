@@ -5,12 +5,12 @@
 ```json
 {
   "vault_path": "~/path/to/vault",
-  "injection_mode": "shadow",
+  "injection_mode": "live",
   "injection_threshold": 0.3
 }
 ```
 
-`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. Defaults to `shadow` — the pipeline runs and logs what it _would_ have injected but never mutates the prompt. Flip to `live` after reviewing the shadow log (see Context injection below). The `injection-shadow-gate` health check watches the shadow logs and nudges at session start once the go-live gate is passing; `/learning-loop:doctor` can apply the flip with your approval.
+`injection_mode` controls just-in-time context injection on `UserPromptSubmit`. The shipped config sets `live`: hits that clear the gate are injected into the prompt. `shadow` runs the same pipeline but only logs what it _would_ have injected, never mutating the prompt; it remains available for calibration (see Context injection below). `off` disables the pipeline. If the key is absent from config, the hook falls back to `shadow`. When running in shadow, the `injection-shadow-gate` health check nudges at session start once the go-live gate is passing, and `/learning-loop:doctor` can apply the flip with your approval.
 
 `injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw RRF fusion sum (each of the five search signals contributes `1/(5+rank)`), **not** a cosine similarity: a hit ranked #1 in one signal scores ~0.17, #1 in two signals ~0.33, and #1 in all five ~0.83. Defaults to `0.3` — just below the two-strong-signals level, calibrated against 18k shadow-injection gate evaluations (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
 
@@ -26,7 +26,7 @@ Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows 
 
 ## Hooks
 
-Eight hook handlers across six Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides.
+Eight hook handlers across five Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides. This table is the canonical roster.
 
 | Event                                       | Hook                    | What it enforces                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -34,10 +34,10 @@ Eight hook handlers across six Claude Code event types enforce process disciplin
 | Stop                                        | stop-nudge.js           | Suggests `/reflect` after substantial sessions                                                                                                                                                                                                                                                    |
 | UserPromptSubmit                            | session-label.js        | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`)                                                                                                                                                                     |
 | PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt)                                                                       |
+| PreToolUse (WebSearch\|WebFetch)            | web-guard.js            | Denies the raw web tools globally (main session included; PreToolUse cannot scope to subagents) and routes web access through the source gateway, `bin/source-gateway.mjs`, so every search, fetch, and research call goes through a config-selected source with a per-session fetch budget       |
 | PostToolUse (Write\|Edit\|Agent\|Skill)     | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
 | PostToolUse (Read)                          | post-read-retrieval.js  | Tracks vault reads for retrieval instrumentation                                                                                                                                                                                                                                                  |
 | PostToolUse (mcp\_\_plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches                                                                                                                                                                                                                                                                   |
-| PreCompact                                  | pre-compact.js          | Captures context insights before compression (opt-in: set `LEARNING_LOOP_PRECOMPACT_SPIKE=1` to enable)                                                                                                                                                                                           |
 
 The post-tool modules live under `hooks/modules/`, listed in execution order:
 
@@ -48,13 +48,35 @@ The post-tool modules live under `hooks/modules/`, listed in execution order:
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
+`hooks.pre_write_fail_mode` (shipped in `config.json`, read by `pre-write-check.js`) controls what happens when the duplicate scan itself fails (missing binary, dead daemon). The default `"open"` lets the write through with the check skipped; `"closed"` blocks vault writes until the scan infrastructure is available again.
+
+```json
+{
+  "hooks": {
+    "pre_write_fail_mode": "open"
+  }
+}
+```
+
+### Web access gateway
+
+`web-guard.js` denies the raw `WebSearch`/`WebFetch` tools; all web access routes through `bin/source-gateway.mjs` instead:
+
+```bash
+node bin/source-gateway.mjs search --q "<query>" --json
+node bin/source-gateway.mjs fetch --url <url>
+node bin/source-gateway.mjs research --q "<question>"
+```
+
+Each verb resolves its source from the unified source registry (`scripts/lib/sources/registry.mjs`), so every web call is config-selected. `fetch` enforces a per-session budget (default 10, override with `LL_GATEWAY_FETCH_BUDGET`) backed by a file counter that survives the one-process-per-call pattern. `research` runs the librarian research engine and refuses on a sub-tier model (exit 3). All gateway verbs honor `LL_OFFLINE`.
+
 ## Context injection
 
-The `session-label.js` hook runs a dual-backend search (vault + episodic) on every `UserPromptSubmit` and either emits a real context injection (live mode) or writes a shadow log (shadow mode, the default). A race cap bounds total hook latency; backends that exceed the cap are killed and skipped for the turn.
+The `session-label.js` hook runs a dual-backend search (vault + episodic) on every `UserPromptSubmit` and either emits a real context injection (live mode, the shipped default) or writes a shadow log (shadow mode, for calibration). A race cap bounds total hook latency; backends that exceed the cap are killed and skipped for the turn.
 
 - shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
 - review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
-- flip to live: set `"injection_mode": "live"` in `config.json` once the gate passes — the `injection-shadow-gate` health check surfaces a session-start nudge when the shadow data clears the gate, and `/learning-loop:doctor` applies the edit on approval (never automatically)
+- calibrate: set `"injection_mode": "shadow"` in `config.json` to run the pipeline without mutating prompts, review the log, then set it back to `"live"`
 - gate threshold: `injection_threshold` in `config.json` (default `0.3`, an RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
@@ -74,7 +96,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `LEARNING_LOOP_INJECTION_MODE`        | Per-session override of `injection_mode` (`shadow`, `live`, `off`)                                             |
 | `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`)                               |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
-| `LEARNING_LOOP_PRECOMPACT_SPIKE`      | Set to `1` to enable the PreCompact hook (opt-in). Default: hook is dormant.                                   |
+| `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |
 
 ## Vault librarian
 
@@ -107,6 +129,16 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
 | `keep_alive`           | `30m`                    | How long ollama keeps the model resident after idle. Set lower to free RAM sooner, higher to avoid reloads.   |
 | `pause_on_battery`     | `true`                   | Suspend the librarian while the machine is on battery power (polled).                                         |
 | `battery_poll_seconds` | `60`                     | How often to re-check power state when `pause_on_battery` is on.                                              |
+
+Five override knobs are read by `scripts/librarian/config.mjs` but omitted from the shipped config; set them under `librarian` only when the built-in defaults (defined in that file) need replacing:
+
+| Key                | Purpose                                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------- |
+| `link_prompt`      | System prompt for the agentic link investigation on orphan notes.                                                       |
+| `voice_prompt`     | Classifier prompt for the voice gate (claim vs topic titles).                                                            |
+| `tag_prompt`       | Classifier prompt for tag suggestion (vocabulary-bounded picks).                                                        |
+| `duplicate_prompt` | Classifier prompt for duplicate detection (duplicate / same_topic / unrelated).                                          |
+| `structural_tags`  | Array of tags the tag suggester never proposes; default `["literature", "counterpoint", "synthesis", "excalidraw"]`.     |
 
 ### Remote model provider (advanced)
 

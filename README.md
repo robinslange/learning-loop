@@ -8,7 +8,7 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it.
 
-The outcome is a vault that gets sharper, not heavier. Eight lifecycle hook handlers across six Claude Code event types wire the discipline into the runtime — retrieval fires before you ask, gates fire before promotion, verification catches fabricated sources at write time, and corrections propagate when beliefs change.
+The outcome is a vault that gets sharper, not heavier. Eight lifecycle hook handlers across five Claude Code event types wire the discipline into the runtime — retrieval fires before you ask, gates fire before promotion, verification catches fabricated sources at write time, web research routes through a config-selected gateway, and corrections propagate when beliefs change. The full roster lives in [guide/configuration.md](guide/configuration.md).
 
 ## Install
 

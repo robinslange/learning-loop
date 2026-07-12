@@ -1073,12 +1073,11 @@ function shellQuote(s) {
   claude-fallback is already Claude.
 - **Always report `verifyEngine` like `gatherMode`.** Surface whether verification
   ran on GLM, mechanically, or on Claude, so an off-Claude offload is never
-  invisible. Same reason as the engine field above. See the spec for the routing
-  table: `docs/superpowers/specs/2026-06-16-librarian-research-design.md`.
+  invisible. Same reason as the engine field above. The tested source of truth
+  for the routing table is `scripts/librarian/verify-route.mjs`.
 - This is the first skill to offload to the librarian; `scripts/librarian/research/`
   is built to be reused once it earns trust. See
-  `scripts/librarian/research/README.md` and
-  `docs/superpowers/specs/2026-06-16-librarian-research-design.md`.
+  `scripts/librarian/research/README.md`.
 
 ```
 

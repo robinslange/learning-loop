@@ -13,7 +13,7 @@ If invoked with `--redact`, skip the normal health-check steps and run the **Red
 
 Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply).
 
-`fix` strings in the health-check JSON prefix paths with a user-facing `PLUGIN` shorthand for the plugin root (defined in `guide/troubleshooting.md`). Show them verbatim when the user will run the command; substitute `${CLAUDE_PLUGIN_ROOT}` for the leading `PLUGIN` segment when you execute it yourself via Bash.
+`fix` strings in the health-check JSON prefix paths with a user-facing `PLUGIN` shorthand for the plugin root (defined in [guide/troubleshooting.md](https://github.com/robinslange/learning-loop/blob/main/guide/troubleshooting.md); the `guide/` tree is not shipped with the plugin). Show them verbatim when the user will run the command; substitute `${CLAUDE_PLUGIN_ROOT}` for the leading `PLUGIN` segment when you execute it yourself via Bash.
 
 ## Step 1: Run all checks
 

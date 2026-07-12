@@ -161,6 +161,6 @@ Skills are composable. Some useful chains beyond the standard research cycle:
 
 ## Context injection
 
-You don't need to invoke anything for this. On every prompt, the UserPromptSubmit hook runs a dual-backend search (vault + episodic memory) and either injects relevant context (live mode) or logs what it would have injected (shadow mode, the default).
+You don't need to invoke anything for this. On every prompt, the UserPromptSubmit hook runs a dual-backend search (vault + episodic memory) and either injects relevant context (live mode, the shipped default) or logs what it would have injected (shadow mode).
 
-Shadow mode lets you review what the pipeline finds before trusting it. Run `node scripts/review-shadow.mjs` to inspect the shadow log, then flip `injection_mode` to `live` in `config.json` when you're satisfied.
+Shadow mode lets you review what the pipeline finds without it touching your prompts. Set `injection_mode` to `shadow` in `config.json`, run `node scripts/review-shadow.mjs` to inspect the shadow log, then flip back to `live` when you're satisfied.

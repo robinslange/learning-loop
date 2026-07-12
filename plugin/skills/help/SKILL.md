@@ -43,6 +43,14 @@ Want to just browse without saving anything? Add `--surf`:
 
 Other options: `--style guided|branch|checkpoint`, `--tone academic|conversational|persona`.
 
+**Need depth, not a walk-through?** Run `/learning-loop:research`.
+
+```
+/learning-loop:research "does creatine help cognition in sleep-deprived adults?"
+```
+
+Deep research with the local librarian doing the token-heavy middle: Claude scopes the question into search angles, the local Ollama model (12b+ tier) runs Search, Fetch, and Extract, then Claude adversarially verifies the surviving claims and synthesizes a cited report. Falls back to a Claude-native research path automatically when the librarian is unavailable or the model is below the research tier.
+
 **Reading something good?** Run `/learning-loop:literature`.
 
 ```
@@ -127,7 +135,7 @@ If you've enabled the librarian (see below), `/health` also shows pending librar
 
 If `/health` reports installation problems (missing binary, broken shims, stale daemons), run `/learning-loop:doctor` — it diagnoses your install and walks you through fixes one at a time, re-checking each after you apply it.
 
-**The vault librarian** runs in the background when `ll-watch` is active, using Gemma 4 E2B locally via ollama. It wanders the vault autonomously, finding orphan notes that should be linked, suggesting tags for under-tagged notes, flagging topic-style titles, flagging duplicates against near-neighbours, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
+**The vault librarian** runs in the background when `ll-watch` is active, using a local Gemma model via ollama: `gemma3:12b` by default (also the research tier), or `gemma4:e2b` on 16-32GB machines (triage only). It wanders the vault autonomously, finding orphan notes that should be linked, suggesting tags for under-tagged notes, flagging topic-style titles, flagging duplicates against near-neighbours, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
 
 ```
 /learning-loop:health --librarian
@@ -143,7 +151,7 @@ Phase 1 presents link suggestions, tag suggestions, voice flags, and duplicate f
 
 ### Importing external context
 
-**`/learning-loop:ingest`** pulls bulk context from external systems into your vault and auto-memory. Three sources supported:
+**`/learning-loop:ingest`** pulls bulk context from external systems into your vault and auto-memory. Four modes supported:
 
 ```
 /learning-loop:ingest linear                    # my assigned tickets
@@ -151,11 +159,14 @@ Phase 1 presents link suggestions, tag suggestions, voice flags, and duplicate f
 /learning-loop:ingest repo ~/dev/acme/monorepo # scan a repo
 /learning-loop:ingest repo ~/dev/foo --deep     # force the parallel deep fan-out
 /learning-loop:ingest context                   # paste text to extract
+/learning-loop:ingest bundle <path>             # restore a harvest bundle
 ```
 
 It fetches the data, extracts atomic insights, previews them for your confirmation, then routes project-state to auto-memory and durable insights to `0-inbox/`. Run it when starting a new project, onboarding to a codebase, or pulling in work context from Linear.
 
 For `repo`, a Haiku gate decides between a single-pass scan and a 5-wide parallel fan-out (4 deep mappers covering stack/architecture/conventions/domain + 1 state sidecar) that stages structured docs at `<vault>/_ingested-repos/<slug>/` and synthesizes them into atomic notes. Pass `--deep` to skip the gate and force the parallel path.
+
+For `bundle`, point it at a `harvest-bundle-<date>/` directory that `/learning-loop:harvest` emitted on another instance you own. It restores the carried auto-memory files and vault notes verbatim: notes land in `0-inbox/` for normal triage, existing files are never overwritten, and conflicts are listed for manual merge.
 
 ### The natural flow
 
@@ -164,6 +175,7 @@ first time → /learning-loop:init       → vault path, persona, folder structu
 federation → /learning-loop:federation  → identity, token redeem, visibility, sync test
 external   → /learning-loop:ingest     → auto-memory + inbox notes
 curiosity  → /learning-loop:discovery   → inbox notes  → /learning-loop:deepen  → permanent notes
+deep dive  → /learning-loop:research    → verified, cited report
 question   → /learning-loop:quick      → answer + auto-capture if novel
 reading    → /learning-loop:literature  → literature notes
 mid-work   → /learning-loop:quick-note  → inbox note (don't break flow)
@@ -184,7 +196,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 - **Manual sync:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` refreshes peer indexes from the hub
 - **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
 - **Visibility:** you control what peers see of your vault (public/listed/private tiers, configured during init)
-- **Details:** see `guide/federation.md`
+- **Details:** see [guide/federation.md](https://github.com/robinslange/learning-loop/blob/main/guide/federation.md) (the `guide/` tree is not shipped with the plugin)
 
 ### Quick reference
 
@@ -193,6 +205,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:init` | First-time setup: vault path, persona, folder structure |
 | `/learning-loop:federation` | Configure federation: identity, token redeem, peers, visibility, sync |
 | `/learning-loop:discovery "topic"` | Interactive research journey: explore something new or go deeper |
+| `/learning-loop:research "question"` | Deep research: local librarian does the token-heavy gathering, Claude verifies and synthesizes a cited report |
 | `/learning-loop:quick "question"` | Fast verified answer: vault + web, auto-captures if novel |
 | `/learning-loop:literature <URL>` | Capture an external source as a literature note |
 | `/learning-loop:quick-note [title] [body]` | Quick capture to inbox: no args infers from context |
@@ -211,6 +224,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:doctor` | Diagnose your learning-loop installation: runs health checks, presents issues, offers per-fix remediation, re-runs each check after the fix to confirm |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
 | `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
+| `/learning-loop:uninstall` | Guided removal: marketplace uninstall, dependent MCP cleanup, captured-index purge, with per-step confirmation |
 | `/learning-loop:help` | This guide |
 
 ---

@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **Just-in-time context injection now ships live.** `injection_mode` defaults to `live` in the shipped config: the shadow experiment graduated, and full-rate shadow paid two vector-search spawns per prompt for telemetry only. `shadow` remains available for calibration; `off` disables the pipeline.
+
+### Added
+
+- **`/ingest bundle <path>`: harvest bundles get a receiving side.** Restores a `harvest-bundle-<date>/` emitted by `/harvest` on another instance you own; a verbatim carry, with auto-memory files and notes copied in (notes to `0-inbox/` for normal triage), same-name conflicts skipped and listed, never overwritten.
+- **edges-backfill doctor check plus session-start auto-heal.** `/doctor` flags a missing or empty `edges.db` when the vault has notes, and the watch-daemon lifecycle runs a one-shot edges backfill so pre-index installs get their wikilinks classified without running `backfill-edges.mjs` by hand.
+- **note-verifier batch contract.** The note-verifier agent and every caller now speak the same 1-5 note batch contract, so verification sweeps dispatch fewer agents. New `agent-contract-guards` and `skill-contract-guards` test suites plus architecture-lint rules M18-M21 pin the contracts.
+
+### Fixed
+
+- **Install portability of config and binary resolution.** `check-deps.mjs` read only the plugin-root `config.json`, so installs whose config lives at `PLUGIN_DATA/config.json` got an empty dependency report with exit 0; `refinement-candidates.mjs` hardcoded the marketplace plugin-data path and threw on any other install. Both now resolve through `lib/config.mjs` and `lib/binary.mjs`, and skills document `PLUGIN_DATA` resolution via `resolve-paths.mjs` instead of a wrong hardcoded fallback.
+- **CRLF vaults no longer silently no-op.** Five hand-rolled frontmatter parsers collapse onto `markdown-parse.mjs`, and the splice-writers share a lossless CRLF-safe `splitRawFrontmatter()`; on CRLF vaults the `reflect_sid` stamp was never stripped and the sid sweep never matched.
+- **nli-cleanup missed subfolder notes.** Its walk was non-recursive; it now uses the canonical `listVaultNotes` walker (as do backfill-edges and sweep-hook-replay), which also keeps all three out of `_archive` nests.
+- **Ingest contract holes closed.** The four durable ingest mappers self-contain the full ack schema the coordinator validates (it lived only in the stack mapper), and ingest-synthesizer emits the canonical extract-insights item schema under `confirmed_insights`, so preview and route-output need no deep-mode special-casing.
+- **`/reflect` drains the deferred refinement queue even in note-less sessions.** A reflect that captured nothing new used to strand queued refinement candidates until the next note-producing session.
+- **`/rewrite` notifies federation peers on retraction.** Phase 5 probes `federation-active.mjs` and runs `retraction-notify.mjs` per retracted note, fail-soft; the emission path existed but was never wired into the skill.
+
+### Performance
+
+- **fleeting-sweep: 199s to 27s on a real vault.** One `grep -roE` link-extraction pass with an awk tally replaces a whole-vault grep per fleeting note (O(fleeting x vault) serial processes), byte-identical output.
+- **Hook hot paths.** sweep-hook-replay replays post-tool in-process instead of a Node cold start per note (20-note sweep 59ms vs ~2.6s); post-search-tracking reads supersessions from an mtime-keyed JSON sidecar instead of booting sql.js WASM per episodic search; pre-write-check loads the vault snapshot only when there are wikilinks to validate; session-start emits its provenance event inline instead of spawning a detached node child.
+- **Session-start skips re-injecting the retrieval protocol.** When the static CLAUDE.md section's version marker is present and deps are satisfied, a compact pointer carries only the resolved vault-search path, saving ~250 duplicated instruction tokens per session.
+
+### Removed
+
+- **PreCompact spike.** With the spike env unset it booted Node on every compaction to emit `{}`; wiring and files removed. The hook surface is now eight handlers across five event types.
+- **Dead surface.** The nli-edges tombstone and the dead `--include-noise` flag are gone; unused agent tool grants trimmed.
+
 ## v1.35.1
 
 - **Integrity/stability/accuracy pass — 12 fixes across the plugin and the `ll-search` Rust crate, no API changes.** A 45-agent adversarial audit (7 dimensions, each finding 3-skeptic-verified) then a second adversarial pass over the fixes themselves.

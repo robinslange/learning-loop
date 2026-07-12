@@ -28,7 +28,6 @@ The model is chosen by **RAM tier** so one resident model serves everything:
 - Recent captures capped at the last 5 notes
 - Intention summaries use compact format
 - Provenance, backlinks, and session labels write to disk, not into context
-- Pre-compact hook spawns a detached worker that extracts atomic notes from the pre-compaction transcript into `0-inbox/` (opt-in via `LEARNING_LOOP_PRECOMPACT_SPIKE=1`; zero overhead unless enabled)
 - Search batches multiple queries into a single process
 
 ## Measuring cache impact
@@ -39,4 +38,4 @@ The model is chosen by **RAM tier** so one resident model serves everything:
 node scripts/cache-health-report.mjs [--session <id>] [--month YYYY-MM]
 ```
 
-Weighted hit rate, percentile distribution, and zero-hit events. Useful for measuring the cost impact of flipping `injection_mode` from shadow to live.
+Weighted hit rate, percentile distribution, and zero-hit events. Useful for measuring the cost impact of live `injection_mode` (or of a shadow calibration run).
