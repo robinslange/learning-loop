@@ -2,13 +2,15 @@
 // Guards spawn with file-lock.mjs acquireLock (O_EXCL + stale recovery).
 // SIGTERMs daemons spawned from a different binary file (detected by mtime).
 
-import { readFileSync, writeFileSync, statSync, existsSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, statSync, existsSync, rmSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
+import { MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
+import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
@@ -178,5 +180,29 @@ export async function run(ctx) {
     } finally {
       releaseLock(handle);
     }
+  }
+
+  // One-shot edges backfill, wired into the same auto-embed lifecycle as the
+  // watch daemon: installs that predate the justification index (or restored
+  // vaults) get their existing wikilinks classified into edges.db without an
+  // operator ever running backfill-edges.mjs by hand. Best-effort: the marker
+  // is written before the spawn, so a failed run does not retry every session;
+  // /doctor's edges check is the diagnosable fallback.
+  try {
+    const marker = MARKER_PATHS.edgesBackfilled(pluginData);
+    const edgesDb = DATA_FILES.edgesDb(pluginData);
+    if (!existsSync(marker) && !existsSync(edgesDb)) {
+      mkdirSync(dirname(marker), { recursive: true });
+      writeFileSync(marker, new Date().toISOString());
+      const child = spawn('node', [join(pluginDir, 'scripts', 'backfill-edges.mjs')], {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.unref();
+      recordDetachedChild(child.pid);
+    }
+  } catch (err) {
+    logError('session-start.watch-daemon.edgesBackfill', err);
   }
 }

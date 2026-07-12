@@ -4,7 +4,7 @@
 
 import { existsSync } from 'node:fs';
 import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
-import { openEdgeDb, findMatchingSupersessions } from '../scripts/lib/edges.mjs';
+import { loadSupersessionsCached, matchSupersessions } from '../scripts/lib/edges.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
@@ -15,10 +15,11 @@ async function checkSupersessions(query) {
   const dbPath = DATA_FILES.edgesDb(pluginData);
   if (!existsSync(dbPath)) return null;
 
-  let db;
   try {
-    db = await openEdgeDb(dbPath);
-    const matches = findMatchingSupersessions(db, query);
+    // Sidecar-cached read: sql.js only boots when edges.db changed since the
+    // last read; the steady state is two stats + a tiny JSON parse per call.
+    const rows = await loadSupersessionsCached(dbPath);
+    const matches = matchSupersessions(rows, query);
     if (matches.length === 0) return null;
     const lines = matches.map((m) => {
       const replacement = m.replacement_note_path
@@ -31,8 +32,6 @@ async function checkSupersessions(query) {
   } catch (err) {
     logError('post-search-tracking.checkSupersessions', err);
     return null;
-  } finally {
-    if (db) db.close();
   }
 }
 

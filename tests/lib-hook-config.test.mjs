@@ -6,7 +6,7 @@ import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 test('HookConfig is frozen', () => {
   assert.equal(Object.isFrozen(HookConfig), true);
   assert.throws(() => {
-    HookConfig.LABEL_TIMEOUT_MS = 99;
+    HookConfig.STDIN_TIMEOUT_MS = 99;
   }, TypeError);
 });
 
@@ -19,7 +19,7 @@ test('all values are finite non-negative numbers', () => {
 });
 
 test('timeout constants are in plausible ranges (ms)', () => {
-  assert.ok(HookConfig.LABEL_TIMEOUT_MS >= 100 && HookConfig.LABEL_TIMEOUT_MS <= 30_000);
+  assert.ok(HookConfig.STDIN_TIMEOUT_MS >= 100 && HookConfig.STDIN_TIMEOUT_MS <= 30_000);
   assert.ok(HookConfig.SNAPSHOT_TIMEOUT_MS >= 1000 && HookConfig.SNAPSHOT_TIMEOUT_MS <= 30_000);
   assert.ok(HookConfig.DAEMON_STARTUP_DEADLINE_MS >= 100);
   assert.ok(
@@ -54,7 +54,7 @@ test('INJECTION_THRESHOLD is calibrated to the RRF fusion-sum scale', () => {
 
 test('required keys are all present (regression guard)', () => {
   const required = [
-    'LABEL_TIMEOUT_MS',
+    'STDIN_TIMEOUT_MS',
     'QUERY_TIMEOUT_MS',
     'INJECTION_RACE_CAP_MS',
     'DEDUPE_WINDOW_MS',

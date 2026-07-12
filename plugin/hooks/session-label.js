@@ -12,6 +12,7 @@ import {
   resolvePluginData,
   emitRetrieval,
   readFileTail,
+  readStdin,
 } from './lib/common.mjs';
 import {
   buildInjection,
@@ -28,16 +29,7 @@ import { logError } from '../scripts/lib/log.mjs';
 import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
-const input = await new Promise((resolve) => {
-  let data = '';
-  process.stdin.setEncoding('utf8');
-  const timeout = setTimeout(() => resolve(''), HookConfig.LABEL_TIMEOUT_MS);
-  process.stdin.on('data', (chunk) => (data += chunk));
-  process.stdin.on('end', () => {
-    clearTimeout(timeout);
-    resolve(data);
-  });
-});
+const input = await readStdin();
 
 if (!input.trim()) process.exit(0);
 

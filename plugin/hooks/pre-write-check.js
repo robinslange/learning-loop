@@ -20,6 +20,7 @@ import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
+import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { emitJson } from './lib/io.mjs';
 
@@ -57,8 +58,7 @@ export const SCAN_FAILED = Symbol('SCAN_FAILED');
 
 function logDuplicateGateIssue(pluginData, code, source, detail) {
   if (!pluginData) return;
-  const month = new Date().toISOString().slice(0, 7);
-  appendJsonlLineSafe(join(pluginData, `hook-errors-${month}.jsonl`), {
+  appendJsonlLineSafe(join(pluginData, `hook-errors-${monthStr()}.jsonl`), {
     ts: new Date().toISOString(),
     module: 'pre-write-check.checkDuplicateNote',
     code,
@@ -382,15 +382,20 @@ runHook(async ({ tool, input }) => {
       return;
     }
 
-    const noteIndex = buildNoteIndex(vaultRoot);
-    const broken = extractWikilinks(newString).filter((l) => {
-      const target = l.split('#')[0].trim();
-      return target && !noteExistsInIndex(target, noteIndex);
-    });
-    if (broken.length > 0) {
-      warn(
-        `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
-      );
+    // Only pay for the snapshot load (a multi-hundred-KB JSON parse, or a full
+    // vault readdir on TTL expiry) when there are wikilinks to validate.
+    const editLinks = extractWikilinks(newString);
+    if (editLinks.length > 0) {
+      const noteIndex = buildNoteIndex(vaultRoot);
+      const broken = editLinks.filter((l) => {
+        const target = l.split('#')[0].trim();
+        return target && !noteExistsInIndex(target, noteIndex);
+      });
+      if (broken.length > 0) {
+        warn(
+          `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
+        );
+      }
     }
     return;
   }
@@ -444,15 +449,17 @@ runHook(async ({ tool, input }) => {
   if (styleAdvisory) warnings.push(styleAdvisory);
 
   const links = extractWikilinks(fmBody);
-  const noteIndex = buildNoteIndex(vaultRoot);
-  const broken = links.filter((l) => {
-    const target = l.split('#')[0].trim();
-    return target && !noteExistsInIndex(target, noteIndex);
-  });
-  if (broken.length > 0) {
-    warnings.push(
-      `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
-    );
+  if (links.length > 0) {
+    const noteIndex = buildNoteIndex(vaultRoot);
+    const broken = links.filter((l) => {
+      const target = l.split('#')[0].trim();
+      return target && !noteExistsInIndex(target, noteIndex);
+    });
+    if (broken.length > 0) {
+      warnings.push(
+        `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
+      );
+    }
   }
 
   const titleMatch = content.match(/^#\s+(.+)$/m);

@@ -11,7 +11,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
-import { recordDetachedChild } from '../lib/common.mjs';
+import { recordDetachedChild, emitProvenance } from '../lib/common.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -264,23 +264,11 @@ export async function run(ctx) {
     }
   }
 
-  // 10. Emit session-start provenance event — fire and forget.
+  // 10. Emit session-start provenance event inline — one JSONL append is
+  // cheaper than a detached node child (see modules/provenance.mjs, which
+  // made the same call for the post-tool hot path).
   try {
-    const child = spawn(
-      'node',
-      [
-        join(pluginDir, 'scripts', 'provenance.mjs'),
-        JSON.stringify({
-          agent: 'session',
-          action: 'session-start',
-          source: 'hook',
-        }),
-      ],
-      { detached: true, stdio: 'ignore' },
-    );
-    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-    child.unref();
-    recordDetachedChild(child.pid);
+    emitProvenance({ agent: 'session', action: 'session-start' });
   } catch (err) {
     logError('session-start.context-assembly.provenance', err);
   }

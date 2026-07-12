@@ -7,6 +7,7 @@
 
 import { basename, join } from 'node:path';
 import { home, readStdin, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
+import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
@@ -46,8 +47,7 @@ function recordMemoryWriteIfApplicable(filePath) {
 function logHookError(moduleName, err) {
   const pluginData = getPluginData();
   if (!pluginData) return;
-  const month = new Date().toISOString().slice(0, 7);
-  appendJsonlLineSafe(join(pluginData, `hook-errors-${month}.jsonl`), {
+  appendJsonlLineSafe(join(pluginData, `hook-errors-${monthStr()}.jsonl`), {
     ts: new Date().toISOString(),
     module: moduleName,
     message:

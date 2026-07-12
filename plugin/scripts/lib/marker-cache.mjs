@@ -26,6 +26,10 @@ export const MARKER_PATHS = {
   // timestamp there (dream-gate's first-run write); moving it would reset
   // every install's 24h dream clock.
   lastDream: (pluginData) => join(DATA_PATHS.retrieval(pluginData), 'last-dream'),
+  // One-shot edges-backfill marker. Lives under retrieval/ (not markers/)
+  // because the markers/ TTL sweep would reap it and re-trigger a full-vault
+  // backfill every 7 days.
+  edgesBackfilled: (pluginData) => join(DATA_PATHS.retrieval(pluginData), 'edges-backfilled'),
   lastReflect: (pluginData) => join(DATA_PATHS.markers(pluginData), 'last-reflect'),
   dreamLock: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-lock'),
   dreamNudged: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-nudged'),

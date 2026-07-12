@@ -13,7 +13,6 @@ import {
   fstatSync,
 } from 'node:fs';
 import { join, sep, dirname } from 'node:path';
-import { homedir } from 'node:os';
 import {
   resolvePluginData,
   getVaultPath,
@@ -27,20 +26,12 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
-import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
-import { DATA_PATHS, toForwardSlash } from '../../scripts/lib/paths.mjs';
+import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
+import { DATA_PATHS, toForwardSlash, home } from '../../scripts/lib/paths.mjs';
 
-export { resolvePluginData, getSessionId };
+export { resolvePluginData, getSessionId, home };
 export const resolveVaultPath = getVaultPath;
 export const resolveConfig = getConfig;
-
-export function home() {
-  return env.HOME || env.USERPROFILE || homedir();
-}
-
-export function binaryName() {
-  return process.platform === 'win32' ? 'll-search.exe' : 'll-search';
-}
 
 export function findBinary() {
   const bin = binaryPath();
@@ -77,7 +68,6 @@ export function recordDetachedChild(pid) {
   if (!file || !pid) return;
   try {
     appendFileSync(file, `${pid}\n`);
-    // eslint-disable-next-line learning-loop/no-empty-catch
   } catch {
     // Best-effort: a lost record only means the harness can't reap early.
   }
@@ -168,11 +158,6 @@ export async function runHook(handler) {
 }
 
 // --- Emission helpers ---
-
-function monthStr() {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-}
 
 const provenanceDedupeKeys = new Set();
 

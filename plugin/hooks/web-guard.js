@@ -4,9 +4,11 @@ import { emitJson } from './lib/io.mjs';
 const BLOCKED = new Set(['WebSearch', 'WebFetch']);
 
 /**
- * Deny raw web tools in researcher subagents; route them through the source
- * gateway instead. Returns the PreToolUse deny payload for a blocked tool, else
- * null (pass-through). Pure — no stdin/process, so it is unit-testable.
+ * Deny raw web tools globally; hooks.json wires this as an unconditional
+ * PreToolUse matcher (main session included, since PreToolUse cannot scope to
+ * subagents). Web access routes through the source gateway instead. Returns
+ * the PreToolUse deny payload for a blocked tool, else null (pass-through).
+ * Pure, no stdin/process, so it is unit-testable.
  */
 export function webGuardDecision(tool) {
   if (!BLOCKED.has(tool)) return null;

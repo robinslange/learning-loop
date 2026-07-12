@@ -1,18 +1,20 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync, utimesSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import {
   openEdgeDb, addSupersession, removeSupersession,
   listSupersessions, findMatchingSupersessions, saveDb,
+  loadSupersessionsCached,
 } from '../plugin/scripts/lib/edges.mjs';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'post-search-tracking.js');
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-super-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
+const SIDECAR = `${DB_PATH}.supersessions.json`;
 
 function runHookWith(query) {
   const input = JSON.stringify({
@@ -155,6 +157,7 @@ describe('post-search-tracking supersession annotation', () => {
 
   beforeEach(async () => {
     if (existsSync(DB_PATH)) rmSync(DB_PATH);
+    if (existsSync(SIDECAR)) rmSync(SIDECAR);
   });
 
   after(() => {
@@ -200,5 +203,68 @@ describe('post-search-tracking supersession annotation', () => {
     if (existsSync(DB_PATH)) rmSync(DB_PATH);
     const result = runHookWith('use mocks in tests');
     assert.equal(result, null);
+  });
+});
+
+describe('loadSupersessionsCached sidecar', () => {
+  before(() => {
+    mkdirSync(PLUGIN_DATA, { recursive: true });
+  });
+
+  beforeEach(() => {
+    if (existsSync(DB_PATH)) rmSync(DB_PATH);
+    if (existsSync(SIDECAR)) rmSync(SIDECAR);
+  });
+
+  after(() => {
+    rmSync(PLUGIN_DATA, { recursive: true, force: true });
+  });
+
+  it('cold call rebuilds the sidecar from the db', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addSupersession(db, { oldPatternQuery: 'always use mocks in tests' });
+    saveDb(db, DB_PATH);
+    db.close();
+
+    const rows = await loadSupersessionsCached(DB_PATH);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].old_pattern_query, 'always use mocks in tests');
+    assert.ok(existsSync(SIDECAR), 'rebuild must persist the sidecar');
+  });
+
+  it('fresh sidecar is served without opening the db (corrupt db stays untouched)', async () => {
+    // A garbage edges.db would throw inside sql.js — returning the sidecar
+    // rows proves the warm path never boots the SQL layer.
+    writeFileSync(DB_PATH, 'not a sqlite file');
+    const rows = [{ old_pattern_query: 'from sidecar', superseded_date: '2026-01-01' }];
+    writeFileSync(SIDECAR, JSON.stringify(rows));
+    const past = Date.now() / 1000 - 60;
+    utimesSync(DB_PATH, past, past);
+
+    const got = await loadSupersessionsCached(DB_PATH);
+    assert.deepEqual(got, rows);
+  });
+
+  it('sidecar older than the db is rebuilt from the db', async () => {
+    const db = await openEdgeDb(DB_PATH);
+    addSupersession(db, { oldPatternQuery: 'pattern from db' });
+    saveDb(db, DB_PATH);
+    db.close();
+
+    writeFileSync(SIDECAR, JSON.stringify([{ old_pattern_query: 'stale sidecar row' }]));
+    const past = Date.now() / 1000 - 60;
+    utimesSync(SIDECAR, past, past);
+
+    const got = await loadSupersessionsCached(DB_PATH);
+    assert.equal(got.length, 1);
+    assert.equal(got[0].old_pattern_query, 'pattern from db');
+    const rewritten = JSON.parse(readFileSync(SIDECAR, 'utf-8'));
+    assert.equal(rewritten[0].old_pattern_query, 'pattern from db');
+  });
+
+  it('missing db returns empty without creating a sidecar', async () => {
+    const got = await loadSupersessionsCached(DB_PATH);
+    assert.deepEqual(got, []);
+    assert.equal(existsSync(SIDECAR), false);
   });
 });

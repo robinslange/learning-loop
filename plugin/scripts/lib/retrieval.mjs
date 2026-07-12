@@ -19,7 +19,11 @@ import { logError } from './log.mjs';
 import { DATA_PATHS } from './paths.mjs';
 import { deriveOrigin } from './row-origin.mjs';
 
-function monthStr() {
+// Canonical month bucket for log/telemetry filenames. Local time on purpose:
+// buckets follow the operator's calendar month. Callers must not substitute
+// toISOString().slice(0, 7), which is UTC and lands boundary events in a
+// different month file.
+export function monthStr() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }

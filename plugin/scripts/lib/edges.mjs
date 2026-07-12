@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
 import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
@@ -411,14 +411,16 @@ function tokenize(text) {
     .filter((t) => t && !STOPWORDS.has(t));
 }
 
-export function findMatchingSupersessions(db, query) {
+// Pure matcher over already-loaded supersession rows. The SQL layer only ever
+// feeds it SELECT * — hot-path callers (post-search-tracking) match against
+// the JSON sidecar instead and never boot sql.js.
+export function matchSupersessions(rows, query) {
   if (!query || !query.trim()) return [];
   const queryTokens = new Set(tokenize(query));
   if (queryTokens.size === 0) return [];
 
-  const all = rowsToObjects(db.exec('SELECT * FROM supersessions'));
   const matches = [];
-  for (const s of all) {
+  for (const s of rows) {
     const patternTokens = new Set(tokenize(s.old_pattern_query || ''));
     if (patternTokens.size === 0) continue;
     let shared = 0;
@@ -432,6 +434,45 @@ export function findMatchingSupersessions(db, query) {
     }
   }
   return matches.sort((a, b) => b.match_ratio - a.match_ratio);
+}
+
+export function findMatchingSupersessions(db, query) {
+  return matchSupersessions(rowsToObjects(db.exec('SELECT * FROM supersessions')), query);
+}
+
+// Read the supersessions table without booting sql.js when possible. Keeps an
+// mtime-keyed JSON sidecar next to edges.db: valid (sidecar newer than db)
+// means two stats + a tiny JSON parse; stale or missing means one cold
+// openEdgeDb rebuild, after which every call is cheap until edges.db changes.
+// The common case — an instance with zero supersessions — settles to parsing
+// "[]" per call instead of a WASM compile + full 1MB+ db read.
+export async function loadSupersessionsCached(dbPath) {
+  if (!existsSync(dbPath)) return [];
+  const sidecar = `${dbPath}.supersessions.json`;
+  try {
+    const dbMtime = statSync(dbPath).mtimeMs;
+    if (statSync(sidecar).mtimeMs >= dbMtime) {
+      const rows = JSON.parse(readFileSync(sidecar, 'utf8'));
+      if (Array.isArray(rows)) return rows;
+    }
+  } catch (err) {
+    if (err.code !== 'ENOENT') logError('edges.loadSupersessionsCached.read', err);
+  }
+  let db;
+  try {
+    db = await openEdgeDb(dbPath);
+    const rows = rowsToObjects(db.exec('SELECT * FROM supersessions'));
+    try {
+      const tmp = `${sidecar}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify(rows));
+      renameSync(tmp, sidecar);
+    } catch (err) {
+      logError('edges.loadSupersessionsCached.write', err);
+    }
+    return rows;
+  } finally {
+    if (db) db.close();
+  }
 }
 
 export function saveDb(db, dbPath) {
