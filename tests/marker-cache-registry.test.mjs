@@ -114,39 +114,28 @@ test('dreamLockHeld: missing → false; fresh → true; old+dead-pid → false; 
 });
 
 // Runs `appendMemoryWrite(pluginData, sessionId, basename)` in a fresh child
-// process. When `delayMs` is set, the child patches `node:fs`'s readFileSync
-// via the CJS module object (createRequire) BEFORE importing marker-cache.mjs
-// — ESM named-import bindings for core modules resolve through that same
-// underlying CJS module object, so this reaches appendMemoryWrite's internal
-// call to readFileSync even though it was imported as a named ESM binding
-// (a plain `fs.readFileSync = …` on the ESM namespace throws: core-module
-// namespace objects are frozen). The FIRST read of the marker file then
-// blocks synchronously for `delayMs` before returning, widening that single
-// call's read-modify-write window so a concurrent writer is forced to
-// overlap it — deterministically, without touching production code or
-// timing two process startups against each other.
-function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
-  const delaySetup =
-    delayMs > 0
-      ? `const { createRequire } = await import('node:module');` +
-        `const fsCjs = createRequire(import.meta.url)('node:fs');` +
-        `const origRead = fsCjs.readFileSync;` +
-        `let patched = false;` +
-        `fsCjs.readFileSync = (...args) => {` +
-        `  const result = origRead(...args);` +
-        `  if (!patched && String(args[0]).includes('memory-writes')) {` +
-        `    patched = true;` +
-        `    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});` +
-        `  }` +
-        `  return result;` +
-        `};`
-      : '';
+// process. Before calling it, the child writes its own ready-file into
+// `barrierDir` and busy-polls (short Atomics.wait sleeps — no setTimeout
+// jitter) until the OTHER writer's ready-file also exists. This is a real
+// rendezvous barrier: both children only proceed into appendMemoryWrite once
+// BOTH have signaled ready, so they enter the read-modify-write at
+// essentially the same instant regardless of how long process spawn or ESM
+// resolution took for either one. A fixed setTimeout-based stagger (tried
+// first) can only hit the actual read-modify-write window — a few hundred
+// microseconds — by luck: it was empirically flaky in both directions,
+// sometimes missing the race against unlocked code and sometimes exhausting
+// appendMemoryWrite's own retry budget against locked code. The barrier
+// removes the guesswork.
+function spawnAppend(pluginData, sessionId, basename, barrierDir, readyName, otherReadyName) {
   const script =
-    `(async () => {` +
-    `${delaySetup}` +
-    `const { appendMemoryWrite } = await import(${JSON.stringify(MARKER_CACHE_MODULE_URL)});` +
-    `appendMemoryWrite(${JSON.stringify(pluginData)}, ${JSON.stringify(sessionId)}, ${JSON.stringify(basename)});` +
-    `})();`;
+    `import('node:fs').then(async (fs) => {` +
+    `  fs.writeFileSync(${JSON.stringify(join(barrierDir, readyName))}, '1');` +
+    `  const other = ${JSON.stringify(join(barrierDir, otherReadyName))};` +
+    `  const buf = new Int32Array(new SharedArrayBuffer(4));` +
+    `  while (!fs.existsSync(other)) { Atomics.wait(buf, 0, 0, 1); }` +
+    `  const { appendMemoryWrite } = await import(${JSON.stringify(MARKER_CACHE_MODULE_URL)});` +
+    `  appendMemoryWrite(${JSON.stringify(pluginData)}, ${JSON.stringify(sessionId)}, ${JSON.stringify(basename)});` +
+    `});`;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
       encoding: 'utf8',
@@ -160,46 +149,55 @@ function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
   });
 }
 
-// Forces the lost-update interleave deterministically: writer A's read of
-// the marker blocks for 100ms (via the readFileSync monkey-patch above)
-// before it computes its updated set and writes. Writer B, unpatched, runs
-// its own full read-modify-write in well under 100ms and finishes first.
-// An unlocked appendMemoryWrite lets A's in-flight read (captured before B
-// wrote) clobber B's write when A finally saves — B's basename is lost. A
-// properly locked appendMemoryWrite serializes the two: whichever acquires
-// the marker's lock first holds it across its own delayed read, so the
-// second writer's read (whether that's A's delayed read or B's fast one)
-// always observes the first writer's completed write. 100ms comfortably
-// exceeds appendMemoryWrite's own retry budget's floor (10 retries * 20ms =
-// 180ms max wait) minus the head start below, so a correctly locked B
-// reliably outlasts A's hold rather than timing out its own lock wait.
-//
-// The marker is pre-seeded with an existing entry: readMarker short-circuits
-// on a missing file before ever calling readFileSync (statSync throws first),
-// so on a brand-new marker the delay hook — keyed on readFileSync — would
-// never fire and the test would pass vacuously regardless of locking.
-test("appendMemoryWrite: a slow reader and a fast writer both survive", async () => {
+// Runs one barrier-synchronized pair of concurrent appendMemoryWrite calls
+// against a fresh marker and reports whether both basenames survived.
+async function runRacePair(sessionId) {
   const root = mkdtempSync(join(tmpdir(), 'll-marker-append-race-'));
+  const barrierDir = mkdtempSync(join(tmpdir(), 'll-marker-append-barrier-'));
   try {
-    const path = MARKER_PATHS.memoryWrites(root, 'sess1');
+    const path = MARKER_PATHS.memoryWrites(root, sessionId);
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(['note-existing.md']));
 
-    const slow = spawnAppend(root, 'sess1', 'note-a.md', 100);
-    await new Promise((r) => setTimeout(r, 40)); // let the slow reader start its delayed read first
-    const fast = spawnAppend(root, 'sess1', 'note-b.md', 0);
-
-    const [a, b] = await Promise.all([slow, fast]);
-    assert.equal(a.code, 0, `slow writer should exit cleanly (stderr: ${a.stderr})`);
-    assert.equal(b.code, 0, `fast writer should exit cleanly (stderr: ${b.stderr})`);
+    const [a, b] = await Promise.all([
+      spawnAppend(root, sessionId, 'note-a.md', barrierDir, 'a', 'b'),
+      spawnAppend(root, sessionId, 'note-b.md', barrierDir, 'b', 'a'),
+    ]);
+    if (a.code !== 0) throw new Error(`writer A exited ${a.code} (stderr: ${a.stderr})`);
+    if (b.code !== 0) throw new Error(`writer B exited ${b.code} (stderr: ${b.stderr})`);
 
     const final = JSON.parse(readFileSync(path, 'utf8'));
-    assert.deepEqual(
-      new Set(final),
-      new Set(['note-existing.md', 'note-a.md', 'note-b.md']),
-      `lost update — all three basenames must survive, got ${JSON.stringify(final)}`,
-    );
+    const got = new Set(final);
+    return { ok: got.size === 3 && got.has('note-a.md') && got.has('note-b.md'), final };
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(barrierDir, { recursive: true, force: true });
   }
+}
+
+// A single barrier-synchronized pair collides on the actual read-modify-write
+// window (not process-startup timing) roughly 40% of the time against
+// unlocked code, measured empirically — the window itself is real but
+// sub-millisecond, so any single trial can land on either side of it purely
+// from OS scheduling noise. Running pairs SEQUENTIALLY (not all in parallel)
+// keeps this test's own footprint to 2 concurrent child processes at a time
+// — running many pairs at once was empirically flaky under `npm test`'s full
+// parallel suite load (extra processes competing for CPU can exhaust
+// appendMemoryWrite's fixed retry budget on legitimate scheduling delay
+// alone, which looks identical to a lost update from the outside). 6
+// sequential trials drives the chance of missing every collision down to
+// roughly 0.6^6 ≈ 4.7% while adding minimal load of its own: a properly
+// locked appendMemoryWrite must pass every trial; an unlocked one reliably
+// drops a basename in at least one.
+test('appendMemoryWrite: repeated barrier-synchronized concurrent writer pairs all survive', async () => {
+  const failures = [];
+  for (let i = 0; i < 6; i++) {
+    const r = await runRacePair(`sess${i}`);
+    if (!r.ok) failures.push(`pair ${i}: got ${JSON.stringify(r.final)}`);
+  }
+  assert.deepEqual(
+    failures,
+    [],
+    `lost update(s) — both concurrent basenames must survive every pair:\n${failures.join('\n')}`,
+  );
 });
