@@ -23,6 +23,12 @@ pre-commit:
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
+    eslint:
+      glob:
+        - "{plugin/hooks,plugin/scripts}/*.{js,mjs}"
+        - "{plugin/hooks,plugin/scripts}/**/*.{js,mjs}"
+      run: npx eslint {staged_files}
+
     test:
       glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native}/**"
       run: npm test --silent

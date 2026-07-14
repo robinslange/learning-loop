@@ -212,7 +212,6 @@ export async function runFullChecks(ctx = {}) {
     try {
       pid = parseInt(readFileSync(pidfilePath, 'utf-8').trim(), 10);
       if (Number.isFinite(pid)) pidIsAlive = isProcessAlive(pid);
-      // eslint-disable-next-line learning-loop/no-empty-catch
     } catch {
       // Documented fallback: readFileSync may throw if the pidfile vanishes
       // between existsSync and read; treat as "no daemon" (pidIsAlive stays

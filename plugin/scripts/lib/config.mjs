@@ -40,7 +40,6 @@ function persistMarker(p) {
 }
 
 export function getPluginData() {
-  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
   const fromEnv = process.env.CLAUDE_PLUGIN_DATA;
   if (fromEnv) {
     persistMarker(fromEnv);
@@ -184,7 +183,6 @@ function migrateConfig(from, to) {
 
 export function getVaultPath() {
   const cfg = getConfig();
-  // eslint-disable-next-line learning-loop/no-process-env-outside-env-module
   const raw = process.env.VAULT_PATH || cfg.vault_path;
   if (!raw) return null;
   return expandHome(raw);

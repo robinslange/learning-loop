@@ -38,7 +38,6 @@ function emit(level, scope, msg, meta) {
     // fails (e.g. circular references in meta) or stderr is unavailable.
     try {
       process.stderr.write(`[log.mjs] dropped ${level} ${scope}\n`);
-      // eslint-disable-next-line learning-loop/no-empty-catch
     } catch {}
   }
 }
