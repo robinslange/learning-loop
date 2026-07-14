@@ -60,6 +60,19 @@ describe('post-search-tracking', () => {
     assert.ok(events[0].ts);
   });
 
+  it('joins array-form queries into a single string', () => {
+    run({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'mcp__plugin_episodic-memory_episodic-memory__search',
+      tool_input: { query: ['vault search', 'ranking'] },
+      tool_response: { results: [] },
+    });
+
+    const events = readRetrieval('episodic-queries');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].query, 'vault search ranking');
+  });
+
   it('writes nothing when there is no query field', () => {
     run({
       hook_event_name: 'PostToolUse',

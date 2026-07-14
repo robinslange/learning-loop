@@ -36,7 +36,8 @@ async function checkSupersessions(query) {
 }
 
 runHook(async ({ tool, input }) => {
-  const query = input.query || input.message || input.text || '';
+  const raw = input.query || input.message || input.text || '';
+  const query = Array.isArray(raw) ? raw.join(' ') : raw;
   if (query) emitRetrieval('episodic-queries', { type: 'episodic-search', tool, query });
 
   if (!query) return;
