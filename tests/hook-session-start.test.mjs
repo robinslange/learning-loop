@@ -454,7 +454,7 @@ test(
 );
 
 test(
-  'a 230KB MEMORY.md is injected capped, and the hook output stays valid JSON',
+  'a 230KB MEMORY.md (10x over cap) is injected as truncated-head + pointer, and the hook output stays valid JSON',
   { timeout: 12000 },
   () => {
     const r = runHook(HOOK, {
@@ -485,9 +485,64 @@ test(
       const parsed = JSON.parse(out);
       const ctx = parsed.hookSpecificOutput.additionalContext;
       assert.ok(ctx.includes('## Global memory index:'));
-      assert.ok(ctx.includes('[truncated — full index at'));
+      // Soft-truncate: real entry lines from the head survive, not a bare pointer.
+      assert.ok(ctx.includes('- [note](note.md)'), 'truncated head should retain real entry lines');
+      assert.match(ctx, /… \d+ more entries — read .*MEMORY\.md/);
       // The injected section is capped, not the whole file:
       assert.ok(Buffer.byteLength(out, 'utf8') <= 8192);
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+test(
+  'a MEMORY.md 5% over MEMORY_INDEX_MAX_BYTES is soft-truncated to the last full line plus a pointer, not the bare pointer-only fallback',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'slightly-over-cap-global-mem' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd, sb) => {
+        seedUpdateCheck(pd);
+        const encodedVaultParent = encodeProjectDir(resolve(VAULT, '..'));
+        const globalMemoryPath = join(
+          sb,
+          '.claude',
+          'projects',
+          encodedVaultParent,
+          'memory',
+          'MEMORY.md',
+        );
+        mkdirSync(dirname(globalMemoryPath), { recursive: true });
+        // MEMORY_INDEX_MAX_BYTES is 3072. Build a line-oriented index ~5% over
+        // that cap so the soft-truncate path (not the 10x path) is exercised.
+        const line = '- [note](note.md) - ' + 'x'.repeat(20) + '\n';
+        const lineBytes = Buffer.byteLength(line, 'utf8');
+        const targetBytes = Math.floor(3072 * 1.05);
+        const lineCount = Math.ceil(targetBytes / lineBytes);
+        const content = line.repeat(lineCount);
+        assert.ok(
+          Buffer.byteLength(content, 'utf8') > 3072,
+          'fixture must exceed MEMORY_INDEX_MAX_BYTES to exercise truncation',
+        );
+        writeFileSync(globalMemoryPath, content);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const parsed = JSON.parse(r.stdout);
+      const ctx = parsed.hookSpecificOutput.additionalContext;
+      assert.ok(ctx.includes('## Global memory index:'));
+      assert.ok(
+        ctx.includes('- [note](note.md)'),
+        'truncated head should retain real entry lines, not just a bare pointer',
+      );
+      assert.match(
+        ctx,
+        /… \d+ more entries — read .*MEMORY\.md/,
+        'must carry a dropped-entry-count pointer line',
+      );
     } finally {
       r.cleanup();
     }

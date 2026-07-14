@@ -40,16 +40,19 @@ function capSection(text, pointer) {
 }
 
 // Memory index injection. When the index fits under the cap, inject it whole —
-// every line carries signal. When it overflows, inject a pointer instead of an
-// unranked byte-prefix: a 3KB slice of a 200KB file is the first ~1% of entries
-// in raw /dream write-order, not a ranked menu, so it costs ~720 tokens for
-// near-zero retrieval value. The Retrieval Protocol already instructs the model
-// to read indexes it deems relevant — the pointer tells it where and how big.
+// every line carries signal. When it overflows, soft-truncate: keep the head up
+// to the last full line under the cap (still real, grep-able entries in raw
+// /dream write-order) and tag the cut with a count of how many entries were
+// dropped. The Retrieval Protocol already instructs the model to read indexes
+// it deems relevant — the pointer tells it where to go for the rest.
 function readMemoryIndexCapped(path) {
   const raw = readFileSync(path, 'utf8');
   if (Buffer.byteLength(raw, 'utf8') <= MEM_CAP) return raw.trim();
   const entryCount = (raw.match(/^\s*-\s/gm) || []).length;
-  return `${entryCount} entries — read ${path} or \`grep\` it when a task looks relevant. [truncated — full index at ${path}]`;
+  const head = Buffer.from(raw, 'utf8').subarray(0, MEM_CAP).toString('utf8');
+  const cut = head.slice(0, head.lastIndexOf('\n'));
+  const shown = (cut.match(/^\s*-\s/gm) || []).length;
+  return `${cut.trim()}\n… ${entryCount - shown} more entries — read ${path}`;
 }
 
 export async function run(ctx) {
