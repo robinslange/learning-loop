@@ -53,7 +53,7 @@ Search every store for the OLD pattern. Run all four searches in parallel (singl
    `Grep` the project's `~/.claude/projects/*/memory/` directory for substrings of the old pattern. Read `MEMORY.md` and any matching files.
 
 4. **Episodic memory:**
-   Call `mcp__plugin_episodic-memory_episodic-memory__search` with the old pattern. The post-search-tracking hook will already annotate the result if a supersession exists: do not pre-create one yet.
+   If the episodic memory MCP tool is available (`mcp__plugin_episodic-memory_episodic-memory__search`), call it with the old pattern. The post-search-tracking hook will already annotate the result if a supersession exists: do not pre-create one yet. If unavailable, skip this leg and note it in the hit map.
 
 ### Phase 3: Edge Impact (correction-analyser)
 

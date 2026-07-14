@@ -48,7 +48,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 ## Phase 2: Gather Signal
 
 1. **Group by type, sort newest-last within each group.**
-   Order: feedback, user, project, reference. Within each group, oldest first (exploits recency bias per Chattaraj & Raj 2026).
+   Order: feedback, user, project, reference. Within each group, oldest first: transformer attention favors recent tokens, so placing the memories you want the consolidator to weight most heavily last in each group keeps them in the recency-favored position.
 
    *Steps 2–8 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
 
