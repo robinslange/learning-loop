@@ -29,7 +29,7 @@
           {
             "type": "command",
             "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-label.js\"",
-            "timeout": 3
+            "timeout": 5
           }
         ]
       }

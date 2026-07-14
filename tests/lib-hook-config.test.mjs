@@ -199,6 +199,7 @@ test('stdin-reading hooks declare a hooks.json timeout longer than STDIN_TIMEOUT
     'post-read-retrieval.js',
     'post-search-tracking.js',
     'subagent-stop.js',
+    'session-label.js',
   ];
 
   let checked = 0;
