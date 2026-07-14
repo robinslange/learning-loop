@@ -45,6 +45,9 @@ function truncateAtSentenceBoundary(text, maxTokens) {
 // pointer — the note still qualifies for body injection (the model has only
 // seen a one-line title, not the content). A plain Set (legacy callers) is
 // treated as all-body.
+const DIRECTIVE =
+  'If a note below bears on the current request, apply it and say "Recall: <note title>" in your reply; if none do, ignore this block silently.';
+
 export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected }) {
   const levelOf = (path) =>
     alreadyInjected instanceof Map
@@ -62,7 +65,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
     const top = filtered[0];
     const body = truncateAtSentenceBoundary(top.body, 300);
     const lines = [
-      `## From your vault (top match: ${top.title}, match score ${top.score})`,
+      `## From your vault (top match: ${top.title}, match score ${Number(top.score).toFixed(2)})`,
       '',
       body,
     ];
@@ -92,7 +95,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
   }
 
   return {
-    additionalContext: sections.join('\n\n'),
+    additionalContext: [DIRECTIVE, ...sections].join('\n\n'),
     injectedVault,
   };
 }

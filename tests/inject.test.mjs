@@ -112,6 +112,16 @@ describe('buildInjection', () => {
     assert.ok(!result.additionalContext.includes('similarity'));
   });
 
+  it('payload opens with a directive that travels with the content', () => {
+    const out = buildInjection({
+      vaultHits: [{ path: 'a.md', title: 'alpha', score: 0.41, body: 'Alpha body text. More.' }],
+      episodicHits: [],
+      query: 'q',
+      alreadyInjected: new Map(),
+    });
+    assert.match(out.additionalContext.split('\n')[0], /apply it and say "Recall:/);
+  });
+
   it('filters out vault hits already injected at body level', () => {
     const result = buildInjection({
       vaultHits: [
@@ -201,7 +211,8 @@ describe('buildInjection', () => {
     });
     assert.ok(result);
     const ctx = result.additionalContext;
-    const bodyStart = ctx.indexOf('\n\n') + 2;
+    const headerStart = ctx.indexOf('## From your vault');
+    const bodyStart = ctx.indexOf('\n\n', headerStart) + 2;
     const bodySection = ctx.slice(bodyStart);
     assert.ok(bodySection.length <= 1200 + 200);
     assert.match(bodySection, /[.!?]$/m);
