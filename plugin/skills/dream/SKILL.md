@@ -113,9 +113,14 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
 
 ## Phase 4: Rebuild Index and Report
 
-1. Rebuild MEMORY.md from scratch: scan all `.md` files (excluding MEMORY.md, _dream_log.md, _archived/), format as `- [filename.md](filename.md): description`, group by topic, under 150 chars per line, drop unmodified-in-90-days if over 200 lines.
+1. Rebuild the index from scratch: scan all `.md` files (excluding MEMORY.md, the `_index_*.md` files, _dream_log.md, _archived/), format each as `- [filename.md](filename.md): description`, one line, under 150 chars.
 
-2. Write MEMORY.md (full overwrite). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
+   **MEMORY.md has a hard 16KB budget.** It is read into context whole at session start; an over-budget index is silently truncated there, and every rule past the cut stops surfacing — the failure this budget prevents. When a single monolithic MEMORY.md would exceed 16KB, do NOT emit one and do NOT rely on line-count heuristics. Use the per-type split structure instead:
+   - Write the full per-type entry lists to `_index_feedback.md`, `_index_project.md`, and `_index_reference.md` (one line per memory, no frontmatter — these hold the bulk).
+   - Keep MEMORY.md slim: the User-type entries inline (the small, always-relevant set), plus exactly one pointer line per split type (e.g. `- [_index_feedback.md](_index_feedback.md) — all feedback entries, grep when a task might match past feedback`), and a one-line note that the split was made to stay under budget.
+   Only keep a single monolithic MEMORY.md when the whole index fits under 16KB. Never regenerate a monolithic index above budget.
+
+2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
 
 3. Report:
    ```
