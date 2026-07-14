@@ -37,6 +37,12 @@ export const HookConfig = Object.freeze({
   // edges.db.<pid>.tmp orphans (crash between saveDb's write and rename).
   EDGES_TMP_ORPHAN_TTL_MS: 3_600_000, // 1 hour
   CONVERGENCE_TTL_MS: 604_800_000, // 7 days
+  // librarian/queue.jsonl.bak.* backups (crash-safety copies taken before a
+  // queue rewrite) older than this are reaped by the same TTL sweep.
+  LIBRARIAN_QUEUE_BAK_TTL_MS: 604_800_000, // 7 days
+  // retrieval/<prefix>-YYYY-MM.jsonl: months kept per prefix, by filename
+  // month, not mtime. The current month is always kept regardless of count.
+  RETRIEVAL_LOG_KEEP_MONTHS: 3,
   AUTOLINK_ML_TIMEOUT_MS: 1000,
   STDIN_TIMEOUT_MS: 3000,
   SWEEP_HOOK_TIMEOUT_MS: 15000,

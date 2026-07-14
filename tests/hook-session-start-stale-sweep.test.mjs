@@ -6,8 +6,10 @@
 //   2. convergence/*.json older than CONVERGENCE_TTL_MS — regenerable telemetry.
 //
 // vault-snapshot.mjs runs the TTL sweep: retrieval/session-dedupe + markers/
-// (7d), edges.db.<pid>.tmp orphans (1h), and tmp per-session/legacy markers
-// (7d) — never the live learning-loop-session-id fallback.
+// (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d)
+// — never the live learning-loop-session-id fallback — plus retrieval log
+// month-pruning (keep newest RETRIEVAL_LOG_KEEP_MONTHS per prefix, current
+// month always kept) and librarian queue.jsonl.bak.* reaping (7d TTL).
 //
 // Fixtures use matching installed/running versions so the binary-update block
 // early-returns and never spawns a downloader — isolating the sweep behaviour.
@@ -73,6 +75,16 @@ async function withSandbox(fx, fn) {
 function ageFile(path, ms) {
   const t = (Date.now() - ms) / 1000;
   utimesSync(path, t, t);
+}
+
+// Mirrors scripts/lib/retrieval.mjs monthStr(), offset by `back` whole
+// months, so fixtures always bracket the *real* current month instead of
+// hardcoding calendar dates that would go stale.
+function monthOffset(back) {
+  const d = new Date();
+  d.setDate(1); // avoid month-length rollover (e.g. day 31 minus a month)
+  d.setMonth(d.getMonth() - back);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 test('sweep: removes orphaned ll-search.*-bak binaries', async () => {
@@ -245,4 +257,99 @@ test('sweep: no-ops cleanly when bin/ and convergence/ are absent', async () => 
   await withSandbox(fx, async () => {
     await assert.doesNotReject(runCacheCleanup(fx.ctx));
   });
+});
+
+test('sweep: retrieval logs pruned to newest RETRIEVAL_LOG_KEEP_MONTHS per prefix, current month untouched', async () => {
+  const fx = makeFixture();
+  const retrievalDir = join(fx.ctx.pluginData, 'retrieval');
+  mkdirSync(retrievalDir, { recursive: true });
+
+  // 7 months back (oldest) through the current month, for four prefixes —
+  // mirrors the brief's shadow-injection-2026-01..-07 fixture but generated
+  // relative to the real current month so the test never goes stale.
+  const months = Array.from({ length: 7 }, (_, i) => monthOffset(6 - i)); // oldest..newest
+  const prefixes = ['shadow-injection', 'queries', 'access', 'cache-health'];
+  for (const prefix of prefixes) {
+    for (const month of months) {
+      writeFileSync(join(retrievalDir, `${prefix}-${month}.jsonl`), '{}\n');
+    }
+  }
+  // provenance/ must never be touched by this sweep.
+  const provenanceDir = join(fx.ctx.pluginData, 'provenance');
+  mkdirSync(provenanceDir, { recursive: true });
+  writeFileSync(join(provenanceDir, `history-${months[0]}.jsonl`), '{}\n');
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-retention-tmp-'));
+  const baseCtx = {
+    ...fx.ctx,
+    tmp: isolatedTmp,
+    projectDir: null,
+    memoryDir: join(fx.sandbox, 'memdir'),
+    payloadSessionId: 'retention-test-sid',
+  };
+
+  await withSandbox(fx, async () => {
+    await run({ ...baseCtx });
+
+    const currentMonth = months[months.length - 1];
+    const keep = new Set(months.slice(-HookConfig.RETRIEVAL_LOG_KEEP_MONTHS));
+    for (const prefix of prefixes) {
+      for (const month of months) {
+        const p = join(retrievalDir, `${prefix}-${month}.jsonl`);
+        if (keep.has(month)) {
+          assert.ok(existsSync(p), `${prefix}-${month}.jsonl (newest ${HookConfig.RETRIEVAL_LOG_KEEP_MONTHS}) must survive`);
+        } else {
+          assert.equal(existsSync(p), false, `${prefix}-${month}.jsonl (beyond the window) must be pruned`);
+        }
+      }
+    }
+    assert.ok(
+      existsSync(join(retrievalDir, `shadow-injection-${currentMonth}.jsonl`)),
+      'current month is always kept regardless of the keep-window count',
+    );
+    assert.ok(
+      existsSync(join(provenanceDir, `history-${months[0]}.jsonl`)),
+      'provenance/ is never touched by the retrieval-log retention sweep',
+    );
+  });
+
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backups and the live queue survive', async () => {
+  const fx = makeFixture();
+  const librarianDir = join(fx.ctx.pluginData, 'librarian');
+  mkdirSync(librarianDir, { recursive: true });
+
+  const eightDaysAgo = 8 * 24 * 60 * 60 * 1000;
+  const oneDayAgo = 24 * 60 * 60 * 1000;
+
+  const staleBak = join(librarianDir, 'queue.jsonl.bak.20260101T000000Z');
+  const freshBak = join(librarianDir, 'queue.jsonl.bak.20260713T000000Z');
+  const liveQueue = join(librarianDir, 'queue.jsonl');
+  writeFileSync(staleBak, '{"stale":true}\n');
+  writeFileSync(freshBak, '{"fresh":true}\n');
+  writeFileSync(liveQueue, '{"live":true}\n');
+  ageFile(staleBak, eightDaysAgo);
+  ageFile(freshBak, oneDayAgo);
+  ageFile(liveQueue, eightDaysAgo); // old mtime, but must never be swept — not a .bak. file
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-librarian-tmp-'));
+  const baseCtx = {
+    ...fx.ctx,
+    tmp: isolatedTmp,
+    projectDir: null,
+    memoryDir: join(fx.sandbox, 'memdir'),
+    payloadSessionId: 'librarian-bak-test-sid',
+  };
+
+  await withSandbox(fx, async () => {
+    await run({ ...baseCtx });
+
+    assert.equal(existsSync(staleBak), false, 'queue.jsonl.bak.* older than 7 days must be removed');
+    assert.ok(existsSync(freshBak), 'queue.jsonl.bak.* within 7 days must survive');
+    assert.ok(existsSync(liveQueue), 'the live queue.jsonl must never be swept');
+  });
+
+  rmSync(isolatedTmp, { recursive: true, force: true });
 });

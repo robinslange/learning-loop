@@ -11,6 +11,7 @@ import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { env } from '../../scripts/lib/env.mjs';
+import { monthStr } from '../../scripts/lib/retrieval.mjs';
 
 // Sweep at most once per 24h regardless of session cadence.
 const SWEEP_GATE_MS = 24 * 60 * 60 * 1000;
@@ -94,7 +95,7 @@ export async function run(ctx) {
     logError('session-start.vault-snapshot.writeSessionId', err);
   }
 
-  // TTL sweeps. One pass, three targets:
+  // TTL sweeps. One pass, five targets:
   //   (a) retrieval/session-dedupe + markers/ entries older than 7 days
   //       (memory-writes-<sid> accumulates one file per session, as did the
   //       now-removed memory-snapshot-<sid> — both reaped here);
@@ -103,7 +104,11 @@ export async function run(ctx) {
   //   (c) tmp per-session/legacy markers older than 7 days — stop-nudged
   //       transcript-dedupe, session-label files, and the pre-v1.27 tmp
   //       marker names that nothing reads anymore. NEVER the live
-  //       learning-loop-session-id fallback.
+  //       learning-loop-session-id fallback;
+  //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
+  //   (e) retrieval/<prefix>-YYYY-MM.jsonl logs beyond the newest
+  //       RETRIEVAL_LOG_KEEP_MONTHS per prefix (current month always kept).
+  //       provenance/ is untouched — its consumers read full history.
   function sweepDir(dir, match, cutoffMs) {
     let names;
     try {
@@ -119,6 +124,47 @@ export async function run(ctx) {
         if (st.isFile() && st.mtimeMs < cutoffMs) rmSync(full, { force: true });
       } catch (err) {
         if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.ttlSweep', err);
+      }
+    }
+  }
+
+  // retrieval/<prefix>-YYYY-MM.jsonl retention: keep only the newest
+  // RETRIEVAL_LOG_KEEP_MONTHS months per prefix. Grouping and cutoff are both
+  // derived from the filename's YYYY-MM suffix — never from mtime or file
+  // content — because a month bucket is written to (and its mtime bumped)
+  // all month long; mtime can't tell a live current-month file from a stale
+  // one. YYYY-MM sorts lexically = chronologically, so string comparison is
+  // enough. The current month is always kept, even if the prefix has fewer
+  // than RETRIEVAL_LOG_KEEP_MONTHS files. provenance/ is a different
+  // directory entirely and this function never touches it.
+  function sweepRetrievalLogs(dir, keepMonths) {
+    let names;
+    try {
+      names = readdirSync(dir);
+    } catch {
+      return;
+    }
+    const currentMonth = monthStr();
+    const byPrefix = new Map();
+    const re = /^(.+)-(\d{4}-\d{2})\.jsonl$/;
+    for (const f of names) {
+      const m = re.exec(f);
+      if (!m) continue;
+      const [, prefix, month] = m;
+      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+      byPrefix.get(prefix).push({ file: f, month });
+    }
+    for (const entries of byPrefix.values()) {
+      const months = [...new Set(entries.map((e) => e.month))].sort();
+      const keep = new Set(months.slice(-keepMonths));
+      keep.add(currentMonth);
+      for (const { file, month } of entries) {
+        if (keep.has(month)) continue;
+        try {
+          rmSync(join(dir, file), { force: true });
+        } catch (err) {
+          if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.retrievalLogSweep', err);
+        }
       }
     }
   }
@@ -141,6 +187,12 @@ export async function run(ctx) {
         (f) => /^edges\.db\..+\.tmp$/.test(f),
         Date.now() - HookConfig.EDGES_TMP_ORPHAN_TTL_MS,
       );
+      sweepDir(
+        DATA_PATHS.librarian(ctx.pluginData),
+        (f) => /^queue\.jsonl\.bak\..+$/.test(f),
+        Date.now() - HookConfig.LIBRARIAN_QUEUE_BAK_TTL_MS,
+      );
+      sweepRetrievalLogs(DATA_PATHS.retrieval(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
     }
     const TMP_SWEEP_PATTERNS = [
       /^learning-loop-stop-nudged-/,
