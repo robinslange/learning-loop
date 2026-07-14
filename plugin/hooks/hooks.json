@@ -73,7 +73,7 @@
           {
             "type": "command",
             "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-read-retrieval.js\"",
-            "timeout": 2
+            "timeout": 5
           }
         ]
       },
@@ -83,7 +83,7 @@
           {
             "type": "command",
             "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-search-tracking.js\"",
-            "timeout": 2
+            "timeout": 5
           }
         ]
       }

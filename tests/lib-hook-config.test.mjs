@@ -182,3 +182,30 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
       `the outer budget leaves no time for the subprocess fallback`,
   );
 });
+
+// Regression: any PostToolUse hook that reads stdin via the shared readStdin()
+// (which races HookConfig.STDIN_TIMEOUT_MS) must declare a hooks.json timeout
+// long enough that the stdin wait alone can't exhaust the outer deadline.
+// Pre-fix, post-read-retrieval.js and post-search-tracking.js declared 2s
+// while STDIN_TIMEOUT_MS was 3000 — a slow/absent stdin write could let
+// Claude Code SIGKILL the hook before readStdin's own timeout ever fires.
+test('stdin-reading hooks declare a hooks.json timeout longer than STDIN_TIMEOUT_MS', () => {
+  const hooksJson = JSON.parse(
+    readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
+  );
+  const stdinReadingHooks = ['post-read-retrieval.js', 'post-search-tracking.js'];
+
+  for (const group of hooksJson.hooks.PostToolUse) {
+    for (const hook of group.hooks) {
+      const match = stdinReadingHooks.find((name) => hook.command.includes(name));
+      if (!match) continue;
+      const hookBudgetMs = hook.timeout * 1000;
+      assert.ok(
+        HookConfig.STDIN_TIMEOUT_MS < hookBudgetMs,
+        `${match}'s hooks.json timeout (${hookBudgetMs}ms) must exceed ` +
+          `STDIN_TIMEOUT_MS (${HookConfig.STDIN_TIMEOUT_MS}ms): otherwise the outer deadline ` +
+          `can SIGKILL the hook before its own stdin read gives up`,
+      );
+    }
+  }
+});

@@ -20,6 +20,11 @@ test('flags a JWT-looking eyJ token', () => {
   assert.ok(hits.some((h) => h.kind === 'jwt'));
 });
 
+test('redact-scan matches Anthropic API keys', () => {
+  const hits = scanForSecrets('key is sk-ant-api03-' + 'a'.repeat(80));
+  assert.ok(hits.some((h) => h.kind.includes('anthropic') || h.kind.includes('key')));
+});
+
 test('does not flag ordinary prose', () => {
   const hits = scanForSecrets('the quick brown fox jumps over the lazy dog');
   assert.equal(hits.length, 0);

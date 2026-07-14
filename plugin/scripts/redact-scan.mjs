@@ -9,6 +9,7 @@ const TEXT_EXTENSIONS = new Set(['.jsonl', '.json', '.md', '.log', '.txt']);
 const PATTERNS = [
   { kind: 'github-pat', re: /\bghp_[A-Za-z0-9]{30,}\b/g },
   { kind: 'openai-key', re: /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9]{16,}\b/g },
+  { kind: 'anthropic-key', re: /\bsk-ant-api[A-Za-z0-9_-]{20,}\b/g },
   { kind: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{8,}\b/g },
   { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\b/g },
 ];
