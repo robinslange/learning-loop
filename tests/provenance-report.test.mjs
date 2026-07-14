@@ -86,6 +86,21 @@ test('counts verify-skill gate-shape scores alongside note-verifier result-shape
   });
 });
 
+test('an over-range gate (numerator > denominator) is flagged, not counted as a pass', () => {
+  const events = [
+    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
+    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/over-range.md', folder: 'inbox' },
+    // A corrupted gate string like '10/6' is unreadable, not evidence of a pass:
+    // 10/6 >= 4/6 would wrongly read as pass. It must be flagged.
+    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'over-range.md', tier: 'deep', gate: '10/6' },
+  ];
+
+  withProvenance(events, ({ status, stdout, stderr }) => {
+    assert.strictEqual(status, 0, `report exited ${status}: ${stderr}`);
+    assert.match(stdout, /verify depth=default: 1\/1 flagged \(100%\)/);
+  });
+});
+
 test('dedupes a basename written across folders (inbox → permanent move)', () => {
   const events = [
     { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'reflect', config: {} },

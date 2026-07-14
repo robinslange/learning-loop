@@ -70,6 +70,7 @@ function gatePassed(gate) {
   if (parts.length !== 2) return false;
   const [num, den] = parts.map(Number);
   if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return false;
+  if (num < 0 || num > den) return false;
   return num / den >= 4 / 6;
 }
 
@@ -85,7 +86,10 @@ function gatePassed(gate) {
 // listed explicitly: an unrecognized spelling defaults to 'fail' anyway --
 // same "unreadable is not a pass" policy Task 16 applied to malformed gates.
 function normalizeResult(value) {
-  const key = String(value).trim().toLowerCase().replace(/[\s_]+/g, '-');
+  const key = String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-');
   if (key === 'pass') return 'pass';
   if (key === 'warn' || key === 'partial') return 'warn';
   return 'fail';
