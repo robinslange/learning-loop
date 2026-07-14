@@ -1,9 +1,9 @@
 // plugin/scripts/librarian/verify-route.mjs : pure decision logic for the Verify router.
 //
-// The router in skills/research/SKILL.md runs inside the Workflow sandbox and cannot
+// The router in skills/research/workflow.js runs inside the Workflow sandbox and cannot
 // import this module, so it inlines the same functions verbatim. This module is the
 // tested source of truth; tests/librarian-verify-route.test.mjs exercises it and a
-// contract test asserts SKILL.md carries a faithful copy.
+// contract test asserts workflow.js carries a faithful copy.
 //
 // Two invariants the whole-system adversarial pass surfaced:
 //   1. A verdict/survives is NEVER trusted from a transcribed subagent result; survives
