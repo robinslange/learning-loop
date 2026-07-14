@@ -84,18 +84,19 @@ function lastLine(path) {
 // per-invocation CLI path.
 const DUP_WINDOW_MS = 2000;
 
-// agent-result records (emitted from subagent-stop.js on the SubagentStop
-// hook event) carry only { action, session_id, transcript_path } -- and
-// session_id/transcript_path are identical across every subagent in a
-// session, so the record has no field that distinguishes one subagent's
-// completion from another's. Two real, distinct subagents finishing within
-// the dedup window (the modal case for parallel dispatch) would fingerprint
-// identically and the second would be wrongly dropped. Every other action
-// type carries a discriminating field (target, subagent_type, skill name,
-// ...), so this exemption is scoped to agent-result specifically rather than
-// weakening dedup generally.
+// Provenance fan-out actions are exempt from dedup. A uniform parallel
+// dispatch emits byte-identical payloads bar `ts`: three Explore agents with
+// the same description (agent-spawn), one skill invoked twice (skill-invoke),
+// two subagents finishing (agent-result, whose session_id/transcript_path are
+// identical across the session). None carries a field that separates one call
+// from the next, so fingerprint dedup would collapse a real fan-out into one
+// line and undercount volume in the provenance report. Dedup still guards the
+// other event stream (common.mjs events-*.jsonl), where a repeated identical
+// payload is a genuine consecutive double-emit, not distinct concurrent work.
+const DEDUP_EXEMPT_ACTIONS = new Set(['agent-result', 'agent-spawn', 'skill-invoke']);
+
 export function appendJsonlLineDeduped(path, record, now = Date.now()) {
-  if (record.action === 'agent-result') {
+  if (DEDUP_EXEMPT_ACTIONS.has(record.action)) {
     appendJsonlLine(path, record);
     return true;
   }

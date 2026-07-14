@@ -147,3 +147,25 @@ test('appendJsonlLineDeduped: agent-result is exempt from dedup, even with ident
     assert.strictEqual(lines.length, 2, 'agent-result must always be written, even if identical to the prior line');
   });
 });
+
+// agent-spawn and skill-invoke are the other two provenance fan-out actions:
+// a uniform parallel dispatch (three Explore agents, same description; the same
+// skill invoked twice) emits byte-identical payloads bar `ts`. They carry no
+// field that separates one call from the next, so the same reasoning that
+// exempts agent-result applies -- dedup must not collapse a real fan-out into
+// one line and undercount volume in the provenance report.
+for (const action of ['agent-spawn', 'skill-invoke']) {
+  test(`appendJsonlLineDeduped: ${action} is exempt from dedup, even with identical payload within 2s`, () => {
+    withTempDir((dir) => {
+      const path = join(dir, 'dedup.jsonl');
+      const record =
+        action === 'agent-spawn'
+          ? { ts: new Date(T0).toISOString(), action, agent: 'Explore', description: 'search the codebase', background: true }
+          : { ts: new Date(T0).toISOString(), action, skill: 'verify', args: 'inbox' };
+      appendJsonlLineDeduped(path, record, T0);
+      appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 500).toISOString() }, T0 + 500);
+      const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
+      assert.strictEqual(lines.length, 2, `${action} must always be written, even if identical to the prior line`);
+    });
+  });
+}
