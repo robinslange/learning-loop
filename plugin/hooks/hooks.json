@@ -58,7 +58,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Agent|Skill",
+        "matcher": "Write|Edit|Task|Skill",
         "hooks": [
           {
             "type": "command",

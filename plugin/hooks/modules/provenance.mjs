@@ -1,7 +1,7 @@
 // hooks/modules/provenance.mjs: provenance event emission.
 // Extracted from hooks/post-tool-provenance.js. Calls emitProvenance inline
 // (no subprocess) to keep the post-tool hot path under 60ms. Vault-less:
-// runs without ctx.vaultRoot for Agent/Skill events.
+// runs without ctx.vaultRoot for Task/Skill events.
 
 import { emitProvenance, vaultRelPath, classifyVaultPath } from '../lib/common.mjs';
 import { parseFrontmatter, parseTags } from '../../scripts/lib/markdown-parse.mjs';
@@ -30,7 +30,7 @@ export async function runProvenance(ctx) {
       return;
     }
 
-    if (tool === 'Agent') {
+    if (tool === 'Task') {
       emitProvenance({
         action: 'agent-spawn',
         agent: input.subagent_type || 'general-purpose',

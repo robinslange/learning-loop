@@ -24,7 +24,7 @@ learning-loop/
                            update-check-worker)
       session-start.js  -- vault context injection on session open
       session-label.js  -- just-in-time injection pipeline on each prompt
-      post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Agent|Skill)
+      post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Task|Skill)
       pre-write-check.js  -- duplicate + added-dash gate before vault writes and edits
       web-guard.js      -- global WebSearch/WebFetch deny; routes web access to the source gateway
       stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
