@@ -1,7 +1,6 @@
 import { spawn as defaultSpawn } from 'node:child_process';
-import { findBinary, findEpisodicBinary } from './common.mjs';
+import { findBinary } from './common.mjs';
 import { emitJson } from './io.mjs';
-import { warnOnce } from '../../scripts/lib/warn-once.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 
 const SECRET_PATTERNS = [
@@ -40,15 +39,15 @@ function truncateAtSentenceBoundary(text, maxTokens) {
   return lastSpace > 0 ? text.slice(0, lastSpace) : slice;
 }
 
+const DIRECTIVE =
+  'If a note below bears on the current request, apply it and say "Recall: <note title>" in your reply; if none do, ignore this block silently.';
+
 // alreadyInjected is a Map of path -> 'body' | 'pointer'. A body-level entry
 // suppresses the note entirely; a pointer-level entry only suppresses a repeat
 // pointer — the note still qualifies for body injection (the model has only
 // seen a one-line title, not the content). A plain Set (legacy callers) is
 // treated as all-body.
-const DIRECTIVE =
-  'If a note below bears on the current request, apply it and say "Recall: <note title>" in your reply; if none do, ignore this block silently.';
-
-export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected }) {
+export function buildInjection({ vaultHits, query, alreadyInjected }) {
   const levelOf = (path) =>
     alreadyInjected instanceof Map
       ? alreadyInjected.get(path)
@@ -56,7 +55,7 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
         ? 'body'
         : undefined;
   const filtered = vaultHits.filter((h) => levelOf(h.path) !== 'body');
-  if (filtered.length === 0 && episodicHits.length === 0) return null;
+  if (filtered.length === 0) return null;
 
   const sections = [];
   const injectedVault = [];
@@ -81,15 +80,6 @@ export function buildInjection({ vaultHits, episodicHits, query, alreadyInjected
         lines.push(`- ${p.title} — ${p.path}`);
         injectedVault.push({ path: p.path, level: 'pointer' });
       }
-    }
-    sections.push(lines.join('\n'));
-  }
-
-  if (episodicHits.length > 0) {
-    const lines = ['## From past conversations'];
-    for (const hit of episodicHits.slice(0, 3)) {
-      const snippet = hit.snippet.length > 120 ? hit.snippet.slice(0, 120) : hit.snippet;
-      lines.push(`- [${hit.date}, ${hit.project}] ${snippet}`);
     }
     sections.push(lines.join('\n'));
   }
@@ -161,35 +151,6 @@ function parseVault(result) {
   }
 }
 
-function parseEpisodic(result) {
-  if (!result.ok)
-    return {
-      hits: [],
-      error: result.error || `exit ${result.code}`,
-      raced_out: result.killed || false,
-      latency_ms: result.latency_ms,
-    };
-  const hits = [];
-  const lines = result.stdout.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^\d+\.\s*\[([^,]+),\s*([^\]]+)\]\s*-\s*(-?\d+)%/);
-    if (m) {
-      const project = m[1].trim();
-      const date = m[2].trim();
-      const score = parseInt(m[3], 10) / 100;
-      let snippet = '';
-      const next = (lines[i + 1] || '').trim();
-      if (next.startsWith('"') && next.endsWith('"')) {
-        snippet = next.slice(1, -1);
-      } else if (next && !next.startsWith('Lines ') && !/^\d+\./.test(next)) {
-        snippet = next;
-      }
-      hits.push({ date, project, snippet, score });
-    }
-  }
-  return { hits, raced_out: false, latency_ms: result.latency_ms };
-}
-
 export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _spawnFn }) {
   const spawnFn = _spawnFn || defaultSpawn;
   const controller = new AbortController();
@@ -200,15 +161,7 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const llCmd = llBinary ? llBinary.bin : 'll-search';
   const llEnv = llBinary ? ortSpawnEnv(llBinary.binDir) : undefined;
 
-  const epCmd = useRealBinaries ? findEpisodicBinary() : 'episodic-memory';
-  if (useRealBinaries && !epCmd) {
-    warnOnce(
-      'episodic-unavailable',
-      'learning-loop: episodic-memory unavailable; semantic recall disabled. Install via `claude plugin install episodic-memory@superpowers-marketplace` for full functionality.\n',
-    );
-  }
-
-  const tasks = [
+  const [result] = await Promise.allSettled([
     spawnSearch(
       spawnFn,
       llCmd,
@@ -216,25 +169,10 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
       controller.signal,
       llEnv,
     ),
-  ];
-  if (epCmd) {
-    tasks.push(
-      spawnSearch(spawnFn, epCmd, ['search', '--vector', '--limit', '5', query], controller.signal),
-    );
-  }
-
-  const results = await Promise.allSettled(tasks);
+  ]);
   clearTimeout(timer);
 
   const vault =
-    results[0].status === 'fulfilled'
-      ? parseVault(results[0].value)
-      : { hits: [], error: 'rejected' };
-  const episodic =
-    epCmd && results[1]
-      ? results[1].status === 'fulfilled'
-        ? parseEpisodic(results[1].value)
-        : { hits: [], error: 'rejected' }
-      : { hits: [], error: 'episodic_unavailable' };
-  return { vault, episodic };
+    result.status === 'fulfilled' ? parseVault(result.value) : { hits: [], error: 'rejected' };
+  return { vault };
 }

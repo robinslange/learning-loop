@@ -282,12 +282,6 @@ function summarizeBackends(results) {
       error: results.vault?.error,
       raced_out: results.vault?.raced_out,
     },
-    episodic: {
-      latency_ms: results.episodic?.latency_ms,
-      hits: results.episodic?.hits?.length || 0,
-      error: results.episodic?.error,
-      raced_out: results.episodic?.raced_out,
-    },
   };
 }
 
@@ -328,19 +322,17 @@ try {
   const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs });
 
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
-  const episodicTop = results.episodic?.hits?.[0]?.score || 0;
 
   // Threshold cascade: env (if set) > config > HookConfig default.
   const gateThreshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
     ? env.LEARNING_LOOP_INJECTION_THRESHOLD
     : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
-  if (vaultTop < gateThreshold && episodicTop < gateThreshold) {
+  if (vaultTop < gateThreshold) {
     logShadow({
       type: 'gate-fail-below-threshold',
       gate: {
         passed: false,
         vault_top_score: vaultTop,
-        episodic_top_score: episodicTop,
         threshold: gateThreshold,
       },
       backends: summarizeBackends(results),
@@ -365,7 +357,6 @@ try {
     .filter((h) => h.body);
   const injection = buildInjection({
     vaultHits: enrichedVaultHits,
-    episodicHits: results.episodic?.hits || [],
     query,
     alreadyInjected,
   });
@@ -392,7 +383,7 @@ try {
   logShadow({
     type: 'gate-pass-payload',
     mode,
-    gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
+    gate: { passed: true, vault_top_score: vaultTop },
     backends: summarizeBackends(results),
     payload: {
       tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
