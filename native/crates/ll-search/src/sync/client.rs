@@ -50,10 +50,23 @@ type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
+/// Tailscale's CGNAT range (100.64.0.0/10): first octet 100, second octet
+/// in 64..=127. Tailnet traffic is already WireGuard-encrypted end-to-end,
+/// so requiring TLS on top buys nothing.
+fn is_tailscale_cgnat_ip(host: &str) -> bool {
+    host.parse::<std::net::Ipv4Addr>()
+        .map(|ip| {
+            let [a, b, ..] = ip.octets();
+            a == 100 && (64..=127).contains(&b)
+        })
+        .unwrap_or(false)
+}
+
 /// Enforce wss:// for hub connections. Cleartext `ws://` (and any other
 /// scheme) is rejected so the vault index never streams unencrypted, EXCEPT
-/// for loopback hosts (127.0.0.1 / ::1 / localhost) where ws:// is allowed for
-/// local testing and same-host hub development.
+/// for loopback hosts (127.0.0.1 / ::1 / localhost) and Tailscale tailnet
+/// hosts (100.64.0.0/10 CGNAT range, or `.ts.net` MagicDNS names), where
+/// ws:// is allowed since those transports are already encrypted.
 fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
     let rest = endpoint.trim();
     if let Some(after) = rest.strip_prefix("wss://") {
@@ -73,9 +86,12 @@ fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
         if host == "127.0.0.1" || host == "::1" || host == "localhost" {
             return Ok(());
         }
+        if is_tailscale_cgnat_ip(host) || host.ends_with(".ts.net") {
+            return Ok(());
+        }
         anyhow::bail!(
             "refusing cleartext ws:// connection to non-loopback hub {endpoint:?}; \
-             federation requires wss://"
+             federation requires wss:// (or a Tailscale tailnet host)"
         );
     }
     let scheme = rest.split("://").next().unwrap_or(rest);
@@ -923,6 +939,26 @@ mod tests {
         assert!(check_hub_scheme("ws://127.0.0.1:8080/ws").is_ok());
         assert!(check_hub_scheme("ws://localhost:9000").is_ok());
         assert!(check_hub_scheme("ws://[::1]:8080/ws").is_ok());
+    }
+
+    #[test]
+    fn check_hub_scheme_allows_tailscale_cgnat_ws() {
+        assert!(check_hub_scheme("ws://100.101.102.103:8787").is_ok());
+        assert!(check_hub_scheme("ws://100.64.0.0:8787").is_ok());
+        assert!(check_hub_scheme("ws://100.127.255.255:8787/ws").is_ok());
+    }
+
+    #[test]
+    fn check_hub_scheme_allows_ts_net_hostname_ws() {
+        assert!(check_hub_scheme("ws://my-hub.tailnet-name.ts.net:8787").is_ok());
+    }
+
+    #[test]
+    fn check_hub_scheme_rejects_non_tailscale_ws() {
+        assert!(check_hub_scheme("ws://8.8.8.8:1").is_err());
+        assert!(check_hub_scheme("ws://100.63.255.255:8787").is_err());
+        assert!(check_hub_scheme("ws://100.128.0.0:8787").is_err());
+        assert!(check_hub_scheme("ws://hub.example.com:8787").is_err());
     }
 
     #[test]
