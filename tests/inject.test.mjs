@@ -1,5 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import {
   scrubSecrets,
@@ -9,6 +11,31 @@ import {
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+
+const INJECT_SRC = fileURLToPath(new URL('../plugin/hooks/lib/inject.mjs', import.meta.url));
+const REDACT_SCAN_SRC = fileURLToPath(
+  new URL('../plugin/scripts/redact-scan.mjs', import.meta.url),
+);
+
+describe('secret-patterns single source of truth', () => {
+  it('inject.mjs imports SECRET_PATTERNS from the shared secret-patterns module', () => {
+    const src = readFileSync(INJECT_SRC, 'utf8');
+    assert.match(
+      src,
+      /import\s*\{[^}]*SECRET_PATTERNS[^}]*\}\s*from\s*['"].*secret-patterns\.mjs['"]/,
+      'inject.mjs must import SECRET_PATTERNS from lib/secret-patterns.mjs, not define its own',
+    );
+  });
+
+  it('redact-scan.mjs imports from the shared secret-patterns module', () => {
+    const src = readFileSync(REDACT_SCAN_SRC, 'utf8');
+    assert.match(
+      src,
+      /import\s*\{[^}]*\}\s*from\s*['"].*secret-patterns\.mjs['"]/,
+      'redact-scan.mjs must import from lib/secret-patterns.mjs to build its reported kinds',
+    );
+  });
+});
 
 describe('scrubSecrets', () => {
   it('masks AWS access key', () => {

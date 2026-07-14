@@ -367,3 +367,50 @@ test('object deny term throws (fail closed, never silently dropped)', () => {
     }),
   );
 });
+
+test('hard-blocks a GitHub PAT in candidate content with an empty denylist', () => {
+  const notes = [
+    { path: 'leak.md', text: 'token: ghp_abc123DEF456ghi789jkl012mno345pqr678stu' },
+  ];
+  const { blocked, clean } = scrubNotes(notes, { denylist: [], tripwirePatterns: [] });
+  assert.deepEqual(
+    blocked.map((b) => b.path),
+    ['leak.md'],
+  );
+  assert.equal(clean.length, 0);
+});
+
+test('hard-blocks an sk-ant-api key in candidate content with an empty denylist', () => {
+  const notes = [{ path: 'leak.md', text: 'key is sk-ant-api03-' + 'a'.repeat(30) }];
+  const { blocked, clean } = scrubNotes(notes, { denylist: [], tripwirePatterns: [] });
+  assert.deepEqual(
+    blocked.map((b) => b.path),
+    ['leak.md'],
+  );
+  assert.equal(clean.length, 0);
+});
+
+test('hard-blocks a JWT in candidate content with an empty denylist', () => {
+  const notes = [
+    {
+      path: 'leak.md',
+      text: 'auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.fake_signature_test',
+    },
+  ];
+  const { blocked, clean } = scrubNotes(notes, { denylist: [], tripwirePatterns: [] });
+  assert.deepEqual(
+    blocked.map((b) => b.path),
+    ['leak.md'],
+  );
+  assert.equal(clean.length, 0);
+});
+
+test('hard-blocks a bare email address in candidate content with an empty denylist', () => {
+  const notes = [{ path: 'leak.md', text: 'reach out at robin@example.com for details' }];
+  const { blocked, clean } = scrubNotes(notes, { denylist: [], tripwirePatterns: [] });
+  assert.deepEqual(
+    blocked.map((b) => b.path),
+    ['leak.md'],
+  );
+  assert.equal(clean.length, 0);
+});

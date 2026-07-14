@@ -3,9 +3,18 @@
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { SECRET_PATTERNS } from './lib/secret-patterns.mjs';
 
 const TEXT_EXTENSIONS = new Set(['.jsonl', '.json', '.md', '.log', '.txt']);
 
+// redact-scan REPORTS findings for human review, so it needs \b-anchored,
+// narrower regexes than the shared SECRET_PATTERNS (tuned for a wide net on a
+// hard block) — reusing those bodies verbatim here would flag ordinary
+// hyphenated prose (e.g. "sk-learning-rate-was-set-to-low") as an openai-key.
+// Every kind below still comes from the shared vocabulary (asserted at load
+// time) so the two lists cannot silently drift apart; only 'openai-key' has
+// no shared-module counterpart, since it covers a redact-scan-specific shape.
+const SHARED_KINDS = new Set(SECRET_PATTERNS.map((p) => p.kind));
 const PATTERNS = [
   { kind: 'github-pat', re: /\bghp_[A-Za-z0-9]{30,}\b/g },
   { kind: 'openai-key', re: /\bsk-(?:proj-|svcacct-)?[A-Za-z0-9]{16,}\b/g },
@@ -13,6 +22,11 @@ const PATTERNS = [
   { kind: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{8,}\b/g },
   { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\b/g },
 ];
+for (const { kind } of PATTERNS) {
+  if (kind !== 'openai-key' && !SHARED_KINDS.has(kind)) {
+    throw new Error(`redact-scan: kind '${kind}' has drifted from shared secret-patterns.mjs`);
+  }
+}
 
 export function scanForSecrets(text) {
   const hits = [];

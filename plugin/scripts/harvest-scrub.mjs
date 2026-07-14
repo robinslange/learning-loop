@@ -8,7 +8,17 @@
 
 import { basename } from 'node:path';
 import { denyTermRegExp } from './lib/deny-match.mjs';
+import { SECRET_PATTERNS, EMAIL_RE } from './lib/secret-patterns.mjs';
 import { pathToFileURL } from 'node:url';
+
+// Credential-shaped content and bare email addresses are always a hard block,
+// not just a tripwire — this is the same net inject.mjs redacts with, applied
+// here as BLOCK rather than [REDACTED] since harvest candidates that contain a
+// live secret must never reach clean/review at all.
+const SECRET_DENY_RES = [
+  ...SECRET_PATTERNS.map(({ kind, re }) => ({ term: `secret:${kind}`, re })),
+  { term: 'secret:email', re: EMAIL_RE },
+];
 
 /**
  * @param {{path:string,text:string}[]} notes
@@ -26,7 +36,8 @@ export function scrubNotes(notes, opts) {
     })
     .map((d) => d.trim())
     .filter(Boolean)
-    .map((d) => ({ term: d, re: denyTermRegExp(d) }));
+    .map((d) => ({ term: d, re: denyTermRegExp(d) }))
+    .concat(SECRET_DENY_RES);
   const tripRes = (opts.tripwirePatterns || [])
     .map((p) => {
       try {
@@ -41,7 +52,14 @@ export function scrubNotes(notes, opts) {
   const clean = [];
   for (const note of notes) {
     const haystacks = [note.text, basename(note.path || '')];
-    const denyHits = denyRes.filter((d) => haystacks.some((h) => d.re.test(h))).map((d) => d.term);
+    const denyHits = denyRes
+      .filter((d) =>
+        haystacks.some((h) => {
+          d.re.lastIndex = 0; // d.re may be a shared /g regex (SECRET_DENY_RES); reset before each test
+          return d.re.test(h);
+        }),
+      )
+      .map((d) => d.term);
     if (denyHits.length > 0) {
       blocked.push({ path: note.path, hits: denyHits });
       continue; // block wins; do not add to clean

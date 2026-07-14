@@ -3,24 +3,12 @@ import { findBinary } from './common.mjs';
 import { emitJson } from './io.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
-
-const SECRET_PATTERNS = [
-  /AKIA[0-9A-Z]{16}/g,
-  /gh[po]_[A-Za-z0-9]{36,}/g,
-  /sk-ant-api[A-Za-z0-9_-]{20,}/g,
-  /sk_(?:live|test)_[A-Za-z0-9]{20,}/g,
-  /sk-[A-Za-z0-9_-]{20,}/g,
-  /cfpat-[A-Za-z0-9_-]{20,}/g,
-  /Bearer\s+[A-Za-z0-9._\-\/+=]{20,}/g,
-  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
-  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
-  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
-];
+import { SECRET_PATTERNS } from '../../scripts/lib/secret-patterns.mjs';
 
 export function scrubSecrets(text) {
   let result = text;
-  for (const pat of SECRET_PATTERNS) {
-    result = result.replace(pat, '[REDACTED]');
+  for (const { re } of SECRET_PATTERNS) {
+    result = result.replace(re, '[REDACTED]');
   }
   return result;
 }
