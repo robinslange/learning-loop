@@ -264,3 +264,26 @@ test('emits upstream_hash of the exact body it validated against', () => {
 
   assert.equal(result.upstream_hash, createHash('sha256').update(upstream).digest('hex'));
 });
+
+test('CRLF note body: frontmatter is extracted, not treated as absent', () => {
+  const upstream = '---\r\ntitle: X\r\n---\r\nBody\r\n';
+  const proposed = '---\r\ntitle: Y\r\n---\r\nBody\r\n';
+
+  const result = validateEdit({ decision: 'edit', id: 'crlf1', proposed_body: proposed }, upstream);
+
+  assert.equal(
+    result.flags.find((f) => f.type === 'sentences_removed'),
+    undefined,
+    'a frontmatter-only change must never be mistaken for a body sentence removal',
+  );
+  const mismatch = result.flags.find((f) => f.type === 'frontmatter_modified');
+  assert.ok(
+    mismatch,
+    'a real frontmatter change on a CRLF note must be caught by frontmatter_modified',
+  );
+  assert.match(
+    result.cleaned_body,
+    /^---\r\ntitle: X\r\n---\r\n/,
+    'reassembled body must keep the UPSTREAM frontmatter verbatim, never the proposed one',
+  );
+});
