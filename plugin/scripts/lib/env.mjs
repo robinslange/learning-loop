@@ -117,6 +117,12 @@ export const env = Object.freeze({
     process.env.LEARNING_LOOP_INJECTION_THRESHOLD,
     0.3, // keep in sync with HookConfig.INJECTION_THRESHOLD
   ),
+  // Marks shadow-injection telemetry written by synthetic/calibration
+  // sessions (e.g. a fixed prompt cycle run to exercise the gate) so
+  // review-shadow.mjs and future calibration tooling can filter them out —
+  // unlabeled synthetic traffic silently pollutes the pass-rate stats it's
+  // supposed to calibrate against.
+  LEARNING_LOOP_SYNTHETIC: isTruthy(process.env.LEARNING_LOOP_SYNTHETIC),
 
   // --- Distribution / build ---
   LL_REPO: pick('LL_REPO', 'robinslange/learning-loop'),

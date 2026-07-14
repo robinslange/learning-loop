@@ -267,6 +267,7 @@ function logShadow(record) {
       session_label: label,
       prompt: scrubSecrets((prompt || '').slice(0, HookConfig.PROMPT_SLICE_CHARS)),
       prompt_length: (prompt || '').length,
+      ...(env.LEARNING_LOOP_SYNTHETIC ? { synthetic: true } : {}),
       ...record,
     });
   } catch (err) {

@@ -628,3 +628,81 @@ describe(
     });
   },
 );
+
+describe(
+  'session-label synthetic session tagging',
+  {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  },
+  () => {
+    function runWithSynthetic(synthetic) {
+      const base = mkdtempSync(join(tmpdir(), 'll-synthetic-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(
+          join(vault, 'notes', 'delta.md'),
+          'Delta note body about synthetic calibration tagging.\n',
+        );
+        const hit = JSON.stringify([{ path: 'notes/delta.md', title: 'delta', score: 0.99 }]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+          mode: 0o755,
+        });
+
+        const out = execFileSync('node', [HOOK], {
+          input: JSON.stringify({
+            session_id: randomUUID(),
+            prompt: 'what do we know about synthetic calibration tagging',
+            transcript_path: '',
+            cwd: '/tmp',
+          }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: base,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_INJECTION_MODE: 'shadow',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+            ...(synthetic ? { LEARNING_LOOP_SYNTHETIC: '1' } : {}),
+          },
+        });
+        assert.ok(out.length === 0, 'shadow mode must stay silent on stdout');
+
+        const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+        const logPath = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
+        assert.ok(existsSync(logPath), 'shadow run must write a telemetry record');
+        const records = readFileSync(logPath, 'utf8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l));
+        const pass = records.find((r) => r.gate?.passed === true);
+        assert.ok(pass, 'a gate-pass record must be logged');
+        return pass;
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    }
+
+    it('LEARNING_LOOP_SYNTHETIC=1 tags the logged record synthetic: true', () => {
+      const pass = runWithSynthetic(true);
+      assert.equal(pass.synthetic, true);
+    });
+
+    it('without the env var, records carry no synthetic field', () => {
+      const pass = runWithSynthetic(false);
+      assert.equal('synthetic' in pass, false);
+    });
+  },
+);
