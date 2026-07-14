@@ -183,29 +183,40 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
   );
 });
 
-// Regression: any PostToolUse hook that reads stdin via the shared readStdin()
-// (which races HookConfig.STDIN_TIMEOUT_MS) must declare a hooks.json timeout
-// long enough that the stdin wait alone can't exhaust the outer deadline.
-// Pre-fix, post-read-retrieval.js and post-search-tracking.js declared 2s
-// while STDIN_TIMEOUT_MS was 3000 — a slow/absent stdin write could let
-// Claude Code SIGKILL the hook before readStdin's own timeout ever fires.
+// Regression: any hook that reads stdin via the shared readStdin() (which
+// races HookConfig.STDIN_TIMEOUT_MS) must declare a hooks.json timeout long
+// enough that the stdin wait alone can't exhaust the outer deadline. Pre-fix,
+// post-read-retrieval.js and post-search-tracking.js declared 2s while
+// STDIN_TIMEOUT_MS was 3000 — a slow/absent stdin write could let Claude Code
+// SIGKILL the hook before readStdin's own timeout ever fires. Scanned across
+// ALL event groups (not just PostToolUse) so a new stdin hook like
+// subagent-stop.js is covered automatically.
 test('stdin-reading hooks declare a hooks.json timeout longer than STDIN_TIMEOUT_MS', () => {
   const hooksJson = JSON.parse(
     readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
   );
-  const stdinReadingHooks = ['post-read-retrieval.js', 'post-search-tracking.js'];
+  const stdinReadingHooks = [
+    'post-read-retrieval.js',
+    'post-search-tracking.js',
+    'subagent-stop.js',
+  ];
 
-  for (const group of hooksJson.hooks.PostToolUse) {
-    for (const hook of group.hooks) {
-      const match = stdinReadingHooks.find((name) => hook.command.includes(name));
-      if (!match) continue;
-      const hookBudgetMs = hook.timeout * 1000;
-      assert.ok(
-        HookConfig.STDIN_TIMEOUT_MS < hookBudgetMs,
-        `${match}'s hooks.json timeout (${hookBudgetMs}ms) must exceed ` +
-          `STDIN_TIMEOUT_MS (${HookConfig.STDIN_TIMEOUT_MS}ms): otherwise the outer deadline ` +
-          `can SIGKILL the hook before its own stdin read gives up`,
-      );
+  let checked = 0;
+  for (const groups of Object.values(hooksJson.hooks)) {
+    for (const group of groups) {
+      for (const hook of group.hooks) {
+        const match = stdinReadingHooks.find((name) => hook.command.includes(name));
+        if (!match) continue;
+        checked += 1;
+        const hookBudgetMs = hook.timeout * 1000;
+        assert.ok(
+          HookConfig.STDIN_TIMEOUT_MS < hookBudgetMs,
+          `${match}'s hooks.json timeout (${hookBudgetMs}ms) must exceed ` +
+            `STDIN_TIMEOUT_MS (${HookConfig.STDIN_TIMEOUT_MS}ms): otherwise the outer deadline ` +
+            `can SIGKILL the hook before its own stdin read gives up`,
+        );
+      }
     }
   }
+  assert.equal(checked, stdinReadingHooks.length, 'every named stdin hook must be present in hooks.json');
 });

@@ -34,6 +34,17 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/subagent-stop.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Write|Edit",
