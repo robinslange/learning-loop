@@ -14,13 +14,53 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { verifyAgainstSums, sumsRequired } from '../plugin/scripts/download-binary.mjs';
+import {
+  verifyAgainstSums,
+  sumsRequired,
+  download,
+  extractZip,
+} from '../plugin/scripts/download-binary.mjs';
 
 const DL_PATH = fileURLToPath(new URL('../plugin/scripts/download-binary.mjs', import.meta.url));
+
+function fakeHttpModule(responses) {
+  let call = 0;
+  return {
+    get(url, _opts, cb) {
+      const res = responses[Math.min(call, responses.length - 1)];
+      call++;
+      const emitter = new EventEmitter();
+      queueMicrotask(() => {
+        cb(res);
+        if (res.body !== undefined) {
+          queueMicrotask(() => {
+            res.emit('data', Buffer.from(res.body));
+            res.emit('end');
+          });
+        }
+      });
+      return emitter;
+    },
+  };
+}
+
+function fakeResponse({ statusCode, location, body }) {
+  const res = new EventEmitter();
+  res.statusCode = statusCode;
+  res.headers = location ? { location } : {};
+  res.body = body;
+  res.pipe = (dest) => {
+    res.on('data', (chunk) => dest.write(chunk));
+    res.on('end', () => dest.end());
+    return dest;
+  };
+  return res;
+}
 
 test('verifyAgainstSums verifies a matching artifact and throws on mismatch', (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'll-dlverify-'));
@@ -89,5 +129,72 @@ test('main() wires the verify pipeline: verifyAgainstSums before extraction, sum
     /sumsRequired\(tag\)/,
     'the SUMS-404 branch must consult sumsRequired(tag): a >= 1.27.0 release with no ' +
       'SHA256SUMS is still building — exit 0 without stamping instead of installing unverified',
+  );
+});
+
+test('download follows an https redirect chain to a 200 and writes the body to dest', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-dl-redirect-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dest = join(dir, 'out.bin');
+
+  const httpsModule = fakeHttpModule([
+    fakeResponse({ statusCode: 302, location: 'https://cdn.example/final.bin' }),
+    fakeResponse({ statusCode: 200, body: 'artifact-bytes' }),
+  ]);
+
+  await download('https://github.example/release.bin', dest, { _httpsModule: httpsModule });
+  assert.equal(readFileSync(dest, 'utf8'), 'artifact-bytes');
+});
+
+test('download refuses a redirect to a non-https location instead of following it', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-dl-redirect-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dest = join(dir, 'out.bin');
+
+  const httpsModule = fakeHttpModule([
+    fakeResponse({ statusCode: 302, location: 'http://evil.example/steal.bin' }),
+  ]);
+
+  await assert.rejects(
+    () => download('https://github.example/release.bin', dest, { _httpsModule: httpsModule }),
+    /Refusing non-https redirect/,
+  );
+});
+
+test('download surfaces a 404 statusCode on the rejected error (main()s fail-closed branch keys on this)', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-dl-404-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const dest = join(dir, 'out.bin');
+
+  const httpsModule = fakeHttpModule([fakeResponse({ statusCode: 404 })]);
+
+  await assert.rejects(
+    () => download('https://github.example/SHA256SUMS', dest, { _httpsModule: httpsModule }),
+    (err) => {
+      assert.equal(err.statusCode, 404);
+      return true;
+    },
+  );
+});
+
+test('extractZip dispatches to the injected spawn function and succeeds on its first success', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-dl-extract-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const calls = [];
+  const spawnFn = (cmd) => {
+    calls.push(cmd);
+    return { status: 0 };
+  };
+  extractZip(join(dir, 'a.zip'), dir, { _spawnFn: spawnFn });
+  assert.deepEqual(calls, ['tar']);
+});
+
+test('extractZip throws when every extraction backend fails', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-dl-extract-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const spawnFn = () => ({ status: 1 });
+  assert.throws(
+    () => extractZip(join(dir, 'a.zip'), dir, { _spawnFn: spawnFn }),
+    /Failed to extract/,
   );
 });

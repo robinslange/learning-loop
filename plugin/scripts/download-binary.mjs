@@ -63,9 +63,9 @@ export function verifyAgainstSums(tmpPath, artifact, sumsText) {
   return true;
 }
 
-async function download(url, dest) {
-  const https = await import('https');
-  const http = await import('http');
+export async function download(url, dest, { _httpsModule, _httpModule } = {}) {
+  const https = _httpsModule || (await import('https'));
+  const http = _httpModule || (await import('http'));
 
   return new Promise((resolve, reject) => {
     const follow = (u, redirects = 0) => {
@@ -116,15 +116,15 @@ async function download(url, dest) {
   });
 }
 
-function extractZip(zipPath, destDir) {
+export function extractZip(zipPath, destDir, { _spawnFn = spawnSync } = {}) {
   // Windows 10 1803+ ships tar.exe with zip support; older Windows + non-Windows
   // need a fallback. Try tar first, then PowerShell Expand-Archive on Windows,
   // then unzip on POSIX.
-  const tarRes = spawnSync('tar', ['-xf', zipPath, '-C', destDir], { stdio: 'ignore' });
+  const tarRes = _spawnFn('tar', ['-xf', zipPath, '-C', destDir], { stdio: 'ignore' });
   if (tarRes.status === 0) return;
 
   if (platform() === 'win32') {
-    const psRes = spawnSync(
+    const psRes = _spawnFn(
       'powershell',
       [
         '-NoProfile',
@@ -135,7 +135,7 @@ function extractZip(zipPath, destDir) {
     );
     if (psRes.status === 0) return;
   } else {
-    const unzipRes = spawnSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
+    const unzipRes = _spawnFn('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
     if (unzipRes.status === 0) return;
   }
   throw new Error(`Failed to extract ${zipPath}: install tar, powershell, or unzip`);
