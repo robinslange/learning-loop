@@ -354,6 +354,11 @@ describe('buildQuery', () => {
     assert.ok(q.includes('second to last'));
     assert.ok(q.includes('last before prompt'));
   });
+
+  it('a short prompt with no messages returns the prompt head, does not throw', () => {
+    assert.equal(buildQuery({ prompt: 'short', messages: undefined, soloMinChars: 80 }), 'short');
+    assert.equal(buildQuery({ prompt: 'short', soloMinChars: 80 }), 'short');
+  });
 });
 
 describe('runBackendsWithRaceCap vault-only', () => {

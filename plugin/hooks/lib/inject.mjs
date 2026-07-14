@@ -32,7 +32,7 @@ function truncateAtSentenceBoundary(text, maxTokens) {
 // blends in the last two prior messages, since it likely can't stand on its
 // own (e.g. "fix the flaky one" needs the conversation to know what "the
 // flaky one" refers to).
-export function buildQuery({ prompt, messages, soloMinChars }) {
+export function buildQuery({ prompt, messages = [], soloMinChars }) {
   const head = (prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS);
   if ((prompt || '').trim().length >= soloMinChars) return head;
   const prior = messages
