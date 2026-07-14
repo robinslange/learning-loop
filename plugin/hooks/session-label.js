@@ -89,7 +89,6 @@ const topicPatterns = [
   [/\bsse\b/, 'SSE'],
   [/\bstatusline\b|\bstatus.line\b/, 'statusline'],
   [/\bclaude.code\b/, 'Claude Code'],
-  [/\boh.my.claude\b|\bomc\b/, 'oh-my-claude'],
   [/\bplugin\b/, 'plugin'],
   [/\bhook\b/, 'hooks'],
   [/\bmcp\b/, 'MCP'],
@@ -101,16 +100,32 @@ const topicPatterns = [
   [/\bfrontend\b|\breact\b|\bcomponent/, 'frontend'],
   [/\bbackend\b|\bapi\b.*\bservice/, 'backend'],
   [/\brailway\b|\bcloudflare\b|\bworker\b|\binfra/, 'infra'],
-  [/\bsupplement\b|\bcompound\b|\bnootropic/, 'supplements'],
-  [/\bautis[a-z]*\b|\bneurodiv|\baudhd\b/, 'autism'],
-  [/\bsleep\b|\bcircadian\b|\bmelatonin/, 'sleep'],
-  [/\beczema\b|\btsw\b|\bdermat/, 'skin'],
-  [/\bgrid.bot\b|\btrading\b/, 'trading'],
-  [/\bcoaching\b/, 'coaching'],
-  [/\bwow\b|\bresto.druid\b|\bmythic/, 'WoW'],
   [/\bpr\b.*#?\d+|\bpull.request/, 'PR'],
-  [/\blinear\b|\bticket\b|\bkin-\d+/i, 'tickets'],
+  [/\blinear\b|\bticket\b/, 'tickets'],
 ];
+
+// Owner-specific topics come from config `label_topics`:
+// [{ "match": "\\bkayak\\b", "label": "kayaking" }, ...]. An entry with a
+// bad regex is skipped (logged), never fatal — labels degrade, hooks don't.
+function configTopicPatterns() {
+  try {
+    const raw = resolveConfig().label_topics;
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const t of raw) {
+      if (!t || typeof t.match !== 'string' || typeof t.label !== 'string') continue;
+      try {
+        out.push([new RegExp(t.match, 'i'), t.label]);
+      } catch (err) {
+        logError('session-label.configTopicPattern', err);
+      }
+    }
+    return out;
+  } catch (err) {
+    logError('session-label.configTopicPatterns', err);
+    return [];
+  }
+}
 
 function instanceTopicPatterns() {
   try {
@@ -128,7 +143,7 @@ function instanceTopicPatterns() {
   }
 }
 
-const allTopicPatterns = [...instanceTopicPatterns(), ...topicPatterns];
+const allTopicPatterns = [...instanceTopicPatterns(), ...configTopicPatterns(), ...topicPatterns];
 
 // --- Action patterns ---
 const actionPatterns = [
@@ -369,23 +384,24 @@ try {
 
   const scrubbedContext = scrubSecrets(injection.additionalContext);
 
-  if (mode === 'shadow') {
-    logShadow({
-      type: 'gate-pass-payload',
-      gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
-      backends: summarizeBackends(results),
-      payload: {
-        tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
-        vault_notes: injection.injectedVault.length,
-      },
-      dedupe_filtered_count: dedupeFilteredCount,
-      would_inject: scrubbedContext,
-    });
-    persistDedupeState(session_id, injection.injectedVault);
-  } else if (mode === 'live') {
+  // One record shape for both modes — live injections stay visible to
+  // review-shadow.mjs, so gate recalibration keeps its data after go-live.
+  if (mode === 'live') {
     emitHookOutput({ event: 'UserPromptSubmit', additionalContext: scrubbedContext });
-    persistDedupeState(session_id, injection.injectedVault);
   }
+  logShadow({
+    type: 'gate-pass-payload',
+    mode,
+    gate: { passed: true, vault_top_score: vaultTop, episodic_top_score: episodicTop },
+    backends: summarizeBackends(results),
+    payload: {
+      tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
+      vault_notes: injection.injectedVault.length,
+    },
+    dedupe_filtered_count: dedupeFilteredCount,
+    would_inject: scrubbedContext,
+  });
+  persistDedupeState(session_id, injection.injectedVault);
 } catch (err) {
   process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);
 }

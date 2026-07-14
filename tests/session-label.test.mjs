@@ -161,9 +161,9 @@ describe('session-label', () => {
 
   it('does not crash when transcript file is missing', () => {
     const sid = randomUUID();
-    const label = run(sid, 'work on the trading grid bot', '/nonexistent/path.jsonl');
+    const label = run(sid, 'work on the react frontend components', '/nonexistent/path.jsonl');
     assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('trading'), `expected trading, got: ${label}`);
+    assert.ok(label.includes('frontend'), `expected frontend, got: ${label}`);
   });
 
   it('truncates labels longer than 35 characters', () => {
@@ -269,6 +269,90 @@ describe('session-label', () => {
       /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
       'instance patterns must be spread first into allTopicPatterns',
     );
+    // Owner-specific life/project patterns belong in the instance config
+    // (label_topics), never in the public source.
+    assert.doesNotMatch(
+      src,
+      /eczema|\\btsw\\b|dermat|nootropic|supplement|autis|audhd|neurodiv|circadian|melatonin|grid.bot|trading|coaching|resto.druid|mythic|\\bwow\\b|kin-\\d|oh.my.claude/i,
+      'personal topic patterns must live in instance config (label_topics), not source',
+    );
+  });
+
+  it('loads owner topic patterns from config label_topics', () => {
+    const base = mkdtempSync(join(tmpdir(), 'll-label-config-'));
+    try {
+      const pluginData = join(base, 'plugin-data');
+      mkdirSync(pluginData, { recursive: true });
+      writeFileSync(
+        join(pluginData, 'config.json'),
+        JSON.stringify({
+          label_topics: [{ match: '\\bkayak\\b', label: 'kayaking' }],
+        }),
+      );
+      const sid = randomUUID();
+      execFileSync('node', [HOOK], {
+        input: JSON.stringify({
+          session_id: sid,
+          prompt: 'fix the kayak roll technique please',
+          transcript_path: '',
+          cwd: '/tmp',
+        }),
+        encoding: 'utf-8',
+        timeout: 5000,
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          LEARNING_LOOP_INJECTION_MODE: 'off',
+        },
+      });
+      const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
+      assert.ok(existsSync(labelFile), 'label file should exist');
+      const label = readFileSync(labelFile, 'utf8');
+      assert.ok(label.includes('kayaking'), `config label_topics should drive label, got: ${label}`);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  it('an invalid label_topics regex is skipped without crashing the hook', () => {
+    const base = mkdtempSync(join(tmpdir(), 'll-label-badcfg-'));
+    try {
+      const pluginData = join(base, 'plugin-data');
+      mkdirSync(pluginData, { recursive: true });
+      writeFileSync(
+        join(pluginData, 'config.json'),
+        JSON.stringify({
+          label_topics: [
+            { match: '([', label: 'broken' },
+            { match: '\\bkayak\\b', label: 'kayaking' },
+            'not-an-object',
+          ],
+        }),
+      );
+      const sid = randomUUID();
+      const result = spawnSync('node', [HOOK], {
+        input: JSON.stringify({
+          session_id: sid,
+          prompt: 'fix the kayak roll technique please',
+          transcript_path: '',
+          cwd: '/tmp',
+        }),
+        encoding: 'utf-8',
+        timeout: 5000,
+        env: {
+          ...process.env,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          LEARNING_LOOP_INJECTION_MODE: 'off',
+        },
+      });
+      assert.equal(result.status, 0, `hook exited ${result.status}: ${result.stderr}`);
+      const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
+      assert.ok(existsSync(labelFile), 'label file should exist despite the bad pattern');
+      const label = readFileSync(labelFile, 'utf8');
+      assert.ok(label.includes('kayaking'), `valid patterns must survive a bad sibling, got: ${label}`);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 
@@ -463,6 +547,81 @@ describe(
         );
         assert.ok(!out.includes('AKIAIOSFODNN7EXAMPLE'), 'AWS key leaked into live injection');
         assert.ok(out.includes('[REDACTED]'));
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+describe(
+  'session-label live injection telemetry',
+  {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  },
+  () => {
+    // Going live must not blind the calibration loop: a successful live
+    // injection writes the same gate-pass-payload record shadow mode wrote,
+    // marked mode:'live', so review-shadow.mjs keeps seeing gate passes.
+    it('live mode logs a gate-pass-payload record with the injected payload', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-telemetry-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(
+          join(vault, 'notes', 'gamma.md'),
+          'Gamma note body about race caps and injection telemetry.\n',
+        );
+        const hit = JSON.stringify([{ path: 'notes/gamma.md', title: 'gamma', score: 0.99 }]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+          mode: 0o755,
+        });
+
+        const out = execFileSync('node', [HOOK], {
+          input: JSON.stringify({
+            session_id: randomUUID(),
+            prompt: 'what do we know about race caps and injection telemetry',
+            transcript_path: '',
+            cwd: '/tmp',
+          }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: base,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_INJECTION_MODE: 'live',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+          },
+        });
+        assert.ok(out.length > 0, 'gate did not pass — stub arrangement broken');
+
+        const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+        const logPath = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
+        assert.ok(existsSync(logPath), 'live injection must write a telemetry record');
+        const records = readFileSync(logPath, 'utf8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l));
+        const pass = records.find((r) => r.gate?.passed === true);
+        assert.ok(pass, 'a gate-pass record must be logged in live mode');
+        assert.equal(pass.mode, 'live');
+        assert.ok(pass.payload?.tokens_estimated > 0, 'payload size must be recorded');
+        assert.ok(
+          (pass.would_inject || '').includes('Gamma note body'),
+          'the injected context must be captured for quality review',
+        );
       } finally {
         rmSync(base, { recursive: true, force: true });
       }
