@@ -34,6 +34,10 @@ export default [
       'provenance/**',
       'docs/**',
       'tests/fixtures/**',
+      // Workflow-tool scripts: the runtime wraps the body in an async function,
+      // so they legitimately mix `export const meta` with top-level `return` —
+      // a shape ESLint's module parser (like `node --check`) cannot parse.
+      'plugin/skills/**/workflow.js',
     ],
   },
 ];
