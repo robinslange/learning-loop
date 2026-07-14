@@ -63,6 +63,29 @@ test('unverified backlog excludes scored notes (regression: path-vs-basename mis
   });
 });
 
+test('counts verify-skill gate-shape scores alongside note-verifier result-shape scores', () => {
+  const events = [
+    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: { depth: 'default' } },
+    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/note-verifier-pass.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/gate-pass.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:02Z', action: 'vault-write', session_id: 's1', target: '0-inbox/gate-fail.md', folder: 'inbox' },
+    // note-verifier shape: {action:'score', result:'pass'|'fail', confidence:...}
+    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'note-verifier-pass.md', result: 'pass', confidence: 'clear', trigger: 'verify-auto' },
+    // verify-skill shape: {action:'score', gate:'N/6', tier:...} — no `result` field
+    { ts: '2026-05-01T00:02:01Z', action: 'score', target: 'gate-pass.md', tier: 'deep', gate: '5/6', claim_specificity: 2, source_grounded: 2 },
+    { ts: '2026-05-01T00:02:02Z', action: 'score', target: 'gate-fail.md', tier: 'shallow', gate: '2/6', claim_specificity: 0, source_grounded: 0 },
+  ];
+
+  withProvenance(events, ({ status, stdout, stderr }) => {
+    assert.strictEqual(status, 0, `report exited ${status}: ${stderr}`);
+    // All three scored notes count as verified; none are unverified.
+    assert.match(stdout, /Notes created: 3 \| Verified: 3 \| Unverified: 0/);
+    // gate 5/6 >= 4/6 -> pass (not flagged); gate 2/6 < 4/6 -> fail (flagged).
+    // Only gate-fail.md should be flagged, so config correlation shows 1/3.
+    assert.match(stdout, /verify depth=default: 1\/3 flagged \(33%\)/);
+  });
+});
+
 test('dedupes a basename written across folders (inbox → permanent move)', () => {
   const events = [
     { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'reflect', config: {} },

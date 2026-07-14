@@ -55,7 +55,27 @@ if (events.length === 0) {
 // Separate event types
 const sessionStarts = events.filter((e) => e.action === 'session-start' && e.skill);
 const vaultWrites = events.filter((e) => e.action === 'vault-write');
-const scores = events.filter((e) => e.action === 'score');
+
+// Two producers write different score-event shapes:
+//   note-verifier: {action:'score', result:'pass'|'fail', confidence:...}
+//   verify-skill:  {action:'score', gate:'N/6', tier:...}            (no `result` field)
+// Normalize both into a unified `passed: boolean` so downstream tallies (flagged
+// notes, findings-by-type, findings-by-trigger) see verify-skill's gate scores too.
+// Mapping: gate numerator/denominator >= 4/6 -> pass, else fail. A malformed gate
+// string (missing, unparseable, wrong shape) is treated as fail — an unreadable
+// gate is not evidence of a pass, and treating it as a finding surfaces it for review
+// instead of silently disappearing.
+function gatePassed(gate) {
+  const parts = String(gate).split('/');
+  if (parts.length !== 2) return false;
+  const [num, den] = parts.map(Number);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den === 0) return false;
+  return num / den >= 4 / 6;
+}
+
+const scores = events
+  .filter((e) => e.action === 'score')
+  .map((e) => ({ ...e, passed: 'result' in e ? e.result === 'pass' : gatePassed(e.gate) }));
 
 // Unique sessions (skill-level, not hook-level)
 const sessions = new Set(sessionStarts.map((e) => e.session_id));
@@ -68,10 +88,13 @@ const uniqueNotes = new Set(noteCreations.map((e) => basename(e.target)));
 
 // Verified notes (notes that have at least one score record)
 const scoredNotes = new Set(scores.map((e) => e.target));
-const flaggedNotes = new Set(scores.filter((e) => e.result === 'fail').map((e) => e.target));
+const flaggedNotes = new Set(scores.filter((e) => !e.passed).map((e) => e.target));
 const unverifiedNotes = [...uniqueNotes].filter((n) => !scoredNotes.has(n));
 
 // --- Metric 1: Finding rate by type ---
+// Scoped to note-verifier's `result` shape only: gate-shape events carry no
+// finding_type/trigger (they're quality scores, not findings) and would only
+// pollute this taxonomy with `unknown` entries if included.
 const findingsByType = {};
 for (const s of scores) {
   if (s.result !== 'fail') continue;
@@ -104,6 +127,8 @@ for (const note of uniqueNotes) {
 }
 
 // --- Metric 3: Auto vs manual catch rate ---
+// Scoped to note-verifier's `result` shape only, same reasoning as Metric 1:
+// gate-shape events carry no `trigger` field.
 const findingsByTrigger = {};
 for (const s of scores) {
   if (s.result !== 'fail') continue;
