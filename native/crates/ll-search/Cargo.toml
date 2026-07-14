@@ -35,6 +35,7 @@ hkdf = "0.12"
 notify = "7"
 ctrlc = "3"
 zstd = "0.13"
+regex = "1"
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

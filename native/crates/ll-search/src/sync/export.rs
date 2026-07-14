@@ -1,8 +1,10 @@
 use std::collections::HashSet;
 use std::path::Path;
 use anyhow::Context;
+use regex::Regex;
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::sync::LazyLock;
 
 use super::config::FederationConfig;
 use super::visibility::VisibilityEngine;
@@ -264,10 +266,46 @@ fn read_frontmatter_visibility(vault_path: &Path, rel_path: &str) -> Option<Stri
     None
 }
 
+/// Credential-shaped regexes for scrubbing `listed`-tier summaries.
+///
+/// Canonical source: `plugin/scripts/lib/secret-patterns.mjs` — port the 10
+/// patterns from there and keep this list in sync when that file changes.
+/// The PEM pattern uses `(?s:...)` so `.` matches newlines within just that
+/// alternation, mirroring JS's `[\s\S]*?`.
+static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
+        r"AKIA[0-9A-Z]{16}",
+        r"gh[po]_[A-Za-z0-9]{36,}",
+        r"sk-ant-api[A-Za-z0-9_-]{20,}",
+        r"sk_(?:live|test)_[A-Za-z0-9]{20,}",
+        r"sk-[A-Za-z0-9_-]{20,}",
+        r"cfpat-[A-Za-z0-9_-]{20,}",
+        r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}",
+        r"xox[abprs]-[A-Za-z0-9-]{10,}",
+        r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+        r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)",
+    ]
+    .iter()
+    .map(|p| Regex::new(p).expect("secret pattern must compile"))
+    .collect()
+});
+
+/// Replace any credential-shaped substring with `[REDACTED]`.
+///
+/// Applied to `listed`-tier summaries only — `public`-tier export is a
+/// deliberate full-body export and stays raw.
+fn scrub(text: &str) -> String {
+    let mut out = text.to_string();
+    for pattern in SECRET_PATTERNS.iter() {
+        out = pattern.replace_all(&out, "[REDACTED]").into_owned();
+    }
+    out
+}
+
 fn summarize(text: &str, max_chars: usize) -> String {
     let first_para = text.split("\n\n").next().unwrap_or(text).trim();
     if first_para.chars().count() <= max_chars {
-        return first_para.to_string();
+        return scrub(first_para);
     }
     let byte_end = first_para
         .char_indices()
@@ -276,7 +314,7 @@ fn summarize(text: &str, max_chars: usize) -> String {
         .unwrap_or(first_para.len());
     let truncated = &first_para[..byte_end];
     let last_space = truncated.rfind(' ').unwrap_or(byte_end);
-    format!("{}...", &truncated[..last_space])
+    scrub(&format!("{}...", &truncated[..last_space]))
 }
 
 /// Compute a SQLite patchset from `base_db` to `current_db` covering the four
@@ -355,6 +393,24 @@ mod tests {
     #[test]
     fn summarize_empty_string() {
         assert_eq!(summarize("", 100), "");
+    }
+
+    #[test]
+    fn summarize_scrubs_aws_key() {
+        let text = "The key AKIAIOSFODNN7EXAMPLE rotates.\n\nMore.";
+        let result = summarize(text, 300);
+        assert!(!result.contains("AKIA"), "AWS key shape leaked: {result}");
+    }
+
+    #[test]
+    fn summarize_scrubs_on_the_truncated_path() {
+        // Secret sits early in a first paragraph that overflows max_chars, so the
+        // truncating branch of summarize (not the short-circuit) must still scrub.
+        let mut text = String::from("Key AKIAIOSFODNN7EXAMPLE then ");
+        text.push_str(&"padding ".repeat(60));
+        let result = summarize(&text, 40);
+        assert!(result.ends_with("..."), "expected the truncated branch: {result}");
+        assert!(!result.contains("AKIA"), "AWS key shape leaked on truncated path: {result}");
     }
 
     #[test]
