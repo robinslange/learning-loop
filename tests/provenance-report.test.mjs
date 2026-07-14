@@ -98,3 +98,49 @@ test('dedupes a basename written across folders (inbox → permanent move)', () 
     assert.match(stdout, /Notes created: 1 \|/);
   });
 });
+
+test('normalizes verify.status spelling variants (ISSUES FOUND / ISSUES_FOUND) into one flagged bucket', () => {
+  const events = [
+    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
+    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/space-spelling.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/underscore-spelling.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:02:00Z', action: 'verify', target: 'space-spelling.md', status: 'ISSUES FOUND' },
+    { ts: '2026-05-01T00:02:01Z', action: 'verify', target: 'underscore-spelling.md', status: 'ISSUES_FOUND' },
+  ];
+
+  withProvenance(events, ({ status, stdout, stderr }) => {
+    assert.strictEqual(status, 0, `report exited ${status}: ${stderr}`);
+    // Both spellings must land in the same flagged bucket: 2/2 flagged, not split.
+    assert.match(stdout, /verify depth=default: 2\/2 flagged \(100%\)/);
+  });
+});
+
+test('normalizes score.result spelling variants to {pass, fail, warn}', () => {
+  const events = [
+    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
+    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/a.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/b.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:02Z', action: 'vault-write', session_id: 's1', target: '0-inbox/c.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:03Z', action: 'vault-write', session_id: 's1', target: '0-inbox/d.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:04Z', action: 'vault-write', session_id: 's1', target: '0-inbox/e.md', folder: 'inbox' },
+    { ts: '2026-05-01T00:01:05Z', action: 'vault-write', session_id: 's1', target: '0-inbox/f.md', folder: 'inbox' },
+    // fail-spellings: fail, issues, issues-found, minor-issues, minor -- all must land in
+    // the same findings-by-type bucket ('overclaim'), none silently dropped as non-fail.
+    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'a.md', result: 'fail', finding_type: 'overclaim', trigger: 'verify-auto' },
+    { ts: '2026-05-01T00:02:01Z', action: 'score', target: 'b.md', result: 'issues', finding_type: 'overclaim', trigger: 'verify-auto' },
+    { ts: '2026-05-01T00:02:02Z', action: 'score', target: 'c.md', result: 'issues-found', finding_type: 'overclaim', trigger: 'verify-auto' },
+    { ts: '2026-05-01T00:02:03Z', action: 'score', target: 'd.md', result: 'minor-issues', finding_type: 'overclaim', trigger: 'verify-auto' },
+    { ts: '2026-05-01T00:02:04Z', action: 'score', target: 'e.md', result: 'minor', finding_type: 'overclaim', trigger: 'verify-auto' },
+    // warn-spellings: warn, partial -- normalize to 'warn', distinct from the fail bucket,
+    // and must not crash or silently vanish either.
+    { ts: '2026-05-01T00:02:05Z', action: 'score', target: 'f.md', result: 'partial', finding_type: 'overclaim', trigger: 'verify-auto' },
+  ];
+
+  withProvenance(events, ({ status, stdout, stderr }) => {
+    assert.strictEqual(status, 0, `report exited ${status}: ${stderr}`);
+    // All 5 fail-spellings land in the same 'overclaim' finding-type bucket.
+    assert.match(stdout, /\*\*overclaim\*\*: 5 \(100%\)/);
+    // All 6 notes flagged in config correlation: no spelling variant silently counts as pass.
+    assert.match(stdout, /verify depth=default: 6\/6 flagged \(100%\)/);
+  });
+});

@@ -20,7 +20,7 @@ import {
   pluginDataExists,
 } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
-import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
+import { appendJsonlLineDeduped } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
@@ -176,7 +176,7 @@ export function emitProvenance(event) {
     source: 'hook',
     ...event,
   };
-  appendJsonlLine(join(dir, `events-${monthStr()}.jsonl`), record);
+  appendJsonlLineDeduped(join(dir, `events-${monthStr()}.jsonl`), record);
 }
 
 export function emitRetrieval(prefix, event) {

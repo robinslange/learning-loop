@@ -4,7 +4,7 @@
 // Usage as CLI:    node provenance.mjs '{"agent":"x","action":"create","target":"y.md"}'
 
 import { copyFileSync, existsSync, mkdirSync, realpathSync } from 'node:fs';
-import { appendJsonlLine } from './lib/jsonl.mjs';
+import { appendJsonlLineDeduped } from './lib/jsonl.mjs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { getPluginData, pluginDataExists } from './lib/config.mjs';
@@ -49,7 +49,7 @@ export function emitProvenance(event) {
     source: 'skill',
     ...event,
   };
-  appendJsonlLine(getCurrentMonthFile(), record);
+  appendJsonlLineDeduped(getCurrentMonthFile(), record);
 }
 
 // Node realpaths the ESM entry for import.meta.url but argv[1] keeps the

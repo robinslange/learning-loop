@@ -73,9 +73,42 @@ function gatePassed(gate) {
   return num / den >= 4 / 6;
 }
 
+// Historical events on disk carry inconsistent enum spellings (typos, doc/code
+// drift between agents). Normalize on READ only -- historical data stays as-is
+// on disk. Two independent vocabularies feed the same pass/fail/warn semantics:
+//   score.result:  fail|pass|issues|issues-found|minor-issues|minor|warn|partial
+//   verify.status: PASS|PARTIAL|ISSUES FOUND|ISSUES_FOUND  (note-verifier's own
+//                  doc header uses the space spelling; its emitted JSON uses the
+//                  underscore spelling -- both appear in the live log)
+// Both normalize into the same {pass, fail, warn} bucket set.
+// fail-spellings (fail, issues, issues-found, minor-issues, minor) are not
+// listed explicitly: an unrecognized spelling defaults to 'fail' anyway --
+// same "unreadable is not a pass" policy Task 16 applied to malformed gates.
+function normalizeResult(value) {
+  const key = String(value).trim().toLowerCase().replace(/[\s_]+/g, '-');
+  if (key === 'pass') return 'pass';
+  if (key === 'warn' || key === 'partial') return 'warn';
+  return 'fail';
+}
+
+// Feeds the same `passed` composition Task 16 introduced for gate-shape score
+// events: normalizeResult's 'pass' bucket is the only bucket that counts as
+// passed, so 'warn' (partial/warn spellings) is treated as flagged, same as
+// 'fail' -- neither is a clean pass.
 const scores = events
   .filter((e) => e.action === 'score')
-  .map((e) => ({ ...e, passed: 'result' in e ? e.result === 'pass' : gatePassed(e.gate) }));
+  .map((e) => ({
+    ...e,
+    passed: 'result' in e ? normalizeResult(e.result) === 'pass' : gatePassed(e.gate),
+  }));
+
+// action:'verify' events (note-verifier, inbox-organiser, discovery) carry a
+// summary `status` per note, parallel in shape to score's per-note `result`.
+// Fold them into the same passed/flaggedNotes/scoredNotes accounting so a
+// verify-only note (no separate score event) still counts as verified.
+const verifyEvents = events
+  .filter((e) => e.action === 'verify' && 'status' in e)
+  .map((e) => ({ ...e, passed: normalizeResult(e.status) === 'pass' }));
 
 // Unique sessions (skill-level, not hook-level)
 const sessions = new Set(sessionStarts.map((e) => e.session_id));
@@ -86,9 +119,11 @@ const noteCreations = vaultWrites.filter((e) =>
 );
 const uniqueNotes = new Set(noteCreations.map((e) => basename(e.target)));
 
-// Verified notes (notes that have at least one score record)
-const scoredNotes = new Set(scores.map((e) => e.target));
-const flaggedNotes = new Set(scores.filter((e) => !e.passed).map((e) => e.target));
+// Verified notes (notes that have at least one score or verify record)
+const scoredNotes = new Set([...scores, ...verifyEvents].map((e) => e.target));
+const flaggedNotes = new Set(
+  [...scores, ...verifyEvents].filter((e) => !e.passed).map((e) => e.target),
+);
 const unverifiedNotes = [...uniqueNotes].filter((n) => !scoredNotes.has(n));
 
 // --- Metric 1: Finding rate by type ---
@@ -97,7 +132,7 @@ const unverifiedNotes = [...uniqueNotes].filter((n) => !scoredNotes.has(n));
 // pollute this taxonomy with `unknown` entries if included.
 const findingsByType = {};
 for (const s of scores) {
-  if (s.result !== 'fail') continue;
+  if (!('result' in s) || normalizeResult(s.result) !== 'fail') continue;
   const t = s.finding_type || 'unknown';
   if (!findingsByType[t]) findingsByType[t] = { count: 0, ambiguous: 0 };
   findingsByType[t].count++;
@@ -131,7 +166,7 @@ for (const note of uniqueNotes) {
 // gate-shape events carry no `trigger` field.
 const findingsByTrigger = {};
 for (const s of scores) {
-  if (s.result !== 'fail') continue;
+  if (!('result' in s) || normalizeResult(s.result) !== 'fail') continue;
   const t = s.trigger || 'unknown';
   findingsByTrigger[t] = (findingsByTrigger[t] || 0) + 1;
 }
