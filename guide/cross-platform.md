@@ -39,8 +39,8 @@ Intel Macs are not currently supported (no prebuilt artifact). See [Building fro
 ### Linux
 
 - glibc only. musl distributions (Alpine) are not currently a build target. Open an issue if you need it.
-- The bundled `ll-search` binary statically links its ONNX runtime; the only runtime system dependency is libc.
-- `ORT_DYLIB_PATH` and `ORT_LIB_LOCATION` are set automatically by `findBinary` so the loader finds the bundled `libonnxruntime.so`.
+- The `ll-search` binary does not link the ONNX runtime; `ll-core`'s `dylib::ensure_dylib()` downloads and SHA-256-verifies the pinned `libonnxruntime.so` on first run (see [Building from source](#building-from-source)). The only build-time system dependency is libc.
+- `ORT_DYLIB_PATH` is set automatically by `ensure_dylib()` once the runtime is staged, so the loader finds `libonnxruntime.so` without further configuration.
 - **Build-from-source needs `libdbus-1-dev` + `pkg-config`.** Since v1.18.0 the federation signing seed uses the `keyring` crate with the `sync-secret-service` feature, which transitively pulls `libdbus-sys`. A stock `ubuntu-latest` image lacks the DBus headers and `cargo build` fails. Install with `sudo apt-get install -y libdbus-1-dev pkg-config` before invoking cargo. CI installs the package as the first step of the `Test` and `Build ll-search` workflows. Pre-built binaries from CI bundle their deps; this only affects local source builds.
 - **Federation seed backend selection.** On desktop installs with a running DBus session, the seed lives in Secret Service (gnome-keyring, kwallet, KeePassXC's Secret Service plugin, etc.). On headless servers without DBus, `ll-search` falls back to encrypted-at-rest (chacha20poly1305 sealed with a `machine-uid` derived key). See [Federation > Seed storage](federation.md#seed-storage).
 
@@ -57,7 +57,7 @@ Intel Macs are not currently supported (no prebuilt artifact). See [Building fro
 For platforms without a prebuilt artifact (Intel macOS, Linux aarch64) — what `install.sh`'s "continue anyway" path commits you to:
 
 1. Install a Rust toolchain via https://rustup.rs (the workspace requires Rust 1.88+). On Linux, also `sudo apt-get install -y libdbus-1-dev pkg-config` (see Linux caveats above).
-2. Build: `cd native && cargo build --release`. The `ort` crate's `download-binaries` feature fetches the ONNX runtime at build time and links it into the binary — no separate `libonnxruntime` needs to be placed next to `ll-search`.
+2. Build: `cd native && cargo build --release`. The `ort` crate is configured with the `load-dynamic` feature, so nothing ONNX-related is linked at build time. On first run, `ll-core`'s `dylib::ensure_dylib()` downloads the pinned Microsoft ONNX Runtime release for your platform, verifies its SHA-256 (both the archive and the extracted library), and stages it to `~/.learning-loop/lib` (override with `ORT_DYLIB_PATH` or `LL_ORT_DIR`) before the first `ort` session is built.
 3. Install where the plugin looks for it:
 
    ```bash

@@ -240,7 +240,7 @@ Two shell scripts in `~/.local/bin/` give vault tools a stable name regardless o
 - `~/.local/bin/ll-search` -- search, indexing, identity, and similarity queries.
 - `~/.local/bin/ll-watch` -- vault watcher that runs the librarian and incremental reindex.
 
-The `ll-search` shim resolves `PLUGIN_DATA` from `$CLAUDE_PLUGIN_DATA` if set, otherwise from the marker file at `~/.claude/plugins/data/.ll-data-path` that the SessionStart hook writes, otherwise from the canonical default `~/.claude/plugins/data/learning-loop-learning-loop-marketplace`. It then exec's the binary at `$PLUGIN_DATA/bin/ll-search`, with `ORT_DYLIB_PATH` and `ORT_LIB_LOCATION` pointed at the binary's directory so the ONNX runtime loader finds the bundled `libonnxruntime` next to the binary.
+The `ll-search` shim resolves `PLUGIN_DATA` from `$CLAUDE_PLUGIN_DATA` if set, otherwise from the marker file at `~/.claude/plugins/data/.ll-data-path` that the SessionStart hook writes, otherwise from the canonical default `~/.claude/plugins/data/learning-loop-learning-loop-marketplace`. It then exec's the binary at `$PLUGIN_DATA/bin/ll-search`. The ONNX runtime is not bundled next to the binary; `ll-core`'s `dylib::ensure_dylib()` downloads and SHA-256-verifies `libonnxruntime` on first run and sets `ORT_DYLIB_PATH` so the loader finds it (override the location with `ORT_DYLIB_PATH` or `LL_ORT_DIR`).
 
 The `ll-watch` shim picks the latest version-named directory under `~/.claude/plugins/cache/learning-loop-marketplace/learning-loop/` and exec's `node ${LATEST}/scripts/watch.mjs`. Filtering to digit-prefixed names skips orphan hash directories the plugin manager leaves behind.
 

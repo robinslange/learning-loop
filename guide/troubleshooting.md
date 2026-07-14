@@ -6,7 +6,7 @@ Commands below written as `node PLUGIN/scripts/...` use `PLUGIN` as shorthand fo
 
 ## `/learning-loop:init` hangs on binary download
 
-The `ll-search` binary is ~60MB (includes embedding and reranker models). On slow connections, the download can take a minute. If it fails, re-run init.
+The `ll-search` binary is ~31MB. On first run it also downloads the ONNX Runtime (~34MB) and the embedding/reranker models, each SHA-256-verified before use — on slow connections these downloads can take a minute. If any fails, re-run init.
 
 ## Search returns no results
 
