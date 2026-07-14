@@ -12,7 +12,7 @@ import { logError } from './log.mjs';
 import { pluginDataExists } from './config.mjs';
 import { DATA_PATHS } from './paths.mjs';
 import { HookConfig } from './hook-config.mjs';
-import { isProcessAlive } from './file-lock.mjs';
+import { isProcessAlive, withLock } from './file-lock.mjs';
 
 // 25 hours: ensures at least one session per day refreshes, even on weekly cadence.
 export const MARKER_TTL_MS = 25 * 60 * 60 * 1000;
@@ -50,15 +50,30 @@ export const MARKER_PATHS = {
 };
 
 // Append a basename to the session-scoped memory-writes log, de-duplicated.
-// Fire-and-forget: a failed read or write costs at most one uncounted file in
-// the dream nudge, never a thrown error on the PostToolUse hot path.
+// Fire-and-forget: a failed read or write — or a lock that can't be acquired
+// — costs at most one uncounted file in the dream nudge, never a thrown
+// error on the PostToolUse hot path. The read-modify-write runs under a lock
+// because two sessions' PostToolUse hooks can interleave (read, read, write,
+// write) and lose one session's basename otherwise.
 export function appendMemoryWrite(pluginData, sessionId, basename) {
   const path = MARKER_PATHS.memoryWrites(pluginData, sessionId);
-  const existing = readMarker(path, { ttlMs: Infinity });
-  const set = new Set(Array.isArray(existing) ? existing : []);
-  if (set.has(basename)) return;
-  set.add(basename);
-  writeMarker(path, [...set]);
+  try {
+    // The lock file lives alongside the marker (`<path>.lock`) and O_EXCL
+    // cannot create it if the parent dir doesn't exist yet — unlike
+    // writeMarker's own mkdir, this one has to happen before the lock is
+    // even acquired.
+    mkdirSync(dirname(path), { recursive: true });
+    withLock(path, { retries: 10, retryDelayMs: 20 }, () => {
+      const existing = readMarker(path, { ttlMs: Infinity });
+      const set = new Set(Array.isArray(existing) ? existing : []);
+      if (set.has(basename)) return;
+      set.add(basename);
+      writeMarker(path, [...set]);
+    });
+  } catch (err) {
+    if (err.code === 'ELOCK_TIMEOUT') return;
+    logError('marker-cache.appendMemoryWrite', err);
+  }
 }
 
 export function readMarker(path, { ttlMs = MARKER_TTL_MS } = {}) {

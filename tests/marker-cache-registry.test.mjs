@@ -11,12 +11,19 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import {
   MARKER_PATHS,
   readMarker,
   writeMarker,
   dreamLockHeld,
 } from '../plugin/scripts/lib/marker-cache.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MARKER_CACHE_MODULE_URL = pathToFileURL(
+  join(HERE, '..', 'plugin/scripts/lib/marker-cache.mjs'),
+).href;
 
 const PD = '/fake/plugin-data';
 
@@ -102,6 +109,97 @@ test('dreamLockHeld: missing → false; fresh → true; old+dead-pid → false; 
     } else {
       process.env.CLAUDE_PLUGIN_DATA = savedEnv;
     }
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Runs `appendMemoryWrite(pluginData, sessionId, basename)` in a fresh child
+// process. When `delayMs` is set, the child patches `node:fs`'s readFileSync
+// via the CJS module object (createRequire) BEFORE importing marker-cache.mjs
+// — ESM named-import bindings for core modules resolve through that same
+// underlying CJS module object, so this reaches appendMemoryWrite's internal
+// call to readFileSync even though it was imported as a named ESM binding
+// (a plain `fs.readFileSync = …` on the ESM namespace throws: core-module
+// namespace objects are frozen). The FIRST read of the marker file then
+// blocks synchronously for `delayMs` before returning, widening that single
+// call's read-modify-write window so a concurrent writer is forced to
+// overlap it — deterministically, without touching production code or
+// timing two process startups against each other.
+function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
+  const delaySetup =
+    delayMs > 0
+      ? `const { createRequire } = await import('node:module');` +
+        `const fsCjs = createRequire(import.meta.url)('node:fs');` +
+        `const origRead = fsCjs.readFileSync;` +
+        `let patched = false;` +
+        `fsCjs.readFileSync = (...args) => {` +
+        `  const result = origRead(...args);` +
+        `  if (!patched && String(args[0]).includes('memory-writes')) {` +
+        `    patched = true;` +
+        `    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});` +
+        `  }` +
+        `  return result;` +
+        `};`
+      : '';
+  const script =
+    `(async () => {` +
+    `${delaySetup}` +
+    `const { appendMemoryWrite } = await import(${JSON.stringify(MARKER_CACHE_MODULE_URL)});` +
+    `appendMemoryWrite(${JSON.stringify(pluginData)}, ${JSON.stringify(sessionId)}, ${JSON.stringify(basename)});` +
+    `})();`;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      encoding: 'utf8',
+    });
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stderr }));
+  });
+}
+
+// Forces the lost-update interleave deterministically: writer A's read of
+// the marker blocks for 100ms (via the readFileSync monkey-patch above)
+// before it computes its updated set and writes. Writer B, unpatched, runs
+// its own full read-modify-write in well under 100ms and finishes first.
+// An unlocked appendMemoryWrite lets A's in-flight read (captured before B
+// wrote) clobber B's write when A finally saves — B's basename is lost. A
+// properly locked appendMemoryWrite serializes the two: whichever acquires
+// the marker's lock first holds it across its own delayed read, so the
+// second writer's read (whether that's A's delayed read or B's fast one)
+// always observes the first writer's completed write. 100ms comfortably
+// exceeds appendMemoryWrite's own retry budget's floor (10 retries * 20ms =
+// 180ms max wait) minus the head start below, so a correctly locked B
+// reliably outlasts A's hold rather than timing out its own lock wait.
+//
+// The marker is pre-seeded with an existing entry: readMarker short-circuits
+// on a missing file before ever calling readFileSync (statSync throws first),
+// so on a brand-new marker the delay hook — keyed on readFileSync — would
+// never fire and the test would pass vacuously regardless of locking.
+test("appendMemoryWrite: a slow reader and a fast writer both survive", async () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-marker-append-race-'));
+  try {
+    const path = MARKER_PATHS.memoryWrites(root, 'sess1');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(['note-existing.md']));
+
+    const slow = spawnAppend(root, 'sess1', 'note-a.md', 100);
+    await new Promise((r) => setTimeout(r, 40)); // let the slow reader start its delayed read first
+    const fast = spawnAppend(root, 'sess1', 'note-b.md', 0);
+
+    const [a, b] = await Promise.all([slow, fast]);
+    assert.equal(a.code, 0, `slow writer should exit cleanly (stderr: ${a.stderr})`);
+    assert.equal(b.code, 0, `fast writer should exit cleanly (stderr: ${b.stderr})`);
+
+    const final = JSON.parse(readFileSync(path, 'utf8'));
+    assert.deepEqual(
+      new Set(final),
+      new Set(['note-existing.md', 'note-a.md', 'note-b.md']),
+      `lost update — all three basenames must survive, got ${JSON.stringify(final)}`,
+    );
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
