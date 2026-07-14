@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test --test-force-exit tests/artifact-verify.test.mjs"
+  },
+  "mutate": ["plugin/scripts/lib/artifact-verify.mjs"],
+  "thresholds": { "high": 97, "low": 87, "break": 87 },
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/artifact-verify.json" },
+  "concurrency": 4, "timeoutMS": 20000, "coverageAnalysis": "off", "tempDirName": ".stryker-tmp"
+}

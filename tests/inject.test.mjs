@@ -246,6 +246,65 @@ describe('buildInjection', () => {
     assert.ok(result);
     assert.ok(!result.additionalContext.includes('## From past conversations'));
   });
+
+  it('caps pointers at 4, dropping the 5th related note', () => {
+    const vaultHits = [{ title: 'Top', path: 'top.md', body: 'Top body.', score: 0.99 }];
+    for (let i = 0; i < 5; i++) {
+      vaultHits.push({ title: `Related ${i}`, path: `r${i}.md`, body: 'x', score: 0.5 - i * 0.01 });
+    }
+    const result = buildInjection({ vaultHits, query: 'test', alreadyInjected: new Map() });
+    const pointerPaths = result.injectedVault.filter((v) => v.level === 'pointer').map((v) => v.path);
+    assert.deepEqual(pointerPaths, ['r0.md', 'r1.md', 'r2.md', 'r3.md']);
+    assert.ok(!result.additionalContext.includes('Related 4'), '5th related note must be dropped');
+  });
+
+  it('omits the "Related notes:" header when there are no pointers', () => {
+    const result = buildInjection({
+      vaultHits: [{ title: 'Only', path: 'only.md', body: 'Only body.', score: 0.9 }],
+      query: 'test',
+      alreadyInjected: new Map(),
+    });
+    assert.ok(!result.additionalContext.includes('Related notes:'));
+  });
+});
+
+describe('truncateAtSentenceBoundary (via buildInjection)', () => {
+  function bodySectionFor(body) {
+    const result = buildInjection({
+      vaultHits: [{ title: 'T', path: 't.md', body, score: 0.9 }],
+      query: 'test',
+      alreadyInjected: new Map(),
+    });
+    const ctx = result.additionalContext;
+    const headerStart = ctx.indexOf('## From your vault');
+    const bodyStart = ctx.indexOf('\n\n', headerStart) + 2;
+    return ctx.slice(bodyStart);
+  }
+
+  it('cuts at the sentence boundary, including the punctuation, excluding the trailing space', () => {
+    const sentences = [];
+    for (let i = 0; i < 20; i++) {
+      sentences.push(`Sentence ${i} has enough padding text to push this over the limit here.`);
+    }
+    const body = sentences.join(' ');
+    const bodySection = bodySectionFor(body);
+    assert.match(bodySection, /[.!?]$/, 'must end exactly at a sentence boundary, no trailing space');
+  });
+
+  it('falls back to the last space when no sentence boundary exists under the limit', () => {
+    const body = Array(400).fill('word').join(' ');
+    const bodySection = bodySectionFor(body);
+    assert.ok(bodySection.length < body.length, 'must have been truncated');
+    assert.ok(!bodySection.endsWith(' '), 'must not end on a trailing space');
+    assert.equal(bodySection, body.slice(0, bodySection.length));
+    assert.equal(body[bodySection.length], ' ', 'the cut must land exactly before a space');
+  });
+
+  it('returns the raw slice when there is no space to fall back on either', () => {
+    const body = 'x'.repeat(2000);
+    const bodySection = bodySectionFor(body);
+    assert.equal(bodySection, 'x'.repeat(1200));
+  });
 });
 
 describe('buildInjection vault Related notes header', () => {
@@ -278,6 +337,22 @@ describe('buildQuery', () => {
     const shortPrompt = 'fix the flaky one';
     const q = buildQuery({ prompt: shortPrompt, messages, soloMinChars: 80 });
     assert.ok(q.includes('GraphQL subscriptions'), 'short prompt must blend prior context');
+  });
+
+  it('a prompt exactly at soloMinChars searches alone (boundary is inclusive)', () => {
+    const messages = ['unrelated prior context that must not appear', 'PROMPT'];
+    const prompt = 'p'.repeat(80);
+    const q = buildQuery({ prompt, messages, soloMinChars: 80 });
+    assert.equal(q, prompt);
+    assert.ok(!q.includes('unrelated'), 'exactly-at-threshold prompt must not blend prior context');
+  });
+
+  it('blends only the two messages immediately before the last one', () => {
+    const messages = ['too old to include', 'second to last', 'last before prompt', 'PROMPT'];
+    const q = buildQuery({ prompt: 'short', messages, soloMinChars: 80 });
+    assert.ok(!q.includes('too old to include'), 'must not include messages older than the last two');
+    assert.ok(q.includes('second to last'));
+    assert.ok(q.includes('last before prompt'));
   });
 });
 
@@ -360,6 +435,91 @@ describe('runBackendsWithRaceCap vault-only', () => {
 
     assert.equal(spawnCount, 1, 'only the vault backend should be spawned');
     assert.deepEqual(Object.keys(results), ['vault']);
+  });
+
+  function makeMockSpawn({ stdout = '', stderr = '', exitCode = 0, errorEvent = null }) {
+    return () => {
+      const closeCallbacks = [];
+      const errorCallbacks = [];
+      const stdoutCallbacks = [];
+      const stderrCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => {
+          child.killed = true;
+        },
+        stdout: {
+          on: (evt, cb) => {
+            if (evt === 'data') stdoutCallbacks.push(cb);
+          },
+        },
+        stderr: {
+          on: (evt, cb) => {
+            if (evt === 'data') stderrCallbacks.push(cb);
+          },
+        },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+          if (evt === 'error') errorCallbacks.push(cb);
+        },
+      };
+      setTimeout(() => {
+        if (errorEvent) {
+          for (const cb of errorCallbacks) cb(errorEvent);
+          return;
+        }
+        for (const cb of stdoutCallbacks) cb(stdout);
+        for (const cb of stderrCallbacks) cb(stderr);
+        for (const cb of closeCallbacks) cb(exitCode);
+      }, 5);
+      return child;
+    };
+  }
+
+  it('a non-zero exit code produces an error result carrying the exit code, not a false ok', async () => {
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: makeMockSpawn({ exitCode: 1 }),
+    });
+    assert.equal(results.vault.hits.length, 0);
+    assert.equal(results.vault.error, 'exit 1');
+  });
+
+  it('a spawn error event resolves with ok:false and the error message, not a throw', async () => {
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: makeMockSpawn({ errorEvent: new Error('ENOENT: binary not found') }),
+    });
+    assert.equal(results.vault.hits.length, 0);
+    assert.match(results.vault.error, /ENOENT/);
+  });
+
+  it('invalid JSON on stdout yields parse_error, not a thrown exception', async () => {
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: makeMockSpawn({ stdout: 'not json{{{' }),
+    });
+    assert.equal(results.vault.hits.length, 0);
+    assert.equal(results.vault.error, 'parse_error');
+  });
+
+  it('a {results: [...]} shaped JSON payload extracts hits from the results key', async () => {
+    const results = await runBackendsWithRaceCap({
+      query: 'test',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: makeMockSpawn({
+        stdout: JSON.stringify({ results: [{ title: 'X', path: 'x.md', body: 'b', score: 1 }] }),
+      }),
+    });
+    assert.equal(results.vault.hits.length, 1);
+    assert.equal(results.vault.hits[0].path, 'x.md');
   });
 });
 

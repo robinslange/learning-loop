@@ -14,6 +14,14 @@ test('parseSums maps filenames to hashes (sha256sum format, ignores blank/commen
   });
 });
 
+test('parseSums rejects a hash that is not anchored to the start of the line', () => {
+  assert.deepEqual(parseSums('# comment aaaa  file.tar.gz'), {});
+});
+
+test('parseSums rejects a line with trailing content after the filename', () => {
+  assert.deepEqual(parseSums('aaaabbbb  file.tar.gz extra-junk'), {});
+});
+
 test('verifyArtifact passes on matching hash and fails on mismatch', () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-av-'));
   const file = join(dir, 'a.tar.gz');
@@ -37,4 +45,10 @@ test('isAllowedRedirect permits https and rejects http/other schemes', () => {
   assert.equal(isAllowedRedirect('https://objects.github.com/x'), true);
   assert.equal(isAllowedRedirect('http://evil.example/x'), false);
   assert.equal(isAllowedRedirect('ftp://x/y'), false);
+});
+
+test('isAllowedRedirect rejects non-string values', () => {
+  assert.equal(isAllowedRedirect(undefined), false);
+  assert.equal(isAllowedRedirect(null), false);
+  assert.equal(isAllowedRedirect(42), false);
 });

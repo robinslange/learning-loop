@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test --test-force-exit tests/inject.test.mjs tests/session-label.test.mjs"
+  },
+  "mutate": ["plugin/hooks/lib/inject.mjs"],
+  "thresholds": { "high": 76, "low": 66, "break": 66 },
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/inject.json" },
+  "concurrency": 4, "timeoutMS": 30000, "coverageAnalysis": "off", "tempDirName": ".stryker-tmp"
+}
