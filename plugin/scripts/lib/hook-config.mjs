@@ -74,6 +74,12 @@ export const HookConfig = Object.freeze({
   PROMPT_SLICE_CHARS: 200,
   PRIOR_MSG_SLICE_CHARS: 200,
   QUERY_SLICE_CHARS: 400,
+  // Below this length, the prompt alone doesn't carry enough of its own
+  // topic to search on — blend in prior message context. At or above it,
+  // prior context is stale noise that dilutes a query that's already
+  // self-sufficient (2026-07 sample: 19/50 irrelevant injections were thin
+  // continuations dominated by stale prior-message text).
+  QUERY_SOLO_MIN_CHARS: 80,
   RECENT_MSG_WINDOW: 80,
   // session-label reads only this much of the transcript tail per prompt;
   // transcripts embed full tool outputs and reach tens of MB, while only the

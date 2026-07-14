@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   scrubSecrets,
   buildInjection,
+  buildQuery,
   emitHookOutput,
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
@@ -232,6 +233,24 @@ describe('buildInjection vault Related notes header', () => {
       alreadyInjected: new Map(),
     });
     assert.ok(result.additionalContext.includes('Related notes:'));
+  });
+});
+
+describe('buildQuery', () => {
+  it('long prompts search alone; short prompts blend prior context', () => {
+    const messages = [
+      'we were discussing GraphQL subscriptions',
+      'and the websocket drop',
+      'PROMPT',
+    ];
+    const longPrompt = 'p'.repeat(120);
+    assert.equal(
+      buildQuery({ prompt: longPrompt, messages, soloMinChars: 80 }),
+      longPrompt.slice(0, 400),
+    );
+    const shortPrompt = 'fix the flaky one';
+    const q = buildQuery({ prompt: shortPrompt, messages, soloMinChars: 80 });
+    assert.ok(q.includes('GraphQL subscriptions'), 'short prompt must blend prior context');
   });
 });
 

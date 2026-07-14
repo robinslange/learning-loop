@@ -16,6 +16,7 @@ import {
 } from './lib/common.mjs';
 import {
   buildInjection,
+  buildQuery,
   emitHookOutput,
   runBackendsWithRaceCap,
   scrubSecrets,
@@ -306,10 +307,7 @@ try {
     process.exit(0);
   }
 
-  const priorMsgs = messages
-    .slice(-3, -1)
-    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
-  const query = [(prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS), ...priorMsgs].join(' ');
+  const query = buildQuery({ prompt, messages, soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS });
 
   const vaultRoot = resolveVaultPath();
   if (!vaultRoot) {

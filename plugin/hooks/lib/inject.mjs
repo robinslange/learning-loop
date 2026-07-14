@@ -2,6 +2,7 @@ import { spawn as defaultSpawn } from 'node:child_process';
 import { findBinary } from './common.mjs';
 import { emitJson } from './io.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
+import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 
 const SECRET_PATTERNS = [
   /AKIA[0-9A-Z]{16}/g,
@@ -37,6 +38,19 @@ function truncateAtSentenceBoundary(text, maxTokens) {
   if (lastBoundary > 0) return text.slice(0, lastBoundary);
   const lastSpace = slice.lastIndexOf(' ');
   return lastSpace > 0 ? text.slice(0, lastSpace) : slice;
+}
+
+// A prompt long enough to carry its own topic searches alone; a short one
+// blends in the last two prior messages, since it likely can't stand on its
+// own (e.g. "fix the flaky one" needs the conversation to know what "the
+// flaky one" refers to).
+export function buildQuery({ prompt, messages, soloMinChars }) {
+  const head = (prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS);
+  if ((prompt || '').trim().length >= soloMinChars) return head;
+  const prior = messages
+    .slice(-3, -1)
+    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
+  return [head, ...prior].join(' ');
 }
 
 const DIRECTIVE =
