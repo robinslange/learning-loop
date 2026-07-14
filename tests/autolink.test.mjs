@@ -45,12 +45,16 @@ function makeVault() {
 // stub in EVERY test also keeps the sibling edge-infer module off the real
 // model, so runs are fast and deterministic. The stub only answers the
 // `similar` subcommand; everything else exits 0 with no output.
-function stubBinary(pluginDataDir, { similarJson = '[]', sleepSecs = 0, markerPath = null } = {}) {
+function stubBinary(
+  pluginDataDir,
+  { similarJson = '[]', sleepSecs = 0, markerPath = null, rmPath = null } = {},
+) {
   const binDir = join(pluginDataDir, 'bin');
   mkdirSync(binDir, { recursive: true });
   const lines = ['#!/bin/sh', 'if [ "$1" = "similar" ]; then'];
   if (markerPath) lines.push(`  : > '${markerPath}'`);
   if (sleepSecs) lines.push(`  sleep ${sleepSecs}`);
+  if (rmPath) lines.push(`  rm -f '${rmPath}'`);
   lines.push(`  cat <<'JSON'`, similarJson, 'JSON', 'fi', 'exit 0');
   writeFileSync(join(binDir, 'll-search'), lines.join('\n') + '\n', { mode: 0o755 });
 }
@@ -428,6 +432,47 @@ test(
         CIRCADIAN_NOTE,
       );
       // Handled inside the module (logError), not surfaced as a module crash.
+      assert.deepEqual(readAutolinkErrors(r.pluginDataDir), []);
+    } finally {
+      r.cleanup();
+      rmSync(vault, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'autolink: source note vanishes between the execFileSync call and the re-read — no throw, no error logged',
+  { skip: SKIP },
+  () => {
+    const vault = makeVault();
+    mkdirSync(join(vault, '.vault-search'), { recursive: true });
+    writeFileSync(join(vault, '.vault-search', 'vault-index.db'), '');
+    const content = 'See [[sleep]].\n';
+    const stdin = writeStdin(vault, '0-inbox/new-note.md', content);
+    const sourcePath = join(vault, '0-inbox', 'new-note.md');
+    // The stub deletes the just-written source note as a side effect of the
+    // `similar` subcommand, so it is gone by the time the module re-reads it
+    // at line ~102 (the probe-note race from hook-errors-2026-05/06.jsonl).
+    const r = run(stdin, vault, (pd) =>
+      stubBinary(pd, {
+        similarJson: '[{"path":"3-permanent/circadian.md","score":0.9}]',
+        rmPath: sourcePath,
+      }),
+    );
+    try {
+      assert.equal(r.exitCode, 0, `stderr: ${r.stderr}`);
+      // Wikilink backlink phase ran before the file vanished.
+      assert.equal(
+        readFileSync(join(vault, '3-permanent', 'sleep.md'), 'utf8'),
+        SLEEP_NOTE + '[[new-note]]\n',
+      );
+      // Vanished source aborted the similarity phase: no reciprocal write.
+      assert.equal(
+        readFileSync(join(vault, '3-permanent', 'circadian.md'), 'utf8'),
+        CIRCADIAN_NOTE,
+      );
+      assert.ok(!existsSync(sourcePath), 'source note should still be gone');
+      // A vanished probe note is expected, not an error — nothing logged.
       assert.deepEqual(readAutolinkErrors(r.pluginDataDir), []);
     } finally {
       r.cleanup();

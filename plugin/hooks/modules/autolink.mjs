@@ -99,7 +99,13 @@ export async function runAutolink(ctx) {
     return;
   }
 
-  const currentContent = readFileSync(filePath, 'utf-8');
+  let currentContent;
+  try {
+    currentContent = readFileSync(filePath, 'utf-8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return;
+    throw e;
+  }
   const currentBody = stripFrontmatter(currentContent);
   const diskLinks = new Set(
     extractWikilinks(currentBody)
