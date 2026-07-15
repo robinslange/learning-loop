@@ -163,7 +163,8 @@ export async function run(ctx) {
         try {
           rmSync(join(dir, file), { force: true });
         } catch (err) {
-          if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.retrievalLogSweep', err);
+          if (err?.code !== 'ENOENT')
+            logError('session-start.vault-snapshot.retrievalLogSweep', err);
         }
       }
     }
@@ -192,7 +193,10 @@ export async function run(ctx) {
         (f) => /^queue\.jsonl\.bak\..+$/.test(f),
         Date.now() - HookConfig.LIBRARIAN_QUEUE_BAK_TTL_MS,
       );
-      sweepRetrievalLogs(DATA_PATHS.retrieval(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
+      sweepRetrievalLogs(
+        DATA_PATHS.retrieval(ctx.pluginData),
+        HookConfig.RETRIEVAL_LOG_KEEP_MONTHS,
+      );
     }
     const TMP_SWEEP_PATTERNS = [
       /^learning-loop-stop-nudged-/,
