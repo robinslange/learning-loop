@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.37.0
+
 ### Added
 
 - **Provenance covers the agent lifecycle.** `agent-spawn` fires on the real Task tool name, and a new SubagentStop hook emits `agent-result`, so the provenance report sees dispatch and completion, not just skill activity. The report also counts verify-skill `N/6` gate scores alongside note-verifier results, treats malformed or over-range gates (`10/6`) as flagged rather than passed, and normalizes historical enum spellings at read.
