@@ -4,6 +4,30 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Provenance covers the agent lifecycle.** `agent-spawn` fires on the real Task tool name, and a new SubagentStop hook emits `agent-result`, so the provenance report sees dispatch and completion, not just skill activity. The report also counts verify-skill `N/6` gate scores alongside note-verifier results, treats malformed or over-range gates (`10/6`) as flagged rather than passed, and normalizes historical enum spellings at read.
+- **Injection telemetry separates calibration from real traffic.** Synthetic calibration sessions are tagged, live-mode injections are logged (shadow logged, live didn't), and owner-specific topic patterns moved from code into config (`label_topics`).
+- **Mutation tests pin the security-critical paths.** Secret scrubbing, artifact verification, and the edge classifier run under mutation testing, gated in lefthook; download-binary's redirect and extraction paths are exercised under test.
+
+### Changed
+
+- **JIT injection hot path slimmed.** Episodic memory left the per-prompt path (telemetry: 0 of 7,455 gate passes carried solely by episodic; it remains available via SessionStart retrieval and the MCP tool), a prompt long enough to carry its own topic now searches alone without blending prior messages, and the injected payload carries its own directive line.
+- **`/dream` rebuilds MEMORY.md under a hard 16KB budget.** Above budget, per-type entry lists split into `_index_{feedback,project,reference}.md` with one pointer line each in a slim MEMORY.md, so the always-loaded index is never silently truncated at session start.
+- **One adversarial-content guard, referenced by all twelve agents.** The copy-pasted external-content guard is extracted to `agents-shared/adversarial-content.md`, and the four high-stakes agents (correction-analyser, inbox-organiser, literature-capturer, note-deepener) refuse to run unless dispatched by their owning skill.
+- **Data retention.** Retrieval logs prune to a 3-month window and stale librarian queue backups are reaped; the provenance dir is never touched.
+
+### Security
+
+- **One source of truth for credential scrubbing.** The ten secret-pattern regexes live in `secret-patterns.mjs`, mirrored byte-for-byte in the Rust exporter; listed-tier federation summaries are scrubbed before export, and redact-scan now recognizes Anthropic keys. Federation accepts `ws://` endpoints only inside the Tailscale CGNAT range.
+
+### Fixed
+
+- **Concurrent sessions no longer lose memory-write markers.** `appendMemoryWrite` runs its read-modify-write under an O_EXCL file lock, backed by a concurrency test verified to discriminate locked from unlocked code.
+- **Provenance dedup suppresses double-emits without collapsing fan-out.** Consecutive identical emits within 2s are dropped, while `agent-spawn`/`skill-invoke`/`agent-result` — where identical payloads are distinct parallel work — are exempt.
+- **Hook deadlines fit their stdin budgets.** Every stdin-reading hook declares a hooks.json timeout above the 3s stdin race (session-label rose to 5s to cover stdin plus the search race cap), enforced by a config regression test.
+- **Assorted hardening.** Post-search tracking normalizes array-form queries; a note vanishing between event and autolink re-read no longer throws; the memory-index size cap truncates at a line boundary instead of discarding everything; refinement-validate parses CRLF frontmatter; `buildQuery` tolerates an absent messages arg; `/rewrite` guards its episodic search behind the same availability check `/reflect` uses; `/dream` drops an unverified citation and justifies oldest-first ordering operationally.
+
 ## v1.36.0
 
 ### Changed
