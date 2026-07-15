@@ -169,10 +169,11 @@ function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
 // properly locked appendMemoryWrite serializes the two: whichever acquires
 // the marker's lock first holds it across its own delayed read, so the
 // second writer's read (whether that's A's delayed read or B's fast one)
-// always observes the first writer's completed write. 100ms comfortably
-// exceeds appendMemoryWrite's own retry budget's floor (10 retries * 20ms =
-// 180ms max wait) minus the head start below, so a correctly locked B
-// reliably outlasts A's hold rather than timing out its own lock wait.
+// always observes the first writer's completed write. The lock-wait budget
+// (9 inter-retry sleeps x 20ms = ~180ms) comfortably exceeds A's remaining
+// hold when B first contends (~60ms: the 100ms delayed read minus B's 40ms
+// head start), so a correctly locked B outlasts A's hold rather than timing
+// out its own lock wait.
 //
 // The marker is pre-seeded with an existing entry: readMarker short-circuits
 // on a missing file before ever calling readFileSync (statSync throws first),

@@ -90,9 +90,12 @@ const DUP_WINDOW_MS = 2000;
 // two subagents finishing (agent-result, whose session_id/transcript_path are
 // identical across the session). None carries a field that separates one call
 // from the next, so fingerprint dedup would collapse a real fan-out into one
-// line and undercount volume in the provenance report. Dedup still guards the
-// other event stream (common.mjs events-*.jsonl), where a repeated identical
-// payload is a genuine consecutive double-emit, not distinct concurrent work.
+// line and undercount volume in the provenance report. Both emitters
+// (common.mjs and provenance.mjs) write the SAME events-*.jsonl stream; what
+// dedup still guards is every non-exempt action on it (score, session-start,
+// verify, vault-write, ...), where a repeated identical payload is a genuine
+// consecutive double-emit, not distinct concurrent work — the live log shows
+// thousands of those against a handful of exempt-action pairs.
 const DEDUP_EXEMPT_ACTIONS = new Set(['agent-result', 'agent-spawn', 'skill-invoke']);
 
 export function appendJsonlLineDeduped(path, record, now = Date.now()) {
