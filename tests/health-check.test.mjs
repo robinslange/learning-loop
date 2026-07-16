@@ -643,7 +643,7 @@ function writeShadowLog(dir, month, entries) {
 }
 
 // Fixtures include ts at the calibration epoch so the epoch filter counts them.
-const POST_EPOCH_TS = '2026-06-12T01:00:00.000Z';
+const POST_EPOCH_TS = '2026-07-16T01:00:00.000Z';
 const shadowPass = {
   ts: POST_EPOCH_TS,
   gate: { passed: true, vault_top_score: 0.42 },
@@ -689,11 +689,11 @@ test('checkInjectionShadowGate: shadow mode with no logs stays ok (keep collecti
 
 test('checkInjectionShadowGate: nudges ready-for-review when the go-live gate passes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-ready-'));
-  const now = new Date('2026-06-12T00:00:00Z');
+  const now = new Date('2026-07-16T02:00:00Z');
   const entries = [];
   for (let i = 0; i < 25; i++) entries.push(shadowPass);
   for (let i = 0; i < 80; i++) entries.push(shadowFail);
-  writeShadowLog(dir, '2026-06', entries);
+  writeShadowLog(dir, '2026-07', entries);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
@@ -706,8 +706,8 @@ test('checkInjectionShadowGate: nudges ready-for-review when the go-live gate pa
 
 test('checkInjectionShadowGate: stays ok below the healthy-entry minimum', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-thin-'));
-  const now = new Date('2026-06-12T00:00:00Z');
-  writeShadowLog(dir, '2026-06', Array(50).fill(shadowPass));
+  const now = new Date('2026-07-16T02:00:00Z');
+  writeShadowLog(dir, '2026-07', Array(50).fill(shadowPass));
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'ok');
   assert.match(result.detail, /keep collecting/);
@@ -716,8 +716,8 @@ test('checkInjectionShadowGate: stays ok below the healthy-entry minimum', () =>
 
 test('checkInjectionShadowGate: stays ok below the pass minimum', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-fewpass-'));
-  const now = new Date('2026-06-12T00:00:00Z');
-  writeShadowLog(dir, '2026-06', [...Array(10).fill(shadowPass), ...Array(150).fill(shadowFail)]);
+  const now = new Date('2026-07-16T02:00:00Z');
+  writeShadowLog(dir, '2026-07', [...Array(10).fill(shadowPass), ...Array(150).fill(shadowFail)]);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
@@ -729,7 +729,7 @@ test('checkInjectionShadowGate: infrastructure warning when backend health below
   // infrastructure warning rather than ready-to-flip — pass rates over surviving
   // entries aren't evidence about the gate when >40% of entries errored.
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-infra-'));
-  const now = new Date('2026-06-12T00:00:00Z');
+  const now = new Date('2026-07-16T02:00:00Z');
   const entries = [
     ...Array(25).fill(shadowPass),
     ...Array(80).fill(shadowFail),
@@ -737,7 +737,7 @@ test('checkInjectionShadowGate: infrastructure warning when backend health below
     ...Array(500).fill(shadowVaultError),
     '{not json',
   ];
-  writeShadowLog(dir, '2026-06', entries);
+  writeShadowLog(dir, '2026-07', entries);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'ok', 'infrastructure problem must not emit the ready-to-flip nudge');
   assert.match(result.detail, /infrastructure/i);
@@ -750,14 +750,14 @@ test('checkInjectionShadowGate: fast-path skips and corrupt lines are excluded f
   // With 100 vault-ok entries (25 pass + 75 fail) and no backend errors,
   // the gate should see the clean 25/100 and report ready-to-flip.
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-noise-'));
-  const now = new Date('2026-06-12T00:00:00Z');
+  const now = new Date('2026-07-16T02:00:00Z');
   const entries = [
     ...Array(25).fill(shadowPass),
     ...Array(75).fill(shadowFail),
     ...Array(10).fill(shadowFastPath),
     '{not json',
   ];
-  writeShadowLog(dir, '2026-06', entries);
+  writeShadowLog(dir, '2026-07', entries);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
   assert.match(result.detail, /25\/100/);
@@ -766,9 +766,9 @@ test('checkInjectionShadowGate: fast-path skips and corrupt lines are excluded f
 
 test('checkInjectionShadowGate: combines current and previous month logs', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-months-'));
-  const now = new Date('2026-06-12T00:00:00Z');
-  writeShadowLog(dir, '2026-06', [...Array(15).fill(shadowPass), ...Array(40).fill(shadowFail)]);
-  writeShadowLog(dir, '2026-05', [...Array(10).fill(shadowPass), ...Array(40).fill(shadowFail)]);
+  const now = new Date('2026-07-16T02:00:00Z');
+  writeShadowLog(dir, '2026-07', [...Array(15).fill(shadowPass), ...Array(40).fill(shadowFail)]);
+  writeShadowLog(dir, '2026-06', [...Array(10).fill(shadowPass), ...Array(40).fill(shadowFail)]);
   // 25 passes over 105 healthy entries across the two months.
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
@@ -778,9 +778,9 @@ test('checkInjectionShadowGate: combines current and previous month logs', () =>
 
 test('checkInjectionShadowGate: snooze dismissed silences the nag when gate-ready', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-snooze-'));
-  const now = new Date('2026-06-12T00:00:00Z');
+  const now = new Date('2026-07-16T02:00:00Z');
   const entries = [...Array(25).fill(shadowPass), ...Array(80).fill(shadowFail)];
-  writeShadowLog(dir, '2026-06', entries);
+  writeShadowLog(dir, '2026-07', entries);
   // Gate-ready but nudge dismissed — should not emit the ready-for-review fail.
   const result = checkInjectionShadowGate({
     pluginData: dir,
@@ -795,13 +795,13 @@ test('checkInjectionShadowGate: snooze dismissed silences the nag when gate-read
 
 test('checkInjectionShadowGate: pre-epoch entries are filtered out', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-epoch-'));
-  const now = new Date('2026-06-12T00:00:00Z');
+  const now = new Date('2026-07-16T02:00:00Z');
   // Pre-epoch entries should not count toward the gate criteria.
   const preEpochTs = '2026-06-11T23:59:59.000Z';
   const stalePass = { ts: preEpochTs, gate: { passed: true, vault_top_score: 0.42 }, backends: {} };
   const staleFail = { ts: preEpochTs, gate: { passed: false, vault_top_score: 0.1 }, backends: {} };
   const entries = [...Array(200).fill(stalePass), ...Array(100).fill(staleFail)];
-  writeShadowLog(dir, '2026-06', entries);
+  writeShadowLog(dir, '2026-07', entries);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   // All 300 entries predate the epoch — gate sees 0 post-epoch healthy entries.
   assert.equal(result.status, 'ok');

@@ -125,18 +125,26 @@ export const HookConfig = Object.freeze({
   // above a lone single-signal #1 (1/6 = 0.167) — i.e. inject only when the
   // top hit is corroborated near the top of at least two signals.
   //
-  // 0.30 is INTENTIONALLY PERMISSIVE: every observed nonzero top score sits
-  // at or above the 0.333 floor, so against the pre-OR-mode logs this gate
-  // admits ~96% of substantive prompts — behaviorally "inject on any
-  // corroborated hit", with per-session dedupe as the real spam control. A
-  // threshold that discriminates within the nonzero distribution (nonzero
-  // p25-p50 ≈ 0.37-0.40) is deferred until post-epoch shadow data
-  // accumulates: INJECTION_CALIBRATION_EPOCH below floors what the readiness
-  // check counts, and scripts/review-shadow.mjs buckets the 0.30-0.56
-  // decision region at 0.02 so the distribution is actually resolvable.
-  // Re-calibrate from post-OR-mode logs once they accumulate
-  // (node scripts/review-shadow.mjs).
-  INJECTION_THRESHOLD: 0.3,
+  // 0.30 was INTENTIONALLY PERMISSIVE: it admitted "any corroborated hit"
+  // (>= two-strong-signals, 0.333) and deferred within-distribution
+  // discrimination until post-epoch shadow data accumulated.
+  //
+  // Recalibration (2026-07-16): the post-OR-mode data now exists. On 42,241
+  // healthy gate evaluations since the 2026-06-12 epoch, the passing-score
+  // distribution resolved to 0.32-0.60 (p50 ~0.44), and a grounded relevance
+  // study (50 injections, 10/band, LLM-judged) found top-note relevance runs
+  // 30-40% in the 0.32-0.40 band and only lifts to 50-60% at 0.45+. The
+  // 0.30 gate therefore shipped ~40% of its volume (the 0.32-0.40 bands,
+  // ~8,800 injections) at the LEAST on-topic score band — the loud, lukewarm
+  // volume that trains banner-blindness. Raising to 0.40 drops that bottom
+  // ~40% at the weakest band while keeping the corroborated core. It is the
+  // volume/noise cut, not the precision ceiling: score is a weak, non-monotonic
+  // predictor of relevance, so the real precision lift is a reranker in the JIT
+  // path (a separate lever). 0.40 sits above the two-bare-#1-signals floor
+  // (0.333): the gate now requires corroboration BEYOND two lone top hits.
+  // Re-measure with the per-rank injected-vs-used join (payload.injected_paths,
+  // added the same day) before the next move.
+  INJECTION_THRESHOLD: 0.4,
   SIMILARITY_THRESHOLD: 0.85,
   COSINE_MIN: 0.74,
   COSINE_MAX: 0.92,
@@ -152,7 +160,9 @@ export const HookConfig = Object.freeze({
 // whenever INJECTION_THRESHOLD or the fusion mode changes — the go-live
 // criteria then reset automatically to post-change data.
 // Set 2026-06-12: 0.35 -> 0.30 threshold + BM25 OR-mode for long queries.
-export const INJECTION_CALIBRATION_EPOCH = '2026-06-12T00:00:00.000Z';
+// Bumped 2026-07-16: 0.30 -> 0.40 threshold (precision cut). The readiness
+// check + review-shadow calibration now count only post-bump data.
+export const INJECTION_CALIBRATION_EPOCH = '2026-07-16T00:00:00.000Z';
 
 /**
  * Read the pre_write_fail_mode setting from a loaded config object.

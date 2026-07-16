@@ -39,16 +39,18 @@ test('ML thresholds are in [0, 1]', () => {
 test('INJECTION_THRESHOLD is calibrated to the RRF fusion-sum scale', () => {
   // ll-search fuses five signals with RRF_K=5: each contributes 1/(5+rank).
   // A lone #1 in one signal scores 1/6 ≈ 0.167; #1 in two signals 2/6 ≈ 0.333.
-  // The gate must admit a two-strong-signals match (the observed nonzero
-  // floor in the shadow logs) and reject a lone single-signal #1 — see the
-  // derivation comment in hook-config.mjs.
+  // 2026-07-16 recalibration: the gate now requires corroboration BEYOND two
+  // bare top hits — it sits ABOVE the two-strong-signals floor (2/6) to cut the
+  // 0.32-0.40 band the relevance study found least on-topic. The upper bound
+  // keeps it below the observed passing p50 (~0.44) so the corroborated core
+  // still injects. See the derivation comment in hook-config.mjs.
   assert.ok(
-    HookConfig.INJECTION_THRESHOLD <= 2 / 6,
-    'gate must not exceed the two-strong-signals floor (2/(5+1))',
+    HookConfig.INJECTION_THRESHOLD > 2 / 6,
+    'gate must exceed the two-bare-signals floor (2/(5+1)) after the precision cut',
   );
   assert.ok(
-    HookConfig.INJECTION_THRESHOLD > 1 / 6,
-    'gate must exceed a lone single-signal #1 (1/(5+1))',
+    HookConfig.INJECTION_THRESHOLD < 0.45,
+    'gate must stay below the p50 of passing scores so the corroborated core still injects',
   );
 });
 
