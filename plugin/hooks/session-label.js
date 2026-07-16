@@ -387,6 +387,9 @@ try {
     payload: {
       tokens_estimated: Math.ceil(injection.additionalContext.length / 4),
       vault_notes: injection.injectedVault.length,
+      // Full injected list (body + pointer slots, in rank order) so the
+      // injected-vs-used join can score per rank, not just the top note.
+      injected_paths: injection.injectedVault,
     },
     dedupe_filtered_count: dedupeFilteredCount,
     would_inject: scrubbedContext,

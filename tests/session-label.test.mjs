@@ -619,6 +619,14 @@ describe(
         assert.equal(pass.mode, 'live');
         assert.ok(pass.payload?.tokens_estimated > 0, 'payload size must be recorded');
         assert.ok(
+          Array.isArray(pass.payload?.injected_paths) && pass.payload.injected_paths.length > 0,
+          'the full injected note list must be recorded for the per-rank injected-vs-used join',
+        );
+        assert.ok(
+          pass.payload.injected_paths.every((e) => typeof e.path === 'string' && e.level),
+          'each injected_paths entry carries a path and its slot level',
+        );
+        assert.ok(
           (pass.would_inject || '').includes('Gamma note body'),
           'the injected context must be captured for quality review',
         );
