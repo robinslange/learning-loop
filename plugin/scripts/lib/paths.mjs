@@ -83,6 +83,9 @@ export const DATA_PATHS = {
   provenance: (pd) => join(pd, 'provenance'),
   federation: (pd) => join(pd, 'federation'),
   sessionStartCache: (pd) => join(pd, 'session-start-cache'),
+  dreamEval: (pd) => join(pd, 'dream-eval'),
+  dreamEvalProbes: (pd) => join(pd, 'dream-eval', 'probes.jsonl'),
+  dreamEvalReports: (pd) => join(pd, 'dream-eval', 'reports'),
 };
 
 export const FEDERATION_PATHS = {
