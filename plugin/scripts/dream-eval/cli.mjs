@@ -8,9 +8,24 @@ import { resolveMemoryDir } from '../lib/memory-paths.mjs';
 import { DATA_PATHS } from '../lib/paths.mjs';
 import { runControl, runSingle, runRepeated } from './run.mjs';
 import { writeReport, renderMarkdown } from './report.mjs';
-import { retrieve } from './retrieve.mjs';
+import { retrieveTwoHop } from './retrieve.mjs';
 
 const MODES = new Set(['single', 'control', 'repeated']);
+
+// Parse an `_index_*.md` split-index file in `dir` into the memory filenames it
+// lists: lines shaped `- [file.md](file.md) — description`. Returns [] if the
+// index is missing (the second hop then finds nothing and the probe is a miss,
+// which is the honest outcome).
+export function readIndexEntries(dir, indexFile) {
+  const path = `${dir}/${indexFile}`;
+  if (!existsSync(path)) return [];
+  const out = [];
+  for (const line of readFileSync(path, 'utf8').split('\n')) {
+    const m = line.match(/^\s*-\s*\[[^\]]+\]\(([^)]+\.md)\)/);
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
 
 export function parseArgs(argv) {
   const out = { mode: 'single', passes: 10, mine: false };
@@ -52,7 +67,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const invokeDream = async () => {
     throw new Error('invokeDream must be wired to an in-session /dream invocation');
   };
-  const retrieveFn = ({ question, indexText }) => retrieve({ question, indexText, pick });
+  const retrieveFn = ({ question, indexText, dir }) =>
+    retrieveTwoHop({
+      question,
+      indexText,
+      pick,
+      readIndexFile: (indexFile) => readIndexEntries(dir, indexFile),
+    });
   const readIndex = (dir) => readFileSync(`${dir}/MEMORY.md`, 'utf8');
   const workDir = DATA_PATHS.dreamEval(pd);
 

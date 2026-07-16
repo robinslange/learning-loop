@@ -6,7 +6,7 @@ async function runProbes({ dir, probes, retrieveFn, readIndex, k }) {
   const indexText = readIndex(dir);
   const rows = [];
   for (const p of probes) {
-    const retrieved = await retrieveFn({ question: p.question, indexText });
+    const retrieved = await retrieveFn({ question: p.question, indexText, dir });
     rows.push(scoreProbe(p, retrieved, k));
   }
   return aggregate(rows);
