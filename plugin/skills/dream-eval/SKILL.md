@@ -20,13 +20,15 @@ wraps /dream without changing it, and answers three questions with a number: did
 
 ## Steps
 
-1. if `probes.jsonl` is absent and `--mine` was not passed, stop and say: "no probe corpus found. run with --mine first."
-2. if `--mine`, run the probe miner (forward + reverse) and persist to probes.jsonl.
-3. run the chosen mode. the retrieval function is an in-session Task dispatch: given the question and the MEMORY.md index, pick up to 3 files to read. single mode snapshots the live dir first; control and repeated operate on clones only.
-4. write the json + markdown report under dream-eval/reports/ and show the markdown summary inline.
+1. acquire the dream lock first, before any mining or mode run, using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-acquire dream`. exit 0 means proceed. exit 1 means another /dream or dream-eval run is active (or a crashed one less than an hour old), so stop and tell the user. exit 2 means a usage or install error, report the stderr message and abort.
+2. if `probes.jsonl` is absent and `--mine` was not passed, stop and say: "no probe corpus found. run with --mine first." (release the lock before stopping, see step 6).
+3. if `--mine`, run the probe miner (forward + reverse) and persist to probes.jsonl.
+4. run the chosen mode. the retrieval function is an in-session Task dispatch: given the question and the MEMORY.md index, pick up to 3 files to read. single mode snapshots the live dir first; control and repeated operate on clones only.
+5. write the json + markdown report under dream-eval/reports/ and show the markdown summary inline.
+6. release the dream lock when done, after the report is written, always, using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-release dream`.
 
 ## Safety
 
-- shares the dream lock so the harness and /dream never run at once.
+- shares the dream lock (acquired in step 1, released in step 6) so the harness and /dream never run at once.
 - single mode mutates the live memory dir (snapshot taken first); control and repeated never touch it.
 - archive over delete.
