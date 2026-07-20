@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **`/learning-loop:dream-eval` measures whether a consolidation pass helps.** A report-only harness that wraps `/dream` without changing it and answers three questions with a number: did this pass improve retrieval (single mode, scored pre/post on the live corpus with a snapshot taken first), is `/dream` better than no consolidation at all (control mode, which forks two clones and dreams only one), and does repeated consolidation degrade the corpus (repeated mode, plotting the drift and content-survival curve over N passes). Probes are mined forward (from notes) and reverse (from memory tokens) into `probes.jsonl`; scoring reports hit-rate and MRR with a per-tier breakdown. It shares the `/dream` lock so the two never run at once, and control/repeated modes never touch the live memory dir.
+
+### Changed
+
+- **JIT injection threshold raised 0.30 → 0.40 (precision cut).** Post-OR-mode shadow data (42,241 healthy evaluations since the calibration epoch) plus an LLM-judged relevance study showed the 0.32–0.40 score band runs only 30–40% on-topic, so the old 0.30 gate shipped ~40% of its injection volume at the least-relevant band — the loud, lukewarm noise that trains banner-blindness. 0.40 drops that band while staying above the two-signal corroboration floor (0.333) and below the passing p50 (~0.44), so the corroborated core still injects. Score is a weak, non-monotonic relevance predictor; the real precision lift is a JIT-path reranker, tracked separately. The calibration epoch advances to 2026-07-16 so the readiness check and `review-shadow.mjs` measure only post-bump traffic, and the injection-threshold env default now derives from the config constant so the two can't drift.
+- **Gate-pass telemetry records the full injected note list.** The shadow record carries `injected_paths` (every body and pointer slot in rank order), so the next recalibration can score an injected-vs-used join per rank rather than only on the top note.
+
 ## v1.37.0
 
 ### Added
