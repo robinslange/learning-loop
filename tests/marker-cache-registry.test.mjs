@@ -8,7 +8,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  utimesSync,
+  readFileSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -114,36 +122,52 @@ test('dreamLockHeld: missing → false; fresh → true; old+dead-pid → false; 
 });
 
 // Runs `appendMemoryWrite(pluginData, sessionId, basename)` in a fresh child
-// process. When `delayMs` is set, the child patches `node:fs`'s readFileSync
-// via the CJS module object (createRequire) BEFORE importing marker-cache.mjs
-// — ESM named-import bindings for core modules resolve through that same
-// underlying CJS module object, so this reaches appendMemoryWrite's internal
-// call to readFileSync even though it was imported as a named ESM binding
-// (a plain `fs.readFileSync = …` on the ESM namespace throws: core-module
-// namespace objects are frozen). The FIRST read of the marker file then
-// blocks synchronously for `delayMs` before returning, widening that single
-// call's read-modify-write window so a concurrent writer is forced to
-// overlap it — deterministically, without touching production code or
-// timing two process startups against each other.
-function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
-  const delaySetup =
-    delayMs > 0
-      ? `const { createRequire } = await import('node:module');` +
-        `const fsCjs = createRequire(import.meta.url)('node:fs');` +
-        `const origRead = fsCjs.readFileSync;` +
-        `let patched = false;` +
-        `fsCjs.readFileSync = (...args) => {` +
-        `  const result = origRead(...args);` +
-        `  if (!patched && String(args[0]).includes('memory-writes')) {` +
-        `    patched = true;` +
-        `    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${delayMs});` +
-        `  }` +
-        `  return result;` +
-        `};`
-      : '';
+// process. The child patches `node:fs`'s readFileSync via the CJS module object
+// (createRequire) BEFORE importing marker-cache.mjs — ESM named-import bindings
+// for core modules resolve through that same underlying CJS module object, so
+// this reaches appendMemoryWrite's internal call to readFileSync even though it
+// was imported as a named ESM binding (a plain `fs.readFileSync = …` on the ESM
+// namespace throws: core-module namespace objects are frozen).
+//
+// On its FIRST marker read, the child drops a `<signalPrefix>-read` file (this
+// happens INSIDE appendMemoryWrite's critical section, after the lock is held)
+// and then, if `waitForBasename` is set, spins until `<waitPrefix>-read` exists
+// or `maxWaitMs` elapses. This is a file-rendezvous, not a wall-clock delay:
+// the waiter blocks on the OTHER writer's progress, not on a guessed duration,
+// so the forced overlap is independent of process-spawn and I/O timing under
+// load. The wait ceiling is a correctness backstop the locked path simply waits
+// out (see the test below), never a race the waiter can lose.
+function spawnAppend(
+  pluginData,
+  sessionId,
+  basename,
+  { signalDir, signalName, waitName, maxWaitMs = 0 } = {},
+) {
+  const hook = signalName
+    ? `const { createRequire } = await import('node:module');` +
+      `const fsCjs = createRequire(import.meta.url)('node:fs');` +
+      `const origRead = fsCjs.readFileSync;` +
+      `const sig = ${JSON.stringify(join(signalDir ?? '', signalName ?? ''))};` +
+      `const waitFile = ${JSON.stringify(waitName ? join(signalDir, waitName) : '')};` +
+      `const deadline = Date.now() + ${maxWaitMs};` +
+      `let patched = false;` +
+      `fsCjs.readFileSync = (...args) => {` +
+      `  const result = origRead(...args);` +
+      `  if (!patched && String(args[0]).includes('memory-writes')) {` +
+      `    patched = true;` +
+      `    try { fsCjs.writeFileSync(sig, '1'); } catch {}` +
+      `    if (waitFile) {` +
+      `      while (!fsCjs.existsSync(waitFile) && Date.now() < deadline) {` +
+      `        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);` +
+      `      }` +
+      `    }` +
+      `  }` +
+      `  return result;` +
+      `};`
+    : '';
   const script =
     `(async () => {` +
-    `${delaySetup}` +
+    `${hook}` +
     `const { appendMemoryWrite } = await import(${JSON.stringify(MARKER_CACHE_MODULE_URL)});` +
     `appendMemoryWrite(${JSON.stringify(pluginData)}, ${JSON.stringify(sessionId)}, ${JSON.stringify(basename)});` +
     `})();`;
@@ -160,39 +184,59 @@ function spawnAppend(pluginData, sessionId, basename, delayMs = 0) {
   });
 }
 
-// Forces the lost-update interleave deterministically: writer A's read of
-// the marker blocks for 100ms (via the readFileSync monkey-patch above)
-// before it computes its updated set and writes. Writer B, unpatched, runs
-// its own full read-modify-write in well under 100ms and finishes first.
-// An unlocked appendMemoryWrite lets A's in-flight read (captured before B
-// wrote) clobber B's write when A finally saves — B's basename is lost. A
-// properly locked appendMemoryWrite serializes the two: whichever acquires
-// the marker's lock first holds it across its own delayed read, so the
-// second writer's read (whether that's A's delayed read or B's fast one)
-// always observes the first writer's completed write. The lock-wait budget
-// (9 inter-retry sleeps x 20ms = ~180ms) comfortably exceeds A's remaining
-// hold when B first contends (~60ms: the 100ms delayed read minus B's 40ms
-// head start), so a correctly locked B outlasts A's hold rather than timing
-// out its own lock wait.
+// Forces the lost-update interleave with a file rendezvous, not a timing race,
+// so it is deterministic under arbitrary release-gate load.
 //
-// The marker is pre-seeded with an existing entry: readMarker short-circuits
-// on a missing file before ever calling readFileSync (statSync throws first),
-// so on a brand-new marker the delay hook — keyed on readFileSync — would
-// never fire and the test would pass vacuously regardless of locking.
-test("appendMemoryWrite: a slow reader and a fast writer both survive", async () => {
+// Writer A, on its first marker read (inside its critical section), signals
+// `a-read` and then blocks until `b-read` appears or a generous ceiling
+// elapses. Writer B, on its first read, signals `b-read` and returns at once.
+// We start A first and wait for `a-read` — proof A has entered the read step —
+// before starting B.
+//
+//   Locked (correct):   A holds the marker lock across its read, so B blocks at
+//     acquireLock and never reaches its own read. `b-read` never appears, so A
+//     waits out the ceiling, writes, and releases; B then acquires, reads A's
+//     completed write, and appends. Both basenames survive. The ceiling is pure
+//     slack A spends holding the lock — no contention can turn it into a loss.
+//
+//   Unlocked (broken):  B is not blocked, so it reaches its read WHILE A is
+//     still waiting; `b-read` appears, A stops waiting immediately, and both
+//     saw the pre-existing-only marker. Whichever writes second clobbers the
+//     other. The lost update is provoked every run, so the test discriminates.
+//
+// The marker is pre-seeded: readMarker short-circuits on a missing file before
+// ever calling readFileSync (statSync throws first), so on a brand-new marker
+// the read hook would never fire and the test would pass vacuously.
+test('appendMemoryWrite: two concurrent writers both survive (lock serializes them)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'll-marker-append-race-'));
+  const sig = mkdtempSync(join(tmpdir(), 'll-marker-append-sig-'));
   try {
     const path = MARKER_PATHS.memoryWrites(root, 'sess1');
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(['note-existing.md']));
 
-    const slow = spawnAppend(root, 'sess1', 'note-a.md', 100);
-    await new Promise((r) => setTimeout(r, 40)); // let the slow reader start its delayed read first
-    const fast = spawnAppend(root, 'sess1', 'note-b.md', 0);
+    // A blocks in its read until B has also read (or 3s passes); B reads and returns.
+    const a = spawnAppend(root, 'sess1', 'note-a.md', {
+      signalDir: sig,
+      signalName: 'a-read',
+      waitName: 'b-read',
+      maxWaitMs: 3000,
+    });
+    const aReadFile = join(sig, 'a-read');
+    const aReadDeadline = Date.now() + 5000;
+    while (!existsSync(aReadFile) && Date.now() < aReadDeadline) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    assert.ok(existsSync(aReadFile), 'writer A must reach its marker read before B starts');
 
-    const [a, b] = await Promise.all([slow, fast]);
-    assert.equal(a.code, 0, `slow writer should exit cleanly (stderr: ${a.stderr})`);
-    assert.equal(b.code, 0, `fast writer should exit cleanly (stderr: ${b.stderr})`);
+    const b = spawnAppend(root, 'sess1', 'note-b.md', {
+      signalDir: sig,
+      signalName: 'b-read',
+    });
+
+    const [ra, rb] = await Promise.all([a, b]);
+    assert.equal(ra.code, 0, `writer A should exit cleanly (stderr: ${ra.stderr})`);
+    assert.equal(rb.code, 0, `writer B should exit cleanly (stderr: ${rb.stderr})`);
 
     const final = JSON.parse(readFileSync(path, 'utf8'));
     assert.deepEqual(
@@ -202,5 +246,6 @@ test("appendMemoryWrite: a slow reader and a fast writer both survive", async ()
     );
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(sig, { recursive: true, force: true });
   }
 });
