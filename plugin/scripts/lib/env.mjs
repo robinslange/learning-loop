@@ -14,6 +14,7 @@
 
 import { homedir } from 'node:os';
 import { DEFAULT_OLLAMA_URL } from './defaults.mjs';
+import { HookConfig } from './hook-config.mjs';
 
 /**
  * Returns true for the canonical truthy env-var strings.
@@ -115,7 +116,7 @@ export const env = Object.freeze({
   ),
   LEARNING_LOOP_INJECTION_THRESHOLD: coerceNumber(
     process.env.LEARNING_LOOP_INJECTION_THRESHOLD,
-    0.3, // keep in sync with HookConfig.INJECTION_THRESHOLD
+    HookConfig.INJECTION_THRESHOLD,
   ),
   // Marks shadow-injection telemetry written by synthetic/calibration
   // sessions (e.g. a fixed prompt cycle run to exercise the gate) so

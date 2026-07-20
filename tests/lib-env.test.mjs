@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 
 import { isTruthy, coerceNumber, env, isOffline } from '../plugin/scripts/lib/env.mjs';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const MOD = JSON.stringify(new URL('../plugin/scripts/lib/env.mjs', import.meta.url).href);
 
@@ -122,7 +123,7 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
   assert.equal(out.status, 0, out.stderr.toString());
   const parsed = JSON.parse(out.stdout.toString());
   assert.equal(parsed.debug, false);
-  assert.equal(parsed.threshold, 0.3);
+  assert.equal(parsed.threshold, HookConfig.INJECTION_THRESHOLD);
   assert.equal(parsed.raceCap, 1500);
   assert.equal(parsed.ollama, 'http://localhost:11434');
   assert.equal(parsed.model, null);
