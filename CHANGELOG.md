@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.38.0
+
 ### Added
 
 - **`/learning-loop:dream-eval` measures whether a consolidation pass helps.** A report-only harness that wraps `/dream` without changing it and answers three questions with a number: did this pass improve retrieval (single mode, scored pre/post on the live corpus with a snapshot taken first), is `/dream` better than no consolidation at all (control mode, which forks two clones and dreams only one), and does repeated consolidation degrade the corpus (repeated mode, plotting the drift and content-survival curve over N passes). Probes are mined forward (from notes) and reverse (from memory tokens) into `probes.jsonl`; scoring reports hit-rate and MRR with a per-tier breakdown. It shares the `/dream` lock so the two never run at once, and control/repeated modes never touch the live memory dir.
