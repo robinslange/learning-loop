@@ -63,7 +63,13 @@ export function appendMemoryWrite(pluginData, sessionId, basename) {
     // writeMarker's own mkdir, this one has to happen before the lock is
     // even acquired.
     mkdirSync(dirname(path), { recursive: true });
-    withLock(path, { retries: 10, retryDelayMs: 20 }, () => {
+    // Generous lock-wait budget (~780ms) rather than ~180ms: the critical
+    // section is a whole-file read-modify-write, and when several sessions'
+    // PostToolUse hooks contend on one machine the holder's own syscalls can be
+    // starved past a short budget. A loser that exhausts its budget drops its
+    // write silently (fire-and-forget), which is exactly the lost update this
+    // lock exists to prevent — so the budget must outlast a starved holder.
+    withLock(path, { retries: 40, retryDelayMs: 20 }, () => {
       const existing = readMarker(path, { ttlMs: Infinity });
       const set = new Set(Array.isArray(existing) ? existing : []);
       if (set.has(basename)) return;

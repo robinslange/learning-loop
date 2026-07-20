@@ -13,6 +13,10 @@ All notable changes to this project are documented here. The format is based on 
 - **JIT injection threshold raised 0.30 → 0.40 (precision cut).** Post-OR-mode shadow data (42,241 healthy evaluations since the calibration epoch) plus an LLM-judged relevance study showed the 0.32–0.40 score band runs only 30–40% on-topic, so the old 0.30 gate shipped ~40% of its injection volume at the least-relevant band — the loud, lukewarm noise that trains banner-blindness. 0.40 drops that band while staying above the two-signal corroboration floor (0.333) and below the passing p50 (~0.44), so the corroborated core still injects. Score is a weak, non-monotonic relevance predictor; the real precision lift is a JIT-path reranker, tracked separately. The calibration epoch advances to 2026-07-16 so the readiness check and `review-shadow.mjs` measure only post-bump traffic, and the injection-threshold env default now derives from the config constant so the two can't drift.
 - **Gate-pass telemetry records the full injected note list.** The shadow record carries `injected_paths` (every body and pointer slot in rank order), so the next recalibration can score an injected-vs-used join per rank rather than only on the top note.
 
+### Fixed
+
+- **Concurrent memory-write markers survive heavy contention.** `appendMemoryWrite`'s lock-wait budget rose from ~180ms to ~780ms. Because the append is fire-and-forget, a writer that exhausted the shorter budget dropped its basename silently — the exact lost update the lock exists to prevent — and when several sessions' PostToolUse hooks contend on one machine the lock holder's own syscalls can be starved past a short budget.
+
 ## v1.37.0
 
 ### Added
