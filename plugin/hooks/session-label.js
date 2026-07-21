@@ -16,7 +16,7 @@ import {
 } from './lib/common.mjs';
 import {
   buildInjection,
-  buildQuery,
+  buildQueryParts,
   emitHookOutput,
   runBackendsWithRaceCap,
   scrubSecrets,
@@ -308,7 +308,11 @@ try {
     process.exit(0);
   }
 
-  const query = buildQuery({ prompt, messages, soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS });
+  const { query, soloQuery, padded } = buildQueryParts({
+    prompt,
+    messages,
+    soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS,
+  });
 
   const vaultRoot = resolveVaultPath();
   if (!vaultRoot) {
@@ -318,14 +322,25 @@ try {
   const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
 
   const raceCapMs = env.LEARNING_LOOP_INJECTION_RACE_CAP_MS;
-  const results = await runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs });
+  const results = await runBackendsWithRaceCap({ query, soloQuery, vaultDbPath, raceCapMs });
 
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
+  // Counterfactual for the STEP-2 thin-continuation gate (log-only, no
+  // suppression yet): on a padded query, did the injection score on the
+  // prompt's own words, or only on the borrowed prior-message context? When
+  // padded and the prompt alone would NOT have cleared the gate, the padding
+  // was load-bearing — the candidate suppression target.
+  const soloTop = padded ? results.vaultSolo?.hits?.[0]?.score || 0 : vaultTop;
 
   // Threshold cascade: env (if set) > config > HookConfig default.
   const gateThreshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
     ? env.LEARNING_LOOP_INJECTION_THRESHOLD
     : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
+  // Padding is load-bearing when the padded query cleared the gate but the
+  // prompt alone would not have. STEP 2 will suppress these; for now it is
+  // recorded on gate-pass records only (a suppression target is a note that
+  // passed).
+  const paddingLoadBearing = padded && vaultTop >= gateThreshold && soloTop < gateThreshold;
   if (vaultTop < gateThreshold) {
     logShadow({
       type: 'gate-fail-below-threshold',
@@ -364,7 +379,12 @@ try {
   if (!injection) {
     logShadow({
       type: 'gate-pass-no-payload',
-      gate: { passed: true },
+      gate: {
+        passed: true,
+        padded,
+        solo_top_score: soloTop,
+        padding_load_bearing: paddingLoadBearing,
+      },
       backends: summarizeBackends(results),
       payload: null,
       dedupe_filtered_count: dedupeFilteredCount,
@@ -382,7 +402,13 @@ try {
   logShadow({
     type: 'gate-pass-payload',
     mode,
-    gate: { passed: true, vault_top_score: vaultTop },
+    gate: {
+      passed: true,
+      vault_top_score: vaultTop,
+      padded,
+      solo_top_score: soloTop,
+      padding_load_bearing: paddingLoadBearing,
+    },
     backends: summarizeBackends(results),
     payload: {
       tokens_estimated: Math.ceil(injection.additionalContext.length / 4),

@@ -32,13 +32,24 @@ function truncateAtSentenceBoundary(text, maxTokens) {
 // blends in the last two prior messages, since it likely can't stand on its
 // own (e.g. "fix the flaky one" needs the conversation to know what "the
 // flaky one" refers to).
-export function buildQuery({ prompt, messages = [], soloMinChars }) {
+// The retrieval query, plus the prompt-alone variant and whether prior-message
+// context was blended in. `padded` is true exactly when the prompt was short
+// enough to fall back to blending priors; in that case `soloQuery` (the prompt
+// head alone) lets the caller run a second retrieval and ask whether the
+// injection scored on the prompt's own words or only on the borrowed context.
+export function buildQueryParts({ prompt, messages = [], soloMinChars }) {
   const head = (prompt || '').slice(0, HookConfig.QUERY_SLICE_CHARS);
-  if ((prompt || '').trim().length >= soloMinChars) return head;
+  if ((prompt || '').trim().length >= soloMinChars) {
+    return { query: head, soloQuery: head, padded: false };
+  }
   const prior = messages
     .slice(-3, -1)
     .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
-  return [head, ...prior].join(' ');
+  return { query: [head, ...prior].join(' '), soloQuery: head, padded: true };
+}
+
+export function buildQuery(args) {
+  return buildQueryParts(args).query;
 }
 
 const DIRECTIVE =
@@ -153,7 +164,19 @@ function parseVault(result) {
   }
 }
 
-export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _spawnFn }) {
+// soloQuery, when given AND different from query, runs a second concurrent
+// retrieval on the prompt alone under the SAME race-cap (~250ms each warm, so
+// two in parallel stay well inside the cap). Its top score tells the caller
+// whether a padded-query injection scored on the prompt's own words or only on
+// the borrowed prior-message context. Omit it (or pass it equal to query) and
+// the function behaves exactly as before: one spawn, `{ vault }` only.
+export async function runBackendsWithRaceCap({
+  query,
+  soloQuery,
+  vaultDbPath,
+  raceCapMs,
+  _spawnFn,
+}) {
   const spawnFn = _spawnFn || defaultSpawn;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), raceCapMs);
@@ -163,18 +186,19 @@ export async function runBackendsWithRaceCap({ query, vaultDbPath, raceCapMs, _s
   const llCmd = llBinary ? llBinary.bin : 'll-search';
   const llEnv = llBinary ? ortSpawnEnv(llBinary.binDir) : undefined;
 
-  const [result] = await Promise.allSettled([
-    spawnSearch(
-      spawnFn,
-      llCmd,
-      ['query', '--top', '5', vaultDbPath, query],
-      controller.signal,
-      llEnv,
-    ),
-  ]);
+  const search = (q) =>
+    spawnSearch(spawnFn, llCmd, ['query', '--top', '5', vaultDbPath, q], controller.signal, llEnv);
+
+  const runSolo = soloQuery && soloQuery !== query;
+  const settled = await Promise.allSettled(
+    runSolo ? [search(query), search(soloQuery)] : [search(query)],
+  );
   clearTimeout(timer);
 
-  const vault =
-    result.status === 'fulfilled' ? parseVault(result.value) : { hits: [], error: 'rejected' };
-  return { vault };
+  const toVault = (r) =>
+    r?.status === 'fulfilled' ? parseVault(r.value) : { hits: [], error: 'rejected' };
+
+  const out = { vault: toVault(settled[0]) };
+  if (runSolo) out.vaultSolo = toVault(settled[1]);
+  return out;
 }

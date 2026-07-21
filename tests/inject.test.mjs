@@ -7,6 +7,7 @@ import {
   scrubSecrets,
   buildInjection,
   buildQuery,
+  buildQueryParts,
   emitHookOutput,
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
@@ -253,7 +254,9 @@ describe('buildInjection', () => {
       vaultHits.push({ title: `Related ${i}`, path: `r${i}.md`, body: 'x', score: 0.5 - i * 0.01 });
     }
     const result = buildInjection({ vaultHits, query: 'test', alreadyInjected: new Map() });
-    const pointerPaths = result.injectedVault.filter((v) => v.level === 'pointer').map((v) => v.path);
+    const pointerPaths = result.injectedVault
+      .filter((v) => v.level === 'pointer')
+      .map((v) => v.path);
     assert.deepEqual(pointerPaths, ['r0.md', 'r1.md', 'r2.md', 'r3.md']);
     assert.ok(!result.additionalContext.includes('Related 4'), '5th related note must be dropped');
   });
@@ -288,7 +291,11 @@ describe('truncateAtSentenceBoundary (via buildInjection)', () => {
     }
     const body = sentences.join(' ');
     const bodySection = bodySectionFor(body);
-    assert.match(bodySection, /[.!?]$/, 'must end exactly at a sentence boundary, no trailing space');
+    assert.match(
+      bodySection,
+      /[.!?]$/,
+      'must end exactly at a sentence boundary, no trailing space',
+    );
   });
 
   it('falls back to the last space when no sentence boundary exists under the limit', () => {
@@ -350,7 +357,10 @@ describe('buildQuery', () => {
   it('blends only the two messages immediately before the last one', () => {
     const messages = ['too old to include', 'second to last', 'last before prompt', 'PROMPT'];
     const q = buildQuery({ prompt: 'short', messages, soloMinChars: 80 });
-    assert.ok(!q.includes('too old to include'), 'must not include messages older than the last two');
+    assert.ok(
+      !q.includes('too old to include'),
+      'must not include messages older than the last two',
+    );
     assert.ok(q.includes('second to last'));
     assert.ok(q.includes('last before prompt'));
   });
@@ -358,6 +368,31 @@ describe('buildQuery', () => {
   it('a short prompt with no messages returns the prompt head, does not throw', () => {
     assert.equal(buildQuery({ prompt: 'short', messages: undefined, soloMinChars: 80 }), 'short');
     assert.equal(buildQuery({ prompt: 'short', soloMinChars: 80 }), 'short');
+  });
+});
+
+describe('buildQueryParts', () => {
+  const messages = ['prior context about GraphQL', 'and websockets', 'PROMPT'];
+
+  it('long prompt: not padded, soloQuery equals query', () => {
+    const longPrompt = 'p'.repeat(120);
+    const parts = buildQueryParts({ prompt: longPrompt, messages, soloMinChars: 80 });
+    assert.equal(parts.padded, false);
+    assert.equal(parts.query, parts.soloQuery);
+    assert.ok(!parts.query.includes('GraphQL'), 'long prompt must not blend priors');
+  });
+
+  it('short prompt: padded true, query blends priors, soloQuery is the prompt alone', () => {
+    const parts = buildQueryParts({ prompt: 'fix the flaky one', messages, soloMinChars: 80 });
+    assert.equal(parts.padded, true);
+    assert.ok(parts.query.includes('GraphQL'), 'padded query blends prior context');
+    assert.equal(parts.soloQuery, 'fix the flaky one');
+    assert.ok(!parts.soloQuery.includes('GraphQL'), 'soloQuery must be the prompt alone');
+  });
+
+  it('buildQuery stays a thin wrapper returning parts.query', () => {
+    const args = { prompt: 'short', messages, soloMinChars: 80 };
+    assert.equal(buildQuery(args), buildQueryParts(args).query);
   });
 });
 
@@ -440,6 +475,95 @@ describe('runBackendsWithRaceCap vault-only', () => {
 
     assert.equal(spawnCount, 1, 'only the vault backend should be spawned');
     assert.deepEqual(Object.keys(results), ['vault']);
+  });
+
+  it('soloQuery spawns a second concurrent search and returns vaultSolo', async () => {
+    // The query string is the last spawn arg; score each query differently so
+    // the padded vs solo results are distinguishable.
+    const scoreFor = (q) => (q === 'padded blended query' ? 0.6 : 0.2);
+    let spawnCount = 0;
+    const seenQueries = [];
+    const mockSpawn = (_cmd, args) => {
+      spawnCount++;
+      const q = args[args.length - 1];
+      seenQueries.push(q);
+      const json = JSON.stringify([{ title: 'T', path: 't.md', body: 'b', score: scoreFor(q) }]);
+      const dataCallbacks = [];
+      const closeCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => {
+          child.killed = true;
+        },
+        stdout: {
+          on: (evt, cb) => {
+            if (evt === 'data') dataCallbacks.push(cb);
+          },
+        },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      setTimeout(() => {
+        for (const cb of dataCallbacks) cb(json);
+        for (const cb of closeCallbacks) cb(0);
+      }, 5);
+      return child;
+    };
+
+    const results = await runBackendsWithRaceCap({
+      query: 'padded blended query',
+      soloQuery: 'prompt alone',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(spawnCount, 2, 'padded + solo queries each spawn a search');
+    assert.deepEqual(new Set(seenQueries), new Set(['padded blended query', 'prompt alone']));
+    assert.equal(results.vault.hits[0].score, 0.6, 'vault carries the padded result');
+    assert.equal(results.vaultSolo.hits[0].score, 0.2, 'vaultSolo carries the prompt-alone result');
+  });
+
+  it('soloQuery equal to query does not spawn a second search', async () => {
+    let spawnCount = 0;
+    const mockSpawn = () => {
+      spawnCount++;
+      const dataCallbacks = [];
+      const closeCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => {
+          child.killed = true;
+        },
+        stdout: {
+          on: (evt, cb) => {
+            if (evt === 'data') dataCallbacks.push(cb);
+          },
+        },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      setTimeout(() => {
+        for (const cb of dataCallbacks) cb('[]');
+        for (const cb of closeCallbacks) cb(0);
+      }, 5);
+      return child;
+    };
+
+    const results = await runBackendsWithRaceCap({
+      query: 'same',
+      soloQuery: 'same',
+      vaultDbPath: '/nonexistent',
+      raceCapMs: 2000,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(spawnCount, 1, 'identical solo query must not add a spawn');
+    assert.deepEqual(Object.keys(results), ['vault'], 'no vaultSolo when solo == padded');
   });
 
   function makeMockSpawn({ stdout = '', stderr = '', exitCode = 0, errorEvent = null }) {
