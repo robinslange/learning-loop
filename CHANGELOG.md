@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Injection precision is measurable per rank.** New `injection-precision.mjs` joins the ranked `injected_paths` in each gate-pass record against the notes a session actually used, keyed by `(session_id, path)`, and reports precision per rank (0 = body, 1–4 = pointer) and per level. The used side unions two signals: `/reflect`'s `note-usage` events (reflect-gated, model-judged) and `vault-edit`/`vault-write` provenance (un-gated — every session that edits a note emits them), which widens the join past the `/reflect` gate structurally. It counts each `(session, path, rank)` once rather than once per burst, so a chatty session that re-injects the same notes can't inflate the denominator, and it prints its own denominators plus a thin-sample gate so a starved join announces itself instead of reading as a precision estimate.
+
+### Changed
+
+- **Gate-pass telemetry records two injection counterfactuals, log-only.** Alongside each gate-pass the injector now logs what two candidate precision fixes _would_ do, without acting on either, so both can be proven on real traffic before they ship. (1) The thin-continuation signal: on a short prompt whose query blends prior-message context, a second concurrent prompt-alone retrieval records `solo_top_score` and `padding_load_bearing` (the padded query cleared the gate but the prompt alone would not have) — the candidate for suppression, since ~96% of gate-passes ride the padding branch and length alone can't tell a thin continuation from a real short prompt. (2) The reranker: on gate-pass the injector runs the MiniLM cross-encoder `rerank` subcommand (which the JIT path otherwise never invokes) under its own 1200ms timeout and records `rerank_order` / `rerank_top_path` / `rerank_moved_top`, so the injected-vs-used join can later ask whether reranking lifts rank-0 precision. Injection still proceeds in fusion order and the gate still keys off the fusion score; the rerank logits are a different scale and are logged, never gated on.
+
 ## v1.38.0
 
 ### Added
