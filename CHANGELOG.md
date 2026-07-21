@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.39.0
+
 ### Added
 
 - **Injection precision is measurable per rank.** New `injection-precision.mjs` joins the ranked `injected_paths` in each gate-pass record against the notes a session actually used, keyed by `(session_id, path)`, and reports precision per rank (0 = body, 1–4 = pointer) and per level. The used side unions two signals: `/reflect`'s `note-usage` events (reflect-gated, model-judged) and `vault-edit`/`vault-write` provenance (un-gated — every session that edits a note emits them), which widens the join past the `/reflect` gate structurally. It counts each `(session, path, rank)` once rather than once per burst, so a chatty session that re-injects the same notes can't inflate the denominator, and it prints its own denominators plus a thin-sample gate so a starved join announces itself instead of reading as a precision estimate.
