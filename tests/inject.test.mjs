@@ -9,6 +9,7 @@ import {
   buildQuery,
   buildQueryParts,
   emitHookOutput,
+  rerankCandidates,
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
@@ -725,5 +726,105 @@ describe('runBackendsWithRaceCap zombie kill', () => {
     });
 
     assert.equal(signals['ll-search'], 'SIGTERM', 'll-search should be killed with SIGTERM');
+  });
+});
+
+describe('rerankCandidates', () => {
+  function spawnReturning(json, { exitCode = 0 } = {}) {
+    return (_cmd, args) => {
+      const dataCallbacks = [];
+      const closeCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => {
+          child.killed = true;
+        },
+        stdout: {
+          on: (evt, cb) => {
+            if (evt === 'data') dataCallbacks.push(cb);
+          },
+        },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+        _args: args,
+      };
+      setTimeout(() => {
+        for (const cb of dataCallbacks) cb(json);
+        for (const cb of closeCallbacks) cb(exitCode);
+      }, 5);
+      return child;
+    };
+  }
+
+  it('invokes the rerank subcommand and returns hits in rerank order', async () => {
+    let seenArgs = null;
+    const json = JSON.stringify([
+      { index: 3, score: 3.6, path: 'a.md' },
+      { index: 0, score: 1.6, path: 'b.md' },
+    ]);
+    const mockSpawn = (cmd, args, opts) => {
+      seenArgs = args;
+      return spawnReturning(json)(cmd, args, opts);
+    };
+
+    const out = await rerankCandidates({
+      query: 'graphql auth',
+      vaultDbPath: '/db',
+      topN: 5,
+      candidates: 20,
+      timeoutMs: 2000,
+      _spawnFn: mockSpawn,
+    });
+
+    assert.equal(seenArgs[0], 'rerank', 'first arg is the rerank subcommand');
+    assert.deepEqual(seenArgs.slice(1, 3), ['/db', 'graphql auth'], 'db then query');
+    assert.ok(seenArgs.includes('--candidates') && seenArgs.includes('20'));
+    assert.deepEqual(
+      out.hits.map((h) => h.path),
+      ['a.md', 'b.md'],
+    );
+  });
+
+  it('a rerank timeout resolves to empty hits with an error, never throws', async () => {
+    // A spawn that never fires close: the internal timeout must abort + resolve.
+    const hangingSpawn = () => {
+      const closeCallbacks = [];
+      const child = {
+        killed: false,
+        kill: () => {
+          child.killed = true;
+          for (const cb of closeCallbacks) cb(143);
+        },
+        stdout: { on: () => {} },
+        stderr: { on: () => {} },
+        on: (evt, cb) => {
+          if (evt === 'close') closeCallbacks.push(cb);
+        },
+      };
+      return child;
+    };
+
+    const out = await rerankCandidates({
+      query: 'q',
+      vaultDbPath: '/db',
+      timeoutMs: 20,
+      _spawnFn: hangingSpawn,
+    });
+
+    assert.deepEqual(out.hits, [], 'timeout yields no hits');
+    assert.ok(out.error, 'timeout surfaces an error, not a throw');
+  });
+
+  it('malformed rerank output yields a parse_error, not a throw', async () => {
+    const out = await rerankCandidates({
+      query: 'q',
+      vaultDbPath: '/db',
+      timeoutMs: 2000,
+      _spawnFn: spawnReturning('not json'),
+    });
+    assert.deepEqual(out.hits, []);
+    assert.equal(out.error, 'parse_error');
   });
 });

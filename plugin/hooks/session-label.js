@@ -18,6 +18,7 @@ import {
   buildInjection,
   buildQueryParts,
   emitHookOutput,
+  rerankCandidates,
   runBackendsWithRaceCap,
   scrubSecrets,
 } from './lib/inject.mjs';
@@ -354,6 +355,39 @@ try {
     process.exit(0);
   }
 
+  // STEP 3 rerank counterfactual (log-only, no reordering yet): the plain
+  // `query` path returns raw RRF fusion order; the vault says the top slot is
+  // best only a third of the time and the reranker — a MiniLM cross-encoder
+  // ll-search ships but the JIT path never calls — is the real lever. Run it
+  // here on gate-pass only (we only care about reordering notes we would
+  // inject) and record what it WOULD do, so injection-precision.mjs can later
+  // ask whether reranking lifts rank-0 precision before we commit to reordering.
+  // Fusion-order injection below is unchanged. Rerank score is cross-encoder
+  // logits on a different scale from the RRF gate — logged, never gated on.
+  const fusionTopPath = results.vault?.hits?.[0]?.path || null;
+  let rerankInfo = null;
+  try {
+    const reranked = await rerankCandidates({
+      query,
+      vaultDbPath,
+      candidates: HookConfig.INJECTION_RERANK_CANDIDATES,
+      timeoutMs: HookConfig.INJECTION_RERANK_TIMEOUT_MS,
+    });
+    if (reranked.hits?.length) {
+      const rerankOrder = reranked.hits.map((h) => h.path);
+      rerankInfo = {
+        rerank_top_path: rerankOrder[0] || null,
+        rerank_order: rerankOrder,
+        rerank_moved_top: rerankOrder[0] !== fusionTopPath,
+        rerank_latency_ms: reranked.latency_ms ?? null,
+      };
+    } else {
+      rerankInfo = { rerank_error: reranked.error || 'no_hits' };
+    }
+  } catch (err) {
+    rerankInfo = { rerank_error: err?.message || String(err) };
+  }
+
   const alreadyInjected = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
   const enrichedVaultHits = (results.vault?.hits || [])
@@ -385,6 +419,7 @@ try {
         solo_top_score: soloTop,
         padding_load_bearing: paddingLoadBearing,
       },
+      rerank: rerankInfo,
       backends: summarizeBackends(results),
       payload: null,
       dedupe_filtered_count: dedupeFilteredCount,
@@ -409,6 +444,7 @@ try {
       solo_top_score: soloTop,
       padding_load_bearing: paddingLoadBearing,
     },
+    rerank: rerankInfo,
     backends: summarizeBackends(results),
     payload: {
       tokens_estimated: Math.ceil(injection.additionalContext.length / 4),

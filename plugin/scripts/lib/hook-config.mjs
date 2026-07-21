@@ -29,6 +29,12 @@ export const HookConfig = Object.freeze({
   POST_TOOL_TIMEOUT_MS: 5000,
   PROVENANCE_TIMEOUT_MS: 3000,
   INJECTION_RACE_CAP_MS: 1500,
+  // Rerank runs AFTER fusion (it needs the gate to have passed) and is strictly
+  // slower (~750ms warm at 20 candidates, measured), so it gets its own timeout
+  // rather than sharing the fusion race-cap. Log-only today: a timeout drops the
+  // rerank telemetry for that prompt, injection still proceeds in fusion order.
+  INJECTION_RERANK_TIMEOUT_MS: 1200,
+  INJECTION_RERANK_CANDIDATES: 20,
   DEDUPE_WINDOW_MS: 180_000,
   // Cutoff for vault-snapshot's stale per-session artifact sweeps (three
   // targets: retrieval/session-dedupe entries, plugin-data markers/, legacy
