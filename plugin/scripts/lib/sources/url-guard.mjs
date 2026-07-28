@@ -6,7 +6,9 @@
 // note bodies). A URL reaching either can be attacker-authored: note content
 // arrives via /literature <URL>, /ingest repo, and clipped pages.
 //
-// Scheme allowlist + literal-IP range check. DNS rebinding is NOT defended
+// Scheme allowlist + literal-IP range check, applied to the origin AND to every
+// redirect hop via fetchGuarded — validating only the origin is not a guard, and
+// both callers now drive the same loop. DNS rebinding is NOT defended
 // here: resolving the host and checking the address still races the kernel's
 // own resolution at connect time. The honest mitigation is that fetch results
 // are treated as untrusted data downstream, not that the host is proven safe.
@@ -46,11 +48,22 @@ function isPrivateIPv6(host) {
   if (h === '::1' || h === '::') return true;
   if (h.startsWith('fc') || h.startsWith('fd')) return true; // unique-local
   if (h.startsWith('fe80')) return true; // link-local
-  // IPv4-mapped (::ffff:127.0.0.1) — check the embedded v4.
-  const m = /^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/.exec(h);
-  if (m) {
-    const v4 = parseIPv4(m[1]);
-    return v4 ? isPrivateIPv4(v4) : true;
+  // IPv4-mapped. Both spellings are the SAME address and must not be two cases:
+  // new URL() rewrites '[::ffff:127.0.0.1]' to its hex form '[::ffff:7f00:1]', so
+  // a guard matching only the dotted-quad spelling passes loopback and IMDS
+  // straight through (executed: fetch('http://[::ffff:7f00:1]:p/') reaches
+  // 127.0.0.1). Pull the embedded v4 out of whichever form arrived, then apply
+  // the one v4 rule.
+  const mapped = /^::ffff:(.+)$/.exec(h);
+  if (mapped) {
+    const dotted = parseIPv4(mapped[1]);
+    if (dotted) return isPrivateIPv4(dotted);
+    const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(mapped[1]);
+    if (hex) {
+      const n = (parseInt(hex[1], 16) << 16) | parseInt(hex[2], 16);
+      return isPrivateIPv4([(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255]);
+    }
+    return true; // an ::ffff: form we cannot decompose is not one we should trust
   }
   return false;
 }
@@ -104,4 +117,38 @@ export function checkRedirect(location, base) {
   }
   const r = checkFetchUrl(abs);
   return r.ok ? r : { ok: false, reason: `redirect_${r.reason}` };
+}
+
+export const MAX_REDIRECTS = 5;
+
+/**
+ * Fetch with every hop validated. `redirect: 'follow'` makes checkFetchUrl a
+ * check on the ORIGIN only — a public host 302-ing into loopback or IMDS walks
+ * straight past it (executed: a 302 into 127.0.0.1 returned the loopback body
+ * through the source gateway). Guarding one entry point and not the other is
+ * how that happened, so both now drive this loop.
+ *
+ * @param {string} url
+ * @param {(u: string) => Promise<Response>} doFetch — issues ONE hop, must use
+ *   `redirect: 'manual'`; owns its own headers/timeout.
+ * @returns {Promise<{ok:true, res:Response, url:string} | {ok:false, reason:string}>}
+ */
+export async function fetchGuarded(url, doFetch) {
+  const guard = checkFetchUrl(url);
+  if (!guard.ok) return { ok: false, reason: guard.reason };
+  let current = guard.url.href;
+  for (let hop = 0; ; hop++) {
+    const res = await doFetch(current);
+    // Treat as a redirect only on an explicit 3xx WITH a Location header. A
+    // response lacking status/headers (a stubbed fetch) is terminal, not a
+    // redirect — defaulting the other way spins the loop.
+    const status = typeof res.status === 'number' ? res.status : 200;
+    if (status < 300 || status >= 400) return { ok: true, res, url: current };
+    const location = res.headers?.get?.('location');
+    if (!location) return { ok: true, res, url: current };
+    if (hop >= MAX_REDIRECTS) return { ok: false, reason: 'too_many_redirects' };
+    const hopCheck = checkRedirect(location, current);
+    if (!hopCheck.ok) return { ok: false, reason: hopCheck.reason };
+    current = hopCheck.url.href;
+  }
 }

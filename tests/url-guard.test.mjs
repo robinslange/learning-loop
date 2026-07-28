@@ -6,7 +6,12 @@
 // scraped out of (attacker-authorable) note bodies.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { checkFetchUrl, checkRedirect } from '../plugin/scripts/lib/sources/url-guard.mjs';
+import {
+  checkFetchUrl,
+  checkRedirect,
+  fetchGuarded,
+} from '../plugin/scripts/lib/sources/url-guard.mjs';
+import { fetchText } from '../plugin/scripts/librarian/research/fetch.mjs';
 import { runGateway } from '../plugin/bin/source-gateway.mjs';
 
 describe('checkFetchUrl', () => {
@@ -22,6 +27,16 @@ describe('checkFetchUrl', () => {
     ['http://0.0.0.0/', 'host_private_ip'],
     ['http://100.64.0.1/', 'host_private_ip'],
     ['http://foo.internal/x', 'host_loopback'],
+    // IPv4-mapped IPv6, BOTH spellings. new URL() rewrites the dotted-quad form
+    // into hex, so a guard that matched only '::ffff:127.0.0.1' let
+    // '::ffff:7f00:1' through — and that is the form it actually sees. Verified
+    // reachable: fetch('http://[::ffff:7f00:1]:p/') hits 127.0.0.1.
+    ['http://[::ffff:127.0.0.1]/', 'host_private_ip'],
+    ['http://[::ffff:7f00:1]/', 'host_private_ip'],
+    ['http://[::ffff:169.254.169.254]/', 'host_private_ip'],
+    ['http://[::ffff:a9fe:a9fe]/', 'host_private_ip'],
+    ['http://[::ffff:192.168.1.1]/', 'host_private_ip'],
+    ['http://[::ffff:c0a8:101]/', 'host_private_ip'],
   ];
   for (const [url, reason] of blocked) {
     it(`blocks ${url}`, () => {
@@ -52,6 +67,9 @@ describe('checkFetchUrl', () => {
       'https://sub.domain.co.nz/x?y=1#z',
       'https://172.32.0.1/', // just outside 172.16/12
       'https://11.0.0.1/', // just outside 10/8
+      'http://[::ffff:8.8.8.8]/', // mapped, but public — must not over-block
+      'http://[::ffff:808:808]/', // same address, hex spelling
+      'http://[2001:4860:4860::8888]/',
     ]) {
       assert.equal(checkFetchUrl(u).ok, true, `${u} must be allowed`);
     }
@@ -165,5 +183,111 @@ describe('source-gateway fetch verb', () => {
     const out = await runGateway(['fetch', '--url', 'https://example.com/a'], deps);
     assert.equal(out.doc.ok, true);
     assert.equal(out.source_used, 'test-source');
+  });
+});
+
+// A guard applied to the ORIGIN only is not a guard: `redirect: 'follow'` lets a
+// public host 302 into loopback or IMDS behind a clean-looking URL. This was
+// live on the gateway path (fetch-source -> fetchText), proven by a 302 into
+// 127.0.0.1 returning the loopback body. fetchGuarded is the single hop loop
+// both entry points now drive.
+describe('fetchGuarded — every hop, not just the origin', () => {
+  const res = (status, location) => ({
+    ok: true,
+    status,
+    headers: { get: (k) => (k.toLowerCase() === 'location' ? location : null) },
+    text: async () => 'BODY',
+  });
+
+  it('blocks a public origin that redirects into loopback', async () => {
+    const hops = [];
+    const out = await fetchGuarded('https://public.example.com/a', (u) => {
+      hops.push(u);
+      return Promise.resolve(res(302, 'http://127.0.0.1:8791/secret'));
+    });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'redirect_host_private_ip');
+    assert.deepEqual(hops, ['https://public.example.com/a'], 'must not fetch the loopback hop');
+  });
+
+  it('blocks a redirect into IMDS, including the mapped-IPv6 spelling', async () => {
+    for (const target of ['http://169.254.169.254/latest/meta-data/', 'http://[::ffff:a9fe:a9fe]/']) {
+      const out = await fetchGuarded('https://public.example.com/a', () =>
+        Promise.resolve(res(302, target)),
+      );
+      assert.equal(out.ok, false, `${target} must be blocked`);
+      assert.equal(out.reason, 'redirect_host_private_ip');
+    }
+  });
+
+  it('blocks a private hop reached only on the second redirect', async () => {
+    const chain = ['https://b.example.com/', 'http://10.0.0.5/'];
+    let i = 0;
+    const out = await fetchGuarded('https://a.example.com/', () =>
+      Promise.resolve(res(302, chain[i++])),
+    );
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'redirect_host_private_ip');
+  });
+
+  it('follows public redirects and returns the final response', async () => {
+    let i = 0;
+    const out = await fetchGuarded('https://a.example.com/', () =>
+      Promise.resolve(i++ === 0 ? res(302, 'https://b.example.com/x') : res(200, null)),
+    );
+    assert.equal(out.ok, true);
+    assert.equal(out.url, 'https://b.example.com/x');
+  });
+
+  it('caps redirect chains', async () => {
+    let n = 0;
+    const out = await fetchGuarded('https://a.example.com/', () =>
+      Promise.resolve(res(302, `https://a.example.com/${n++}`)),
+    );
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'too_many_redirects');
+  });
+
+  it('treats a stubbed response with no status/headers as terminal, not a redirect', async () => {
+    const out = await fetchGuarded('https://a.example.com/', () =>
+      Promise.resolve({ ok: true, text: async () => 'BODY' }),
+    );
+    assert.equal(out.ok, true);
+  });
+});
+
+describe('fetchText (source-gateway fetch slot) validates hops', () => {
+  it('blocks a 302 into loopback instead of returning its body', async () => {
+    let call = 0;
+    const fetchOverride = async () => {
+      call++;
+      if (call === 1) {
+        return {
+          ok: true,
+          status: 302,
+          headers: { get: (k) => (k.toLowerCase() === 'location' ? 'http://127.0.0.1:9/x' : null) },
+          text: async () => '',
+        };
+      }
+      return { ok: true, status: 200, headers: { get: () => null }, text: async () => '<p>SECRET</p>' };
+    };
+    const out = await fetchText('https://public.example.com/a', { fetchOverride });
+    assert.equal(out.ok, false);
+    assert.match(out.reason, /^blocked_/);
+    assert.doesNotMatch(out.text, /SECRET/);
+    assert.equal(call, 1, 'must not issue the loopback hop');
+  });
+
+  it('rejects a loopback origin outright', async () => {
+    let called = false;
+    const out = await fetchText('http://127.0.0.1:11434/api/tags', {
+      fetchOverride: async () => {
+        called = true;
+        return { ok: true, status: 200, headers: { get: () => null }, text: async () => 'x' };
+      },
+    });
+    assert.equal(out.ok, false);
+    assert.equal(out.reason, 'blocked_host_private_ip');
+    assert.equal(called, false);
   });
 });

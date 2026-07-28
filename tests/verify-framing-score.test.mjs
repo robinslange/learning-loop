@@ -194,7 +194,21 @@ describe('shipped VERIFY_PROMPT matches the measured framing (P0.2)', () => {
   // shipped prompt drifts away from it, the measurement no longer applies to
   // what actually runs — so pin the load-bearing parts.
   const SRC = fileURLToPath(new URL('../plugin/skills/research/workflow.js', import.meta.url));
-  const src = readFileSync(SRC, 'utf8');
+  const raw = readFileSync(SRC, 'utf8');
+
+  // Count only what reaches the model. workflow.js is a workflow script (the
+  // runtime wraps its body in an async function), so it cannot be imported and
+  // the prompt cannot be rendered here — but a raw file scan counts COMMENTS
+  // too, and the comments above each sink quote these very clauses to warn
+  // against dropping them. That decoy is not hypothetical: deleting the
+  // evidentiary sentence from VERIFY_PROMPT left comment + Synthesize = 2 hits
+  // and this suite stayed green. Strip comments first so the assertion measures
+  // the prompt, not the documentation defending it.
+  const src = raw
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join('\n');
 
   it('carries the three adversarial-content clauses in both untrusted sinks', () => {
     // Two sinks: VERIFY_PROMPT and the Synthesize block. Both take the same

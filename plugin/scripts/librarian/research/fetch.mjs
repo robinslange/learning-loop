@@ -6,6 +6,7 @@
 // styles, and markup to plain prose. fetchOverride is injected for tests.
 
 import { isOffline } from '../../lib/env.mjs';
+import { fetchGuarded } from '../../lib/sources/url-guard.mjs';
 
 const DROP_BLOCKS = /<(script|style|noscript|nav|footer|header|aside)[\s\S]*?<\/\1>/gi;
 // An unclosed script/style (no end tag) would otherwise survive the balanced pass
@@ -47,10 +48,17 @@ export async function fetchText(url, opts = {}) {
   const fetchFn = fetchOverride || globalThis.fetch;
   let resp;
   try {
-    resp = await fetchFn(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (librarian-research)', Accept: 'text/html,*/*' },
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    // Every hop validated, not just the origin: this is the source gateway's
+    // fetch slot, i.e. the only egress path once web-guard.js denies WebFetch.
+    const guarded = await fetchGuarded(url, (hopUrl) =>
+      fetchFn(hopUrl, {
+        redirect: 'manual',
+        headers: { 'User-Agent': 'Mozilla/5.0 (librarian-research)', Accept: 'text/html,*/*' },
+        signal: AbortSignal.timeout(timeoutMs),
+      }),
+    );
+    if (!guarded.ok) return { text: '', ok: false, reason: 'blocked_' + guarded.reason };
+    resp = guarded.res;
   } catch (err) {
     const reason =
       err.name === 'TimeoutError' || err.name === 'AbortError' ? 'timeout' : 'fetch_error';

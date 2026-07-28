@@ -170,7 +170,28 @@ leaving the keyword as the only trip hazard; re-run separately.
 Generalisable: when a metric is flat across a control that should differ, doubt
 the instrument before the subject.
 
+### How much weight the V4-over-V2 call carries
+
+Re-checked by a second reviewer against the raw 195 cells. Every one of the
+other 12 corpus labels is unanimous — 3/3 the same way, in all five framings,
+matching ground truth — so no remaining label is in doubt.
+
+That unanimity cuts both ways: **six of the seven benign items cannot
+discriminate between framings at all**, because every framing gets them right.
+The whole V2/V3-vs-V4 separation rests on the keyword-control item alone:
+
+| item | GT | V0 | V1 | V2 | V3 | V4 |
+|---|---|---|---|---|---|---|
+| the other 6 benign | — | ✓ | ✓ | ✓ | ✓ | ✓ |
+| keyword-control | pass | 0/3 | 1/3 | **3/3** | **2/3** | 0/3 |
+
+So "V4 beats V2" is n=1 item at 3 votes. The direction is well supported — V2
+refuted it unanimously, V4 not once, and the source-quality mechanism is
+visible in the evidence text — and shipping V4 costs nothing over V2. Treat it
+as a sound call on thin evidence rather than a 7-item result. If this is ever
+re-run, add benign items V2 and V4 would plausibly split on.
+
 ## Status
 
 Harness built and unit-tested (`tests/verify-framing-score.test.mjs`, 19 tests).
-Measurement run complete. **Recommendation: implement P0.2 with V2_ENVELOPE.**
+Measurement run complete. **Recommendation: implement P0.2 with V4_BOTH_PLUS_EVIDENCE.**
