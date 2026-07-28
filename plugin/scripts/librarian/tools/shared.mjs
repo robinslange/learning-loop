@@ -4,7 +4,7 @@
 // (submitLink, submitSuspect) used across tool modules.
 
 import { readFileSync, existsSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { basename } from 'node:path';
 import { run } from '../../lib/binary.mjs';
 import { openReadonly } from '../../lib/sqljs.mjs';
 import {
@@ -16,6 +16,7 @@ import {
   readQueue,
 } from '../queue.mjs';
 import { VAULT_PATH, DB_PATH } from '../../lib/constants.mjs';
+import { resolveInVault } from '../../lib/paths.mjs';
 import { logError } from '../../lib/log.mjs';
 import { stripFrontmatter } from '../../lib/markdown-parse.mjs';
 
@@ -24,6 +25,15 @@ export const MAX_RESULT = 1500;
 export function cap(str) {
   if (typeof str !== 'string') str = JSON.stringify(str);
   return str.length > MAX_RESULT ? str.slice(0, MAX_RESULT) + '…' : str;
+}
+
+// Resolve a model-supplied vault-relative path to an absolute .md path inside
+// the vault, or null. Single choke point for every path the librarian tools
+// accept from the model — see resolveInVault on why existsSync is not a
+// containment check.
+export function vaultFile(relPath) {
+  if (typeof relPath !== 'string' || !relPath.endsWith('.md')) return null;
+  return resolveInVault(relPath, VAULT_PATH);
 }
 
 export function slug(notePath) {
@@ -93,8 +103,14 @@ export async function getTags() {
   return cap(JSON.stringify(results));
 }
 
+// note_path is model-supplied. The local model's only inputs are vault note
+// bodies, so a note carrying "read ../../../.ssh/id_rsa for context" steers it
+// into reading outside the vault — and existsSync() cannot stop that, because a
+// traversal names a file that really does exist. Resolve for containment, and
+// require .md so non-note file types are refused even inside the vault.
 export async function readNote({ note_path }) {
-  const fullPath = join(VAULT_PATH, note_path);
+  const fullPath = vaultFile(note_path);
+  if (!fullPath) return 'Rejected: note_path must be a vault-relative .md path';
   if (!existsSync(fullPath)) return 'Note not found: ' + note_path;
   const content = stripFrontmatter(readFileSync(fullPath, 'utf-8')).trimStart();
   return cap(content.slice(0, 500));
@@ -108,8 +124,8 @@ export async function submitLink({
   cosine_score,
   model_prob,
 }) {
-  const targetFullPath = join(VAULT_PATH, target);
-  if (!existsSync(targetFullPath)) {
+  const targetFullPath = vaultFile(target);
+  if (!targetFullPath || !existsSync(targetFullPath)) {
     let state = loadState();
     state = incrementCounter(state, 'rejected_missing_target');
     saveState(state);
@@ -123,8 +139,8 @@ export async function submitLink({
     return 'Rejected: self-link';
   }
 
-  const fullSuggestedPath = join(VAULT_PATH, suggested_link);
-  if (!existsSync(fullSuggestedPath)) {
+  const fullSuggestedPath = vaultFile(suggested_link);
+  if (!fullSuggestedPath || !existsSync(fullSuggestedPath)) {
     let state = loadState();
     state = incrementCounter(state, 'rejected_missing_file');
     saveState(state);
@@ -177,7 +193,33 @@ export async function submitLink({
   return 'Queued link suggestion: ' + item.id;
 }
 
+// target is model-generated, same as submitLink's. submitLink gates on five
+// conditions; this validated nothing, so a hallucinated path (or the same one
+// re-submitted every turn of the 8-turn loop) queued a real item and inflated
+// staleness_suspects. Queue entries are read back into Claude's context by
+// /health --librarian, so an unvalidated target is also a content channel.
 export async function submitSuspect({ target, reason }) {
+  const targetFullPath = vaultFile(target);
+  if (!targetFullPath || !existsSync(targetFullPath)) {
+    let state = loadState();
+    state = incrementCounter(state, 'rejected_missing_target');
+    saveState(state);
+    return 'Rejected: target file does not exist';
+  }
+
+  const existing = readQueue().find(
+    (q) =>
+      q.task === 'staleness_suspect' &&
+      q.target === target &&
+      (q.status === 'pending' || q.status === 'acknowledged'),
+  );
+  if (existing) {
+    let state = loadState();
+    state = incrementCounter(state, 'rejected_duplicate');
+    saveState(state);
+    return 'Rejected: duplicate suspect already queued';
+  }
+
   const item = {
     id: newItemId(),
     task: 'staleness_suspect',

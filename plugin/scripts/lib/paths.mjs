@@ -1,4 +1,4 @@
-import { sep, resolve, join } from 'path';
+import { sep, resolve, join, relative, isAbsolute } from 'path';
 import { tmpdir, homedir } from 'os';
 import { env } from './env.mjs';
 
@@ -32,6 +32,28 @@ export function relativeToVault(fullPath, vaultPath) {
   if (rel.length === 0) return '';
   if (rel[0] === sep || rel[0] === '/') return toForwardSlash(rel.slice(1));
   return null;
+}
+
+// Resolve a caller-supplied relative path against the vault root, returning the
+// absolute path ONLY if it stays inside. The inverse of relativeToVault.
+//
+// existsSync() is not a containment check and must never be used as one: a
+// traversal like '../../.zshrc' names a file that genuinely exists, so an
+// existence guard passes it straight through. Callers that take a path from an
+// LLM tool call, a note body, or any other untrusted source must resolve
+// through here first.
+//
+// Returns null for: a non-string, an absolute path, a traversal that escapes,
+// or the vault root itself. Extension filtering is the caller's job — a
+// librarian reading notes should also require '.md'.
+export function resolveInVault(relPath, vaultPath) {
+  if (typeof relPath !== 'string' || !relPath || !vaultPath) return null;
+  if (isAbsolute(relPath)) return null;
+  const base = resolve(vaultPath);
+  const full = resolve(base, relPath);
+  const rel = relative(base, full);
+  if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
+  return full;
 }
 
 export function expandHome(raw) {
