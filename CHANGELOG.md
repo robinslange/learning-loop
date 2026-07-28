@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`/reflect` no longer records every note twice in the new-notes marker.** Main-thread notes reached the marker once from the live PostToolUse hook and again from Step 4.4's sweep, whose candidate union matches `unlinked || reflect_sid == sid` — and SKILL.md has the agent stamp `reflect_sid` on every note it writes, so the replay re-hit notes the hook had already recorded. SKILL.md claimed this was harmless because refinement "de-dups paths on read in Step 4.6.a", but nothing deduped: `refinement-candidates.mjs` iterates the raw list (its only `Set` excludes candidates rather than collapsing inputs) and `readStdinPaths()` doesn't dedup either, so each duplicate ran the similarity query again and emitted duplicate pairs under different ids — which survived 4.6.a's deferred merge, since its `(new_note, candidate)` dedup seeds `seen` from the already-duplicated list. The result was the same refinement proposed twice in the 4.6.d confirmation table plus doubled search work. Fixed at the single writer: `reflect-track` skips a path the marker already holds, which makes the sweep genuinely idempotent rather than only documented as such. The false de-dup claim in SKILL.md is corrected.
+
 ## v1.39.0
 
 ### Added
