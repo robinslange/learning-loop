@@ -369,9 +369,7 @@ test('object deny term throws (fail closed, never silently dropped)', () => {
 });
 
 test('hard-blocks a GitHub PAT in candidate content with an empty denylist', () => {
-  const notes = [
-    { path: 'leak.md', text: 'token: ghp_abc123DEF456ghi789jkl012mno345pqr678stu' },
-  ];
+  const notes = [{ path: 'leak.md', text: 'token: ghp_abc123DEF456ghi789jkl012mno345pqr678stu' }];
   const { blocked, clean } = scrubNotes(notes, { denylist: [], tripwirePatterns: [] });
   assert.deepEqual(
     blocked.map((b) => b.path),
@@ -413,4 +411,31 @@ test('hard-blocks a bare email address in candidate content with an empty denyli
     ['leak.md'],
   );
   assert.equal(clean.length, 0);
+});
+
+test('reports a malformed tripwire pattern instead of dropping it silently', () => {
+  // A bad pattern used to vanish with no signal: 'falcon[' simply stopped
+  // existing and the operator kept believing it was scanning. The deny path in
+  // the same function throws on bad input — this half degraded quietly, in the
+  // gate whose job is catching sensitive content before it leaves the machine.
+  const notes = [{ path: 'a.md', text: 'nothing sensitive here' }];
+  const { droppedTripwires, clean, tripwire } = scrubNotes(notes, {
+    denylist: [],
+    tripwirePatterns: ['falcon[', 'https?://\\S+'],
+  });
+  assert.deepEqual(droppedTripwires, ['falcon[']);
+  // A bad pattern must not fail the harvest — tripwires flag, they do not block.
+  assert.equal(clean.length, 1);
+  assert.equal(tripwire.length, 0);
+});
+
+test('valid tripwire patterns still flag, and report no drops', () => {
+  const notes = [{ path: 'a.md', text: 'see https://example.com/x for more' }];
+  const { droppedTripwires, tripwire, clean } = scrubNotes(notes, {
+    denylist: [],
+    tripwirePatterns: ['https?://\\S+'],
+  });
+  assert.deepEqual(droppedTripwires, []);
+  assert.equal(tripwire.length, 1);
+  assert.equal(clean.length, 1);
 });

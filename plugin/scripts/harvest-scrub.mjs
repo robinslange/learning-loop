@@ -10,6 +10,7 @@ import { basename } from 'node:path';
 import { denyTermRegExp } from './lib/deny-match.mjs';
 import { SECRET_PATTERNS, EMAIL_RE } from './lib/secret-patterns.mjs';
 import { pathToFileURL } from 'node:url';
+import { logError } from './lib/log.mjs';
 
 // Credential-shaped content and bare email addresses are always a hard block,
 // not just a tripwire — this is the same net inject.mjs redacts with, applied
@@ -23,9 +24,10 @@ const SECRET_DENY_RES = [
 /**
  * @param {{path:string,text:string}[]} notes
  * @param {{denylist:string[], tripwirePatterns:string[]}} opts
- * @returns {{blocked:{path:string,hits:string[]}[], tripwire:{path:string,hits:string[]}[], clean:{path:string,text:string}[]}}
+ * @returns {{blocked:{path:string,hits:string[]}[], tripwire:{path:string,hits:string[]}[], clean:{path:string,text:string}[], droppedTripwires:string[]}}
  */
 export function scrubNotes(notes, opts) {
+  const droppedTripwires = [];
   const denyRes = (opts.denylist || [])
     .map((d) => {
       if (typeof d === 'number') return String(d);
@@ -38,11 +40,22 @@ export function scrubNotes(notes, opts) {
     .filter(Boolean)
     .map((d) => ({ term: d, re: denyTermRegExp(d) }))
     .concat(SECRET_DENY_RES);
+  // A malformed tripwire pattern used to vanish here with no signal at all —
+  // 'falcon[' simply stopped existing, and the operator who wrote it kept
+  // believing it was scanning. That is the wrong posture for a privacy gate, and
+  // it disagreed with the deny path six lines up, which throws on bad input.
+  // Tripwires are a review aid rather than a block, so a bad pattern must not
+  // fail the whole harvest — but it must be loud.
   const tripRes = (opts.tripwirePatterns || [])
     .map((p) => {
       try {
         return new RegExp(p, 'g');
-      } catch {
+      } catch (err) {
+        logError(
+          'harvest-scrub.tripwirePattern',
+          new Error(`dropped ${JSON.stringify(p)}: ${err.message}`),
+        );
+        droppedTripwires.push(String(p));
         return null;
       }
     })
@@ -72,7 +85,7 @@ export function scrubNotes(notes, opts) {
     if (tripHits.length > 0) tripwire.push({ path: note.path, hits: tripHits });
     clean.push(note); // passes mechanical gate -> goes to LLM/human review
   }
-  return { blocked, tripwire, clean };
+  return { blocked, tripwire, clean, droppedTripwires };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -121,7 +134,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const denylist = [...new Set([...fileTerms, ...facts])];
   const TRIPWIRES = ['https?://\\S+', '\\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\\b'];
   const notes = paths.map((p) => ({ path: p, text: readFileSync(p, 'utf8') }));
-  console.log(
-    JSON.stringify(scrubNotes(notes, { denylist, tripwirePatterns: TRIPWIRES }), null, 2),
-  );
+  const report = scrubNotes(notes, { denylist, tripwirePatterns: TRIPWIRES });
+  // On stderr as well as in the JSON: a scan the operator believes is running
+  // and is not should not require reading the report to discover.
+  for (const p of report.droppedTripwires) {
+    process.stderr.write(`[harvest-scrub] tripwire pattern dropped (invalid regex): ${p}\n`);
+  }
+  console.log(JSON.stringify(report, null, 2));
 }
