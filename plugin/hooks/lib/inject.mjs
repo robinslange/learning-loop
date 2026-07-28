@@ -77,7 +77,7 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
       '',
       body,
     ];
-    injectedVault.push({ path: top.path, level: 'body' });
+    injectedVault.push({ path: top.path, level: 'body', score: top.score });
 
     const pointers = filtered
       .slice(1)
@@ -87,7 +87,7 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
       lines.push('', 'Related notes:');
       for (const p of pointers) {
         lines.push(`- ${p.title} — ${p.path}`);
-        injectedVault.push({ path: p.path, level: 'pointer' });
+        injectedVault.push({ path: p.path, level: 'pointer', score: p.score });
       }
     }
     sections.push(lines.join('\n'));

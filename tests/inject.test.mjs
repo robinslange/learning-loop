@@ -120,7 +120,9 @@ describe('buildInjection', () => {
     assert.ok(result);
     assert.ok(result.additionalContext.includes('From your vault'));
     assert.ok(!result.additionalContext.includes('## From past conversations'));
-    assert.deepEqual(result.injectedVault, [{ path: 'notes/sleep.md', level: 'body' }]);
+    assert.deepEqual(result.injectedVault, [
+      { path: 'notes/sleep.md', level: 'body', score: 0.92 },
+    ]);
   });
 
   it('labels the top-match score as "match score", not cosine similarity', () => {
@@ -158,7 +160,7 @@ describe('buildInjection', () => {
     assert.ok(result);
     assert.ok(!result.additionalContext.includes('Note A'));
     assert.ok(result.additionalContext.includes('Note B'));
-    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body' }]);
+    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body', score: 0.85 }]);
   });
 
   it('treats a legacy Set of paths as body-level entries', () => {
@@ -172,7 +174,7 @@ describe('buildInjection', () => {
     });
     assert.ok(result);
     assert.ok(!result.additionalContext.includes('Note A'));
-    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body' }]);
+    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body', score: 0.85 }]);
   });
 
   // Regression: a note that was only surfaced as a one-line pointer must still
@@ -193,7 +195,7 @@ describe('buildInjection', () => {
       result.additionalContext.includes('Body B content here.'),
       'pointer-seen note must be body-injected when it becomes the top hit',
     );
-    assert.deepEqual(result.injectedVault[0], { path: 'b.md', level: 'body' });
+    assert.deepEqual(result.injectedVault[0], { path: 'b.md', level: 'body', score: 0.95 });
   });
 
   it('pointer-level dedupe entry suppresses a repeat pointer', () => {
@@ -210,9 +212,30 @@ describe('buildInjection', () => {
     assert.ok(result.additionalContext.includes('Body A content here.'));
     assert.ok(!result.additionalContext.includes('Note B'), 'pointer must not repeat');
     assert.deepEqual(result.injectedVault, [
-      { path: 'a.md', level: 'body' },
-      { path: 'c.md', level: 'pointer' },
+      { path: 'a.md', level: 'body', score: 0.95 },
+      { path: 'c.md', level: 'pointer', score: 0.85 },
     ]);
+  });
+
+  it('records the per-hit score on every injected entry, not just the top match', () => {
+    // The gate logs vault_top_score (rank 0 only), so without per-hit scores an
+    // offline threshold sweep cannot tell whether a POINTER that got used was a
+    // marginal admit or a strong match. injection-precision.mjs joins on these.
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
+        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.41 },
+      ],
+      query: 'q',
+      alreadyInjected: new Map(),
+    });
+    assert.deepEqual(result.injectedVault, [
+      { path: 'a.md', level: 'body', score: 0.95 },
+      { path: 'b.md', level: 'pointer', score: 0.41 },
+    ]);
+    for (const entry of result.injectedVault) {
+      assert.equal(typeof entry.score, 'number', `${entry.path} must carry a numeric score`);
+    }
   });
 
   it('truncates top vault body at sentence boundary under 1200 chars', () => {

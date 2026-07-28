@@ -366,11 +366,11 @@ if (bundle && bundleClaims.length > 0) {
     angle.query +
     '`\n\n' +
     '## Task\nRun the source gateway search verb via the Bash tool:\n' +
-    '`node "' +
-    GATEWAY +
-    '" search --q "' +
-    angle.query +
-    '" --json` (refine the query if needed).\n' +
+    '`node ' +
+    shellQuote(GATEWAY) +
+    ' search --q ' +
+    shellQuote(angle.query) +
+    ' --json` (refine the query if needed).\n' +
     'It returns `{ hits: [{url,title,snippet}], source_used }`. Read the hits and return the ' +
     'top 4-6 most relevant results (url, title, snippet).\n' +
     'Rank by relevance to the ORIGINAL question, not just the search query. Skip obvious SEO spam/content farms.\n' +
@@ -389,11 +389,11 @@ if (bundle && bundleClaims.length > 0) {
     angle +
     ' search\n\n' +
     '## Task\n1. Retrieve the page via the source gateway fetch verb with the Bash tool:\n' +
-    '`node "' +
-    GATEWAY +
-    '" fetch --url "' +
-    source.url +
-    '" --json`. It returns `{ doc: {text, ok, reason} }` — `doc.text` is the content; ' +
+    '`node ' +
+    shellQuote(GATEWAY) +
+    ' fetch --url ' +
+    shellQuote(source.url) +
+    ' --json`. It returns `{ doc: {text, ok, reason} }` — `doc.text` is the content; ' +
     '`doc.ok` false with `doc.reason` signals failure.\n' +
     '2. Assess source quality: primary research/institution? secondary reporting? blog/opinion? forum? unreliable?\n' +
     '3. Extract 2-5 FALSIFIABLE claims that bear on the research question. Each claim must:\n' +
@@ -550,9 +550,9 @@ const VERIFY_PROMPT = (claim, v) =>
   '"\n\n' +
   '## Checklist\n' +
   '1. Is the claim actually supported by the quote, or is it an overreach/misread?\n' +
-  '2. Search for contradicting evidence via the source gateway with the Bash tool: `node "' +
-  (PLUGIN_ROOT ? PLUGIN_ROOT + '/bin/source-gateway.mjs' : 'source-gateway.mjs') +
-  '" search --q "<contradicting-evidence query>" --json` — does any credible source dispute or heavily qualify this?\n' +
+  '2. Search for contradicting evidence via the source gateway with the Bash tool: `node ' +
+  shellQuote(PLUGIN_ROOT ? PLUGIN_ROOT + '/bin/source-gateway.mjs' : 'source-gateway.mjs') +
+  ' search --q "<contradicting-evidence query>" --json` — does any credible source dispute or heavily qualify this?\n' +
   "3. Is the source quality sufficient for the claim's strength? (extraordinary claims need primary sources)\n" +
   '4. Is the claim outdated? (check dates — old claims about fast-moving fields are suspect)\n' +
   '5. Is this a marketing claim / press release / cherry-picked benchmark / forum speculation?\n\n' +

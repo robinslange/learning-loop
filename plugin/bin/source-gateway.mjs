@@ -5,6 +5,7 @@ import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/li
 import { getSessionId } from '../scripts/lib/session.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { readCount, bumpCount } from '../scripts/lib/fetch-budget.mjs';
+import { checkFetchUrl } from '../scripts/lib/sources/url-guard.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
 
@@ -59,6 +60,17 @@ export async function runGateway(argv, deps = {}) {
   }
   // fetch
   if (!args.url) throw new UsageError('fetch requires --url <url>');
+  // SSRF gate. web-guard.js denies WebFetch/WebSearch and points the model here,
+  // so this is the ONLY egress path — an unvalidated --url turns the gateway into
+  // a proxy for loopback/link-local services (Ollama, cloud IMDS). Checked before
+  // the budget bump: a rejected URL must not consume the session's fetch budget.
+  const urlCheck = checkFetchUrl(args.url);
+  if (!urlCheck.ok) {
+    return {
+      doc: { ok: false, reason: `blocked_url:${urlCheck.reason}` },
+      source_used: 'url-guard',
+    };
+  }
   const budget = fetchBudget ?? DEFAULT_FETCH_BUDGET;
   const source = resolveSlot('fetch');
   // Budget enforcement via injected store (tests) or file-backed per-session counter (production).
