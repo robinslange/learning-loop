@@ -95,13 +95,24 @@ export function runReflectTrack(ctx) {
   // main-thread note twice, and refinement-candidates.mjs — which iterates
   // the raw list with no dedup of its own — runs the similarity query twice
   // and emits duplicate pairs under different ids.
-  let recorded;
+  // Fail OPEN: dedup is an optimisation, so a read that fails (Windows can
+  // briefly refuse to re-open a file just appended to) must fall through to the
+  // append. Returning here would silently drop the write, which is the very
+  // thing this module exists to record. A spurious duplicate is recoverable; a
+  // missing path is not. Split on /\r?\n/ so a marker that ever picks up CRLF
+  // still compares equal.
+  let recorded = '';
   try {
     recorded = readFileSync(marker, 'utf-8');
   } catch {
-    return;
+    recorded = '';
   }
-  const seen = new Set(recorded.split('\n').filter(Boolean));
+  const seen = new Set(
+    recorded
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
   if (seen.has(input.file_path)) return;
 
   appendFileSync(marker, input.file_path + '\n');

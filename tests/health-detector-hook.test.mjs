@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { run as runHealthDetector } from '../plugin/hooks/session-start/health-detector.mjs';
 
 const DETECTOR_PATH = fileURLToPath(
@@ -30,7 +30,7 @@ test('health-detector: emits no line when LL_DISABLE_DETECTOR=1', () => {
   // time, so the override must be in place before the module loads: run the
   // detector in a subprocess with the env var set.
   const script = `
-    import { run } from ${JSON.stringify(DETECTOR_PATH)};
+    import { run } from ${JSON.stringify(pathToFileURL(DETECTOR_PATH).href)};
     const ctx = {
       pluginDir: process.cwd(),
       pluginData: null,

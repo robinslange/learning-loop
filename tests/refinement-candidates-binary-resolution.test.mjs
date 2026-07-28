@@ -16,6 +16,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, '..', 'plugin/scripts/refinement-candidates.mjs');
 
 test('refinement-candidates resolves ll-search from CLAUDE_PLUGIN_DATA/bin', () => {
+  // POSIX-only: the stub below is a `#!/bin/sh` script named `ll-search`, which
+  // Windows cannot execute and binaryPath() would not resolve there anyway (it
+  // looks for ll-search.exe). The resolution logic under test is platform-
+  // independent; only the executable-stub fixture is not.
+  if (process.platform === 'win32') return;
   const sb = mkdtempSync(join(tmpdir(), 'll-refc-bin-'));
   try {
     const vault = join(sb, 'vault');

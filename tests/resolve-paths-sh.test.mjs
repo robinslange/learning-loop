@@ -15,6 +15,12 @@ import { execFileSync } from 'node:child_process';
 const SCRIPT = fileURLToPath(new URL('../plugin/scripts/resolve-paths.mjs', import.meta.url));
 
 test('--sh output is eval-safe and sets shell vars', () => {
+  // POSIX-only, same rationale as the shQuote test below: it round-trips
+  // through a real `sh -c "eval ..."`, and --sh exists for the reflect skill's
+  // bash fences. On Windows the two resolver spawns can also straddle a session
+  // id another test file left on disk, so the eval-vs-direct compare is racy
+  // there in a way it is not under the POSIX ordering.
+  if (process.platform === 'win32') return;
   const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });
   // every non-empty line is KEY='...'
   for (const line of shOut.split('\n').filter(Boolean)) {
@@ -40,6 +46,11 @@ test("the script's own shQuote survives an apostrophe in a real path", () => {
   // `eval "$(...--sh)"` that every reflect fence runs, mid-handshake. The
   // earlier version re-implemented the escaping inline and never invoked the
   // script's own, so deleting shQuote left it green.
+  // POSIX-only: this drives a real `sh -c "eval ..."` round-trip, and the
+  // --sh mode exists for the reflect skill's bash fences, which never run on
+  // Windows. VAULT_PATH is also resolved to an absolute native path there
+  // ('/tmp/x' becomes 'D:\tmp\x'), so the round-trip value could not match.
+  if (process.platform === 'win32') return;
   const VALUE = "/tmp/wei'rd vault";
   const shOut = execFileSync('node', [SCRIPT, '--sh'], {
     encoding: 'utf-8',

@@ -537,7 +537,10 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       await runReflectTrack(ctx); // live hook on the main-thread Write
       await runReflectTrack(ctx); // Step 4.4 replay on the same note
 
-      const lines = readFileSync(marker, 'utf8').trimEnd().split('\n').filter(Boolean);
+      const lines = readFileSync(marker, 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
       assert.deepEqual(
         lines,
         [fp],
@@ -561,7 +564,10 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
         });
       }
 
-      const lines = readFileSync(marker, 'utf8').trimEnd().split('\n').filter(Boolean);
+      const lines = readFileSync(marker, 'utf8')
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter(Boolean);
       assert.deepEqual(lines, [a, b], 'each distinct path recorded once, in first-seen order');
     });
 
