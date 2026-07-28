@@ -75,7 +75,14 @@ test('--sh REFLECT_SCRATCH/SESSION_ID match the single-field resolver (mode agre
   // value. Pin the two the marker handshake depends on: if --sh ever diverged
   // from single-field (which the hook mirrors), the skill and hook would land
   // on different marker paths.
-  const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });
+  // Pin the session id for BOTH spawns. getSessionId() otherwise falls through
+  // to a bare id file in the shared tmp dir, which other test files write and
+  // delete concurrently — reflect-new-notes-track.test.mjs seeds
+  // 'other-concurrent-session' there. The two resolvers below are separate
+  // processes, so an id that changes between them fails this equality check for
+  // reasons that have nothing to do with mode agreement, which is all it tests.
+  const env = { ...process.env, CLAUDE_CODE_SESSION_ID: 'mode-agreement-sid' };
+  const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8', env });
   const parsed = Object.fromEntries(
     shOut
       .split('\n')
@@ -88,7 +95,7 @@ test('--sh REFLECT_SCRATCH/SESSION_ID match the single-field resolver (mode agre
       }),
   );
   for (const field of ['SESSION_ID', 'REFLECT_SCRATCH']) {
-    const direct = execFileSync('node', [SCRIPT, field], { encoding: 'utf-8' }).trimEnd();
+    const direct = execFileSync('node', [SCRIPT, field], { encoding: 'utf-8', env }).trimEnd();
     assert.equal(parsed[field], direct, `--sh ${field} must equal the single-field resolve`);
   }
 });

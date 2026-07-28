@@ -743,6 +743,13 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // simulating a concurrent session that started later (last-writer-wins on
       // the unsuffixed plugin-data id). The fix must ignore this and key off
       // LL_REFLECT_SID instead.
+      //
+      // NOTE: sidFileBare lives at a SHARED tmp path (learning-loop-session-id),
+      // not a per-suite one, so this value is visible to any test file running
+      // concurrently. Anything that spawns a resolver and compares ids across
+      // two spawns must pin CLAUDE_CODE_SESSION_ID rather than inherit it — see
+      // the mode-agreement test in resolve-paths-sh.test.mjs, which this string
+      // used to break on Windows.
       writeFileSync(sidFileBare, 'other-concurrent-session');
       const mod = await import(
         '../plugin/hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now()
