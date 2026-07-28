@@ -153,7 +153,13 @@ function spawnAppend(
       `let patched = false;` +
       `fsCjs.readFileSync = (...args) => {` +
       `  const result = origRead(...args);` +
-      `  if (!patched && String(args[0]).includes('memory-writes')) {` +
+      // Must match the MARKER read only. `<path>.lock` also contains
+      // 'memory-writes', and tryRemoveIfStale() readFileSync's the lockfile to
+      // check the owner PID — so a bare substring test fires while the waiter
+      // is still blocked at acquireLock, before it has read the marker at all.
+      // That false signal released writer A early and inverted the whole
+      // rendezvous (see the test below).
+      `  if (!patched && String(args[0]).includes('memory-writes') && !String(args[0]).endsWith('.lock')) {` +
       `    patched = true;` +
       `    try { fsCjs.writeFileSync(sig, '1'); } catch {}` +
       `    if (waitFile) {` +
@@ -172,8 +178,16 @@ function spawnAppend(
     `appendMemoryWrite(${JSON.stringify(pluginData)}, ${JSON.stringify(sessionId)}, ${JSON.stringify(basename)});` +
     `})();`;
   return new Promise((resolve, reject) => {
+    // The child MUST see CLAUDE_PLUGIN_DATA: writeMarker() bails at its
+    // pluginDataExists() guard and returns false when plugin data isn't
+    // configured, so without this every append silently no-ops and the marker
+    // keeps only its pre-seeded entry. Inheriting the ambient env made this
+    // pass on dev machines (which have plugin data) and fail on every CI
+    // runner (which does not) — the same environment coupling that hid the
+    // real lock behaviour.
     const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
       encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
     });
     let stderr = '';
     child.stderr?.on('data', (chunk) => {

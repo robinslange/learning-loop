@@ -63,13 +63,15 @@ export function appendMemoryWrite(pluginData, sessionId, basename) {
     // writeMarker's own mkdir, this one has to happen before the lock is
     // even acquired.
     mkdirSync(dirname(path), { recursive: true });
-    // Generous lock-wait budget (~780ms) rather than ~180ms: the critical
-    // section is a whole-file read-modify-write, and when several sessions'
-    // PostToolUse hooks contend on one machine the holder's own syscalls can be
-    // starved past a short budget. A loser that exhausts its budget drops its
-    // write silently (fire-and-forget), which is exactly the lost update this
-    // lock exists to prevent — so the budget must outlast a starved holder.
-    withLock(path, { retries: 40, retryDelayMs: 20 }, () => {
+    // Lock-wait budget (~5s): the critical section is a whole-file
+    // read-modify-write, and when several sessions' PostToolUse hooks contend
+    // on one machine the holder's own syscalls can be starved well past a short
+    // budget. A loser that exhausts its budget drops its write, which is
+    // exactly the lost update this lock exists to prevent, so the budget must
+    // outlast a starved holder. The previous ~780ms did not: it was under the
+    // stale-lock reclaim threshold by two orders of magnitude, so a holder
+    // merely descheduled on a loaded CI runner outlived it.
+    withLock(path, { retries: 250, retryDelayMs: 20 }, () => {
       const existing = readMarker(path, { ttlMs: Infinity });
       const set = new Set(Array.isArray(existing) ? existing : []);
       if (set.has(basename)) return;
@@ -77,7 +79,13 @@ export function appendMemoryWrite(pluginData, sessionId, basename) {
       writeMarker(path, [...set]);
     });
   } catch (err) {
-    if (err.code === 'ELOCK_TIMEOUT') return;
+    // Never throw: every caller is a fire-and-forget hook. But a timeout means
+    // this session's write was LOST, so it must not vanish silently the way it
+    // used to — the log line is the only evidence the marker undercounts.
+    if (err.code === 'ELOCK_TIMEOUT') {
+      logError('marker-cache.appendMemoryWrite', err, { path, basename, lost: true });
+      return;
+    }
     logError('marker-cache.appendMemoryWrite', err);
   }
 }
