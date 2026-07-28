@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **CI is green again on all platforms.** Four independent failures, red since at least v1.38.0 and all invisible to a local `npm test` on a dev machine. (1) Importing `backfill-edges.mjs` for its pure exports crashed the whole test file wherever plugin data isn't configured — module scope ran `DATA_FILES.edgesDb(PLUGIN_DATA)`, and `PLUGIN_DATA` is null on every CI runner. The CLI's paths now resolve inside `main()`, which also guards a missing plugin-data dir instead of throwing out of `join()`. (2) `new URL(...).pathname` was used as a filesystem path in six places; on Windows that yields `/D:/...` and resolves to `D:\D:\...`, accounting for ~20 Windows-only failures across five test files plus the shipped `health-check.mjs`. All now use `fileURLToPath`, with a `no-url-pathname` lint rule enabled as an error so the class cannot return. (3) The `appendMemoryWrite` concurrency test passed for the wrong reason: its rendezvous hook matched `<marker>.lock` as well as the marker (`tryRemoveIfStale` reads the lockfile for the owner PID), so the waiter signalled while still blocked at `acquireLock` and released the holder early; its spawned children also inherited an env without `CLAUDE_PLUGIN_DATA`, so `writeMarker` bailed at its `pluginDataExists()` guard and every append silently no-opped. (4) `cargo-deny` flagged RUSTSEC-2026-0190 (`anyhow`, unsound) and RUSTSEC-2026-0204 (`crossbeam-epoch`, vulnerability); both are patch bumps within the existing semver ranges.
+
+### Changed
+
+- **A lost `appendMemoryWrite` no longer disappears silently.** The lock-wait budget was ~780ms against a 60s stale-reclaim threshold, so a holder merely descheduled on a loaded runner outlived it; it is now ~5s. More importantly, a loser that exhausted the budget returned on `ELOCK_TIMEOUT` leaving no trace, dropping that session's write — exactly the lost update the lock exists to prevent. It still never throws (every caller is a fire-and-forget hook), but the loss is now logged, so an undercounted marker leaves evidence.
+
 ## v1.39.1
 
 ### Fixed
