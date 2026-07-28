@@ -12,12 +12,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const SCRIPT = new URL('../plugin/scripts/nli-cleanup.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/nli-cleanup.mjs', import.meta.url));
 
 function runCleanup(vaultRoot, extraArgs = []) {
   return execFileSync(

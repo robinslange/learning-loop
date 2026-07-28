@@ -20,6 +20,7 @@ export default [
       'learning-loop/no-empty-catch': 'off',
       'learning-loop/no-direct-jsonparse': 'off',
       'learning-loop/no-raw-lockfile': 'error',
+      'learning-loop/no-url-pathname': 'error',
     },
   },
   {

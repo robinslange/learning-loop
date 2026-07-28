@@ -13,12 +13,13 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 
-const SCRIPT = new URL('../plugin/scripts/strip-reflect-sid.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/strip-reflect-sid.mjs', import.meta.url));
 
 function run(newNotesContent, dir) {
   const listFile = join(dir, 'new-notes.txt');

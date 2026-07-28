@@ -9,9 +9,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const SCRIPT = new URL('../plugin/scripts/resolve-paths.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/resolve-paths.mjs', import.meta.url));
 
 test('--sh output is eval-safe and sets shell vars', () => {
   const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });

@@ -11,13 +11,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { scanVaultCandidates } from '../plugin/scripts/sweep-hook-replay.mjs';
 
-const SCRIPT = new URL('../plugin/scripts/sweep-hook-replay.mjs', import.meta.url).pathname;
+const SCRIPT = fileURLToPath(new URL('../plugin/scripts/sweep-hook-replay.mjs', import.meta.url));
 
 function runCli(args) {
   try {

@@ -7,6 +7,7 @@ import noProcessEnv from './rules/no-process-env-outside-env-module.mjs';
 import noEmptyCatch from './rules/no-empty-catch.mjs';
 import noDirectJsonparse from './rules/no-direct-jsonparse.mjs';
 import noRawLockfile from './rules/no-raw-lockfile.mjs';
+import noUrlPathname from './rules/no-url-pathname.mjs';
 
 export default {
   meta: { name: 'eslint-plugin-learning-loop', version: '0.0.0' },
@@ -15,5 +16,6 @@ export default {
     'no-empty-catch': noEmptyCatch,
     'no-direct-jsonparse': noDirectJsonparse,
     'no-raw-lockfile': noRawLockfile,
+    'no-url-pathname': noUrlPathname,
   },
 };

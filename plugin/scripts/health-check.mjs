@@ -23,9 +23,11 @@ import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const PLUGIN_DIR = new URL('..', import.meta.url).pathname;
+// fileURLToPath, not .pathname: on Windows a file URL's pathname is
+// `/D:/a/...`, which resolves against the drive root as `D:\D:\a\...`.
+const PLUGIN_DIR = fileURLToPath(new URL('..', import.meta.url));
 
 function safeExec(cmd, args, opts = {}) {
   try {

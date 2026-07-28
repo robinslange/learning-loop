@@ -1,12 +1,15 @@
 import { describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { runHook } from './helpers/hook-runner.mjs';
 import { webGuardDecision } from '../plugin/hooks/web-guard.js';
 
-const HOOK = new URL('../plugin/hooks/web-guard.js', import.meta.url).pathname;
+const HOOK = fileURLToPath(new URL('../plugin/hooks/web-guard.js', import.meta.url));
 
 function run(toolName) {
-  const r = runHook(HOOK, { stdin: { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {} } });
+  const r = runHook(HOOK, {
+    stdin: { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {} },
+  });
   try {
     assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
     assert.equal(r.exitCode, 0, r.stderr);
