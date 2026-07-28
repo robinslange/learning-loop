@@ -1,7 +1,9 @@
 import { describe, it, before, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, rmSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { openEdgeDb, addEdge, saveDb, getEdgesFrom } from '../plugin/scripts/lib/edges.mjs';
@@ -9,6 +11,13 @@ import { removeOrphanEdges, isScopedRun } from '../plugin/scripts/backfill-edges
 
 const PLUGIN_DATA = join(tmpdir(), `ll-test-backfill-orphan-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
+const BACKFILL_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'plugin',
+  'scripts',
+  'backfill-edges.mjs',
+);
 
 async function seed() {
   const db = await openEdgeDb(DB_PATH);
@@ -27,6 +36,43 @@ async function seed() {
   saveDb(db, DB_PATH);
   return db;
 }
+
+// Regression (CI red on ubuntu/macos/windows, 2026-07-28): importing
+// backfill-edges.mjs for its pure exports crashed the whole test FILE with
+// `ERR_INVALID_ARG_TYPE: path must be of type string. Received null`.
+// Module scope ran `DATA_FILES.edgesDb(PLUGIN_DATA)`, and PLUGIN_DATA is null
+// wherever plugin-data isn't configured — every CI runner. It passed on dev
+// machines only because they happen to have plugin-data, so the whole class of
+// import-time environment coupling was invisible locally.
+//
+// The CLI's paths belong inside main(), not at module scope. This pins that:
+// importing the module must not touch the environment at all.
+describe('backfill-edges import purity', () => {
+  it('imports cleanly with no plugin-data configured (the CI environment)', () => {
+    // A real subprocess with HOME pointed at a nonexistent dir and every
+    // plugin-data override cleared — the resolver finds nothing and returns
+    // null, exactly as on a CI runner. In-process this can't be tested: the
+    // module is already cached by the import at the top of this file.
+    const probe = `import('${pathToFileURL(BACKFILL_PATH).href}').then(m => {
+      if (typeof m.removeOrphanEdges !== 'function') { console.error('missing export'); process.exit(2); }
+      process.exit(0);
+    }).catch(e => { console.error(e.message); process.exit(1); });`;
+
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        HOME: join(tmpdir(), `ll-no-plugin-data-${randomBytes(6).toString('hex')}`),
+      },
+    });
+
+    assert.equal(
+      res.status,
+      0,
+      `importing backfill-edges.mjs without plugin-data must not throw; got: ${res.stderr}`,
+    );
+  });
+});
 
 describe('backfill-edges orphan removal scope', () => {
   before(() => mkdirSync(PLUGIN_DATA, { recursive: true }));

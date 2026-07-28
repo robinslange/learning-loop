@@ -31,13 +31,11 @@ import { hasFlag, flagValue } from './lib/cli-args.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const VAULT_DIRS = ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '4-projects', '5-maps'];
-const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
 
-const args = process.argv.slice(2);
-
-const dryRun = hasFlag(args, '--dry-run');
-const folderFilter = flagValue(args, '--folder');
-const limit = parseInt(flagValue(args, '--limit') || '0', 10);
+// CLI-only state is resolved inside main(), never at module scope. PLUGIN_DATA
+// is null wherever plugin-data isn't configured, and `DATA_FILES.edgesDb(null)`
+// throws — so computing it here crashed every importer of the pure exports
+// below on any machine without plugin-data, CI included.
 
 // Truncates on any TRUTHY max, floored at one file (a negative --limit walks
 // one file, never zero); isScopedRun must agree with this predicate.
@@ -101,6 +99,16 @@ async function main() {
     console.error('VAULT_PATH not configured');
     process.exit(1);
   }
+  if (!PLUGIN_DATA) {
+    console.error('plugin data dir not configured');
+    process.exit(1);
+  }
+
+  const args = process.argv.slice(2);
+  const dryRun = hasFlag(args, '--dry-run');
+  const folderFilter = flagValue(args, '--folder');
+  const limit = parseInt(flagValue(args, '--limit') || '0', 10);
+  const DB_FILE = DATA_FILES.edgesDb(PLUGIN_DATA);
 
   const folders = folderFilter ? [folderFilter] : VAULT_DIRS;
   const files = walkVault(VAULT_PATH, folders, limit);
