@@ -19,6 +19,14 @@
 // O_APPEND is atomic per write on POSIX, so concurrent hook invocations
 // from sub-agent sweeps don't corrupt lines.
 //
+// Appends are de-duplicated against the marker's current contents: the file is
+// a set of paths, and the same note legitimately arrives twice (live hook, then
+// Step 4.4's replay). The read-then-append is not atomic, so two truly
+// concurrent invocations racing on the SAME path could still both append; that
+// costs a duplicate line, which is exactly the pre-existing behaviour, and
+// never a lost or corrupted one. The common ordering — live write, sweep replay
+// much later — is strictly sequential.
+//
 // Background: an earlier revision of Step 4 required the agent to run
 // `echo "$PATH" >> "$FILE"` after every Write. The init and per-write
 // commands lived in the same fenced bash block, so agents naturally
@@ -26,7 +34,7 @@
 // only the last entry. Moving the work into the hook removes the
 // footgun entirely (see tests/reflect-new-notes-track.test.mjs).
 
-import { appendFileSync, existsSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getSessionId, resolvePluginData, vaultRelPath } from '../lib/common.mjs';
@@ -78,6 +86,23 @@ export function runReflectTrack(ctx) {
   // (SESSION_ID).
   const marker = reflectNewNotesPath(sessionId);
   if (!existsSync(marker)) return;
+
+  // The marker is a SET of paths, so a path already recorded is not appended
+  // again. Main-thread Writes reach here twice: once live, then again when
+  // Step 4.4's sweep replays post-tool.js over the reflect_sid candidate set
+  // (which matches every note this session stamped, not just the sub-agent
+  // ones the replay exists for). Without this check the marker holds each
+  // main-thread note twice, and refinement-candidates.mjs — which iterates
+  // the raw list with no dedup of its own — runs the similarity query twice
+  // and emits duplicate pairs under different ids.
+  let recorded;
+  try {
+    recorded = readFileSync(marker, 'utf-8');
+  } catch {
+    return;
+  }
+  const seen = new Set(recorded.split('\n').filter(Boolean));
+  if (seen.has(input.file_path)) return;
 
   appendFileSync(marker, input.file_path + '\n');
 }

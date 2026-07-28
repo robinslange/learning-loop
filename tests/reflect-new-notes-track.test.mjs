@@ -519,6 +519,52 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       for (let i = 0; i < writes.length; i++) assert.equal(lines[i], writes[i]);
     });
 
+    it('does not re-append a path the marker already holds', async () => {
+      // Regression (root-caused 2026-07-28): every main-thread note reached the
+      // marker TWICE. The live PostToolUse hook appends on the Write; then Step
+      // 4.4's sweep replays post-tool.js on the same note and appends again,
+      // because the 4.4 candidate union matches `unlinked || reflect_sid==sid`
+      // and SKILL.md tells the agent to stamp reflect_sid on EVERY note it
+      // writes — including its own main-thread Writes, which the live hook
+      // already captured. The marker is a SET of paths, so the single writer
+      // must not add one it already holds.
+      const marker = reflectNewNotesPath();
+      writeFileSync(marker, '');
+
+      const fp = join(fakeVaultRoot, '0-inbox', 'written-then-swept.md');
+      const ctx = { tool: 'Write', input: { file_path: fp }, vaultRoot: fakeVaultRoot };
+
+      await runReflectTrack(ctx); // live hook on the main-thread Write
+      await runReflectTrack(ctx); // Step 4.4 replay on the same note
+
+      const lines = readFileSync(marker, 'utf8').trimEnd().split('\n').filter(Boolean);
+      assert.deepEqual(
+        lines,
+        [fp],
+        'the replay must not duplicate a path the live hook already recorded — ' +
+          'duplicates make refinement-candidates.mjs query and propose the pair twice',
+      );
+    });
+
+    it('still records distinct paths after a duplicate is suppressed', async () => {
+      // The dedup must be per-path, not "append at most once per marker".
+      const marker = reflectNewNotesPath();
+      writeFileSync(marker, '');
+
+      const a = join(fakeVaultRoot, '0-inbox', 'dedup-a.md');
+      const b = join(fakeVaultRoot, '0-inbox', 'dedup-b.md');
+      for (const fp of [a, a, b, a, b]) {
+        await runReflectTrack({
+          tool: 'Write',
+          input: { file_path: fp },
+          vaultRoot: fakeVaultRoot,
+        });
+      }
+
+      const lines = readFileSync(marker, 'utf8').trimEnd().split('\n').filter(Boolean);
+      assert.deepEqual(lines, [a, b], 'each distinct path recorded once, in first-seen order');
+    });
+
     it('handles Edit the same as Write', async () => {
       const marker = reflectNewNotesPath();
       writeFileSync(marker, '');
