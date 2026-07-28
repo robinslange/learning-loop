@@ -12,7 +12,7 @@ import {
   closeSync,
   fstatSync,
 } from 'node:fs';
-import { join, sep, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import {
   resolvePluginData,
   getVaultPath,
@@ -27,7 +27,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
-import { DATA_PATHS, toForwardSlash, home } from '../../scripts/lib/paths.mjs';
+import { DATA_PATHS, relativeToVault, home } from '../../scripts/lib/paths.mjs';
 
 export { resolvePluginData, getSessionId, home };
 export const resolveVaultPath = getVaultPath;
@@ -73,23 +73,35 @@ export function recordDetachedChild(pid) {
   }
 }
 
+// Vault-relative path, or null if the file is outside the vault.
+//
+// Resolves before comparing. A raw string prefix answers a question about
+// spelling, not location, and the two diverge in both directions: callers pass
+// paths straight from tool input, so '<vault>/./0-inbox/a.md' (a real note) was
+// null while '<vault>/0-inbox/../../../.ssh/id_rsa.md' (not in the vault at
+// all) returned a string. That string then became a note IDENTITY in provenance
+// records and the edges graph, so this is a data-layer fix as much as a gate.
 export function vaultRelPath(filePath, vaultPath) {
-  const prefix = vaultPath + sep;
-  if (filePath && filePath.startsWith(prefix)) {
-    return toForwardSlash(filePath.slice(prefix.length));
-  }
-  return null;
+  if (!filePath || !vaultPath) return null;
+  const rel = relativeToVault(filePath, vaultPath);
+  return rel ? rel : null; // '' is the vault root, not a note
 }
 
+// A note the hooks should act on: inside the vault, .md, and not under a
+// system/hidden folder.
+//
+// Containment is vaultRelPath's job — the only thing left here is the folder
+// rule, which is why _system stays excluded for gating while vaultRelPath still
+// resolves it (provenance records system writes; gating skips them). Sharing
+// the resolution is what closes the divergence: '0-inbox/../_system/persona.md'
+// used to defeat the _system exclusion because the first segment was read off
+// an unresolved string.
 export function isVaultNote(filePath, vaultRoot) {
-  if (!filePath) return false;
-  const prefix = vaultRoot + sep;
-  if (!filePath.startsWith(prefix)) return false;
-  if (!filePath.endsWith('.md')) return false;
-  const rel = filePath.slice(prefix.length);
-  const firstSegment = rel.split(sep)[0];
-  if (firstSegment.startsWith('_') || firstSegment.startsWith('.')) return false;
-  return true;
+  if (!filePath || !filePath.endsWith('.md')) return false;
+  const rel = vaultRelPath(filePath, vaultRoot);
+  if (!rel) return false;
+  const firstSegment = rel.split('/')[0];
+  return !firstSegment.startsWith('_') && !firstSegment.startsWith('.');
 }
 
 export function classifyVaultPath(relPath) {

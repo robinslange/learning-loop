@@ -177,3 +177,79 @@ describe('readFileTail', () => {
     assert.equal(tail, 'final line');
   });
 });
+
+// The shared containment fixture (REMEDIATION-PLAN P4.5): across 165 test files
+// none fed a '../' path to a containment check — every "traversal" hit was
+// GRAPH traversal. That gap is why isVaultNote and vaultRelPath compared raw
+// string prefixes for so long. One table, run against both functions; add a row
+// here rather than a new test when a new spelling turns up.
+describe('vault containment (isVaultNote / vaultRelPath)', () => {
+  // Imported here, not at module scope: the getSessionId suite above rewrites
+  // HOME before loading common.mjs, and a top-level import would fix the module
+  // to the real HOME first.
+  let isVaultNote, vaultRelPath, classifyVaultPath;
+  before(async () => {
+    ({ isVaultNote, vaultRelPath, classifyVaultPath } = await import(
+      '../plugin/hooks/lib/common.mjs'
+    ));
+  });
+
+  const V = '/vault/brain';
+  // [path, isVaultNote, vaultRelPath]
+  const CASES = [
+    ['plain note', `${V}/0-inbox/a.md`, true, '0-inbox/a.md'],
+    ['nested note', `${V}/3-permanent/x/y.md`, true, '3-permanent/x/y.md'],
+
+    // Traversal that lands back INSIDE: a real note, and gating used to skip it
+    // entirely because the string did not start with the prefix.
+    ['round-trip traversal', `${V}/../brain/0-inbox/a.md`, true, '0-inbox/a.md'],
+    ['dot segment', `${V}/./0-inbox/a.md`, true, '0-inbox/a.md'],
+    ['doubled slash', `${V}/0-inbox//a.md`, true, '0-inbox/a.md'],
+
+    // Traversal that ESCAPES. The sharp one: a benign first segment passes
+    // every folder guard while the path resolves to ~/.ssh, and provenance
+    // recorded it as folder:'inbox'.
+    ['escapes via traversal', `${V}/0-inbox/../../../.ssh/id_rsa.md`, false, null],
+    ['escapes to sibling', `${V}-other/0-inbox/a.md`, false, null],
+    ['sibling by prefix', `${V}x/0-inbox/a.md`, false, null],
+    ['vault root itself', V, false, null],
+
+    // _system is the deliberate asymmetry: gating skips it, provenance still
+    // records it. Traversal must not be a way to launder past the exclusion.
+    ['_system direct', `${V}/_system/x.md`, false, '_system/x.md'],
+    ['_system via traversal', `${V}/0-inbox/../_system/persona.md`, false, '_system/persona.md'],
+    ['hidden folder', `${V}/.obsidian/x.md`, false, '.obsidian/x.md'],
+
+    ['non-markdown', `${V}/0-inbox/a.txt`, false, '0-inbox/a.txt'],
+    ['empty path', '', false, null],
+    ['null path', null, false, null],
+  ];
+
+  for (const [name, path, wantNote, wantRel] of CASES) {
+    it(`${name}: isVaultNote -> ${wantNote}`, () => {
+      assert.equal(isVaultNote(path, V), wantNote);
+    });
+    it(`${name}: vaultRelPath -> ${JSON.stringify(wantRel)}`, () => {
+      assert.equal(vaultRelPath(path, V), wantRel);
+    });
+  }
+
+  it('never returns a relative path that escapes the vault', () => {
+    // The data-layer half: whatever vaultRelPath returns becomes a note
+    // IDENTITY in provenance records and the edges graph. A '..' surviving into
+    // that string is a corrupt identity, not just a failed gate.
+    for (const [, path] of CASES) {
+      const rel = vaultRelPath(path, V);
+      if (rel === null) continue;
+      assert.ok(!rel.includes('..'), `${path} produced an escaping identity: ${rel}`);
+      assert.ok(!rel.startsWith('/'), `${path} produced an absolute identity: ${rel}`);
+    }
+  });
+
+  it('agrees with classifyVaultPath on the resolved form', () => {
+    // Pre-fix, '<V>/0-inbox/../../../.ssh/id_rsa.md' resolved to rel
+    // '0-inbox/../../../.ssh/id_rsa.md' and classified as folder:'inbox'.
+    assert.equal(vaultRelPath(`${V}/0-inbox/../../../.ssh/id_rsa.md`, V), null);
+    assert.equal(classifyVaultPath(vaultRelPath(`${V}/0-inbox/../_system/p.md`, V)), 'system');
+  });
+});
