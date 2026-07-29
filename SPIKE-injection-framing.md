@@ -24,6 +24,11 @@
 > after this was parked (`spike/verify-framing/` — a different spike, same
 > shape, now a reusable template). A4 also splits the remaining work into two
 > sessions and names the corpus trap that nearly undermined the P0.2 result.
+>
+> **Then read A5 before doing anything.** Session 1 ran on 2026-07-29 and hit a
+> hard blocker: A2 cannot be built from telemetry (11 usable labels, 9 notes,
+> ~3 topically independent, and no row carries the prompt). Criterion 2 is
+> currently unfalsifiable. A5 names the one-line telemetry fix that unblocks it.
 
 Timebox: one focused session. Output: a go/no-go on P0.1's framing change, plus a
 threshold recommendation backed by an offline sweep. **No production behaviour
@@ -209,6 +214,51 @@ staleness-note anchor).
 
 Doing A1 first is the tempting order because it is the tractable half. It is
 also the half that cannot decide anything on its own.
+
+### A5. BLOCKER — A2 cannot be built from telemetry (measured 2026-07-29)
+
+Session 1 ran and stopped here. A2 needs ~15 benign notes each paired with a
+prompt it genuinely bears on. Measured against the live provenance log
+(`$PLUGIN_DATA/provenance/events-2026-{06,07}.jsonl`):
+
+| | count |
+|---|---|
+| `note-usage` events total | 1851 |
+| rows with NO `usage` value (field undefined) | 1724 |
+| labelled `ignored` | 112 |
+| labelled `used` | **11** |
+| distinct notes among those | **9** |
+| sessions | 4 |
+
+Two things make this worse than the raw count suggests:
+
+1. **No row carries the prompt.** Keys are `ts, session_id, source, agent,
+   skill, action, note, usage, …`. The note is recorded; the query that
+   surfaced it is not. A2 needs PAIRS, and telemetry supplies only one side.
+2. **7 of the 11 are one topic** (property-separation: mortgage ledger,
+   separation timeline, car ledger, XPeng, contested date). Roughly 3
+   topically-independent pairs exist, not 15.
+
+That second point is the A4 discrimination trap arriving early, and baked into
+the source data rather than into selection. Notes from one work cluster behave
+near-identically across framings — the same unanimity that left the P0.2
+conclusion resting on a single item.
+
+**Consequence for the exit criteria.** Criterion 2 is "A2 read-through at
+parity with V0". With ~3 independent pairs, parity is unfalsifiable: V0 and V2
+tie on almost anything. Building A1 first would yield a clean mechanical attack
+table that still cannot ship, because criterion 2 stays unmeasurable. A2 is not
+hard to *design* — it is **not yet instrumented**.
+
+**Recommended unblock (not yet done — needs a decision):** log the prompt
+alongside the note in `note-usage`, exactly as B3 added per-hit scores.
+Telemetry-only, no behaviour change, and it converts every future `/reflect`
+into a real A2 pair — 9 notes become 9 pairs, then accumulate. The alternative
+is hand-authoring both sides of the corpus, which is precisely the setup that
+produced the one wrong ground-truth label in the P0.2 run.
+
+**Do not** resume by building A1 until A2 has a path to enough independent
+pairs to make criterion 2 falsifiable.
 
 ---
 
