@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.39.2
+
 ### Security
 
 - **The SSRF guard on the egress path now holds for IPv4-mapped IPv6 and for redirect hops.** `web-guard.js` denies the harness's permission-gated `WebFetch`/`WebSearch` and points the model at `bin/source-gateway.mjs`, so the gateway is the only way out and an unvalidated `--url` turns it into a proxy for any loopback or link-local service. Two holes: (1) the literal-IP check matched `::ffff:127.0.0.1` but `new URL()` normalises that to its hex form `::ffff:7f00:1`, which is the spelling the guard actually receives — verified reachable, `fetch('http://[::ffff:7f00:1]:port/')` hits 127.0.0.1, and `::ffff:a9fe:a9fe` hits cloud IMDS. The embedded v4 is now extracted from whichever form arrives and run through the one v4 rule, so the two spellings stop being two cases. (2) The gateway validated the origin and then followed redirects: `librarian/research/fetch.mjs` passed no `redirect` option, so it defaulted to `follow` and every hop after the first was unchecked. A public-origin host 302-ing into `127.0.0.1` returned the loopback body through the gateway. `web-fetch.mjs` already re-checked each hop correctly; rather than copy that loop, it is extracted as `fetchGuarded` in `lib/sources/url-guard.mjs` and both entry points now drive it. Also closes the original P0.4/P0.5 exposure (scheme allowlist, RFC1918/loopback/link-local/CGNAT ranges) and two missing `shellQuote` call sites on `angle.query` and `source.url` in the research workflow.
