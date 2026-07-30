@@ -8,18 +8,25 @@
 // reads back into Claude's context.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { resolveInVault } from '../plugin/scripts/lib/paths.mjs';
 
 const VAULT = '/tmp/ll-test-vault';
+// resolveInVault returns a NATIVE absolute path, so the expectation has to be
+// built the same way rather than spelled with '/'. On Windows the function
+// correctly yields 'D:\tmp\ll-test-vault\0-inbox\a.md' while a hardcoded
+// '/tmp/...' literal does not — that mismatch is a platform-naive assertion,
+// not a containment failure, and it only shows up on the Windows CI leg.
+const inVault = (...segments) => resolve(VAULT, ...segments);
 
 describe('resolveInVault', () => {
   it('accepts an ordinary vault-relative path', () => {
-    assert.equal(resolveInVault('0-inbox/a.md', VAULT), `${VAULT}/0-inbox/a.md`);
+    assert.equal(resolveInVault('0-inbox/a.md', VAULT), inVault('0-inbox/a.md'));
   });
 
   it('normalises interior . and .. that stay inside', () => {
-    assert.equal(resolveInVault('0-inbox/../3-permanent/b.md', VAULT), `${VAULT}/3-permanent/b.md`);
-    assert.equal(resolveInVault('./0-inbox/a.md', VAULT), `${VAULT}/0-inbox/a.md`);
+    assert.equal(resolveInVault('0-inbox/../3-permanent/b.md', VAULT), inVault('3-permanent/b.md'));
+    assert.equal(resolveInVault('./0-inbox/a.md', VAULT), inVault('0-inbox/a.md'));
   });
 
   it('rejects traversal that escapes the vault', () => {
