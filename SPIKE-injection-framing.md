@@ -25,10 +25,10 @@
 > shape, now a reusable template). A4 also splits the remaining work into two
 > sessions and names the corpus trap that nearly undermined the P0.2 result.
 >
-> **Then read A5 before doing anything.** Session 1 ran on 2026-07-29 and hit a
-> hard blocker: A2 cannot be built from telemetry (11 usable labels, 9 notes,
-> ~3 topically independent, and no row carries the prompt). Criterion 2 is
-> currently unfalsifiable. A5 names the one-line telemetry fix that unblocks it.
+> **Then read A6.** A5 declared A2 blocked on instrumentation; that was wrong
+> and is retracted. `usefulness-sample.mjs` on `feat/jit-injection-quality`
+> already builds the corpus from transcripts (145 cases, 31 sessions, no
+> `/reflect` gate). A2 needs topical-diversity filtering, not new telemetry.
 
 Timebox: one focused session. Output: a go/no-go on P0.1's framing change, plus a
 threshold recommendation backed by an offline sweep. **No production behaviour
@@ -215,7 +215,16 @@ staleness-note anchor).
 Doing A1 first is the tempting order because it is the tractable half. It is
 also the half that cannot decide anything on its own.
 
-### A5. BLOCKER — A2 cannot be built from telemetry (measured 2026-07-29)
+### A5. RETRACTED — the blocker below was wrong; see A6
+
+> **A5 is superseded by A6 (2026-07-31).** Its measurement of the `note-usage`
+> join is accurate, but its CONCLUSION is not: it treated that join as the only
+> possible source of A2 pairs. `usefulness-sample.mjs` on
+> `feat/jit-injection-quality` already builds the corpus from transcripts
+> instead — 145 cases, 31 sessions, no `/reflect` gate. Kept below because the
+> reasoning error is worth not repeating, not because the conclusion stands.
+
+### A5 (retracted). A2 cannot be built from telemetry (measured 2026-07-29)
 
 Session 1 ran and stopped here. A2 needs ~15 benign notes each paired with a
 prompt it genuinely bears on. Measured against the live provenance log
@@ -259,6 +268,37 @@ produced the one wrong ground-truth label in the P0.2 run.
 
 **Do not** resume by building A1 until A2 has a path to enough independent
 pairs to make criterion 2 falsifiable.
+
+### A6. A5 was wrong — the corpus exists, on `feat/jit-injection-quality`
+
+A5 measured the `note-usage` join correctly and then drew the wrong conclusion
+from it: that the join's scarcity bounded what A2 could be built from. It does
+not. **`/reflect` is not the only witness.** Every session writes a transcript,
+and the assistant turn immediately after a `UserPromptSubmit` is exactly where
+an injection either shows its effect or does not.
+
+`plugin/scripts/usefulness-sample.mjs` (worktree `.worktrees/jit-injection-quality`,
+commit `9761896`, with tests) already implements that join: **145 cases, 142
+distinct prompts, 31 sessions, no manual gating step.** Measured usefulness:
+
+| slice | used | 95% CI |
+|---|---|---|
+| 0.50+ (proposed gate) | 25% (5/20) | [11.2, 46.9] |
+| below 0.50 | 20% (4/20) | [8.1, 41.6] |
+
+Both bounds bias low: transcript retention is ~9% and skews recent, and a note
+can steer an answer without leaving a trace. Treat 25% as a lower bound.
+
+**What this changes for A2.** The benign corpus does not need hand-authoring or
+new instrumentation. It needs the transcript join, filtered for topical
+diversity — the A4 discrimination requirement still holds, and 31 sessions is
+enough to select against clustering rather than being trapped by it.
+
+**The reasoning error, recorded because it recurred twice.** Scoping a corpus to
+whichever telemetry you happen to query, then reporting that ceiling as a
+property of the problem. The question is "what could witness this effect?", not
+"what does the log I opened contain?". Ask that before declaring a measurement
+blocked.
 
 ---
 
