@@ -94,15 +94,18 @@ async function buildCandidates(newNotePaths, opts = {}) {
   const dbPath = resolve(vaultRoot, '.vault-search/vault-index.db');
   const bin = resolveBinary();
 
-  const newSet = new Set(newNotePaths.map((p) => vaultRel(resolve(p), vaultRoot)));
+  // The new-notes marker is append-only (hooks/modules/reflect-track.mjs), so a
+  // note appears once per Write plus once per hook-chain Edit that followed it.
+  // Dedupe on the same vault-relative key newSet uses: an undeduped list costs
+  // one querySimilar call and one full pair set per repeat.
+  const newRels = [...new Set(newNotePaths.map((p) => vaultRel(resolve(p), vaultRoot)))];
+  const newSet = new Set(newRels);
   const allPairs = [];
   let nextId = 1;
 
-  for (const inputPath of newNotePaths) {
-    const newAbs = resolve(inputPath);
-    if (!existsSync(newAbs)) continue;
-    const newRel = vaultRel(newAbs, vaultRoot);
+  for (const newRel of newRels) {
     if (!newRel.endsWith('.md')) continue;
+    if (!existsSync(resolve(vaultRoot, newRel))) continue;
 
     const newBase = basename(newRel, '.md');
     const newFolder = topFolder(newRel);
