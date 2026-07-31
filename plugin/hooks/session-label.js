@@ -249,9 +249,23 @@ function persistDedupeState(sid, newEntries) {
       const { value } = safeLoad(p, { fallback: [] });
       const existing = Array.isArray(value) ? value : [];
       const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
-      const kept = existing.filter((e) => new Date(e.ts).getTime() >= cutoff);
       const ts = new Date().toISOString();
-      for (const { path, level } of newEntries) kept.push({ path, level, ts });
+      // One row per path: loadDedupeState only ever reads the newest entry for
+      // a path, so keeping every timestamped repeat grows the file with the
+      // window (4h of a busy session is ~2.6k rows) for no lookup benefit.
+      // Collapsing on write bounds it by distinct notes instead of turns. Body
+      // beats pointer, matching loadDedupeState's precedence.
+      const byPath = new Map();
+      for (const e of existing) {
+        if (new Date(e.ts).getTime() < cutoff) continue;
+        const prior = byPath.get(e.path);
+        if (!prior || prior.level !== 'body') byPath.set(e.path, e);
+      }
+      for (const { path, level } of newEntries) {
+        const prior = byPath.get(path);
+        byPath.set(path, { path, level: prior?.level === 'body' ? 'body' : level, ts });
+      }
+      const kept = [...byPath.values()];
       const tmp = `${p}.${process.pid}.tmp`;
       writeFileSync(tmp, JSON.stringify(kept));
       renameSync(tmp, p);

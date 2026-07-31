@@ -35,7 +35,33 @@ export const HookConfig = Object.freeze({
   // rerank telemetry for that prompt, injection still proceeds in fusion order.
   INJECTION_RERANK_TIMEOUT_MS: 1200,
   INJECTION_RERANK_CANDIDATES: 20,
-  DEDUPE_WINDOW_MS: 180_000,
+  // Per-session suppression window for re-injecting a note already shown. The
+  // window is the only thing standing between the payload and a note that keeps
+  // winning fusion turn after turn.
+  //
+  // Calibration (2026-07-31): replay of fixture-free shadow-injection rows
+  // 2026-05..07, n=5,347 injections over 404 sessions
+  // (scripts/dedupe-window-replay.mjs). 45.2% of injections re-showed a note
+  // already injected earlier in the SAME session; 21% were back-to-back. The
+  // repeat-gap distribution is short and heavy at the head: p25=18s, p50=66s,
+  // p90=1823s. The prior 180_000 (3 min) caught only 66.5% of repeats, and
+  // measured dedupe_filtered_count was 0 on 89.3% of injections — the cutoff
+  // pruned the state faster than a working session accumulated it.
+  //
+  // 4h covers 95.9% of repeats (vs 99.5% at 24h) and is set at the knee: past
+  // this the curve is flat, and a bounded window keeps a genuinely-new phase of
+  // a long session able to re-surface a note it has moved back to. Repeats are
+  // also enriched for low-value turns: repeat prompts average 8.0 words against
+  // 16.6 for first-time injections, i.e. the same thin-prompt population the
+  // specificity floor already targets.
+  //
+  // Suppression is a token-budget and habituation argument, NOT a claim that
+  // repetition degrades model attention: the one controlled study of exact
+  // repetition (arXiv:2412.07923) found null results. The support is that
+  // massed repeats are the weakest condition in the human spacing-effect
+  // literature (Cepeda et al. 2008), and that redundancy filtering measurably
+  // helps RAG (ChunkRAG, arXiv:2410.19572).
+  DEDUPE_WINDOW_MS: 14_400_000, // 4 hours
   // Cutoff for vault-snapshot's stale per-session artifact sweeps (three
   // targets: retrieval/session-dedupe entries, plugin-data markers/, legacy
   // tmp markers).

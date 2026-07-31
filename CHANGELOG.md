@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`/reflect` asked the refinement proposer the same question two or three times.** The new-notes marker is append-only by design — `reflect-track.mjs` appends once per Write plus once per hook-chain Edit that follows it — so a single note arrives at `refinement-candidates.mjs` as 2-3 input lines. The loop iterated that raw list, running `querySimilar` once per repeat and re-emitting the whole pair set each time: observed live as 25 pairs built from 10 distinct ones, with the proposer dispatched the same `(new_note, candidate)` question three times. The vault-relative key needed to deduplicate was already being computed one line above to build `newSet`; it now drives the loop. Fixed here rather than in the hook because the append-only design is deliberate (no cross-process locks) and Step 4.4's sweep already tolerates repeats — `refinement.md` 4.6.a had a pair dedupe, but only on the deferred-queue merge path, so freshly-built pairs bypassed it.
+
+### Changed
+
+- **The JIT dedupe window is 4 hours, not 3 minutes — the same note was re-injecting all session long.** Replaying fixture-free shadow-injection telemetry (2026-05..07, n=5,347 injections over 404 sessions, `scripts/dedupe-window-replay.mjs`) found **45.2% of injections re-showed a note already injected earlier in the same session**, and 21% were back-to-back. `dedupe_filtered_count` was 0 on 89.3% of injections: the suppression existed but almost never fired, because `DEDUPE_WINDOW_MS` was 180,000 and the repeat-gap distribution is heavy at the head (p25=18s, p50=66s, p90=1823s) but runs for hours. A 3-minute cutoff pruned the state faster than a working session accumulated it, so the median state file held 5 entries and every turn started near-blank. At 4h the window covers 95.9% of repeats (99.5% at 24h) and sits at the knee of the curve, leaving a long session able to re-surface a note it has genuinely returned to. Worth ~1.04M of the 2.58M tokens injected over the measured quarter. The concentration this produced was extreme and not broad popularity: one job-application cover letter took 563 injections across 6 sessions (94 per sitting), and 950 of 7,008 notes have ever ranked first.
+- **Dedupe state collapses to one row per path.** `persistDedupeState` appended a timestamped row per note per turn while `loadDedupeState` only ever reads the newest row for a path, so the file grew with the window for no lookup benefit — a busy session under a 4h window would reach ~2.6k rows, rewritten under a lock on every prompt. Growth is now bounded by distinct notes instead of turns, with body still beating pointer to match the read-side precedence.
+
+  Suppression is justified on token budget and human habituation, **not** on a claim that repetition degrades model attention: the one controlled study of exact repetition ([arXiv:2412.07923](https://arxiv.org/html/2412.07923v3)) found null results. The support is that massed repeats are the weakest condition in the spacing-effect literature (Cepeda et al. 2008) and that redundancy filtering measurably reduces hallucination ([ChunkRAG, arXiv:2410.19572](https://arxiv.org/html/2410.19572v5)). Repeat injections are also enriched for the thin prompts the specificity floor already targets: 8.0 words on average against 16.6 for first-time injections.
+
+### Added
+
+- **`scripts/dedupe-window-replay.mjs`** — replays shadow-injection telemetry against candidate dedupe windows and reports repeats suppressed, share of injections, and tokens saved per window, filtering the pre-2026-07-28 test fixtures. Reports suppression volume only; it makes no usefulness claim, since the judged-usefulness join is underpowered at current n.
+
 ## v1.39.2
 
 ### Security

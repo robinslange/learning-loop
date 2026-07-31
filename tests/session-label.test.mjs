@@ -479,6 +479,126 @@ describe(
         rmSync(base, { recursive: true, force: true });
       }
     });
+
+    // The 4h window is only worth anything if a body-injected note actually
+    // stays suppressed on the next prompt. Telemetry replay found 45.2% of
+    // injections re-showed a note already injected earlier in the same session
+    // under the prior 3-minute window.
+    it('body-injected note stays suppressed on the next prompt', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-dedupe-repeat-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(
+          join(vault, 'notes', 'solo.md'),
+          'Solo note body about hook injection ordering and budgets.\n',
+        );
+
+        const hits = JSON.stringify([{ path: 'notes/solo.md', title: 'solo', score: 0.99 }]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
+          mode: 0o755,
+        });
+
+        const sid = randomUUID();
+        const env = {
+          ...process.env,
+          HOME: home,
+          TMPDIR: base,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          VAULT_PATH: vault,
+          LEARNING_LOOP_INJECTION_MODE: 'live',
+          LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+          LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+        };
+        const runPrompt = (prompt) =>
+          execFileSync('node', [HOOK], {
+            input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
+            encoding: 'utf-8',
+            timeout: 30000,
+            env,
+          });
+
+        const out1 = runPrompt('tell me about hook injection ordering and budgets');
+        assert.ok(out1.includes('Solo note body'), 'prompt 1 must body-inject the hit');
+
+        const out2 = runPrompt('more on hook injection ordering and budgets please');
+        assert.ok(
+          !out2.includes('Solo note body'),
+          `body-injected note must stay suppressed within the window; got: ${out2}`,
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+
+    // Dedupe state is a path->level lookup, so repeated turns must not append a
+    // row per turn. Without collapsing, a 4h window over a busy session grows
+    // the file to ~2.6k rows that loadDedupeState never reads.
+    it('dedupe state keeps one row per path across repeated prompts', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-dedupe-collapse-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(join(vault, 'notes', 'alpha.md'), 'Alpha body about budgets.\n');
+        writeFileSync(join(vault, 'notes', 'beta.md'), 'Beta body about budgets.\n');
+
+        const hits = JSON.stringify([
+          { path: 'notes/alpha.md', title: 'alpha', score: 0.99 },
+          { path: 'notes/beta.md', title: 'beta', score: 0.9 },
+        ]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
+          mode: 0o755,
+        });
+
+        const sid = randomUUID();
+        const env = {
+          ...process.env,
+          HOME: home,
+          TMPDIR: base,
+          CLAUDE_PLUGIN_DATA: pluginData,
+          VAULT_PATH: vault,
+          LEARNING_LOOP_INJECTION_MODE: 'live',
+          LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+          LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+        };
+        for (let i = 0; i < 4; i++) {
+          execFileSync('node', [HOOK], {
+            input: JSON.stringify({
+              session_id: sid,
+              prompt: `budgets question number ${i} about hook injection ordering`,
+              transcript_path: '',
+              cwd: '/tmp',
+            }),
+            encoding: 'utf-8',
+            timeout: 30000,
+            env,
+          });
+        }
+
+        const statePath = join(pluginData, 'retrieval', 'session-dedupe', `${sid}.json`);
+        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        const paths = state.map((e) => e.path);
+        assert.equal(
+          paths.length,
+          new Set(paths).size,
+          `dedupe state must hold one row per path; got ${JSON.stringify(state)}`,
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
   },
 );
 

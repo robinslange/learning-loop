@@ -95,8 +95,18 @@ test('CONVERGENCE_TTL_MS is exactly 7 days in milliseconds', () => {
   assert.equal(HookConfig.CONVERGENCE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
 });
 
-test('DEDUPE_WINDOW_MS is exactly 3 minutes in milliseconds', () => {
-  assert.equal(HookConfig.DEDUPE_WINDOW_MS, 3 * 60 * 1000);
+test('DEDUPE_WINDOW_MS is exactly 4 hours in milliseconds', () => {
+  assert.equal(HookConfig.DEDUPE_WINDOW_MS, 4 * 60 * 60 * 1000);
+});
+
+// The window must outlast a working session's repeat cadence but stay inside
+// the sweep that reaps the state files, or the per-session dedupe entries are
+// pruned out from under it.
+test('DEDUPE_WINDOW_MS sits below the session artifact sweep TTL', () => {
+  assert.ok(
+    HookConfig.DEDUPE_WINDOW_MS < HookConfig.SESSION_SWEEP_TTL_MS,
+    'dedupe entries must not outlive the sweep that reaps them',
+  );
 });
 
 // Regression: post-tool's worst-case inner spend (stdin ceiling + one full
