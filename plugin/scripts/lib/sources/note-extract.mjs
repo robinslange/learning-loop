@@ -1,5 +1,39 @@
 import { extractAuthorYearCitations } from '../cite-extract.mjs';
 
+const AUTHOR_YEAR =
+  /([A-Z][a-zÀ-ɏ]+(?:-[A-Z][a-zÀ-ɏ]+)*(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-zÀ-ɏ]+))*)\s*[\(,]?\s*((?:19|20)\d{2})/g;
+
+// The author-year belonging to an identifier is the LAST one before it, not the
+// first in a fixed lookback: a window wide enough to hold two citations would
+// otherwise bind every identifier to the earliest author on the line. Stop at a
+// citation boundary (";" or a preceding identifier) so a window never reaches
+// back into the citation before this one.
+function nearestAuthorYear(content, index) {
+  const start = Math.max(0, index - 240);
+  let window = content.slice(start, index);
+
+  const boundary = Math.max(
+    window.lastIndexOf(';'),
+    window.lastIndexOf('\n'),
+    window.lastIndexOf('- "'),
+  );
+  if (boundary !== -1) window = window.slice(boundary + 1);
+
+  // A previous identifier in the window means its author already claimed
+  // everything to its left.
+  const prevId = /(?:PMID|PubMed)\s+\d{7,8}|PMC\s?\d{5,8}|10\.\d{4,9}\/\S+/gi;
+  let lastId = -1,
+    idm;
+  while ((idm = prevId.exec(window)) !== null) lastId = idm.index + idm[0].length;
+  if (lastId !== -1) window = window.slice(lastId);
+
+  AUTHOR_YEAR.lastIndex = 0;
+  let match = null,
+    m;
+  while ((m = AUTHOR_YEAR.exec(window)) !== null) match = m;
+  return match;
+}
+
 export function extractSourcesFromNote(content) {
   const sources = [];
 
@@ -38,10 +72,7 @@ export function extractSourcesFromNote(content) {
   while ((m = pmidInlineRe.exec(content)) !== null) {
     const pmid = m[1];
     if (!sources.some((s) => s.pmid === pmid)) {
-      const surrounding = content.substring(Math.max(0, m.index - 100), m.index);
-      const authorYearMatch = surrounding.match(
-        /([A-Z][a-zÀ-ɏ]+(?:-[A-Z][a-zÀ-ɏ]+)*(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-zÀ-ɏ]+))*)\s*[\(,]?\s*((?:19|20)\d{2})/,
-      );
+      const authorYearMatch = nearestAuthorYear(content, m.index);
       sources.push({
         text: `PMID ${pmid}`,
         url: null,
@@ -58,10 +89,7 @@ export function extractSourcesFromNote(content) {
   while ((m = pmcInlineRe.exec(content)) !== null) {
     const pmc = `PMC${m[1]}`;
     if (!sources.some((s) => s.pmc === pmc)) {
-      const surrounding = content.substring(Math.max(0, m.index - 100), m.index);
-      const authorYearMatch = surrounding.match(
-        /([A-Z][a-zÀ-ɏ]+(?:-[A-Z][a-zÀ-ɏ]+)*(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-zÀ-ɏ]+))*)\s*[\(,]?\s*((?:19|20)\d{2})/,
-      );
+      const authorYearMatch = nearestAuthorYear(content, m.index);
       sources.push({
         text: `${pmc}`,
         url: null,
