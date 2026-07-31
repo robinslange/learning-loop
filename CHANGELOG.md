@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.39.3
+
 ### Fixed
 
 - **A note citing two papers on one line attributed both identifiers to the first author.** `extractSourcesFromNote` took the author-year as the *first* regex match inside a fixed 100-character lookback, so `Smith et al. 2019 found X (PMID 12345678); Jones & Barr 2021 showed Y (PMID 87654321)` claimed Smith for both PMIDs — and the lookback was wide enough to reach back past a preceding citation, so the misattribution grew with line density. The scan now walks to the *last* author-year before the identifier and stops at a citation boundary (`;`, newline, list-item marker, or a preceding identifier, since that identifier's own author already claimed everything to its left). `claimedAuthor`/`claimedYear` feed source verification, so a wrong bind sends the verifier to check the wrong paper. Adds `tests/sources/note-extract.test.mjs` — the function had no test coverage before.
