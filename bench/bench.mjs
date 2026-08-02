@@ -479,8 +479,7 @@ function compareBaselines(current, baseline) {
 
   const currentPlatform = current.quality?.provenance?.platform;
   const baselinePlatform = baseline.quality?.provenance?.platform;
-  const crossPlatform =
-    currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform;
+  const crossPlatform = currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform;
 
   function check(name, curr, prev, thresholdPct = 20) {
     if (curr == null || prev == null || prev === 0) return;

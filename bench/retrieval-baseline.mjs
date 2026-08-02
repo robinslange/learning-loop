@@ -77,7 +77,8 @@ for (const f of files) {
 }
 
 const pct = (n, d) => (d ? ((100 * n) / d).toFixed(1) + '%' : 'n/a');
-const quantile = (sorted, q) => (sorted.length ? sorted[Math.floor(q * (sorted.length - 1))] : null);
+const quantile = (sorted, q) =>
+  sorted.length ? sorted[Math.floor(q * (sorted.length - 1))] : null;
 
 // --- gate funnel -----------------------------------------------------------
 const byType = {};
@@ -93,7 +94,10 @@ const backendBroke = belowThreshold.filter((r) => r.backends?.vault?.error);
 const healthyConsidered = considered.length - backendBroke.length;
 
 // --- score separation ------------------------------------------------------
-const scores = passed.map((r) => r.gate?.vault_top_score).filter(Number.isFinite).sort((a, b) => a - b);
+const scores = passed
+  .map((r) => r.gate?.vault_top_score)
+  .filter(Number.isFinite)
+  .sort((a, b) => a - b);
 const failScores = belowThreshold
   .filter((r) => !r.backends?.vault?.error)
   .map((r) => r.gate?.vault_top_score)
@@ -172,7 +176,10 @@ const report = {
   },
   cost: {
     injections: tokens.length,
-    tokens_p50: quantile([...tokens].sort((a, b) => a - b), 0.5),
+    tokens_p50: quantile(
+      [...tokens].sort((a, b) => a - b),
+      0.5,
+    ),
     tokens_total: totalTokens,
     tokens_live: liveTokens,
   },
@@ -193,18 +200,28 @@ if (asJson) {
   console.log(`  Epoch:               ${report.epoch}`);
   console.log(`  Records:             ${report.total_records}`);
   console.log(`  Dropped pre-epoch:   ${report.dropped_pre_epoch}`);
-  console.log(`  Dropped fixture:     ${report.dropped_fixture}  (test-suite traffic in the production stream)`);
+  console.log(
+    `  Dropped fixture:     ${report.dropped_fixture}  (test-suite traffic in the production stream)`,
+  );
   console.log('');
   console.log('Gate funnel');
-  console.log(`  Fast-path skipped:   ${f.fast_path_skipped}  (${pct(f.fast_path_skipped, report.total_records)})`);
+  console.log(
+    `  Fast-path skipped:   ${f.fast_path_skipped}  (${pct(f.fast_path_skipped, report.total_records)})`,
+  );
   console.log(`  Considered:          ${f.considered}`);
-  console.log(`  Backend error:       ${f.backend_error}  (${pct(f.backend_error, f.considered)} — counted as fails today)`);
+  console.log(
+    `  Backend error:       ${f.backend_error}  (${pct(f.backend_error, f.considered)} — counted as fails today)`,
+  );
   console.log(`  Healthy considered:  ${f.healthy_considered}`);
-  console.log(`  Passed w/ payload:   ${f.passed_with_payload}  (${pct(f.passed_with_payload, f.healthy_considered)} of healthy)`);
+  console.log(
+    `  Passed w/ payload:   ${f.passed_with_payload}  (${pct(f.passed_with_payload, f.healthy_considered)} of healthy)`,
+  );
   console.log('');
   const s = report.score_separation;
   console.log('Gate score separation (RRF fusion score)');
-  console.log(`  Passing p10/p50/p90: ${s.pass_p10?.toFixed(3)} / ${s.pass_p50?.toFixed(3)} / ${s.pass_p90?.toFixed(3)}`);
+  console.log(
+    `  Passing p10/p50/p90: ${s.pass_p10?.toFixed(3)} / ${s.pass_p50?.toFixed(3)} / ${s.pass_p90?.toFixed(3)}`,
+  );
   console.log(`  Passing max:         ${s.pass_max?.toFixed(3)}`);
   console.log(`  Failing p50/max:     ${s.fail_p50?.toFixed(3)} / ${s.fail_max?.toFixed(3)}`);
   console.log(`  Whole observed span: ${s.observed_span?.toFixed(3)}  <- the range 0.4 must cut`);
@@ -212,19 +229,27 @@ if (asJson) {
   const rr = report.rerank_counterfactual;
   console.log('Rerank counterfactual (cross-encoder, currently log-only)');
   console.log(`  Passes with rerank:  ${rr.passes_with_rerank}   errors: ${rr.rerank_errors}`);
-  console.log(`  Would move top slot: ${rr.moved_top}  (${pct(rr.moved_top, rr.passes_with_rerank)})`);
+  console.log(
+    `  Would move top slot: ${rr.moved_top}  (${pct(rr.moved_top, rr.passes_with_rerank)})`,
+  );
   console.log(`  Latency p50/p95:     ${rr.latency_p50}ms / ${rr.latency_p95}ms`);
   console.log('');
   const p = report.padding;
   console.log('Query padding');
-  console.log(`  Padded passes:       ${p.padded_passes}  (${pct(p.padded_passes, f.passed_with_payload)})`);
-  console.log(`  Padding load-bearing:${p.load_bearing}  (${pct(p.load_bearing, f.passed_with_payload)} of passes)`);
+  console.log(
+    `  Padded passes:       ${p.padded_passes}  (${pct(p.padded_passes, f.passed_with_payload)})`,
+  );
+  console.log(
+    `  Padding load-bearing:${p.load_bearing}  (${pct(p.load_bearing, f.passed_with_payload)} of passes)`,
+  );
   console.log('');
   const c = report.cost;
   console.log('Cost');
   console.log(`  Injections:          ${c.injections}`);
   console.log(`  Tokens p50:          ${c.tokens_p50}`);
-  console.log(`  Tokens total:        ${c.tokens_total.toLocaleString()}  (live: ${c.tokens_live.toLocaleString()})`);
+  console.log(
+    `  Tokens total:        ${c.tokens_total.toLocaleString()}  (live: ${c.tokens_live.toLocaleString()})`,
+  );
   console.log('');
   const l = report.latency;
   console.log('Latency');
