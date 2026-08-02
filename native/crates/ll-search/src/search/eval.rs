@@ -7,7 +7,7 @@ use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K, TOP_K_INITIAL};
 use crate::embed::embed_query;
 use crate::rerank::rerank_with_report;
 
-use super::scoring::{finalize_rrf, rocchio_prf_with, PrfParams, add_ranked_rrf};
+use super::scoring::{finalize_rrf, rocchio_prf_with, PrfParams, add_ranked_rrf, FusionWeights};
 use super::store::EmbeddingStore;
 use super::context::{SearchContext, StageFlags};
 use super::federation::batch_load_bodies_federated;
@@ -437,4 +437,91 @@ mod tests {
         assert!(derive_long_query("").is_none());
         assert!(derive_long_query("[[only]] [[links]] [[here]]").is_none());
     }
+}
+
+/// Grid-search fusion weights against the wikilink eval set.
+///
+/// Signals do not depend on weights, so they are computed once per query and
+/// every configuration is scored against the same cached signals: the sweep
+/// costs one embedding pass, not one per configuration.
+///
+/// Queries are split train/holdout on an even/odd stride. The winner is chosen
+/// on train and reported on holdout, because a grid search that picks and
+/// reports on the same queries measures the search, not the weights.
+pub fn tune_weights(
+    conn: &Connection,
+    _store: &EmbeddingStore,
+    min_links: usize,
+    limit: Option<usize>,
+) -> Vec<(FusionWeights, f64, f64)> {
+    let mut queries = build_eval_set(conn, min_links);
+    if let Some(cap) = limit {
+        if queries.len() > cap {
+            let stride = queries.len() / cap;
+            queries = queries.into_iter().step_by(stride.max(1)).take(cap).collect();
+        }
+    }
+    let ctx = SearchContext::build(conn);
+    eprintln!("Tuning on {} queries", queries.len());
+
+    // Cache signals per query. Long queries are the JIT distribution and the
+    // one the shipped gate actually sees, so tune on those where available.
+    struct Cached {
+        signals: super::context::Signals,
+        relevant: HashSet<String>,
+        path: String,
+    }
+    let mut cached: Vec<Cached> = Vec::new();
+    for (i, q) in queries.iter().enumerate() {
+        let text = q.long_query.as_deref().unwrap_or(&q.title);
+        let qvec = embed_query(text);
+        cached.push(Cached {
+            signals: ctx.compute_signals_holdout(conn, &qvec, text, &q.path),
+            relevant: q.relevant.clone(),
+            path: q.path.clone(),
+        });
+        if (i + 1) % 50 == 0 {
+            eprintln!("  signals {}/{}", i + 1, queries.len());
+        }
+    }
+
+    let flags = StageFlags::default();
+    // PRF is applied in `local_rrf_scores`, downstream of the fusion this
+    // sweep exercises, so varying it here changes nothing. Sweeping it anyway
+    // would print a column of identical numbers and imply the harness had
+    // tested it. Tune PRF with `tune-prf`, which does drive that stage.
+    let grid_ppr = [0.0, 0.05, 0.1, 0.25, 0.5, 1.0];
+    let grid_tag = [0.0, 0.05, 0.1, 0.25, 0.5, 1.0];
+
+    let score_on = |w: &FusionWeights, idxs: &[usize]| -> f64 {
+        let mut total = 0.0;
+        for &i in idxs {
+            let c = &cached[i];
+            let rrf = ctx.rrf_from_signals_weighted(&c.signals, &flags, w, None);
+            let ranked: Vec<String> =
+                finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect();
+            let (_, _, ndcg, _, _) = score_ranking(&ranked, &c.relevant, &c.path);
+            total += ndcg;
+        }
+        total / idxs.len().max(1) as f64
+    };
+
+    let train: Vec<usize> = (0..cached.len()).filter(|i| i % 2 == 0).collect();
+    let holdout: Vec<usize> = (0..cached.len()).filter(|i| i % 2 == 1).collect();
+
+    let mut results: Vec<(FusionWeights, f64, f64)> = Vec::new();
+    for &ppr in &grid_ppr {
+        for &tag in &grid_tag {
+            let w = FusionWeights {
+                vec: 1.0,
+                bm25: 1.0,
+                ppr,
+                tag,
+                prf: FusionWeights::default().prf,
+            };
+            results.push((w, score_on(&w, &train), score_on(&w, &holdout)));
+        }
+    }
+    results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    results
 }

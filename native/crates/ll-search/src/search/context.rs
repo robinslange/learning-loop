@@ -9,7 +9,8 @@ use crate::config::{
     TAG_FREQ_BAND_MAX, TAG_FREQ_BAND_MIN,
     TOP_K_FTS, TOP_K_GRAPH, TOP_K_INITIAL, TOP_K_VEC,
 };
-use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query, collect_seeds, rocchio_prf_with, PrfParams};
+use super::scoring::{add_weighted_rrf, dot_product, fts_bm25_query, collect_seeds, rocchio_prf_with, PrfParams,
+    FusionWeights};
 use super::graph::{load_link_graph, load_tags_map, personalized_pagerank, personalized_pagerank_holdout};
 use super::store::{EmbeddingStore, load_store};
 use super::query::{load_titles_map, load_mtime_map};
@@ -234,7 +235,7 @@ impl SearchContext {
         signals: &Signals,
         extra: Option<&[(String, f64)]>,
     ) -> HashMap<String, f64> {
-        self.rrf_from_signals_gated(signals, &StageFlags::default(), extra)
+        self.rrf_from_signals_weighted(signals, &StageFlags::default(), &FusionWeights::default(), extra)
     }
 
     /// RRF fusion that skips disabled stages. Used by eval harnesses.
@@ -244,21 +245,51 @@ impl SearchContext {
         flags: &StageFlags,
         extra: Option<&[(String, f64)]>,
     ) -> HashMap<String, f64> {
+        self.rrf_from_signals_weighted(signals, flags, &FusionWeights::default(), extra)
+    }
+
+    /// Fusion with explicit lane weights. The sweep in `tune.rs` varies these;
+    /// everything else takes `FusionWeights::default()`.
+    pub(crate) fn rrf_from_signals_weighted(
+        &self,
+        signals: &Signals,
+        flags: &StageFlags,
+        w: &FusionWeights,
+        extra: Option<&[(String, f64)]>,
+    ) -> HashMap<String, f64> {
         let mut rrf: HashMap<String, f64> = HashMap::new();
         if flags.vec_search {
-            add_ranked_rrf(&mut rrf, signals.vec_scored.iter().map(|(p, _)| p.as_str()));
+            add_weighted_rrf(
+                &mut rrf,
+                w.vec,
+                signals.vec_scored.iter().map(|(p, _)| p.as_str()),
+            );
         }
         if flags.bm25 {
-            add_ranked_rrf(&mut rrf, signals.fts_results.iter().map(|(_, p, _)| p.as_str()));
+            add_weighted_rrf(
+                &mut rrf,
+                w.bm25,
+                signals.fts_results.iter().map(|(_, p, _)| p.as_str()),
+            );
         }
         if flags.ppr {
-            add_ranked_rrf(&mut rrf, signals.ppr_results.iter().map(|(p, _)| p.as_str()));
+            add_weighted_rrf(
+                &mut rrf,
+                w.ppr,
+                signals.ppr_results.iter().map(|(p, _)| p.as_str()),
+            );
         }
         if flags.tag_expand {
-            add_ranked_rrf(&mut rrf, signals.tag_results.iter().map(|(p, _)| p.as_str()));
+            add_weighted_rrf(
+                &mut rrf,
+                w.tag,
+                signals.tag_results.iter().map(|(p, _)| p.as_str()),
+            );
         }
+        // `extra` is the federated-peer lane; it carries the same rank
+        // semantics as the local vector lane it mirrors.
         if let Some(extra) = extra {
-            add_ranked_rrf(&mut rrf, extra.iter().map(|(p, _)| p.as_str()));
+            add_weighted_rrf(&mut rrf, w.vec, extra.iter().map(|(p, _)| p.as_str()));
         }
         rrf
     }
@@ -280,7 +311,7 @@ impl SearchContext {
         initial.truncate(TOP_K_INITIAL);
         let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
         let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
-        add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+        add_weighted_rrf(&mut rrf, FusionWeights::default().prf, prf_results.iter().map(|(p, _)| p.as_str()));
 
         rrf
     }
@@ -421,6 +452,35 @@ fn read_data_version(conn: &Connection) -> i64 {
 mod tests {
     use super::*;
     use super::super::test_helpers::helpers::*;
+
+    #[test]
+    fn fusion_lets_bm25_outrank_agreeing_graph_lanes() {
+        // Production shape of the tail-passage failure: BM25 ranks the note
+        // holding the text first, while PPR and tag expansion — which never saw
+        // it — both rank a different note first. Under equal votes the graph
+        // lanes win 2:1. They must not.
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let conn = create_test_db(&[
+            ("right.md", "right", "the passage", &emb),
+            ("wrong.md", "wrong", "unrelated", &emb),
+        ]);
+        let ctx = SearchContext::build(&conn);
+
+        let signals = Signals {
+            vec_scored: vec![],
+            fts_results: vec![(1, "right.md".to_string(), 1.0)],
+            ppr_results: vec![("wrong.md".to_string(), 1.0)],
+            tag_results: vec![("wrong.md".to_string(), 1.0)],
+        };
+
+        let rrf = ctx.rrf_from_signals(&signals, None);
+        use super::super::scoring::finalize_rrf;
+        let ranked = finalize_rrf(rrf, 2);
+        assert_eq!(
+            ranked[0].0, "right.md",
+            "the lane holding the text must win against two that do not"
+        );
+    }
 
     #[test]
     fn test_build_caches_match_inline() {

@@ -180,6 +180,13 @@ enum Commands {
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    TuneWeights {
+        db_path: String,
+        #[arg(long, default_value_t = 2)]
+        min_links: usize,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
     EvalFunnel {
         db_path: String,
         #[arg(long, default_value_t = 2)]
@@ -477,6 +484,23 @@ async fn main() {
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
             out(&result);
+        }
+        Commands::TuneWeights { db_path, min_links, limit } => {
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
+            let store = ll_search::search::store::load_store(&conn);
+            let results = ll_search::search::tune_weights(&conn, &store, min_links, limit);
+            println!("{:>6} {:>6}   {:>9} {:>9}", "ppr", "tag", "train", "holdout");
+            for (w, train, hold) in results.iter() {
+                println!("{:>6.2} {:>6.2}   {:>9.4} {:>9.4}", w.ppr, w.tag, train, hold);
+            }
+            let dflt = ll_search::search::scoring_defaults();
+            if let Some((w, train, hold)) =
+                results.iter().find(|(w, _, _)| *w == dflt)
+            {
+                println!("\nshipped default: ppr {:.2} tag {:.2} -> train {:.4} holdout {:.4}",
+                    w.ppr, w.tag, train, hold);
+            }
         }
         Commands::TunePrf { db_path, queries } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");

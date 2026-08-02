@@ -260,6 +260,51 @@ pub fn try_fts_bm25_query(
 ///
 /// Call once per retrieval system (e.g. vector, FTS, graph). Documents that
 /// appear in multiple lists accumulate scores from each.
+/// Per-lane fusion weights.
+///
+/// Unweighted RRF gives every list the same vote, so a lane that knows nothing
+/// about the query counts as much as the one that does. Measured on tail
+/// passages, BM25 alone put the source note at rank 1 for 85% of queries and
+/// the equal-weight funnel for 25%: PPR and tag expansion, which had never seen
+/// the text, agreed on a wrong note and outvoted it.
+///
+/// Set by `ll-search tune-weights` against the wikilink eval set, not by taste.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FusionWeights {
+    pub vec: f64,
+    pub bm25: f64,
+    pub ppr: f64,
+    pub tag: f64,
+    pub prf: f64,
+}
+
+impl Default for FusionWeights {
+    fn default() -> Self {
+        Self { vec: VEC_WEIGHT, bm25: BM25_WEIGHT, ppr: PPR_WEIGHT, tag: TAG_WEIGHT, prf: PRF_WEIGHT }
+    }
+}
+
+pub const VEC_WEIGHT: f64 = 1.0;
+pub const BM25_WEIGHT: f64 = 1.0;
+/// Graph lanes vote at a twentieth of the retrieval lanes: statistically tied
+/// with the sweep's optimum (zero) on both splits, while still placing their
+/// candidates in the pool the reranker judges.
+pub const PPR_WEIGHT: f64 = 0.05;
+pub const TAG_WEIGHT: f64 = 0.05;
+pub const PRF_WEIGHT: f64 = 0.5;
+
+/// Add a ranked list to the fusion map, scaled by the lane's weight.
+pub fn add_weighted_rrf<'a>(
+    rrf_scores: &mut HashMap<String, f64>,
+    weight: f64,
+    items: impl Iterator<Item = &'a str>,
+) {
+    for (rank, path) in items.enumerate() {
+        *rrf_scores.entry(path.to_string()).or_default() +=
+            weight / (RRF_K + rank as f64 + 1.0);
+    }
+}
+
 pub fn add_ranked_rrf<'a>(rrf_scores: &mut HashMap<String, f64>, items: impl Iterator<Item = &'a str>) {
     for (rank, path) in items.enumerate() {
         *rrf_scores.entry(path.to_string()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
@@ -560,6 +605,72 @@ mod tests {
         // Must not panic, and must still produce results from the valid vec.
         let out = rocchio_prf_with(&query, &top, &all, &params);
         assert!(!out.is_empty(), "valid feedback vec still drives expansion");
+    }
+
+    #[test]
+    fn a_high_weight_lane_top_hit_beats_agreement_between_low_weight_lanes() {
+        // The tail-passage failure, reduced. BM25 held the full note body and
+        // put the right note first; PPR and tag expansion had never seen the
+        // passage, agreed on a wrong note, and their two equal votes outscored
+        // the one lane that knew the answer. Measured cost: BM25 alone put the
+        // source note at rank 1 for 85% of tail queries, the funnel for 25%.
+        let mut rrf = HashMap::new();
+        add_weighted_rrf(&mut rrf, BM25_WEIGHT, ["right.md"].into_iter());
+        add_weighted_rrf(&mut rrf, PPR_WEIGHT, ["wrong.md"].into_iter());
+        add_weighted_rrf(&mut rrf, TAG_WEIGHT, ["wrong.md"].into_iter());
+
+        let ranked = finalize_rrf(rrf, 2);
+        assert_eq!(
+            ranked[0].0, "right.md",
+            "a lane that saw the text must outrank two that did not"
+        );
+    }
+
+    #[test]
+    fn shipped_graph_lane_weights_stay_inside_the_tuned_region() {
+        // `tune-weights` swept ppr and tag against the wikilink eval set with a
+        // train/holdout split. nDCG@10 is flat from 0.00 to 0.10 (holdout
+        // 0.5804 to 0.5776) and falls off a cliff above it: 0.50 gives 0.5295
+        // and equal weight — the old behaviour — gives 0.1887.
+        //
+        // Anything above a tenth of the retrieval lanes is outside the region
+        // the sweep found safe. Re-run `tune-weights` before raising this.
+        let w = FusionWeights::default();
+        let retrieval = w.vec.min(w.bm25);
+        assert!(
+            w.ppr <= 0.1 * retrieval,
+            "ppr weight {} is outside the tuned region (max {})",
+            w.ppr,
+            0.1 * retrieval
+        );
+        assert!(
+            w.tag <= 0.1 * retrieval,
+            "tag weight {} is outside the tuned region (max {})",
+            w.tag,
+            0.1 * retrieval
+        );
+    }
+
+    #[test]
+    fn graph_lanes_still_contribute_candidates() {
+        // Zero would maximise fused nDCG, but it also drops PPR- and
+        // tag-surfaced notes out of the candidate pool entirely, and the funnel
+        // shows the reranker recovering real gains from exactly those. They
+        // must vote weakly, not be deleted.
+        let w = FusionWeights::default();
+        assert!(w.ppr > 0.0 && w.tag > 0.0, "graph lanes must still surface candidates");
+    }
+
+    #[test]
+    fn weight_scales_the_rank_contribution() {
+        let mut single = HashMap::new();
+        add_weighted_rrf(&mut single, 1.0, ["a.md"].into_iter());
+        let mut double = HashMap::new();
+        add_weighted_rrf(&mut double, 2.0, ["a.md"].into_iter());
+        assert!(
+            (double["a.md"] - 2.0 * single["a.md"]).abs() < 1e-12,
+            "doubling the weight must double the contribution"
+        );
     }
 
     #[test]

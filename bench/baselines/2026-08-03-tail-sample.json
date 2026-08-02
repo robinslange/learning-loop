@@ -1,0 +1,242 @@
+[
+ {
+  "path": "0-inbox/day-of-week-covariate-is-the-cheap-test-ar3-never-ran.md",
+  "tail": "e explanation. Qualifies ar3-makes-supplement-detection-practically-unachievable. Its session-cost estimate assumes AR(3) holds, an assumption untested against the cheaper explanation. n-of-1-inference-requires-ar1-errors-and-bayesian-shrinkage autocorrelation-in-both-series-collapses-effective-sample-size honest-patt"
+ },
+ {
+  "path": "1-fleeting/exercise-is-the-ed-safe-metabolic-lever-metformin-is-not-zero-but-not-for-her-now.md",
+  "tail": "ough in lean PCOS specifically the expected weight effect is close to null -- don't overstate it. She's also not TTC, so the ovulation benefit is moot. lean-pcos-is-driven-by-the-hpo-axis-not-insulin-resistance covers why the lean phenotype doesn't automatically spare the metabolic axis. lean-pcos-disordered-eating-i"
+ },
+ {
+  "path": "1-fleeting/philosopher-persona-prompts-gain-more-on-weaker-models.md",
+  "tail": "he venue and authors as reported, not independently confirmed. aristotle-was-a-better-prompt-engineer-than-you named-persona-prompting-needs-an-anti-mimicry-guard-and-a-concrete-example adding-a-persona-voice-is-a-register-scoping-problem-not-a-flavor-choice persona-pass-is-the-missing-step-after-draft-in-the-long-form"
+ },
+ {
+  "path": "2-literature/ag1-unit-economics-podcast-influencer-model.md",
+  "tail": ". AG1 expanded product line in 2025 (AGZ, other products) after years of single-SKU discipline. **Leadership:** Founder Chris Ashenden resigned October 2024 amid scrutiny over past conduct. Kat Cole (former Focus Brands president) became CEO. **What made the model work:** Podcast audiences have high trust, high healt"
+ },
+ {
+  "path": "2-literature/doran-parberry-emergent-economies-rpg-2012.md",
+  "tail": "sed some agents to go bankrupt who otherwise would not have, and shifted prices by ~20% after 500 rounds. This is not an error -- it is expected in iterative simulations with feedback coupling. Over 1.5 billion random production rulesets were tested on PS3 Cell processors. 0.19% produced economies passing all stabilit"
+ },
+ {
+  "path": "2-literature/hu-memoryagentbench-evaluating-memory-llm-agents-2026.md",
+  "tail": "by-operator liang-swe-bench-illusion-memorisation-not-reasoning-2025 prathifkumar-swe-bench-verified-tests-memory-not-ability-2025 test-prompt-driven-skills-with-llm-judgment-not-heuristics moderation-throughput-caps-safe-content-generation better-retrieval-primitives-reduce-the-agent-loop-burden-not-the-other-way-arou"
+ },
+ {
+  "path": "2-literature/proactive-memory-agent-behavioral-state-decay.md",
+  "tail": "a fixed-interval trigger.\" The paper is explicit that the trigger function is a fixed step count in the main experiments, with error-driven or context-shift triggers named only as future work, not tested. The \"when\" decision is entirely delegated to the memory agent's own judgment inside Phase 2, not decomposed into a"
+ },
+ {
+  "path": "3-permanent/a-good-reranker-can-be-a-bad-gate.md",
+  "tail": "rerankers are Redis's own commercial LangCache models. The mechanism argument does not depend on that affiliation: monotonic-invariance of ranking metrics is a proof, BCE score compression is a training-objective property, and ColBERT's pool-scoped softmax is confirmed independently in the original SIGIR 2020 paper. Wh"
+ },
+ {
+  "path": "3-permanent/adr-rust-vs-go-local-first-messaging-daemon.md",
+  "tail": "ld catch at compile time will now surface at runtime. Mitigation: Go's race detector (`-race` flag), table-driven tests, structured error handling, and context propagation discipline. ## Stack update Replace the Rust/tokio/rmcp/axum stack from local-first-messaging-mcp-architecture-sketch with: - Go 1.25+ - whatsmeow"
+ },
+ {
+  "path": "3-permanent/arctic-embed-2-multilingual-resolves-english-quality-tradeoff.md",
+  "tail": "tic-embed-xs-is-the-smallest-viable-retrieval-model arctic-embed-m-retrieves-different-notes-not-better-ones merrick-arctic-embed-training-recipe-2024 embedding-model-selection-discovery-synthesis-2026-04-04 messaging-semantic-search-layer-design-synthesis arctic-embed-m-leads-sub-150m-retrieval-at-54-point-9 embedding"
+ },
+ {
+  "path": "3-permanent/bge-small-outperforms-embeddinggemma-on-domain-specific-retrieval.md",
+  "tail": "g-level jina-reranker-v1-turbo-en-is-the-2026-upgrade-from-ms-marco-minilm-l6 cde-small-v2-onnx-export-is-engineering-cost-not-architecture-blocker cde-small-v2-onnx-export-costs-35x-size-for-2-point-5-ndcg-lift shaukat-adnan-kuhn-paragraph-group-chunking-wins-1080-configs-2026 qu-tu-bao-semantic-chunking-not-consisten"
+ },
+ {
+  "path": "3-permanent/chronic-low-dose-doxycycline-is-established-anti-inflammatory-therapy-for-mgd-blepharitis-and-ocular-rosacea.md",
+  "tail": "esistant-strain full-dose-doxycycline-modestly-raises-vaginal-thrush-risk-but-the-scary-16-percent-figure-is-very-low-certainty stopping-doxycycline-acne-longer-antibiotic-courses-predict-more-recurrence-not-less-needs-replication doxycycline-photo-onycholysis-is-phototoxic-not-photoallergic-no-tolerance-no-safe-dose-f"
+ },
+ {
+  "path": "3-permanent/constrain-the-model-to-narration-never-adjudication.md",
+  "tail": "the place that cannot lie. thalen-coaching-system-design-spec is the sibling project this pattern should be checked against, not copied from: different product, same constraint. telling-a-model-to-omit-rather-than-guess-suppresses-confident-fabrication verdicts-harm-some-users-and-help-others-information-frame-is-defau"
+ },
+ {
+  "path": "3-permanent/convergence-claim-has-a-contamination-problem.md",
+  "tail": "m those traditions, and a 20th-century Western reconstruction that assembled them as evidence of each other. The stronger version of the argument: the principles are robust enough that they were worth transmitting across cultures. That is still a real claim. It just needs a different warrant. Related: compression-car"
+ },
+ {
+  "path": "3-permanent/digital-mental-health-safety-err-toward-sensitivity-and-no-guideline-sets-a-log-cap.md",
+  "tail": "al that tested overuse. The IAPT deterioration thresholds were designed for therapist-guided care, not a standalone on-device tool. The Tier 1/Tier 2 crisis rules are synthesized, not validated. The app's \"why\" copy must NOT claim these caps are clinically validated, must NOT present the screen as a diagnostic or scree"
+ },
+ {
+  "path": "3-permanent/effective-ig-carousel-copywriting-rules-for-supplement-education.md",
+  "tail": "synthesis-2026-05 a-booking-flow-emits-three-distinct-archetypes-not-one-template colloquialisms-earn-their-place-when-they-replace-something-stiffer-not-when-they-flavour a-value-close-earns-the-brand-mention-with-a-concrete-callback-not-a-vague-claim each-ingredient-line-must-tie-back-to-the-carousels-one-spine-not-s"
+ },
+ {
+  "path": "3-permanent/evidence-quality-grading-for-supplement-claims.md",
+  "tail": "rts, theoretical, or conflicting results | Most nootropic stacks | Each PK profile should carry its grade prominently. Users deserve to know the difference between \"caffeine speeds simple reactions (Grade A, 50+ RCTs)\" and \"EnXtra enhances focus (Grade C, 2 industry-funded studies).\" This connects to unverified-citat"
+ },
+ {
+  "path": "3-permanent/four-leak-vectors-bypass-all-request-response-versioning.md",
+  "tail": "-headers-are-governance-infrastructure-not-optional-metadata subscribeto-more-vs-usesubscription-serve-different-purposes graphql-versioning-strategy-map.excalidraw query-rewriting-is-incompatible-with-persisted-documents graphql-deprecation-observability-pipeline.excalidraw content-based-dedup-breaks-across-serializat"
+ },
+ {
+  "path": "3-permanent/glicko2-cognitive-self-tracking.md",
+  "tail": "vidence. This aligns with Self-Determination Theory. A naked theta estimate from IRT does none of this without additional design work. **Implementation specifics.** Tau set to 0.6 (raised from 0.5) for faster detection of lifestyle changes. Three separate ratings: alertness, executive, composite. Wide Potent band (130"
+ },
+ {
+  "path": "3-permanent/hot-fill-hold-kills-vegetative-cells-not-heat-resistant-spores.md",
+  "tail": "s-heat-transfer-mode-in-thermal-processing If pH control ever fails, the thermal process doesn't compensate. HFH at 93°C does not approach the spore kill required for low-acid foods, LACF targets F0 ≥ 3 min at 121°C (the 12D botulinum cook; D-value for *C. botulinum* at 121.1°C ≈ 0.21 min, so 12 × 0.21 = 2.52 min, rou"
+ },
+ {
+  "path": "3-permanent/instagram-dm-v1-verdict-defer-not-drop.md",
+  "tail": "tolerance and maintenance burden. Defer conditions: ship v1 without Instagram. Revisit when: (a) the project has other channels working and the additional complexity is worth absorbing, or (b) Meta opens a personal-account API path (unlikely near-term). The cookie technique should be treated as a fragile integration t"
+ },
+ {
+  "path": "3-permanent/kv-cache-hit-rate-is-the-production-agent-metric.md",
+  "tail": "agent-memory sleep-time-compute-shifts-reasoning-from-query-time-to-idle-time lin-sleep-time-compute-2025 vaswani-attention-is-all-you-need-2017 sleep-time-compute-collapses-to-1-5x-on-coding-tasks cache-research-by-entity-then-rag-deepens-the-base any-tool-definition-change-busts-the-entire-cache-hierarchy model-routi"
+ },
+ {
+  "path": "3-permanent/llm-output-constraints-need-post-hoc-enforcement.md",
+  "tail": "ema-compliance style-rule-without-enforcement-hook-is-aspiration-not-policy enforce-house-style-at-both-prompt-and-render-not-just-one llm-extracted-metadata-is-still-untrusted-input an-advisory-prompt-rule-is-not-a-structural-guard reject-is-the-only-write-time-enforcement-a-pretooluse-hook-has a-schema-gate-retrofitt"
+ },
+ {
+  "path": "3-permanent/mautrix-whatsapp-bridge-model-and-local-first-variant.md",
+  "tail": "latform-model imessage-bluebubbles-polling-architecture bridge-ecosystem-signal-for-language-choice contact-unification-is-the-unified-messaging-gap mautrix-ghost-puppet-does-not-solve-cross-bridge-unification whatsapp-ipls-encrypted-contact-sync-across-linked-devices whatsapp-1on1-backfill-is-silently-unreliable whats"
+ },
+ {
+  "path": "3-permanent/mcp-relay-revocation-ux.md",
+  "tail": "o resubscribe.\"}`. ## Token introspection vs local validation Real-time revocation requires checking `devices.revoked_at` on every request -- this is token introspection semantics even without a formal introspection endpoint. For a personal relay with low traffic, this is a single database read per request, which is"
+ },
+ {
+  "path": "3-permanent/miscalibrated-llm-judges-drift-toward-acceptance-not-random-error.md",
+  "tail": "udgebench-exposes-that-strong-llm-judges-are-near-random-on-hard-factual-tasks sycophancy-is-rlhf-optimizing-for-user-approval-not-truth aggregate-binary-claim-verdicts-for-graduated-note-scores ph-llm-is-published-prior-art-for-deterministic-feature-pack-llm-context pass-at-k-hides-what-pass-power-k-reveals calibratio"
+ },
+ {
+  "path": "3-permanent/non-chinese-local-coding-models-shrink-to-the-mistral-family-on-a-48gb-mac.md",
+  "tail": "ackends-via-base-url-and-subagent-model-env offloading-coding-gruntwork-to-cheaper-llms research-rankings-measure-agentic-loops-one-shot-diagnosis-inverts-them tiny-fine-tuned-local-model-for-query-expansion-not-the-calling-llm contradiction-resolution-fails-at-seven-percent-across-all-agent-memory-systems wang-wise-li"
+ },
+ {
+  "path": "3-permanent/nz-likeness-bill-must-clear-bora-s14-with-satire-news-and-art-exceptions.md",
+  "tail": "-federalise denmark-copyright-amendment-treats-likeness-as-quasi-copyright-to-stop-deepfakes nz-light-touch-ai-regulation-is-explicit-policy-choice a-dedicated-likeness-voice-right-not-copyright-avoids-the-work-vs-attribute-mismatch no-fakes-act-creates-a-sui-generis-digital-replica-right-not-a-copyright no-fakes-act-b"
+ },
+ {
+  "path": "3-permanent/palestinian-intellectual-tradition-reframes-conflict-as-colonial.md",
+  "tail": "05/edward-said-saw-the-future-of-israel-and-palestine/) khalidi-hundred-years-war-on-palestine israel-palestine-power-structures-map erakat-justice-for-some-law-palestine us-shields-israel-with-300b-and-51-vetoes balfour-declaration-was-imperial-calculus-not-moral-commitment oslo-created-the-fragmentation-it-was-suppos"
+ },
+ {
+  "path": "3-permanent/postbox-search-spike-results-2026-04-10.md",
+  "tail": "cision-not-recall bge-small-score-compression-masks-relevance-thresholds mem0-selective-injection-90-percent-token-reduction chatgpt-search-citations-match-bing-top-results-at-eighty-seven-percent multilingual-e5-small-is-the-default-for-mixed-language-messaging rocchio-vector-prf-adds-2-to-5-percent-recall-at-zero-cos"
+ },
+ {
+  "path": "3-permanent/prop-65-heavy-metals-multivitamin-warning-requirement.md",
+  "tail": "function-claim-framework | xlear-ftc-countersuit-challenges-substantiation-standard uspstf-2022-multivitamin-evidence-is-insufficient-not-negative fda-cardiovascular-supplement-warning-letters-2022 calcium-needs-a-distribution-strategy-not-just-an-intake-target us-supplement-marketing-safe-zone-synthesis crn-survey-dat"
+ },
+ {
+  "path": "3-permanent/relay-blindness-is-the-architectural-security-primitive.md",
+  "tail": "rix.org/unstable/server-server-api/) relay-is-dumb-byte-forwarder-not-json-rpc-parser client-side-invariants-are-the-real-defense-not-server-guards binary-sanitization-reveals-data-sensitivity-awareness terraform-reveals-capabilities-invisible-in-application-code the-mcp-privacy-line-is-what-enters-the-prompt-not-where"
+ },
+ {
+  "path": "3-permanent/safety-work-is-the-background-the-approach-arrives-into.md",
+  "tail": "ention is the default, brief mutual acknowledgement, then disattention. Approach is a departure. Gardner 1995 extended this: the departure is gendered. Women receive unrequested sustained attention from male strangers at rates far exceeding the reverse. Approach is therefore never interactionally neutral; the cost of a"
+ },
+ {
+  "path": "3-permanent/signal-detection-theory-nback.md",
+  "tail": "med.ncbi.nlm.nih.gov/20383801/), [Vandierendonck 2017](https://doi.org/10.3758/s13428-016-0721-5), [Pastore et al. 2003](https://pubmed.ncbi.nlm.nih.gov/14620349/), [Gray et al. 2003](https://pubmed.ncbi.nlm.nih.gov/12592404/), [Kane et al. 2007](https://pubmed.ncbi.nlm.nih.gov/17470009/), [Miyake et al. 2000](https://"
+ },
+ {
+  "path": "3-permanent/stalled-tsw-recovery-is-a-five-mechanism-loop.md",
+  "tail": "out-atrophy-sasso-2018 steroid-withdrawal-creates-treg-insufficiency-window physiological-lipids-in-lamellar-form-do-bypass-broken-machinery protein-a-depletes-the-immune-systems-memory-of-s-aureus cannabinoids-disrupt-s-aureus-biofilm-by-membrane-attack-not-immune-clearance eczema-worsens-autism-severity-through-cytok"
+ },
+ {
+  "path": "3-permanent/supplement-bioavailability-is-invisible-to-the-average-buyer.md",
+  "tail": "useful-metric-not-superfoods guallar-2013-enough-is-enough-scientific-consensus-against-multivitamins magnesium-is-the-most-common-subclinical-deficiency-in-developed-countries fat-soluble-vitamins-accumulate-because-they-store-in-lipid-tissue food-matrix-disruption-multiplies-carotenoid-absorption-up-to-seven-x satura"
+ },
+ {
+  "path": "3-permanent/the-cancer-supplement-gate-is-tissue-type-specific-not-blanket-hormonal.md",
+  "tail": "enotypes-are-the-rule-for-dietary-bioactives coq10-and-melatonin-are-not-unconditional-safe-defaults-with-unknown-cancer thiamine-anxiety-mechanism-clear-outcomes-null-narrow-claim-survives mangiferin-converter-phenotype-splits-population-60-40 gastrectomy-status-is-the-pivot-for-a-gastric-cancer-survivor pcos-sundae-n"
+ },
+ {
+  "path": "3-permanent/tilburt-2008-harm-vs-inefficacy-asymmetry-is-methodologically-junk.md",
+  "tail": "nsensus-against-multivitamins consumers-ignore-negative-efficacy-but-respond-to-harm vitamin-e-mortality-signal-is-a-meta-analysis-artefact tilburt-supplement-sales-after-negative-evidence-2008 null-results-are-stack-simplification-achievements honest-null-results-may-be-nocebo-interventions saturated-fat-raises-ldl-bu"
+ },
+ {
+  "path": "3-permanent/uk-and-australia-show-the-patchwork-ceiling-for-likeness-without-a-dedicated-right.md",
+  "tail": "imicry -- unaddressed. A dedicated civil right is the gap neither has closed. Sources: [Carruthers Law UK deepfakes](https://www.carruthers-law.co.uk/articles/deepfake-law-uk-ai-misrepresentation/), [Bosher Journal of World IP 2025](https://onlinelibrary.wiley.com/doi/10.1111/jwip.70020), [Australian Criminal Code Ame"
+ },
+ {
+  "path": "3-permanent/verifier-bias-is-directional-llm-judges-over-accept-by-default.md",
+  "tail": "ceptance - authority-bias-in-llm-judges-is-format-sensitive-not-content-sensitive - structured-rubrics-and-cross-family-ensembles-are-the-main-levers-for-debiasing-llm-verifiers - miscalibrated-llm-judges-drift-toward-acceptance-not-random-error - judgebench-exposes-that-strong-llm-judges-are-near-random-on-hard-factua"
+ },
+ {
+  "path": "3-permanent/when-a-join-starves-ask-whether-the-question-needs-the-join.md",
+  "tail": "it-on-real-traffic the-recall-marker-overstates-use-cited-is-not-used instrumentation-failures-masquerade-as-feature-failures jit-injection-graduated-to-live-default-but-needs-a-quality-pass the-jit-thin-turn-lever-is-prompt-alone-agreement-not-a-padded-query-threshold jit-context-injection-fails-as-learned-banner-blin"
+ },
+ {
+  "path": "4-projects/droplet-ios/2026-05-22-M0-foundation.md",
+  "tail": "lTests/ ``` --- ## Task 1: Initialise repo + project scaffolding **Files:** - Create: `~/dev/droplet-ios/.gitignore` - Create: `~/dev/droplet-ios/README.md` - Create: `~/dev/droplet-ios/project.yml` - [ ] **Step 1: Verify XcodeGen is installed** Run: `which xcodegen && xcodegen --version` Expected: a path and a ve"
+ },
+ {
+  "path": "4-projects/idle-settler.md",
+  "tail": "config implies past memory issues. zustand-test-mock-handles-immer-middleware-transparently zustand-v5-selectors-must-return-stable-references-or-infinite-loop supp-central client-deprecation-journey-has-six-stages-and-two-tooling-gaps trade zustand-is-explicit-by-design-and-every-footgun-follows-from-that increment"
+ },
+ {
+  "path": "4-projects/omit.md",
+  "tail": "g-integration-targets-are-timely-cliniko-servicem8 dental-booking-is-a-closed-henry-schein-ecosystem nz-born-software-stack-is-a-positioning-asset cosmetic-injectables-is-the-highest-composite-opportunity-in-auckland asa-2026-therapeutic-code-reshapes-health-client-copy sleeper-verticals-arborists-driving-schools-optic"
+ },
+ {
+  "path": "4-projects/strom-storefront/future-scope-2026-05-25.md",
+  "tail": "t codes ported from Shopify. - Custom Astro `/admin/profit` route with Postgres-backed metric views. Needs Thomas's COGS data, either Lifetimely export or fresh entry. - Shopify app stack disposition: cancel TinySEO, Order Printer, Flow, Search-and-Discovery, Kip Payment Methods, Lifetimely, etc. ## Phase 7, Staging s"
+ },
+ {
+  "path": "5-maps/autism-discovery-synthesis.md",
+  "tail": "odiversity synthesis **Research agents used:** 20 across 4 rounds + gaps + literature alexithymia-mediates-autism-sensory-link-at-genetic-level alexithymia-mediates-autism-sensory-link-at-genetic-level sensory-sensitivity-may-be-alexithymia-not-autism crompton-2025-information-transfer-autistic-nonautistic-chains autis"
+ },
+ {
+  "path": "5-maps/gym-xp-tracker-discovery.md",
+  "tail": "s) as the base; manual entry first-class per the nutricalc NZ-coverage lesson. Sources: [STEP UP RCT](https://pubmed.ncbi.nlm.nih.gov/31498375/), [S-shaped gamification richness](https://www.frontiersin.org/journals/psychology/articles/10.3389/fpsyg.2025.1671543/full), [OSRS XP curve](https://oldschool.runescape.wiki/"
+ },
+ {
+  "path": "5-maps/selling-a-discernment-first-ai-course.md",
+  "tail": "size did not affect optimal price. Over half of creators earn under $15k/year, so the first real bar (~$1,250/mo) is one $1,500 cohort sale a week, not dozens of $49 sales. for-a-professional-course-price-high-because-audience-size-doesnt-set-the-price ## The build sequence Lesson 1 must ship a usable real-work artif"
+ },
+ {
+  "path": "6-writing/006-zod-validation-at-read-boundary.md",
+  "tail": "lity on the queries Kinso actually runs. ### Typed query libraries (mongodb-ts, ts-mongo) Compile-time type checking on filters and update operators. Catches field name typos at build time. Immature. Low adoption, incomplete operator coverage. The complex queries Kinso uses (nested `$elemMatch` with `$or`, positiona"
+ },
+ {
+  "path": "6-writing/ig-reel-many-doors-one-room.md",
+  "tail": "me correct outcome. if there's only one path, you have a fragility problem. add doors until users can't pick wrong. ## Props (for remotion render later) ```json { \"voiceoverAudio\": \"many-doors-one-room/voiceover-TBD.wav\", \"textTimeline\": [ {\"text\": \"ONE PATH\", \"frameStart\": 30, \"frameEnd\": 90}, {\"text\": \""
+ },
+ {
+  "path": "Excalidraw/ad-systemic-comorbidity-mechanisms.excalidraw.md",
+  "tail": ": \"Atopic Dermatitis\\n(Chronic Th2 Activation)\", \"autoResize\": true, \"fontSize\": 20, \"fontFamily\": 5, \"textAlign\": \"center\", \"verticalAlign\": \"middle\", \"containerId\": \"rect_ad_core\", \"lineHeight\": 1.25, \"versionNonce\": 575503244, \"index\": \"a1\", \"groupIds\": [], \"frameId\": null, \"hasTe"
+ },
+ {
+  "path": "Excalidraw/ai-metering-mvp-wedge.excalidraw.md",
+  "tail": "\"originalText\": \"Surprise LLM bill\\nNo idea which team caused it\", \"autoResize\": true, \"fontSize\": 20, \"fontFamily\": 5, \"textAlign\": \"center\", \"verticalAlign\": \"middle\", \"containerId\": \"pain-rect\", \"lineHeight\": 1.25 }, { \"id\": \"arrow-pain-q\", \"type\": \"arrow"
+ },
+ {
+  "path": "Excalidraw/b2b-ingredient-marketplace-monetization-phases.excalidraw.md",
+  "tail": ", \"boundElements\": [ { \"id\": \"pwCNSTYH\", \"type\": \"text\" } ], \"updated\": 1774097844922, \"link\": null, \"locked\": false, \"customData\": { \"legacyTextWrap\": true }, \"versionNonce\": 824065844, \"index\": \"a1\", \"groupIds\": [], \"frameId\": null, \"hasTextLink\": false },"
+ },
+ {
+  "path": "Excalidraw/compound-attribution-decision-flow.excalidraw.md",
+  "tail": "roundColor\": \"#b2f2bb\", \"fillStyle\": \"solid\", \"strokeWidth\": 2, \"roughness\": 1, \"opacity\": 100, \"roundness\": { \"type\": 3 }, \"seed\": 57382916, \"version\": 1, \"versionNonce\": 19283764, \"isDeleted\": false, \"boundElements\": [ { \"type\": \"text\", \"id\": \"txt000"
+ },
+ {
+  "path": "Excalidraw/generalist-expertise-profile-axes.excalidraw.md",
+  "tail": "\" }, { \"type\": \"text\", \"id\": \"depthLabel\", \"x\": 290, \"y\": 58, \"width\": 60, \"height\": 20, \"angle\": 0, \"strokeColor\": \"#5c5f77\", \"backgroundColor\": \"transparent\", \"fillStyle\": \"solid\", \"strokeWidth\": 1, \"strokeStyle\": \"solid\", \"roughnes"
+ },
+ {
+  "path": "Excalidraw/hrv-cognition-confound-structure.excalidraw.md",
+  "tail": "1e\", \"backgroundColor\": \"#ffec99\", \"fillStyle\": \"solid\", \"strokeWidth\": 2, \"roughness\": 1, \"opacity\": 100, \"roundness\": { \"type\": 3 }, \"seed\": 746382915, \"version\": 2, \"versionNonce\": 1633190284, \"isDeleted\": false, \"boundElements\": [ { \"type\": \"text\", \"id\": \"txt02b"
+ },
+ {
+  "path": "Excalidraw/moe-architecture-economics.excalidraw.md",
+  "tail": "\": 0, \"opacity\": 100, \"roundness\": {\"type\": 3} }, { \"type\": \"text\", \"id\": \"label-e1\", \"x\": 135, \"y\": 172, \"text\": \"E1\", \"fontSize\": 12, \"fontFamily\": 1, \"textAlign\": \"center\", \"strokeColor\": \"#268bd2\" }, { \"type\": \"rectangle\","
+ },
+ {
+  "path": "Excalidraw/proactive-surfacing-decision-paradigms.excalidraw.md",
+  "tail": "okeWidth\": 2, \"strokeStyle\": \"solid\", \"roughness\": 1, \"opacity\": 100, \"roundness\": { \"type\": 3 }, \"seed\": 119210, \"version\": 1, \"isDeleted\": false, \"boundElements\": [ { \"id\": \"ctx_txt\", \"type\": \"text\" } ], \"upd"
+ },
+ {
+  "path": "Excalidraw/supplement-incoming-material-verification-flow.excalidraw.md",
+  "tail": "\"x\": 110, \"y\": 228, \"width\": 120, \"height\": 26, \"angle\": 0, \"strokeColor\": \"#1e1e1e\", \"backgroundColor\": \"transparent\", \"fillStyle\": \"solid\", \"strokeWidth\": 1, \"strokeStyle\": \"solid\", \"roughness\": 1, \"opacity\": 100, \"roundness\": null, \"seed\": 111004"
+ },
+ {
+  "path": "Excalidraw/thalen-ux-evolution-roadmap.excalidraw.md",
+  "tail": "\"#1e1e1e\", \"backgroundColor\": \"transparent\", \"fillStyle\": \"solid\", \"strokeWidth\": 2, \"strokeStyle\": \"solid\", \"roughness\": 1, \"opacity\": 100, \"angle\": 0, \"roundness\": null, \"seed\": 2001, \"version\": 33, \"isDeleted\": false, \"boundElements\": [], \"updated\": 1773636944780, \"link\": nu"
+ }
+]

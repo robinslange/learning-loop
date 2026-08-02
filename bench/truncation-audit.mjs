@@ -30,7 +30,8 @@ function stripFrontmatter(raw) {
   const end = raw.indexOf('\n---', 3);
   return end === -1 ? raw : raw.slice(raw.indexOf('\n', end + 1) + 1);
 }
-const cleanWikilinks = (s) => s.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1');
+const cleanWikilinks = (s) =>
+  s.replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, '$2').replace(/\[\[([^\]]+)\]\]/g, '$1');
 
 function walk(dir) {
   const out = [];
@@ -112,11 +113,17 @@ if (asJson) {
   const o = report.overall;
   console.log(`Embedding truncation audit — ${VAULT}`);
   console.log('='.repeat(72));
-  console.log(`  byte cap ${CAP}; token limit ${MAX_TOKENS} ~= ${tokenCapBytes} bytes at ${RATIO} B/tok\n`);
+  console.log(
+    `  byte cap ${CAP}; token limit ${MAX_TOKENS} ~= ${tokenCapBytes} bytes at ${RATIO} B/tok\n`,
+  );
   console.log(`  notes:              ${o.n}`);
   console.log(`  over the byte cap:  ${o.over_cap}  (${pct(o.over_cap, o.n)})`);
-  console.log(`  over the TOKEN cap: ${o.over_token_limit}  (${pct(o.over_token_limit, o.n)})  <- irreducible`);
-  console.log(`  body text encoded:  ${pct(o.coverage_now * 100, 100)} now  ->  ${pct(o.coverage_fixed * 100, 100)} if the tokenizer bound\n`);
+  console.log(
+    `  over the TOKEN cap: ${o.over_token_limit}  (${pct(o.over_token_limit, o.n)})  <- irreducible`,
+  );
+  console.log(
+    `  body text encoded:  ${pct(o.coverage_now * 100, 100)} now  ->  ${pct(o.coverage_fixed * 100, 100)} if the tokenizer bound\n`,
+  );
   console.log('  folder            notes   >cap   median B   encoded now -> fixed');
   for (const [f, s] of Object.entries(report.folders)) {
     console.log(

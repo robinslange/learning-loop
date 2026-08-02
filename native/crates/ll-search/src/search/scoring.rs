@@ -1,7 +1,8 @@
-pub(crate) use ll_core::scoring::{
+pub use ll_core::scoring::{
     PrfParams,
     dot_product,
-    add_ranked_rrf, finalize_rrf,
+    add_ranked_rrf, add_weighted_rrf, finalize_rrf,
+    FusionWeights,
     collect_seeds, rocchio_prf_with,
 };
 use ll_core::scoring::VAULT_FTS;
