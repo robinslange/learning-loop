@@ -22,6 +22,7 @@ import { promisify } from 'node:util';
 import { buildQueryParts } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { CONTROL_PROMPTS } from './control-prompts.mjs';
+import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -31,28 +32,13 @@ const SAMPLE = Number(arg('--sample', 400));
 const OUT = arg('--out', 'bench/baselines/replay.jsonl');
 const CANDIDATES = Number(arg('--candidates', String(HookConfig.INJECTION_RERANK_CANDIDATES)));
 const CONCURRENCY = Number(arg('--concurrency', '4'));
+const LIVE_ONLY = argv.includes('--live-only');
 
 const pluginData =
   process.env.CLAUDE_PLUGIN_DATA ||
   join(process.env.HOME, '.claude/plugins/data/learning-loop-learning-loop-marketplace');
 const BIN = arg('--bin', join(import.meta.dirname, '..', 'native/target/release/ll-search'));
 const DB = arg('--db', join(process.env.HOME, 'brain/brain/.vault-search/vault-index.db'));
-
-// Test-suite prompts reach the production stream (fixed in 97d6bfa, but the
-// historical records remain). Derive the list from the test source so it tracks
-// the tests rather than rotting in a copy.
-function fixturePrompts() {
-  const src = readFileSync(join(import.meta.dirname, '..', 'tests/session-label.test.mjs'), 'utf8');
-  const out = new Set();
-  for (const m of src.matchAll(/['"`]([^'"`\n]{15,200})['"`]/g)) {
-    const s = m[1];
-    if (/^[/.~]/.test(s) || /^[A-Z_]+$/.test(s) || s.includes('${')) continue;
-    out.add(s.slice(0, 40));
-  }
-  return [...out];
-}
-const FIXTURES = fixturePrompts();
-const isFixture = (p) => FIXTURES.some((f) => (p || '').startsWith(f));
 
 // --- corpus: per-session prompt sequences, in order ------------------------
 const dir = join(pluginData, 'retrieval');
@@ -72,20 +58,39 @@ for (const f of readdirSync(dir)
     if (!sessions.has(r.session_id)) sessions.set(r.session_id, []);
     // Fast-path-skipped prompts are kept: they are real user turns and the
     // hook's padding draws on them, even though they never reach the gate.
-    sessions.get(r.session_id).push({ ts: r.ts, prompt: r.prompt, type: r.type });
+    sessions.get(r.session_id).push({
+      ts: r.ts,
+      prompt: r.prompt,
+      type: r.type,
+      live: r.mode === 'live' && r.type === 'gate-pass-payload',
+    });
   }
 }
 for (const seq of sessions.values()) seq.sort((a, b) => (a.ts < b.ts ? -1 : 1));
 
 // Candidates: real prompts that reached the gate, with their session position
 // so padding can be reconstructed.
+//
+// --live-only narrows to prompts that actually injected in live mode. Those
+// are the only ones the model could have acted on, so they are the only ones
+// recall-labels.mjs can attach a positive label to. Deduping by prompt is
+// dropped in that mode: the label is per (session, prompt), and the same
+// wording in two sessions is two independent observations.
 const candidates = [];
 const seenPrompt = new Set();
 for (const [sid, seq] of sessions) {
+  // Fixture exclusion is unconditional. Making it a property of one branch is
+  // exactly how --live-only ended up scoring a test session.
+  if (isFixtureSession(seq.map((t) => t.prompt))) continue;
   seq.forEach((turn, i) => {
-    if (turn.type === 'gate-fail-fast-path') return;
-    if (isFixture(turn.prompt) || seenPrompt.has(turn.prompt)) return;
-    seenPrompt.add(turn.prompt);
+    if (isFixturePrompt(turn.prompt)) return;
+    if (LIVE_ONLY) {
+      if (!turn.live) return;
+    } else {
+      if (turn.type === 'gate-fail-fast-path') return;
+      if (seenPrompt.has(turn.prompt)) return;
+      seenPrompt.add(turn.prompt);
+    }
     candidates.push({ sid, index: i, prompt: turn.prompt });
   });
 }
@@ -93,7 +98,10 @@ for (const [sid, seq] of sessions) {
 // Deterministic stride, not a random sample: the run must be reproducible for
 // a before/after comparison.
 const stride = Math.max(1, Math.floor(candidates.length / SAMPLE));
-const chosen = candidates.filter((_, i) => i % stride === 0).slice(0, SAMPLE);
+const chosen =
+  LIVE_ONLY && SAMPLE >= candidates.length
+    ? candidates
+    : candidates.filter((_, i) => i % stride === 0).slice(0, SAMPLE);
 
 const work = [
   ...chosen.map((c) => {
@@ -102,7 +110,7 @@ const work = [
     // this one", so the array must end with the current prompt.
     const messages = seq.slice(Math.max(0, c.index - 3), c.index).map((t) => t.prompt);
     messages.push(c.prompt);
-    return { source: 'real', prompt: c.prompt, messages };
+    return { source: 'real', session_id: c.sid, prompt: c.prompt, messages };
   }),
   // Controls are standalone substantive questions in domains the vault has no
   // notes on. No padding: a control is a fresh first turn, which is also the
@@ -117,7 +125,13 @@ async function scoreOne(item) {
     soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS,
   });
   const env = { ...process.env, CLAUDE_PLUGIN_DATA: pluginData };
-  const out = { source: item.source, prompt: item.prompt, padded, query_len: query.length };
+  const out = {
+    source: item.source,
+    session_id: item.session_id ?? null,
+    prompt: item.prompt,
+    padded,
+    query_len: query.length,
+  };
 
   try {
     const { stdout } = await execFileP(BIN, ['query', '--top', '5', DB, query], { env });
@@ -125,6 +139,7 @@ async function scoreOne(item) {
     const hits = Array.isArray(j) ? j : j.results || [];
     out.rrf = hits[0]?.score ?? null;
     out.rrf_top = hits[0]?.path ?? null;
+    out.rrf_order = hits.map((h) => h.path);
   } catch (err) {
     out.rrf_error = err.code ?? String(err.message).slice(0, 80);
   }
@@ -138,6 +153,7 @@ async function scoreOne(item) {
     const j = JSON.parse(stdout);
     out.ce = j[0]?.score ?? null;
     out.ce_top = j[0]?.path ?? null;
+    out.ce_order = j.map((h) => h.path);
   } catch (err) {
     out.ce_error = err.code ?? String(err.message).slice(0, 80);
   }
