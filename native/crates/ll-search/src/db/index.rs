@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::config::EMBED_BATCH_SIZE;
 use crate::embed::embed_documents;
-use crate::preprocess::{content_hash, preprocess_file, Intention};
+use crate::preprocess::{content_hash_parts, preprocess_file, Intention};
 
 use super::query::{chrono_iso_now, compute_project_phases, compute_sessions};
 use super::schema::{create_schema, drop_all};
@@ -228,7 +228,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
             }
         };
 
-        let hash = content_hash(&result.text);
+        let hash = content_hash_parts(&result.title, &result.tags, &result.body);
 
         if let Some(&(id, ref ex_hash, _)) = ex {
             if *ex_hash == hash {

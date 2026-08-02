@@ -6,7 +6,32 @@ mod intentions;
 
 pub use intentions::parse_intentions;
 
-const MAX_TEXT_LENGTH: usize = 1500;
+/// Guard bound on embedding input, in bytes.
+///
+/// The tokenizer is the real limit: bge-small truncates at 512 tokens and is
+/// configured to do so (`model::bge_small::MAX_TOKENS`). This constant exists
+/// only so a pathological file cannot hand the tokenizer megabytes, and is set
+/// far above the bytes any 512-token span occupies, so it does not bind on
+/// real notes.
+///
+/// It used to be 1500, which bound long before the model's window and cut 69%
+/// of a 6,006-note vault — worst exactly where it hurts most: 93% of
+/// 2-literature and 98% of 5-maps, the most source-dense and link-dense notes.
+/// When two limits sit in series, the one that binds has to be the one you
+/// meant.
+const MAX_EMBED_BYTES: usize = 16_384;
+
+/// Truncate in place to at most `max_bytes`, landing on a char boundary.
+fn truncate_on_char_boundary(text: &mut String, max_bytes: usize) {
+    if text.len() <= max_bytes {
+        return;
+    }
+    let mut end = max_bytes;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct Intention {
@@ -44,22 +69,21 @@ pub fn preprocess_note(raw: &str, filename: &str) -> Option<PreprocessedNote> {
     let links = extract_wikilinks(&body);
     let cleaned = clean_wikilinks(&body);
 
-    let mut text = format!("Title: {}\n\n{}", title, cleaned);
+    // Tags lead, ahead of the body. They were appended last, which made them
+    // the first thing truncation ate: the highest-signal terms on a note were
+    // dropped from its vector exactly on the notes long enough to need them.
+    let mut text = format!("Title: {}\n", title);
     if !tags.is_empty() {
         let tag_str = tags
             .split_whitespace()
             .map(|t| format!("#{}", t))
             .collect::<Vec<_>>()
             .join(" ");
-        text.push_str(&format!("\n\nTags: {}", tag_str));
+        text.push_str(&format!("Tags: {}\n", tag_str));
     }
-    if text.len() > MAX_TEXT_LENGTH {
-        let mut end = MAX_TEXT_LENGTH;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-    }
+    text.push('\n');
+    text.push_str(&cleaned);
+    truncate_on_char_boundary(&mut text, MAX_EMBED_BYTES);
 
     Some(PreprocessedNote {
         title,
@@ -101,13 +125,7 @@ pub fn preprocess_excalidraw(raw: &str, filename: &str) -> Option<PreprocessedNo
 
     let body = texts.join("\n");
     let mut text = format!("Title: {}\n\n{}", title, body);
-    if text.len() > MAX_TEXT_LENGTH {
-        let mut end = MAX_TEXT_LENGTH;
-        while !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        text.truncate(end);
-    }
+    truncate_on_char_boundary(&mut text, MAX_EMBED_BYTES);
 
     Some(PreprocessedNote {
         title,
@@ -130,6 +148,23 @@ pub fn preprocess_file(raw: &str, filename: &str) -> Option<PreprocessedNote> {
 pub fn content_hash(text: &str) -> String {
     let digest = Sha256::digest(text.as_bytes());
     hex::encode(&digest[..16])
+}
+
+/// Change-detection hash over everything an indexed row depends on.
+///
+/// Must NOT be taken over the embedding text: that is truncated, so an edit
+/// past the cut produced an identical hash and the note was skipped entirely,
+/// leaving BOTH the vector and the full-text body stale with no error. On a
+/// vault where most notes exceed the old cap, that made late edits invisible
+/// to search.
+pub fn content_hash_parts(title: &str, tags: &str, body: &str) -> String {
+    let mut hasher = Sha256::new();
+    // Length-prefixed so ("ab", "c") and ("a", "bc") cannot collide.
+    for part in [title, tags, body] {
+        hasher.update((part.len() as u64).to_le_bytes());
+        hasher.update(part.as_bytes());
+    }
+    hex::encode(&hasher.finalize()[..16])
 }
 
 fn title_from_filename(filename: &str) -> String {
@@ -254,8 +289,12 @@ mod tests {
         assert_eq!(result.body, "Body text here.");
         assert_eq!(result.tags, "search ml");
         assert_eq!(result.title, "test note");
-        assert!(result.text.starts_with("Title: test note\n\n"));
-        assert!(result.text.contains("Tags: #search #ml"));
+        // Tags sit between the title and the body so truncation cannot reach
+        // them before the body it is meant to be trimming.
+        assert_eq!(
+            result.text,
+            "Title: test note\nTags: #search #ml\n\nBody text here."
+        );
     }
 
     #[test]
@@ -326,11 +365,46 @@ excalidraw-plugin: parsed
     }
 
     #[test]
-    fn test_truncation() {
-        let long_body = "x".repeat(2000);
+    fn test_truncation_guard_binds_only_far_past_the_token_window() {
+        let long_body = "x".repeat(MAX_EMBED_BYTES * 2);
         let raw = format!("---\ntags: [a]\n---\n\n{}", long_body);
         let result = preprocess_note(&raw, "long.md").unwrap();
-        assert!(result.text.len() <= MAX_TEXT_LENGTH);
+        assert!(result.text.len() <= MAX_EMBED_BYTES);
+        // The guard must sit well above any 512-token span, or it — not the
+        // tokenizer — becomes the limit that decides what the model sees.
+        assert!(MAX_EMBED_BYTES >= 512 * 8);
+    }
+
+    #[test]
+    fn test_tags_survive_truncation_on_a_long_note() {
+        let long_body = "consensus ".repeat(1000); // ~10KB, far past the old cap
+        let raw = format!("---\ntags: [distributed, raft]\n---\n\n{}", long_body);
+        let result = preprocess_note(&raw, "long.md").unwrap();
+        // Tags were appended after the body, so on exactly the notes long
+        // enough to need them they were the first thing cut.
+        assert!(result.text.contains("#distributed"), "tags must reach the encoder");
+        assert!(result.text.contains("#raft"));
+    }
+
+    #[test]
+    fn test_hash_changes_when_only_the_tail_changes() {
+        // The regression that made late edits invisible: the hash was taken
+        // over the truncated embedding text, so appending past the cut left it
+        // identical and the indexer skipped the note, staling the vector AND
+        // the full-text body.
+        let head = "y".repeat(4000);
+        let a = content_hash_parts("t", "tag", &head);
+        let b = content_hash_parts("t", "tag", &format!("{head}\nZANZIBAR"));
+        assert_ne!(a, b, "an edit past the embedding cut must change the hash");
+    }
+
+    #[test]
+    fn test_hash_parts_are_unambiguous() {
+        assert_ne!(
+            content_hash_parts("ab", "c", "d"),
+            content_hash_parts("a", "bc", "d"),
+            "field boundaries must be encoded, not just concatenated"
+        );
     }
 
     #[test]
