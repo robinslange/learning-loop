@@ -9,8 +9,9 @@
 // The query is rebuilt with the hook's OWN buildQueryParts, including the
 // prior-message padding it applies to short prompts, reconstructed from the
 // session's earlier logged prompts. Replaying the bare prompt would feed the
-// scorer a cleaner input than production sends, and the padded 19% is exactly
-// where the gate misbehaves.
+// scorer a cleaner input than production sends, and 47% of the replayed sample
+// is padded — the case where the gate scores on borrowed words rather than the
+// user's own.
 //
 // Usage: node bench/gate-replay.mjs --sample 400 --out bench/baselines/replay.jsonl
 

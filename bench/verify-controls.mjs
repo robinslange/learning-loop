@@ -11,7 +11,7 @@
 
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { CONTROL_PROMPTS } from './control-prompts.mjs';
+import { CONTROL_PROMPTS, WEAK_CONTROLS } from './control-prompts.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -54,6 +54,7 @@ const RARE_ENOUGH = 2;
 
 let failures = 0;
 let weak = 0;
+const computedWeak = new Set();
 console.log("Control verification: no note may match the conjunction of a control's rarest stems");
 console.log('(counts are stem counts under the porter tokenizer, shown for audit)\n');
 for (const p of CONTROL_PROMPTS) {
@@ -79,6 +80,7 @@ for (const p of CONTROL_PROMPTS) {
     console.log(`             ${expr} -> ${n} notes`);
   } else if ((ranked[0]?.[1] ?? Infinity) > RARE_ENOUGH) {
     weak++;
+    computedWeak.add(p);
     console.log(`  WEAK     ${shown}  <- no term is vault-absent; soft negative`);
   } else {
     console.log(`  clean    ${shown}`);
@@ -88,8 +90,16 @@ const strong = CONTROL_PROMPTS.length - failures - weak;
 console.log(
   `\n${strong} strong, ${weak} weak, ${failures} covered (of ${CONTROL_PROMPTS.length}).`,
 );
-if (weak) {
-  console.log('Weak controls still pass the conjunction test but rest on common words alone.');
-  console.log('Treat the false-positive rate as measured on the strong set.');
+
+// gate-ab.mjs reports the headline false-positive rate on the strong set, so
+// the declared split has to match what the vault actually says today. Drifting
+// apart would silently move the number without anyone editing it.
+const declared = [...WEAK_CONTROLS].sort();
+const computed = [...computedWeak].sort();
+if (JSON.stringify(declared) !== JSON.stringify(computed)) {
+  failures++;
+  console.log('\nWEAK_CONTROLS in control-prompts.mjs is stale.');
+  console.log(`  declared: ${JSON.stringify(declared, null, 2)}`);
+  console.log(`  computed: ${JSON.stringify(computed, null, 2)}`);
 }
 process.exit(failures === 0 ? 0 : 1);

@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
-import { CONTROL_PROMPTS } from './control-prompts.mjs';
+import { CONTROL_PROMPTS, WEAK_CONTROLS } from './control-prompts.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
@@ -35,7 +35,11 @@ const rows = readFileSync(REPLAY, 'utf8')
   .filter((r) => Number.isFinite(r.rrf) && Number.isFinite(r.ce));
 
 const real = rows.filter((r) => r.source === 'real');
-const control = rows.filter((r) => r.source === 'control');
+const allControl = rows.filter((r) => r.source === 'control');
+// Headline rate is the strong set: a weak control's zero-conjunction rests on
+// common words alone, which is a softer claim than "this domain is absent".
+// verify-controls.mjs keeps the split honest against the current vault.
+const control = allControl.filter((r) => !WEAK_CONTROLS.has(r.prompt));
 
 const rate = (set, pred) => set.filter(pred).length / set.length;
 const pct = (x) => (100 * x).toFixed(1) + '%';
@@ -90,7 +94,10 @@ if (asJson) {
 } else {
   console.log('Gate A/B: RRF fusion score vs cross-encoder');
   console.log('='.repeat(66));
-  console.log(`  ${real.length} real prompts replayed, ${control.length} verified controls\n`);
+  console.log(
+    `  ${real.length} real prompts replayed, ${control.length} strong controls ` +
+      `(+${allControl.length - control.length} weak, excluded)\n`,
+  );
 
   console.log('Arm A  live gate, RRF >= ' + T_RRF);
   console.log(`  admits ${pct(aReal)} of real traffic`);

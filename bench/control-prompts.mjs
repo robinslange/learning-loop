@@ -39,3 +39,18 @@ export const CONTROL_PROMPTS = [
   'what glaze chemistry produces a copper red reduction firing',
   'safe stocking density for rainbow trout in a raceway system',
 ];
+
+// Controls whose rarest terms all appear somewhere in the vault. They still
+// pass the conjunction test, but "no note contains all three of these common
+// words" is a weaker claim than "this domain is absent", so the headline
+// false-positive rate is reported on the complement of this set.
+//
+// This is the output of verify-controls.mjs against the current vault, kept
+// here so gate-ab.mjs has one source of truth. verify-controls.mjs asserts the
+// two agree and fails if the vault has grown into a control.
+export const WEAK_CONTROLS = new Set([
+  'how long should concrete fence posts cure in cold weather',
+  'how to replace the escapement in a fusee pocket watch',
+  'seasoning schedule for air drying european oak boards',
+  'how to calibrate a beam balance with class f test weights',
+]);
