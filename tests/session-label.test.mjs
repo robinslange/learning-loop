@@ -1,7 +1,15 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { writeFileSync, readFileSync, rmSync, mkdirSync, mkdtempSync, existsSync } from 'node:fs';
+import {
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  mkdirSync,
+  mkdtempSync,
+  existsSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -11,6 +19,45 @@ const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.j
 // mkdtemp, not a fixed name: parallel test runs sharing one dir flake when
 // one run's after() rmSync deletes another run's live transcripts.
 const TMP = mkdtempSync(join(tmpdir(), 'session-label-test-'));
+
+// Every hook run logs a shadow-injection record to CLAUDE_PLUGIN_DATA. Leaving
+// it unset does NOT mean "no telemetry": getPluginData falls through to the
+// ~/.claude/plugins/data/.ll-data-path marker, which points at the developer's
+// real install. Test prompts then land in the production stream carrying no
+// mark that distinguishes them from real traffic, and the injection gate is
+// calibrated on the mixture.
+const SANDBOX = mkdtempSync(join(tmpdir(), 'session-label-data-'));
+
+// The single spawn seam for this file. CLAUDE_PLUGIN_DATA is applied AFTER the
+// caller's env so an ambient value can never win, and it is a named option
+// rather than an env key so "use my own plugin-data dir" is a deliberate
+// argument instead of something a `...process.env` spread does by accident.
+// Sandbox paths live under tmpdir(), which isTransientPath excludes from the
+// marker file, so tests cannot stomp the real install's saved path either.
+function hookEnv({ env = {}, pluginData = SANDBOX } = {}) {
+  return { ...process.env, ...env, CLAUDE_PLUGIN_DATA: pluginData };
+}
+
+function runHook({ env, pluginData, ...opts } = {}) {
+  return execFileSync('node', [HOOK], {
+    encoding: 'utf-8',
+    timeout: 5000,
+    ...opts,
+    env: hookEnv({ env, pluginData }),
+  });
+}
+
+// spawnSync variant for the tests that need exit status and stderr rather than
+// stdout. Same env discipline; a second spawn primitive is exactly how the
+// first leak survived review.
+function spawnHook({ env, pluginData, ...opts } = {}) {
+  return spawnSync('node', [HOOK], {
+    encoding: 'utf-8',
+    timeout: 5000,
+    ...opts,
+    env: hookEnv({ env, pluginData }),
+  });
+}
 
 function makeTranscript(userMessages) {
   return userMessages
@@ -25,11 +72,7 @@ function run(sessionId, prompt, transcriptPath, cwd = '/tmp') {
     transcript_path: transcriptPath,
     cwd,
   });
-  execFileSync('node', [HOOK], {
-    input,
-    encoding: 'utf-8',
-    timeout: 5000,
-  });
+  runHook({ input });
   const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
   if (existsSync(labelFile)) return readFileSync(labelFile, 'utf8');
   return null;
@@ -42,12 +85,7 @@ function runWithVault(sessionId, prompt, transcriptPath, vaultPath) {
     transcript_path: transcriptPath,
     cwd: '/tmp',
   });
-  execFileSync('node', [HOOK], {
-    input,
-    encoding: 'utf-8',
-    timeout: 5000,
-    env: { ...process.env, VAULT_PATH: vaultPath },
-  });
+  runHook({ input, env: { VAULT_PATH: vaultPath } });
   const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
   return existsSync(labelFile) ? readFileSync(labelFile, 'utf8') : null;
 }
@@ -149,7 +187,7 @@ describe('session-label', () => {
       transcript_path: transcript,
       cwd: '/tmp',
     });
-    const result = spawnSync('node', [HOOK], { input, encoding: 'utf-8', timeout: 5000 });
+    const result = spawnHook({ input });
     assert.equal(result.status, 0, `hook exited ${result.status}: ${result.stderr}`);
     assert.ok(
       !result.stderr.includes('parseTranscriptLine'),
@@ -181,21 +219,12 @@ describe('session-label', () => {
   });
 
   it('exits cleanly with empty stdin', () => {
-    const result = execFileSync('node', [HOOK], {
-      input: '',
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
+    const result = runHook({ input: '' });
     assert.equal(result.trim(), '');
   });
 
   it('exits cleanly with no session_id', () => {
-    const input = JSON.stringify({ prompt: 'hello' });
-    const result = execFileSync('node', [HOOK], {
-      input,
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
+    const result = runHook({ input: JSON.stringify({ prompt: 'hello' }) });
     assert.equal(result.trim(), '');
   });
 
@@ -290,25 +319,23 @@ describe('session-label', () => {
         }),
       );
       const sid = randomUUID();
-      execFileSync('node', [HOOK], {
+      runHook({
         input: JSON.stringify({
           session_id: sid,
           prompt: 'fix the kayak roll technique please',
           transcript_path: '',
           cwd: '/tmp',
         }),
-        encoding: 'utf-8',
-        timeout: 5000,
-        env: {
-          ...process.env,
-          CLAUDE_PLUGIN_DATA: pluginData,
-          LEARNING_LOOP_INJECTION_MODE: 'off',
-        },
+        pluginData,
+        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
       });
       const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
       assert.ok(existsSync(labelFile), 'label file should exist');
       const label = readFileSync(labelFile, 'utf8');
-      assert.ok(label.includes('kayaking'), `config label_topics should drive label, got: ${label}`);
+      assert.ok(
+        label.includes('kayaking'),
+        `config label_topics should drive label, got: ${label}`,
+      );
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
@@ -349,7 +376,10 @@ describe('session-label', () => {
       const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
       assert.ok(existsSync(labelFile), 'label file should exist despite the bad pattern');
       const label = readFileSync(labelFile, 'utf8');
-      assert.ok(label.includes('kayaking'), `valid patterns must survive a bad sibling, got: ${label}`);
+      assert.ok(
+        label.includes('kayaking'),
+        `valid patterns must survive a bad sibling, got: ${label}`,
+      );
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
@@ -364,12 +394,7 @@ describe('session-label stdout contract', () => {
       transcript_path: '',
       cwd: '/tmp',
     });
-    return execFileSync('node', [HOOK], {
-      input,
-      encoding: 'utf-8',
-      timeout: 5000,
-      env: { ...process.env, ...env },
-    });
+    return runHook({ input, env });
   }
 
   it('produces empty stdout in shadow mode', () => {
@@ -834,3 +859,57 @@ describe(
     });
   },
 );
+
+// Every hook spawn must name the plugin-data dir it writes to. Left unset, the
+// hook resolves the ~/.claude/plugins/data/.ll-data-path marker and logs into
+// the developer's real install, where fixture prompts are indistinguishable
+// from real traffic — 70% of one calibration window was test runs before this
+// was caught. Asserted against this file's own source because the invariant is
+// about how spawns are written, and a spawn that forgets it looks correct at
+// every other layer.
+describe('session-label test isolation', () => {
+  it('no hook spawn omits CLAUDE_PLUGIN_DATA', () => {
+    const src = readFileSync(new URL(import.meta.url), 'utf8');
+    const offenders = [];
+    const spawnRe = /(?:execFileSync|spawnSync)\(\s*'node',\s*\[HOOK\][\s\S]*?\n(\s*)\}\);/g;
+    for (const m of src.matchAll(spawnRe)) {
+      const call = m[0];
+      // Sanctioned forms: the hookEnv() seam, an inline key, or an `env`
+      // identifier whose object literal above defines one (the shared-env
+      // sites build `const env = {...}` once and reuse it).
+      const viaSeam = call.includes('hookEnv(');
+      const inline = call.includes('CLAUDE_PLUGIN_DATA');
+      const viaSharedEnv = /\n\s*env,\n/.test(call) && /CLAUDE_PLUGIN_DATA:/.test(src);
+      if (!viaSeam && !inline && !viaSharedEnv) {
+        offenders.push(call.slice(0, 120).replace(/\s+/g, ' '));
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `hook spawns must set CLAUDE_PLUGIN_DATA (use runHook):\n${offenders.join('\n')}`,
+    );
+  });
+
+  it('runHook applies the sandbox after the caller env, so ambient values cannot win', () => {
+    const sid = randomUUID();
+    runHook({
+      input: JSON.stringify({
+        session_id: sid,
+        prompt: 'a prompt long enough to clear the fast path gate for isolation',
+        transcript_path: '',
+        cwd: '/tmp',
+      }),
+      env: { CLAUDE_PLUGIN_DATA: '/should/be/overridden' },
+    });
+    // Assert on where the telemetry actually landed, not on the absence of a
+    // path: "the bogus dir wasn't created" would also pass if the hook simply
+    // never logged, which is the failure this test exists to catch.
+    const retrieval = join(SANDBOX, 'retrieval');
+    assert.ok(existsSync(retrieval), 'the hook must have logged into the sandbox');
+    assert.ok(
+      readdirSync(retrieval).some((f) => f.startsWith('shadow-injection-')),
+      'sandbox must hold the shadow-injection record',
+    );
+  });
+});
