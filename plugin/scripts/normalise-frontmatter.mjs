@@ -22,6 +22,7 @@ import {
   DATE_RE,
   STATUS_VALUES,
   checkFrontmatter,
+  hasBodyCitation,
   hasUngroundedFactualSignal,
 } from './lib/frontmatter-schema.mjs';
 
@@ -81,13 +82,25 @@ function isoDate(d) {
   return new Date(d).toISOString().slice(0, 10);
 }
 
-// A sourceless note is only honest as synthesis when it asserts nothing a
-// reader could check. Anything with a bare figure or attribution owes a URL,
-// and saying so out loud beats laundering it through the synthesis exemption.
+// Pick the capture origin from what the body actually shows. Body citations
+// come first: a note whose sources sit on a `Source:` line is cited work, and
+// calling it uncited because the URLs are not in frontmatter is a lie about a
+// note that is fine. Then the honest-synthesis test: only a note asserting
+// nothing a reader could check earns `synthesis`. Everything else owes a URL,
+// and saying so beats laundering it through the synthesis exemption.
 // Deliberately does NOT stamp synthesis_validated: the downstream audit still
 // gets to run.
 function inferSource(body) {
+  if (hasBodyCitation(body)) return 'literature';
   return hasUngroundedFactualSignal(body) ? '"[no URL found]"' : 'synthesis';
+}
+
+// An earlier pass of this script judged groundedness on wikilinks alone and
+// stamped `[no URL found]` on 99 notes that carry their citations in the body.
+// Correcting a value this script wrote is its job, so the repair is a rule here
+// rather than a one-off migration nobody will find later.
+function miscalledUncited(fm, body) {
+  return fm.source === '[no URL found]' && hasBodyCitation(body);
 }
 
 // Group raw lines by key so a block-form value moves as one unit:
@@ -132,7 +145,8 @@ function repair(raw, relPath, addDate) {
   const misordered = ordered.some((g, i) => g !== groups[i]);
 
   const violations = checkFrontmatter(fm);
-  if (violations.length === 0 && !misordered) return { changes: [], unfixable: [] };
+  const miscalled = miscalledUncited(fm, body);
+  if (violations.length === 0 && !misordered && !miscalled) return { changes: [], unfixable: [] };
 
   const changes = [];
   const unfixable = [];
@@ -194,6 +208,9 @@ function repair(raw, relPath, addDate) {
     const value = inferSource(body);
     append('source', value);
     changes.push(`source: ${value}`);
+  } else if (miscalled) {
+    rewrite(indexOf('source'), 'source: literature');
+    changes.push('source: [no URL found] -> literature (citations are in the body)');
   }
 
   if (indexOf('tags') === -1) unfixable.push('no tags (cannot be inferred)');

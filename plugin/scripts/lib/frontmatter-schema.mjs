@@ -40,7 +40,10 @@ export const ALIASES = {
 // repairer uses this to decide whether a sourceless note may be called
 // synthesis or must be flagged as owing a URL.
 const FACTUAL_SIGNAL_RES = [
-  /\b\d[\d,.]*\s?(%|mg|kg|ms|hz|kb|mb|gb|x|-fold)\b/i,
+  // `%` is a non-word character, so a trailing \b after it never matches (the
+  // space that follows is non-word too). Word-shaped units keep their boundary;
+  // the percent sign must not have one.
+  /\b\d[\d,.]*\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b)/i,
   /\b(n\s?=\s?\d|p\s?[<>=]\s?0?\.\d)/i,
   /[<>]\s?\d/,
   /\b[A-Z][a-z]+(?:\s(?:&|and)\s[A-Z][a-z]+)?,?\s\(?(?:19|20)\d{2}\)?/,
@@ -64,6 +67,23 @@ export function hasUngroundedFactualSignal(body) {
   return text
     .split(/\n\s*\n/)
     .some((para) => !para.includes('[[') && FACTUAL_SIGNAL_RES.some((re) => re.test(para)));
+}
+
+// Frontmatter `source:` is the capture ORIGIN (session, discovery, ingest,
+// synthesis, literature). Citation URLs live on a body `Source:` line, and
+// ~693 notes use both together. Anything judging whether a note is sourced
+// has to read the body line too: calling a note uncited because its citations
+// are not in frontmatter is a false negative about a note that is fine.
+const BODY_CITATION_RE = /^(Sources?):/m;
+
+/**
+ * True when the body carries its citations on a `Source:` / `Sources:` line.
+ *
+ * @param {string} body
+ * @returns {boolean}
+ */
+export function hasBodyCitation(body) {
+  return BODY_CITATION_RE.test(stripFences(typeof body === 'string' ? body : ''));
 }
 
 /**
@@ -119,8 +139,12 @@ export function formatViolations(violations) {
     `Frontmatter does not meet the atomic-note contract:\n` +
     violations.map((v) => `  ${v.message}`).join('\n') +
     `\n\nEvery note in 0-inbox/, 1-fleeting/, 2-literature/ and 3-permanent/ needs ` +
-    `\`tags\`, \`date: YYYY-MM-DD\` and \`source\`. For a first-hand observation with no ` +
-    `external claim, write \`source: synthesis\`. When an external fact needs a URL you ` +
-    `do not have, write \`source: "[no URL found]"\` so the gap is visible.`
+    `\`tags\`, \`date: YYYY-MM-DD\` and \`source\`.\n\n` +
+    `\`source:\` is the capture ORIGIN, not a citation: \`session\`, \`discovery\`, ` +
+    `\`ingest\`, \`literature\` (cited work, citations on a body \`Source:\` line), or ` +
+    `\`synthesis\` (first-hand, asserts nothing a reader could check). Citation URLs ` +
+    `belong on a body \`Source:\` line and coexist with this field. Only when a note ` +
+    `makes an external claim and you have no citation anywhere, write ` +
+    `\`source: "[no URL found]"\` so the gap stays visible.`
   );
 }
