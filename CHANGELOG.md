@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.40.1
+
 ### Fixed
 
 - **Weighted fusion moved the scale out from under the injection gate, leaving it at 92% of the achievable ceiling.** `INJECTION_THRESHOLD` is denominated in raw RRF fusion sum, a unit whose scale is set by constants that live in Rust. v1.40.0 weighted the lanes (`VEC`/`BM25` 1.0, `PPR`/`TAG` 0.05, `PRF` 0.5) and shipped rebuilt binaries for all three platforms, which dropped the maximum achievable score from `5/(5+1) = 0.8333` to `2.6/(5+1) = 0.4333`. The gate stayed at 0.40. Reachable combinations under the new weights are `vec#1` 0.1667, `vec#1+bm25#1` 0.3333, `+graph#1` 0.3500, `+prf#1` 0.4167, all five 0.4333 — so 0.40 passed only when the dense, BM25 and PRF lanes all ranked the *same* note first. Measured against 1,755 nonzero gate evaluations recorded on the old scale (p50 0.458, p90 0.500, max 0.559): 65.8% of observed scores sit above what is now achievable at all. The gate moves to **0.34**, which restores the documented intent on the new scale — just above the two-bare-#1-lanes floor of 0.3333, so injection still demands corroboration beyond two lone top hits, and deliberately off 0.35, which is exactly reachable by graph-lane agreement. This value is derived from achievable-score arithmetic, not from measured relevance: every percentile on record predates the reweighting.
