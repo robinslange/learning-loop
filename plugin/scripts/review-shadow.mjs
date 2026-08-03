@@ -11,6 +11,8 @@ import {
   SHADOW_BACKEND_HEALTH_MIN_RATE,
   SHADOW_BACKEND_HEALTH_MIN_TOTAL,
 } from './lib/shadow-gate.mjs';
+import { assessGateReachability } from './lib/gate-reachability.mjs';
+import { INJECTION_CALIBRATION_EPOCH } from './lib/hook-config.mjs';
 
 function resolvePluginData() {
   const fromEnv = env.CLAUDE_PLUGIN_DATA;
@@ -107,6 +109,20 @@ if (healthy.length > 0) {
   console.log(
     `  Healthy pass rate:  ${passedHealthy.length} / ${healthy.length} = ${healthyPct.toFixed(1)}%  <-- meaningful metric`,
   );
+}
+
+// Reachability: a gate denominated in raw RRF sum breaks silently when the
+// fusion scale moves beneath it (v1.40.0 weighted the lanes and dropped the
+// ceiling from 0.8333 to 0.4333 while the gate stayed at 0.40). Judged against
+// post-epoch scores only, since pre-epoch rows are on the older scale.
+const epochScores = healthy
+  .filter((e) => e.ts >= INJECTION_CALIBRATION_EPOCH)
+  .map((e) => Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0));
+const reach = assessGateReachability({ scores: epochScores, threshold: Number(threshold) });
+if (reach.verdict === 'unreachable' || reach.verdict === 'starved') {
+  console.log(`\n  !! GATE ${reach.verdict.toUpperCase()}: ${reach.message}`);
+} else {
+  console.log(`  Reachability:       ${reach.message}`);
 }
 
 if (healthy.length > 0) {
