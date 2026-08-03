@@ -174,9 +174,32 @@ export const HookConfig = Object.freeze({
   // predictor of relevance, so the real precision lift is a reranker in the JIT
   // path (a separate lever). 0.40 sits above the two-bare-#1-signals floor
   // (0.333): the gate now requires corroboration BEYOND two lone top hits.
-  // Re-measure with the per-rank injected-vs-used join (payload.injected_paths,
-  // added the same day) before the next move.
-  INJECTION_THRESHOLD: 0.4,
+  //
+  // Rescale (2026-08-04): weighted fusion (ll-core VEC/BM25=1.0, PPR/TAG=0.05,
+  // PRF=0.5, shipped v1.40.0) changed the UNIT this constant is denominated in.
+  // The achievable maximum fell from 5/(5+1)=0.8333 to 2.6/(5+1)=0.4333, so the
+  // 0.40 gate inherited from the unweighted scale sat at 92% of the new ceiling
+  // and passed only when vec, BM25 and PRF all ranked the same note #1
+  // (1/6+1/6+0.5/6 = 0.4167). Reachable combinations under the new weights:
+  //   vec#1                      0.1667
+  //   vec#1 + bm25#2             0.3095
+  //   vec#1 + bm25#1             0.3333   <- two-strong-lanes floor (unchanged:
+  //                                          both retrieval lanes kept weight 1.0)
+  //   vec#1 + bm25#1 + graph#1   0.3500
+  //   vec#1 + bm25#1 + prf#1     0.4167
+  //   all five lanes #1          0.4333   <- ceiling
+  // 0.34 restores the ORIGINAL intent on the new scale: just above the
+  // two-bare-#1 floor, so the gate still demands corroboration beyond two lone
+  // top hits, without requiring a near-perfect sweep. It deliberately does not
+  // sit on 0.35, which is exactly reachable by graph-lane agreement.
+  //
+  // This value is INTERIM. It is derived from achievable-score arithmetic, not
+  // from measured relevance: every percentile quoted above was recorded under
+  // unweighted fusion and says nothing about this scale. Re-derive from
+  // post-epoch data before moving it again. The 0.50 candidate on
+  // feat/jit-injection-quality was measured on the unweighted scale and is
+  // ABOVE the current ceiling — do not merge that value without re-deriving it.
+  INJECTION_THRESHOLD: 0.34,
   SIMILARITY_THRESHOLD: 0.85,
   COSINE_MIN: 0.74,
   COSINE_MAX: 0.92,
@@ -194,7 +217,11 @@ export const HookConfig = Object.freeze({
 // Set 2026-06-12: 0.35 -> 0.30 threshold + BM25 OR-mode for long queries.
 // Bumped 2026-07-16: 0.30 -> 0.40 threshold (precision cut). The readiness
 // check + review-shadow calibration now count only post-bump data.
-export const INJECTION_CALIBRATION_EPOCH = '2026-07-16T00:00:00.000Z';
+// Bumped 2026-08-04: weighted fusion (v1.40.0) + 0.40 -> 0.34 rescale. Weighted
+// fusion landed WITHOUT bumping this epoch, so scores either side of it were
+// pooled on incommensurable scales; everything before this timestamp is
+// unweighted-fusion data and cannot be compared to what follows.
+export const INJECTION_CALIBRATION_EPOCH = '2026-08-04T00:00:00.000Z';
 
 /**
  * Read the pre_write_fail_mode setting from a loaded config object.
