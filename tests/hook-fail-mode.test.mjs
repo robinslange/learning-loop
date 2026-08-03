@@ -57,7 +57,8 @@ const SKIP = skipOnWindows('UDS socket / subprocess: skipped on win32');
 
 // A Write payload with a title (triggers the duplicate gate) and no
 // wikilinks (no broken-link noise in the output).
-const NOTE = '---\ntags: [test]\n---\n\n# Test note title\n\nBody text.\n';
+const NOTE =
+  '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\n\n# Test note title\n\nBody text.\n';
 
 // Binary that always crashes with a non-zero exit, simulating a scan failure.
 const CRASHING_STUB = '#!/bin/sh\necho "scan failed" 1>&2\nexit 1\n';

@@ -10,10 +10,17 @@ import {
   resolveConfig,
   findBinary as findBinaryShared,
   isVaultNote,
+  vaultRelPath,
+  classifyVaultPath,
 } from './lib/common.mjs';
 import { checkFilenameStyle } from './lib/filename-style.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { parseFrontmatter, parseTags, extractWikilinks } from '../scripts/lib/markdown-parse.mjs';
+import {
+  SCHEMA_CLASSES,
+  checkFrontmatter,
+  formatViolations,
+} from '../scripts/lib/frontmatter-schema.mjs';
 import { HookConfig, preWriteFailMode } from '../scripts/lib/hook-config.mjs';
 import { getConfig } from '../scripts/lib/config.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
@@ -136,6 +143,23 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
       }
     });
   });
+}
+
+// Deny only on violations a write INTRODUCES, never on ones it inherits.
+// 2977 notes predate the contract; a gate that judged absolute state would
+// block every legitimate edit to them and get switched off within a day. Same
+// added-only delta rule the dash check uses.
+// `oldFm` is null when nothing precedes this write (a new note), which inherits
+// no excuses. Passing `{}` instead would read as "an existing note whose
+// frontmatter is empty" and hand every new note a free pass on all three
+// required keys.
+function frontmatterDenial(oldFm, newFm, filePath, vaultRoot) {
+  const rel = vaultRelPath(filePath, vaultRoot);
+  if (!rel || !SCHEMA_CLASSES.has(classifyVaultPath(rel))) return null;
+
+  const inherited = new Set(oldFm ? checkFrontmatter(oldFm).map((v) => v.id) : []);
+  const introduced = checkFrontmatter(newFm).filter((v) => !inherited.has(v.id));
+  return introduced.length > 0 ? formatViolations(introduced) : null;
 }
 
 function findDuplicateTags(tags) {
@@ -348,6 +372,9 @@ runHook(async ({ tool, input }) => {
     let oldText = oldString;
     let newText = newString;
     let skipDashCheck = false;
+    // An Edit fragment carries no frontmatter of its own; the schema delta is
+    // only knowable from the reconstructed post-edit note.
+    let schemaDenial = null;
     if (oldString) {
       let disk = null;
       try {
@@ -364,10 +391,18 @@ runHook(async ({ tool, input }) => {
           const postEdit = input.replace_all
             ? disk.split(oldString).join(newString)
             : disk.slice(0, idx) + newString + disk.slice(idx + oldString.length);
-          oldText = parseFrontmatter(disk).body;
-          newText = parseFrontmatter(postEdit).body;
+          const before = parseFrontmatter(disk);
+          const after = parseFrontmatter(postEdit);
+          oldText = before.body;
+          newText = after.body;
+          schemaDenial = frontmatterDenial(before.fm, after.fm, filePath, vaultRoot);
         }
       }
+    }
+
+    if (schemaDenial) {
+      deny(schemaDenial);
+      return;
     }
 
     if (!skipDashCheck && countExposedDashes(newText) > countExposedDashes(oldText)) {
@@ -409,6 +444,17 @@ runHook(async ({ tool, input }) => {
       deny(`Duplicate tags found: [${dupes.join(', ')}]. Remove duplicates before writing.`);
       return;
     }
+  }
+
+  // A new file inherits nothing, so every violation is introduced and the
+  // contract applies in full.
+  const onDiskFm = existsSync(filePath)
+    ? parseFrontmatter(readFileSync(filePath, 'utf-8')).fm
+    : null;
+  const schemaDenial = frontmatterDenial(onDiskFm, fm, filePath, vaultRoot);
+  if (schemaDenial) {
+    deny(schemaDenial);
+    return;
   }
 
   // Same added-only delta rule as the Edit path: a Write that rewrites an

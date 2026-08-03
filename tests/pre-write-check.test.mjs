@@ -71,7 +71,7 @@ describe('pre-write-check', () => {
     writeFileSync(join(VAULT, '6-writing', 'the-loud-room.md'), '---\ntitle: the loud room\n---\n');
     writeFileSync(
       join(VAULT, '3-permanent', 'dashed-note.md'),
-      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\n',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe gate is policy — not aspiration.\n',
     );
   });
 
@@ -81,27 +81,44 @@ describe('pre-write-check', () => {
   });
 
   it('ignores non-vault writes', () => {
-    const result = run('Write', join(NON_VAULT, 'file.md'), '---\ntags: [a, a]\n---\n');
+    const result = run(
+      'Write',
+      join(NON_VAULT, 'file.md'),
+      '---\ntags: [a, a]\ndate: 2026-08-03\nsource: synthesis\n---\n',
+    );
     assert.equal(result, null);
   });
 
   it('ignores non-Write tools', () => {
-    const result = run('Read', join(VAULT, '0-inbox', 'test.md'), '---\ntags: [a, a]\n---\n');
+    const result = run(
+      'Read',
+      join(VAULT, '0-inbox', 'test.md'),
+      '---\ntags: [a, a]\ndate: 2026-08-03\nsource: synthesis\n---\n',
+    );
     assert.equal(result, null);
   });
 
   it('ignores non-.md files in vault', () => {
-    const result = run('Write', join(VAULT, '0-inbox', 'test.txt'), '---\ntags: [a, a]\n---\n');
+    const result = run(
+      'Write',
+      join(VAULT, '0-inbox', 'test.txt'),
+      '---\ntags: [a, a]\ndate: 2026-08-03\nsource: synthesis\n---\n',
+    );
     assert.equal(result, null);
   });
 
   it('ignores _system/ paths', () => {
-    const result = run('Write', join(VAULT, '_system', 'config.md'), '---\ntags: [a, a]\n---\n');
+    const result = run(
+      'Write',
+      join(VAULT, '_system', 'config.md'),
+      '---\ntags: [a, a]\ndate: 2026-08-03\nsource: synthesis\n---\n',
+    );
     assert.equal(result, null);
   });
 
   it('denies duplicate tags (inline format)', () => {
-    const content = '---\ntags: [sleep, circadian, sleep]\n---\nBody text.';
+    const content =
+      '---\ntags: [sleep, circadian, sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody text.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -117,19 +134,30 @@ describe('pre-write-check', () => {
   });
 
   it('allows clean notes with no issues', () => {
-    const content = '---\ntags: [sleep, circadian]\n---\nBody with [[existing-note]].';
+    const content =
+      '---\ntags: [sleep, circadian]\ndate: 2026-08-03\nsource: synthesis\n---\nBody with [[existing-note]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
 
-  it('allows notes with no frontmatter', () => {
+  // Was 'allows notes with no frontmatter'. A bare note in an atomic folder is
+  // how the vault accumulated 1429 notes with no source; the contract denies it.
+  // Folders outside SCHEMA_CLASSES still take frontmatter-free notes.
+  it('denies an atomic note with no frontmatter', () => {
     const content = 'Just a plain note with no frontmatter.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
+    assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+  });
+
+  it('allows a frontmatter-free note outside the atomic folders', () => {
+    const content = 'Just a plain note with no frontmatter.';
+    const result = run('Write', join(VAULT, '4-projects', 'index.md'), content);
     assert.equal(result, null);
   });
 
   it('warns on broken wikilinks (additionalContext, NOT deny)', () => {
-    const content = '---\ntags: [sleep]\n---\nSee [[nonexistent-note]] and [[also-missing]].';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nSee [[nonexistent-note]] and [[also-missing]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, undefined);
@@ -139,25 +167,29 @@ describe('pre-write-check', () => {
   });
 
   it('resolves bare-basename wikilinks to notes living in 6-writing/', () => {
-    const content = '---\ntags: [sleep]\n---\nSee [[the-loud-room]].';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nSee [[the-loud-room]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
 
   it('resolves subdir-prefixed wikilinks like [[6-writing/the-loud-room]]', () => {
-    const content = '---\ntags: [sleep]\n---\nSee [[6-writing/the-loud-room]].';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nSee [[6-writing/the-loud-room]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
 
   it('resolves subdir-prefixed wikilinks like [[3-permanent/existing-note]]', () => {
-    const content = '---\ntags: [sleep]\n---\nSee [[3-permanent/existing-note]].';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nSee [[3-permanent/existing-note]].';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
 
   it('denies an em-dash in body prose, naming the line', () => {
-    const content = '---\ntags: [sleep]\n---\nThe rule is policy — or it is aspiration.';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nThe rule is policy — or it is aspiration.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -166,7 +198,8 @@ describe('pre-write-check', () => {
   });
 
   it('denies an en-dash in body prose', () => {
-    const content = '---\ntags: [sleep]\n---\nThe range is 3–5 notes per day.';
+    const content =
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nThe range is 3–5 notes per day.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -177,27 +210,28 @@ describe('pre-write-check', () => {
   // notEqual.
   it('allows an em-dash on a Source: line', () => {
     const content =
-      '---\ntags: [sleep]\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nClean body.\n\nSource: example.com — pulled after second reading.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows an em-dash on a Related: line', () => {
     const content =
-      '---\ntags: [sleep]\n---\nClean body.\n\nRelated: [[existing-note]] — the same shape at the data layer.';
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nClean body.\n\nRelated: [[existing-note]] — the same shape at the data layer.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('allows an em-dash inside frontmatter only', () => {
     const content =
-      '---\ntags: [sleep]\nsource: 2026-05-29 vault sweep — span bug caught in preview\n---\nClean body with no dashes.';
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: 2026-05-29 vault sweep — span bug caught in preview\n---\nClean body with no dashes.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.equal(result, null);
   });
 
   it('denies on duplicate tags before checking em-dashes (tags win)', () => {
-    const content = '---\ntags: [sleep, sleep]\n---\nBody with an em-dash — here.';
+    const content =
+      '---\ntags: [sleep, sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody with an em-dash — here.';
     const result = run('Write', join(VAULT, '0-inbox', 'test.md'), content);
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -209,27 +243,28 @@ describe('pre-write-check', () => {
   // violation, so the hook must produce no output at all.
   it('stays silent on frontmatter source: plus a body Sources: line', () => {
     const content =
-      '---\ntags: [test]\nsource: https://example.com/paper\ndate: 2026-05-21\n---\n\n# Test Note\n\nThe claim happens.\n\nSources: pulled from example.com after second reading.\n';
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: https://example.com/paper\ndate: 2026-05-21\n---\n\n# Test Note\n\nThe claim happens.\n\nSources: pulled from example.com after second reading.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions.md'), content);
     assert.equal(result, null);
   });
 
   it('stays silent on a body Sources: line with no frontmatter source field', () => {
-    const content = '---\ntags: [test]\n---\n\n# Test Note\n\nSources: a blog post.\n';
+    const content =
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\n\n# Test Note\n\nSources: a blog post.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'test-conventions-2.md'), content);
     assert.equal(result, null);
   });
 
   it('allows a Write to an existing file whose pre-existing em-dash is carried unchanged', () => {
     const content =
-      '---\ntags: [test]\n---\nThe gate is policy — not aspiration. A new clean sentence.\n';
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe gate is policy — not aspiration. A new clean sentence.\n';
     const result = run('Write', join(VAULT, '3-permanent', 'dashed-note.md'), content);
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('denies a Write to an existing dashed file when the new content ADDS another dash', () => {
     const content =
-      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\nA second dash — added now.\n';
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe gate is policy — not aspiration.\nA second dash — added now.\n';
     const result = run('Write', join(VAULT, '3-permanent', 'dashed-note.md'), content);
     assert.ok(result, 'expected a deny payload');
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -237,7 +272,8 @@ describe('pre-write-check', () => {
   });
 
   it('denies a Write to a NEW file carrying an em-dash (any-dash deny unchanged)', () => {
-    const content = '---\ntags: [test]\n---\nBrand new note — with a dash.\n';
+    const content =
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBrand new note — with a dash.\n';
     const result = run('Write', join(VAULT, '0-inbox', 'brand-new-dashed.md'), content);
     assert.ok(result, 'expected a deny payload');
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -284,7 +320,7 @@ describe('pre-write-check', () => {
     const p = join(VAULT, '3-permanent', 'fm-edit-note.md');
     writeFileSync(
       p,
-      '---\ntags: [test]\nsource: 2026-05-29 vault sweep\n---\nClean body with no dashes.\n',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: 2026-05-29 vault sweep\n---\nClean body with no dashes.\n',
     );
     const result = runEdit(
       p,
@@ -296,14 +332,20 @@ describe('pre-write-check', () => {
 
   it('allows an Edit adding a dash to an existing Source: line via a fragment without the line prefix', () => {
     const p = join(VAULT, '3-permanent', 'source-line-edit-note.md');
-    writeFileSync(p, '---\ntags: [test]\n---\nClean body.\n\nSource: example.com\n');
+    writeFileSync(
+      p,
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nClean body.\n\nSource: example.com\n',
+    );
     const result = runEdit(p, 'example.com', 'example.com — pulled after second reading');
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
   it('still denies an Edit adding a dash to body prose of an on-disk note', () => {
     const p = join(VAULT, '3-permanent', 'body-prose-edit-note.md');
-    writeFileSync(p, '---\ntags: [test]\n---\nThe rule is policy.\n');
+    writeFileSync(
+      p,
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe rule is policy.\n',
+    );
     const result = runEdit(p, 'The rule is policy.', 'The rule is policy — or it is aspiration.');
     assert.ok(result, 'expected a deny payload');
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
@@ -314,7 +356,7 @@ describe('pre-write-check', () => {
     const p = join(VAULT, '3-permanent', 'replace-all-edit-note.md');
     writeFileSync(
       p,
-      '---\ntags: [test]\n---\nThe gate is policy — not aspiration.\nAgain: the gate is policy — not aspiration.\n',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe gate is policy — not aspiration.\nAgain: the gate is policy — not aspiration.\n',
     );
     const result = runEdit(p, 'policy — not aspiration', 'policy — never aspiration', {
       replaceAll: true,
@@ -325,8 +367,8 @@ describe('pre-write-check', () => {
   it('Edit payloads skip the duplicate-tags deny even when new_string carries duplicated tags', () => {
     const result = runEdit(
       join(VAULT, '0-inbox', 'test.md'),
-      '---\ntags: [sleep]\n---\nBody text.',
-      '---\ntags: [sleep, circadian, sleep]\n---\nBody text.',
+      '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody text.',
+      '---\ntags: [sleep, circadian, sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody text.',
     );
     assert.equal(result, null);
   });
@@ -385,7 +427,7 @@ describe('pre-write-check filename-style advisory', () => {
     const result = runStyleHook(
       STYLE_VAULT,
       join(STYLE_VAULT, '0-inbox', 'My Spaced Note.md'),
-      '---\ntags: [test]\n---\nBody.',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.',
     );
     assert.ok(result, 'expected an advisory payload');
     assert.equal(result.hookSpecificOutput.permissionDecision, undefined, 'must warn, never deny');
@@ -397,7 +439,7 @@ describe('pre-write-check filename-style advisory', () => {
     const result = runStyleHook(
       STYLE_VAULT,
       join(STYLE_VAULT, '0-inbox', 'my-clean-note.md'),
-      '---\ntags: [test]\n---\nBody.',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.',
     );
     // Either null or no additionalContext about convention (may have other
     // advisories like broken wikilinks, but not a style one).
@@ -421,7 +463,7 @@ describe('pre-write-check filename-style advisory', () => {
       const result = runStyleHook(
         spacesVault,
         join(spacesVault, '0-inbox', 'My New Note.md'),
-        '---\ntags: [test]\n---\nBody.',
+        '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.',
       );
       if (result) {
         assert.ok(
@@ -447,7 +489,7 @@ describe('pre-write-check filename-style advisory', () => {
       const result = runStyleHook(
         spacesVault,
         join(spacesVault, '0-inbox', 'My Spaced Note.md'),
-        '---\ntags: [test]\n---\nBody.',
+        '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.',
         { filename_style: 'kebab' },
       );
       assert.ok(result, 'expected an advisory payload');
@@ -464,7 +506,11 @@ describe('pre-write-check filename-style advisory', () => {
 
   it('existing-file Write (not new) → no style advisory', () => {
     const existingPath = join(STYLE_VAULT, '0-inbox', 'existing-kebab-note-0.md');
-    const result = runStyleHook(STYLE_VAULT, existingPath, '---\ntags: [test]\n---\nUpdated body.');
+    const result = runStyleHook(
+      STYLE_VAULT,
+      existingPath,
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nUpdated body.',
+    );
     if (result) {
       assert.ok(
         !result.hookSpecificOutput?.additionalContext?.includes('convention'),
@@ -477,7 +523,7 @@ describe('pre-write-check filename-style advisory', () => {
     const result = runStyleHook(
       STYLE_VAULT,
       join(STYLE_VAULT, '_system', 'My Config.md'),
-      '---\ntags: [test]\n---\nBody.',
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.',
     );
     assert.equal(result, null, '_system writes must be ignored entirely');
   });
@@ -509,5 +555,132 @@ describe('pre-write-check filename-style advisory', () => {
     } finally {
       r.cleanup();
     }
+  });
+});
+
+describe('pre-write-check frontmatter schema', () => {
+  let FM_VAULT;
+
+  const VALID = '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.';
+
+  before(() => {
+    FM_VAULT = mkdtempSync(join(tmpdir(), 'll-pwc-fm-vault-'));
+    for (const dir of [...VAULT_DIRS, ...TITLE_INDEX_EXTRA_DIRS, '_system']) {
+      mkdirSync(join(FM_VAULT, dir), { recursive: true });
+    }
+    // Predates the contract: missing date and source, and using the `created:`
+    // alias. Edits to it must stay possible.
+    writeFileSync(
+      join(FM_VAULT, '3-permanent', 'legacy-note.md'),
+      '---\ntags: [legacy]\ncreated: 2026-01-01\n---\nOld body.\n',
+    );
+  });
+
+  after(() => {
+    rmSync(FM_VAULT, { recursive: true, force: true });
+  });
+
+  function write(relPath, content) {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(FM_VAULT, relPath), content },
+      },
+      env: { VAULT_PATH: FM_VAULT },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      return out ? JSON.parse(out) : null;
+    } finally {
+      r.cleanup();
+    }
+  }
+
+  function edit(relPath, oldString, newString) {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: join(FM_VAULT, relPath),
+          old_string: oldString,
+          new_string: newString,
+        },
+      },
+      env: { VAULT_PATH: FM_VAULT },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      return out ? JSON.parse(out) : null;
+    } finally {
+      r.cleanup();
+    }
+  }
+
+  const denial = (result) =>
+    result?.hookSpecificOutput?.permissionDecision === 'deny'
+      ? result.hookSpecificOutput.permissionDecisionReason
+      : null;
+
+  it('accepts a conforming new note', () => {
+    assert.equal(denial(write('0-inbox/good.md', VALID)), null);
+  });
+
+  it('denies a new note missing date and source', () => {
+    const reason = denial(write('0-inbox/bare.md', '---\ntags: [test]\n---\nBody.'));
+    assert.ok(reason, 'expected a deny');
+    assert.match(reason, /`date:` is required/);
+    assert.match(reason, /`source:` is required/);
+  });
+
+  it('denies the created: alias and names the replacement', () => {
+    const content = '---\ntags: [test]\ncreated: 2026-08-03\nsource: synthesis\n---\nBody.';
+    const reason = denial(write('0-inbox/aliased.md', content));
+    assert.match(reason, /`created:` is not a vault key\. Use `date:`/);
+  });
+
+  it('denies source-project: and names the replacement', () => {
+    const content = '---\ntags: [t]\ndate: 2026-08-03\nsource-project: learning-loop\n---\nBody.';
+    const reason = denial(write('0-inbox/sp.md', content));
+    assert.match(reason, /`source-project:` is not a vault key\. Use `source:`/);
+  });
+
+  it('denies a malformed date', () => {
+    const content = '---\ntags: [t]\ndate: 03-08-2026\nsource: synthesis\n---\nBody.';
+    assert.match(denial(write('0-inbox/baddate.md', content)), /not YYYY-MM-DD/);
+  });
+
+  it('denies a folder name smuggled into status:', () => {
+    const content = VALID.replace('source: synthesis', 'source: synthesis\nstatus: permanent');
+    assert.match(denial(write('0-inbox/badstatus.md', content)), /not an intention value/);
+  });
+
+  it('exempts folders that are not atomic notes', () => {
+    assert.equal(denial(write('4-projects/index.md', '---\ntags: [t]\n---\nBody.')), null);
+  });
+
+  it('allows an edit to a legacy note that fixes nothing', () => {
+    assert.equal(denial(edit('3-permanent/legacy-note.md', 'Old body.', 'New body.')), null);
+  });
+
+  it('allows an edit that repairs a legacy note', () => {
+    const reason = denial(
+      edit(
+        '3-permanent/legacy-note.md',
+        'created: 2026-01-01',
+        'date: 2026-01-01\nsource: synthesis',
+      ),
+    );
+    assert.equal(reason, null);
+  });
+
+  it('denies an edit that introduces a new violation on a legacy note', () => {
+    const reason = denial(
+      edit('3-permanent/legacy-note.md', 'tags: [legacy]', 'tags: [legacy]\nstatus: permanent'),
+    );
+    assert.match(reason, /not an intention value/);
   });
 });

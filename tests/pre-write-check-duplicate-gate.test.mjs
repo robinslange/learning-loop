@@ -124,7 +124,8 @@ function readHookErrorTimeouts(pluginDataDir) {
 
 // Note content with a # title (triggers the gate) and no wikilinks (no
 // broken-link noise in additionalContext).
-const NOTE = '---\ntags: [sleep]\n---\n\n# Sleep consolidates memory\n\nClean body.\n';
+const NOTE =
+  '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\n\n# Sleep consolidates memory\n\nClean body.\n';
 
 function runWithStub(
   stubScript,
