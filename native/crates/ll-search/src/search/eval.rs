@@ -464,8 +464,17 @@ pub fn tune_weights(
     let ctx = SearchContext::build(conn);
     eprintln!("Tuning on {} queries", queries.len());
 
-    // Cache signals per query. Long queries are the JIT distribution and the
-    // one the shipped gate actually sees, so tune on those where available.
+    // Tune on TITLE queries, not the body-derived long ones.
+    //
+    // A long query is 40 tokens lifted verbatim from a note, and
+    // `fts_bm25_query` runs AND-mode first and only falls back to OR when AND
+    // returns nothing. Over 25+ terms AND matches exactly the note the text
+    // came from — 1 result where OR would give 5929 — and `score_ranking`
+    // filters that note out as the query's own source. The sparse lane
+    // therefore contributes nothing on that distribution, and any sweep over
+    // it is really measuring a vector-only pipeline: vec weights 0.2, 1.0 and
+    // 3.0 all scored identically to four decimals, while vec 0.0 collapsed to
+    // 0.1055.
     struct Cached {
         signals: super::context::Signals,
         relevant: HashSet<String>,
@@ -473,7 +482,7 @@ pub fn tune_weights(
     }
     let mut cached: Vec<Cached> = Vec::new();
     for (i, q) in queries.iter().enumerate() {
-        let text = q.long_query.as_deref().unwrap_or(&q.title);
+        let text = q.title.as_str();
         let qvec = embed_query(text);
         cached.push(Cached {
             signals: ctx.compute_signals_holdout(conn, &qvec, text, &q.path),
@@ -490,8 +499,11 @@ pub fn tune_weights(
     // sweep exercises, so varying it here changes nothing. Sweeping it anyway
     // would print a column of identical numbers and imply the harness had
     // tested it. Tune PRF with `tune-prf`, which does drive that stage.
-    let grid_ppr = [0.0, 0.05, 0.1, 0.25, 0.5, 1.0];
-    let grid_tag = [0.0, 0.05, 0.1, 0.25, 0.5, 1.0];
+    // Only the ratio between lanes matters, so bm25 is pinned at 1.0 and the
+    // others move against it.
+    let grid_vec = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    let grid_ppr = [0.0, 0.05, 0.1, 0.25];
+    let grid_tag = [0.0, 0.05, 0.1, 0.25];
 
     let score_on = |w: &FusionWeights, idxs: &[usize]| -> f64 {
         let mut total = 0.0;
@@ -510,18 +522,91 @@ pub fn tune_weights(
     let holdout: Vec<usize> = (0..cached.len()).filter(|i| i % 2 == 1).collect();
 
     let mut results: Vec<(FusionWeights, f64, f64)> = Vec::new();
-    for &ppr in &grid_ppr {
-        for &tag in &grid_tag {
-            let w = FusionWeights {
-                vec: 1.0,
-                bm25: 1.0,
-                ppr,
-                tag,
-                prf: FusionWeights::default().prf,
-            };
-            results.push((w, score_on(&w, &train), score_on(&w, &holdout)));
+    for &v in &grid_vec {
+        for &ppr in &grid_ppr {
+            for &tag in &grid_tag {
+                let w = FusionWeights {
+                    vec: v,
+                    bm25: 1.0,
+                    ppr,
+                    tag,
+                    prf: FusionWeights::default().prf,
+                };
+                results.push((w, score_on(&w, &train), score_on(&w, &holdout)));
+            }
         }
     }
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     results
+}
+
+/// Per-lane, per-query statistics for the two query distributions that differ
+/// only in whether the dense lane has seen the text.
+///
+/// Query-adaptive weighting is only buildable if some statistic observable at
+/// query time separates a lane that found the answer from one that is guessing.
+/// This reports the candidates — top score, gap to rank 2, spread across the
+/// top 10 — alongside where the gold note actually landed in each lane, so the
+/// question can be settled before any weighting rule is written.
+#[derive(Debug, Serialize)]
+pub struct LaneStat {
+    pub set: String,
+    pub vec_top: f64,
+    pub vec_gap: f64,
+    pub vec_spread: f64,
+    pub vec_gold_rank: i64,
+    pub bm25_top: f64,
+    pub bm25_gap: f64,
+    pub bm25_gold_rank: i64,
+}
+
+fn top_gap_spread(scores: &[f64]) -> (f64, f64, f64) {
+    // Lists arrive best-first; magnitudes let the BM25 convention (negative,
+    // more negative is better) and cosine share one code path.
+    if scores.is_empty() {
+        return (0.0, 0.0, 0.0);
+    }
+    let top = scores[0].abs();
+    let gap = if scores.len() > 1 { (scores[0] - scores[1]).abs() } else { 0.0 };
+    let last = scores[scores.len() - 1].abs();
+    (top, gap, (top - last).abs())
+}
+
+pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) -> Vec<LaneStat> {
+    let ctx = SearchContext::build(conn);
+    let mut out = Vec::new();
+    for (set, gold_path, text) in probes {
+        if text.trim().is_empty() {
+            continue;
+        }
+        let qvec = embed_query(text);
+        let sig = ctx.compute_signals(conn, &qvec, text);
+
+        let vec_scores: Vec<f64> = sig.vec_scored.iter().map(|(_, s)| *s).take(10).collect();
+        let bm_scores: Vec<f64> = sig.fts_results.iter().map(|(_, _, s)| *s).take(10).collect();
+        let (vt, vg, vsp) = top_gap_spread(&vec_scores);
+        let (bt, bg, _) = top_gap_spread(&bm_scores);
+
+        out.push(LaneStat {
+            set: set.clone(),
+            vec_top: vt,
+            vec_gap: vg,
+            vec_spread: vsp,
+            vec_gold_rank: sig
+                .vec_scored
+                .iter()
+                .position(|(p, _)| p == gold_path)
+                .map(|r| r as i64)
+                .unwrap_or(-1),
+            bm25_top: bt,
+            bm25_gap: bg,
+            bm25_gold_rank: sig
+                .fts_results
+                .iter()
+                .position(|(_, p, _)| p == gold_path)
+                .map(|r| r as i64)
+                .unwrap_or(-1),
+        });
+    }
+    out
 }

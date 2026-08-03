@@ -17,7 +17,7 @@ pub use cluster::{SimilarResult, DiscriminatePair, similar_notes, cluster_notes,
 pub use reflect::{ReflectQueryResult, ReflectScanResult, reflect_scan, reflect_scan_federated};
 pub use store::{EmbeddingStore, load_store};
 pub use tune::tune_prf;
-pub use eval::{eval_prf, eval_funnel, tune_weights};
+pub use eval::{eval_prf, eval_funnel, tune_weights, lane_diagnostics, LaneStat};
 pub use context::SearchContext;
 
 /// The shipped fusion weights, for harnesses that want to mark them in a sweep.

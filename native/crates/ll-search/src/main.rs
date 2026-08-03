@@ -180,6 +180,11 @@ enum Commands {
         #[arg(long, default_value_t = 2)]
         min_links: usize,
     },
+    LaneDiag {
+        db_path: String,
+        /// JSON array of [set, gold_path, query_text] triples.
+        probes: String,
+    },
     TuneWeights {
         db_path: String,
         #[arg(long, default_value_t = 2)]
@@ -485,14 +490,22 @@ async fn main() {
             let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
             out(&result);
         }
+        Commands::LaneDiag { db_path, probes } => {
+            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            init_embedding();
+            let raw = std::fs::read_to_string(&probes).expect("read probes");
+            let triples: Vec<(String, String, String)> =
+                serde_json::from_str(&raw).expect("parse probes");
+            out(&ll_search::search::lane_diagnostics(&conn, &triples));
+        }
         Commands::TuneWeights { db_path, min_links, limit } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::tune_weights(&conn, &store, min_links, limit);
-            println!("{:>6} {:>6}   {:>9} {:>9}", "ppr", "tag", "train", "holdout");
+            println!("{:>6} {:>6} {:>6}   {:>9} {:>9}", "vec", "ppr", "tag", "train", "holdout");
             for (w, train, hold) in results.iter() {
-                println!("{:>6.2} {:>6.2}   {:>9.4} {:>9.4}", w.ppr, w.tag, train, hold);
+                println!("{:>6.2} {:>6.2} {:>6.2}   {:>9.4} {:>9.4}", w.vec, w.ppr, w.tag, train, hold);
             }
             let dflt = ll_search::search::scoring_defaults();
             if let Some((w, train, hold)) =
