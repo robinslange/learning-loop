@@ -56,6 +56,41 @@
       "quote": "A subset of individuals show little change in muscle creatine after supplementation.",
       "expected_refuted": true,
       "why": "Quote says 'a subset'; claim invents a precise 47% figure not in the quote — fabricated specificity."
+    },
+    {
+      "id": "hard-right-conclusion-wrong-evidence",
+      "claim": "Beta-alanine improves high-intensity exercise capacity.",
+      "quote": "Beta-alanine supplementation raised muscle carnosine content by 58% over four weeks.",
+      "expected_refuted": true,
+      "why": "The claim is TRUE in the literature, but this quote only establishes the mechanism (raised carnosine), not the outcome (exercise capacity). A shallow verifier that pattern-matches 'beta-alanine + plausible' affirms; a real one sees the quote does not reach the claimed endpoint."
+    },
+    {
+      "id": "hard-scope-narrowing",
+      "claim": "Omega-3 supplementation reduces all-cause mortality.",
+      "quote": "In patients with established coronary heart disease, omega-3 supplementation reduced cardiac death.",
+      "expected_refuted": true,
+      "why": "Quote is scoped to CHD patients and cardiac death; claim generalises to all-cause mortality in everyone. Support is narrower than the claim — must refute. Discriminates: the topic and direction match, only the scope betrays it."
+    },
+    {
+      "id": "hard-unit-magnitude-shift",
+      "claim": "The study found a 30% increase in strength.",
+      "quote": "Participants improved by 30 kg on the leg press over the intervention.",
+      "expected_refuted": true,
+      "why": "30 kg (absolute) is not 30% (relative). Numeric-looking coincidence a shallow verifier affirms on; the units make it unsupported."
+    },
+    {
+      "id": "hard-temporal-overreach",
+      "claim": "The supplement produces lasting cognitive benefits.",
+      "quote": "Cognitive performance improved significantly on tests administered 60 minutes after a single dose.",
+      "expected_refuted": true,
+      "why": "Acute (60-min, single-dose) effect does not support a 'lasting' claim. Temporal scope mismatch; support is real but for a different time horizon."
+    },
+    {
+      "id": "hard-supported-despite-hedge",
+      "claim": "Vitamin D supplementation reduced fracture risk in this trial.",
+      "quote": "Although effects varied by baseline status, the vitamin D group had a statistically significant 16% lower fracture incidence than placebo.",
+      "expected_refuted": false,
+      "why": "A hedging clause ('effects varied') can bait an over-eager refuter, but the quote DOES specifically support the claim (significant 16% reduction). Discriminates the opposite failure mode: refuting genuinely-supported claims because the language is qualified."
     }
   ]
 }

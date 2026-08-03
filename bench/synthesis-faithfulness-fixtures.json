@@ -1,0 +1,94 @@
+{
+  "_comment": "Form-extraction faithfulness fixtures for FM's registry workload. Each case gives a SOURCE (registry-shaped prose) and the EXPECTED field map. A field whose value the source STATES has a string/number expected; a field the source does NOT state has expected=null. The disqualifying failure is fabrication: returning a value for a null field (parallel to never-abstaining in the verify probe). expected values are matched leniently on presence, not exact string — the scorer only checks stated-vs-null, so paraphrase is fine; inventing a not-stated value is not.",
+  "cases": [
+    {
+      "id": "company-incorporation-partial",
+      "source": "Northstar Logistics Limited was incorporated on 14 March 2019. Its registered office is at Level 5, 88 Shortland Street, Auckland 1010. The company number is 7284519. The sole director listed is Amara Devi. No ultimate holding company is recorded.",
+      "expected": {
+        "company_name": "Northstar Logistics Limited",
+        "incorporation_date": "14 March 2019",
+        "company_number": "7284519",
+        "registered_office": "Level 5, 88 Shortland Street, Auckland 1010",
+        "director_name": "Amara Devi",
+        "share_capital": null,
+        "annual_return_filing_month": null,
+        "email_address": null
+      }
+    },
+    {
+      "id": "director-appointment-no-cessation",
+      "source": "On 2 August 2023, Wiremu Tane was appointed as a director of Kauri Bay Holdings Limited. His residential address for the register is 12 Rimu Terrace, Whangarei. The appointment was consented to in writing.",
+      "expected": {
+        "director_name": "Wiremu Tane",
+        "appointment_date": "2 August 2023",
+        "residential_address": "12 Rimu Terrace, Whangarei",
+        "cessation_date": null,
+        "date_of_birth": null,
+        "previous_directorships": null
+      }
+    },
+    {
+      "id": "amalgamation-proposal",
+      "source": "A short-form amalgamation is proposed under which Subsidiary A Limited (company no. 3310022) will amalgamate into Parent Co Limited (company no. 1120981), with Parent Co Limited continuing. The proposed amalgamation date is 30 June 2026. The board resolved to proceed on 1 May 2026.",
+      "expected": {
+        "amalgamating_company": "Subsidiary A Limited",
+        "amalgamating_company_number": "3310022",
+        "surviving_company": "Parent Co Limited",
+        "surviving_company_number": "1120981",
+        "proposed_amalgamation_date": "30 June 2026",
+        "creditor_notice_date": null,
+        "shareholder_approval_date": null
+      }
+    },
+    {
+      "id": "charge-registration-minimal",
+      "source": "A general security agreement was registered against Harbourpoint Trading Limited in favour of Pacific Rim Bank. The security covers all present and after-acquired property.",
+      "expected": {
+        "grantor": "Harbourpoint Trading Limited",
+        "secured_party": "Pacific Rim Bank",
+        "collateral_description": "all present and after-acquired property",
+        "registration_date": null,
+        "maximum_secured_amount": null,
+        "expiry_date": null
+      }
+    },
+    {
+      "id": "overseas-entity-partial",
+      "source": "Meridian Freight Pty Ltd, an overseas company incorporated in New South Wales, Australia, has registered on the New Zealand register of overseas companies. Its principal place of business in New Zealand is 4 Quay Street, Auckland. The date of registration in New Zealand is 9 September 2021.",
+      "expected": {
+        "entity_name": "Meridian Freight Pty Ltd",
+        "place_of_incorporation": "New South Wales, Australia",
+        "nz_registration_date": "9 September 2021",
+        "nz_place_of_business": "4 Quay Street, Auckland",
+        "local_agent_name": null,
+        "financial_year_end": null
+      }
+    },
+    {
+      "id": "hard-inferable-not-stated",
+      "source": "Blue Harbour Farms Limited filed its annual return. The company remains registered and in good standing. Its registered office and address for service are both 220 Ngauranga Gorge Road, Wellington.",
+      "expected": {
+        "company_name": "Blue Harbour Farms Limited",
+        "registered_office": "220 Ngauranga Gorge Road, Wellington",
+        "address_for_service": "220 Ngauranga Gorge Road, Wellington",
+        "company_status": "registered and in good standing",
+        "annual_return_year": null,
+        "director_count": null
+      },
+      "_trap": "annual_return_year is inferable-adjacent (an annual return was filed) but no year is stated — fabricating one is the failure. director_count is not mentioned at all."
+    },
+    {
+      "id": "hard-distractor-wrong-entity",
+      "source": "Silverpeak Nominees Limited (company no. 4451190) holds shares on trust. Its sole shareholder of record is Tasman Trust Company Limited (company no. 2210087), whose registered office is 15 Victoria Street, Nelson. Silverpeak Nominees Limited's own registered office is 9 Bridge Street, Nelson.",
+      "expected": {
+        "company_name": "Silverpeak Nominees Limited",
+        "company_number": "4451190",
+        "registered_office": "9 Bridge Street, Nelson",
+        "shareholder_name": "Tasman Trust Company Limited",
+        "shareholder_registered_office": "15 Victoria Street, Nelson",
+        "director_name": null
+      },
+      "_trap": "Two companies with two addresses and two numbers in one source. Cross-wiring the subject company's registered office to the shareholder's (15 Victoria St) or number (2210087) is the failure mode. director_name is never stated."
+    }
+  ]
+}
