@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.40.0
+
 ### Fixed
 
 - **MIGRATION — an edit past byte 1500 of a note was silently never indexed.** `db/index.rs` took the change-detection hash over `result.text`, which `preprocess.rs` had already truncated to `MAX_TEXT_LENGTH`. Appending to a note longer than the cap therefore produced an identical hash, the indexer took the `continue` branch, and **both** the embedding and the full-text body stayed stale — with no error and nothing in the logs. 68.9% of a 6,006-note vault sits over the old cap, so most notes were eligible, and the pipelines that append to notes (`/deepen`, the note-writer, verification passes) were the ones feeding it. Reproduced before the fix by appending a unique marker to a 2.1KB note and re-indexing: 0 FTS hits for the marker; after, 1. The hash now covers title, tags and the full body, length-prefixed so field boundaries cannot collide. Changing the hash forces one full re-index on first run after upgrade — roughly 5 minutes for 6,000 notes, and it is what carries the fix.
