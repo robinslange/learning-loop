@@ -6,6 +6,32 @@ import { updateCitationIndex, loadCitationIndex } from '../lib/sources/citation-
 import unpaywall from '../lib/sources/adapters/unpaywall.mjs';
 import { authorMatches, firstAuthorMatches } from '../lib/sources/author-match.mjs';
 
+// A source that failed to verify returns `{verified:false, error}` and no
+// `issues` array, so every consumer that grades by `issues[].severity` — the
+// promotion gate among them — counted zero problems and let the note through.
+// A verification that could not run is not a verification that passed.
+//
+// Graded by kind: an identifier or author+year that resolves to nothing is the
+// fabrication case the check exists for, while a bare link carrying no citation
+// claim is merely unverifiable and must not demote every note containing a URL.
+const UNCHECKABLE = 'No identifiable source information';
+
+function withFailureIssue(result) {
+  if (result.verified !== false) return result;
+  if (Array.isArray(result.issues) && result.issues.length > 0) return result;
+  const uncheckable = result.error === UNCHECKABLE;
+  return {
+    ...result,
+    issues: [
+      {
+        type: uncheckable ? 'unverifiable_source' : 'verification_failed',
+        severity: uncheckable ? 'low' : 'high',
+        reason: result.error || 'verification did not complete',
+      },
+    ],
+  };
+}
+
 export async function verifyNote(notePath, config = {}) {
   const content = readFileSync(notePath, 'utf-8');
   const sources = extractSourcesFromNote(content);
@@ -64,7 +90,7 @@ export async function verifyNote(notePath, config = {}) {
       await updateCitationIndex(result.metadata.pmid, result.metadata, noteFilename);
     }
 
-    results.push({ source: src, ...result });
+    results.push({ source: src, ...withFailureIssue(result) });
   }
 
   const index = loadCitationIndex();
