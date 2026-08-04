@@ -13,7 +13,7 @@ import {
   writeHealthCache,
   isCacheStale,
 } from '../../scripts/lib/health-checks/cache.mjs';
-import { buildAbiDrift } from '../../scripts/check-deps-impl.mjs';
+import { abiDriftSummary } from '../../scripts/check-deps-impl.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 
@@ -61,10 +61,7 @@ export async function run(ctx) {
         installedVersion: readInstalledVersion(homeDir),
         pluginVersion: ctx.pluginVersion,
         templateVersion: readTemplateVersion(ctx.pluginDir),
-        abiDriftResult: (() => {
-          const entries = buildAbiDrift();
-          return entries.length > 0 ? entries[0] : { status: 'ok' };
-        })(),
+        abiDriftResult: abiDriftSummary(),
         injectionMode: resolveConfig().injection_mode,
         injectionNudge: resolveConfig().injection_nudge,
       };

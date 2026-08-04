@@ -44,10 +44,11 @@ export function readVaultProjectIndexSync(vaultPath) {
 export async function readVaultProjectIndex(vaultPath) {
   const fs = await import('node:fs/promises');
   const path = await import('node:path');
-  const projectsDir = path.join(vaultPath, '4-projects');
   let entries;
   try {
-    entries = await fs.readdir(projectsDir, { withFileTypes: true });
+    // join() is inside the try: it throws on a missing vaultPath, and that
+    // threw past the empty-index fallback this function already intends.
+    entries = await fs.readdir(path.join(vaultPath, '4-projects'), { withFileTypes: true });
   } catch {
     return { projectFiles: [], projectDirs: [] };
   }

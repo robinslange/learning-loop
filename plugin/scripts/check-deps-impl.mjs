@@ -81,3 +81,18 @@ export function buildAbiDrift() {
   }
   return entries;
 }
+
+/**
+ * The single abi-drift verdict a health check reports.
+ *
+ * Callers used to reduce buildAbiDrift() themselves, and health-check.mjs
+ * instead called detectAbiDrift() with no module path — which probes nothing
+ * and returns `ok` unconditionally, so `/doctor` reported "no drift" on a
+ * machine that had it.
+ *
+ * @returns {{status: string, [k: string]: unknown}}
+ */
+export function abiDriftSummary() {
+  const entries = buildAbiDrift();
+  return entries.length > 0 ? entries[0] : { status: 'ok' };
+}

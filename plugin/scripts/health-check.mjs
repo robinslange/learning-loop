@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { makeCheck, SEVERITIES } from './lib/health-checks/types.mjs';
-import { detectAbiDrift } from './check-deps-impl.mjs';
+import { abiDriftSummary } from './check-deps-impl.mjs';
 import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
@@ -318,7 +318,7 @@ if (isMain) {
     installedVersion,
     pluginVersion: pluginVersion(),
     templateVersion: readTemplateVersion(),
-    abiDriftResult: detectAbiDrift({ currentAbi: process.versions.modules }),
+    abiDriftResult: abiDriftSummary(),
     injectionMode: getConfig().injection_mode,
     injectionNudge: getConfig().injection_nudge,
     minNodeMajor: 22,
