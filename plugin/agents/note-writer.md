@@ -17,7 +17,7 @@ Apply `${CLAUDE_PLUGIN_ROOT}/agents-shared/adversarial-content.md` with `{conten
 You will receive:
 - **insight**: The core idea to capture (required)
 - **research**: Supporting findings, sources, context (optional: may be absent for simple captures)
-- **verified_sources**: Table of URLs verified by the researcher (optional). When present, use these URLs verbatim in the `source:` frontmatter field. **NEVER generate a URL that isn't in this table.** If no verified source matches the note's topic, set `source: unverified`. If this field is absent (e.g., quick captures without research), you may include a URL only if you fetched the page yourself in this session.
+- **verified_sources**: Table of URLs verified by the researcher (optional). When present, use these URLs verbatim on the note's body `Source:` line. **NEVER generate a URL that isn't in this table.** If no verified source matches the note's topic, set `source: unverified` in frontmatter. If this field is absent (e.g., quick captures without research), you may include a URL only if you fetched the page yourself in this session.
 - **existing_note**: Current note content if this is a rewrite/deepen (optional)
 - **related_notes**: Vault notes to link to (optional)
 - **destination**: Suggested folder: `0-inbox/`, `1-fleeting/`, `2-literature/`, `3-permanent/`, or `5-maps/`. The promote-gate skill may override this based on note quality (see the Override Rules below). `2-literature/` and `5-maps/` are caller-respected — the gate will not override them. Hub-shaped synthesis notes (`source: synthesis`/`discovery` + `synthesis` tag + ≥10 wikilinks) are auto-routed to `5-maps/` even when caller asks for `0-inbox/` or `3-permanent/`.
@@ -57,7 +57,7 @@ Write the note to its destination folder yourself (using the `Write` tool), then
 ---
 tags: [tag1, tag2]
 date: YYYY-MM-DD
-source: "[Author, \"Title\" (Year)](URL)"
+source: discovery
 claim_specificity: 0-2
 source_grounded: 0-2
 ---
@@ -67,18 +67,19 @@ source_grounded: 0-2
 Body text in persona voice. Short. Sharp. Linked.
 
 [[related-note]] connects because reason.
+
+Source: [Author, "Title" (Year)](URL)
 ```
 
-**Source placement:** sources go in the `source:` frontmatter field only. Do NOT write a `**Source:**` line in the body: the frontmatter field is the single source of truth and is what retrieval/federation indexes read.
+**Source placement — two fields, two jobs.** Frontmatter `source:` is the capture **origin**: `session`, `discovery`, `ingest`, `literature`, or `synthesis`. Citation URLs go on a body `Source:` line and coexist with it. The pre-write gate requires the frontmatter field; verification reads the body line, and the em/en-dash check exempts it.
 
-For multiple sources, use a YAML list:
-```yaml
-source:
-  - "[Author1, \"Title1\"](URL1)"
-  - "[Author2, \"Title2\"](URL2)"
+For multiple citations, list them on one `Source:` line or use a `Sources:` line with one per row:
+
+```markdown
+Sources: [Author1, "Title1"](URL1) · [Author2, "Title2"](URL2)
 ```
 
-For synthesis notes with no external source, use `source: synthesis`. For unverifiable sources, use `source: unverified`.
+Use `source: synthesis` for a note that asserts nothing a reader could check. Use `source: unverified` when the note makes an external claim but no source survived verification — an honest "unverified" is better than a fabricated PMID.
 
 Set `claim_specificity` and `source_grounded` per the promote-gate scoring dimensions. Use the highest applicable score across claims in the note. If the note is tagged `[synthesis]`, set `source_grounded` based on vault links (0 = no links, 1 = links to grounded notes).
 

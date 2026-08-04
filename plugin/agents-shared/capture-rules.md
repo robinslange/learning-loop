@@ -17,7 +17,7 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 - **Body**: 3-10 lines (up to 15 for deep notes with sources). Notes under 5 lines should be substantive enough to stand alone. One idea per note.
 - **Tags**: Max 3. Pick the most specific ones.
 - **Links**: At least one wiki-link to a related note. More if genuine.
-- **Frontmatter**: Include `tags`, `date` (YYYY-MM-DD), and `source` (the URL or citation).
+- **Frontmatter**: Include `tags`, `date` (YYYY-MM-DD), and `source` (the capture origin).
 
 ## Frontmatter Template
 
@@ -25,21 +25,24 @@ Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ---
 tags: [tag1, tag2]
 date: YYYY-MM-DD
-source: "[Author, \"Title\" (Year)](URL)"
+source: discovery
 claim_specificity: 0-2
 source_grounded: 0-2
 ---
 ```
 
-For multiple sources, use a YAML list:
+`source:` records **where the note came from**, not what it cites. Legal values:
 
-```yaml
-source:
-  - "[Author1, \"Title1\"](URL1)"
-  - "[Author2, \"Title2\"](URL2)"
-```
+| Value        | Means                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| `session`    | Captured from a working session                                    |
+| `discovery`  | Produced by a `/discovery` research pass                           |
+| `ingest`     | Extracted from an ingested repo, ticket, or document               |
+| `literature` | A capture of an external work; its citations go on a `Source:` line |
+| `synthesis`  | First-hand reasoning that asserts nothing a reader could check     |
+| `unverified` | Makes an external claim, but no source survived verification       |
 
-For synthesis notes, use `source: synthesis`. For unverifiable citations, use `source: unverified`.
+Citation URLs do **not** go here — they belong on a body `Source:` line, and the two coexist. Only when a note makes an external claim and you have no citation anywhere, write `source: "[no URL found]"` so the gap stays visible.
 
 `claim_specificity` and `source_grounded` are set by the promote-gate scoring pass. Values: 0 (vague/none), 1 (bounded/vault-linked), 2 (falsifiable/externally-cited). Omit both fields if the note has not been scored yet.
 
@@ -47,7 +50,7 @@ For synthesis notes, use `source: synthesis`. For unverifiable citations, use `s
 
 Two fields have strict semantics — do not overload them:
 
-- **`source:`** — URL or citation only. The single source of truth for provenance. Readers, retrieval, and federation all index this field. Never duplicate it as a `**Source:**` line in the body.
+- **`source:`** — capture origin only (`session`, `discovery`, `ingest`, `literature`, `synthesis`, `unverified`). Never put a URL or citation here. The pre-write gate denies a note that is missing this field.
 - **`status:`** — intention tracking only. Legal values: `intentioned | resolved | limbo`. Managed by inbox-organiser. Never write `status: inbox`, `status: permanent`, or `status: fleeting` — the folder location IS the maturity status. A note in `3-permanent/` is permanent by virtue of being there.
 
 ## Tag Hygiene
@@ -56,15 +59,17 @@ When writing or rewriting frontmatter tags, de-duplicate the list before writing
 
 ## Sources
 
-Include source URLs at write-time, not as a deferred step. Every non-synthesis note that cites a source should set the `source:` frontmatter field with a clickable markdown link:
+Include source URLs at write-time, not as a deferred step. Citations live on a body `Source:` line, one per source, as clickable markdown links:
 
-```yaml
-source: "[Author, \"Title\" (Year)](URL)"
+```markdown
+Source: [Author, "Title" (Year)](URL)
 ```
 
-The `source:` field lives in frontmatter only. Do NOT write a `**Source:**` or `Source:` line in the body — the frontmatter field is what retrieval, verification, and federation read. A body-level Source line is invisible to tooling.
+For several sources, use one `Source:` line listing them, or a `Sources:` line with one per row. Verification reads this line, and the em/en-dash gate exempts it, so reference punctuation is safe there.
 
-If no URL exists, write `source: "[no URL found]"` rather than omitting the field. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone.
+This is separate from the `source:` frontmatter field, which records the capture origin. A literature note normally carries both: `source: literature` in frontmatter, and the actual citations on a body `Source:` line.
+
+If a note makes a checkable external claim and no URL exists anywhere, write `source: "[no URL found]"` in frontmatter rather than omitting the field. This surfaces gaps at write-time where they can be fixed, instead of at verification-time where the browsing context is gone. A note that asserts nothing checkable is `source: synthesis` and owes no URL.
 
 ## Claim Shapes Requiring Verbatim Anchoring
 

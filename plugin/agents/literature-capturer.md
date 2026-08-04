@@ -91,7 +91,7 @@ Write the literature note to `{{VAULT}}/2-literature/` using the `Write` tool:
 ```markdown
 ---
 tags: [literature, <domain>]
-source: '[Author, "Title" (Year)](URL)'
+source: literature
 date: YYYY-MM-DD
 ---
 
@@ -99,10 +99,12 @@ date: YYYY-MM-DD
 
 <Core ideas, 5-15 lines, persona voice>
 
+Source: [Author, "Title" (Year)](URL)
+
 **Related:** [[vault-note-1]] · [[vault-note-2]]
 ```
 
-The `source:` field is the single source of truth: do NOT duplicate it as a `**Source:**` line in the body. Never write `status: inbox/permanent/fleeting`; the folder IS the status.
+Frontmatter `source:` is the capture origin — for a literature note that is always `literature`. The citation itself goes on a body `Source:` line, which is what verification reads. Never write `status: inbox/permanent/fleeting`; the folder IS the status.
 
 Voice: match `_system/persona.md`. Capture the source's ideas faithfully, in vault voice.
 
