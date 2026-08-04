@@ -6,13 +6,23 @@
 {
   "vault_path": "~/path/to/vault",
   "injection_mode": "live",
-  "injection_threshold": 0.3
+  "injection_threshold": 0.34
 }
 ```
 
 `injection_mode` controls just-in-time context injection on `UserPromptSubmit`. The shipped config sets `live`: hits that clear the gate are injected into the prompt. `shadow` runs the same pipeline but only logs what it _would_ have injected, never mutating the prompt; it remains available for calibration (see Context injection below). `off` disables the pipeline. If the key is absent from config, the hook falls back to `shadow`. When running in shadow, the `injection-shadow-gate` health check nudges at session start once the go-live gate is passing, and `/learning-loop:doctor` can apply the flip with your approval.
 
-`injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw RRF fusion sum (each of the five search signals contributes `1/(5+rank)`), **not** a cosine similarity: a hit ranked #1 in one signal scores ~0.17, #1 in two signals ~0.33, and #1 in all five ~0.83. Defaults to `0.3` — just below the two-strong-signals level, calibrated against 18k shadow-injection gate evaluations (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
+`injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw **weighted** RRF fusion sum, **not** a cosine similarity. Each lane contributes `weight/(5+rank)`, and since v1.40.0 the lanes are weighted unequally (vector 1.0, BM25 1.0, PRF 0.5, PPR 0.05, tags 0.05), so the reachable range is:
+
+| Agreement                        | Score    |
+| -------------------------------- | -------- |
+| vector #1 alone                  | 0.1667   |
+| vector #1 + BM25 #1              | 0.3333   |
+| vector #1 + BM25 #1 + graph #1   | 0.3500   |
+| vector #1 + BM25 #1 + PRF #1     | 0.4167   |
+| all five lanes #1 (ceiling)      | 0.4333   |
+
+Defaults to `0.34` — just above the two-strong-lanes floor, so the gate demands corroboration beyond two lone top hits. Cosine-style values (0.7+) are unreachable, and anything above 0.4333 disables injection entirely. This value is derived from achievable-score arithmetic, not from measured relevance: every percentile on record predates the reweighting (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output, which reports gate reachability against the observed distribution. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
 
 `filename_style` controls the pre-write filename-convention advisory. Values: `'kebab'` (enforce kebab-case, e.g. `my-note.md`), `'spaces'` (enforce space-separated titles, e.g. `My Note.md`), `'auto'` (detect from the vault population), or absent (same as `'auto'`). In `auto` mode the hook reads up to 200 basenames across `0-inbox/`, `1-fleeting/`, and `3-permanent/` at write time; if >70% lack spaces the convention is kebab, if >70% have spaces the convention is spaces, otherwise the check is skipped. The advisory is non-blocking — it appears as `additionalContext`, never as a deny.
 
@@ -26,16 +36,17 @@ Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows 
 
 ## Hooks
 
-Eight hook handlers across five Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides. This table is the canonical roster.
+Nine hook handlers across six Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides. This table is the canonical roster.
 
 | Event                                       | Hook                    | What it enforces                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SessionStart                                | session-start.js        | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn                                                   |
 | Stop                                        | stop-nudge.js           | Suggests `/reflect` after substantial sessions                                                                                                                                                                                                                                                    |
 | UserPromptSubmit                            | session-label.js        | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`)                                                                                                                                                                     |
+| SubagentStop                                | subagent-stop.js        | Emits an `agent-result` provenance record (session id + transcript path) when a subagent finishes                                                                                                                                                                                                 |
 | PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt)                                                                       |
 | PreToolUse (WebSearch\|WebFetch)            | web-guard.js            | Denies the raw web tools globally (main session included; PreToolUse cannot scope to subagents) and routes web access through the source gateway, `bin/source-gateway.mjs`, so every search, fetch, and research call goes through a config-selected source with a per-session fetch budget       |
-| PostToolUse (Write\|Edit\|Agent\|Skill)     | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
+| PostToolUse (Write\|Edit\|Task\|Skill)      | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
 | PostToolUse (Read)                          | post-read-retrieval.js  | Tracks vault reads for retrieval instrumentation                                                                                                                                                                                                                                                  |
 | PostToolUse (mcp\_\_plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches                                                                                                                                                                                                                                                                   |
 
@@ -77,7 +88,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 - shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
 - review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
 - calibrate: set `"injection_mode": "shadow"` in `config.json` to run the pipeline without mutating prompts, review the log, then set it back to `"live"`
-- gate threshold: `injection_threshold` in `config.json` (default `0.3`, an RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
+- gate threshold: `injection_threshold` in `config.json` (default `0.34`, a weighted-RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
@@ -94,7 +105,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `CLAUDE_PLUGIN_DATA`                  | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
 | `VAULT_PATH`                          | Overrides `vault_path` from `config.json`                                                                      |
 | `LEARNING_LOOP_INJECTION_MODE`        | Per-session override of `injection_mode` (`shadow`, `live`, `off`)                                             |
-| `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`)                               |
+| `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (weighted-RRF fusion-sum scale, max `0.4333`, e.g. `0.35`)      |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
 | `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |
 
@@ -112,7 +123,6 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
     "pace_seconds": 2,
     "queue_cap": 200,
     "ollama_url": "http://localhost:11434",
-    "keep_alive": "30m",
     "pause_on_battery": true,
     "battery_poll_seconds": 60
   }

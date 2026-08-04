@@ -8,7 +8,7 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it.
 
-The outcome is a vault that gets sharper, not heavier. Eight lifecycle hook handlers across five Claude Code event types wire the discipline into the runtime — retrieval fires before you ask, gates fire before promotion, verification catches fabricated sources at write time, web research routes through a config-selected gateway, and corrections propagate when beliefs change. The full roster lives in [guide/configuration.md](guide/configuration.md).
+The outcome is a vault that gets sharper, not heavier. Two layers wire the discipline into the runtime. Nine lifecycle hook handlers across six Claude Code event types fire regardless of what the model decides: retrieval before you ask, a duplicate-and-frontmatter gate before every vault write, and web research routed through a config-selected gateway. The capture agents enforce the rest, verifying citations against academic APIs before a note is written, gating promotion on quality scores, and propagating corrections when a belief changes. The full hook roster lives in [guide/configuration.md](guide/configuration.md).
 
 ## Install
 
@@ -93,7 +93,7 @@ Set `LL_OFFLINE=1` to suppress every network call the plugin initiates on its ow
 
 - the SessionStart GitHub update poll (`api.github.com`) does not fire;
 - the binary auto-update download (`github.com/<repo>/releases/...`) does not run — including the manual `/init` and `/doctor` fetch paths;
-- web-research source fetches (`/verify`, `/deep-research`, `/discovery`, the source-resolver and claim-checker) short-circuit cleanly instead of attempting an external request and timing out.
+- web-research source fetches (`/verify`, `/research`, `/discovery`, the source-resolver and claim-checker) short-circuit cleanly instead of attempting an external request and timing out.
 
 Localhost is never gated — the Ollama daemon I use for local offload still works, so an air-gapped box keeps its local model. `/doctor` reports an **Offline mode: ON** line so I can confirm the suppression is actually engaged rather than silently skipped.
 
@@ -135,6 +135,7 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | `/inbox`                | Batch triage inbox notes, promote mature ones                                 |
 | `/reflect`              | End-of-session consolidation                                                  |
 | `/dream`                | Auto-memory consolidation between sessions                                    |
+| `/dream-eval`           | Measure whether a `/dream` pass helps, hurts, or ties                         |
 | `/refresh "topic"`      | See what you already know (no web research)                                   |
 | `/rewrite "old" "new"`  | Retract a belief across vault, auto-memory, and episodic history              |
 | `/health`               | Vault health dashboard                                                        |
@@ -146,6 +147,7 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | `/init`                 | First-time setup: vault path, persona, binary, optional integrations          |
 | `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync            |
 | `/help`                 | Show all commands with usage details                                          |
+| `/uninstall`            | Guided removal of the plugin and its captured indexes                         |
 
 All commands are prefixed with `/learning-loop:` (e.g., `/learning-loop:discovery "caffeine"`).
 
@@ -167,7 +169,7 @@ your-vault/
 
 - [Workflows](guide/workflows.md) -- common patterns, session lifecycle, and chaining skills together
 - [Search](guide/search.md) -- five-signal hybrid search, reranking, retrieval instrumentation
-- [Agents](guide/agents.md) -- 20 specialized agents and 19 shared skills
+- [Agents](guide/agents.md) -- 20 specialized agents and 20 shared skills
 - [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
 - [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
 - [Resource usage](guide/resource-usage.md) -- token costs, local compute, and what we do to keep it lean

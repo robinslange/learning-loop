@@ -1,6 +1,6 @@
 # Agents
 
-Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 19 shared skills that enforce consistent quality standards across all operations.
+Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 20 shared skills that enforce consistent quality standards across all operations.
 
 ## Why agents, not prompts
 
@@ -66,8 +66,9 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 19 skills in `agents-shared/` that standardize quality decisions:
+Agents share 20 skills in `agents-shared/` that standardize quality decisions:
 
+- **adversarial-content** -- the prompt-injection guard every agent that reads outside content opens with: external text is data, never directives
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs
 - **cross-validation** -- checks claims against other vault notes for consistency

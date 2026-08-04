@@ -223,6 +223,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | `/learning-loop:health --librarian` | Review librarian queue: approve link/tag suggestions, acknowledge voice flags, resolve duplicate flags, investigate staleness |
 | `/learning-loop:doctor` | Diagnose your learning-loop installation: runs health checks, presents issues, offers per-fix remediation, re-runs each check after the fix to confirm |
 | `/learning-loop:dream` | Consolidate auto-memory between sessions |
+| `/learning-loop:dream-eval --mode={single\|control\|repeated}` | Measure whether a `/dream` pass helps, hurts, or ties against no consolidation |
 | `/learning-loop:diagram "concept"` | Generate Excalidraw diagram for vault |
 | `/learning-loop:uninstall` | Guided removal: marketplace uninstall, dependent MCP cleanup, captured-index purge, with per-step confirmation |
 | `/learning-loop:help` | This guide |

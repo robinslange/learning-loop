@@ -30,6 +30,7 @@ learning-loop/
       stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
       post-read-retrieval.js  -- passive read telemetry
       post-search-tracking.js -- episodic-memory search query tracking
+      subagent-stop.js  -- agent-result provenance when a subagent stops
 
     bin/                -- source-gateway.mjs (the one sanctioned web-access CLI)
 
@@ -231,7 +232,7 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The eight hook handlers across five Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
+**Hook surface.** The nine hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
 
 `session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
@@ -317,9 +318,9 @@ This replaced static linking via `ort`'s `download-binaries` build feature (work
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why eight hook handlers across five event types?**
+**Why nine hook handlers across six event types?**
 
-Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), post-read and post-episodic-search (retrieval telemetry), subagent stop (agent-result provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 

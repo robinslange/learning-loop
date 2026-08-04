@@ -1,6 +1,6 @@
 # Search
 
-Five-signal hybrid search fused via Reciprocal Rank Fusion. All search, embedding, graph traversal, and reranking runs in the `ll-search` Rust binary (backed by the `ll-core` library crate) with zero native Node.js dependencies.
+Five-signal hybrid search fused via weighted Reciprocal Rank Fusion. All search, embedding, graph traversal, and reranking runs in the `ll-search` Rust binary (backed by the `ll-core` library crate) with zero native Node.js dependencies.
 
 ## Signals
 
@@ -12,7 +12,23 @@ Every query runs five retrieval signals in parallel:
 4. **Tag expansion** -- finds notes sharing rare tags (frequency 2-20) with the top results, IDF-weighted to favor specific tags over broad ones
 5. **Rocchio PRF** -- pseudo-relevance feedback: nudges the query vector toward the centroid of the top BM25+vector candidates and re-searches. Patches queries where the initial phrasing misses vocabulary the vault actually uses
 
-The top 30 candidates from each signal enter the RRF merge. Graph signals (PPR + tags) improve cross-domain recall: they surface notes that no single keyword or embedding would find, but that your wikilinks connect. PRF improves recall for paraphrased queries without needing query rewriting.
+## Fusion
+
+The top 30 candidates from each signal enter the RRF merge, where each lane contributes `weight/(5+rank)`. The lanes do **not** vote equally:
+
+| Lane                | Weight |
+| ------------------- | ------ |
+| Vector similarity   | 1.0    |
+| BM25                | 1.0    |
+| Rocchio PRF         | 0.5    |
+| Personalized PageRank | 0.05 |
+| Tag expansion       | 0.05   |
+
+Equal weighting was measurably worse. On tail passages, BM25 alone put the source note at rank 1 for 85% of queries; the equal-weight funnel managed 25%. PPR and tag expansion, which never see the query text, agreed on a wrong note and outvoted the lane that did. The weights are set by `ll-search tune-weights` against the wikilink eval set, not by taste.
+
+The graph lanes are therefore deliberately near-silent: at 0.05 they are statistically tied with the sweep's optimum of zero. They are kept above zero so their candidates still enter the pool the reranker judges — their value is recall into that pool, not votes in the ranking. PRF improves recall for paraphrased queries without needing query rewriting.
+
+Because the weights sum to 2.6 rather than 5, the achievable fusion score tops out at `2.6/(5+1) = 0.4333`. Any threshold denominated in this raw sum — notably `injection_threshold` — is on that scale. See [configuration.md](configuration.md#context-injection).
 
 ## Reranking
 
