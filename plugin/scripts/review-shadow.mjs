@@ -5,14 +5,14 @@ import { env } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import {
   isVaultOk,
-  isEpisodicOk,
   isHealthy,
   isGatePassed,
   SHADOW_BACKEND_HEALTH_MIN_RATE,
   SHADOW_BACKEND_HEALTH_MIN_TOTAL,
 } from './lib/shadow-gate.mjs';
 import { assessGateReachability } from './lib/gate-reachability.mjs';
-import { INJECTION_CALIBRATION_EPOCH } from './lib/hook-config.mjs';
+import { INJECTION_CALIBRATION_EPOCH, HookConfig } from './lib/hook-config.mjs';
+import { getConfig } from './lib/config.mjs';
 
 function resolvePluginData() {
   const fromEnv = env.CLAUDE_PLUGIN_DATA;
@@ -52,7 +52,6 @@ const total = entries.length;
 const fastPathSkips = entries.filter((e) => e.gate?.fast_path_skip).length;
 
 const vaultOk = entries.filter(isVaultOk);
-const episodicOk = entries.filter(isEpisodicOk);
 const healthy = entries.filter(isHealthy);
 const passed = entries.filter(isGatePassed);
 const passedHealthy = healthy.filter(isGatePassed);
@@ -78,12 +77,15 @@ function topErrors(list, key) {
 const vaultLat = healthy
   .map((e) => e.backends?.vault?.latency_ms)
   .filter((v) => typeof v === 'number');
-const episodicLat = healthy
-  .map((e) => e.backends?.episodic?.latency_ms)
-  .filter((v) => typeof v === 'number');
-const racedOut = healthy.filter((e) => e.backends?.episodic?.raced_out).length;
+const racedOut = healthy.filter((e) => e.backends?.vault?.raced_out).length;
 
-const threshold = env.LEARNING_LOOP_INJECTION_THRESHOLD;
+// Match the live cascade in session-label.js: env (only when explicitly set) >
+// config.json > the shipped constant. Reading the env var alone reported a pass
+// rate against a threshold the gate was not using whenever `injection_threshold`
+// was set in config.
+const threshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
+  ? env.LEARNING_LOOP_INJECTION_THRESHOLD
+  : (getConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
 
 console.log('# Shadow injection review\n');
 console.log(`Total entries: ${total}`);
@@ -91,14 +93,9 @@ console.log(`Fast-path skips: ${fastPathSkips} (${((fastPathSkips / total) * 100
 
 console.log('\n## Backend health');
 const vaultHealthPct = (vaultOk.length / total) * 100;
-const episodicHealthPct = (episodicOk.length / total) * 100;
 console.log(`  Vault:    ${vaultOk.length} / ${total} healthy (${vaultHealthPct.toFixed(1)}%)`);
 for (const [err, n] of topErrors(entries, 'vault')) console.log(`            ${n}x ${err}`);
-console.log(
-  `  Episodic: ${episodicOk.length} / ${total} healthy (${episodicHealthPct.toFixed(1)}%)`,
-);
-for (const [err, n] of topErrors(entries, 'episodic')) console.log(`            ${n}x ${err}`);
-console.log(`  Both OK (excl. fast-path): ${healthy.length}`);
+console.log(`  Healthy (excl. fast-path): ${healthy.length}`);
 
 console.log('\n## Gate (threshold=' + threshold + ')');
 console.log(
@@ -107,7 +104,23 @@ console.log(
 if (healthy.length > 0) {
   const healthyPct = (passedHealthy.length / healthy.length) * 100;
   console.log(
-    `  Healthy pass rate:  ${passedHealthy.length} / ${healthy.length} = ${healthyPct.toFixed(1)}%  <-- meaningful metric`,
+    `  Healthy pass rate:  ${passedHealthy.length} / ${healthy.length} = ${healthyPct.toFixed(1)}%  (all time)`,
+  );
+}
+
+// Scores either side of the calibration epoch were produced by different fusion
+// scales and are not comparable, so the all-time rate above mixes units. This is
+// the one to tune against.
+const postEpoch = healthy.filter((e) => e.ts >= INJECTION_CALIBRATION_EPOCH);
+const postEpochPassed = postEpoch.filter(isGatePassed);
+if (postEpoch.length > 0) {
+  const pct = (postEpochPassed.length / postEpoch.length) * 100;
+  console.log(
+    `  Post-epoch rate:    ${postEpochPassed.length} / ${postEpoch.length} = ${pct.toFixed(1)}%  <-- meaningful metric (since ${INJECTION_CALIBRATION_EPOCH.slice(0, 10)})`,
+  );
+} else {
+  console.log(
+    `  Post-epoch rate:    0 entries since ${INJECTION_CALIBRATION_EPOCH.slice(0, 10)} — keep collecting; earlier rows are on a superseded fusion scale.`,
   );
 }
 
@@ -117,7 +130,7 @@ if (healthy.length > 0) {
 // post-epoch scores only, since pre-epoch rows are on the older scale.
 const epochScores = healthy
   .filter((e) => e.ts >= INJECTION_CALIBRATION_EPOCH)
-  .map((e) => Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0));
+  .map((e) => e.gate?.vault_top_score || 0);
 const reach = assessGateReachability({ scores: epochScores, threshold: Number(threshold) });
 if (reach.verdict === 'unreachable' || reach.verdict === 'starved') {
   console.log(`\n  !! GATE ${reach.verdict.toUpperCase()}: ${reach.message}`);
@@ -136,7 +149,7 @@ if (healthy.length > 0) {
   for (let x = 60; x <= 90; x += 10) edgesPct.push(x);
   const buckets = new Map();
   for (const e of healthy) {
-    const s = Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0);
+    const s = e.gate?.vault_top_score || 0;
     const pct = Math.min(Math.floor(s * 100), 99);
     let idx = 0;
     for (let i = 0; i < edgesPct.length; i++) {
@@ -158,13 +171,11 @@ if (healthy.length > 0) {
 
 console.log('\n## Latency (healthy only)');
 const vp = percentiles(vaultLat);
-const ep = percentiles(episodicLat);
 console.log(`  Vault:    p50=${vp.p50}ms p95=${vp.p95}ms max=${vp.max}ms`);
-console.log(`  Episodic: p50=${ep.p50}ms p95=${ep.p95}ms max=${ep.max}ms`);
-console.log(`  Episodic raced out: ${racedOut} / ${healthy.length}`);
+console.log(`  Raced out: ${racedOut} / ${healthy.length}`);
 
 console.log('\n## Verdict');
-const healthyRate = total > 0 ? Math.min(vaultOk.length, episodicOk.length) / total : 0;
+const healthyRate = total > 0 ? vaultOk.length / total : 0;
 const passRate = healthy.length > 0 ? passedHealthy.length / healthy.length : 0;
 
 if (healthyRate < SHADOW_BACKEND_HEALTH_MIN_RATE && total >= SHADOW_BACKEND_HEALTH_MIN_TOTAL) {
@@ -180,14 +191,10 @@ if (healthyRate < SHADOW_BACKEND_HEALTH_MIN_RATE && total >= SHADOW_BACKEND_HEAL
   );
   console.log(`  Top 20 highest-confidence injections follow — judge quality before go-live.`);
   const ranked = [...passedHealthy]
-    .sort(
-      (a, b) =>
-        Math.max(b.gate?.vault_top_score || 0, b.gate?.episodic_top_score || 0) -
-        Math.max(a.gate?.vault_top_score || 0, a.gate?.episodic_top_score || 0),
-    )
+    .sort((a, b) => (b.gate?.vault_top_score || 0) - (a.gate?.vault_top_score || 0))
     .slice(0, 20);
   for (const [i, e] of ranked.entries()) {
-    const s = Math.max(e.gate?.vault_top_score || 0, e.gate?.episodic_top_score || 0);
+    const s = e.gate?.vault_top_score || 0;
     console.log(`\n--- #${i + 1} score=${s.toFixed(3)} ---`);
     console.log(`Prompt: ${(e.prompt || '').slice(0, 200)}`);
     if (e.would_inject) console.log(`Would inject:\n${e.would_inject}`);
