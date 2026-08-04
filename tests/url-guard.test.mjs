@@ -18,6 +18,12 @@ describe('checkFetchUrl', () => {
   const blocked = [
     ['http://127.0.0.1:8791/admin', 'host_private_ip'],
     ['http://localhost:11434/api/tags', 'host_loopback'],
+    // A trailing root dot resolves to the same host but is preserved by
+    // `new URL()`, so an exact-match name check misses it.
+    ['http://localhost.:11434/api/tags', 'host_loopback'],
+    ['http://localhost../', 'host_loopback'],
+    ['http://metadata.google.internal./computeMetadata/v1/', 'host_loopback'],
+    ['http://foo.localhost./', 'host_loopback'],
     ['http://169.254.169.254/latest/meta-data/', 'host_private_ip'],
     ['http://[::1]:8080/', 'host_private_ip'],
     ['http://10.0.0.5/', 'host_private_ip'],

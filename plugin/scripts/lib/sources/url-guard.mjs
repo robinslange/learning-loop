@@ -86,7 +86,10 @@ export function checkFetchUrl(raw) {
   if (!ALLOWED_SCHEMES.has(u.protocol)) {
     return { ok: false, reason: `scheme_not_allowed:${u.protocol.replace(':', '')}` };
   }
-  const host = u.hostname.toLowerCase();
+  // A trailing root dot is a legal, resolvable spelling of the same host, and
+  // `new URL()` keeps it. Strip it before any name comparison or the exact
+  // matches below miss `localhost.` and `metadata.google.internal.`.
+  const host = u.hostname.toLowerCase().replace(/\.+$/, '');
   if (!host) return { ok: false, reason: 'url_no_host' };
 
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) {
