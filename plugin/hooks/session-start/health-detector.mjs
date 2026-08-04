@@ -14,7 +14,6 @@ import {
   isCacheStale,
 } from '../../scripts/lib/health-checks/cache.mjs';
 import { abiDriftSummary } from '../../scripts/check-deps-impl.mjs';
-import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 
 const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
@@ -51,7 +50,11 @@ export async function run(ctx) {
     if (cache && !isCacheStale(cache)) {
       result = cache;
     } else {
-      // Run quickChecks and write cache, bounded by DETECTOR_TIMEOUT_MS
+      // runQuickChecks is 17 synchronous file-stat checks. It carries the
+      // `async` keyword but awaits nothing, so its body runs to completion
+      // before it yields — a Promise.race against it could never fire, and the
+      // 200ms budget it appeared to enforce was decorative. The real bound is
+      // the 10s SessionStart timeout in hooks.json.
       const homeDir = home();
       const checkCtx = {
         pluginData: ctx.pluginData,
@@ -66,20 +69,7 @@ export async function run(ctx) {
         injectionNudge: resolveConfig().injection_nudge,
       };
 
-      const TIMEOUT_SENTINEL = Symbol('timeout');
-      const timeoutPromise = new Promise((resolve) =>
-        setTimeout(() => resolve(TIMEOUT_SENTINEL), HookConfig.DETECTOR_TIMEOUT_MS),
-      );
-      const raced = await Promise.race([runQuickChecks(checkCtx), timeoutPromise]);
-
-      if (raced === TIMEOUT_SENTINEL) {
-        logError(
-          'session-start.health-detector',
-          new Error(`quickChecks exceeded ${HookConfig.DETECTOR_TIMEOUT_MS}ms`),
-        );
-        return;
-      }
-      result = raced;
+      result = await runQuickChecks(checkCtx);
       writeHealthCache({ pluginData: ctx.pluginData, result });
     }
 
