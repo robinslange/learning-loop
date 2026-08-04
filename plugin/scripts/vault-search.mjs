@@ -277,8 +277,14 @@ try {
     }
 
     case 'intentions': {
-      const data = intentions(args[1] || null);
-      if (process.argv.includes('--session-start-refresh')) {
+      // The context is the first non-flag positional. Taking args[1] blindly
+      // handed `--session-start-refresh` to the binary as the context, which
+      // clap rejects; intentions() swallowed the error and returned [], so the
+      // refresh wrote an empty marker every time and the session-start
+      // intentions block never rendered.
+      const context = args.slice(1).find((a) => !a.startsWith('--')) || null;
+      const data = intentions(context);
+      if (args.includes('--session-start-refresh')) {
         const { writeMarker, MARKER_PATHS } = await import('./lib/marker-cache.mjs');
         writeMarker(MARKER_PATHS.intentions(PLUGIN_DATA), data);
       } else {

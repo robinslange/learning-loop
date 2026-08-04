@@ -138,7 +138,10 @@ export const env = Object.freeze({
   LL_OFFLINE: isTruthy(process.env.LL_OFFLINE),
 
   // --- Ollama / model ---
-  OLLAMA_URL: pick('OLLAMA_URL', DEFAULT_OLLAMA_URL),
+  // null when unset, NOT the default: consumers layer config between the env
+  // var and the default, and a pre-defaulted value here is indistinguishable
+  // from an explicit one, so `librarian.ollama_url` could never be reached.
+  OLLAMA_URL: pick('OLLAMA_URL', null),
   MODEL: pick('MODEL', null),
 
   // --- Cascade-detection sentinels ---

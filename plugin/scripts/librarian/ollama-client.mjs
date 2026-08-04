@@ -6,13 +6,14 @@
 
 import { env } from '../lib/env.mjs';
 import { logError } from '../lib/log.mjs';
+import { DEFAULT_OLLAMA_URL } from '../lib/defaults.mjs';
 
 /**
  * Default timing constants for ollama operations.
  * librarian/config.mjs may override url/model; timeouts are fixed.
  */
 export const DEFAULTS = Object.freeze({
-  url: env.OLLAMA_URL,
+  url: env.OLLAMA_URL || DEFAULT_OLLAMA_URL,
   maxAttempts: 10,
   intervalMs: 60_000,
   tagsTimeoutMs: 5_000,

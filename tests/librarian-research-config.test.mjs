@@ -1,6 +1,15 @@
 // tests/librarian-research-config.test.mjs : keep_alive + research gate.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const configModulePath = fileURLToPath(
+  new URL('../plugin/scripts/librarian/config.mjs', import.meta.url),
+);
 import {
   loadLibrarianConfig,
   __test__,
@@ -13,6 +22,55 @@ describe('librarian consolidation config', () => {
     __test__.resetCache();
     const cfg = loadLibrarianConfig({ configPath: '/nonexistent-so-defaults-apply.json' });
     assert.equal(cfg.keepAlive, '30m');
+  });
+
+  // env.OLLAMA_URL used to be pre-defaulted to DEFAULT_OLLAMA_URL, so the
+  // `env || config || default` chain short-circuited on the env value every
+  // time and `librarian.ollama_url` was dead config: pointing the librarian at
+  // a remote host silently kept talking to localhost.
+  // Subprocess: the config body comes from getConfig(), which reads
+  // CLAUDE_PLUGIN_DATA — `configPath` only keys the cache — and both layers
+  // cache in-process.
+  it('honours librarian.ollama_url when OLLAMA_URL is unset', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'll-ollama-url-'));
+    try {
+      writeFileSync(
+        join(dir, 'config.json'),
+        JSON.stringify({ vault_path: dir, librarian: { ollama_url: 'http://remote:9999' } }),
+      );
+      const out = spawnSync(
+        process.execPath,
+        [
+          '-e',
+          `import('${pathToFileURL(configModulePath).href}').then((m) => {
+             const c = m.loadLibrarianConfig();
+             console.log(JSON.stringify({ url: c.ollamaUrl, base: c.provider.baseUrl }));
+           })`,
+        ],
+        { encoding: 'utf8', env: { PATH: process.env.PATH, CLAUDE_PLUGIN_DATA: dir } },
+      );
+      assert.equal(out.status, 0, out.stderr);
+      assert.deepEqual(JSON.parse(out.stdout), {
+        url: 'http://remote:9999',
+        base: 'http://remote:9999',
+      });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to the default ollama url when neither env nor config sets one', () => {
+    const prev = process.env.OLLAMA_URL;
+    delete process.env.OLLAMA_URL;
+    try {
+      __test__.resetCache();
+      const cfg = loadLibrarianConfig({ configPath: '/nonexistent-so-defaults-apply.json' });
+      assert.equal(cfg.ollamaUrl, 'http://localhost:11434');
+    } finally {
+      if (prev === undefined) delete process.env.OLLAMA_URL;
+      else process.env.OLLAMA_URL = prev;
+      __test__.resetCache();
+    }
   });
 
   it('researchModelOk accepts 12b/27b, rejects e2b and tiny models', () => {
