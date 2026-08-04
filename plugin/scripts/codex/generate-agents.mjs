@@ -9,7 +9,7 @@
 //
 // Usage: node generate-agents.mjs [--out <dir>] [--list]
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,8 +23,9 @@ const PREFIX = 'learning-loop-';
 
 // Claude Code model aliases mapped onto the Codex tiers documented for
 // subagents. Verify these slugs against the Codex release you are running:
-// model names move faster than this file does, and a stale slug makes the agent
-// fall back to the parent's model rather than failing loudly.
+// model names move faster than this file does, and a stale slug is sent to the
+// API as written — Codex synthesises fallback metadata but does not substitute
+// a working model, so the agent fails on every turn.
 const MODELS = {
   opus: 'gpt-5.6',
   sonnet: 'gpt-5.6',
@@ -37,12 +38,27 @@ const EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ul
 // tells us whether the agent ever writes. One that does not gets sandboxed.
 const WRITE_TOOLS = new Set(['Write', 'Edit', 'NotebookEdit']);
 
+// TOML forbids raw control characters in both basic and multi-line basic
+// strings, and a single stray one makes Codex drop the whole agent file. Tab is
+// legal; newline is legal only in the multi-line form, so the two escapers
+// differ on it alone.
+function escapeControls(value, keepNewline) {
+  return value.replace(/\r\n?|\n|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, (ch) => {
+    if (ch === '\r\n' || ch === '\r' || ch === '\n') return keepNewline ? '\n' : '\\n';
+    return '\\u' + ch.charCodeAt(0).toString(16).padStart(4, '0');
+  });
+}
+
 function tomlString(value) {
-  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  const escaped = escapeControls(String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"'), false);
+  return `"${escaped}"`;
 }
 
 function tomlMultiline(value) {
-  const escaped = String(value).replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+  const escaped = escapeControls(
+    String(value).replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"'),
+    true,
+  );
   return `"""\n${escaped.endsWith('\n') ? escaped : escaped + '\n'}"""`;
 }
 
@@ -54,7 +70,14 @@ function tomlMultiline(value) {
  */
 export function toCodexAgent(source, fallbackName) {
   const { fm, body } = parseFrontmatter(source);
-  const name = PREFIX + (fm.name || fallbackName);
+  const raw = String(fm.name || fallbackName);
+  // The name becomes a filename under the user's home. A frontmatter `name:`
+  // carrying a separator would escape --out, so reject rather than sanitise:
+  // a silently renamed agent is worse than a loud stop.
+  if (!/^[A-Za-z0-9._-]+$/.test(raw) || raw.startsWith('.')) {
+    throw new Error(`unusable agent name ${JSON.stringify(raw)} — expected [A-Za-z0-9._-]+`);
+  }
+  const name = PREFIX + raw;
   const tools = String(fm.tools || '')
     .split(',')
     .map((t) => t.trim())
@@ -96,4 +119,16 @@ function main(argv) {
   return written;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) main(process.argv.slice(2));
+// Node resolves symlinks in import.meta.url but not in argv[1], so comparing
+// them raw makes this script a silent no-op whenever its path runs through a
+// symlink — which is exactly how a plugin cache is often laid out.
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMain()) main(process.argv.slice(2));

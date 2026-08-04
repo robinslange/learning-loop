@@ -16,7 +16,7 @@ import { isAbsolute, resolve } from 'node:path';
 
 const FILE_DIRECTIVE = /^\*\*\* (Add|Update|Delete) File: (.+)$/;
 const MOVE_DIRECTIVE = /^\*\*\* Move to: (.+)$/;
-const HUNK_HEADER = /^@@/;
+const HUNK_HEADER = /^@@(.*)$/;
 
 /**
  * Splits an apply_patch body into Write/Edit-shaped entries.
@@ -33,13 +33,22 @@ function parseApplyPatch(patch, cwd) {
 
   const abs = (p) => (isAbsolute(p) ? p : resolve(cwd || process.cwd(), p));
 
+  // A hunk matches whole LINES; a consumer doing indexOf on the joined text
+  // would happily bind mid-line (a `-beta` hunk landing inside
+  // `https://example.com/beta-notes`). Wrapping both sides in newlines makes
+  // the match line-anchored, and `context` carries the `@@` anchor so a
+  // consumer can start its search past the ambiguity the anchor exists to
+  // resolve. A hunk at the very start or end of a file will not match and the
+  // consumer falls open, which is the pre-existing behaviour for an
+  // unlocatable fragment.
   const flushHunk = () => {
     if (!hunk || !file) return;
     out.push({
       tool: 'Edit',
       file_path: file,
-      old_string: hunk.old.join('\n'),
-      new_string: hunk.new.join('\n'),
+      old_string: '\n' + hunk.old.join('\n') + '\n',
+      new_string: '\n' + hunk.new.join('\n') + '\n',
+      context: hunk.context,
     });
     hunk = null;
   };
@@ -47,14 +56,20 @@ function parseApplyPatch(patch, cwd) {
   const flushFile = () => {
     flushHunk();
     if (file && action === 'Add') {
-      out.push({ tool: 'Write', file_path: file, content: added.join('\n') });
+      // apply_patch writes a trailing newline after every added line, so the
+      // on-disk file always ends with one.
+      out.push({ tool: 'Write', file_path: file, content: added.join('\n') + '\n' });
     }
     file = null;
     action = null;
     added = [];
   };
 
-  for (const line of String(patch || '').split('\n')) {
+  // Split on either line ending. Codex strips a trailing \r per line before
+  // applying, so a CRLF patch applies fine there; matching on \n alone would
+  // leave every directive line ending in \r, match nothing, and silently skip
+  // the whole patch — no gate, no provenance, no backlinks.
+  for (const line of String(patch || '').split(/\r\n|\n|\r/)) {
     const directive = FILE_DIRECTIVE.exec(line);
     if (directive) {
       flushFile();
@@ -90,13 +105,17 @@ function parseApplyPatch(patch, cwd) {
       continue;
     }
 
-    if (HUNK_HEADER.test(line)) {
+    const header = HUNK_HEADER.exec(line);
+    if (header) {
       flushHunk();
-      hunk = { old: [], new: [] };
+      // `@@ <text>` names a line the hunk occurs strictly after. It is the only
+      // thing that disambiguates a removed line appearing more than once, so it
+      // travels with the hunk rather than being dropped.
+      hunk = { old: [], new: [], context: header[1].trim() || null };
       continue;
     }
 
-    if (!hunk) hunk = { old: [], new: [] };
+    if (!hunk) hunk = { old: [], new: [], context: null };
     if (line.startsWith('-')) hunk.old.push(line.slice(1));
     else if (line.startsWith('+')) hunk.new.push(line.slice(1));
     else {

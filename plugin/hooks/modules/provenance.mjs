@@ -37,8 +37,10 @@ export async function runProvenance(ctx) {
     if (tool === 'Task' || tool === 'Agent') {
       emitProvenance({
         action: 'agent-spawn',
-        agent: input.subagent_type || input.agent || input.name || 'general-purpose',
-        description: input.description || input.prompt?.slice(0, 120) || '',
+        agent: input.subagent_type || input.agent_type || input.agent || 'general-purpose',
+        // Never fall back to the prompt: it is unbounded user text, and the
+        // provenance log is not where it belongs.
+        description: typeof input.description === 'string' ? input.description : '',
         background: !!input.run_in_background,
       });
       return;

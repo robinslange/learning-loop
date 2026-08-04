@@ -15,11 +15,12 @@ export const CODEX = 'codex';
 /**
  * Resolves the active harness.
  *
- * LL_HARNESS wins when set: it is an explicit statement, written by install.sh
- * into the Codex shell environment policy. Otherwise PLUGIN_ROOT decides —
- * Codex sets it for plugin-bundled hooks alongside the CLAUDE_-prefixed
- * compatibility pair, and Claude Code never sets it. Anything else is Claude
- * Code, which is the safe default: it is the harness with the larger tool
+ * The two signals cover disjoint worlds, and neither alone is enough.
+ * LL_HARNESS is written by install.sh into `shell_environment_policy.set`,
+ * which Codex applies only to shell-like tool calls — so it reaches scripts a
+ * skill runs, and never reaches a hook process. PLUGIN_ROOT is set only in
+ * Codex's plugin-hook branch, so it covers exactly the case LL_HARNESS misses.
+ * Claude Code sets neither, and is the safe default: it has the larger tool
  * surface, so assuming it never disables a capability that exists.
  *
  * @returns {'claude-code' | 'codex'}

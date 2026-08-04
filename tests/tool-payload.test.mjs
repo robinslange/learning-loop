@@ -56,7 +56,7 @@ describe('normalizeWrites — Codex apply_patch', () => {
         {
           tool: 'Write',
           file_path: '/repo/0-inbox/note.md',
-          content: '---\ntags: [a]\n---\n\nA claim.',
+          content: '---\ntags: [a]\n---\n\nA claim.\n',
         },
       ],
     );
@@ -80,8 +80,9 @@ describe('normalizeWrites — Codex apply_patch', () => {
         {
           tool: 'Edit',
           file_path: '/repo/0-inbox/note.md',
-          old_string: 'context line\nold text\ntrailing context',
-          new_string: 'context line\nnew text\ntrailing context',
+          old_string: '\ncontext line\nold text\ntrailing context\n',
+          new_string: '\ncontext line\nnew text\ntrailing context\n',
+          context: null,
         },
       ],
     );
@@ -109,8 +110,8 @@ describe('normalizeWrites — Codex apply_patch', () => {
     assert.deepEqual(
       out.map((w) => [w.old_string, w.new_string]),
       [
-        ['one', 'ONE'],
-        ['two', 'TWO'],
+        ['\none\n', '\nONE\n'],
+        ['\ntwo\n', '\nTWO\n'],
       ],
     );
   });
@@ -163,8 +164,9 @@ describe('normalizeWrites — Codex apply_patch', () => {
       {
         tool: 'Edit',
         file_path: '/repo/3-permanent/note.md',
-        old_string: 'draft',
-        new_string: 'final',
+        old_string: '\ndraft\n',
+        new_string: '\nfinal\n',
+        context: null,
       },
     ]);
   });
@@ -179,5 +181,68 @@ describe('normalizeWrites — Codex apply_patch', () => {
       cwd: CWD,
     });
     assert.equal(out[0].file_path, '/abs/note.md');
+  });
+});
+
+describe('normalizeWrites — regressions found by adversarial review', () => {
+  const patch = (body) =>
+    normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: body }, cwd: CWD });
+
+  it('reads a CRLF patch rather than silently seeing no writes at all', () => {
+    const body = ['*** Begin Patch', '*** Add File: a.md', '+x', '*** End Patch'].join('\r\n');
+    assert.deepEqual(patch(body), [{ tool: 'Write', file_path: '/repo/a.md', content: 'x\n' }]);
+  });
+
+  it('line-anchors old_string so a hunk cannot bind mid-line', () => {
+    const [edit] = patch(
+      [
+        '*** Begin Patch',
+        '*** Update File: a.md',
+        '@@',
+        '-beta',
+        '+beta two',
+        '*** End Patch',
+      ].join('\n'),
+    );
+    const disk = '# D\n\nSource: https://example.com/beta-notes\n\nbeta\n';
+    // The naive form would hit the URL; the anchored form must hit the real line.
+    assert.equal(disk.indexOf('beta'), disk.indexOf('https://example.com/') + 20);
+    assert.equal(disk.indexOf(edit.old_string), disk.lastIndexOf('\nbeta\n'));
+  });
+
+  it('carries the @@ anchor so an ambiguous removal can be disambiguated', () => {
+    const [edit] = patch(
+      [
+        '*** Begin Patch',
+        '*** Update File: a.md',
+        '@@ Bad frontmatter looks like this:',
+        '-source: session',
+        '*** End Patch',
+      ].join('\n'),
+    );
+    assert.equal(edit.context, 'Bad frontmatter looks like this:');
+    const disk =
+      '---\nsource: session\n---\n\nBad frontmatter looks like this:\n\nsource: session\n';
+    const from = disk.indexOf(edit.context) + edit.context.length;
+    // Anchored search must find the body occurrence, not the frontmatter one.
+    assert.ok(disk.indexOf(edit.old_string, from) > disk.indexOf(edit.old_string));
+  });
+
+  it('does not lose a pending hunk when a Delete File follows it', () => {
+    const out = patch(
+      [
+        '*** Begin Patch',
+        '*** Update File: a.md',
+        '@@',
+        '-a',
+        '+b',
+        '*** Delete File: gone.md',
+        '*** End Patch',
+      ].join('\n'),
+    );
+    assert.deepEqual(
+      out.map((w) => w.tool),
+      ['Edit', 'Delete'],
+    );
   });
 });

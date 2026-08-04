@@ -12,7 +12,7 @@ concurrently.
 
 ## Codex
 
-There is no typed dispatch parameter. Name the agent in the instruction:
+Name the agent in the instruction:
 
 > Spawn the `learning-loop-<name>` subagent to …
 
@@ -22,9 +22,10 @@ run several at once, say so and say whether to wait:
 
 > Spawn one `learning-loop-<name>` subagent per item, wait for all of them, then …
 
-Codex delegates on a direct request or on a skill instruction that asks for it,
-so the instruction has to be explicit. "Consider delegating" will not spawn
-anything.
+Codex's `spawn_agent` does take an `agent_type` argument, but it is exposed
+conditionally, so the named instruction is the form that always works. Codex
+also delegates only on a direct request or on a skill instruction that asks for
+it — "consider delegating" will not spawn anything.
 
 ## Either harness
 

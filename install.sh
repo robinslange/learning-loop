@@ -459,12 +459,15 @@ find_codex_generator() {
     printf '%s\n' "$here/plugin/$rel"
     return 0
   fi
+  # Cache layout is <base>/<version>/scripts/codex/generate-agents.mjs, so the
+  # file sits four levels down. maxdepth must clear that or find silently
+  # matches nothing and Codex setup no-ops while reporting a locate failure.
   local base
   for base in "$HOME/.claude/plugins/cache/learning-loop-marketplace/learning-loop" \
     "$HOME/.codex/plugins/cache/learning-loop-marketplace/learning-loop"; do
     [ -d "$base" ] || continue
     local found
-    found=$(find "$base" -maxdepth 2 -path "*/$rel" 2>/dev/null | sort -V | tail -1)
+    found=$(find "$base" -maxdepth 4 -path "*/$rel" 2>/dev/null | sort -V | tail -1)
     [ -n "$found" ] && printf '%s\n' "$found" && return 0
   done
   return 1
@@ -488,39 +491,51 @@ setup_codex() {
     return 0
   fi
 
-  if ! run_logged "node \"$generator\" --out \"$HOME/.codex/agents\""; then
-    step_fail "agent generation failed (exit $?)"
+  local rc=0
+  run_logged "node \"$generator\" --out \"$HOME/.codex/agents\"" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    step_fail "agent generation failed (exit $rc)"
     echo "  See $LOG_FILE for details."
     return 0
   fi
 
   run_logged "codex plugin marketplace add robinslange/learning-loop" || true
 
+  # Gate on our own marker, not on the key name: the appended block contains
+  # "shell_environment_policy", so keying on that makes every later run believe
+  # a user wrote it and nag forever.
   local codex_config="$HOME/.codex/config.toml"
-  local notes=()
-  if [ ! -f "$codex_config" ] || ! grep -q "shell_environment_policy" "$codex_config" 2>/dev/null; then
-    mkdir -p "$HOME/.codex"
-    cat >>"$codex_config" <<'EOF'
+  local note=""
+  if ! grep -q "^# --- learning-loop ---$" "$codex_config" 2>/dev/null; then
+    if grep -q "shell_environment_policy" "$codex_config" 2>/dev/null; then
+      note="add \`set = { LL_HARNESS = \"codex\" }\` under [shell_environment_policy] in $codex_config"
+    else
+      mkdir -p "$HOME/.codex"
+      cat >>"$codex_config" <<'EOF'
 
 # --- learning-loop ---
-# Codex gives commands no marker saying which harness launched them, so the
-# plugin's scripts read this to tell Codex from Claude Code.
+# Codex gives shell commands no marker saying which harness launched them, so
+# the plugin's scripts read this to tell Codex from Claude Code. Plugin hooks
+# do not go through this policy; they use PLUGIN_ROOT, which Codex always sets.
 [shell_environment_policy]
 set = { LL_HARNESS = "codex" }
 EOF
-  else
-    notes+=("add \`set = { LL_HARNESS = \"codex\" }\` under [shell_environment_policy] in $codex_config")
+    fi
   fi
 
+  # Count what this run produced. `ls | wc -l` would also count orphans from an
+  # older version and any hand-written learning-loop-*.toml.
   local count
-  count=$(ls -1 "$HOME/.codex/agents"/learning-loop-*.toml 2>/dev/null | wc -l | tr -d ' ')
+  count=$(find "$HOME/.codex/agents" -maxdepth 1 -name 'learning-loop-*.toml' -newermt '-2 minutes' 2>/dev/null | wc -l | tr -d ' ')
+  [ -n "$count" ] || count=0
   step_done "$count agents written to ~/.codex/agents"
 
   echo "  ${C_DIM}Codex will not run plugin hooks until you trust them: run ${C_RESET}/hooks${C_DIM} in Codex.${C_RESET}"
-  local n
-  for n in "${notes[@]:-}"; do
-    [ -n "$n" ] && echo "  ${C_DIM}Manual step: $n${C_RESET}"
-  done
+  [ -n "$note" ] && echo "  ${C_DIM}Manual step: $note${C_RESET}"
+
+  # Never let the last command's status become this function's, or a clean
+  # install returns non-zero and set -e kills the installer before its summary.
+  return 0
 }
 
 version_ge() {
