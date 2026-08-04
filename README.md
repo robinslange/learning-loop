@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/robinslange/learning-loop/main/inst
 
 This takes ~3 minutes. It will:
 
-1. Check your platform (macOS arm64 / Linux x86_64 / WSL x86_64 — the platforms with prebuilt `ll-search` binaries; others need a [source build](guide/cross-platform.md))
+1. Check your platform. This script is bash, so it covers macOS arm64, Linux x86_64, and WSL x86_64. Native Windows x64 is supported too — it has a prebuilt binary and `.cmd` shims — but install it via [Manual install](#manual-install) below. Other platforms need a [source build](guide/cross-platform.md).
 2. Ensure Node.js 22+ is available, using your existing version manager if present (nvm, fnm, volta, asdf, mise, n, brew). If none, offers fnm.
 3. Add `~/.local/bin` to PATH (with a versioned marker in your shell rc, so it's safe to re-run)
 4. Install Claude Code if missing

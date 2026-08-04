@@ -138,7 +138,7 @@ detect_platform() {
     darwin-x86_64|linux-aarch64)
       PLATFORM="${kernel}-${arch}"
       step_fail "No prebuilt ll-search binary for ${PLATFORM}"
-      echo "Prebuilt binaries cover: macOS arm64 (Apple Silicon), Linux x86_64, Windows x64 (WSL)."
+      echo "Prebuilt binaries cover: macOS arm64 (Apple Silicon), Linux x86_64 (also used by WSL), Windows x64."
       echo "On ${PLATFORM}, /learning-loop:init cannot download the search binary; you would"
       echo "need a Rust toolchain to build it from source (cd native && cargo build --release)."
       echo "See guide/cross-platform.md in the repo for details."
@@ -151,8 +151,11 @@ detect_platform() {
       ;;
     *)
       step_fail "Unsupported platform: ${kernel}-${arch}"
-      echo "Supported: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
-      echo "If you're on native Windows, use WSL: https://learn.microsoft.com/en-us/windows/wsl/install"
+      echo "This installer is bash, so it covers: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
+      echo "Native Windows x64 is supported by the plugin itself — install it manually:"
+      echo "  claude plugin marketplace add robinslange/learning-loop"
+      echo "  claude plugin install learning-loop@learning-loop-marketplace"
+      echo "See guide/cross-platform.md for per-platform status."
       exit 1
       ;;
   esac
