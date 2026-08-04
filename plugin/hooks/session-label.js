@@ -429,6 +429,12 @@ try {
       type: 'gate-pass-no-payload',
       gate: {
         passed: true,
+        // Carried here as well as on gate-pass-payload: this entry cleared the
+        // gate by definition, and every consumer (review-shadow's distribution
+        // and reachability, the readiness check) reads vault_top_score. Omitting
+        // it counted these rows as score 0 — dragging the distribution toward a
+        // floor the gate had in fact been cleared above.
+        vault_top_score: vaultTop,
         padded,
         solo_top_score: soloTop,
         padding_load_bearing: paddingLoadBearing,

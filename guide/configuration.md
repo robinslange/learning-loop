@@ -12,7 +12,7 @@
 
 `injection_mode` controls just-in-time context injection on `UserPromptSubmit`. The shipped config sets `live`: hits that clear the gate are injected into the prompt. `shadow` runs the same pipeline but only logs what it _would_ have injected, never mutating the prompt; it remains available for calibration (see Context injection below). `off` disables the pipeline. If the key is absent from config, the hook falls back to `shadow`. When running in shadow, the `injection-shadow-gate` health check nudges at session start once the go-live gate is passing, and `/learning-loop:doctor` can apply the flip with your approval.
 
-`injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw **weighted** RRF fusion sum, **not** a cosine similarity. Each lane contributes `weight/(5+rank)`, and since v1.40.0 the lanes are weighted unequally (vector 1.0, BM25 1.0, PRF 0.5, PPR 0.05, tags 0.05), so the reachable range is:
+`injection_threshold` is the minimum score the top vault hit must clear before context is injected. The vault score is a raw **weighted** RRF fusion sum, **not** a cosine similarity. Each lane contributes `weight/(5+rank)`, and since v1.40.0 the lanes are weighted unequally (vector 1.0, BM25 1.0, PRF 0.5, PPR 0.05, tags 0.05), so the reachable range is:
 
 | Agreement                        | Score    |
 | -------------------------------- | -------- |
@@ -47,15 +47,15 @@ Nine hook handlers across six Claude Code event types enforce process discipline
 | PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags, em/en dashes added to note body prose, and frontmatter-contract violations introduced in `0-inbox`/`1-fleeting`/`2-literature`/`3-permanent` notes (missing or empty `tags`/`date`/`source`, the deprecated `created:`/`updated:`/`source-project:` keys, a non-`YYYY-MM-DD` date, an off-vocabulary `status:`). Both the dash and schema checks are added-only deltas against the note on disk, so pre-existing violations are inherited rather than denied; `Source:`/`Related:` lines are exempt from the dash rule |
 | PreToolUse (WebSearch\|WebFetch)            | web-guard.js            | Denies the raw web tools globally (main session included; PreToolUse cannot scope to subagents) and routes web access through the source gateway, `bin/source-gateway.mjs`, so every search, fetch, and research call goes through a config-selected source with a per-session fetch budget       |
 | PostToolUse (Write\|Edit\|Task\|Skill)      | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
-| PostToolUse (Read)                          | post-read-retrieval.js  | Tracks vault reads for retrieval instrumentation                                                                                                                                                                                                                                                  |
+| PostToolUse (Read)                          | post-read-retrieval.js  | Tracks **auto-memory** file reads (`~/.claude/projects/<project>/memory/*.md`) for retrieval instrumentation. Vault reads are not recorded here                                                                                                                                                   |
 | PostToolUse (mcp\_\_plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches                                                                                                                                                                                                                                                                   |
 
 The post-tool modules live under `hooks/modules/`, listed in execution order:
 
-- **provenance** — records every vault read/write for the provenance log
+- **provenance** — records vault writes and edits, plus agent-spawn (`Task`) and skill-invoke (`Skill`) events, to the provenance log. There is no `Read` branch
 - **reflect-track** — appends each new vault Write/Edit to the `/reflect` new-notes marker while the marker exists (added v1.25.3)
 - **autolink** — adds backlinks and semantic links after vault writes
-- **edge-infer** — classifies wikilink pairs via regex, writes `challenges_*` typed edges to `edges.db`
+- **edge-infer** — classifies wikilink pairs via regex into six typed edges — `derived_from`, `evidence_for`, `supports`, and the `challenges_undermining` / `challenges_undercutting` / `challenges_rebuttal` family — and writes them to `edges.db`
 
 These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
 
@@ -140,7 +140,7 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
 | `pause_on_battery`     | `true`                   | Suspend the librarian while the machine is on battery power (polled).                                         |
 | `battery_poll_seconds` | `60`                     | How often to re-check power state when `pause_on_battery` is on.                                              |
 
-Five override knobs are read by `scripts/librarian/config.mjs` but omitted from the shipped config; set them under `librarian` only when the built-in defaults (defined in that file) need replacing:
+Six override knobs are read by `scripts/librarian/config.mjs` but omitted from the shipped config; set them under `librarian` only when the built-in defaults (defined in that file) need replacing:
 
 | Key                | Purpose                                                                                                               |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
@@ -149,6 +149,7 @@ Five override knobs are read by `scripts/librarian/config.mjs` but omitted from 
 | `tag_prompt`       | Classifier prompt for tag suggestion (vocabulary-bounded picks).                                                        |
 | `duplicate_prompt` | Classifier prompt for duplicate detection (duplicate / same_topic / unrelated).                                          |
 | `structural_tags`  | Array of tags the tag suggester never proposes; default `["literature", "counterpoint", "synthesis", "excalidraw"]`.     |
+| `keep_alive`       | How long ollama keeps the model resident after idle; default `30m`.                                                     |
 
 ### Remote model provider (advanced)
 

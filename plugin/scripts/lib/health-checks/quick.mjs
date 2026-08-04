@@ -16,6 +16,7 @@ import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { DATA_FILES } from '../paths.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
+import { recentMonths } from '../retrieval.mjs';
 import {
   isVaultOk,
   isEpisodicOk,
@@ -25,16 +26,11 @@ import {
   SHADOW_BACKEND_HEALTH_MIN_TOTAL,
 } from '../shadow-gate.mjs';
 
-// Current + previous month as YYYY-MM in UTC. Log filenames come from
-// toISOString(), so a local-time Date here would pick the wrong previous
-// month east of UTC (all of June in NZ would scan April instead of May).
-// Shared by checkDuplicateGateHealth and collectShadowGateStats so the two
-// cannot diverge. Exported for tests.
-export function recentUtcMonths(now) {
-  return [now, new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1))].map((d) =>
-    d.toISOString().slice(0, 7),
-  );
-}
+// Re-exported from the writer that owns the naming. The scan basis must match
+// the filenames, which monthStr() builds in LOCAL time; computing these in UTC
+// made the reader miss the current month's file for the first hours of every
+// month east of UTC. Kept as a named export here for the existing callers.
+export { recentMonths };
 
 const VAULT_FOLDERS = [
   '0-inbox',
@@ -697,7 +693,7 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
       fix: null,
     });
   }
-  const months = recentUtcMonths(now);
+  const months = recentMonths(now);
   let totalTimeouts = 0;
   let totalStaleDaemon = 0;
   for (const month of months) {
@@ -777,7 +773,7 @@ export function checkHookErrors({ pluginData, now = new Date() } = {}) {
       fix: null,
     });
   }
-  const months = recentUtcMonths(now);
+  const months = recentMonths(now);
   let totalCount = 0;
   let latest = null;
   for (const month of months) {
@@ -851,7 +847,7 @@ function readTailLines(path, maxBytes) {
 // decisions (old threshold / old BM25 mode) don't inflate the ready-to-flip
 // signal toward a pipeline those entries never exercised.
 function collectShadowGateStats(pluginData, now) {
-  const months = recentUtcMonths(now);
+  const months = recentMonths(now);
   let healthy = 0;
   let passed = 0;
   let vaultOkCount = 0;

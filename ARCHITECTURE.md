@@ -17,7 +17,8 @@ learning-loop/
   plugin/               -- the installed plugin (marketplace source ./plugin)
     .claude-plugin/     -- plugin manifest (plugin.json)
     hooks/              -- Claude Code lifecycle hooks (entry: *.js)
-      lib/              -- hook-shared helpers (common, dream-gate, io, inject, snapshot)
+      lib/              -- hook-shared helpers (common, dream-gate, filename-style, io,
+                           inject, snapshot)
       modules/          -- post-tool modules (provenance, reflect-track, autolink, edge-infer)
       session-start/    -- session-start submodules (context-assembly, watch-daemon,
                            vault-snapshot, cache-cleanup, health-detector, update-check,
@@ -57,7 +58,7 @@ learning-loop/
       omc-cache-health/ -- cache health subplugin
     provenance/         -- learned/retired pattern notes
     templates/          -- CLAUDE.md section template version
-    vendor/             -- vendored schemas and NLP libs
+    vendor/             -- pinned sql.js build (sql-wasm.js/.wasm)
     config.json         -- plugin config
 
   native/               -- Rust workspace
@@ -70,7 +71,9 @@ learning-loop/
   .claude-plugin/       -- marketplace manifest (marketplace.json)
   tests/                -- Node.js tests (node --test)
   eslint-plugin-learning-loop/ -- custom ESLint rules (no-empty-catch, no-direct-jsonparse,
-                           no-process-env-outside-env-module, no-raw-lockfile)
+                           no-process-env-outside-env-module, no-raw-lockfile,
+                           no-url-pathname). Only the last two are enabled;
+                           see 'critical invariants'.
   docs/
     baseline/           -- convention docs (the only tracked part of docs/)
     superpowers/        -- plan archives (local-only; docs/* is gitignored except baseline/)
@@ -349,7 +352,7 @@ On session open, hooks fire in this order:
 8. On each subagent finishing: `subagent-stop.js` -- emits an `agent-result` provenance record
 9. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
-Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races its vault queries — the padded query, plus a concurrent query on the bare prompt when the two differ — against `HookConfig.INJECTION_RACE_CAP_MS` and emits results for whichever finishes within the cap.
+Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races its vault queries — the padded query, plus a concurrent query on the bare prompt when the two differ — against `env.LEARNING_LOOP_INJECTION_RACE_CAP_MS` (which defaults to `HookConfig.INJECTION_RACE_CAP_MS`) and emits results for whichever finishes within the cap.
 
 ---
 
@@ -487,7 +490,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs:164-180`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs`:
 
 ```json
 {
@@ -521,7 +524,7 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
 
 ### shadow injection log
 
-`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js:261-277`):
+`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js`):
 
 ```json
 {

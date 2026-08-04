@@ -23,7 +23,7 @@ cd native && cargo test --workspace
 # Prettier auto-format (run before committing)
 npx prettier --write 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'
 
-# Custom ESLint rules (no-empty-catch, no-direct-jsonparse, etc.)
+# Custom ESLint rules (no-raw-lockfile, no-url-pathname enabled; three more off)
 npx eslint .
 ```
 
@@ -40,7 +40,7 @@ If a test fails on your branch but passes on `main`, rebuild the native binary (
 5. **lint** -- four checks:
    - **Resolved-paths grep.** No file under `plugin/agents/` or `plugin/skills/` may contain `$HOME/brain/learning-loop`, `~/brain/learning-loop`, `$HOME/brain/brain`, or `~/brain/brain`. These paths are Robin's local layout. Use `${CLAUDE_PLUGIN_ROOT}`, `$PLUGIN`, or `{{VAULT}}` tokens instead.
    - **Prettier check.** `npx prettier --check 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'` must pass with no diff. Vendored code under `plugin/scripts/lib/vendor/` and `plugin/vendor/` is excluded.
-   - **ESLint custom rules.** `npx eslint .` runs the `eslint-plugin-learning-loop` rules (`no-empty-catch`, `no-direct-jsonparse`, `no-process-env-outside-env-module`, `no-raw-lockfile`).
+   - **ESLint custom rules.** `eslint-plugin-learning-loop` ships five rules: `no-empty-catch`, `no-direct-jsonparse`, `no-process-env-outside-env-module`, `no-raw-lockfile`, `no-url-pathname`. Only `no-raw-lockfile` and `no-url-pathname` are enabled in `eslint.config.mjs`; the other three are set to `'off'` and currently fail on shipped code.
    - **Code-fence tag check.** No markdown file under `plugin/skills/`, `plugin/agents/`, `docs/`, `guide/`, `plugin/hooks/`, `plugin/scripts/` (plus `CHANGELOG.md` and `README.md`) may use non-canonical code-fence tags. Use `bash`, `js`, or `ts` only.
 
 ## Commit style

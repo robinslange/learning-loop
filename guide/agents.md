@@ -39,7 +39,7 @@ A separate tier runs outside of Claude entirely. The vault librarian (`scripts/l
 
 | Task | Mode | Trigger | Output |
 |---|---|---|---|
-| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Orphan notes (no inbound or outbound links) | `link_suggestion` queue entry per candidate |
+| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Notes with no INBOUND links (outbound links are not consulted) | `link_suggestion` queue entry per candidate |
 | Voice gate | Single structured-output call | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag` |
 | Tag suggestion | Single structured-output call | Notes with 0 or 1 tags | `tag_suggestion` with up to 2 tags |
 | Duplicate detection | Single structured-output call | Every visited note | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |

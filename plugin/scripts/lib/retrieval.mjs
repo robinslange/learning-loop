@@ -23,9 +23,27 @@ import { deriveOrigin } from './row-origin.mjs';
 // buckets follow the operator's calendar month. Callers must not substitute
 // toISOString().slice(0, 7), which is UTC and lands boundary events in a
 // different month file.
-export function monthStr() {
-  const now = new Date();
+export function monthStr(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * The month buckets a reader must scan to cover "recent": current + previous,
+ * on the same LOCAL basis the filenames use.
+ *
+ * Readers must not compute these in UTC. East of UTC the two disagree for the
+ * first hours of every month — at 2026-08-01T09:00+12:00 the writer is filling
+ * `...-2026-08.jsonl` while UTC still reads 2026-07 — so a UTC reader scans a
+ * file the writer is no longer appending to and reports no recent events.
+ *
+ * Formatted with local getters throughout: mixing local construction with
+ * `toISOString()` is what produced the earlier off-by-one on the previous month.
+ *
+ * @param {Date} [now]
+ * @returns {[string, string]} [currentMonth, previousMonth] as YYYY-MM
+ */
+export function recentMonths(now = new Date()) {
+  return [monthStr(now), monthStr(new Date(now.getFullYear(), now.getMonth() - 1, 1))];
 }
 
 /**

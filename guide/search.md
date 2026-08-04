@@ -83,7 +83,7 @@ The `reflect-scan` command batches multiple queries into a single process, shari
 Every search query and vault read logs to `PLUGIN_DATA/retrieval/` in one of four prefixed files:
 
 - `queries-YYYY-MM.jsonl` — vault search invocations
-- `reads-YYYY-MM.jsonl` — vault file reads tracked by `post-read-retrieval`
+- `reads-YYYY-MM.jsonl` — auto-memory file reads tracked by `post-read-retrieval` (vault reads are not recorded)
 - `episodic-queries-YYYY-MM.jsonl` — episodic-memory MCP searches
 - `shadow-injection-YYYY-MM.jsonl` — just-in-time injection pipeline events (shadow + live)
 

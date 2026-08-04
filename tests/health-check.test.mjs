@@ -5,6 +5,7 @@ import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
+import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 import {
   checkVaultPath,
   checkVaultFolders,
@@ -23,7 +24,7 @@ import {
   checkHookErrors,
   checkInjectionShadowGate,
   checkAbiDrift,
-  recentUtcMonths,
+  recentMonths,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
   checkNodeVersion,
@@ -486,42 +487,44 @@ test('checkDuplicateGateHealth: warns on stale-daemon error code with restart ad
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkDuplicateGateHealth: previous-month UTC arithmetic (regression for UTC+ timezone bug)', () => {
-  // In NZ (UTC+13), local midnight on 2026-06-01 is 2026-05-31T11:00Z,
-  // so `new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString()`
-  // would produce '2026-04-...' instead of '2026-05'. recentUtcMonths must
-  // use UTC arithmetic.
-  // Place timeout entries in the PREVIOUS UTC month's file. With a `now`
-  // near the start of June UTC (but June 1 local in UTC+13), the previous
-  // UTC month is May. A local-time implementation would scan April instead.
-  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-utc-'));
-  // now = 2026-06-01T05:00:00Z — still May 31 in UTC-... no, we want UTC+13.
-  // Use 2026-06-01T00:30:00Z — this is 2026-06-01T13:30 NZST (UTC+13:00),
-  // so local midnight check of getMonth()-1 would land on April not May.
-  const now = new Date('2026-06-01T00:30:00Z');
-  const prevUtcMonth = '2026-05';
-  // Write 4 timeouts in the previous UTC month file.
+test('checkDuplicateGateHealth: scans the previous month on the writer basis', () => {
+  // The scan basis must match the filenames, which monthStr() builds in LOCAL
+  // time. Deriving the expected month from the same helper keeps this test
+  // timezone-independent: a UTC-based reader missed the current month's file
+  // for the first hours of every month east of UTC.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-month-'));
+  const now = new Date('2026-06-15T00:30:00Z');
+  const [, prevMonth] = recentMonths(now);
   const lines = Array(4)
     .fill(null)
     .map(() => JSON.stringify({ code: 'duplicate-gate-timeout', source: 'daemon' }));
-  writeFileSync(join(dir, `hook-errors-${prevUtcMonth}.jsonl`), lines.join('\n') + '\n');
+  writeFileSync(join(dir, `hook-errors-${prevMonth}.jsonl`), lines.join('\n') + '\n');
   const result = checkDuplicateGateHealth({ pluginData: dir, now });
-  assert.equal(result.status, 'fail', 'must scan previous UTC month, not local-time month-2');
+  assert.equal(result.status, 'fail', 'must scan the previous month on the local basis');
   assert.match(result.detail, /4 duplicate-gate timeouts/);
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('recentUtcMonths: returns UTC YYYY-MM for current and previous month', () => {
-  // Verify the helper itself produces correct UTC strings for a UTC+ edge case.
-  const now = new Date('2026-06-01T00:30:00Z');
-  const months = recentUtcMonths(now);
-  assert.deepEqual(months, ['2026-06', '2026-05']);
+test('recentMonths: agrees with the filenames monthStr writes', () => {
+  // The invariant that matters: whatever the writer names a file right now,
+  // the reader must include it. Timezone-independent by construction.
+  const now = new Date('2026-06-15T00:30:00Z');
+  const [current, previous] = recentMonths(now);
+  assert.equal(current, monthStr(now));
+  assert.equal(previous, monthStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
 });
 
-test('recentUtcMonths: wraps year boundary correctly (Jan -> prev Dec)', () => {
-  const now = new Date('2026-01-15T00:00:00Z');
-  const months = recentUtcMonths(now);
-  assert.deepEqual(months, ['2026-01', '2025-12']);
+test('recentMonths: wraps the year boundary (Jan -> prev Dec)', () => {
+  const now = new Date(2026, 0, 15, 12, 0, 0); // local January
+  assert.deepEqual(recentMonths(now), ['2026-01', '2025-12']);
+});
+
+test('recentMonths: includes the current month at a month boundary east of UTC', () => {
+  // 2026-08-01 09:00 local. A UTC-based reader would still be in July here and
+  // would never scan the file the writer is currently appending to.
+  const now = new Date(2026, 7, 1, 9, 0, 0);
+  assert.equal(recentMonths(now)[0], '2026-08');
+  assert.equal(recentMonths(now)[0], monthStr(now));
 });
 
 // --- checkHookErrors ---

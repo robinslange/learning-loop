@@ -24,7 +24,7 @@ You will receive:
   ```
 - **vault_path**: Path to the vault root.
 
-The pairs have already been pre-filtered by cosine similarity (0.78–0.92) and folder/basename rules. They are likely to touch related claims, but **likely is not certain**. Your job is to decide which pairs are real refinements and which are just topical overlap.
+The pairs have already been pre-filtered by cosine similarity (0.74–0.92) and folder/basename rules. They are likely to touch related claims, but **likely is not certain**. Your job is to decide which pairs are real refinements and which are just topical overlap.
 
 ## Skills
 
