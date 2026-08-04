@@ -191,7 +191,7 @@ async function main() {
   if (exitCode === 3) {
     process.stderr.write(
       `research: model "${model}" is below the research tier (needs 12b+). ` +
-        `Set librarian.model to gemma3:12b, or let /deep-research use its Claude-native path.\n`,
+        `Set librarian.model to gemma3:12b, or let /learning-loop:research use its Claude-native path.\n`,
     );
     process.exit(3);
   }

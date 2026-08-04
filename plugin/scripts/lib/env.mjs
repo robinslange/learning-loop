@@ -132,7 +132,7 @@ export const env = Object.freeze({
   // --- Distribution / offline ---
   // Air-gap / update-control switch. When truthy, every plugin-INITIATED network
   // call is suppressed: the GitHub update poll, the binary auto-update download,
-  // and all external web-research fetches (source-resolver, /verify, /deep-research).
+  // and all external web-research fetches (source-resolver, /verify, /research).
   // Localhost (Ollama) is unaffected — an air-gapped box still runs its local model.
   // Gate every call site through isOffline(), not by reading this field directly.
   LL_OFFLINE: isTruthy(process.env.LL_OFFLINE),
