@@ -78,7 +78,7 @@ The resolver returns:
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"
 ```
-This searches PubMed → Semantic Scholar → CrossRef. If found, report the correct URL and verify authors match.
+This searches, in order and stopping at the first author-matched hit: PubMed (author/year-qualified), PubMed (unqualified), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, DBLP. If found, report the correct URL and verify authors match.
 
 ### 2b. Claim-vs-Abstract Check
 

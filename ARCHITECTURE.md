@@ -408,9 +408,11 @@ ll-search benchmark <db> --model-a A --model-b B <queries...>
 
 **Evaluation and tuning**
 ```
-ll-search tune-prf    <db> <queries...>
-ll-search eval-prf    <db> [--min-links N]
-ll-search eval-funnel <db> [--min-links N] [--limit N]
+ll-search tune-prf     <db> <queries...>
+ll-search eval-prf     <db> [--min-links N]
+ll-search eval-funnel  <db> [--min-links N] [--limit N]
+ll-search tune-weights <db> [--min-links N] [--limit N]   # fusion lane weights, train/holdout
+ll-search lane-diag    <db> [--min-links N]               # per-query, per-lane statistics
 ```
 
 **Federation**

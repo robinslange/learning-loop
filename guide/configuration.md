@@ -26,6 +26,19 @@ Defaults to `0.34` — just above the two-strong-lanes floor, so the gate demand
 
 `filename_style` controls the pre-write filename-convention advisory. Values: `'kebab'` (enforce kebab-case, e.g. `my-note.md`), `'spaces'` (enforce space-separated titles, e.g. `My Note.md`), `'auto'` (detect from the vault population), or absent (same as `'auto'`). In `auto` mode the hook reads up to 200 basenames across `0-inbox/`, `1-fleeting/`, and `3-permanent/` at write time; if >70% lack spaces the convention is kebab, if >70% have spaces the convention is spaces, otherwise the check is skipped. The advisory is non-blocking — it appears as `additionalContext`, never as a deny.
 
+`label_topics` extends the session labels written for episodic-memory retrieval with your own topics. The built-in patterns cover generic engineering vocabulary; add domain terms as `{match, label}` pairs, where `match` is a case-insensitive regex source string:
+
+```json
+{
+  "label_topics": [
+    { "match": "\\bkayak\\b", "label": "kayaking" },
+    { "match": "\\bresto\\s?druid\\b", "label": "wow" }
+  ]
+}
+```
+
+An entry with an invalid regex is logged and skipped rather than throwing — labels degrade, hooks do not.
+
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
 Persona voice and capture rules live in the vault itself (`_system/persona.md` and `_system/capture-rules.md`), not in config. Agents read them directly.
