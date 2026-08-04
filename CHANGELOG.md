@@ -4,9 +4,212 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+A consistency pass over the whole plugin: every documented claim checked against
+the code that implements it, and the gaps closed on whichever side was wrong.
+Most entries below are cases where a doc described a system we no longer ship, or
+a check reported a result it had not actually computed.
+
+### Security
+
+- **A trailing dot bypassed the SSRF guard.** `checkFetchUrl` compared
+  `u.hostname` against `localhost` and `.internal` exactly, and `new URL()`
+  preserves the trailing root dot that DNS treats as the same name.
+  `http://localhost.:60426/` returned `{ok: true}`, and so did
+  `http://metadata.google.internal./` — the GCP metadata endpoint. Both egress
+  paths were affected: `source-gateway.mjs fetch --url` (model-supplied) and
+  `web-fetch.mjs` (URLs scraped from note bodies, which that file's own header
+  calls attacker-authored). Literal-IP spellings were already safe because
+  `new URL()` normalises them. The dot is now stripped at the `host` assignment,
+  so the private-IP and IPv6 branches get the normalised value too.
+
+- **Author verification matched on substrings.** `extractSurnames` filtered
+  tokens by RAW length before normalising, so `R.` survived as the one-letter
+  token `r`, and the predicate accepted containment in either direction. Against
+  the real RFC 9110 author list, `authorMatches('Roberts', …)` was **true**,
+  because `'roberts'.includes('r')`. So were `('Jackson', ['Smith JA'])` and
+  `('Smith et al.', ['Smithers John'])`. A fabricated author passed whenever the
+  genuine list contained any substring of it — and every adapter, plus
+  `bestAuthorMatch`'s choice of which paper a citation refers to, routes through
+  this predicate. Now: normalise first then filter, fold diacritics, split
+  hyphenated surnames, drop tokens carrying no identity (initials, `et al`,
+  `Ed.`, `Jr`, and particles like `van`/`von`/`der`), and require whole-token
+  equality. The file had no tests; it has 23 now.
+
+- **The just-in-time injection path emitted note bodies unframed.** README
+  promised retrieved content is "re-emitted into agent context wrapped as
+  untrusted data". That held only for `vault-search.mjs --json`, which routes
+  through `wrapRetrieval()`. `inject.mjs` never imported it: it concatenated the
+  raw note body into `additionalContext` behind a directive reading "apply it".
+  This is the shipped default path — `injection_mode` is `live`. The block now
+  carries `<vault-note trust="untrusted-data">` delimiters plus the three clauses
+  `agents-shared/adversarial-content.md` makes load-bearing. Both halves matter:
+  the framing spike measured delimiters ALONE as worse than no guard at all.
+
 ### Fixed
 
 - **The CI quality gate crashed instead of reporting, on the one path it exists to handle.** `bench.mjs` demotes retrieval-quality regressions to warnings when the stored baseline was blessed on a different OS/arch (ONNX arithmetic diverges between arm64 NEON and x86_64 AVX2). That warning branch read `baseline.quality.provenance.platform`, but `baseline` is block-scoped to the `--compare` loader — so the moment the branch fired it threw `ReferenceError: baseline is not defined` and the job exited 1. The committed baseline is `darwin/arm64` and CI runs `linux/x64`, so every quality regression on CI was cross-platform, and the gate had been failing this way since the baseline was committed (v1.40.1 shows the same failure). `compareBaselines` now carries `currentPlatform` / `baselinePlatform` / `crossPlatform` on the comparison object it returns, and the reporter reads them from there. Verified by rerunning the eval against a platform-mismatched baseline: the branch now prints both platform names and exits 0.
+
+- **A citation check that could not run read as one that passed.** The promotion
+  gate counts `sources[].issues[].severity === 'high'`, but `verify-note`
+  returned `{verified: false, error}` with no `issues` array on any lookup
+  failure — and because `http.mjs` returns null on `!res.ok`, an NCBI 429, a DNS
+  blip and `LL_OFFLINE` are indistinguishable from a genuine miss. The count was
+  zero and the note was promoted to `3-permanent/`. Failures are now typed and
+  graded: an identifier or author+year resolving to nothing is high severity,
+  while a bare markdown link (which `note-extract` also emits as a source, but
+  which claims no citation) is low, so the fix does not demote every note
+  containing a URL.
+
+- **`PMID: 12345678` was never extracted, and long digit runs verified the wrong
+  paper.** The inline scanner required whitespace after the label, so the colon
+  form went unchecked; and with no trailing-digit guard a 12-digit run truncated
+  to its first 8 and verified against a different, real article.
+
+- **Claim numbers matched as substrings.** `findNumberInAbstract` had no digit
+  boundaries, so claiming "5" passed against an abstract saying "45.2", and "12"
+  passed against "120 patients". `in_abstract: true` meant nothing.
+
+- **Three adapters treated "no authors returned" as a passing author check.**
+  rfc, arxiv and openlibrary gated the comparison on `data.authors.length > 0`,
+  so an API returning no author metadata verified the citation clean — the one
+  case where nothing was checked. They now emit the `unverifiable_author` issue
+  `verify-note` already used for that case.
+
+- **`check-claims` silently dropped every source it could not read.** `if
+  (!metadata?.abstract) continue;` produced no row, so a caller saw only the
+  checkable claims and read that as "all claims checked". Now reports
+  `in_abstract: null` with an `unchecked_reason`; `source-verification.md`
+  documents the third state.
+
+- **The session-start intentions block had never rendered.** `context-assembly`
+  spawns `vault-search.mjs intentions --session-start-refresh`, and the handler
+  took `args[1]` as the context — which is the flag. It reached the binary as the
+  positional context argument, clap rejected it, the `try/catch` swallowed the
+  error and returned `[]`, and the refresh persisted that as the marker. The live
+  install showed a 2-byte marker while the same binary without the flag returned
+  100+ contexts. The existing test could not catch it: its stub echoed `[]`
+  regardless of argv.
+
+- **`librarian.ollama_url` was dead config.** `env.OLLAMA_URL` was pre-defaulted,
+  so `env || config || default` short-circuited on the first term every time and
+  a remote host silently kept talking to localhost. The env var is now null when
+  unset, and the default lives once, in `defaults.mjs`.
+
+- **`/doctor`'s ABI-drift check always reported "no drift".** `health-check.mjs`
+  called `detectAbiDrift` with no module path, and that function only probes when
+  given one. Both callers now share one `abiDriftSummary()`.
+
+- **The project-artefact routing command in `route-output.md` crashed.** It read
+  `process.env.VAULT_PATH`, an optional override that is undefined on a default
+  install, so every `/ingest` run got a stack trace instead of
+  `{destination, slug}` and artefacts were never detected.
+
+- **`vault-search.mjs query --rerank "text"` searched for the empty string.**
+  `stripFlags` dropped a flag and the token after it, but `--rerank` is a boolean
+  sitting in the same list as the value-taking flags.
+
+- **The health checks scanned UTC months while the writer names files locally.**
+  `monthStr()` builds filenames in local time and its comment tells callers not
+  to use `toISOString()`; `recentUtcMonths` did exactly that. East of UTC the two
+  disagree for the first hours of each month — precisely when it matters. The
+  helper now lives beside `monthStr()` and shares its formatting.
+
+- **`gate-pass-no-payload` omitted the score the gate had just cleared.** Every
+  consumer reads `vault_top_score`, and `|| 0` turned these into zero-score rows
+  that dragged the observed distribution down.
+
+- **`review-shadow` described a system other than the one running.** It read the
+  threshold from the env var alone while the gate uses env > config > constant;
+  it pooled pre- and post-reweighting scores in the headline pass rate (93.5%
+  "all time" over 14,961 rows, of which 4 were on the current scale); and it
+  still reported episodic as a backend, showing a removed path as 100% healthy
+  with 0ms latency. A post-epoch rate now sits beside the all-time one.
+
+- **`syncInjectionLedger` had no callers.** The `injections-*.jsonl` ledger was
+  read by every report and written by nothing, so the `via: 'injected'` half of
+  the surfaced/used join was permanently empty. Wired into the report entry point
+  its own comment prescribes; recovered 2,932 events on the maintainer's install.
+
+- **The health detector's 200ms budget was decorative.** `runQuickChecks` carries
+  `async` but awaits nothing, so its body ran to completion before it yielded and
+  the `Promise.race` could not fire. Removed, with the real bound named: the 10s
+  SessionStart timeout in `hooks.json`.
+
+- **`dedupe-window-replay` never ran from a path containing a space.** Its main
+  guard compared against `` `file://${process.argv[1]}` ``, but a real file URL
+  percent-encodes spaces, so `main()` silently did not run.
+
+- **The shipped `config.json` preset the maintainer's vault path.** `getConfig()`
+  falls back to the plugin-root config when `PLUGIN_DATA` has none and migrates
+  it in, so every new install inherited `~/brain/brain` and `/init` offered it
+  back as "I found your vault at…". Removed; `/init` now detects.
+
+### Changed
+
+- **`source:` means the capture origin, and `capture-rules.md` finally says so.**
+  v1.40.0 redefined the field, with citation URLs moving to a body `Source:`
+  line, but the file every writing agent reads still stated the old contract —
+  and stated it as a prohibition ("Do NOT write a `Source:` line in the body").
+  Agents were being told, before writing, the inverse of what the gate would tell
+  them after. Since the gate only checks that `source:` is present, a citation
+  URL in that field passed silently and the drift never surfaced. `note-writer`
+  and `literature-capturer` carried the same stale template. `unverified` is now
+  documented as a legal value: the gate accepts it and the whole fleeting-repair
+  pipeline keys on it, but the enum omitted it.
+
+- **Native Windows is supported; only the installer is WSL-only.** `install.sh`
+  is bash, but the plugin ships `ll-search-windows-x64.zip` and `.cmd` shims.
+  The installer nonetheless printed "Supported: macOS, Linux, WSL" as the
+  plugin's support matrix and named the third artifact "Windows x64 (WSL)",
+  which is the wrong binary — WSL runs the Linux build.
+
+### Documentation
+
+Corrected against the code, each verified individually:
+
+- The hook roster said "eight handlers across five event types" in README,
+  ARCHITECTURE (twice) and guide/configuration. There are **nine across six** —
+  `subagent-stop.js` was missing from every count, from the ARCHITECTURE file
+  tree, and from the guide table that calls itself the canonical roster. The
+  guide also documented the PostToolUse matcher as `Write|Edit|Agent|Skill`;
+  `hooks.json` says `Task`.
+- The injection gate's scale. v1.40.0 weighted the fusion lanes, dropping the
+  achievable ceiling from 0.8333 to 0.4333, and v1.40.1 moved the gate to 0.34.
+  guide/configuration still described the unweighted scale — "#1 in all five
+  ~0.83", "Defaults to 0.3" — which invites tuning the threshold to a value
+  nothing can reach. guide/search still presented equal-weight RRF and credited
+  the graph lanes with recall that `ll-core`'s own tuning data puts at zero.
+- Episodic memory has not been in the injection path since v1.37.0. Four docs
+  still described "a dual-backend search (vault + episodic memory)", and
+  troubleshooting sent readers to a `backends.episodic.error` key that is no
+  longer written.
+- Recent captures are never injected — SessionStart emits a two-line pointer —
+  yet four docs described the content as injected, and resource-usage credited a
+  token saving to a cap that does not exist.
+- README attributed verification, promotion gating and correction propagation to
+  the hook layer. Only retrieval, the write gate and the web gateway are hooks.
+- `/help` claims to list every command and omitted `/dream-eval`; the README
+  table omitted `/dream-eval` and `/uninstall`; guide/agents claimed 19 shared
+  skills against 20 on disk, the missing one being `adversarial-content`, the
+  prompt-injection guard.
+- ARCHITECTURE's "critical invariants" claimed "violations are CI failures". The
+  ESLint rules for two of them ship set to `'off'` and are violated in shipped
+  code; seven have no automated check at all. Now states what is actually
+  enforced.
+- Smaller corrections: `post-read-retrieval` tracks auto-memory reads, not vault
+  reads; the provenance module has no `Read` branch; edge-infer emits six edge
+  types, not just `challenges_*`; the doctor redact table omitted
+  `anthropic-key`; the resolver runs eight backends, not three; NOTICE said three
+  ONNX models are downloaded when two are; `label_topics` and `unpaywall_email`
+  were read by code and documented nowhere; `stop-nudge` and the `research` CLI
+  named commands that do not exist (`/reflect`, `/deep-research`).
+
+### Added
+
+- `tests/docs-consistency.test.mjs` derives the hook, agent, shared-skill and
+  command rosters from disk and asserts the docs agree, so the next addition
+  fails a test instead of shipping as prose nobody rechecked. It also fails on
+  any absolute or machine-specific path in the shipped `config.json`.
 
 ## v1.40.2
 
