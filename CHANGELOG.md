@@ -204,6 +204,17 @@ Corrected against the code, each verified individually:
   were read by code and documented nowhere; `stop-nudge` and the `research` CLI
   named commands that do not exist (`/reflect`, `/deep-research`).
 
+- **Author matching keeps short surnames and real particle-shaped names.** The
+  whole-token rewrite above first cut initials at two characters, which deletes
+  Wu, Li, Ng, Xu, Ho and Yu, and stopworded `la`/`le`, which deletes Lê and La.
+  Both reported correct citations as wrong authors. The cut is at one character
+  — what an initial actually is — and only unambiguous particles are stopworded.
+
+- **Claim numbers are compared numerically, not by regex boundary.** A
+  character-class lookaround cannot decide numeric equality: it called `5`
+  absent from "5.0 mg" and still let "200" match "1,200". Whole numeric tokens
+  are now parsed and compared with separators stripped.
+
 ### Added
 
 - `tests/docs-consistency.test.mjs` derives the hook, agent, shared-skill and
