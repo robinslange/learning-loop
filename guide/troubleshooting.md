@@ -14,11 +14,10 @@ Run `node PLUGIN/scripts/vault-search.mjs index --force` to rebuild the index. T
 
 ## Shadow injection log shows 0 passes
 
-First check that the backends are alive. Open a recent shadow record and look at `backends.vault.error` and `backends.episodic.error`.
+First check that the vault backend is alive. Open a recent shadow record and look at `backends.vault.error`.
 
 - If you see `spawn ... ENOENT`, run `/learning-loop:init` to install the binary.
-- If `episodic-memory` exits with a NODE_MODULE_VERSION mismatch, rebuild with `npm rebuild --prefix ~/.claude/plugins/cache/superpowers-marketplace/episodic-memory/<version>`.
-- If both backends are healthy but the gate never passes, the threshold is above what the fusion scale can reach. Run `node PLUGIN/scripts/review-shadow.mjs` — it reports `unreachable` (the gate exceeds the highest score ever recorded), `starved` (within 5% of the observed ceiling), or `ok`. The weighted-RRF ceiling is `0.4333`; the default gate is `0.34`. Lower `injection_threshold` in `config.json` (or set `LEARNING_LOOP_INJECTION_THRESHOLD`) to a value inside that range.
+- If the backend is healthy but the gate never passes, the threshold is above what the fusion scale can reach. Run `node PLUGIN/scripts/review-shadow.mjs` — it reports `unreachable` (the gate exceeds the highest score ever recorded), `starved` (within 5% of the observed ceiling), or `ok`. The weighted-RRF ceiling is `0.4333`; the default gate is `0.34`. Lower `injection_threshold` in `config.json` (or set `LEARNING_LOOP_INJECTION_THRESHOLD`) to a value inside that range.
 
 ## Notes not showing up in vault
 

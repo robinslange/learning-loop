@@ -448,9 +448,9 @@ These are tracked issues, not defects -- the code works, but the structure is no
 
 A complete session runs like this. The total wall time for session-start (target p95: 500 ms) covers all steps below:
 
-1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (recent captures, intention summary), and writes the context to stdout for Claude Code to inject.
+1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (memory index, learned patterns, a recent-captures pointer, intention summary), and writes the context to stdout for Claude Code to inject.
 
-2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
+2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a vault search — and, when the query was padded with prior-message context, a second concurrent vault query on the prompt alone — both under one race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
 3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags and on em/en dashes added to note body prose (both paths use an added-only delta against the note on disk, so pre-existing dashes never block; `Source:`/`Related:` lines are exempt). After each write, `post-tool.js` runs four modules in fixed order: provenance (event log), reflect-track (new-notes marker), autolink (backlinks), and edge-infer (graph edges).
 
@@ -527,18 +527,18 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
   "prompt": "how should I...",
   "prompt_length": 142,
   "type": "gate-pass-payload",
-  "gate": { "passed": true, "vault_top_score": 0.62, "episodic_top_score": 0.41 },
+  "gate": {
+    "passed": true,
+    "vault_top_score": 0.62,
+    "padded": true,
+    "solo_top_score": 0.41,
+    "padding_load_bearing": false
+  },
   "backends": {
     "vault": {
       "latency_ms": 32,
       "hits": 3,
       "top_path": "3-permanent/note.md",
-      "error": null,
-      "raced_out": false
-    },
-    "episodic": {
-      "latency_ms": 45,
-      "hits": 1,
       "error": null,
       "raced_out": false
     }

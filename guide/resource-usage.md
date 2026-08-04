@@ -4,7 +4,7 @@ This plugin is heavy. It runs local model inference and injects vault context in
 
 ## Tokens
 
-Every session gets a context injection with your memory index, recent captures, and active intentions. A fresh vault adds almost nothing. A mature vault adds thousands of tokens per session, and grows. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
+Every session gets a context injection with your memory index, active intentions, learned patterns, and a two-line pointer telling Claude how to list or search recent captures on demand. A fresh vault adds almost nothing. A mature vault adds thousands of tokens per session, and grows. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
 
 ## Local compute
 
@@ -25,7 +25,7 @@ The model is chosen by **RAM tier** so one resident model serves everything:
 ## What we do to keep costs down
 
 - Lightweight agents (vault search, scoring, ingestion) run on Haiku
-- Recent captures capped at the last 5 notes
+- Recent captures are not injected at all — SessionStart emits a fixed two-line pointer and Claude lists or searches them only if the session needs them
 - Intention summaries use compact format
 - Provenance, backlinks, and session labels write to disk, not into context
 - Search batches multiple queries into a single process
