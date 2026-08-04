@@ -72,7 +72,7 @@ export function extractSourcesFromNote(content) {
   // trailing guard matters more: without it a 12-digit run was truncated to its
   // first 8 digits and verified against a DIFFERENT, real article — a fabricated
   // identifier resolving to a genuine paper is worse than one that 404s.
-  const pmidInlineRe = /(?:PMID|PubMed)\s*:?\s*(\d{7,8})(?!\d)/gi;
+  const pmidInlineRe = /(?:PMIDs?|PubMed)\s*:?\s*(\d{7,8})(?!\d)/gi;
   while ((m = pmidInlineRe.exec(content)) !== null) {
     const pmid = m[1];
     if (!sources.some((s) => s.pmid === pmid)) {

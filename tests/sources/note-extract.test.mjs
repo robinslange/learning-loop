@@ -44,6 +44,7 @@ describe('inline PMID extraction', () => {
     assert.deepEqual(pmids('Jones 2020 (PMID:12345678).'), ['12345678']);
     assert.deepEqual(pmids('Jones 2020 (PMID 12345678).'), ['12345678']);
     assert.deepEqual(pmids('Jones 2020 (PubMed 1234567).'), ['1234567']);
+    assert.deepEqual(pmids('see PMIDs 12345678 for detail'), ['12345678']);
   });
 
   it('does not truncate a longer digit run into a different real article', () => {

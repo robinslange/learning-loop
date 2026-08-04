@@ -30,6 +30,7 @@ import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { emitJson } from './lib/io.mjs';
+import { normalizeWrites } from './lib/tool-payload.mjs';
 
 // The hook's outer deadline (hooks.json timeout) starts when the process
 // does; the duplicate gate budgets its subprocess fallback from what's left.
@@ -330,7 +331,13 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   }
 }
 
+// stdout carries exactly one PreToolUse decision, so the first verdict across a
+// multi-file patch is the one the harness sees.
+let emitted = false;
+
 function deny(reason) {
+  if (emitted) return;
+  emitted = true;
   emitJson({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -341,6 +348,8 @@ function deny(reason) {
 }
 
 function warn(context) {
+  if (emitted) return;
+  emitted = true;
   emitJson({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -349,7 +358,7 @@ function warn(context) {
   });
 }
 
-runHook(async ({ tool, input }) => {
+async function checkWrite(tool, input) {
   if (tool !== 'Write' && tool !== 'Edit') return;
 
   const filePath = input.file_path;
@@ -525,5 +534,17 @@ runHook(async ({ tool, input }) => {
 
   if (warnings.length > 0) {
     warn(warnings.join('\n'));
+  }
+}
+
+// One PreToolUse call can carry more than one file: Codex sends a whole
+// apply_patch where Claude Code sends a single Write or Edit. Gate each file in
+// turn and stop at the first one that has something to say — stdout carries one
+// decision, so the first verdict is the verdict.
+runHook(async ({ raw }) => {
+  for (const write of normalizeWrites(raw)) {
+    if (write.tool === 'Delete') continue;
+    await checkWrite(write.tool, write);
+    if (emitted) return;
   }
 });
