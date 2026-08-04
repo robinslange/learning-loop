@@ -11,11 +11,19 @@ import { readFileSync, readdirSync } from 'fs';
 import { join, sep } from 'path';
 import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { logError } from './lib/log.mjs';
-import { sessionSurfaced, usageReport } from './lib/retrieval-usage.mjs';
+import { sessionSurfaced, usageReport, syncInjectionLedger } from './lib/retrieval-usage.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
+
+// Live-mode injections exist only in the ephemeral dedupe state, which is
+// pruned on every write. Nothing called this, so `injections-*.jsonl` was read
+// by every report and written by none: the `via: 'injected'` half of the
+// surfaced/used join was permanently empty, and a report over "retrieved only"
+// looks like complete coverage rather than half a dataset. Idempotent — it
+// dedupes on (session, path, ts) — so running it per invocation is safe.
+syncInjectionLedger(PD);
 
 const args = process.argv.slice(2);
 

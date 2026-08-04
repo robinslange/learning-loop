@@ -204,7 +204,15 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
+The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL.
+
+Twelve of those need no configuration. **Unpaywall does**: its API requires a contact email, so the adapter returns `null` — silently skipping open-access enrichment — unless `unpaywall_email` is set in `config.json`:
+
+```json
+{ "unpaywall_email": "you@example.com" }
+```
+
+It only enriches DOI results with open-access status and a free-full-text URL; leaving it unset costs you `is_oa`/`oa_url`, not verification. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
 
 Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words. The naive regex approach had a ~60% false positive rate on author-year patterns.
 
