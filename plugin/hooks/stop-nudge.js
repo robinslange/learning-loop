@@ -149,6 +149,6 @@ if (trigger) {
   emitJson({
     decision: 'block',
     reason:
-      'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
+      'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /learning-loop:reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
   });
 }

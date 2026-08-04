@@ -42,11 +42,27 @@ export async function checkClaims(notePath) {
       }
     }
 
-    if (!metadata?.abstract) continue;
-
     const srcLabel = src.claimedAuthor
       ? (src.claimedAuthor + ' ' + (src.claimedYear || '')).trim()
       : src.pmid || src.doi || src.url;
+
+    // A source we could not read produced NO row at all, so a caller reading
+    // the results saw only the claims that happened to be checkable and read
+    // that as "all claims checked". `in_abstract: null` is the third state:
+    // not confirmed, not absent — unchecked.
+    if (!metadata?.abstract) {
+      results.push({
+        source: srcLabel,
+        pmid: src.pmid || null,
+        doi: src.doi || null,
+        url: src.url || null,
+        source_kind: null,
+        claim: null,
+        in_abstract: null,
+        unchecked_reason: 'no abstract or page text could be retrieved for this source',
+      });
+      continue;
+    }
 
     for (const num of allNumbers) {
       const { found, excerpt } = findNumberInAbstract(num, metadata.abstract);

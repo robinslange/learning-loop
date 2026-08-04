@@ -25,7 +25,11 @@ export function extractNumbers(text) {
 export function findNumberInAbstract(number, abstract) {
   if (!abstract) return { found: false, excerpt: null };
   const escaped = number.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp('.{0,60}' + escaped + '.{0,60}', 'i');
+  // Digit boundaries, or the claim matches as a substring of a longer number and
+  // `in_abstract: true` becomes meaningless: claiming "5" passed against an
+  // abstract saying "45.2", and "12" passed against "120 patients". The number
+  // must not be preceded or followed by another digit or a decimal point.
+  const re = new RegExp('.{0,60}(?<![\\d.])' + escaped + '(?![\\d.]*\\d).{0,60}', 'i');
   const match = abstract.match(re);
   return match ? { found: true, excerpt: match[0].trim() } : { found: false, excerpt: null };
 }

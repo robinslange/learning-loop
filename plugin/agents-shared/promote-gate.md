@@ -145,7 +145,7 @@ For each claim, compute `(specificity + groundedness) / 4`. Note-level score = m
 
 ### Frontmatter Output
 
-When scoring, write the per-note dimension scores to frontmatter:
+An agent that is **writing a note** records the per-note dimension scores in its frontmatter:
 
 ```yaml
 claim_specificity: 2
@@ -153,6 +153,8 @@ source_grounded: 2
 ```
 
 Use the highest applicable score across claims for each dimension. These fields are advisory metadata for batch analysis — the pass/fail routing table above remains the authority for folder decisions.
+
+**Scoring agents do not write them.** `note-scorer` is granted `Read, Bash` only; it returns the scores in its structured output and the calling skill decides what to do with them. Do not attempt a write from a scoring pass.
 
 ## Override Rules
 

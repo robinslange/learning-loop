@@ -239,7 +239,7 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
-Restart Claude Code. The session-start hook auto-applies config changes on first run after update. It also re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
+Restart Claude Code. Your `config.json` lives in `PLUGIN_DATA` and is read as-is on the next run — an update never rewrites it, so edits take effect immediately and nothing is migrated over them. (The one exception is a first-ever run with no `PLUGIN_DATA/config.json`, where the plugin's own `config.json` is copied in to seed it.) The session-start hook re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
 
 Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed.
 

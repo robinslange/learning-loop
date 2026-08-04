@@ -54,6 +54,26 @@ const WORDS = {
   12: 'twelve',
 };
 
+// getConfig() falls back to `<pluginRoot>/config.json` when PLUGIN_DATA has no
+// config yet and MIGRATES it into PLUGIN_DATA — so anything in the shipped file
+// becomes a new user's real config on first run. It shipped
+// `vault_path: "~/brain/brain"`, the maintainer's own path, which every new
+// install inherited and `/init` then offered back as "I found your vault at…".
+test('the shipped config carries no machine-specific paths', () => {
+  const shipped = JSON.parse(read('plugin', 'config.json'));
+
+  assert.ok(
+    !('vault_path' in shipped),
+    'the shipped config must not preset vault_path — /init detects it per machine',
+  );
+
+  const serialized = JSON.stringify(shipped);
+  for (const pattern of [/\/Users\//, /\/home\//, /\/root\//, /C:\\\\/]) {
+    assert.ok(!pattern.test(serialized), `shipped config contains an absolute path: ${pattern}`);
+  }
+  assert.ok(!/brain\/brain/.test(serialized), 'shipped config contains a personal vault path');
+});
+
 test('every hook handler in hooks.json exists on disk', () => {
   for (const rel of HANDLERS) {
     assert.doesNotThrow(
