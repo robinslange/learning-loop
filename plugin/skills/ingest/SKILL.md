@@ -81,7 +81,7 @@ Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on anoth
 
 Spawn the appropriate agent in the foreground. In the prompts below, resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders). Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID`; when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
-**Linear:** Spawn a `learning-loop:ingest-linear` agent (the `subagent_type` matches the agent name, so its `model: haiku` and `tools:` allowlist apply). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
+**Linear:** Spawn the `ingest-linear` agent (dispatch: `skills-shared/dispatch.md`); its `model: haiku` and `tools:` allowlist come from the agent definition. Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
 
 ```
 Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-linear.md and follow it exactly.
@@ -90,7 +90,7 @@ Scope: {scope}
 State filter: {state_filter or "none"}
 ```
 
-**Context:** Spawn a `learning-loop:ingest-context` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch:
+**Context:** Spawn the `ingest-context` agent (dispatch: `skills-shared/dispatch.md`). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch:
 
 ```
 Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-context.md and follow it exactly.
@@ -150,7 +150,7 @@ REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.s
 
 #### Step 2.4a: tier=single → existing single-pass flow
 
-Spawn a `learning-loop:ingest-repo` agent (`subagent_type` matches the agent name). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
+Spawn the `ingest-repo` agent (dispatch: `skills-shared/dispatch.md`). Resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders), so the agent can read its shared `agents-shared/` contracts:
 
 ```
 Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-repo.md and follow it exactly.
@@ -184,7 +184,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
    GIT_BASELINE=$(cd "${VAULT_ROOT}" && git status --porcelain | sort)
    ```
 
-5. Spawn 5 mapper agents in ONE assistant message (single message, 5 concurrent Task tool calls). Each gets `subagent_type` equal to the agent's frontmatter name. Per-mapper prompt template:
+5. Spawn 5 mapper agents concurrently (dispatch: `skills-shared/dispatch.md`), naming each by its frontmatter name. Per-mapper prompt template:
 
    ```
    You are the {focus} mapper for ingest run. Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-mapper-{focus}.md and follow it exactly.
@@ -195,7 +195,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
    - vault_root: {VAULT_ROOT}
    ```
 
-   The 5 `subagent_type` values: `learning-loop:ingest-mapper-stack`, `learning-loop:ingest-mapper-arch`, `learning-loop:ingest-mapper-conventions`, `learning-loop:ingest-mapper-domain`, `learning-loop:ingest-mapper-state`.
+   The 5 agents: `ingest-mapper-stack`, `ingest-mapper-arch`, `ingest-mapper-conventions`, `ingest-mapper-domain`, `ingest-mapper-state`.
 
 6. Collect 5 ack JSONs. Validate each: `focus`, `status` required; the 4 durable mappers also require `doc_path`. The state sidecar's ack IS the inline JSON to pass to synthesizer in step 10 - capture the full sidecar response into `STATE_SIDECAR_JSON` (or set to `null` if status="failed").
 
@@ -220,7 +220,7 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
    - count=3: spawn synthesizer with 3 docs + `missing_axes: ["<focus>"]`
    - count≤2: abort fan-out. Use `AskUserQuestion`: "Only N of 4 mappers succeeded. (a) retry failed mappers, (b) fall through to single-pass with existing surface profile, (c) cancel"
 
-10. Spawn `learning-loop:ingest-synthesizer` (subagent_type matches the agent's frontmatter name):
+10. Spawn the `ingest-synthesizer` agent (dispatch: `skills-shared/dispatch.md`):
 
     ```
     Read your agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/ingest-synthesizer.md and follow it.
@@ -307,7 +307,7 @@ Split the worklist by the `artefact` flag:
 
 **Artefact rows (`artefact: true`)** are project documents (interview prep, client briefs, evidence bundles), not atomic insights — vault voice and promote-gate grading add nothing, so they do NOT go through note-writer. Write each one yourself with the `Write` tool: destination is the row's `4-projects/<slug>/` folder, filename a kebab-case slug of the insight title, content the row's research body under the insight as the `#` title. Main-thread Writes fire the PostToolUse hooks natively — do not include these paths in the hook replay below.
 
-**Insight rows (`artefact: false`)**: for each, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent rows in ONE message with multiple Agent tool calls — they run in parallel.
+**Insight rows (`artefact: false`)**: for each, spawn a `note-writer` agent (dispatch: `skills-shared/dispatch.md`) with the row's **insight**, **research**, **destination**, and **related_notes**. Resolve all path placeholders to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent rows concurrently.
 
 When the fan-out completes, reconcile before replaying: match each insight row to a written path in the note-writer reports. Retry any unmatched row (agent failed, errored, or returned no path) once with a fresh note-writer dispatch. Rows still unwritten after the retry must not be dropped silently — a user-approved insight with no note is a data loss — carry each one's insight title and a one-line body into Step 6 as "failed to write — re-capture manually".
 
@@ -390,7 +390,7 @@ PY
 
 Same as `${CLAUDE_PLUGIN_ROOT}/skills/reflect/steps/refinement.md` sub-steps 4.6.b through 4.6.f. Spawn `refinement-proposer` with the pairs file, validate via `refinement-validate.mjs`, present preview-format table, apply approved edits via `Write`, route counterpoints via `Edit`, emit provenance events.
 
-The `subagent_type` is `learning-loop:refinement-proposer`. The `pairs_file` is the resolved value of `${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest-refinement-pairs.json` (substitute the literal path before passing to the agent). Likewise for the agent output (`-refinement-agent-output.json`) and validated output (`-refinement-validated.json`). Use `AskUserQuestion` for batch confirmation.
+The agent is `refinement-proposer` (dispatch: `skills-shared/dispatch.md`). The `pairs_file` is the resolved value of `${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest-refinement-pairs.json` (substitute the literal path before passing to the agent). Likewise for the agent output (`-refinement-agent-output.json`) and validated output (`-refinement-validated.json`). Use `AskUserQuestion` for batch confirmation.
 
 #### 5.6.d: Cleanup
 

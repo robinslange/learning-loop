@@ -1,0 +1,30 @@
+{
+  "description": "Codex-only additions, loaded via the hooks array in .codex-plugin/plugin.json. Codex's hosted WebSearch and WebFetch never reach the local hook path, and Codex has no Read function tool, so the shell is the only place those two guards can still act. Claude Code does not load this file and pays no per-Bash hook cost for it.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/web-guard.js\"",
+            "timeout": 3,
+            "statusMessage": "Checking for ungoverned web access"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/post-read-retrieval.js\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

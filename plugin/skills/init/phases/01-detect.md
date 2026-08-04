@@ -28,6 +28,7 @@ Now render the dashboard, mapping each check id to its dashboard row. Use these 
 | Federation    | (computed inline — see below)                                      |
 | Hub sync      | (computed inline — see below)                                      |
 | CLAUDE.md     | `claudemd-section-present` + `claudemd-section-current`            |
+| AGENTS.md     | (computed inline — only when `codex` is on PATH)                   |
 | Librarian     | (computed inline — see below)                                      |
 | Shims         | `shims-exist` + `local-bin-on-path`                                |
 | Model notes   | (computed inline — see below)                                      |
@@ -52,6 +53,8 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Watch daemon status (init view):** If `ll-watch` shim exists, run `ll-watch status` to check if the watcher is running (this complements the library's `watch-daemon-status` check by surfacing the user-facing status output).
 
+**Codex harness:** Check `which codex`. If absent, report every Codex row as "skipped: codex not installed" and do not offer Codex setup — nothing below applies. If present, check three things: whether `~/.codex/AGENTS.md` carries a current `## Learning Loop` section, how many `~/.codex/agents/learning-loop-*.toml` files exist against the count of `${CLAUDE_PLUGIN_ROOT}/agents/*.md` (a mismatch means the generator has not been re-run since an upgrade), and whether `~/.codex/config.toml` sets `LL_HARNESS`. Codex will not run plugin hooks at all until the user trusts them with `/hooks` inside Codex, and that cannot be detected from outside — always state it as a required manual step rather than reporting it as configured.
+
 Present a dashboard:
 
 ```
@@ -67,6 +70,7 @@ Learning Loop Setup
   Federation:    configured (peer registered, hub connected)
   Hub sync:      working (1,200 notes exported, 1 peer downloaded)
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
+  AGENTS.md:     ~/.codex/AGENTS.md (learning-loop section present)
   Librarian:     [status]
   Shims:         ll-watch installed, ll-search installed (watcher not running)
 

@@ -41,7 +41,7 @@ Launch the `inbox-organiser` agent with:
 
 The agent definition is at `${CLAUDE_PLUGIN_ROOT}/agents/inbox-organiser.md` (resolve to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders).
 
-Use `subagent_type: "learning-loop:inbox-organiser"` with the full prompt from the agent definition, or launch as a general-purpose agent that reads the agent file.
+Spawn the `inbox-organiser` agent (dispatch: `skills-shared/dispatch.md`) with the full prompt from the agent definition, or launch a general-purpose agent that reads the agent file.
 
 ### Step 1.5: Surface Librarian Observations for Inbox Notes
 
@@ -68,7 +68,7 @@ These are informational: the user decides whether to act on them during triage. 
 
 The agent cannot spawn note-writer (subagents cannot spawn subagents). It returns a Rewrite Worklist; executing it is this skill's job.
 
-**2a. Autonomous rewrites (no approval needed).** For each item with `type: rewrite`, spawn a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) with:
+**2a. Autonomous rewrites (no approval needed).** For each item with `type: rewrite`, spawn a `note-writer` agent (dispatch: `skills-shared/dispatch.md`) with:
 - **insight**: the note's core idea
 - **existing_note**: the full current note content (read it first)
 - **destination**: the worklist destination
@@ -76,7 +76,7 @@ The agent cannot spawn note-writer (subagents cannot spawn subagents). It return
 - **related_notes**: from the worklist row
 - the worklist `reason` as rewrite context
 
-Resolve all path placeholders in each prompt to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent items in ONE message with multiple Agent tool calls — they run in parallel. After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
+Resolve all path placeholders in each prompt to literal absolute paths (see `agents-shared/vault-io.md` → Placeholders). Dispatch independent items concurrently (dispatch: `skills-shared/dispatch.md`). After note-writer reports the written file, `rm` the `0-inbox/` original and run the three post-promotion frontmatter hygiene checks from the agent's section 6a on the new file. If note-writer returned the note content instead of reporting a written path, Write the file yourself at the worklist destination before `rm`ing the original.
 
 When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills-shared/hook-replay.md`, targeted variant):
 

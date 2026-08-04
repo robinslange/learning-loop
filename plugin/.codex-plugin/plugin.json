@@ -11,6 +11,7 @@
   "license": "Apache-2.0",
   "keywords": ["learning", "knowledge-management", "zettelkasten", "obsidian", "second-brain"],
   "skills": "./skills/",
+  "hooks": ["./hooks/hooks.json", "./hooks/hooks.codex.json"],
   "interface": {
     "displayName": "Learning Loop",
     "shortDescription": "Second brain for coding agents: retrieval, capture, consolidation",

@@ -50,13 +50,16 @@ describe('normalizeWrites — Codex apply_patch', () => {
       '*** End Patch',
     ].join('\n');
 
-    assert.deepEqual(normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD }), [
-      {
-        tool: 'Write',
-        file_path: '/repo/0-inbox/note.md',
-        content: '---\ntags: [a]\n---\n\nA claim.',
-      },
-    ]);
+    assert.deepEqual(
+      normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD }),
+      [
+        {
+          tool: 'Write',
+          file_path: '/repo/0-inbox/note.md',
+          content: '---\ntags: [a]\n---\n\nA claim.',
+        },
+      ],
+    );
   });
 
   it('maps an Update File hunk to an Edit whose old_string matches disk', () => {
@@ -71,14 +74,17 @@ describe('normalizeWrites — Codex apply_patch', () => {
       '*** End Patch',
     ].join('\n');
 
-    assert.deepEqual(normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD }), [
-      {
-        tool: 'Edit',
-        file_path: '/repo/0-inbox/note.md',
-        old_string: 'context line\nold text\ntrailing context',
-        new_string: 'context line\nnew text\ntrailing context',
-      },
-    ]);
+    assert.deepEqual(
+      normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD }),
+      [
+        {
+          tool: 'Edit',
+          file_path: '/repo/0-inbox/note.md',
+          old_string: 'context line\nold text\ntrailing context',
+          new_string: 'context line\nnew text\ntrailing context',
+        },
+      ],
+    );
   });
 
   it('emits one Edit per hunk', () => {
@@ -94,7 +100,11 @@ describe('normalizeWrites — Codex apply_patch', () => {
       '*** End Patch',
     ].join('\n');
 
-    const out = normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD });
+    const out = normalizeWrites({
+      tool_name: 'apply_patch',
+      tool_input: { command: patch },
+      cwd: CWD,
+    });
     assert.equal(out.length, 2);
     assert.deepEqual(
       out.map((w) => [w.old_string, w.new_string]),
@@ -118,7 +128,11 @@ describe('normalizeWrites — Codex apply_patch', () => {
       '*** End Patch',
     ].join('\n');
 
-    const out = normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD });
+    const out = normalizeWrites({
+      tool_name: 'apply_patch',
+      tool_input: { command: patch },
+      cwd: CWD,
+    });
     assert.deepEqual(
       out.map((w) => [w.tool, w.file_path]),
       [
@@ -140,7 +154,11 @@ describe('normalizeWrites — Codex apply_patch', () => {
       '*** End Patch',
     ].join('\n');
 
-    const out = normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD });
+    const out = normalizeWrites({
+      tool_name: 'apply_patch',
+      tool_input: { command: patch },
+      cwd: CWD,
+    });
     assert.deepEqual(out, [
       {
         tool: 'Edit',
@@ -155,7 +173,11 @@ describe('normalizeWrites — Codex apply_patch', () => {
     const patch = ['*** Begin Patch', '*** Add File: /abs/note.md', '+x', '*** End Patch'].join(
       '\n',
     );
-    const out = normalizeWrites({ tool_name: 'apply_patch', tool_input: { command: patch }, cwd: CWD });
+    const out = normalizeWrites({
+      tool_name: 'apply_patch',
+      tool_input: { command: patch },
+      cwd: CWD,
+    });
     assert.equal(out[0].file_path, '/abs/note.md');
   });
 });

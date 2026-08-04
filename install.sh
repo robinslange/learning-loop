@@ -448,6 +448,81 @@ install_plugins() {
   fi
 }
 
+# Locate the generate-agents script in whichever copy of the plugin exists:
+# the repo checkout this script sits in, the Claude Code plugin cache, or the
+# Codex plugin cache. Newest version wins in the cache directories.
+find_codex_generator() {
+  local rel="scripts/codex/generate-agents.mjs"
+  local here=""
+  [[ -n "${BASH_SOURCE[0]:-}" ]] && here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -n "$here" ] && [ -f "$here/plugin/$rel" ]; then
+    printf '%s\n' "$here/plugin/$rel"
+    return 0
+  fi
+  local base
+  for base in "$HOME/.claude/plugins/cache/learning-loop-marketplace/learning-loop" \
+    "$HOME/.codex/plugins/cache/learning-loop-marketplace/learning-loop"; do
+    [ -d "$base" ] || continue
+    local found
+    found=$(find "$base" -maxdepth 2 -path "*/$rel" 2>/dev/null | sort -V | tail -1)
+    [ -n "$found" ] && printf '%s\n' "$found" && return 0
+  done
+  return 1
+}
+
+# Codex reads the same skills and the same hooks/hooks.json out of the plugin
+# tree, so those need nothing here. Subagents are the exception: Codex has no
+# manifest field for them and loads them from standalone TOML in ~/.codex/agents,
+# so they are generated at install time from the same markdown definitions.
+setup_codex() {
+  step_start "Configuring Codex"
+
+  if ! command -v codex >/dev/null 2>&1; then
+    step_skip "codex not on PATH — skipping (re-run this installer after installing Codex)"
+    return 0
+  fi
+
+  local generator
+  if ! generator=$(find_codex_generator); then
+    step_fail "could not locate the learning-loop plugin tree to generate agents from"
+    return 0
+  fi
+
+  if ! run_logged "node \"$generator\" --out \"$HOME/.codex/agents\""; then
+    step_fail "agent generation failed (exit $?)"
+    echo "  See $LOG_FILE for details."
+    return 0
+  fi
+
+  run_logged "codex plugin marketplace add robinslange/learning-loop" || true
+
+  local codex_config="$HOME/.codex/config.toml"
+  local notes=()
+  if [ ! -f "$codex_config" ] || ! grep -q "shell_environment_policy" "$codex_config" 2>/dev/null; then
+    mkdir -p "$HOME/.codex"
+    cat >>"$codex_config" <<'EOF'
+
+# --- learning-loop ---
+# Codex gives commands no marker saying which harness launched them, so the
+# plugin's scripts read this to tell Codex from Claude Code.
+[shell_environment_policy]
+set = { LL_HARNESS = "codex" }
+EOF
+  else
+    notes+=("add \`set = { LL_HARNESS = \"codex\" }\` under [shell_environment_policy] in $codex_config")
+  fi
+
+  local count
+  count=$(ls -1 "$HOME/.codex/agents"/learning-loop-*.toml 2>/dev/null | wc -l | tr -d ' ')
+  step_done "$count agents written to ~/.codex/agents"
+
+  echo "  ${C_DIM}Codex will not run plugin hooks until you trust them: run ${C_RESET}/hooks${C_DIM} in Codex.${C_RESET}"
+  local n
+  for n in "${notes[@]:-}"; do
+    [ -n "$n" ] && echo "  ${C_DIM}Manual step: $n${C_RESET}"
+  done
+}
+
 version_ge() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
@@ -486,6 +561,7 @@ This will:
   4. Install Claude Code if missing
   5. Add the learning-loop + episodic-memory marketplaces
   6. Install both plugins
+  7. Configure Codex too, if it is installed
 
 Estimated time: ~3 minutes.
 EOF
@@ -502,6 +578,7 @@ main() {
   ensure_claude_code
   add_marketplaces
   install_plugins
+  setup_codex
   print_next_steps
 }
 

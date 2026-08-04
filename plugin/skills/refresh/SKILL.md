@@ -25,7 +25,7 @@ If a topic was provided, use it. If not, ask.
 
 ### Step 2: Launch Vault Scout
 
-Spawn a single `discovery-vault-scout` subagent (subagent_type: `learning-loop:discovery-vault-scout`) with this prompt:
+Spawn a single `discovery-vault-scout` subagent (dispatch: `skills-shared/dispatch.md`) with this prompt:
 
 ```
 Search for everything we have on: <topic>

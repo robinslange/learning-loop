@@ -30,11 +30,15 @@ export async function runProvenance(ctx) {
       return;
     }
 
-    if (tool === 'Task') {
+    // Claude Code spawns via Task/Agent and names the agent in `subagent_type`.
+    // Codex spawns via `spawn_agent`, which the hook layer surfaces as `Agent`;
+    // its argument names are not documented, so read the plausible keys and fall
+    // back rather than losing the event.
+    if (tool === 'Task' || tool === 'Agent') {
       emitProvenance({
         action: 'agent-spawn',
-        agent: input.subagent_type || 'general-purpose',
-        description: input.description || '',
+        agent: input.subagent_type || input.agent || input.name || 'general-purpose',
+        description: input.description || input.prompt?.slice(0, 120) || '',
         background: !!input.run_in_background,
       });
       return;

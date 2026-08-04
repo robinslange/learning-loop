@@ -257,7 +257,7 @@ Reuses the `note-scorer` agent. Only invoked for stale inbox notes in `--deep` m
 
 **Launch pattern:**
 
-Spawn `note-scorer` subagent(s) (subagent_type: `learning-loop:note-scorer`) with this prompt:
+Spawn `note-scorer` subagent(s) (dispatch: `skills-shared/dispatch.md`) with this prompt:
 
 ```
 Score these notes for inbox staleness assessment.
