@@ -164,7 +164,6 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
 | `pace_seconds`         | `2`                      | Delay between note investigations. Higher values reduce resource pressure.                                    |
 | `queue_cap`            | `200`                    | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited.  |
 | `ollama_url`           | `http://localhost:11434` | Ollama API endpoint.                                                                                          |
-| `keep_alive`           | `30m`                    | How long ollama keeps the model resident after idle. Set lower to free RAM sooner, higher to avoid reloads.   |
 | `pause_on_battery`     | `true`                   | Suspend the librarian while the machine is on battery power (polled).                                         |
 | `battery_poll_seconds` | `60`                     | How often to re-check power state when `pause_on_battery` is on.                                              |
 
@@ -221,7 +220,7 @@ node scripts/install-cache-health.mjs
 
 ## Provenance
 
-Every vault operation (read, write, agent spawn, skill invocation) logs to `provenance/events-YYYY-MM.jsonl`. The `/health` command reads these logs to show session activity patterns.
+Every vault write, edit, agent spawn and skill invocation logs to `provenance/events-YYYY-MM.jsonl`. Reads are not recorded here — the provenance module has no `Read` branch. The `/health` command reads these logs to show session activity patterns.
 
 ```bash
 # Generate provenance report
@@ -235,7 +234,7 @@ node scripts/provenance-consolidate.mjs
 
 The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL.
 
-Twelve of those need no configuration. **Unpaywall does**: its API requires a contact email, so the adapter returns `null` — silently skipping open-access enrichment — unless `unpaywall_email` is set in `config.json`:
+Twelve of those need no configuration. **Unpaywall does**: its API requires a contact email, so the adapter returns `null` — silently skipping open-access enrichment — unless `unpaywall_email` is set. Note this one lives in the source-resolver's own config file, `PLUGIN_DATA/data/resolver-config.json`, not in `config.json`:
 
 ```json
 { "unpaywall_email": "you@example.com" }

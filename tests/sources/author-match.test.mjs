@@ -40,6 +40,16 @@ describe('extractSurnames', () => {
     }
   });
 
+  // `la` and `le` LOOK like particles but are surnames: Lê is among the most
+  // common Vietnamese surnames, La stands alone in Italian and Spanish. Listing
+  // them as stopwords deletes the only token those authors have.
+  it('keeps la and le, which are surnames as often as particles', () => {
+    assert.deepEqual(extractSurnames('Le TH'), ['le', 'th']);
+    assert.equal(authorMatches('Le', ['Le TH']), true);
+    assert.equal(authorMatches('L\u00ea', ['Le T']), true);
+    assert.equal(authorMatches('La', ['La Rosa M']), true);
+  });
+
   it('drops editorial and particle tokens that carry no identity', () => {
     assert.deepEqual(extractSurnames('Smith et al.'), ['smith']);
     assert.deepEqual(extractSurnames('van der Berg'), ['berg']);

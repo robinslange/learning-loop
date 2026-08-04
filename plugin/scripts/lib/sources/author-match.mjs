@@ -23,9 +23,11 @@ const STOPWORDS = new Set([
   'del',
   'des',
   'dos',
-  'la',
-  'le',
 ]);
+// `la` and `le` are deliberately NOT here. They read as particles, but Lê is
+// among the most common Vietnamese surnames and La stands alone in Italian and
+// Spanish names — listing them deletes the only token those authors have, which
+// is the same failure as cutting the initial filter at two characters.
 
 export function extractSurnames(name) {
   // Normalise BEFORE filtering: `R.` is two characters raw but one once

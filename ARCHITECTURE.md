@@ -210,7 +210,11 @@ All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provid
 
 These are the conventions the codebase is written to. **Most are not mechanically enforced** — treat the list as the standard a reviewer holds you to, not as something CI will catch for you.
 
-What is actually enforced today: invariant 5 via `#![warn(missing_docs)]` in `ll-core/src/lib.rs`, plus the `no-raw-lockfile` and `no-url-pathname` ESLint rules (neither of which is on this list). The custom rules that *would* enforce invariants 1 and 2 — `learning-loop/no-process-env-outside-env-module` and `learning-loop/no-direct-jsonparse` — ship set to `'off'` in `eslint.config.mjs`, and both are violated in shipped code (six files read `process.env` outside `env.mjs`). Invariants 3, 4, 6, 7, 8, 9 and 10 have no automated check at all; 6 and 9 record their own pending work inline.
+What CI actually fails on today: the `no-raw-lockfile` and `no-url-pathname` ESLint rules — neither of which is on this list. Nothing on the list is enforced.
+
+Invariant 5 comes closest and still is not: `#![warn(missing_docs)]` in `ll-core/src/lib.rs` is a warning, and the cargo job runs `cargo test --workspace --locked` with no `-D warnings`, no `RUSTFLAGS`, and no clippy step, so an undocumented public item ships green.
+
+The custom rules that *would* enforce invariants 1 and 2 — `learning-loop/no-process-env-outside-env-module` and `learning-loop/no-direct-jsonparse` — ship set to `'off'` in `eslint.config.mjs`, and both are violated in shipped code. Note the first cannot see the whole plugin even at `'error'`: its `files` globs cover `plugin/hooks/**` and `plugin/scripts/**`, so `plugin/bin/` and `plugin/plugins/` are outside its reach. Invariants 3, 4, 6, 7, 8, 9 and 10 have no automated check at all; 6 and 9 record their own pending work inline.
 
 Turning any of these on is a cleanup task in its own right, because each currently fails.
 
@@ -412,7 +416,7 @@ ll-search tune-prf     <db> <queries...>
 ll-search eval-prf     <db> [--min-links N]
 ll-search eval-funnel  <db> [--min-links N] [--limit N]
 ll-search tune-weights <db> [--min-links N] [--limit N]   # fusion lane weights, train/holdout
-ll-search lane-diag    <db> [--min-links N]               # per-query, per-lane statistics
+ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane stats; probes is a JSON array of [set, gold_path, query] triples
 ```
 
 **Federation**

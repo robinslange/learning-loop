@@ -841,7 +841,7 @@ function readTailLines(path, maxBytes) {
   }
 }
 
-// Scan the current + previous UTC month shadow-injection logs (the same naming
+// Scan the current + previous local month shadow-injection logs (the same naming
 // session-label.js writes) and count healthy entries vs gate passes.
 // Only counts entries ts >= INJECTION_CALIBRATION_EPOCH so stale-pipeline
 // decisions (old threshold / old BM25 mode) don't inflate the ready-to-flip

@@ -62,6 +62,19 @@ describe('findNumberInAbstract digit boundaries', () => {
     assert.equal(findNumberInAbstract('2', 'a 32-fold increase').found, false);
   });
 
+  it('treats equal values written differently as the same number', () => {
+    // A character-class boundary guard calls these absent; they are the same
+    // number, and reporting a real figure as unstated is the costlier error.
+    assert.equal(findNumberInAbstract('5', 'dosed at 5.0 mg').found, true);
+    assert.equal(findNumberInAbstract('5.0', 'dosed at 5 mg').found, true);
+    assert.equal(findNumberInAbstract('1200', 'we saw 1,200 events').found, true);
+    assert.equal(findNumberInAbstract('1,200', 'we saw 1200 events').found, true);
+  });
+
+  it('is not fooled by a thousands separator', () => {
+    assert.equal(findNumberInAbstract('200', 'we saw 1,200 events').found, false);
+  });
+
   it('still matches the number the abstract actually states', () => {
     assert.equal(findNumberInAbstract('45.2', 'the rate was 45.2 percent').found, true);
     assert.equal(findNumberInAbstract('120', 'we enrolled 120 patients').found, true);
