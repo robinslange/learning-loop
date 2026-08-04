@@ -31,10 +31,16 @@ export function extractSurnames(name) {
   // Normalise BEFORE filtering: `R.` is two characters raw but one once
   // punctuation is stripped, and a one-letter initial matches almost any
   // surname under a substring test.
+  //
+  // The cut is at ONE character, not two. Two-letter surnames are common —
+  // Wu, Li, Ng, Xu, Ho, Yu — and dropping them leaves nothing to match on, so
+  // every citation by such an author gets reported as a wrong author. A
+  // two-letter initial pair (`Smith JA` -> `ja`) survives this filter, but
+  // whole-token equality means it can only match another literal `ja`.
   return name
     .split(/[\s,&-]+/)
     .map(normalizeAuthorName)
-    .filter((s) => s.length > 2 && !STOPWORDS.has(s));
+    .filter((s) => s.length > 1 && !STOPWORDS.has(s));
 }
 
 // Surnames match when a whole token matches, never on containment. Substring

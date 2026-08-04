@@ -18,7 +18,26 @@ import {
 describe('extractSurnames', () => {
   it('drops initials, because a one-letter token matches almost anything', () => {
     assert.deepEqual(extractSurnames('R. Fielding, Ed.'), ['fielding']);
-    assert.deepEqual(extractSurnames('Smith JA'), ['smith']);
+  });
+
+  // The initial filter cuts at ONE character. Cutting at two also removes
+  // Wu / Li / Ng / Xu / Ho / Yu, leaving nothing to match on, which reports
+  // every citation by such an author as a WRONG author.
+  it('keeps two-letter surnames', () => {
+    // A two-letter initial pair (`KL`) survives the filter. That is harmless:
+    // whole-token equality means it can only ever match a literal `kl`.
+    assert.deepEqual(extractSurnames('Wu J'), ['wu']);
+    assert.ok(extractSurnames('Ng KL').includes('ng'));
+    for (const [claimed, actual] of [
+      ['Wu', ['Wu J']],
+      ['Ng', ['Ng KL']],
+      ['Li', ['Li X', 'Zhang Y']],
+      ['Xu', ['Xu H']],
+      ['Ho', ['Ho CS']],
+      ['Yu', ['Yu M']],
+    ]) {
+      assert.equal(authorMatches(claimed, actual), true, `${claimed} must match ${actual[0]}`);
+    }
   });
 
   it('drops editorial and particle tokens that carry no identity', () => {

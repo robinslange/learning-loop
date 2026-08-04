@@ -54,6 +54,20 @@ export const env = Object.freeze({
   CLAUDE_PLUGIN_DATA: pick('CLAUDE_PLUGIN_DATA', null),
   CLAUDE_PROJECT_DIR: pick('CLAUDE_PROJECT_DIR', ''),
 
+  // --- Harness ---
+  // Codex sets PLUGIN_ROOT/PLUGIN_DATA for plugin-bundled hooks, and also sets
+  // CLAUDE_PLUGIN_ROOT/CLAUDE_PLUGIN_DATA for compatibility with existing plugin
+  // hooks. Claude Code sets only the CLAUDE_-prefixed pair. PLUGIN_ROOT is
+  // therefore the discriminator. Read it via harness.mjs, not directly.
+  PLUGIN_ROOT: pick('PLUGIN_ROOT', null),
+  PLUGIN_DATA: pick('PLUGIN_DATA', null),
+  CODEX_HOME: pick('CODEX_HOME', null),
+  // Explicit harness name. Codex has no session marker in the shell env it
+  // hands to commands, so install.sh writes this into
+  // `shell_environment_policy.set` in ~/.codex/config.toml. That covers the
+  // script path; PLUGIN_ROOT covers the hook path without any config at all.
+  LL_HARNESS: pick('LL_HARNESS', null),
+
   // --- Host ---
   HOME: homeBase,
   USERPROFILE: pick('USERPROFILE', homeBase),
