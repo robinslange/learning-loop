@@ -237,6 +237,14 @@ test('usageReport: a used event outside the window does not shield the note from
         status: 'used',
         signals: ['read'],
       },
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/hot.md',
+        status: 'ignored',
+        signals: [],
+      },
     ],
   });
   try {
@@ -259,6 +267,16 @@ test('CLI --usage --json emits the aggregation; text mode carries the honesty la
       session_id: 's1',
       top_paths: ['3-permanent/hot.md'],
     })),
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/hot.md',
+        status: 'ignored',
+        signals: [],
+      },
+    ],
   });
   const vault = join(pd, 'vault');
   mkdirSync(join(vault, '3-permanent'), { recursive: true });
@@ -274,8 +292,137 @@ test('CLI --usage --json emits the aggregation; text mode carries the honesty la
 
     const text = spawnSync('node', [REPORT, '--usage'], { env, encoding: 'utf-8' });
     assert.strictEqual(text.status, 0, text.stderr);
-    assert.match(text.stdout, /surfacing alone is never use/);
+    assert.match(text.stdout, /explicit 'ignored' event/);
     assert.match(text.stdout, /3x.*3-permanent\/hot\.md/);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test("usageReport: an 'informed' event with evidence counts as used, tracked apart from engagement", () => {
+  const pd = makePluginData({
+    queries: [1, 2, 3].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      top_paths: ['3-permanent/informed.md', '3-permanent/engaged.md'],
+    })),
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/informed.md',
+        status: 'used',
+        signals: ['informed'],
+        evidence: 'took "gate over-fires on 58%" into the JIT answer',
+      },
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/engaged.md',
+        status: 'used',
+        signals: ['read', 'linked'],
+      },
+    ],
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 3, minIgnored: 1 });
+    assert.strictEqual(r.used_events, 2);
+    assert.strictEqual(r.used_informed_events, 1);
+    assert.strictEqual(r.used_engaged_events, 1);
+    assert.deepStrictEqual(
+      r.surfaced_never_used.map((n) => n.path),
+      [],
+      'a note the session was informed by is used, not an archive candidate',
+    );
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test("loadNoteUsageEvents: 'informed' without evidence is unauditable and counts neither way", () => {
+  const pd = makePluginData({
+    queries: [1, 2, 3].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      top_paths: ['3-permanent/bare.md'],
+    })),
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/bare.md',
+        status: 'used',
+        signals: ['informed'],
+      },
+    ],
+  });
+  try {
+    assert.deepStrictEqual(loadNoteUsageEvents(pd), []);
+    const r = usageReport(pd, { now: NOW, minSurfaced: 3, minIgnored: 1 });
+    assert.strictEqual(r.used_events, 0);
+    assert.strictEqual(r.ignored_events, 0, 'an unevidenced claim is not evidence of non-use');
+    assert.strictEqual(r.unevidenced_informed_events, 1);
+    assert.deepStrictEqual(
+      r.surfaced_never_used.map((n) => n.path),
+      [],
+      'dropping the claim must not promote the note to archive candidate',
+    );
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('usageReport: candidacy needs an explicit ignore, not the absence of a used event', () => {
+  const pd = makePluginData({
+    queries: [1, 2, 3, 4, 5].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      top_paths: ['3-permanent/unevaluated.md'],
+    })),
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 3, minIgnored: 1 });
+    assert.deepStrictEqual(
+      r.surfaced_never_used.map((n) => n.path),
+      [],
+      'no /reflect verdict ever ran on this note — silence is not evidence of non-use',
+    );
+    assert.deepStrictEqual(
+      r.surfaced_unevaluated.map((n) => n.path),
+      ['3-permanent/unevaluated.md'],
+    );
+    assert.strictEqual(r.surfaced_unevaluated[0].surfaced, 5);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('usageReport: a used event with no signals stays used, counted as unspecified', () => {
+  const pd = makePluginData({
+    queries: [1, 2, 3].map((d) => ({
+      ts: daysAgo(d),
+      session_id: 's1',
+      top_paths: ['3-permanent/legacy.md'],
+    })),
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/legacy.md',
+        status: 'used',
+      },
+    ],
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 3, minIgnored: 1 });
+    assert.strictEqual(r.used_events, 1);
+    assert.strictEqual(r.used_unspecified_events, 1);
+    assert.strictEqual(r.used_engaged_events, 0);
+    assert.strictEqual(r.used_informed_events, 0);
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }

@@ -7,9 +7,15 @@
 //                    (rank 0 = body slot, ranks 1..4 = pointer slots).
 //   used side      provenance/events-*.jsonl, two sources unioned:
 //                  · action 'note-usage', status 'used' — the /reflect Step 4.7
-//                    signal (read | edited | linked, model-judged). Read via
-//                    loadNoteUsageEvents so its honesty contract carries
-//                    through: only a literal status:'used' counts.
+//                    signal, model-judged, in two kinds: 'engaged' (read |
+//                    edited | linked) and 'informed' (the note's content
+//                    reached the session's output untouched, evidence string
+//                    required). Read via loadNoteUsageEvents so its honesty
+//                    contract carries through: only a literal status:'used'
+//                    counts, and unevidenced 'informed' claims are dropped
+//                    upstream. hits_by_engagement splits the hits so a
+//                    precision number leaning on the read-only signal is
+//                    visible instead of assumed.
 //                  · action 'vault-edit' | 'vault-write' — a note the session
 //                    actually authored/edited, keyed by (session_id, target).
 //                    This widens "used" past the /reflect gate: note-usage only
@@ -146,19 +152,35 @@ function loadVaultEditEvents(pluginData) {
   return out;
 }
 
-// (session_id, path) pairs a session USED, at or after epochMs. Union of the
-// reflect note-usage 'used' signal and vault authoring (edit/write) events.
+// (session_id, path) pairs a session USED, at or after epochMs, mapped to the
+// engagement kind that earned the pair: 'engaged' | 'informed' | 'unspecified'
+// (all from reflect note-usage) or 'vault_edit'. Union of the reflect signal
+// and vault authoring (edit/write) events.
 // `bySource` keeps the counts separate so a report can show what each channel
-// contributed without conflating the reflect-gated and un-gated signals.
+// contributed without conflating the reflect-gated and un-gated signals, and
+// splits note-usage by engagement so a precision number resting on the
+// read-only 'informed' signal is visible as such rather than assumed.
 function loadUsedPairs(pluginData, epochMs) {
-  const set = new Set();
+  const byPair = new Map();
   const sessions = new Set();
-  const bySource = { note_usage: 0, vault_edit: 0 };
+  const bySource = {
+    note_usage: 0,
+    note_usage_engaged: 0,
+    note_usage_informed: 0,
+    note_usage_unspecified: 0,
+    vault_edit: 0,
+  };
 
-  const add = (sessionId, path, source) => {
+  const add = (sessionId, path, kind) => {
     const key = `${sessionId} ${path}`;
-    if (!set.has(key)) bySource[source]++;
-    set.add(key);
+    if (!byPair.has(key)) {
+      if (kind === 'vault_edit') bySource.vault_edit++;
+      else {
+        bySource.note_usage++;
+        bySource[`note_usage_${kind}`]++;
+      }
+      byPair.set(key, kind);
+    }
     sessions.add(sessionId);
   };
 
@@ -166,14 +188,14 @@ function loadUsedPairs(pluginData, epochMs) {
     if (u.status !== 'used') continue;
     const t = Date.parse(u.ts);
     if (!Number.isFinite(t) || t < epochMs) continue;
-    add(u.session_id, u.path, 'note_usage');
+    add(u.session_id, u.path, u.engagement || 'unspecified');
   }
   for (const e of loadVaultEditEvents(pluginData)) {
     const t = Date.parse(e.ts);
     if (!Number.isFinite(t) || t < epochMs) continue;
     add(e.session_id, e.path, 'vault_edit');
   }
-  return { set, sessions, bySource };
+  return { used: byPair, sessions, bySource };
 }
 
 const pct = (hit, total) => (total === 0 ? null : hit / total);
@@ -191,7 +213,7 @@ export function injectionPrecision(pluginData, opts = {}) {
   const epochMs = Date.parse(epoch);
 
   const injections = loadRankedInjections(pluginData, epochMs);
-  const { set: used, sessions: usedSessions, bySource } = loadUsedPairs(pluginData, epochMs);
+  const { used, sessions: usedSessions, bySource } = loadUsedPairs(pluginData, epochMs);
 
   // A session can only contribute a hit if it also has usage provenance; without
   // a usage event the whole burst is unjoinable (not "ignored", just unknown).
@@ -215,8 +237,11 @@ export function injectionPrecision(pluginData, opts = {}) {
   const perRank = Array.from({ length: MAX_RANK }, () => ({ total: 0, hit: 0 }));
   const perLevel = { body: { total: 0, hit: 0 }, pointer: { total: 0, hit: 0 } };
   const overall = { total: 0, hit: 0 };
+  const hitsByEngagement = { engaged: 0, informed: 0, unspecified: 0, vault_edit: 0 };
   for (const i of joinable) {
-    const hit = used.has(`${i.session_id} ${i.path}`) ? 1 : 0;
+    const kind = used.get(`${i.session_id} ${i.path}`);
+    const hit = kind ? 1 : 0;
+    if (kind) hitsByEngagement[kind]++;
     if (i.rank < MAX_RANK) {
       perRank[i.rank].total++;
       perRank[i.rank].hit += hit;
@@ -233,7 +258,8 @@ export function injectionPrecision(pluginData, opts = {}) {
       ranked_injection_bursts_rows: injections.length,
       injection_sessions: injSessions.size,
       usage_sessions: usedSessions.size,
-      used_pairs_by_source: bySource, // note_usage vs vault_edit contribution
+      used_pairs_by_source: bySource, // note_usage (by engagement) vs vault_edit
+      hits_by_engagement: hitsByEngagement, // what kind of evidence each hit rests on
       joinable_sessions: joinableSessions.size,
       joinable_distinct_surfaced: joinable.length,
       total_hits: overall.hit,
@@ -268,8 +294,13 @@ function printReport(report) {
     `  Injection bursts:      ${d.ranked_injection_bursts_rows} rows  (${d.injection_sessions} sessions)`,
   );
   console.log(`  Sessions w/ usage:     ${d.usage_sessions}`);
+  const src = d.used_pairs_by_source;
   console.log(
-    `  Used pairs by source:  note-usage ${d.used_pairs_by_source.note_usage}, vault-edit ${d.used_pairs_by_source.vault_edit}`,
+    `  Used pairs by source:  note-usage ${src.note_usage} (${src.note_usage_engaged} engaged, ${src.note_usage_informed} informed, ${src.note_usage_unspecified} unspecified), vault-edit ${src.vault_edit}`,
+  );
+  const h = d.hits_by_engagement;
+  console.log(
+    `  Hits by evidence:      ${h.engaged} engaged, ${h.informed} informed, ${h.unspecified} unspecified, ${h.vault_edit} vault-edit`,
   );
   console.log(
     `  Joinable sessions:     ${d.joinable_sessions}  (${d.joinable_distinct_surfaced} distinct surfaced, ${d.total_hits} hits)`,

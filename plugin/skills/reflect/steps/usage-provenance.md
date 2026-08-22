@@ -1,9 +1,11 @@
 # Step 4.7: Retrieval Usage Provenance
 
 Close the surfacing→use loop: for every vault note that retrieval surfaced to
-this session, record whether the session actually engaged with it. These
-events are what `/health`'s "frequently surfaced, never used" check aggregates
-— without them the telemetry can only count surfacing.
+this session, record whether the session actually used it — either by acting on
+the note or by drawing on its content. These
+events are what `/health`'s surfaced-vs-used check and the injection-precision
+join aggregate — without them the telemetry can only count surfacing, and a
+note nobody ever judged is indistinguishable from one that was judged useless.
 
 Run this step on every `/reflect`, even when Step 4.6 was skipped (a session
 that wrote no notes can still have used or ignored its injected context).
@@ -38,7 +40,10 @@ reconstruct paths from memory.
 
 ## 4.7.b: Classify each note as used or ignored
 
-A note is **used** only if at least one of these happened in THIS session:
+A note is **used** when either kind of evidence fired in THIS session. Record
+which kind — they are counted separately downstream.
+
+**engaged** — you acted on the note itself:
 
 - **read** — you personally opened the note's content (Read tool or `cat`).
   Pipeline-mandated reads do NOT count: the Step 3 duplicate-check read is a
@@ -54,20 +59,39 @@ A note is **used** only if at least one of these happened in THIS session:
   link appears in the note body you dictated vs. a trailing autolink block you
   did not write. When in doubt, do not count it.
 
+**informed** — the note's content reached what you said or did, without the
+note being touched. A claim, constraint, number, or distinction from it shaped
+an answer, a recommendation, a piece of work, or a decision this session. This
+is the read-only path the vault exists for: most working retrieval leaves no
+edit behind, so scoring only `engaged` marks the normal success mode as
+failure.
+
+It carries one hard requirement, because a self-reported influence claim is
+only worth anything if someone else can check it: emit an `evidence` field
+naming **the specific claim you took and where it landed**. A `Recall:` or
+`Transfer:` line quoting the note's insight is the clearest case — cite it.
+If you cannot name the claim and the place it landed, you were not informed by
+it: classify ignored. (An `informed` event with an empty or missing `evidence`
+field is discarded by the aggregator — it counts as neither use nor non-use.)
+
 Everything else is **ignored**. Honesty rules — these keep the downstream
 report meaningful:
 
-- Injection alone is never use. A note body sitting in your context at
-  session start counts as ignored unless one of the three signals above also
-  fired. Same for a `level: "pointer"` entry you never opened.
-- Appearing in search results is never use. Parsing reflect-scan similarity
-  scores does not make the matched notes used — only reading/editing/linking
-  them does.
+- Surfacing alone is never use. A note body sitting in your context at session
+  start, or a note that ranked in a search result, is ignored unless one of the
+  signals above also fired. Injection choosing a note cannot also be the
+  evidence that the note worked.
+- Resemblance is not influence. "Topically relevant", "consistent with what I
+  said", or "confirmed something I already knew and changed nothing" is
+  ignored. `informed` needs the note to have contributed something the answer
+  would otherwise have lacked.
 - Machine-generated signals are never use. Hook-chain-triggered reads (duplicate
   gate, edge-infer scan) and autolink-appended wikilinks fire without model
   engagement and must be excluded.
-- When unsure, classify as ignored. A false "used" poisons the
-  surfaced-never-used candidate list; a false "ignored" merely delays it.
+- When unsure, classify as ignored. Explicit ignores are what promote a note to
+  the deepen/archive candidate list, and a false "used" hides a dead note there
+  — but a false "informed" is worse than a false "ignored", because it inflates
+  the injector's measured precision with evidence nobody can audit.
 
 ## 4.7.c: Emit one provenance event per surfaced note
 
@@ -78,9 +102,20 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","ski
 ```
 
 - `status`: `"used"` or `"ignored"`.
-- `signals`: the subset of `["read","edited","linked"]` that fired; `[]` when
-  ignored.
+- `signals`: the subset of `["read","edited","linked","informed"]` that fired;
+  `[]` when ignored.
+- `evidence`: REQUIRED when `signals` contains `"informed"` — the claim you
+  took and where it landed. Omit otherwise.
 - `surfaced_via`: the `via` array from 4.7.a.
+
+`evidence` is free prose, so an `informed` event MUST go through the stdin form
+— quoting it inline will break on the first apostrophe:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" - <<'JSON'
+{"agent":"reflect","skill":"reflect","action":"note-usage","target":"<path>","status":"used","signals":["informed"],"evidence":"used its 58% over-fire figure to argue against query expansion in the JIT answer","surfaced_via":["injected"]}
+JSON
+```
 
 Batch the emissions in a single Bash call (one `provenance-emit.js` line per
 note) to avoid N round-trips.
@@ -90,7 +125,7 @@ note) to avoid N round-trips.
 Add one line to the Step 5 summary:
 
 ```
-Retrieval usage: N used / M ignored of K surfaced
+Retrieval usage: N used (E engaged / I informed) / M ignored of K surfaced
 ```
 
 Omit the line when nothing was surfaced.
