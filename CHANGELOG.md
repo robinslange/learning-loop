@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.40.2
+
 ### Changed
 
 - **Retrieval usage scored the vault's primary success mode as failure.** A note counted as `used` only if the session read, edited, or linked it — an _authoring_ signal. But the working path for a second brain is read-only: the note is injected, it constrains the answer, nothing is written back. Every one of those sessions was recorded as `ignored`, so `surfaced_never_used` preferentially collected the notes that were doing their job and offered them for archival. `/reflect` Step 4.7 now records two kinds of use: **engaged** (read | edited | linked, unchanged) and **informed** (the note's content reached the session's output untouched). `informed` requires a non-empty `evidence` field naming the claim taken and where it landed — a self-reported influence claim is only admissible if a third party can check it against the transcript — and an `informed` event without evidence is discarded as unauditable rather than folded either way. The three counts stay separate through `usageReport` (`used_engaged_events` / `used_informed_events` / `used_unspecified_events` for pre-signals records) and through the injection-precision join (`hits_by_engagement`), so a precision number leaning on the softer signal announces itself instead of being assumed.
