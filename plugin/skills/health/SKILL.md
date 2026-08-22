@@ -172,21 +172,24 @@ Run:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs --usage --json
 ```
 
-Parse the JSON. Two candidate lists:
+Parse the JSON. Two candidate lists plus one coverage list:
 
-- **`surfaced_never_used`**: notes surfaced repeatedly by injection/retrieval with zero `used` provenance events. These are deepen-or-archive candidates — either the note isn't earning its retrieval rank (sharpen/`/deepen` it) or it's noise crowding out better hits (archive it).
+- **`surfaced_never_used`**: notes surfaced repeatedly AND explicitly judged unused (`ignored_events >= min_ignored`) by `/reflect`. These are deepen-or-archive candidates — either the note isn't earning its retrieval rank (sharpen/`/deepen` it) or it's noise crowding out better hits (archive it).
+- **`surfaced_unevaluated`**: surfaced just as often, but no `/reflect` session ever judged them. This is a telemetry gap, NOT a candidate list — report it as coverage ("N notes surfaced repeatedly have never been evaluated; run `/reflect` to close the loop") and never recommend archiving from it.
 - **`never_surfaced`**: content notes (0-inbox, 1-fleeting, 2-literature, 3-permanent) never retrieved by search in the window. These are candidates for archiving, but only when injection coverage is ruled out — do NOT recommend archiving based on `never_surfaced` alone, since the injected channel under-records (bursts pruned before a ledger sync are lost). Say "never retrieved by search" not "never seen".
 
 Honest framing — carry these caveats into the output verbatim, do not soften them:
 
-- "Used" only counts explicit `note-usage` events from `/reflect` Step 4.7. Sessions that never ran that check contribute no events, so "never used" includes "never evaluated" — surfacing alone is never counted as use, and a note the model saw but never opened counts as ignored.
+- "Used" only counts explicit `note-usage` events from `/reflect` Step 4.7, in two kinds: `used_engaged_events` (read/edited/linked) and `used_informed_events` (the note's content reached the session's output untouched, with evidence). Report both — a used-rate resting mostly on `informed` rests on model self-report, auditable but softer than an edit.
+- Absence of a verdict is not a verdict. Sessions that never ran the check contribute no events; those notes land in `surfaced_unevaluated`, not in the candidate list. Never describe them as "never used".
+- If `unevidenced_informed_events` is above zero, say so: that many `informed` claims arrived with no evidence field and were discarded as unauditable — counted as neither use nor non-use.
 - If `coverage_limited` is true, the logs span fewer days than the window: report "never retrieved in `coverage_days`d of logs", not "in `window_days`d".
 - `never_surfaced` measures retrieval-only. Do not frame these as "never seen" or recommend archiving without asking the user to confirm the note was not recently injected.
 
 If `coverage_days` is null (no surfacing telemetry yet), skip this step silently.
 
 **Light:** counts + top 5 of each list.
-**Deep:** full `surfaced_never_used` list with surfaced counts and explicit-ignore counts; `never_surfaced` count + first 20 paths.
+**Deep:** full `surfaced_never_used` list with surfaced counts and explicit-ignore counts; `surfaced_unevaluated` count + top 5; `never_surfaced` count + first 20 paths.
 
 ### Step 8: Present Dashboard
 
@@ -203,12 +206,12 @@ Vault Health: YYYY-MM-DD
   Stale inbox:     N notes older than 14 days
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
-  Retrieval usage: N surfaced-never-used, M never retrieved by search in Kd of logs
+  Retrieval usage: N surfaced-then-ignored, U unevaluated, M never retrieved by search in Kd of logs
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Never-used" means no recorded use — see the Step 7.6 caveats.
+Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
@@ -230,7 +233,7 @@ If `--auto` flag is NOT set:
 - **Ghost dupes:** Ask "Delete N ghost duplicates from inbox? (y/n)": wait for approval, then delete
 - **Broken links:** Ask "Remove N broken wikilinks? (y/n)": wait for approval, then fix
 - **Near-dupes, orphans, stale, embeddings:** Flag only with recommended next command (`/inbox`, `/verify`, `/deepen`, or "re-index in Obsidian")
-- **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-never-used notes worth sharpening, and archival (move to `_archive/`, ask first) for persistently-ignored notes. For `never_surfaced` notes, do NOT recommend archiving based on retrieval telemetry alone — the injected channel under-records, so absence from search logs does not mean absence from sessions. Ask the user whether the note feels useful before suggesting archival.
+- **Retrieval usage:** Flag only, never auto-fix. Recommend `/deepen "<note>"` for surfaced-then-ignored notes worth sharpening, and archival (move to `_archive/`, ask first) for persistently-ignored notes. Never recommend anything from `surfaced_unevaluated` — the fix there is running `/reflect`, not touching the notes. For `never_surfaced` notes, do NOT recommend archiving based on retrieval telemetry alone — the injected channel under-records, so absence from search logs does not mean absence from sessions. Ask the user whether the note feels useful before suggesting archival.
 
 ### Step 10: Summary
 

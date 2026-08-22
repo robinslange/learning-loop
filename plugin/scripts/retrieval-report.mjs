@@ -58,15 +58,29 @@ function printUsageSection() {
     ? `last ${report.window_days}d window, but logs only cover ${report.coverage_days}d`
     : `last ${report.window_days}d`;
   console.log(`  Window:          ${coverage}`);
+  const breakdown = [
+    `${report.used_engaged_events} engaged`,
+    `${report.used_informed_events} informed`,
+  ];
+  if (report.used_unspecified_events > 0) {
+    breakdown.push(`${report.used_unspecified_events} unspecified`);
+  }
   console.log(
-    `  Usage events:    ${report.used_events} used / ${report.ignored_events} ignored across ${report.evaluated_notes} notes (from /reflect)`,
+    `  Usage events:    ${report.used_events} used (${breakdown.join(' / ')}) / ${report.ignored_events} ignored across ${report.evaluated_notes} notes (from /reflect)`,
   );
+  if (report.unevidenced_informed_events > 0) {
+    console.log(
+      `                   ${report.unevidenced_informed_events} 'informed' events dropped for carrying no evidence (counted neither way)`,
+    );
+  }
   console.log(`  Surfaced notes:  ${report.surfaced_notes} in window`);
   console.log();
 
-  console.log(`  Frequently surfaced, never used (deepen/archive candidates):`);
-  console.log(`  ('used' requires an explicit /reflect usage event; sessions without`);
-  console.log(`   that check count as no-use — surfacing alone is never use)`);
+  console.log(`  Frequently surfaced, then explicitly ignored (deepen/archive candidates):`);
+  console.log(
+    `  (a candidate needs >=${report.min_ignored} explicit 'ignored' event from /reflect; a note no`,
+  );
+  console.log(`   session ever judged is unevaluated, which is not evidence of non-use)`);
   if (report.surfaced_never_used.length === 0) {
     console.log('    (none)');
   }
@@ -77,6 +91,17 @@ function printUsageSection() {
     );
   }
   console.log();
+
+  if (report.surfaced_unevaluated.length > 0) {
+    const top = report.surfaced_unevaluated[0];
+    console.log(
+      `  Surfaced repeatedly but never evaluated: ${report.surfaced_unevaluated.length} notes (up to ${top.surfaced}x)`,
+    );
+    console.log(
+      `  (no /reflect ran the usage check on them — telemetry gap, not archive candidates)`,
+    );
+    console.log();
+  }
 
   if (report.never_surfaced.length > 0) {
     const span = report.coverage_limited

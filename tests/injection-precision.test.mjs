@@ -214,3 +214,41 @@ test('records before the epoch are excluded from both sides', () => {
   assert.equal(r.overall.total, 1);
   assert.equal(r.overall.hit, 1);
 });
+
+test('hits are attributed by engagement, so precision resting on informed shows itself', () => {
+  const informed = (session_id, ts, target) => ({
+    ts,
+    session_id,
+    action: 'note-usage',
+    target,
+    status: 'used',
+    signals: ['informed'],
+    evidence: 'quoted its threshold claim in the answer',
+  });
+  const engaged = (session_id, ts, target) => ({
+    ts,
+    session_id,
+    action: 'note-usage',
+    target,
+    status: 'used',
+    signals: ['read'],
+  });
+  const pd = makePluginData({
+    injections: [
+      burst('s1', afterEpoch, [
+        { path: '3-permanent/a.md', level: 'body' },
+        { path: '3-permanent/b.md', level: 'pointer' },
+      ]),
+    ],
+    provenance: [
+      informed('s1', afterEpoch, '3-permanent/a.md'),
+      engaged('s1', afterEpoch, '3-permanent/b.md'),
+    ],
+  });
+  const r = injectionPrecision(pd, { epoch: EPOCH });
+  assert.equal(r.overall.hit, 2, 'an informed note is a hit — the note reached the output');
+  assert.equal(r.diagnostics.hits_by_engagement.informed, 1);
+  assert.equal(r.diagnostics.hits_by_engagement.engaged, 1);
+  assert.equal(r.diagnostics.used_pairs_by_source.note_usage_informed, 1);
+  assert.equal(r.diagnostics.used_pairs_by_source.note_usage_engaged, 1);
+});
