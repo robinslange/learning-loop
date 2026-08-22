@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The CI quality gate crashed instead of reporting, on the one path it exists to handle.** `bench.mjs` demotes retrieval-quality regressions to warnings when the stored baseline was blessed on a different OS/arch (ONNX arithmetic diverges between arm64 NEON and x86_64 AVX2). That warning branch read `baseline.quality.provenance.platform`, but `baseline` is block-scoped to the `--compare` loader — so the moment the branch fired it threw `ReferenceError: baseline is not defined` and the job exited 1. The committed baseline is `darwin/arm64` and CI runs `linux/x64`, so every quality regression on CI was cross-platform, and the gate had been failing this way since the baseline was committed (v1.40.1 shows the same failure). `compareBaselines` now carries `currentPlatform` / `baselinePlatform` / `crossPlatform` on the comparison object it returns, and the reporter reads them from there. Verified by rerunning the eval against a platform-mismatched baseline: the branch now prints both platform names and exits 0.
+
 ## v1.40.2
 
 ### Changed

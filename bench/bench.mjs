@@ -475,11 +475,21 @@ const BUDGETS = {
 // ---------------------------------------------------------------------------
 
 function compareBaselines(current, baseline) {
-  const report = { regressions: [], improvements: [], qualityRegressions: [] };
-
   const currentPlatform = current.quality?.provenance?.platform;
   const baselinePlatform = baseline.quality?.provenance?.platform;
   const crossPlatform = currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform;
+
+  // The platforms ride along in the report: the gate reporter runs outside the
+  // scope that holds `baseline`, and reading them off the comparison is the
+  // only way it can name them without the file being loaded twice.
+  const report = {
+    regressions: [],
+    improvements: [],
+    qualityRegressions: [],
+    currentPlatform,
+    baselinePlatform,
+    crossPlatform: crossPlatform || undefined,
+  };
 
   function check(name, curr, prev, thresholdPct = 20) {
     if (curr == null || prev == null || prev === 0) return;
@@ -712,8 +722,8 @@ async function main() {
     const softRegressions = qualityRegressions.filter((r) => r.crossPlatform);
 
     if (softRegressions.length > 0) {
-      const bp = baseline.quality?.provenance?.platform ?? 'unknown';
-      const cp = output.quality?.provenance?.platform ?? 'unknown';
+      const bp = output.comparison?.baselinePlatform ?? 'unknown';
+      const cp = output.comparison?.currentPlatform ?? 'unknown';
       process.stderr.write(
         `\nWARNING: ${softRegressions.length} quality regression(s) demoted to warning` +
           ` — baseline platform (${bp}) differs from current (${cp}).\n` +
