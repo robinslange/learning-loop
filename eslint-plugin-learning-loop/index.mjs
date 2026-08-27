@@ -1,6 +1,7 @@
 // eslint-plugin-learning-loop/index.mjs
 // Local ESLint plugin for learning-loop conventions.
-// Five rules. `no-raw-lockfile` and `no-url-pathname` run at "error";
+// Six rules. `no-raw-lockfile`, `no-url-pathname` and
+// `no-handwritten-trust-envelope` run at "error";
 // `no-process-env-outside-env-module`, `no-empty-catch` and `no-direct-jsonparse`
 // are still "off" pending consumer migration — each currently fails on shipped
 // code. See eslint.config.mjs for the live settings and ARCHITECTURE.md
@@ -11,6 +12,7 @@ import noEmptyCatch from './rules/no-empty-catch.mjs';
 import noDirectJsonparse from './rules/no-direct-jsonparse.mjs';
 import noRawLockfile from './rules/no-raw-lockfile.mjs';
 import noUrlPathname from './rules/no-url-pathname.mjs';
+import noHandwrittenTrustEnvelope from './rules/no-handwritten-trust-envelope.mjs';
 
 export default {
   meta: { name: 'eslint-plugin-learning-loop', version: '0.0.0' },
@@ -20,5 +22,6 @@ export default {
     'no-direct-jsonparse': noDirectJsonparse,
     'no-raw-lockfile': noRawLockfile,
     'no-url-pathname': noUrlPathname,
+    'no-handwritten-trust-envelope': noHandwrittenTrustEnvelope,
   },
 };

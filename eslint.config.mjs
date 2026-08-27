@@ -21,6 +21,7 @@ export default [
       'learning-loop/no-direct-jsonparse': 'off',
       'learning-loop/no-raw-lockfile': 'error',
       'learning-loop/no-url-pathname': 'error',
+      'learning-loop/no-handwritten-trust-envelope': 'error',
     },
   },
   {

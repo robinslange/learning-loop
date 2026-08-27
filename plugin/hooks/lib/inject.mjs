@@ -13,7 +13,7 @@ import { SECRET_PATTERNS } from '../../scripts/lib/secret-patterns.mjs';
 // The three clauses of UNTRUSTED_NOTE are load-bearing and measured
 // (agents-shared/adversarial-content.md, spike/verify-framing): delimiters
 // ALONE scored worse than no guard at all, so do not reduce this to the tags.
-import { UNTRUSTED_NOTE } from '../../scripts/lib/origin-envelope.mjs';
+import { UNTRUSTED_NOTE, sealedDelimiters } from '../../scripts/lib/origin-envelope.mjs';
 import { stripPointerContent, deriveOrigin } from '../../scripts/lib/row-origin.mjs';
 import { stripFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
 import { readFileSync } from 'node:fs';
@@ -119,13 +119,16 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
   const pointers = filtered.filter((h, i) => i !== bodyIdx && !levelOf(h.path)).slice(0, 4);
   if (!top && pointers.length === 0) return null;
 
+  // Note bodies and peer-controlled titles go in verbatim; the delimiter is
+  // nonced so neither can name the terminator.
+  const { open, close } = sealedDelimiters('vault-note', 'trust="untrusted-data"');
   const injectedVault = [];
   const lines = [
     top
       ? `## From your vault (top match: ${top.title}, match score ${Number(top.score).toFixed(2)})`
       : '## From your vault (pointers only)',
     '',
-    '<vault-note trust="untrusted-data">',
+    open,
   ];
   if (top) {
     lines.push(truncateAtSentenceBoundary(top.body, 300));
@@ -139,7 +142,7 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
       injectedVault.push({ path: p.path, level: 'pointer', score: p.score });
     }
   }
-  lines.push('</vault-note>');
+  lines.push(close);
 
   return {
     additionalContext: [DIRECTIVE, UNTRUSTED_NOTE, lines.join('\n')].join('\n\n'),
