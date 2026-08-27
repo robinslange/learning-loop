@@ -62,14 +62,30 @@ rm -rf ~/.claude/plugins/data/learning-loop-learning-loop-marketplace/  # purge 
 
 ### Disabling parts without uninstalling
 
-To keep commands but silence the hooks, use `"disableAllHooks": true` in
-`~/.claude/settings.json`. This is a blunt instrument — it disables every
-plugin's hooks, not just learning-loop's — but it's the mechanism Claude Code
-exposes for hook suppression. Claude Code's `permissions.deny` array accepts
-tool-name rules (`Bash(...)`, `Read(...)`, `WebFetch`, etc.); there is no
-documented per-hook deny matcher at this Claude Code version. See the
+To turn off individual hooks, list their names under `hooks.disabled` in
+`~/.claude/plugins/data/learning-loop-learning-loop-marketplace/config.json`:
+
+```json
+{ "hooks": { "disabled": ["session-label", "post-search-tracking"] } }
+```
+
+The names are the hook script basenames in `${CLAUDE_PLUGIN_ROOT}/hooks/`. A
+disabled hook exits before reading its input and emits nothing, which every
+registered event reads as "no opinion" — a disabled `PreToolUse` hook allows
+the tool rather than blocking it. The config lives in plugin data, so it
+survives updates; hand-editing `hooks.json` in the plugin cache does not.
+
+To silence hooks from every plugin at once, use `"disableAllHooks": true` in
+`~/.claude/settings.json`. That is the blunt instrument — it is not
+learning-loop-specific — but it is the mechanism Claude Code itself exposes.
+Claude Code's `permissions.deny` array accepts tool-name rules (`Bash(...)`,
+`Read(...)`, `WebFetch`, etc.); there is no documented per-hook deny matcher at
+this Claude Code version. See the
 [permissions documentation](https://docs.anthropic.com/en/docs/claude-code/settings)
 for the current syntax if you want finer control.
+
+The per-hook table, with what each one costs to turn off, ships with the plugin
+at `${CLAUDE_PLUGIN_ROOT}/README.md` so it is readable without network access.
 
 ## Capture surface & trust model
 
