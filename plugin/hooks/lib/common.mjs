@@ -12,7 +12,7 @@ import {
   closeSync,
   fstatSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import {
   resolvePluginData,
   getVaultPath,
@@ -140,7 +140,25 @@ export function readFileTail(path, maxBytes) {
   }
 }
 
+// Per-component disable: `hooks.disabled: ["session-label", ...]` in
+// config.json, matched against the hook script's basename. The gate lives in
+// readStdin() because that is the one call every hook makes before it does
+// anything — putting it at each entry point instead would mean nine places to
+// remember, and a hook added later would silently opt out of it.
+export function hookName() {
+  return basename(process.argv[1] || '', '.js');
+}
+
+export function isHookDisabled(name = hookName()) {
+  const disabled = getConfig()?.hooks?.disabled;
+  return Array.isArray(disabled) && disabled.includes(name);
+}
+
 export function readStdin() {
+  // Exit silently, before reading: no stdout means "no opinion" for every hook
+  // event learning-loop registers, so a disabled PreToolUse hook allows the
+  // tool rather than blocking it.
+  if (isHookDisabled()) process.exit(0);
   return new Promise((res) => {
     let data = '';
     process.stdin.setEncoding('utf8');
