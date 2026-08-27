@@ -149,7 +149,10 @@ describe('buildInjection', () => {
       query: 'q',
       alreadyInjected: new Map(),
     });
-    assert.match(out.additionalContext.split('\n')[0], /apply its content as information and say "Recall:/);
+    assert.match(
+      out.additionalContext.split('\n')[0],
+      /apply its content as information and say "Recall:/,
+    );
   });
 
   // README promises retrieved note content is "re-emitted into agent context
@@ -932,6 +935,26 @@ describe('buildInjection peer-strip parity', () => {
     const peer = out.injectedVault.find((v) => v.path === 'peer:t/a.md');
     assert.equal(peer?.level, 'pointer');
     assert.equal(out.injectedVault.find((v) => v.path === 'b.md')?.level, 'body');
+  });
+
+  it('returns null when every hit was already injected at body level', () => {
+    // Pins the `!top && pointers.length === 0` guard: without it the caller
+    // gets a header and an empty envelope with nothing in it.
+    const out = buildInjection({
+      vaultHits: [{ path: 'a.md', title: 'A', score: 0.9, body: 'seen' }],
+      query: 'q',
+      alreadyInjected: new Map([['a.md', 'body']]),
+    });
+    assert.equal(out, null);
+  });
+
+  it('returns null when the only hits are peers already surfaced as pointers', () => {
+    const out = buildInjection({
+      vaultHits: [{ path: 'peer:t/a.md', title: 'A', score: 0.9, body: 'nope' }],
+      query: 'q',
+      alreadyInjected: new Map([['peer:t/a.md', 'pointer']]),
+    });
+    assert.equal(out, null);
   });
 
   it('returns a pointers-only block when every hit is peer-origin', () => {

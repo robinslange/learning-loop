@@ -28,7 +28,13 @@ function jsonResponse(body) {
 }
 
 function redirectTo(location) {
-  return { ok: false, status: 302, headers: new Headers({ location }), json: async () => null, text: async () => '' };
+  return {
+    ok: false,
+    status: 302,
+    headers: new Headers({ location }),
+    json: async () => null,
+    text: async () => '',
+  };
 }
 
 beforeEach(() => {
@@ -73,7 +79,9 @@ describe('sources/http SSRF guard', () => {
 
   it('passes an allowed URL through and returns the parsed body', async () => {
     stubFetch(() => jsonResponse({ message: 'ok' }));
-    assert.deepEqual(await fetchJSON('https://api.crossref.org/works/10.1000/x'), { message: 'ok' });
+    assert.deepEqual(await fetchJSON('https://api.crossref.org/works/10.1000/x'), {
+      message: 'ok',
+    });
     assert.equal(calls.length, 1);
   });
 
@@ -85,7 +93,16 @@ describe('sources/http SSRF guard', () => {
   });
 
   it('returns null on a non-2xx terminal response', async () => {
-    stubFetch(() => ({ ok: false, status: 404, headers: new Headers(), json: async () => null, text: async () => '' }));
+    // The body must be non-null, or `json: async () => null` satisfies the
+    // assertion on its own and the case passes with the ok-check removed.
+    stubFetch(() => ({
+      ok: false,
+      status: 404,
+      headers: new Headers(),
+      json: async () => ({ error: 'not found' }),
+      text: async () => 'not found',
+    }));
     assert.equal(await fetchJSON('https://api.crossref.org/works/missing'), null);
+    assert.equal(await fetchXML('https://api.crossref.org/works/missing'), null);
   });
 });
