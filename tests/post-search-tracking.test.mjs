@@ -5,6 +5,7 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, existsSync } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'post-search-tracking.js');
 const runId = randomBytes(8).toString('hex');
@@ -82,6 +83,33 @@ describe('post-search-tracking', () => {
     });
 
     assert.equal(readRetrieval('episodic-queries').length, 0);
+  });
+
+  it('scrubs secrets out of the logged query', () => {
+    run({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'mcp__plugin_episodic-memory_episodic-memory__search',
+      tool_input: { query: 'why did AKIA1234567890ABCDEF stop working' },
+      tool_response: { results: [] },
+    });
+
+    const events = readRetrieval('episodic-queries');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].query, 'why did [REDACTED] stop working');
+  });
+
+  it('truncates the logged query to the shared prompt slice', () => {
+    const query = 'a'.repeat(500);
+    run({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'mcp__plugin_episodic-memory_episodic-memory__search',
+      tool_input: { query },
+      tool_response: { results: [] },
+    });
+
+    const events = readRetrieval('episodic-queries');
+    assert.equal(events.length, 1);
+    assert.equal(events[0].query.length, HookConfig.PROMPT_SLICE_CHARS);
   });
 
   it('exits 0 on malformed input (defensive)', () => {
