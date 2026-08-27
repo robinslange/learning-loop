@@ -7,7 +7,7 @@ import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
 import { loadSupersessionsCached, matchSupersessions } from '../scripts/lib/edges.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
-import { scrubSecrets } from './lib/inject.mjs';
+import { scrubForLog } from './lib/inject.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 
@@ -44,7 +44,7 @@ runHook(async ({ tool, input }) => {
     emitRetrieval('episodic-queries', {
       type: 'episodic-search',
       tool,
-      query: scrubSecrets(query.slice(0, HookConfig.PROMPT_SLICE_CHARS)),
+      query: scrubForLog(query, HookConfig.PROMPT_SLICE_CHARS),
     });
   }
 

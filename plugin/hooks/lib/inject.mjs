@@ -28,6 +28,16 @@ export function scrubSecrets(text) {
   return result;
 }
 
+// Build a log-safe excerpt of user-authored text. Scrub FIRST, then cap: a
+// pattern whose match is longer than the cap can never fire on a pre-sliced
+// string, and the PEM key pattern — which needs its -----END----- terminator —
+// is always longer than any cap we use. Both callers had it the other way and
+// persisted raw key material. One function so a third caller cannot get the
+// order wrong again.
+export function scrubForLog(text, max) {
+  return scrubSecrets(String(text ?? '')).slice(0, max);
+}
+
 function truncateAtSentenceBoundary(text, maxTokens) {
   const charLimit = maxTokens * 4;
   if (text.length <= charLimit) return text;

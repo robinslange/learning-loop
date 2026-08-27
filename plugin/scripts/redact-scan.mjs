@@ -11,9 +11,14 @@ const TEXT_EXTENSIONS = new Set(['.jsonl', '.json', '.md', '.log', '.txt']);
 // narrower regexes than the shared SECRET_PATTERNS (tuned for a wide net on a
 // hard block) — reusing those bodies verbatim here would flag ordinary
 // hyphenated prose (e.g. "sk-learning-rate-was-set-to-low") as an openai-key.
-// Every kind below still comes from the shared vocabulary (asserted at load
-// time) so the two lists cannot silently drift apart; only 'openai-key' has
-// no shared-module counterpart, since it covers a redact-scan-specific shape.
+// The scrubber keeps secrets out of new records; this scanner finds what
+// earlier bugs already wrote. They are two halves of one promise, so the check
+// below runs BOTH ways: no kind here may be absent from the shared vocabulary,
+// and no shared kind may be missing a counterpart here. A one-way check let
+// 'pem-key' live in the scrubber and not the scanner, so --redact reported
+// clean on files holding private keys. 'openai-key' is the one documented
+// exception: it covers a redact-scan-specific shape with no shared analogue.
+const SCANNER_ONLY = new Set(['openai-key']);
 const SHARED_KINDS = new Set(SECRET_PATTERNS.map((p) => p.kind));
 const PATTERNS = [
   { kind: 'github-pat', re: /\bghp_[A-Za-z0-9]{30,}\b/g },
@@ -21,12 +26,29 @@ const PATTERNS = [
   { kind: 'anthropic-key', re: /\bsk-ant-api[A-Za-z0-9_-]{20,}\b/g },
   { kind: 'slack-token', re: /\bxox[baprs]-[A-Za-z0-9-]{8,}\b/g },
   { kind: 'jwt', re: /\beyJ[A-Za-z0-9_-]{8,}\b/g },
+  { kind: 'aws-key', re: /\bAKIA[0-9A-Z]{16}\b/g },
+  { kind: 'stripe-key', re: /\bsk_(?:live|test)_[A-Za-z0-9]{20,}\b/g },
+  { kind: 'generic-sk-key', re: /\bsk-[A-Za-z0-9_-]{20,}\b/g },
+  { kind: 'cloudflare-pat', re: /\bcfpat-[A-Za-z0-9_-]{20,}\b/g },
+  { kind: 'bearer-token', re: /Bearer\s+[A-Za-z0-9._\-\/+=]{20,}/g },
+  {
+    kind: 'pem-key',
+    re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
+  },
 ];
+const SCANNER_KINDS = new Set(PATTERNS.map((p) => p.kind));
 for (const { kind } of PATTERNS) {
-  if (kind !== 'openai-key' && !SHARED_KINDS.has(kind)) {
+  if (!SCANNER_ONLY.has(kind) && !SHARED_KINDS.has(kind)) {
     throw new Error(`redact-scan: kind '${kind}' has drifted from shared secret-patterns.mjs`);
   }
 }
+for (const kind of SHARED_KINDS) {
+  if (!SCANNER_KINDS.has(kind)) {
+    throw new Error(`redact-scan: shared kind '${kind}' has no scanner counterpart`);
+  }
+}
+
+export const __test__ = { PATTERNS };
 
 export function scanForSecrets(text) {
   const hits = [];

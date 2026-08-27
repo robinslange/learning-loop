@@ -9,6 +9,7 @@ import {
   scrubSecrets,
   buildInjection,
   enrichVaultHits,
+  scrubForLog,
   buildQuery,
   buildQueryParts,
   emitHookOutput,
@@ -987,5 +988,45 @@ describe('enrichVaultHits', () => {
       vault,
     );
     assert.deepEqual(out, []);
+  });
+});
+
+// One helper for every log record built from user text. Both call sites had
+// sliced BEFORE scrubbing, which cannot work for any pattern whose match is
+// longer than the slice: the PEM key regex needs its -----END----- terminator,
+// no private key fits in 200 chars, so the regex never fired and raw key
+// material was persisted to retrieval/*.jsonl.
+describe('scrubForLog', () => {
+  const PEM =
+    'how do I rotate this key: -----BEGIN RSA PRIVATE KEY-----' +
+    'MIIEowIBAAKCAQEA' +
+    'QWERTYUIOPasdfghjkl0123456789+/'.repeat(6) +
+    '-----END RSA PRIVATE KEY-----';
+
+  it('redacts a PEM key that is longer than the slice', () => {
+    const out = scrubForLog(PEM, 200);
+    assert.ok(!out.includes('BEGIN RSA PRIVATE KEY'), 'key material must not survive');
+    assert.ok(!out.includes('MIIEowIBAAKCAQEA'), 'key body must not survive');
+    assert.equal(out, 'how do I rotate this key: [REDACTED]');
+  });
+
+  it('redacts a secret that straddles the slice boundary', () => {
+    const text = 'x'.repeat(180) + ' sk-ant-api03-' + 'A1b2C3d4E5f6G7h8J9k0'.repeat(2);
+    const out = scrubForLog(text, 200);
+    assert.ok(!out.includes('sk-ant-api03-A1b2C3'), 'no partial key prefix may survive');
+    assert.ok(out.includes('[REDACTED]'));
+  });
+
+  it('still caps the record at the requested length', () => {
+    assert.equal(scrubForLog('a'.repeat(500), 200).length, 200);
+  });
+
+  it('leaves clean text alone', () => {
+    assert.equal(scrubForLog('how do I configure ollama', 200), 'how do I configure ollama');
+  });
+
+  it('tolerates a null or undefined body', () => {
+    assert.equal(scrubForLog(undefined, 200), '');
+    assert.equal(scrubForLog(null, 200), '');
   });
 });

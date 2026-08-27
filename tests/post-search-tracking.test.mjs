@@ -112,6 +112,26 @@ describe('post-search-tracking', () => {
     assert.equal(events[0].query.length, HookConfig.PROMPT_SLICE_CHARS);
   });
 
+  it('redacts a PEM private key rather than logging it', () => {
+    const key =
+      'rotate this: -----BEGIN RSA PRIVATE KEY-----' +
+      'MIIEowIBAAKCAQEA' +
+      'QWERTYUIOPasdfghjkl0123456789+/'.repeat(6) +
+      '-----END RSA PRIVATE KEY-----';
+    run({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'mcp__plugin_episodic-memory_episodic-memory__search',
+      tool_input: { query: key },
+      tool_response: { results: [] },
+    });
+
+    const events = readRetrieval('episodic-queries');
+    assert.equal(events.length, 1);
+    assert.ok(!events[0].query.includes('BEGIN RSA PRIVATE KEY'), 'key material on disk');
+    assert.ok(!events[0].query.includes('MIIEowIBAAKCAQEA'), 'key body on disk');
+    assert.equal(events[0].query, 'rotate this: [REDACTED]');
+  });
+
   it('exits 0 on malformed input (defensive)', () => {
     assert.doesNotThrow(() =>
       execFileSync('node', [HOOK], {

@@ -22,6 +22,7 @@ import {
   rerankCandidates,
   runBackendsWithRaceCap,
   scrubSecrets,
+  scrubForLog,
 } from './lib/inject.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
@@ -280,7 +281,7 @@ function logShadow(record) {
   try {
     emitRetrieval('shadow-injection', {
       session_label: label,
-      prompt: scrubSecrets((prompt || '').slice(0, HookConfig.PROMPT_SLICE_CHARS)),
+      prompt: scrubForLog(prompt, HookConfig.PROMPT_SLICE_CHARS),
       prompt_length: (prompt || '').length,
       ...(env.LEARNING_LOOP_SYNTHETIC ? { synthetic: true } : {}),
       ...record,
