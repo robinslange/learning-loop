@@ -16,6 +16,7 @@ import {
 } from './lib/common.mjs';
 import {
   buildInjection,
+  enrichVaultHits,
   buildQueryParts,
   emitHookOutput,
   rerankCandidates,
@@ -28,7 +29,6 @@ import { env } from '../scripts/lib/env.mjs';
 import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
-import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
 const input = await readStdin();
@@ -404,19 +404,7 @@ try {
 
   const alreadyInjected = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
-  const enrichedVaultHits = (results.vault?.hits || [])
-    .map((h) => {
-      if (h.body) return h;
-      try {
-        const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
-        const body = stripFrontmatter(raw).trim();
-        return { ...h, body };
-      } catch (err) {
-        logError('session-label.enrichVaultHit', err);
-        return { ...h, body: '' };
-      }
-    })
-    .filter((h) => h.body);
+  const enrichedVaultHits = enrichVaultHits(results.vault?.hits || [], vaultRoot);
   const injection = buildInjection({
     vaultHits: enrichedVaultHits,
     query,

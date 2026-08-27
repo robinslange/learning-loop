@@ -1,11 +1,14 @@
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 import {
   scrubSecrets,
   buildInjection,
+  enrichVaultHits,
   buildQuery,
   buildQueryParts,
   emitHookOutput,
@@ -889,5 +892,100 @@ describe('rerankCandidates', () => {
     });
     assert.deepEqual(out.hits, []);
     assert.equal(out.error, 'parse_error');
+  });
+});
+
+// Peer-strip parity. wrapRetrieval() has never let a federated peer row carry a
+// body across the Node boundary — awareness only, pointer never content. The
+// JIT path is the same trust boundary and had none of that guard.
+describe('buildInjection peer-strip parity', () => {
+  it('never injects the body of a peer-origin hit', () => {
+    const out = buildInjection({
+      vaultHits: [
+        {
+          path: 'peer:thomas_kirk/secret.md',
+          title: 'peer note',
+          score: 0.9,
+          body: 'SECRET peer body',
+        },
+        { path: 'local.md', title: 'local note', score: 0.5, body: 'local body' },
+      ],
+      query: 'q',
+      alreadyInjected: new Map(),
+    });
+    const ctx = out.additionalContext;
+    assert.ok(!ctx.includes('SECRET peer body'), 'peer body must not reach the prompt');
+    assert.ok(ctx.includes('local body'), 'the local hit still supplies the body');
+    assert.ok(ctx.includes('peer note'), 'the peer note is still surfaced as a pointer');
+  });
+
+  it('records a peer hit as a pointer, never as body-level', () => {
+    const out = buildInjection({
+      vaultHits: [
+        { path: 'peer:t/a.md', title: 'peer a', score: 0.9, body: 'nope' },
+        { path: 'b.md', title: 'b', score: 0.5, body: 'yes' },
+      ],
+      query: 'q',
+      alreadyInjected: new Map(),
+    });
+    const peer = out.injectedVault.find((v) => v.path === 'peer:t/a.md');
+    assert.equal(peer?.level, 'pointer');
+    assert.equal(out.injectedVault.find((v) => v.path === 'b.md')?.level, 'body');
+  });
+
+  it('returns a pointers-only block when every hit is peer-origin', () => {
+    const out = buildInjection({
+      vaultHits: [{ path: 'peer:t/a.md', title: 'peer a', score: 0.9, body: 'nope' }],
+      query: 'q',
+      alreadyInjected: new Map(),
+    });
+    assert.ok(out, 'a peer-only result set is still worth surfacing as pointers');
+    assert.ok(!out.additionalContext.includes('nope'));
+    assert.ok(out.additionalContext.includes('peer a'));
+    assert.ok(out.injectedVault.every((v) => v.level === 'pointer'));
+  });
+});
+
+// enrichVaultHits: the JIT path reads note bodies off disk before injection.
+// A peer hit has no file under vaultRoot — its path is a `peer:` locator — and
+// must survive to buildInjection as a pointer rather than being dropped.
+describe('enrichVaultHits', () => {
+  let vault;
+
+  before(() => {
+    vault = mkdtempSync(join(tmpdir(), 'll-enrich-'));
+    writeFileSync(join(vault, 'a.md'), '---\ntitle: A\n---\n\nthe body of a\n');
+    writeFileSync(join(vault, 'empty.md'), '---\ntitle: E\n---\n\n   \n');
+  });
+
+  after(() => rmSync(vault, { recursive: true, force: true }));
+
+  it('reads the body of a local hit off disk', () => {
+    const out = enrichVaultHits([{ path: 'a.md', title: 'A', score: 0.5 }], vault);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].body, 'the body of a');
+  });
+
+  it('keeps a hit that already carries a body without touching disk', () => {
+    const hit = { path: 'missing.md', title: 'M', score: 0.5, body: 'inline' };
+    assert.deepEqual(enrichVaultHits([hit], vault), [hit]);
+  });
+
+  it('keeps a peer hit without reading a file for it', () => {
+    const out = enrichVaultHits([{ path: 'peer:t/x.md', title: 'peer x', score: 0.9 }], vault);
+    assert.equal(out.length, 1, 'a peer hit must survive as a pointer');
+    assert.equal(out[0].path, 'peer:t/x.md');
+    assert.equal(out[0].body, undefined);
+  });
+
+  it('drops a local hit whose file is unreadable or empty', () => {
+    const out = enrichVaultHits(
+      [
+        { path: 'gone.md', title: 'G', score: 0.5 },
+        { path: 'empty.md', title: 'E', score: 0.4 },
+      ],
+      vault,
+    );
+    assert.deepEqual(out, []);
   });
 });
