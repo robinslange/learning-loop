@@ -11,6 +11,43 @@ a check reported a result it had not actually computed.
 
 ### Security
 
+- **The automatic injection paths carried no trust framing.** The JSON
+  retrieval path has been wrapped by `wrapRetrieval()` for a while, but the two
+  paths that inject prose straight into a prompt were not. SessionStart
+  concatenated memory indexes, learned patterns, peer names and note intentions
+  into `additionalContext` raw, next to the plugin's own instructions. There is
+  now a prose sibling, `wrapRetrievalText()`, and SessionStart emits all
+  file-sourced content inside one `<retrieved-context trust="untrusted-data">`
+  envelope while its operator sections stay outside it. A body that forges the
+  closing delimiter can no longer escape the envelope.
+- **The two paths stated two different rules.** `origin-envelope.mjs` and
+  `inject.mjs` each carried their own anti-directive wording, so the contract
+  had two copies to keep in step. Both now use the one exported
+  `UNTRUSTED_NOTE`, and it is the stronger of the two texts.
+- **Peer note bodies could reach the JIT injection.** `wrapRetrieval()` has
+  never let a federated peer row carry a body across the Node boundary. The
+  UserPromptSubmit path had none of that guard: a peer hit arriving with a body
+  would have been injected verbatim. `buildInjection()` now applies the same
+  pointer-strip, and picks the body from the first body-bearing hit rather than
+  the first hit — a peer hit is a pointer regardless of its rank.
+- **The librarian failed open.** `librarian.enabled` was read as
+  `!== false`, so off-by-default held only because `config.json` ships an
+  explicit `false`. A partial config write or a migration that dropped the key
+  would have silently activated it and started sending note bodies to Ollama.
+  It is now `=== true`.
+- **The episodic-query log was written verbatim.** `post-search-tracking`
+  appended full query text to `retrieval/episodic-queries-*.jsonl` with no
+  truncation and no secret scrubbing, while its sibling `session-label` did
+  both. It now applies the same `scrubSecrets` and `PROMPT_SLICE_CHARS` slice.
+  Supersession matching still sees the full query; only the log is trimmed.
+- **The adapter fetch leaves bypassed the SSRF guard.** `url-guard.mjs` claims
+  to cover both network entry points; `sources/http.mjs` — `fetchJSON` and
+  `fetchXML`, shared by all ~13 source adapters — called `fetch()` raw, with no
+  guard and no timeout. Hosts are hardcoded literals today so the exposure was
+  latent, but any future adapter building a URL from note content would have
+  inherited zero protection. Both now drive `fetchGuarded` with a 10s
+  `AbortSignal.timeout`, matching the Brave research fetch.
+
 - **A trailing dot bypassed the SSRF guard.** `checkFetchUrl` compared
   `u.hostname` against `localhost` and `.internal` exactly, and `new URL()`
   preserves the trailing root dot that DNS treats as the same name.
@@ -216,6 +253,26 @@ Corrected against the code, each verified individually:
   are now parsed and compared with separators stripped.
 
 ### Added
+
+- **Per-component hook disable.** `hooks.disabled` in plugin-data
+  `config.json` takes a list of hook script basenames and silences exactly
+  those. Previously the only options were a full uninstall, hand-editing
+  `hooks.json` inside the plugin cache (overwritten on every update), or a
+  global `disableAllHooks` that takes down every plugin's hooks. The gate sits
+  in `readStdin()` — the one call every hook makes before doing anything — so
+  all nine shipped hooks are covered and a hook added later inherits it rather
+  than having to remember it. A disabled hook exits before reading input and
+  emits nothing, which every registered event reads as "no opinion": a disabled
+  `PreToolUse` hook allows the tool rather than blocking it. An unrecognised
+  name or a non-array value disables nothing, so a typo cannot take the gate
+  down.
+- **An operator README ships with the plugin.** `plugin/README.md` is readable
+  at `${CLAUDE_PLUGIN_ROOT}/README.md` on an installed machine and covers the
+  per-hook disable table, `disableAllHooks`, the librarian and `LL_OFFLINE`
+  switches, and the manual uninstall sequence. `/learning-loop:uninstall`
+  pointed at a README section that shipped with the repository but not with the
+  plugin, so on an installed machine that pointer went nowhere. A test now
+  fails if any `SKILL.md` names a local doc path that does not ship.
 
 - `tests/docs-consistency.test.mjs` derives the hook, agent, shared-skill and
   command rosters from disk and asserts the docs agree, so the next addition
