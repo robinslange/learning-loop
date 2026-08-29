@@ -290,6 +290,60 @@ test(
   },
 );
 
+// Windows checks: the native binary is `ll-search.exe` and the shims are
+// `.cmd`, and Node statSync reports no POSIX exec bit for either. These mock
+// process.platform so the win32 branches run on the (POSIX) CI runner too.
+test('checkBinaryExists: ok on win32 when ll-search.exe present (no POSIX exec bit)', () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const dir = mkdtempSync(join(tmpdir(), 'health-bin-win-'));
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin/ll-search.exe'), 'MZ');
+    const result = checkBinaryExists({ pluginData: dir });
+    assert.equal(result.status, 'ok');
+    assert.match(result.detail, /ll-search\.exe$/);
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+});
+
+test('checkShimsExist: ok on win32 when .cmd shims present (no POSIX exec bit)', () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-win-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const s of ['ll-watch.cmd', 'll-search.cmd']) {
+      writeFileSync(join(home, '.local/bin', s), '@echo off\n');
+    }
+    const result = checkShimsExist({ home });
+    assert.equal(result.status, 'ok');
+    rmSync(home, { recursive: true, force: true });
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+});
+
+test('checkShimsExist: fail on win32 when only extensionless shims exist', () => {
+  const original = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { value: 'win32' });
+  try {
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-win-noext-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const s of ['ll-watch', 'll-search']) {
+      writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
+    }
+    const result = checkShimsExist({ home });
+    assert.equal(result.status, 'fail');
+    assert.match(result.detail, /ll-watch/);
+    rmSync(home, { recursive: true, force: true });
+  } finally {
+    Object.defineProperty(process, 'platform', original);
+  }
+});
+
 test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
   const result = checkLocalBinOnPath({
     home: '/home/test',
