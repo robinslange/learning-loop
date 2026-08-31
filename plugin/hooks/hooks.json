@@ -1,5 +1,5 @@
 {
-  "description": "Learning Loop lifecycle hooks — retrieval, consolidation, vault write validation, backlinks",
+  "description": "Learning Loop lifecycle hooks — retrieval, consolidation, vault write validation, backlinks. Read by both Claude Code and Codex; matchers name every tool either harness uses, and the ones a harness has no tool for simply never fire. Codex additionally loads hooks.codex.json for the guards its tool surface needs.",
   "hooks": {
     "SessionStart": [
       {
@@ -69,7 +69,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit|Task|Skill",
+        "matcher": "Write|Edit|Task|Skill|Agent",
         "hooks": [
           {
             "type": "command",

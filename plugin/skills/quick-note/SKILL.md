@@ -27,7 +27,7 @@ Captures a single insight to `0-inbox/` mid-conversation. No preview, no approva
 
 ### Step 2: Delegate to Note Writer
 
-Spawn a single `note-writer` subagent (subagent_type: `learning-loop:note-writer`) with this prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders):
+Spawn a single `note-writer` subagent (dispatch: `skills-shared/dispatch.md`) with this prompt (resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch — see `agents-shared/vault-io.md` → Placeholders):
 
 ```
 Write a quick inbox note for the Obsidian vault.

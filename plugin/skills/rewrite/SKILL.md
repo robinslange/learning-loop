@@ -57,10 +57,10 @@ Search every store for the OLD pattern. Run all four searches in parallel (singl
 
 ### Phase 3: Edge Impact (correction-analyser)
 
-For every vault note hit from Phase 2, identify the *primary* note that codifies the old belief (or notes: there may be more than one). For each primary note, dispatch the `learning-loop:correction-analyser` agent:
+For every vault note hit from Phase 2, identify the *primary* note that codifies the old belief (or notes: there may be more than one). For each primary note, dispatch the `correction-analyser` agent (dispatch: `skills-shared/dispatch.md`):
 
 ```
-subagent_type: learning-loop:correction-analyser
+agent: correction-analyser
 prompt: |
   note_path: <vault-relative path>
   change_type: <retraction|update|weakening>

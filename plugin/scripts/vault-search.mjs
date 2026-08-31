@@ -66,12 +66,18 @@ if (wantsHelp) {
   process.exit(0);
 }
 
-function stripFlags(from, ...flags) {
+// Positional arguments only: every flag is dropped, and so is the one token
+// that follows a VALUE-taking flag.
+//
+// Callers used to pass boolean and value flags in one list, so `--rerank` also
+// swallowed the token after it: `query --rerank "caffeine tolerance"` searched
+// for the empty string and returned nothing, with no error. Only value-taking
+// flags belong in `valueFlags`.
+function stripFlags(from, ...valueFlags) {
   return args.slice(from).filter((a, i, arr) => {
-    if (flags.includes(a)) return false;
+    if (a.startsWith('--')) return false;
     const prev = arr[i - 1];
-    if (prev && flags.includes(prev) && !a.startsWith('-')) return false;
-    return true;
+    return !(prev && valueFlags.includes(prev));
   });
 }
 
@@ -107,7 +113,7 @@ try {
   switch (cmd) {
     case 'query': {
       ensureBinary();
-      const text = stripFlags(1, '--top', '--rerank', '--candidates', '--threshold').join(' ');
+      const text = stripFlags(1, '--top', '--candidates', '--threshold').join(' ');
       const topN = flagValue(args, '--top', '10');
       const threshold = flagValue(args, '--threshold', '0.15');
       if (hasFlag(args, '--rerank')) {
@@ -143,7 +149,7 @@ try {
 
     case 'search': {
       ensureBinary();
-      const keywords = stripFlags(1, '--top', '--rerank', '--candidates', '--threshold').join(' ');
+      const keywords = stripFlags(1, '--top', '--candidates', '--threshold').join(' ');
       const topN = flagValue(args, '--top', '20');
       const threshold = flagValue(args, '--threshold', '0.15');
       if (hasFlag(args, '--rerank')) {
@@ -277,8 +283,14 @@ try {
     }
 
     case 'intentions': {
-      const data = intentions(args[1] || null);
-      if (process.argv.includes('--session-start-refresh')) {
+      // The context is the first non-flag positional. Taking args[1] blindly
+      // handed `--session-start-refresh` to the binary as the context, which
+      // clap rejects; intentions() swallowed the error and returned [], so the
+      // refresh wrote an empty marker every time and the session-start
+      // intentions block never rendered.
+      const context = args.slice(1).find((a) => !a.startsWith('--')) || null;
+      const data = intentions(context);
+      if (args.includes('--session-start-refresh')) {
         const { writeMarker, MARKER_PATHS } = await import('./lib/marker-cache.mjs');
         writeMarker(MARKER_PATHS.intentions(PLUGIN_DATA), data);
       } else {

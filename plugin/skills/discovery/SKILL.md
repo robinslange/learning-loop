@@ -94,7 +94,7 @@ Just run.
 
 ### Step 1: Orient
 
-Spawn both subagents in the same turn (a single message with two Agent tool calls, not sequential):
+Spawn both subagents concurrently, not sequentially (dispatch: `skills-shared/dispatch.md`):
 
 1. **Vault Scout** (`discovery-vault-scout`): Search existing vault notes and episodic memory for what the user already knows about this topic.
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)
@@ -109,7 +109,7 @@ While agents work, confirm parameters with the user if any were ambiguous.
 
 Run this after EVERY `discovery-researcher` return — orientation and every loop round — before presenting findings. The researcher returns an UNVERIFIED brief; subagents cannot spawn subagents, so this loop is the only verification gate.
 
-1. Spawn a `note-verifier` agent (`subagent_type: "learning-loop:note-verifier"`) with a one-note batch (the agent contract is a list of 1-5 {path, content} entries; output is one `## Verification: <note title>` section per note):
+1. Spawn a `note-verifier` agent (dispatch: `skills-shared/dispatch.md`) with a one-note batch (the agent contract is a list of 1-5 {path, content} entries; output is one `## Verification: <note title>` section per note):
    - **path**: a label for the brief, e.g. `brief:<topic>` (the brief is not a vault file; the label names its output section)
    - **content**: the full research brief, verbatim (including the Verified Sources table)
 
@@ -164,7 +164,7 @@ Repeat until the user says "done", "wrap up", or similar:
    - `existing_knowledge`: vault scout findings + prior round findings
 3. **Verify**: run Step 1.5 on the returned brief
 4. **Present**: deliver findings in chosen style and tone
-5. **Capture** (if `full` mode): after each round, dispatch a `note-writer` agent (`subagent_type: "learning-loop:note-writer"`) to write an inbox note for the key insight discovered. You decide WHAT the note says; note-writer does the writing (persona voice, capture-rules, atomicity). Pass:
+5. **Capture** (if `full` mode): after each round, dispatch a `note-writer` agent (dispatch: `skills-shared/dispatch.md`) to write an inbox note for the key insight discovered. You decide WHAT the note says; note-writer does the writing (persona voice, capture-rules, atomicity). Pass:
    - **insight**: the key insight from the round, one idea, phrased as a claim
    - **research**: the verified brief excerpts backing it, including source URLs to include as clickable markdown links in the note body (don't defer URL capture to the wrap-up or `/literature` step)
    - **related_notes**: vault scout hits plus trail notes from earlier rounds
@@ -262,7 +262,7 @@ Sources found: N (run /literature to capture)
 - Follows capture-rules: persona voice, atomic, insight title
 - Record reported paths for the Step 4.5 hook replay
 
-**Always spawn agents in the same turn when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. Use a single message with multiple Agent tool calls.
+**Always spawn agents concurrently when they have no dependencies.** Vault scout and researcher have no dependencies on each other at orientation time. See dispatch: `skills-shared/dispatch.md`.
 
 ## Tone Guide
 

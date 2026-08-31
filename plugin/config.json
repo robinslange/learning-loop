@@ -1,5 +1,4 @@
 {
-  "vault_path": "~/brain/brain",
   "injection_mode": "live",
   "dependencies": [
     {

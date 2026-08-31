@@ -1,0 +1,24 @@
+{
+  "name": "learning-loop",
+  "version": "1.40.2",
+  "description": "Self-improving learning loop across coding-agent sessions: retrieval, capture, consolidation, and cross-project transfer",
+  "author": {
+    "name": "Robin Lange",
+    "url": "https://omit.nz"
+  },
+  "homepage": "https://github.com/robinslange/learning-loop",
+  "repository": "https://github.com/robinslange/learning-loop",
+  "license": "Apache-2.0",
+  "keywords": ["learning", "knowledge-management", "zettelkasten", "obsidian", "second-brain"],
+  "skills": "./skills/",
+  "hooks": ["./hooks/hooks.json", "./hooks/hooks.codex.json"],
+  "interface": {
+    "displayName": "Learning Loop",
+    "shortDescription": "Second brain for coding agents: retrieval, capture, consolidation",
+    "longDescription": "Retrieves what you already know at session start, captures insights as atomic notes during work, and consolidates them between sessions. Backed by an Obsidian vault, a hybrid-search Rust binary, and per-note provenance.",
+    "developerName": "Robin Lange",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/robinslange/learning-loop"
+  }
+}

@@ -141,10 +141,11 @@ export function formatViolations(violations) {
     `\n\nEvery note in 0-inbox/, 1-fleeting/, 2-literature/ and 3-permanent/ needs ` +
     `\`tags\`, \`date: YYYY-MM-DD\` and \`source\`.\n\n` +
     `\`source:\` is the capture ORIGIN, not a citation: \`session\`, \`discovery\`, ` +
-    `\`ingest\`, \`literature\` (cited work, citations on a body \`Source:\` line), or ` +
-    `\`synthesis\` (first-hand, asserts nothing a reader could check). Citation URLs ` +
-    `belong on a body \`Source:\` line and coexist with this field. Only when a note ` +
-    `makes an external claim and you have no citation anywhere, write ` +
+    `\`ingest\`, \`literature\` (cited work, citations on a body \`Source:\` line), ` +
+    `\`synthesis\` (first-hand, asserts nothing a reader could check), or ` +
+    `\`unverified\` (makes an external claim, but no source survived verification). ` +
+    `Citation URLs belong on a body \`Source:\` line and coexist with this field. ` +
+    `Only when a note makes an external claim and you have no citation anywhere, write ` +
     `\`source: "[no URL found]"\` so the gap stays visible.`
   );
 }

@@ -16,11 +16,13 @@ import {
 } from './lib/common.mjs';
 import {
   buildInjection,
+  enrichVaultHits,
   buildQueryParts,
   emitHookOutput,
   rerankCandidates,
   runBackendsWithRaceCap,
   scrubSecrets,
+  scrubForLog,
 } from './lib/inject.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
@@ -28,7 +30,6 @@ import { env } from '../scripts/lib/env.mjs';
 import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
-import { stripFrontmatter } from '../scripts/lib/markdown-parse.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
 const input = await readStdin();
@@ -280,7 +281,7 @@ function logShadow(record) {
   try {
     emitRetrieval('shadow-injection', {
       session_label: label,
-      prompt: scrubSecrets((prompt || '').slice(0, HookConfig.PROMPT_SLICE_CHARS)),
+      prompt: scrubForLog(prompt, HookConfig.PROMPT_SLICE_CHARS),
       prompt_length: (prompt || '').length,
       ...(env.LEARNING_LOOP_SYNTHETIC ? { synthetic: true } : {}),
       ...record,
@@ -404,19 +405,7 @@ try {
 
   const alreadyInjected = loadDedupeState(session_id);
   const rawVaultHitCount = (results.vault?.hits || []).length;
-  const enrichedVaultHits = (results.vault?.hits || [])
-    .map((h) => {
-      if (h.body) return h;
-      try {
-        const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
-        const body = stripFrontmatter(raw).trim();
-        return { ...h, body };
-      } catch (err) {
-        logError('session-label.enrichVaultHit', err);
-        return { ...h, body: '' };
-      }
-    })
-    .filter((h) => h.body);
+  const enrichedVaultHits = enrichVaultHits(results.vault?.hits || [], vaultRoot);
   const injection = buildInjection({
     vaultHits: enrichedVaultHits,
     query,
@@ -429,6 +418,12 @@ try {
       type: 'gate-pass-no-payload',
       gate: {
         passed: true,
+        // Carried here as well as on gate-pass-payload: this entry cleared the
+        // gate by definition, and every consumer (review-shadow's distribution
+        // and reachability, the readiness check) reads vault_top_score. Omitting
+        // it counted these rows as score 0 — dragging the distribution toward a
+        // floor the gate had in fact been cleared above.
+        vault_top_score: vaultTop,
         padded,
         solo_top_score: soloTop,
         padding_load_bearing: paddingLoadBearing,

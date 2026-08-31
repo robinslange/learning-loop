@@ -1,6 +1,9 @@
 {
   "name": "learning-loop-marketplace",
   "description": "Learning loop plugin marketplace",
+  "interface": {
+    "displayName": "Learning Loop"
+  },
   "owner": {
     "name": "Robin Lange",
     "url": "https://github.com/robinslange"
@@ -8,6 +11,11 @@
   "plugins": [
     {
       "name": "learning-loop",
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity",
       "description": "Self-improving learning loop across Claude sessions: retrieval, capture, consolidation, and cross-project transfer with a hybrid-search Rust binary, Obsidian vault integration, and federation.",
       "source": "./plugin",
       "homepage": "https://github.com/robinslange/learning-loop",

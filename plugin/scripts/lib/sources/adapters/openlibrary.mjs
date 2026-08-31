@@ -43,7 +43,17 @@ async function verify(src) {
     return { verified: false, error: `ISBN ${src.isbn} not found in Open Library`, metadata: null };
   }
   const issues = [];
-  if (
+  // A missing author list is not a passing author check. Gating the comparison
+  // on `authors.length > 0` meant an API that returned no authors verified the
+  // citation clean, which is the one case where nothing was actually checked.
+  if (src.claimedAuthor && data.authors.length === 0) {
+    issues.push({
+      type: 'unverifiable_author',
+      severity: 'low',
+      claimed: src.claimedAuthor,
+      reason: 'no author metadata returned by the source',
+    });
+  } else if (
     src.claimedAuthor &&
     data.authors.length > 0 &&
     !authorMatches(src.claimedAuthor, data.authors)

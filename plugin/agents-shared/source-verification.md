@@ -124,6 +124,7 @@ The temp-file steps below use the Write tool — they are the variant for Write-
 3. For each claim:
    - `in_abstract: true` -- confirmed in source
    - `in_abstract: false` -- the number does not appear in the fetched source (abstract or page). Read independently; if it appears nowhere, add `[not in source]` after the claim. Do NOT remove the claim.
+   - `in_abstract: null` -- the source could not be read at all (offline, rate-limited, no abstract published), so nothing was checked. `unchecked_reason` says why. Treat this as UNVERIFIED, never as confirmation: mark the claim `[unverified]` rather than letting it pass.
 4. Runs once (informational, not corrective).
 5. Clean up the temp file using Bash: `node -e "try { require('fs').unlinkSync('<tmpdir>/ll-note-verify-TIMESTAMP.md') } catch(e) {}"`
 

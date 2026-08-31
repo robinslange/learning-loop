@@ -7,6 +7,8 @@ import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
 import { loadSupersessionsCached, matchSupersessions } from '../scripts/lib/edges.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
+import { scrubForLog } from './lib/inject.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 
 async function checkSupersessions(query) {
@@ -38,7 +40,13 @@ async function checkSupersessions(query) {
 runHook(async ({ tool, input }) => {
   const raw = input.query || input.message || input.text || '';
   const query = Array.isArray(raw) ? raw.join(' ') : raw;
-  if (query) emitRetrieval('episodic-queries', { type: 'episodic-search', tool, query });
+  if (query) {
+    emitRetrieval('episodic-queries', {
+      type: 'episodic-search',
+      tool,
+      query: scrubForLog(query, HookConfig.PROMPT_SLICE_CHARS),
+    });
+  }
 
   if (!query) return;
   const annotation = await checkSupersessions(query);

@@ -1,7 +1,7 @@
 # librarian-research
 
 Local research engine. Brave search → fetch → local-Gemma claim extraction,
-emitting a claims bundle. Keeps `/deep-research`'s token-heavy middle off Claude:
+emitting a claims bundle. Keeps `/learning-loop:research`'s token-heavy middle off Claude:
 ~15 source documents are distilled to one-line claims before anything reaches
 Claude's context.
 
@@ -57,7 +57,7 @@ thrash). The model tier is chosen at `/init` from system RAM.
 
 Research needs real recall. On the e2b tier (16–32GB machines) the CLI refuses
 (`researchModelOk` is false below 12b) and exits 3 with a message; triage still
-runs and `/deep-research` falls back to its Claude-native path. The benchmark
+runs and `/learning-loop:research` falls back to its Claude-native path. The benchmark
 (dev-only `bench/librarian-research.mjs`) showed e2b produces schema-valid output
 but misses substantive claims, which is why the gate exists.
 
@@ -66,10 +66,10 @@ but misses substantive claims, which is why the gate exists.
 Search/fetch/extract run locally. Verify (3-vote adversarial) and synthesis stay
 on Claude. See `docs/superpowers/specs/2026-06-16-librarian-research-design.md`.
 
-## Integration with /deep-research
+## Integration with /learning-loop:research
 
-`/deep-research` is a built-in Workflow skill (generated per-run; no committed
-source). The integration is a contract, not a code edit:
+`/learning-loop:research` is defined in `plugin/skills/research/` (SKILL.md and
+workflow.js). The integration is a contract, not a code edit:
 
 1. **Scope** (Claude) decomposes the question into angles.
 2. **Shell out** (replaces the Search + Fetch + Extract phases):
@@ -85,7 +85,7 @@ source). The integration is a contract, not a code edit:
 4. **Synthesize** (Claude) writes the cited report.
 
 **Fallback:** on a non-zero exit (exit 3 = sub-tier model; exit 1 = ollama/Brave
-unavailable) or an empty `claims` array, `/deep-research` reverts to its
+unavailable) or an empty `claims` array, `/learning-loop:research` reverts to its
 Claude-native WebSearch path so the command never hard-breaks. Warm the model
 first for snappy runs — a cold 12b load adds ~10–40s to the first call;
 `keep_alive` (default 30m) keeps it warm afterward.

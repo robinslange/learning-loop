@@ -138,7 +138,7 @@ detect_platform() {
     darwin-x86_64|linux-aarch64)
       PLATFORM="${kernel}-${arch}"
       step_fail "No prebuilt ll-search binary for ${PLATFORM}"
-      echo "Prebuilt binaries cover: macOS arm64 (Apple Silicon), Linux x86_64, Windows x64 (WSL)."
+      echo "Prebuilt binaries cover: macOS arm64 (Apple Silicon), Linux x86_64 (also used by WSL), Windows x64."
       echo "On ${PLATFORM}, /learning-loop:init cannot download the search binary; you would"
       echo "need a Rust toolchain to build it from source (cd native && cargo build --release)."
       echo "See guide/cross-platform.md in the repo for details."
@@ -151,8 +151,11 @@ detect_platform() {
       ;;
     *)
       step_fail "Unsupported platform: ${kernel}-${arch}"
-      echo "Supported: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
-      echo "If you're on native Windows, use WSL: https://learn.microsoft.com/en-us/windows/wsl/install"
+      echo "This installer is bash, so it covers: macOS (Apple Silicon arm64), Linux (x86_64), WSL (x86_64)."
+      echo "Native Windows x64 is supported by the plugin itself — install it manually:"
+      echo "  claude plugin marketplace add robinslange/learning-loop"
+      echo "  claude plugin install learning-loop@learning-loop-marketplace"
+      echo "See guide/cross-platform.md for per-platform status."
       exit 1
       ;;
   esac
@@ -445,6 +448,96 @@ install_plugins() {
   fi
 }
 
+# Locate the generate-agents script in whichever copy of the plugin exists:
+# the repo checkout this script sits in, the Claude Code plugin cache, or the
+# Codex plugin cache. Newest version wins in the cache directories.
+find_codex_generator() {
+  local rel="scripts/codex/generate-agents.mjs"
+  local here=""
+  [[ -n "${BASH_SOURCE[0]:-}" ]] && here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [ -n "$here" ] && [ -f "$here/plugin/$rel" ]; then
+    printf '%s\n' "$here/plugin/$rel"
+    return 0
+  fi
+  # Cache layout is <base>/<version>/scripts/codex/generate-agents.mjs, so the
+  # file sits four levels down. maxdepth must clear that or find silently
+  # matches nothing and Codex setup no-ops while reporting a locate failure.
+  local base
+  for base in "$HOME/.claude/plugins/cache/learning-loop-marketplace/learning-loop" \
+    "$HOME/.codex/plugins/cache/learning-loop-marketplace/learning-loop"; do
+    [ -d "$base" ] || continue
+    local found
+    found=$(find "$base" -maxdepth 4 -path "*/$rel" 2>/dev/null | sort -V | tail -1)
+    [ -n "$found" ] && printf '%s\n' "$found" && return 0
+  done
+  return 1
+}
+
+# Codex reads the same skills and the same hooks/hooks.json out of the plugin
+# tree, so those need nothing here. Subagents are the exception: Codex has no
+# manifest field for them and loads them from standalone TOML in ~/.codex/agents,
+# so they are generated at install time from the same markdown definitions.
+setup_codex() {
+  step_start "Configuring Codex"
+
+  if ! command -v codex >/dev/null 2>&1; then
+    step_skip "codex not on PATH — skipping (re-run this installer after installing Codex)"
+    return 0
+  fi
+
+  local generator
+  if ! generator=$(find_codex_generator); then
+    step_fail "could not locate the learning-loop plugin tree to generate agents from"
+    return 0
+  fi
+
+  local rc=0
+  run_logged "node \"$generator\" --out \"$HOME/.codex/agents\"" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    step_fail "agent generation failed (exit $rc)"
+    echo "  See $LOG_FILE for details."
+    return 0
+  fi
+
+  run_logged "codex plugin marketplace add robinslange/learning-loop" || true
+
+  # Gate on our own marker, not on the key name: the appended block contains
+  # "shell_environment_policy", so keying on that makes every later run believe
+  # a user wrote it and nag forever.
+  local codex_config="$HOME/.codex/config.toml"
+  local note=""
+  if ! grep -q "^# --- learning-loop ---$" "$codex_config" 2>/dev/null; then
+    if grep -q "shell_environment_policy" "$codex_config" 2>/dev/null; then
+      note="add \`set = { LL_HARNESS = \"codex\" }\` under [shell_environment_policy] in $codex_config"
+    else
+      mkdir -p "$HOME/.codex"
+      cat >>"$codex_config" <<'EOF'
+
+# --- learning-loop ---
+# Codex gives shell commands no marker saying which harness launched them, so
+# the plugin's scripts read this to tell Codex from Claude Code. Plugin hooks
+# do not go through this policy; they use PLUGIN_ROOT, which Codex always sets.
+[shell_environment_policy]
+set = { LL_HARNESS = "codex" }
+EOF
+    fi
+  fi
+
+  # Count what this run produced. `ls | wc -l` would also count orphans from an
+  # older version and any hand-written learning-loop-*.toml.
+  local count
+  count=$(find "$HOME/.codex/agents" -maxdepth 1 -name 'learning-loop-*.toml' -newermt '-2 minutes' 2>/dev/null | wc -l | tr -d ' ')
+  [ -n "$count" ] || count=0
+  step_done "$count agents written to ~/.codex/agents"
+
+  echo "  ${C_DIM}Codex will not run plugin hooks until you trust them: run ${C_RESET}/hooks${C_DIM} in Codex.${C_RESET}"
+  [ -n "$note" ] && echo "  ${C_DIM}Manual step: $note${C_RESET}"
+
+  # Never let the last command's status become this function's, or a clean
+  # install returns non-zero and set -e kills the installer before its summary.
+  return 0
+}
+
 version_ge() {
   printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
@@ -483,6 +576,7 @@ This will:
   4. Install Claude Code if missing
   5. Add the learning-loop + episodic-memory marketplaces
   6. Install both plugins
+  7. Configure Codex too, if it is installed
 
 Estimated time: ~3 minutes.
 EOF
@@ -499,6 +593,7 @@ main() {
   ensure_claude_code
   add_marketplaces
   install_plugins
+  setup_codex
   print_next_steps
 }
 

@@ -1,34 +1,69 @@
 export function normalizeAuthorName(name) {
-  return name.toLowerCase().replace(/[^a-z]/g, '');
+  return name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z]/g, '');
 }
 
+// Tokens that appear in author lists but carry no identifying power. Matching
+// on one of these is matching on nothing: every Dutch surname shares `van`, and
+// every RFC author list shares `ed`.
+const STOPWORDS = new Set([
+  'et',
+  'al',
+  'ed',
+  'eds',
+  'jr',
+  'sr',
+  'van',
+  'von',
+  'der',
+  'den',
+  'del',
+  'des',
+  'dos',
+]);
+// `la` and `le` are deliberately NOT here. They read as particles, but Lê is
+// among the most common Vietnamese surnames and La stands alone in Italian and
+// Spanish names — listing them deletes the only token those authors have, which
+// is the same failure as cutting the initial filter at two characters.
+
 export function extractSurnames(name) {
+  // Normalise BEFORE filtering: `R.` is two characters raw but one once
+  // punctuation is stripped, and a one-letter initial matches almost any
+  // surname under a substring test.
+  //
+  // The cut is at ONE character, not two. Two-letter surnames are common —
+  // Wu, Li, Ng, Xu, Ho, Yu — and dropping them leaves nothing to match on, so
+  // every citation by such an author gets reported as a wrong author. A
+  // two-letter initial pair (`Smith JA` -> `ja`) survives this filter, but
+  // whole-token equality means it can only match another literal `ja`.
   return name
-    .toLowerCase()
-    .split(/[\s,&]+/)
-    .filter((s) => s.length > 1 && s !== 'et' && s !== 'al' && s !== 'al.')
-    .map((s) => normalizeAuthorName(s));
+    .split(/[\s,&-]+/)
+    .map(normalizeAuthorName)
+    .filter((s) => s.length > 1 && !STOPWORDS.has(s));
+}
+
+// Surnames match when a whole token matches, never on containment. Substring
+// containment made `Roberts` match `R. Fielding` (via the `r` initial) and
+// `Smith et al.` match `Smithers`, so a fabricated author passed verification
+// whenever the real list happened to contain a substring of it.
+function shareSurname(claimed, actual) {
+  const claimedSurnames = extractSurnames(claimed);
+  if (claimedSurnames.length === 0) return false;
+  const actualParts = new Set(extractSurnames(actual));
+  return claimedSurnames.some((cs) => actualParts.has(cs));
 }
 
 export function authorMatches(claimed, actual) {
   if (!actual || actual.length === 0) return false;
-  const claimedSurnames = extractSurnames(claimed);
-  return actual.some((a) => {
-    const actualParts = extractSurnames(a);
-    return claimedSurnames.some((cs) =>
-      actualParts.some((ap) => cs === ap || cs.includes(ap) || ap.includes(cs)),
-    );
-  });
+  return actual.some((a) => shareSurname(claimed, a));
 }
 
 export function firstAuthorMatches(claimed, actualAuthors) {
   if (!actualAuthors || actualAuthors.length === 0) return false;
-  const actualFirst = actualAuthors[0];
-  const claimedSurnames = extractSurnames(claimed);
-  const actualParts = extractSurnames(actualFirst);
-  return claimedSurnames.some((cs) =>
-    actualParts.some((ap) => cs === ap || cs.includes(ap) || ap.includes(cs)),
-  );
+  return shareSurname(claimed, actualAuthors[0]);
 }
 
 export function bestAuthorMatch(candidates, claimedAuthor) {

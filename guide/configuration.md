@@ -6,15 +6,38 @@
 {
   "vault_path": "~/path/to/vault",
   "injection_mode": "live",
-  "injection_threshold": 0.3
+  "injection_threshold": 0.34
 }
 ```
 
 `injection_mode` controls just-in-time context injection on `UserPromptSubmit`. The shipped config sets `live`: hits that clear the gate are injected into the prompt. `shadow` runs the same pipeline but only logs what it _would_ have injected, never mutating the prompt; it remains available for calibration (see Context injection below). `off` disables the pipeline. If the key is absent from config, the hook falls back to `shadow`. When running in shadow, the `injection-shadow-gate` health check nudges at session start once the go-live gate is passing, and `/learning-loop:doctor` can apply the flip with your approval.
 
-`injection_threshold` is the minimum score the top vault or episodic hit must clear before context is injected. The vault score is a raw RRF fusion sum (each of the five search signals contributes `1/(5+rank)`), **not** a cosine similarity: a hit ranked #1 in one signal scores ~0.17, #1 in two signals ~0.33, and #1 in all five ~0.83. Defaults to `0.3` — just below the two-strong-signals level, calibrated against 18k shadow-injection gate evaluations (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
+`injection_threshold` is the minimum score the top vault hit must clear before context is injected. The vault score is a raw **weighted** RRF fusion sum, **not** a cosine similarity. Each lane contributes `weight/(5+rank)`, and since v1.40.0 the lanes are weighted unequally (vector 1.0, BM25 1.0, PRF 0.5, PPR 0.05, tags 0.05), so the reachable range is:
+
+| Agreement                        | Score    |
+| -------------------------------- | -------- |
+| vector #1 alone                  | 0.1667   |
+| vector #1 + BM25 #1              | 0.3333   |
+| vector #1 + BM25 #1 + graph #1   | 0.3500   |
+| vector #1 + BM25 #1 + PRF #1     | 0.4167   |
+| all five lanes #1 (ceiling)      | 0.4333   |
+
+Defaults to `0.34` — just above the two-strong-lanes floor, so the gate demands corroboration beyond two lone top hits. Cosine-style values (0.7+) are unreachable, and anything above 0.4333 disables injection entirely. This value is derived from achievable-score arithmetic, not from measured relevance: every percentile on record predates the reweighting (see the derivation comment on `INJECTION_THRESHOLD` in `scripts/lib/hook-config.mjs`). Tune by inspecting `scripts/review-shadow.mjs` output, which reports gate reachability against the observed distribution. Override per-session with the `LEARNING_LOOP_INJECTION_THRESHOLD` env var.
 
 `filename_style` controls the pre-write filename-convention advisory. Values: `'kebab'` (enforce kebab-case, e.g. `my-note.md`), `'spaces'` (enforce space-separated titles, e.g. `My Note.md`), `'auto'` (detect from the vault population), or absent (same as `'auto'`). In `auto` mode the hook reads up to 200 basenames across `0-inbox/`, `1-fleeting/`, and `3-permanent/` at write time; if >70% lack spaces the convention is kebab, if >70% have spaces the convention is spaces, otherwise the check is skipped. The advisory is non-blocking — it appears as `additionalContext`, never as a deny.
+
+`label_topics` extends the session labels written for episodic-memory retrieval with your own topics. The built-in patterns cover generic engineering vocabulary; add domain terms as `{match, label}` pairs, where `match` is a case-insensitive regex source string:
+
+```json
+{
+  "label_topics": [
+    { "match": "\\bkayak\\b", "label": "kayaking" },
+    { "match": "\\bresto\\s?druid\\b", "label": "wow" }
+  ]
+}
+```
+
+An entry with an invalid regex is logged and skipped rather than throwing — labels degrade, hooks do not.
 
 Config persists across plugin updates. If config exists at the old root location (pre-PLUGIN_DATA), the plugin migrates it automatically on first run.
 
@@ -26,27 +49,46 @@ Config files are read with UTF-8 BOM stripping so Notepad-saved JSON on Windows 
 
 ## Hooks
 
-Eight hook handlers across five Claude Code event types enforce process discipline at the lifecycle level. They run regardless of what Claude decides. This table is the canonical roster.
+Nine hook handlers across six event types enforce process discipline at the lifecycle level. They run regardless of what the agent decides. This table is the canonical roster.
+
+Claude Code and Codex share `hooks/hooks.json` verbatim: the event names, the nested config shape, the stdin payload, and the JSON output contract are the same on both, and Codex sets `CLAUDE_PLUGIN_ROOT` for compatibility with existing plugin hooks. Matchers therefore name every tool either harness uses, and a tool a harness does not have simply never fires. Two matchers below are Claude Code only, and Codex covers them through `hooks/hooks.codex.json` instead — see [Codex differences](#codex-differences).
 
 | Event                                       | Hook                    | What it enforces                                                                                                                                                                                                                                                                                  |
 | ------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SessionStart                                | session-start.js        | Injects vault context (memory index, recent captures, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn                                                   |
+| SessionStart                                | session-start.js        | Injects vault context (memory index, learned patterns, federation status, a recent-captures pointer, intention summary, dream gate nudge) and dispatches to subhooks in `hooks/session-start/` for cache cleanup, binary auto-update, health detection, vault snapshot, and watch-daemon spawn   |
 | Stop                                        | stop-nudge.js           | Suggests `/reflect` after substantial sessions                                                                                                                                                                                                                                                    |
 | UserPromptSubmit                            | session-label.js        | Labels sessions for episodic memory retrieval; runs the just-in-time injection pipeline (shadow or live per `injection_mode`)                                                                                                                                                                     |
-| PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags and em/en dashes added to note body prose (added-only delta against the note on disk, `Source:`/`Related:` lines exempt)                                                                       |
-| PreToolUse (WebSearch\|WebFetch)            | web-guard.js            | Denies the raw web tools globally (main session included; PreToolUse cannot scope to subagents) and routes web access through the source gateway, `bin/source-gateway.mjs`, so every search, fetch, and research call goes through a config-selected source with a per-session fetch budget       |
-| PostToolUse (Write\|Edit\|Agent\|Skill)     | post-tool.js            | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
-| PostToolUse (Read)                          | post-read-retrieval.js  | Tracks vault reads for retrieval instrumentation                                                                                                                                                                                                                                                  |
+| SubagentStop                                | subagent-stop.js        | Emits an `agent-result` provenance record (session id + transcript path) when a subagent finishes                                                                                                                                                                                                 |
+| PreToolUse (Write\|Edit)                    | pre-write-check.js      | Warns on near-duplicate similarity (≥0.85) and broken wikilinks; blocks duplicate frontmatter tags, em/en dashes added to note body prose, and frontmatter-contract violations introduced in `0-inbox`/`1-fleeting`/`2-literature`/`3-permanent` notes (missing or empty `tags`/`date`/`source`, the deprecated `created:`/`updated:`/`source-project:` keys, a non-`YYYY-MM-DD` date, an off-vocabulary `status:`). Both the dash and schema checks are added-only deltas against the note on disk, so pre-existing violations are inherited rather than denied; `Source:`/`Related:` lines are exempt from the dash rule |
+| PreToolUse (WebSearch\|WebFetch)            | web-guard.js            | Denies the raw web tools globally (main session included; PreToolUse cannot scope to subagents) and routes web access through the source gateway, `bin/source-gateway.mjs`, so every search, fetch, and research call the guard can see goes through a config-selected source with a per-session fetch budget. On Claude Code that is every web call, because the tools are hookable; on Codex the shell path is advisory only (see Codex differences)       |
+| PostToolUse (Write\|Edit\|Task\|Skill\|Agent) | post-tool.js          | Coalesced dispatcher. Loads one vault snapshot, then runs the provenance, reflect-track, autolink, and edge-infer modules in fixed order (cheap load-bearing modules first, so a hook timeout only drops enrichment) with per-module timeout isolation. Non-write tool events only run provenance |
+| PostToolUse (Read)                          | post-read-retrieval.js  | Tracks **auto-memory** file reads (`~/.claude/projects/<project>/memory/*.md`) for retrieval instrumentation. Vault reads are not recorded here                                                                                                                                                   |
 | PostToolUse (mcp\_\_plugin_episodic-memory) | post-search-tracking.js | Tracks episodic memory searches                                                                                                                                                                                                                                                                   |
 
 The post-tool modules live under `hooks/modules/`, listed in execution order:
 
-- **provenance** — records every vault read/write for the provenance log
+- **provenance** — records vault writes and edits, plus agent-spawn (`Task`) and skill-invoke (`Skill`) events, to the provenance log. There is no `Read` branch
 - **reflect-track** — appends each new vault Write/Edit to the `/reflect` new-notes marker while the marker exists (added v1.25.3)
 - **autolink** — adds backlinks and semantic links after vault writes
-- **edge-infer** — classifies wikilink pairs via regex, writes `challenges_*` typed edges to `edges.db`
+- **edge-infer** — classifies wikilink pairs via regex into six typed edges — `derived_from`, `evidence_for`, `supports`, and the `challenges_undermining` / `challenges_undercutting` / `challenges_rebuttal` family — and writes them to `edges.db`
 
-These hooks are the core of the plugin's value. Without them, Claude can skip verification, promote unsourced notes, and write in its default voice. With them, these failures are structurally impossible.
+These hooks are the core of the plugin's value. Without them, the agent can skip verification, promote unsourced notes, and write in its default voice. With them, the vault-write failures are structurally impossible: `pre-write-check` sees every write on both harnesses and denies before it lands. The web guard is weaker and always was — it is a routing nudge, not a boundary, and on Codex it only ever sees the shell.
+
+### Codex differences
+
+Codex loads `hooks/hooks.json` unchanged, plus `hooks/hooks.codex.json` via the `hooks` array in `.codex-plugin/plugin.json`. Four things differ, and only four:
+
+| Difference                                                                                       | Consequence                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Codex performs every file mutation through `apply_patch`, and one call can touch several files    | `hooks/lib/tool-payload.mjs` normalises a patch into Write/Edit-shaped entries before any module sees it, so `pre-write-check` and every `post-tool` module run once per file, unchanged                            |
+| `WebSearch` and `WebFetch` are hosted tools that never reach the local hook path (Codex has no WebFetch tool at all) | `web-guard.js` cannot see them. The Codex-only hooks file wires it to `Bash` instead, where it denies a named fetcher aimed at an explicit remote URL. That is a nudge, not a boundary: a scheme-less `curl example.com`, an absolute `/usr/bin/curl`, a URL in a variable, or any fetcher outside the list all pass. Hosted search is ungoverned outright |
+| Codex has no `Read` function tool; reads happen in the shell                                      | `post-read-retrieval.js` matches `Bash` on Codex and derives candidates from markdown paths in the command. Approximate, and it only ever feeds retrieval telemetry                                                |
+| Plugin-bundled hooks are untrusted until reviewed                                                 | Nothing runs until the user runs `/hooks` inside Codex and trusts the definitions. This cannot be done for them, and it cannot be detected from outside                                                            |
+| Codex runs hook commands through a **login** shell (`$SHELL -lc`)                                  | Anything a login profile prints to stdout is prepended to hook output. `Stop` and `SubagentStop` require valid JSON on stdout, so a chatty `.zprofile` breaks those two hooks on Codex and never on Claude Code    |
+
+One asymmetry worth watching once real usage starts: `POST_TOOL_MODULE_TIMEOUT_MS` is per module, and the post-tool chain now runs once per file in a patch. A patch touching many vault notes multiplies the worst case against the 12s `hooks.json` deadline, where a Claude Code write can only ever cost one file's worth.
+
+Subagents are the other asymmetry. Codex loads custom agents from standalone TOML in `~/.codex/agents/` and has no plugin manifest field for them, so `install.sh` generates them from `plugin/agents/*.md` via `scripts/codex/generate-agents.mjs`. The markdown files stay the single source of truth; re-run the generator after any upgrade. Codex also has no typed `subagent_type` parameter — it spawns on a named instruction. `skills-shared/dispatch.md` holds the phrasing for both harnesses, and every skill defers to it rather than naming a dispatch mechanism itself.
 
 `hooks.pre_write_fail_mode` (shipped in `config.json`, read by `pre-write-check.js`) controls what happens when the duplicate scan itself fails (missing binary, dead daemon). The default `"open"` lets the write through with the check skipped; `"closed"` blocks vault writes until the scan infrastructure is available again.
 
@@ -72,12 +114,12 @@ Each verb resolves its source from the unified source registry (`scripts/lib/sou
 
 ## Context injection
 
-The `session-label.js` hook runs a dual-backend search (vault + episodic) on every `UserPromptSubmit` and either emits a real context injection (live mode, the shipped default) or writes a shadow log (shadow mode, for calibration). A race cap bounds total hook latency; backends that exceed the cap are killed and skipped for the turn.
+The `session-label.js` hook runs a vault search (`ll-search query`) on every `UserPromptSubmit` and either emits a real context injection (live mode, the shipped default) or writes a shadow log (shadow mode, for calibration). When the query was padded with prior-message context, a second concurrent vault query runs on the prompt alone, so the hook can tell whether a hit scored on the prompt's own words or only on the borrowed padding. Episodic memory left this path in v1.37.0 (0 of 7,455 gate passes had been carried solely by episodic) — it remains available via SessionStart retrieval and the MCP tool, just not in the per-prompt hook. A race cap bounds total hook latency; queries that exceed the cap are aborted and skipped for the turn.
 
 - shadow log: `PLUGIN_DATA/retrieval/shadow-injection-*.jsonl`
 - review: `node scripts/review-shadow.mjs` — stats, latency percentiles, sample draws, go/no-go gate
 - calibrate: set `"injection_mode": "shadow"` in `config.json` to run the pipeline without mutating prompts, review the log, then set it back to `"live"`
-- gate threshold: `injection_threshold` in `config.json` (default `0.3`, an RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
+- gate threshold: `injection_threshold` in `config.json` (default `0.34`, a weighted-RRF fusion-sum cutoff — see above) or `LEARNING_LOOP_INJECTION_THRESHOLD` env var
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
@@ -94,7 +136,7 @@ The `session-label.js` hook runs a dual-backend search (vault + episodic) on eve
 | `CLAUDE_PLUGIN_DATA`                  | Plugin data root (set by Claude Code). Holds `config.json`, `bin/`, `retrieval/`, `provenance/`, `federation/` |
 | `VAULT_PATH`                          | Overrides `vault_path` from `config.json`                                                                      |
 | `LEARNING_LOOP_INJECTION_MODE`        | Per-session override of `injection_mode` (`shadow`, `live`, `off`)                                             |
-| `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (RRF fusion-sum scale, e.g. `0.4`)                               |
+| `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (weighted-RRF fusion-sum scale, max `0.4333`, e.g. `0.35`)      |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
 | `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |
 
@@ -112,7 +154,6 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
     "pace_seconds": 2,
     "queue_cap": 200,
     "ollama_url": "http://localhost:11434",
-    "keep_alive": "30m",
     "pause_on_battery": true,
     "battery_poll_seconds": 60
   }
@@ -126,11 +167,10 @@ The model is chosen by **RAM tier** so one resident model serves everything: `ge
 | `pace_seconds`         | `2`                      | Delay between note investigations. Higher values reduce resource pressure.                                    |
 | `queue_cap`            | `200`                    | Max pending items before the librarian pauses. Items expire after 30 days or when the target note is edited.  |
 | `ollama_url`           | `http://localhost:11434` | Ollama API endpoint.                                                                                          |
-| `keep_alive`           | `30m`                    | How long ollama keeps the model resident after idle. Set lower to free RAM sooner, higher to avoid reloads.   |
 | `pause_on_battery`     | `true`                   | Suspend the librarian while the machine is on battery power (polled).                                         |
 | `battery_poll_seconds` | `60`                     | How often to re-check power state when `pause_on_battery` is on.                                              |
 
-Five override knobs are read by `scripts/librarian/config.mjs` but omitted from the shipped config; set them under `librarian` only when the built-in defaults (defined in that file) need replacing:
+Six override knobs are read by `scripts/librarian/config.mjs` but omitted from the shipped config; set them under `librarian` only when the built-in defaults (defined in that file) need replacing:
 
 | Key                | Purpose                                                                                                               |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------- |
@@ -139,6 +179,7 @@ Five override knobs are read by `scripts/librarian/config.mjs` but omitted from 
 | `tag_prompt`       | Classifier prompt for tag suggestion (vocabulary-bounded picks).                                                        |
 | `duplicate_prompt` | Classifier prompt for duplicate detection (duplicate / same_topic / unrelated).                                          |
 | `structural_tags`  | Array of tags the tag suggester never proposes; default `["literature", "counterpoint", "synthesis", "excalidraw"]`.     |
+| `keep_alive`       | How long ollama keeps the model resident after idle; default `30m`.                                                     |
 
 ### Remote model provider (advanced)
 
@@ -182,7 +223,7 @@ node scripts/install-cache-health.mjs
 
 ## Provenance
 
-Every vault operation (read, write, agent spawn, skill invocation) logs to `provenance/events-YYYY-MM.jsonl`. The `/health` command reads these logs to show session activity patterns.
+Every vault write, edit, agent spawn and skill invocation logs to `provenance/events-YYYY-MM.jsonl`. Reads are not recorded here — the provenance module has no `Read` branch. The `/health` command reads these logs to show session activity patterns.
 
 ```bash
 # Generate provenance report
@@ -194,7 +235,15 @@ node scripts/provenance-consolidate.mjs
 
 ## Source verification
 
-The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
+The source-resolver verifies citations mechanically against 13 APIs: PubMed, PubMed Central (PMC), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, bioRxiv/medRxiv, DBLP, Unpaywall, RFC Editor, Open Library, and ChEMBL.
+
+Twelve of those need no configuration. **Unpaywall does**: its API requires a contact email, so the adapter returns `null` — silently skipping open-access enrichment — unless `unpaywall_email` is set. Note this one lives in the source-resolver's own config file, `PLUGIN_DATA/data/resolver-config.json`, not in `config.json`:
+
+```json
+{ "unpaywall_email": "you@example.com" }
+```
+
+It only enriches DOI results with open-access status and a free-full-text URL; leaving it unset costs you `is_oa`/`oa_url`, not verification. The note-writer runs `verify-note` and `check-claims` on every note at write time. It catches author swaps and wrong years, flags impossible journal combinations, and checks that cited studies support the claims made.
 
 Citation extraction uses POS tagging (vendored winkNLP) to distinguish author names from month names and common words. The naive regex approach had a ~60% false positive rate on author-year patterns.
 
@@ -229,7 +278,7 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
-Restart Claude Code. The session-start hook auto-applies config changes on first run after update. It also re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
+Restart Claude Code. Your `config.json` lives in `PLUGIN_DATA` and is read as-is on the next run — an update never rewrites it, so edits take effect immediately and nothing is migrated over them. (The one exception is a first-ever run with no `PLUGIN_DATA/config.json`, where the plugin's own `config.json` is copied in to seed it.) The session-start hook re-checks `~/.local/bin/ll-watch` and `~/.local/bin/ll-search`; if either is missing it runs `scripts/install-shims.mjs --install` to write both. The shims resolve their targets at runtime, so they survive cache version changes.
 
 Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed.
 

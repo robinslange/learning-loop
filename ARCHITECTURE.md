@@ -17,7 +17,8 @@ learning-loop/
   plugin/               -- the installed plugin (marketplace source ./plugin)
     .claude-plugin/     -- plugin manifest (plugin.json)
     hooks/              -- Claude Code lifecycle hooks (entry: *.js)
-      lib/              -- hook-shared helpers (common, dream-gate, io, inject, snapshot)
+      lib/              -- hook-shared helpers (common, dream-gate, filename-style, io,
+                           inject, snapshot)
       modules/          -- post-tool modules (provenance, reflect-track, autolink, edge-infer)
       session-start/    -- session-start submodules (context-assembly, watch-daemon,
                            vault-snapshot, cache-cleanup, health-detector, update-check,
@@ -25,11 +26,13 @@ learning-loop/
       session-start.js  -- vault context injection on session open
       session-label.js  -- just-in-time injection pipeline on each prompt
       post-tool.js      -- coalesced PostToolUse dispatcher (Write|Edit|Task|Skill)
-      pre-write-check.js  -- duplicate + added-dash gate before vault writes and edits
+      pre-write-check.js  -- duplicate, added-dash, and frontmatter-contract gate
+                             before vault writes and edits
       web-guard.js      -- global WebSearch/WebFetch deny; routes web access to the source gateway
       stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
       post-read-retrieval.js  -- passive read telemetry
       post-search-tracking.js -- episodic-memory search query tracking
+      subagent-stop.js  -- agent-result provenance when a subagent stops
 
     bin/                -- source-gateway.mjs (the one sanctioned web-access CLI)
 
@@ -55,7 +58,7 @@ learning-loop/
       omc-cache-health/ -- cache health subplugin
     provenance/         -- learned/retired pattern notes
     templates/          -- CLAUDE.md section template version
-    vendor/             -- vendored schemas and NLP libs
+    vendor/             -- pinned sql.js build (sql-wasm.js/.wasm)
     config.json         -- plugin config
 
   native/               -- Rust workspace
@@ -68,7 +71,9 @@ learning-loop/
   .claude-plugin/       -- marketplace manifest (marketplace.json)
   tests/                -- Node.js tests (node --test)
   eslint-plugin-learning-loop/ -- custom ESLint rules (no-empty-catch, no-direct-jsonparse,
-                           no-process-env-outside-env-module, no-raw-lockfile)
+                           no-process-env-outside-env-module, no-raw-lockfile,
+                           no-url-pathname). Only the last two are enabled;
+                           see 'critical invariants'.
   docs/
     baseline/           -- convention docs (the only tracked part of docs/)
     superpowers/        -- plan archives (local-only; docs/* is gitignored except baseline/)
@@ -87,24 +92,24 @@ learning-loop/
 
 ### read path
 
-A user prompt triggers `session-label.js`. The hook dispatches to vault search and optionally to episodic memory, then injects the top results as context before the model sees the prompt.
+A user prompt triggers `session-label.js`. The hook runs a vault search — plus a second concurrent query on the bare prompt when the query was padded with prior-message context — then injects the top result as context before the model sees the prompt. Episodic memory left this path in v1.37.0; it is still a retrieval backend for skills and agents, just not for the per-prompt hook.
 
 ```mermaid
 flowchart LR
   A[UserPromptSubmit] --> B[session-label.js]
-  B --> C[vault-search.mjs]
-  B --> D[episodic-memory plugin]
-  C --> E[ll-search daemon]
-  E --> F[SQLite notes + embeddings]
-  E --> G[ONNX BGE-small model]
-  F --> H[ranked results]
-  G --> H
-  D --> H
+  B --> C[ll-search query: padded]
+  B --> D[ll-search query: bare prompt]
+  C --> E[SQLite notes + embeddings]
+  D --> E
+  E --> F[ONNX BGE-small model]
+  E --> G[ranked results]
+  F --> G
+  G --> H[gate: top score >= injection_threshold]
   H --> I[context injection or shadow log]
   I --> J[Claude Code model]
 ```
 
-`vault-search.mjs` is a Node wrapper that resolves db/vault paths and invokes `ll-search <subcommand>` per call via `execFileSync`. Each call is a fresh subprocess; there is no persistent JSON protocol or channel between the plugin and `ll-search`. This is the canonical statement of the invocation model; other sections reference it. The search pipeline scores candidates via Reciprocal Rank Fusion (RRF) over vector similarity, BM25, graph PageRank, and temporal decay.
+`vault-search.mjs` is a Node wrapper that resolves db/vault paths and invokes `ll-search <subcommand>` per call via `execFileSync`. Each call is a fresh subprocess; there is no persistent JSON protocol or channel between the plugin and `ll-search`. This is the canonical statement of the invocation model; other sections reference it. The search pipeline scores candidates via weighted Reciprocal Rank Fusion over five lanes — vector similarity, BM25, personalized PageRank, tag expansion, and Rocchio PRF — with the graph lanes deliberately down-weighted to 0.05. See [guide/search.md](guide/search.md) for the weights and why they are not equal.
 
 ### write path
 
@@ -203,7 +208,15 @@ All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provid
 
 ## critical invariants
 
-These must hold across all layers after phase 2. Violations are CI failures.
+These are the conventions the codebase is written to. **Most are not mechanically enforced** — treat the list as the standard a reviewer holds you to, not as something CI will catch for you.
+
+What CI actually fails on today: the `no-raw-lockfile` and `no-url-pathname` ESLint rules — neither of which is on this list. Nothing on the list is enforced.
+
+Invariant 5 comes closest and still is not: `#![warn(missing_docs)]` in `ll-core/src/lib.rs` is a warning, and the cargo job runs `cargo test --workspace --locked` with no `-D warnings`, no `RUSTFLAGS`, and no clippy step, so an undocumented public item ships green.
+
+The custom rules that *would* enforce invariants 1 and 2 — `learning-loop/no-process-env-outside-env-module` and `learning-loop/no-direct-jsonparse` — ship set to `'off'` in `eslint.config.mjs`, and both are violated in shipped code. Note the first cannot see the whole plugin even at `'error'`: its `files` globs cover `plugin/hooks/**` and `plugin/scripts/**`, so `plugin/bin/` and `plugin/plugins/` are outside its reach. Invariants 3, 4, 6, 7, 8, 9 and 10 have no automated check at all; 6 and 9 record their own pending work inline.
+
+Turning any of these on is a cleanup task in its own right, because each currently fails.
 
 1. `process.env.X` is read only in `scripts/lib/env.mjs`. Every other file imports `env` from there. See `docs/baseline/plugin.md`.
 
@@ -231,7 +244,7 @@ These must hold across all layers after phase 2. Violations are CI failures.
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The eight hook handlers across five Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
+**Hook surface.** The nine hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
 
 `session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
@@ -317,9 +330,9 @@ This replaced static linking via `ort`'s `download-binaries` build feature (work
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why eight hook handlers across five event types?**
+**Why nine hook handlers across six event types?**
 
-Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), post-read and post-episodic-search (retrieval telemetry), subagent stop (agent-result provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 
@@ -334,15 +347,16 @@ On session open, hooks fire in this order:
 1. `session-start.js` -- context injection, cache cleanup, daemon spawn, vault snapshot
 2. (session is now live)
 3. On each user prompt: `session-label.js` -- JIT injection pipeline
-4. On each Write/Edit/Agent/Skill tool use:
-   - Before (Write|Edit): `pre-write-check.js` -- near-duplicate and added-dash gate
-   - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the provenance, reflect-track, autolink, and edge-infer modules (`hooks/modules/`) in that fixed order (cheap load-bearing first), on Agent/Skill it runs provenance only
+4. On each Write/Edit/Task/Skill tool use:
+   - Before (Write|Edit): `pre-write-check.js` -- near-duplicate, added-dash, and frontmatter-contract gate
+   - After: `post-tool.js` -- coalesced dispatcher; on Write/Edit it runs the provenance, reflect-track, autolink, and edge-infer modules (`hooks/modules/`) in that fixed order (cheap load-bearing first), on Task/Skill it runs provenance only
 5. On each WebSearch/WebFetch attempt: `web-guard.js` -- denies the raw tool and points the agent at `bin/source-gateway.mjs`
 6. On each Read tool use: `post-read-retrieval.js` -- passive telemetry
 7. On each episodic-memory tool use: `post-search-tracking.js`
-8. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
+8. On each subagent finishing: `subagent-stop.js` -- emits an `agent-result` provenance record
+9. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
-Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races both vault search and episodic memory against `HookConfig.INJECTION_RACE_CAP_MS` and emits results for whichever finishes within the cap.
+Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races its vault queries — the padded query, plus a concurrent query on the bare prompt when the two differ — against `env.LEARNING_LOOP_INJECTION_RACE_CAP_MS` (which defaults to `HookConfig.INJECTION_RACE_CAP_MS`) and emits results for whichever finishes within the cap.
 
 ---
 
@@ -398,9 +412,11 @@ ll-search benchmark <db> --model-a A --model-b B <queries...>
 
 **Evaluation and tuning**
 ```
-ll-search tune-prf    <db> <queries...>
-ll-search eval-prf    <db> [--min-links N]
-ll-search eval-funnel <db> [--min-links N] [--limit N]
+ll-search tune-prf     <db> <queries...>
+ll-search eval-prf     <db> [--min-links N]
+ll-search eval-funnel  <db> [--min-links N] [--limit N]
+ll-search tune-weights <db> [--min-links N] [--limit N]   # fusion lane weights, train/holdout
+ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane stats; probes is a JSON array of [set, gold_path, query] triples
 ```
 
 **Federation**
@@ -447,11 +463,11 @@ These are tracked issues, not defects -- the code works, but the structure is no
 
 A complete session runs like this. The total wall time for session-start (target p95: 500 ms) covers all steps below:
 
-1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (recent captures, intention summary), and writes the context to stdout for Claude Code to inject.
+1. **SessionStart** -- `session-start.js` fires. It: checks for plugin updates, verifies dependencies, takes a vault snapshot, starts the ll-search daemon if not running, assembles memory context (memory index, learned patterns, a recent-captures pointer, intention summary), and writes the context to stdout for Claude Code to inject.
 
-2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a dual-backend search (vault + episodic memory) with a race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
+2. **Prompts** -- `session-label.js` fires on every `UserPromptSubmit`. It runs a vault search — and, when the query was padded with prior-message context, a second concurrent vault query on the prompt alone — both under one race cap. In shadow mode it logs the result; in live mode it injects the top context block into the prompt before the model sees it. The label extracted from the conversation is stored for episodic memory retrieval.
 
-3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags and on em/en dashes added to note body prose (both paths use an added-only delta against the note on disk, so pre-existing dashes never block; `Source:`/`Related:` lines are exempt). After each write, `post-tool.js` runs four modules in fixed order: provenance (event log), reflect-track (new-notes marker), autolink (backlinks), and edge-infer (graph edges).
+3. **Writes** -- `pre-write-check.js` fires before each vault Write or Edit and warns on near-duplicate similarity (≥0.85 against existing notes); it hard-blocks on duplicate frontmatter tags, on em/en dashes added to note body prose, and on frontmatter-contract violations introduced in an atomic-note folder (`checkFrontmatter` in `scripts/lib/frontmatter-schema.mjs`: required `tags`/`date`/`source`, deprecated key aliases, a non-`YYYY-MM-DD` date, an off-vocabulary `status:`). All three use an added-only delta against the note on disk, so pre-existing violations never block; `Source:`/`Related:` lines are exempt from the dash rule. After each write, `post-tool.js` runs four modules in fixed order: provenance (event log), reflect-track (new-notes marker), autolink (backlinks), and edge-infer (graph edges).
 
 4. **Stop** -- `stop-nudge.js` fires at each turn end (every assistant Stop, not just session close). If the session was substantial (>512 KB of transcript or ≥200 transcript lines) and the reflect cooldown has passed, it suggests `/reflect`. The Stop hook does not reindex; the `ll-search watch` daemon spawned at SessionStart handles incremental reindexing continuously throughout the session.
 
@@ -480,7 +496,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs:164-180`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs`:
 
 ```json
 {
@@ -514,7 +530,7 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
 
 ### shadow injection log
 
-`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js:261-277`):
+`$CLAUDE_PLUGIN_DATA/retrieval/shadow-injection-YYYY-MM.jsonl` -- one line per prompt-submit event (monthly files, via `emitRetrieval` in `hooks/lib/common.mjs`). The writer (`scripts/lib/retrieval.mjs`) wraps every record with the canonical `ts` / `session_id` / `command` / `query` fields; backend stats nest under a `backends` key built by `summarizeBackends` (`hooks/session-label.js`):
 
 ```json
 {
@@ -526,18 +542,18 @@ The `action` / `target` / `folder` / `tags` fields are per-action shape from `ho
   "prompt": "how should I...",
   "prompt_length": 142,
   "type": "gate-pass-payload",
-  "gate": { "passed": true, "vault_top_score": 0.62, "episodic_top_score": 0.41 },
+  "gate": {
+    "passed": true,
+    "vault_top_score": 0.62,
+    "padded": true,
+    "solo_top_score": 0.41,
+    "padding_load_bearing": false
+  },
   "backends": {
     "vault": {
       "latency_ms": 32,
       "hits": 3,
       "top_path": "3-permanent/note.md",
-      "error": null,
-      "raced_out": false
-    },
-    "episodic": {
-      "latency_ms": 45,
-      "hits": 1,
       "error": null,
       "raced_out": false
     }

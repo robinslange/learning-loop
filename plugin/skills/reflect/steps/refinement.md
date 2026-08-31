@@ -51,7 +51,7 @@ If the resulting refinement-pairs.json is `[]`, report `Refinement: 0 candidates
 
 ## 4.6.b: Dispatch refinement-proposer agent
 
-Spawn the refinement-proposer agent with `subagent_type: "learning-loop:refinement-proposer"` and the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders):
+Spawn the `refinement-proposer` agent (dispatch: `skills-shared/dispatch.md`) with the prompt below. The `pairs_file` placeholder must be substituted with the resolved literal path (`${LL_TMP_PREFIX}-refinement-pairs.json` from the block above, i.e. `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect-refinement-pairs.json`); likewise resolve `${CLAUDE_PLUGIN_ROOT}` to a literal path before dispatch (see `agents-shared/vault-io.md` → Placeholders):
 
 ```
 Read the agent definition at ${CLAUDE_PLUGIN_ROOT}/agents/refinement-proposer.md and follow it exactly.

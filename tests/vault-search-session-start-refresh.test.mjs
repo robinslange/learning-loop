@@ -21,13 +21,18 @@ import { skipOnWindows } from './helpers/platform.mjs';
 
 const VAULT_SEARCH = fileURLToPath(new URL('../plugin/scripts/vault-search.mjs', import.meta.url));
 
-// Create a minimal stub ll-search binary that emits an empty JSON array and
-// exits 0. Without a discoverable binary, vault-search.mjs exits early (code 2)
-// before it reaches writeMarker. The stub satisfies hasBinary() and lets the
-// intentions() call complete normally, returning [] and triggering the write.
-function createStubBinary(binDir) {
+// Create a minimal stub ll-search binary that records the argv it was handed
+// and emits a JSON array. Without a discoverable binary, vault-search.mjs exits
+// early (code 2) before it reaches writeMarker.
+//
+// The stub MUST record argv. An earlier version echoed `[]` regardless of its
+// arguments, which made the marker assertion pass while `--session-start-refresh`
+// was being forwarded to the binary as the positional context argument — clap
+// rejected it, intentions() swallowed the error and returned [], and the marker
+// was empty on every real run. A stub that ignores argv cannot see that.
+function createStubBinary(binDir, argvLog) {
   const stub = join(binDir, 'll-search');
-  writeFileSync(stub, '#!/bin/sh\necho "[]"\n');
+  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" >> ${argvLog}\necho '[{"context":"x","count":1}]'\n`);
   chmodSync(stub, 0o755);
   return stub;
 }
@@ -42,7 +47,8 @@ test(
       // the writeMarker call instead of exiting early with code 2.
       const binDir = join(tmpPluginData, 'bin');
       mkdirSync(binDir, { recursive: true });
-      createStubBinary(binDir);
+      const argvLog = join(tmpPluginData, 'argv.log');
+      createStubBinary(binDir, argvLog);
 
       const result = spawnSync(
         process.execPath,
@@ -72,6 +78,19 @@ test(
         parsed = JSON.parse(raw);
       }, `marker file must be valid JSON; got: ${raw}`);
       assert.ok(Array.isArray(parsed), 'marker contents must be an array');
+
+      // The hook's own flag must never reach the binary, and the refreshed
+      // marker must carry the rows the binary returned rather than the empty
+      // array a swallowed CLI error produces.
+      const argv = readFileSync(argvLog, 'utf8').split('\n').filter(Boolean);
+      assert.deepEqual(
+        argv.filter((a) => a.startsWith('--')),
+        [],
+        `ll-search was handed a flag it does not accept: ${JSON.stringify(argv)}`,
+      );
+      assert.equal(argv[0], 'intentions');
+      assert.equal(argv.length, 2, `expected [intentions, <db>]; got ${JSON.stringify(argv)}`);
+      assert.deepEqual(parsed, [{ context: 'x', count: 1 }]);
     } finally {
       rmSync(tmpPluginData, { recursive: true, force: true });
     }

@@ -22,7 +22,7 @@ Read each phase file in order and execute its instructions. After Phase 1's dash
 2. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/02-vault.md`** -- vault path, folders, system files.
 3. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/03-binary.md`** -- binary, vendor deps, orphan cleanup, index, shims, plugin deps.
 4. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/04-federation.md`** -- single yes/no, hands off to `/learning-loop:federation` for the full flow.
-5. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/05-claudemd.md`** -- CLAUDE.md integration.
+5. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/05-claudemd.md`** -- instruction-file integration (CLAUDE.md, and AGENTS.md when Codex is present).
 6. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/06-cache-health.md`** -- optional cache-health statusline.
 7. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/07-librarian.md`** -- optional librarian background agent (incl. 7d: optional GLM Verify-offload provider for `/learning-loop:research`).
 8. **Read `${CLAUDE_PLUGIN_ROOT}/skills/init/phases/08-seed-restore.md`** -- restore a seed bundle if present and seed the harvest deny-list.
@@ -40,6 +40,8 @@ Learning loop configured.
   Search:       [N] notes indexed
   Federation:   [configured | deferred to /learning-loop:federation | not requested]
   CLAUDE.md:    [status]
+  AGENTS.md:    [status | skipped: codex not installed]
+  Codex agents: [N generated in ~/.codex/agents | skipped: codex not installed]
   Cache health: [installed | skipped: oh-my-claude not found]
   Librarian:    [enabled | skipped: ollama/hardware not available]
   Seed restore: [restored from bundle | no bundle present]

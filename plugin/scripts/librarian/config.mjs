@@ -96,7 +96,7 @@ export function loadLibrarianConfig({ configPath, now: _now } = {}) {
   const ollamaUrl = env.OLLAMA_URL || libCfg.ollama_url || DEFAULT_OLLAMA_URL;
 
   const result = Object.freeze({
-    enabled: libCfg.enabled !== false,
+    enabled: libCfg.enabled === true,
     model,
     paceMs: (libCfg.pace_seconds || 2) * 1000,
     queueCap: libCfg.queue_cap || 200,

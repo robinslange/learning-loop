@@ -89,7 +89,8 @@ fi
 # Update all versioned manifests
 perl -i -pe "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW\"/" \
   package.json \
-  plugin/.claude-plugin/plugin.json
+  plugin/.claude-plugin/plugin.json \
+  plugin/.codex-plugin/plugin.json
 
 for cargo_toml in native/crates/*/Cargo.toml; do
   [ -f "$cargo_toml" ] || continue
@@ -103,7 +104,7 @@ done
 # CHANGELOG: refuse if Unreleased section is empty; otherwise rename and stub.
 if [ ! -f CHANGELOG.md ]; then
   echo "Error: CHANGELOG.md missing"
-  git checkout -- package.json plugin/.claude-plugin/plugin.json native/crates/*/Cargo.toml
+  git checkout -- package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json native/crates/*/Cargo.toml
   exit 1
 fi
 
@@ -116,7 +117,7 @@ UNRELEASED_BODY=$(awk '
 if [ -z "$UNRELEASED_BODY" ]; then
   echo "Error: CHANGELOG.md ## Unreleased section is empty; nothing to release"
   echo "Add a section under '## Unreleased' describing this release, then re-run."
-  git checkout -- package.json plugin/.claude-plugin/plugin.json native/crates/*/Cargo.toml
+  git checkout -- package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json native/crates/*/Cargo.toml
   exit 1
 fi
 
@@ -129,16 +130,16 @@ echo "Syncing lockfiles..."
 npm install --package-lock-only --silent
 
 # Verify
-for f in package.json plugin/.claude-plugin/plugin.json; do
+for f in package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json; do
   v=$(node -e "console.log(JSON.parse(require('fs').readFileSync('$f','utf-8')).version)")
   if [ "$v" != "$NEW" ]; then
     echo "Error: $f version is $v, expected $NEW"
-    git checkout -- package.json plugin/.claude-plugin/plugin.json CHANGELOG.md native/crates/*/Cargo.toml native/Cargo.lock package-lock.json
+    git checkout -- package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json CHANGELOG.md native/crates/*/Cargo.toml native/Cargo.lock package-lock.json
     exit 1
   fi
 done
 
-git add package.json plugin/.claude-plugin/plugin.json CHANGELOG.md native/Cargo.lock package-lock.json
+git add package.json plugin/.claude-plugin/plugin.json plugin/.codex-plugin/plugin.json CHANGELOG.md native/Cargo.lock package-lock.json
 git add native/crates/*/Cargo.toml 2>/dev/null
 git commit -m "release: v$NEW"
 git tag "v$NEW"

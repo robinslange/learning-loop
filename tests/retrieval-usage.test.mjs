@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const REPORT = join(SCRIPTS, 'retrieval-report.mjs');
-const { sessionSurfaced, usageReport, loadNoteUsageEvents } = await import(
+const { sessionSurfaced, usageReport, loadNoteUsageEvents, loadUnevidencedInformed } = await import(
   pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
 );
 
@@ -153,6 +153,58 @@ test('loadNoteUsageEvents folds unknown statuses to ignored (conservative)', () 
     const events = loadNoteUsageEvents(pd);
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].status, 'ignored');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('loadNoteUsageEvents reads the pre-rename `note` key as well as `target`', () => {
+  // Earlier /reflect runs emitted the path as `note`; the field was renamed to
+  // `target` and the readers were not. A record with neither key fails
+  // isVaultNotePath and is skipped, so the rename dropped every pre-rename
+  // event silently — 572 of them in one real vault, most of the usage history
+  // the precision instrument had, with the report showing no sign of a gap.
+  const pd = makePluginData({
+    provenance: [
+      { ts: daysAgo(1), action: 'note-usage', note: '0-inbox/old-shape.md', status: 'used' },
+      { ts: daysAgo(1), action: 'note-usage', target: '0-inbox/new-shape.md', status: 'used' },
+      // Neither key: still skipped, so a malformed record cannot sneak in.
+      { ts: daysAgo(1), action: 'note-usage', status: 'used' },
+      // `note` carrying a non-vault path is filtered the same as `target` would be.
+      { ts: daysAgo(1), action: 'note-usage', note: 'peer:someone/x.md', status: 'used' },
+    ],
+  });
+  try {
+    const events = loadNoteUsageEvents(pd);
+    assert.deepStrictEqual(
+      events.map((e) => e.path).sort(),
+      ['0-inbox/new-shape.md', '0-inbox/old-shape.md']
+    );
+    assert.ok(events.every((e) => e.status === 'used'));
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('loadUnevidencedInformed reads the pre-rename `note` key too', () => {
+  // The second reader had the same bug; an unevidenced `informed` claim written
+  // under the old key was invisible to the gap count that exists to surface it.
+  const pd = makePluginData({
+    provenance: [
+      {
+        ts: daysAgo(1),
+        action: 'note-usage',
+        note: '0-inbox/old-shape.md',
+        status: 'used',
+        signals: ['informed'],
+      },
+    ],
+  });
+  try {
+    assert.deepStrictEqual(
+      loadUnevidencedInformed(pd).map((e) => e.path),
+      ['0-inbox/old-shape.md']
+    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }

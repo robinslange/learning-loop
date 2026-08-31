@@ -125,7 +125,9 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
   assert.equal(parsed.debug, false);
   assert.equal(parsed.threshold, HookConfig.INJECTION_THRESHOLD);
   assert.equal(parsed.raceCap, 1500);
-  assert.equal(parsed.ollama, 'http://localhost:11434');
+  // null, not the default: consumers layer `librarian.ollama_url` between the
+  // env var and DEFAULT_OLLAMA_URL, which a pre-defaulted value would shadow.
+  assert.equal(parsed.ollama, null);
   assert.equal(parsed.model, null);
   assert.equal(parsed.repo, 'robinslange/learning-loop');
   assert.equal(parsed.forceError, false);

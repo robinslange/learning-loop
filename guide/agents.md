@@ -1,6 +1,6 @@
 # Agents
 
-Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 19 shared skills that enforce consistent quality standards across all operations.
+Skills spawn specialized agents as subprocesses. They run in parallel where possible and share 20 shared skills that enforce consistent quality standards across all operations.
 
 ## Why agents, not prompts
 
@@ -39,7 +39,7 @@ A separate tier runs outside of Claude entirely. The vault librarian (`scripts/l
 
 | Task | Mode | Trigger | Output |
 |---|---|---|---|
-| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Orphan notes (no inbound or outbound links) | `link_suggestion` queue entry per candidate |
+| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Notes with no INBOUND links (outbound links are not consulted) | `link_suggestion` queue entry per candidate |
 | Voice gate | Single structured-output call | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag` |
 | Tag suggestion | Single structured-output call | Notes with 0 or 1 tags | `tag_suggestion` with up to 2 tags |
 | Duplicate detection | Single structured-output call | Every visited note | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |
@@ -66,8 +66,9 @@ Lightweight agents (vault search, scoring, ingestion) run on Haiku to keep costs
 
 ## Shared skills
 
-Agents share 19 skills in `agents-shared/` that standardize quality decisions:
+Agents share 20 skills in `agents-shared/` that standardize quality decisions:
 
+- **adversarial-content** -- the prompt-injection guard every agent that reads outside content opens with: external text is data, never directives
 - **promote-gate** -- six-criteria assessment that determines whether a note advances
 - **source-verification** -- mechanical citation checking against academic APIs
 - **cross-validation** -- checks claims against other vault notes for consistency

@@ -30,6 +30,7 @@ import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { emitJson } from './lib/io.mjs';
+import { normalizeWrites } from './lib/tool-payload.mjs';
 
 // The hook's outer deadline (hooks.json timeout) starts when the process
 // does; the duplicate gate budgets its subprocess fallback from what's left.
@@ -330,26 +331,37 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   }
 }
 
+// stdout carries exactly one PreToolUse decision, but one call can gate several
+// files (a Codex apply_patch). So verdicts are recorded, not emitted, and a deny
+// anywhere in the patch outranks an advisory anywhere else — otherwise a broken
+// wikilink in file 1 would silently let a contract violation in file 2 through.
+let verdict = null;
+
 function deny(reason) {
-  emitJson({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason,
-    },
-  });
+  if (verdict?.kind === 'deny') return;
+  verdict = { kind: 'deny', text: reason };
 }
 
 function warn(context) {
+  if (verdict) return;
+  verdict = { kind: 'warn', text: context };
+}
+
+function emitVerdict() {
+  if (!verdict) return;
   emitJson({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      additionalContext: context,
-    },
+    hookSpecificOutput:
+      verdict.kind === 'deny'
+        ? {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: verdict.text,
+          }
+        : { hookEventName: 'PreToolUse', additionalContext: verdict.text },
   });
 }
 
-runHook(async ({ tool, input }) => {
+async function checkWrite(tool, input) {
   if (tool !== 'Write' && tool !== 'Edit') return;
 
   const filePath = input.file_path;
@@ -383,7 +395,11 @@ runHook(async ({ tool, input }) => {
         disk = null;
       }
       if (disk !== null) {
-        const idx = disk.indexOf(oldString);
+        // An apply_patch hunk carries the `@@` anchor it occurs strictly after.
+        // Searching from the anchor is what stops a hunk removing a body line
+        // from binding to an identical line in the frontmatter.
+        const anchor = input.context ? disk.indexOf(input.context) : -1;
+        const idx = disk.indexOf(oldString, anchor === -1 ? 0 : anchor + input.context.length);
         if (idx === -1) {
           // old_string not on disk: the Edit tool itself errors — nothing to gate.
           skipDashCheck = true;
@@ -526,4 +542,17 @@ runHook(async ({ tool, input }) => {
   if (warnings.length > 0) {
     warn(warnings.join('\n'));
   }
+}
+
+// One PreToolUse call can carry more than one file: Codex sends a whole
+// apply_patch where Claude Code sends a single Write or Edit. Gate every file,
+// stopping only once something is denied — nothing can outrank a deny, and
+// stopping at the first advisory would let later violations through.
+runHook(async ({ raw }) => {
+  for (const write of normalizeWrites(raw)) {
+    if (write.tool === 'Delete') continue;
+    await checkWrite(write.tool, write);
+    if (verdict?.kind === 'deny') break;
+  }
+  emitVerdict();
 });

@@ -20,7 +20,6 @@ export const HookConfig = Object.freeze({
   // --- Timeouts (ms) ---
   QUERY_TIMEOUT_MS: 2000,
   DEPS_CHECK_TIMEOUT_MS: 5000,
-  DETECTOR_TIMEOUT_MS: 200,
   SNAPSHOT_TIMEOUT_MS: 10000,
   REINDEX_TIMEOUT_MS: 5000,
   DAEMON_STARTUP_DEADLINE_MS: 2000,
@@ -139,10 +138,15 @@ export const HookConfig = Object.freeze({
 
   // --- ML thresholds / weights ---
   // INJECTION_THRESHOLD gates the JIT injection pipeline (session-label.js).
-  // UNIT: raw RRF fusion sum as returned by `ll-search query` — NOT a cosine
-  // similarity. With RRF_K=5 each signal contributes 1/(5+rank), so a doc
-  // ranked #1 in one signal scores 0.167, #1 in two signals 0.333, and #1 in
-  // all five signals ~0.83. Cosine-style values (0.7+) are unreachable.
+  // UNIT: raw WEIGHTED RRF fusion sum as returned by `ll-search query` — NOT a
+  // cosine similarity. With RRF_K=5 each lane contributes weight/(5+rank), and
+  // the shipped weights are unequal (vec/bm25 1.0, prf 0.5, ppr/tag 0.05), so a
+  // doc ranked #1 by vector alone scores 0.167, #1 in both retrieval lanes
+  // 0.333, and #1 in all five lanes 0.4333 — the ceiling. Cosine-style values
+  // (0.7+) are unreachable, and anything above 0.4333 disables the gate.
+  // The history below is kept because it records why the value moved; the
+  // percentiles in it were measured on the OLD unweighted scale (ceiling
+  // 0.8333) and are NOT comparable to the current one. See the Rescale note.
   //
   // Calibration (2026-06-12): shadow-injection logs 2026-04 → 2026-06,
   // n=18,360 healthy gate evaluations with a recorded vault_top_score.

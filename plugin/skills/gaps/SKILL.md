@@ -84,7 +84,7 @@ Proceed immediately.
 
 ### Step 1: Orient
 
-Spawn all three subagents in the same turn (a single message with three Agent tool calls, not sequential):
+Spawn all three subagents concurrently, not sequentially (dispatch: `skills-shared/dispatch.md`):
 
 1. **Vault Scout** (`discovery-vault-scout`):
    - Pass: topic, vault_path (`{{VAULT}}/`), angle (if any)

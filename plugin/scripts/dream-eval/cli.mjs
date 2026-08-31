@@ -49,12 +49,22 @@ function readProbes(pd) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const { mode, passes } = parseArgs(process.argv.slice(2));
+  const { mode, passes, mine } = parseArgs(process.argv.slice(2));
   const pd = getPluginData();
   const memoryDir = resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR);
   const probes = readProbes(pd);
+  // Mining is step 3 of the skill, run in-session — this guard cannot do it,
+  // so telling a direct CLI caller to "run with --mine" sent them in a circle.
+  if (mine) {
+    process.stderr.write(
+      'probe mining runs in-session: use /learning-loop:dream-eval --mine, not this CLI.\n',
+    );
+    process.exit(2);
+  }
   if (probes.length === 0) {
-    process.stderr.write('no probe corpus found. run with --mine first.\n');
+    process.stderr.write(
+      'no probe corpus found. run /learning-loop:dream-eval --mine first to build it.\n',
+    );
     process.exit(1);
   }
 

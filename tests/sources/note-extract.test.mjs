@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { extractSourcesFromNote } from '../../plugin/scripts/lib/sources/note-extract.mjs';
+import { findNumberInAbstract } from '../../plugin/scripts/lib/sources/claim-numbers.mjs';
 
 const byId = (sources) =>
   sources.map((s) => [s.pmid || s.pmc || s.doi, s.claimedAuthor, s.claimedYear]);
@@ -32,5 +33,51 @@ describe('extractSourcesFromNote author-year attribution', () => {
     assert.equal(only.pmid, '11112222');
     assert.equal(only.claimedAuthor, null);
     assert.equal(only.claimedYear, null);
+  });
+});
+
+describe('inline PMID extraction', () => {
+  const pmids = (s) => extractSourcesFromNote(s).map((x) => x.pmid).filter(Boolean);
+
+  it('accepts the colon form, which is at least as common as the bare space', () => {
+    assert.deepEqual(pmids('Jones 2020 (PMID: 12345678).'), ['12345678']);
+    assert.deepEqual(pmids('Jones 2020 (PMID:12345678).'), ['12345678']);
+    assert.deepEqual(pmids('Jones 2020 (PMID 12345678).'), ['12345678']);
+    assert.deepEqual(pmids('Jones 2020 (PubMed 1234567).'), ['1234567']);
+    assert.deepEqual(pmids('see PMIDs 12345678 for detail'), ['12345678']);
+  });
+
+  it('does not truncate a longer digit run into a different real article', () => {
+    // Without a trailing-digit guard this yielded '12345678' — a genuine but
+    // unrelated PMID, which then verified clean. A fabricated identifier that
+    // resolves to a real paper is worse than one that 404s.
+    assert.deepEqual(pmids('Jones 2020 (PMID 123456789012).'), []);
+  });
+});
+
+describe('findNumberInAbstract digit boundaries', () => {
+  it('does not match a claim as a substring of a longer number', () => {
+    assert.equal(findNumberInAbstract('5', 'the rate was 45.2 percent').found, false);
+    assert.equal(findNumberInAbstract('12', 'we enrolled 120 patients').found, false);
+    assert.equal(findNumberInAbstract('2', 'a 32-fold increase').found, false);
+  });
+
+  it('treats equal values written differently as the same number', () => {
+    // A character-class boundary guard calls these absent; they are the same
+    // number, and reporting a real figure as unstated is the costlier error.
+    assert.equal(findNumberInAbstract('5', 'dosed at 5.0 mg').found, true);
+    assert.equal(findNumberInAbstract('5.0', 'dosed at 5 mg').found, true);
+    assert.equal(findNumberInAbstract('1200', 'we saw 1,200 events').found, true);
+    assert.equal(findNumberInAbstract('1,200', 'we saw 1200 events').found, true);
+  });
+
+  it('is not fooled by a thousands separator', () => {
+    assert.equal(findNumberInAbstract('200', 'we saw 1,200 events').found, false);
+  });
+
+  it('still matches the number the abstract actually states', () => {
+    assert.equal(findNumberInAbstract('45.2', 'the rate was 45.2 percent').found, true);
+    assert.equal(findNumberInAbstract('120', 'we enrolled 120 patients').found, true);
+    assert.equal(findNumberInAbstract('5', 'exactly 5 patients').found, true);
   });
 });

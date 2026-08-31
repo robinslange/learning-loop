@@ -24,13 +24,19 @@ Vendored JavaScript libraries
 
 On-device ONNX models
 ---------------------
-The search binary downloads and embeds three ONNX models. Their sources,
-revisions, licenses, and integrity hashes are recorded in:
+The search binary embeds one ONNX model at build time (the reranker) and
+downloads one at runtime (the embedding model). Their sources, revisions,
+licenses, and integrity hashes are recorded in:
   provenance/models.json
 
-- bge-small-en-v1.5 (embeddings) — MIT
-- ms-marco-MiniLM-L-6-v2 (reranker) — Apache-2.0
-- DeBERTa-v3-base-mnli-fever-anli (NLI, build-time optional) — MIT
+- bge-small-en-v1.5 (embeddings, downloaded at runtime) — MIT
+- ms-marco-MiniLM-L-6-v2 (reranker, embedded at build time) — Apache-2.0
+
+A third is referenced by the build but is NOT fetched by any shipped build:
+its `nli` cargo feature has been removed. Attribution is retained because the
+build script still carries its URLs and hashes.
+
+- DeBERTa-v3-base-mnli-fever-anli (NLI, behind a removed build feature) — MIT
 
 ONNX Runtime
 ------------

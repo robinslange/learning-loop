@@ -93,7 +93,7 @@ Collect paths only; do NOT Read note bodies in the main thread here. Content is 
 
 ### Step 3: Quality Scoring (Parallel Subagents)
 
-Spawn `note-scorer` agent(s) to assess the gathered notes. When spawning multiple agents, dispatch them all in the same turn (a single message with multiple Agent tool calls):
+Spawn `note-scorer` agent(s) to assess the gathered notes. When spawning multiple agents, dispatch them concurrently (dispatch: `skills-shared/dispatch.md`):
 
 - **< 10 notes:** Single `note-scorer` agent with all file paths.
 - **10-99 notes:** Split into batches of ~10. Spawn one `note-scorer` agent per batch in the same turn.
@@ -266,7 +266,7 @@ Scores a batch of vault notes using promote-gate scoring mode.
 
 **Launch pattern:**
 ```
-Agent (subagent_type: "learning-loop:note-scorer"):
+Agent — `note-scorer` (dispatch: `skills-shared/dispatch.md`):
   "Score these notes: <file-path-1>, <file-path-2>, ...
    Return per-note: dimension scores + maturity tier (shallow/medium/deep) + specific issues found."
 ```
@@ -281,7 +281,7 @@ Verifies source URLs, checks claims against cited sources, catches fabrication. 
 
 **Launch pattern:**
 ```
-Agent (subagent_type: "learning-loop:note-verifier"):
+Agent — `note-verifier` (dispatch: `skills-shared/dispatch.md`):
   "Verify these notes:
    Note 1: <path>
    <content>

@@ -110,11 +110,13 @@ describe('source-resolver check-claims', () => {
 
     assert.equal(fetchCalls, 0, 'fetch must not be called for blocklisted domains');
     assert.ok(Array.isArray(results));
-    assert.equal(
-      results.length,
-      0,
-      'no rows expected when the only source is blocklisted and has no PMID/DOI',
-    );
+    // A blocklisted source still reports itself as UNCHECKED. Returning no rows
+    // made "we could not read this" indistinguishable from "there was nothing
+    // to check", and the caller reads an empty result as a clean pass.
+    assert.equal(results.length, 1, 'the unchecked source must still be reported');
+    assert.equal(results[0].in_abstract, null, 'neither confirmed nor absent — unchecked');
+    assert.match(results[0].unchecked_reason || '', /could be retrieved/);
+    assert.equal(results[0].url, 'https://www.sciencedirect.com/article/X');
   });
 
   it('check-claims returns [] when note has no quantitative numbers', async () => {

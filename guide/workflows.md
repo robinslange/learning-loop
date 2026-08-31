@@ -6,7 +6,7 @@ How skills chain together in practice. Each pattern below is a real workflow, no
 
 A typical session has three phases:
 
-1. **Context loads automatically.** The session-start hook injects your memory index, recent captures, and active intentions. The UserPromptSubmit hook searches your vault and past conversations on every prompt, injecting relevant context before Claude responds. You don't invoke anything for this.
+1. **Context loads automatically.** The session-start hook injects your memory index, active intentions, and a pointer to recent captures. The UserPromptSubmit hook searches your vault on every prompt, injecting relevant context before Claude responds. You don't invoke anything for this.
 
 2. **You work.** Research, capture, verify. Skills compose freely. Use what fits.
 
@@ -161,6 +161,6 @@ Skills are composable. Some useful chains beyond the standard research cycle:
 
 ## Context injection
 
-You don't need to invoke anything for this. On every prompt, the UserPromptSubmit hook runs a dual-backend search (vault + episodic memory) and either injects relevant context (live mode, the shipped default) or logs what it would have injected (shadow mode).
+You don't need to invoke anything for this. On every prompt, the UserPromptSubmit hook runs a vault search and either injects relevant context (live mode, the shipped default) or logs what it would have injected (shadow mode).
 
 Shadow mode lets you review what the pipeline finds without it touching your prompts. Set `injection_mode` to `shadow` in `config.json`, run `node scripts/review-shadow.mjs` to inspect the shadow log, then flip back to `live` when you're satisfied.

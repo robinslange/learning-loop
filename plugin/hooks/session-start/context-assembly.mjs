@@ -12,6 +12,7 @@ import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
 import { recordDetachedChild, emitProvenance, home } from '../lib/common.mjs';
+import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -172,6 +173,18 @@ export async function run(ctx) {
     }
   }
 
+  // Sections 4-7 and the intention list are read off disk — memory indexes,
+  // learned patterns, peer names, note frontmatter. All of it is third-party
+  // text that lands in a prompt, so it is gathered here and emitted inside one
+  // untrusted-data envelope (the prose sibling of wrapRetrieval's JSON one)
+  // rather than concatenated raw next to the plugin's own instructions. The
+  // operator lines that used to sit between those sections move to
+  // operatorTail so they stay outside the envelope, and the block is emitted
+  // where section 4 began — keeping the capped indexes ahead of lower-value
+  // sections for emitJson's tail trim.
+  let retrieved = '';
+  let operatorTail = '';
+
   // 4. Project-specific auto-memory. Capped memory indexes come right after
   // the protocol so an oversized payload evicts later, lower-value sections
   // instead of the index lines.
@@ -183,7 +196,7 @@ export async function run(ctx) {
       try {
         const index = readMemoryIndexCapped(projectMemoryIndex);
         if (index) {
-          ctx.context += `\n## Auto-memory index for this project:\n${index}\n`;
+          retrieved += `\n## Auto-memory index for this project:\n${index}\n`;
         }
       } catch (err) {
         logError('session-start.context-assembly.projectMemory', err);
@@ -205,7 +218,7 @@ export async function run(ctx) {
     try {
       const globalIndex = readMemoryIndexCapped(globalMemory);
       if (globalIndex) {
-        ctx.context += `\n## Global memory index:\n${globalIndex}\n`;
+        retrieved += `\n## Global memory index:\n${globalIndex}\n`;
       }
     } catch (err) {
       logError('session-start.context-assembly.globalMemory', err);
@@ -224,7 +237,7 @@ export async function run(ctx) {
             patternsContent,
             `[truncated — full file at ${patternsFile}]`,
           );
-          ctx.context += `\n## Learned Patterns (from verification feedback)\n${patterns}\n`;
+          retrieved += `\n## Learned Patterns (from verification feedback)\n${patterns}\n`;
         }
       } catch (err) {
         logError('session-start.context-assembly.learnedPatterns', err);
@@ -241,8 +254,8 @@ export async function run(ctx) {
             .filter((e) => e.isDirectory())
             .map((e) => e.name);
           if (peerNames.length > 0) {
-            ctx.context += '\n## Federation\n';
-            ctx.context += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
+            retrieved += '\n## Federation\n';
+            retrieved += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
           }
         }
       }
@@ -252,8 +265,8 @@ export async function run(ctx) {
   }
 
   // 8. On-demand vault captures pointer.
-  ctx.context += '\n## Recent vault captures\n';
-  ctx.context += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
+  operatorTail += '\n## Recent vault captures\n';
+  operatorTail += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
   // 9. Intention summary — read cached marker; refresh in background. The
   // rendered list is capped: the marker array is unbounded (one line per
@@ -269,9 +282,9 @@ export async function run(ctx) {
         for (const item of cached) {
           list += `- ${item.context} (${item.count} notes)\n`;
         }
-        ctx.context += '\n## Notes with active intentions:\n';
-        ctx.context += `${capSection(list, `[truncated — run \`${searchCmd} intentions\` for the full list]`)}\n`;
-        ctx.context += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
+        retrieved += '\n## Notes with active intentions:\n';
+        retrieved += `${capSection(list, `[truncated — run \`${searchCmd} intentions\` for the full list]`)}\n`;
+        operatorTail += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
       }
       // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
       const child = spawn(
@@ -286,6 +299,10 @@ export async function run(ctx) {
       logError('session-start.context-assembly.intentions', err);
     }
   }
+
+  const framed = wrapRetrievalText(retrieved, { origin: 'session-start' });
+  if (framed) ctx.context += `\n${framed}\n`;
+  ctx.context += operatorTail;
 
   // 10. Emit session-start provenance event inline: one JSONL append is
   // cheaper than a detached node child (see modules/provenance.mjs, which

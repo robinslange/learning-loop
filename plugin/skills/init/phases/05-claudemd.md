@@ -1,6 +1,15 @@
-# Phase 5: CLAUDE.md Integration
+# Phase 5: Instruction-file Integration
 
-CLAUDE.md tells Claude _how to behave_ with the learning loop throughout a session. Without it, the plugin is installed but Claude does not know when to retrieve, how to capture, or when to suggest consolidation.
+The instruction file tells the agent _how to behave_ with the learning loop throughout a session. Without it, the plugin is installed but the agent does not know when to retrieve, how to capture, or when to suggest consolidation.
+
+Each harness reads a different file, and the same section works in both:
+
+| Harness     | User-level file        | Project-level file      |
+| ----------- | ---------------------- | ----------------------- |
+| Claude Code | `~/.claude/CLAUDE.md`  | `.claude/CLAUDE.md`     |
+| Codex       | `~/.codex/AGENTS.md`   | `AGENTS.md` at repo root |
+
+Run this phase for every harness present on the machine — `codex` on PATH is the test for the second one. A user who installed the plugin for both and only configured Claude Code gets a Codex that loads the skills but never retrieves.
 
 ## Dependencies
 
@@ -26,6 +35,8 @@ Four possible states:
 | CLAUDE.md exists, no learning-loop section | Offer to append section (Phase 5c) |
 | Section exists, version matches            | Skip: already configured           |
 | Section exists, version outdated           | Offer to update section (Phase 5d) |
+
+Then, if `codex` is on PATH, run the same three checks against `~/.codex/AGENTS.md` and resolve it through Phase 5c-codex. The two files are tracked independently: one being current says nothing about the other.
 
 ## 5b: New CLAUDE.md (prompt-driven generation)
 
@@ -108,6 +119,23 @@ Show the section and ask: "Where should the learning-loop section go?"
 
 Append to the end of the chosen file. Never reorder or modify existing content.
 
+## 5c-codex: The same section for Codex
+
+Only if `codex` is on PATH. Codex reads `AGENTS.md`, never `CLAUDE.md`, so the section has to be written there as well — the two files do not substitute for each other.
+
+Use the identical template with two adjustments:
+
+- Replace every `CLAUDE.md` mention in the prose with `AGENTS.md`.
+- Replace `${CLAUDE_PLUGIN_ROOT}` with the literal resolved path. Codex sets `CLAUDE_PLUGIN_ROOT` for plugin hooks, but an instruction file is not a hook and gets no interpolation.
+
+Ask: "Where should the learning-loop section go for Codex?"
+
+1. `~/.codex/AGENTS.md` (user-level, applies to every repo): recommended
+2. `AGENTS.md` at the vault repo root (project-level)
+3. Skip
+
+Codex caps the combined AGENTS.md chain at `project_doc_max_bytes` (32 KiB by default) and stops adding files once it hits the cap. If the target file is already close to that, say so rather than silently pushing it over.
+
 ## 5d: Update outdated section
 
 If the version comment is older than the current template version:
@@ -124,3 +152,5 @@ If the version comment is older than the current template version:
 4. Ask: "Update the learning-loop section in your CLAUDE.md?"
 5. If yes, replace the entire section with the new template
 6. Preserve all content outside the learning-loop section
+
+Apply the same three steps to `~/.codex/AGENTS.md` when it carries an outdated section.

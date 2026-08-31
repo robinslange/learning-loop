@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync, unlinkSync } from 'node:fs';
@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { scanForSecrets } from '../plugin/scripts/redact-scan.mjs';
+import { scanForSecrets, __test__ } from '../plugin/scripts/redact-scan.mjs';
+import { SECRET_PATTERNS } from '../plugin/scripts/lib/secret-patterns.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../plugin/scripts/redact-scan.mjs', import.meta.url));
 
@@ -115,4 +116,30 @@ test('CLI: reports findings with masked match and does not print full secret', (
       unlinkSync(tmp);
     } catch {}
   }
+});
+
+// The scrubber and the scanner are two halves of one promise: the scrubber
+// keeps secrets out of new records, the scanner finds what earlier bugs already
+// wrote. A pattern in one and not the other means /doctor --redact reports
+// clean on a file that holds a private key.
+describe('redact-scan covers the shared vocabulary', () => {
+  it('finds a PEM private key', () => {
+    const text =
+      'leaked: -----BEGIN RSA PRIVATE KEY-----\n' +
+      'MIIEowIBAAKCAQEA' +
+      'QWERTYUIOPasdfghjkl0123456789+/'.repeat(4) +
+      '\n-----END RSA PRIVATE KEY-----';
+    const kinds = scanForSecrets(text).map((h) => h.kind);
+    assert.ok(kinds.includes('pem-key'), `expected a pem-key hit, got ${JSON.stringify(kinds)}`);
+  });
+
+  it('carries a counterpart for every shared secret pattern', () => {
+    const scannerKinds = new Set(__test__.PATTERNS.map((p) => p.kind));
+    const missing = SECRET_PATTERNS.map((p) => p.kind).filter((k) => !scannerKinds.has(k));
+    assert.deepEqual(
+      missing,
+      [],
+      `shared patterns with no redact-scan counterpart: ${missing.join(', ')}`,
+    );
+  });
 });

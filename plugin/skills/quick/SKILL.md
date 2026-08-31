@@ -24,7 +24,7 @@ Answer a question quickly with web research, vault awareness, and source verific
 
 ### Step 2: Parallel Research
 
-Spawn both subagents in the same turn (a single message with two Agent tool calls):
+Spawn both subagents concurrently (dispatch: `skills-shared/dispatch.md`):
 
 **Vault Scout** (`discovery-vault-scout`):
 ```
@@ -70,14 +70,14 @@ Evaluate silently in the main thread. Do not ask the user.
 
 **Substance check:** Is the core insight a durable pattern, mechanism, or decision-relevant fact? If it's transient (today's weather, a live score, a price that will change next week), skip capture.
 
-**If both pass, verify before writing.** Run ONE round of the `note-verifier` subagent (subagent_type: `learning-loop:note-verifier`) with a one-note batch: a list with a single {path, content} entry, path the intended destination (e.g. `0-inbox/<slug>.md`; the file does not exist yet, the path just names the output section) and content the draft note (placeholders resolved per `agents-shared/vault-io.md`). The agent returns one `## Verification: <note title>` section per note; branch on its `### Status:`:
+**If both pass, verify before writing.** Run ONE round of the `note-verifier` subagent (dispatch: `skills-shared/dispatch.md`) with a one-note batch: a list with a single {path, content} entry, path the intended destination (e.g. `0-inbox/<slug>.md`; the file does not exist yet, the path just names the output section) and content the draft note (placeholders resolved per `agents-shared/vault-io.md`). The agent returns one `## Verification: <note title>` section per note; branch on its `### Status:`:
 - **PASS** → write as-is.
 - **PARTIAL** → write, carrying the verifier's `[partial]` claim flags into the note.
 - **ISSUES FOUND** → apply the verifier's `### Corrections` (adopt corrected URLs/claims). Contradicted (level-0) claims and fabricated references are REMOVED from the draft — never written, not even as `source: unverified` (same rule as /discovery's fabricated-reference handling). Any other claim with no surviving source moves out, or the note writes with `source: unverified`.
 
 ONE round only — no revise loop. This is the lightweight tier; the spoken answer in Step 3 is NOT gated, only the captured note.
 
-**Then spawn** a `note-writer` subagent (subagent_type: `learning-loop:note-writer`); the Insight/Research content in the prompt is the POST-correction draft (after the verifier's Corrections and `[partial]` flags are applied), not the original:
+**Then spawn** a `note-writer` subagent (dispatch: `skills-shared/dispatch.md`); the Insight/Research content in the prompt is the POST-correction draft (after the verifier's Corrections and `[partial]` flags are applied), not the original:
 ```
 Write an inbox note for the Obsidian vault.
 

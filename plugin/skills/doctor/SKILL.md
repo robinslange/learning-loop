@@ -167,12 +167,13 @@ where `<MASKED>` shows the first 4 and last 2 characters with the middle replace
 
 Detection patterns:
 
-| kind          | matches                                                        |
-| ------------- | -------------------------------------------------------------- |
-| `github-pat`  | `ghp_` followed by 30+ alphanumeric characters                 |
-| `openai-key`  | `sk-` followed by 16+ alphanumeric characters                  |
-| `slack-token` | `xox[baprs]-` followed by 8+ alphanumeric or hyphen characters |
-| `jwt`         | `eyJ` followed by 8+ base64url characters                      |
+| kind             | matches                                                                    |
+| ---------------- | -------------------------------------------------------------------------- |
+| `github-pat`     | `ghp_` followed by 30+ alphanumeric characters                             |
+| `openai-key`     | `sk-`, optionally `sk-proj-` / `sk-svcacct-`, followed by 16+ alphanumerics |
+| `anthropic-key`  | `sk-ant-api` followed by 20+ alphanumeric, underscore, or hyphen characters |
+| `slack-token`    | `xox[baprs]-` followed by 8+ alphanumeric or hyphen characters             |
+| `jwt`            | `eyJ` followed by 8+ base64url characters                                  |
 
 Detection is intentionally conservative — the patterns target known credential prefixes to avoid alarm fatigue from false positives.
 
