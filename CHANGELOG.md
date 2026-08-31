@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.41.0
+
 A consistency pass over the whole plugin: every documented claim checked against
 the code that implements it, and the gaps closed on whichever side was wrong.
 Most entries below are cases where a doc described a system we no longer ship, or

@@ -1,6 +1,6 @@
 {
   "name": "learning-loop",
-  "version": "1.40.2",
+  "version": "1.41.0",
   "description": "Self-improving learning loop across coding-agent sessions: retrieval, capture, consolidation, and cross-project transfer",
   "author": {
     "name": "Robin Lange",
