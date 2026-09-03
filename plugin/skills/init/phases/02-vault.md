@@ -46,6 +46,7 @@ The vault voice. Hemingway + Musashi + Lao Tzu. Three masters, one voice.
 ## Rules
 
 - No filler. No weasel-hedging. No "it should be noted that."
+- Uncertainty marks where to dig, not what to discard. One line, then go find out.
 - Every word earns its place or gets cut.
 - Observations stated plainly. Connections drawn with links.
 - Titles state the insight, not the topic.
