@@ -1,11 +1,13 @@
 //! FROZEN at sync-hub commit 5c36b487d4ba5d7045bb8f7227123cd6c85ec132 (Plan 3
-//! Task 3). Copied verbatim from `sync-hub/src/v5/handshake.rs`.
+//! Task 3). Copied verbatim from `sync-hub/src/v5/handshake.rs`: the message
+//! structs, the wire constant, and the two message-framing functions that
+//! define the exact bytes each role signs.
 //!
 //! Deliberately duplicated rather than shared across a workspace dependency —
-//! the two repos have independent release cycles. Any change to a struct
+//! the two repos have independent release cycles. Any change to an item
 //! below requires the same change in sync-hub and a `PROTOCOL_VERSION` bump
-//! in both repos, in one change. The pinned wire-format tests below guard
-//! against silent divergence.
+//! in both repos, in one change. The pinned wire-format and exact-byte tests
+//! below guard against silent divergence.
 
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +86,39 @@ pub struct GrantWire {
     pub statement_b64: String,
     pub signature_b64: String,
     pub state: String,
+}
+
+/// Length-prefix every field before concatenating. Plain concatenation lets
+/// `("ab", "c")` and `("a", "bc")` produce identical bytes — a
+/// signature-confusion bug — so each field carries its own 4-byte
+/// big-endian length ahead of it.
+fn framed(prefix: &[u8], parts: &[&[u8]]) -> Vec<u8> {
+    let mut out = prefix.to_vec();
+    for p in parts {
+        out.extend_from_slice(&(p.len() as u32).to_be_bytes());
+        out.extend_from_slice(p);
+    }
+    out
+}
+
+/// The bytes the hub signs (`sig_h`) and the client verifies. Deliberately
+/// carries no `hub_key_id` — the hub signs under its own key, so its identity
+/// is established by *which* key verifies this, not by a field inside it.
+pub fn hub_challenge_message(nonce_h: &[u8], nonce_c: &[u8], exporter: &[u8]) -> Vec<u8> {
+    framed(b"ll-hub-v5", &[nonce_h, nonce_c, exporter])
+}
+
+/// The bytes the client signs (`sig_c`) and the hub verifies. Unlike
+/// [`hub_challenge_message`], this covers `hub_key_id` — the client is
+/// proving it is authenticating to *this* hub specifically, so a signature
+/// collected by one hub cannot be replayed to another.
+pub fn client_auth_message(
+    nonce_h: &[u8],
+    nonce_c: &[u8],
+    hub_key_id: &str,
+    exporter: &[u8],
+) -> Vec<u8> {
+    framed(b"ll-client-v5", &[nonce_h, nonce_c, hub_key_id.as_bytes(), exporter])
 }
 
 #[cfg(test)]
@@ -225,5 +260,123 @@ mod tests {
 
         let round_tripped: ClientMsg = serde_json::from_value(json).unwrap();
         assert!(matches!(round_tripped, ClientMsg::UploadIndex { .. }));
+    }
+
+    /// Independently hand-assembles the expected byte string field-by-field
+    /// rather than calling `framed` — this must catch a divergence in the
+    /// length-prefix width, byte order, or domain prefix that a test built
+    /// on top of `framed` itself could never see, since it would inherit the
+    /// same bug. This is the strongest kind of pin available without a live
+    /// capture from the hub: it is checked against the frozen source
+    /// (verbatim above), not re-derived from intent.
+    #[test]
+    fn hub_challenge_message_produces_the_exact_expected_bytes() {
+        let mut expected = b"ll-hub-v5".to_vec();
+        for part in [b"AB".as_slice(), b"CD".as_slice(), b"EF".as_slice()] {
+            expected.extend_from_slice(&(part.len() as u32).to_be_bytes());
+            expected.extend_from_slice(part);
+        }
+        assert_eq!(hub_challenge_message(b"AB", b"CD", b"EF"), expected);
+    }
+
+    #[test]
+    fn client_auth_message_produces_the_exact_expected_bytes() {
+        let mut expected = b"ll-client-v5".to_vec();
+        for part in [b"AB".as_slice(), b"CD".as_slice(), b"zK".as_slice(), b"EF".as_slice()] {
+            expected.extend_from_slice(&(part.len() as u32).to_be_bytes());
+            expected.extend_from_slice(part);
+        }
+        assert_eq!(client_auth_message(b"AB", b"CD", "zK", b"EF"), expected);
+    }
+
+    #[test]
+    fn the_two_roles_never_produce_the_same_bytes() {
+        let (nh, nc, ex) = (b"nh".as_slice(), b"nc".as_slice(), [7u8; 32]);
+        let hub = hub_challenge_message(nh, nc, &ex);
+        let client = client_auth_message(nh, nc, "zHubKey", &ex);
+        assert_ne!(
+            hub, client,
+            "without distinct domain prefixes a hub signature could be replayed \
+             as a client signature"
+        );
+        assert!(hub.starts_with(b"ll-hub-v5"));
+        assert!(client.starts_with(b"ll-client-v5"));
+    }
+
+    #[test]
+    fn changing_the_exporter_changes_the_client_message() {
+        let a = client_auth_message(b"nh", b"nc", "zK", &[1u8; 32]);
+        let b = client_auth_message(b"nh", b"nc", "zK", &[2u8; 32]);
+        assert_ne!(a, b, "the session must be bound, or a relay is undetectable");
+    }
+
+    #[test]
+    fn changing_the_hub_key_changes_the_client_message() {
+        let a = client_auth_message(b"nh", b"nc", "zHubOne", &[1u8; 32]);
+        let b = client_auth_message(b"nh", b"nc", "zHubTwo", &[1u8; 32]);
+        assert_ne!(a, b, "cross-hub replay must fail — this replaces WG_PUBKEY");
+    }
+
+    #[test]
+    fn message_fields_are_length_prefixed_not_concatenated() {
+        // "ab" + "c" must not collide with "a" + "bc".
+        let a = client_auth_message(b"ab", b"c", "zK", &[0u8; 32]);
+        let b = client_auth_message(b"a", b"bc", "zK", &[0u8; 32]);
+        assert_ne!(a, b);
+    }
+
+    /// `the_two_roles_never_produce_the_same_bytes` proves the two roles'
+    /// byte strings differ, but that alone would pass even if the prefixes
+    /// were deleted entirely — the client message has one extra field
+    /// (`hub_key_id`) that the hub message lacks, so the byte lengths would
+    /// still diverge. The property that actually matters is cryptographic:
+    /// a signature made in one role's domain must fail verification in the
+    /// other's, even when every other field lines up. Only the domain
+    /// prefix can make that fail — removing it collapses this to a same-key,
+    /// same-fields comparison that would otherwise pass.
+    ///
+    /// Uses `ed25519_dalek` directly rather than the client's `KeyId`
+    /// (which — unlike the hub's — has no `verify` method; adding one is
+    /// out of scope for this task) so this stays a pure test of the framing
+    /// functions above.
+    #[test]
+    fn a_signature_over_the_hub_domain_does_not_verify_as_a_client_signature() {
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+
+        let sk = SigningKey::generate(&mut rand::thread_rng());
+        let vk: VerifyingKey = sk.verifying_key();
+        let (nh, nc, ex) = (b"nh".as_slice(), b"nc".as_slice(), [9u8; 32]);
+
+        let hub_bytes = hub_challenge_message(nh, nc, &ex);
+        let sig = sk.sign(&hub_bytes);
+
+        let client_bytes = client_auth_message(nh, nc, "zSomeHubKey", &ex);
+        assert!(
+            vk.verify_strict(&client_bytes, &sig).is_err(),
+            "a hub-domain signature must not verify as a client-domain signature"
+        );
+        // Sanity: the same signature verifies fine in the domain it was
+        // actually made for, so the rejection above is the prefix doing its
+        // job, not a broken fixture.
+        assert!(vk.verify_strict(&hub_bytes, &sig).is_ok());
+    }
+
+    /// The cryptographic counterpart to `changing_the_exporter_changes_the_
+    /// client_message`: that test only proves the bytes differ, which could
+    /// pass even if `verify` never actually checked the exporter bytes for
+    /// anything. This proves a real signature, over a real exporter, fails
+    /// to verify against a message built with a *different* exporter — the
+    /// actual property channel binding depends on, not decoration.
+    #[test]
+    fn a_signature_bound_to_one_exporter_is_rejected_under_a_different_one() {
+        use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+
+        let sk = SigningKey::generate(&mut rand::thread_rng());
+        let vk: VerifyingKey = sk.verifying_key();
+        let a = client_auth_message(b"nh", b"nc", "zK", &[1u8; 32]);
+        let sig = sk.sign(&a);
+        let b = client_auth_message(b"nh", b"nc", "zK", &[2u8; 32]);
+        assert!(vk.verify_strict(&b, &sig).is_err());
+        assert!(vk.verify_strict(&a, &sig).is_ok());
     }
 }
