@@ -650,29 +650,34 @@ const DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD = 3;
 
 // Count duplicate-gate-timeout and duplicate-gate-stale-daemon entries in a
 // single monthly hook-errors jsonl. Returns separate counts so the check can
-// give targeted fix advice. Tolerant of partial/corrupt lines (best-effort
-// diagnostic, never throws).
+// give targeted fix advice — including how many timeouts came from the daemon
+// socket, which is what tells "no daemon" apart from "daemon too slow".
+// Tolerant of partial/corrupt lines (best-effort diagnostic, never throws).
 function countDuplicateGateIssues(path) {
-  if (!existsSync(path)) return { timeouts: 0, staleDaemon: 0 };
+  const empty = { timeouts: 0, daemonTimeouts: 0, staleDaemon: 0 };
+  if (!existsSync(path)) return empty;
   let raw;
   try {
     raw = readFileSync(path, 'utf-8');
   } catch {
-    return { timeouts: 0, staleDaemon: 0 };
+    return empty;
   }
   let timeouts = 0;
+  let daemonTimeouts = 0;
   let staleDaemon = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
       const obj = JSON.parse(line);
-      if (obj?.code === 'duplicate-gate-timeout') timeouts++;
-      else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
+      if (obj?.code === 'duplicate-gate-timeout') {
+        timeouts++;
+        if (obj?.source === 'daemon') daemonTimeouts++;
+      } else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
     } catch {
       // Skip a corrupt line — keep counting the rest.
     }
   }
-  return { timeouts, staleDaemon };
+  return { timeouts, daemonTimeouts, staleDaemon };
 }
 
 // Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
@@ -695,12 +700,14 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
   }
   const months = recentMonths(now);
   let totalTimeouts = 0;
+  let totalDaemonTimeouts = 0;
   let totalStaleDaemon = 0;
   for (const month of months) {
-    const { timeouts, staleDaemon } = countDuplicateGateIssues(
+    const { timeouts, daemonTimeouts, staleDaemon } = countDuplicateGateIssues(
       join(pluginData, `hook-errors-${month}.jsonl`),
     );
     totalTimeouts += timeouts;
+    totalDaemonTimeouts += daemonTimeouts;
     totalStaleDaemon += staleDaemon;
   }
   if (totalStaleDaemon > 0) {
@@ -714,13 +721,21 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
     });
   }
   if (totalTimeouts >= DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD) {
+    // A timeout logged against source 'daemon' proves the socket was there and a
+    // live daemon accepted the connection — it just answered too slowly. Advising
+    // a start would send the user to fix a daemon that is already running.
+    const daemonIsUp = totalDaemonTimeouts > 0;
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
       name: 'Duplicate gate',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
-      detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
-      fix: 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
+      detail: daemonIsUp
+        ? `${totalTimeouts} duplicate-gate timeouts in recent logs (${totalDaemonTimeouts} from the daemon socket) — the daemon is running but too slow to answer inside the write budget, so the gate is silently disabled on writes`
+        : `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
+      fix: daemonIsUp
+        ? 'The daemon is up but slow — usually because it is mid-reindex. Check ll-watch status and whether a reindex is in flight; the gate falls open until it settles.'
+        : 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
     });
   }
   return makeCheck({

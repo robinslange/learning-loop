@@ -465,6 +465,38 @@ test('checkDuplicateGateHealth: stays ok under the repeat threshold', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkDuplicateGateHealth: daemon-sourced timeouts do not advise starting ll-watch', () => {
+  // Every timeout carrying source:'daemon' means the socket was there and a live
+  // daemon accepted the connection but answered too slowly. Telling the user to
+  // start ll-watch sends them to fix a daemon that is already running.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-daemon-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [];
+  for (let i = 0; i < 4; i++) {
+    lines.push(
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'daemon',
+        message: 'timeout',
+      }),
+    );
+  }
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.fix,
+    /start the warm daemon/i,
+    'the daemon is already running -- advising a start is the wrong fix',
+  );
+  assert.match(result.detail, /too slow|not responding|slow/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkDuplicateGateHealth: warns on stale-daemon error code with restart advice', () => {
   // A single stale-daemon entry triggers a distinct warning with restart advice,
   // not the generic ll-watch start advice.
