@@ -26,13 +26,28 @@ impl VisibilityEngine {
         }
     }
 
+    /// The frontmatter tier, if the note declared a valid one.
+    ///
+    /// A present-but-invalid value (`visibility: pubic`) yields `None` so the
+    /// caller falls through to the glob rules *and their cap* — never to an
+    /// uncapped tier. Keying the cap on "was the key present" instead would
+    /// publish a note on a typo.
+    fn explicit(frontmatter_visibility: Option<&str>) -> Option<&str> {
+        frontmatter_visibility.filter(|t| matches!(*t, "public" | "listed" | "private"))
+    }
+
     pub fn evaluate<'a>(&'a self, path: &str, frontmatter_visibility: Option<&'a str>) -> &'a str {
-        if let Some(fm) = frontmatter_visibility {
-            match fm {
-                "public" | "listed" | "private" => return fm,
-                _ => {}
-            }
+        // Frontmatter is the ONLY route to `public`. It is an explicit act by
+        // the note's author, not a consequence of which folder it landed in.
+        if let Some(tier) = Self::explicit(frontmatter_visibility) {
+            return tier;
         }
+        let tier = self.evaluate_globs(path);
+        // Path-derived tiers are capped: a glob may restrict, never publish.
+        if tier == "public" { "listed" } else { tier }
+    }
+
+    fn evaluate_globs(&self, path: &str) -> &str {
         let mut tier = self.default_tier.as_str();
         for (glob_set, rule_tier) in &self.rules {
             if glob_set.is_match(path) {
@@ -64,6 +79,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn glob_rule_cannot_grant_public() {
+        let rules = [("3-permanent/**".to_string(), "public".to_string())];
+        let engine = VisibilityEngine::new("private", &rules);
+        assert_eq!(engine.evaluate("3-permanent/note.md", None), "listed");
+    }
+
+    #[test]
+    fn frontmatter_can_still_grant_public() {
+        let rules = [("3-permanent/**".to_string(), "public".to_string())];
+        let engine = VisibilityEngine::new("private", &rules);
+        assert_eq!(engine.evaluate("3-permanent/note.md", Some("public")), "public");
+    }
+
+    #[test]
+    fn glob_rule_can_still_restrict_to_private() {
+        let rules = [
+            ("3-permanent/**".to_string(), "public".to_string()),
+            ("**/kinso-*".to_string(), "private".to_string()),
+        ];
+        let engine = VisibilityEngine::new("private", &rules);
+        assert_eq!(engine.evaluate("3-permanent/kinso-thing.md", None), "private");
+    }
+
+    #[test]
+    fn default_tier_cannot_grant_public_either() {
+        let engine = VisibilityEngine::new("public", &[]);
+        assert_eq!(engine.evaluate("any.md", None), "listed");
+    }
+
+    #[test]
+    fn an_invalid_frontmatter_value_does_not_bypass_the_cap() {
+        // A typo like `visibility: pubic` must not fall through to an
+        // uncapped glob tier. The cap keys on whether a VALID frontmatter
+        // tier was applied, never on whether the key was merely present.
+        let rules = [("3-permanent/**".to_string(), "public".to_string())];
+        let engine = VisibilityEngine::new("private", &rules);
+        assert_eq!(engine.evaluate("3-permanent/note.md", Some("pubic")), "listed");
+        assert_eq!(engine.evaluate("3-permanent/note.md", Some("")), "listed");
+    }
+
+    #[test]
     fn default_tier() {
         let engine = VisibilityEngine::new("private", &[]);
         assert_eq!(engine.evaluate("any/path.md", None), "private");
@@ -88,7 +144,8 @@ mod tests {
             ("1-fleeting/**".to_string(), "listed".to_string()),
         ];
         let engine = VisibilityEngine::new("private", &rules);
-        assert_eq!(engine.evaluate("3-permanent/note.md", None), "public");
+        // A `public` glob is capped to `listed`: only frontmatter publishes.
+        assert_eq!(engine.evaluate("3-permanent/note.md", None), "listed");
         assert_eq!(engine.evaluate("1-fleeting/note.md", None), "listed");
         assert_eq!(engine.evaluate("0-inbox/note.md", None), "private");
     }
@@ -116,8 +173,10 @@ mod tests {
             ("3-permanent/secret-*".to_string(), "private".to_string()),
         ];
         let engine = VisibilityEngine::new("listed", &rules);
+        // The point of this test is that the LATER rule wins; unchanged.
         assert_eq!(engine.evaluate("3-permanent/secret-stuff.md", None), "private");
-        assert_eq!(engine.evaluate("3-permanent/normal.md", None), "public");
+        // The earlier `public` rule now caps to `listed`.
+        assert_eq!(engine.evaluate("3-permanent/normal.md", None), "listed");
     }
 
     #[test]
