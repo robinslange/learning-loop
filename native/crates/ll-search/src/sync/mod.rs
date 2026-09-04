@@ -11,3 +11,4 @@ pub mod compression;
 pub mod watch;
 pub mod seed_store;
 pub mod seed_migrate;
+pub mod registry;
