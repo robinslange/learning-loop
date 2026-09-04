@@ -25,6 +25,9 @@ pub struct IndexResult {
     pub embedded: usize,
     pub deleted: usize,
     pub total: usize,
+    /// `(rel_path, colliding_id)` for every note reassigned a new id because
+    /// another note already claimed its `id:`.
+    pub duplicate_ids: Vec<(String, String)>,
 }
 
 /// One fully-preprocessed note ready for database insertion.
@@ -174,6 +177,11 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     let vault_files = walk_vault(vault_path);
     let vault_paths: HashSet<&str> = vault_files.iter().map(|f| f.rel_path.as_str()).collect();
 
+    // Every note gets a stable id, whether or not its content changed. Doing
+    // this inside the per-file loop would skip unchanged notes, so an
+    // incremental index would leave most of the vault unaddressable.
+    let (note_uuids, duplicate_ids) = resolve_note_uuids(Path::new(vault_path), &vault_files)?;
+
     let mut existing: HashMap<String, (i64, String, f64)> = HashMap::new();
     {
         let mut stmt = conn
@@ -240,7 +248,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
             }
         }
 
-        let note_uuid = ensure_note_uuid(Path::new(vault_path), &file.rel_path)?;
+        let note_uuid = note_uuids[&file.rel_path].clone();
         to_embed.push(EmbedItem {
             note_uuid,
             path: file.rel_path.clone(),
@@ -348,6 +356,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
         embedded: embedded_vecs.len(),
         deleted: to_delete.len(),
         total,
+        duplicate_ids,
     })
 }
 
