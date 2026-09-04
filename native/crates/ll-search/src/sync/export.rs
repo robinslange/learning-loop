@@ -9,7 +9,7 @@ use std::sync::LazyLock;
 use super::config::FederationConfig;
 use super::visibility::VisibilityEngine;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 /// Maximum notes per multi-row INSERT chunk.
 ///
@@ -62,6 +62,7 @@ pub fn export_index(
         "PRAGMA journal_mode = WAL;
          CREATE TABLE notes (
              id INTEGER PRIMARY KEY,
+             note_uuid TEXT NOT NULL,
              path TEXT NOT NULL,
              title TEXT NOT NULL,
              tags TEXT,
@@ -97,6 +98,7 @@ pub fn export_index(
 
     struct NoteRow {
         id: i64,
+        note_uuid: String,
         path: String,
         title: String,
         tags: String,
@@ -106,17 +108,22 @@ pub fn export_index(
     let mut all_rows: Vec<NoteRow> = Vec::new();
     {
         let mut stmt = source.prepare(
-            "SELECT n.id, n.path, n.title, n.tags, nc.body
+            // A row without a note_uuid predates stable note identity. Export
+            // nothing for it rather than a row the hub cannot address; a
+            // reindex assigns one and it comes back on the next sync.
+            "SELECT n.id, n.note_uuid, n.path, n.title, n.tags, nc.body
              FROM notes n
-             JOIN notes_content nc ON nc.id = n.id"
+             JOIN notes_content nc ON nc.id = n.id
+             WHERE n.note_uuid IS NOT NULL"
         )?;
         let rows = stmt.query_map([], |row| {
             Ok(NoteRow {
-                id:    row.get::<_, i64>(0)?,
-                path:  row.get::<_, String>(1)?,
-                title: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                tags:  row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                body:  row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                id:        row.get::<_, i64>(0)?,
+                note_uuid: row.get::<_, String>(1)?,
+                path:      row.get::<_, String>(2)?,
+                title:     row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                tags:      row.get::<_, Option<String>>(4)?.unwrap_or_default(),
+                body:      row.get::<_, Option<String>>(5)?.unwrap_or_default(),
             })
         })?;
         for row in rows {
@@ -166,9 +173,10 @@ pub fn export_index(
         };
 
         export.prepare_cached(
-            "INSERT INTO notes (id, path, title, tags, tier, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO notes (id, note_uuid, path, title, tags, tier, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         )?
-        .execute(params![row.id, row.path, row.title, row.tags, tier, now])?;
+        .execute(params![row.id, row.note_uuid, row.path, row.title, row.tags, tier, now])?;
 
         export.prepare_cached(
             "INSERT INTO notes_content (id, title, tags, body) VALUES (?1, ?2, ?3, ?4)",
@@ -394,6 +402,90 @@ mod tests {
         let result = summarize(&text, 40);
         assert!(result.ends_with("..."), "expected the truncated branch: {result}");
         assert!(!result.contains("AKIA"), "AWS key shape leaked on truncated path: {result}");
+    }
+
+
+    /// Build a SOURCE index in the shape `db/schema.rs` produces.
+    fn build_source_db(path: &Path, note_uuid: Option<&str>) {
+        let c = Connection::open(path).unwrap();
+        c.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT UNIQUE NOT NULL,
+                 content_hash TEXT NOT NULL,
+                 mtime REAL NOT NULL,
+                 title TEXT,
+                 tags TEXT,
+                 visibility TEXT DEFAULT 'private',
+                 note_uuid TEXT
+             );
+             CREATE TABLE notes_content (
+                 id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT
+             );
+             CREATE TABLE embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+             CREATE TABLE links (
+                 source_id INTEGER NOT NULL, target_path TEXT NOT NULL,
+                 UNIQUE(source_id, target_path)
+             );
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO notes (id, path, content_hash, mtime, title, tags, note_uuid)
+             VALUES (1, 'n.md', 'h', 0.0, 'N', '', ?1)",
+            rusqlite::params![note_uuid],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO notes_content (id, title, tags, body) VALUES (1, 'N', '', 'Body.')",
+            [],
+        )
+        .unwrap();
+    }
+
+    fn public_vault_with_note(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
+    }
+
+    #[test]
+    fn export_carries_note_uuid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
+        public_vault_with_note(&vault);
+
+        let config = FederationConfig::test_fixture("private", vec![]);
+        export_index(&source, &vault, &out, &config).unwrap();
+
+        let c = Connection::open(&out).unwrap();
+        let got: String = c
+            .query_row("SELECT note_uuid FROM notes LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(got, "01926d7e-0000-7000-8000-00000000000a");
+    }
+
+    #[test]
+    fn a_note_without_a_uuid_is_not_exported() {
+        // An index predating note ids exports nothing rather than rows the hub
+        // cannot address. Reindexing populates them.
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_source_db(&source, None);
+        public_vault_with_note(&vault);
+
+        let config = FederationConfig::test_fixture("private", vec![]);
+        let result = export_index(&source, &vault, &out, &config).unwrap();
+
+        assert_eq!(result.exported, 0);
+        let c = Connection::open(&out).unwrap();
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
     }
 
     fn build_minimal_export_db(path: &Path) {
