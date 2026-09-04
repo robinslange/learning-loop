@@ -1,12 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { webGuardDecision } from '../plugin/hooks/web-guard.js';
 import { toCodexAgent } from '../plugin/scripts/codex/generate-agents.mjs';
 
-const HARNESS = fileURLToPath(new URL('../plugin/scripts/lib/harness.mjs', import.meta.url));
+// A file:// URL, not a filesystem path: `import()` of a Windows path parses the
+// drive letter as a URL scheme and throws ERR_UNSUPPORTED_ESM_URL_SCHEME.
+const HARNESS = new URL('../plugin/scripts/lib/harness.mjs', import.meta.url).href;
 
 // env.mjs snapshots process.env at import time, so each case needs its own process.
 function resolveHarness(env) {

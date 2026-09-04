@@ -1,8 +1,13 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { resolve } from 'node:path';
 import { normalizeWrites } from '../plugin/hooks/lib/tool-payload.mjs';
 
-const CWD = '/repo';
+// normalizeWrites resolves relative patch paths against cwd, so the expected
+// paths must be built the same way the platform builds them: on Windows
+// resolve() prefixes the current drive, turning the posix root into D:\\repo.
+const CWD = resolve('/repo');
+const at = (rel) => resolve(CWD, rel);
 
 describe('normalizeWrites — Claude Code payloads', () => {
   it('passes a Write through unchanged', () => {
@@ -55,7 +60,7 @@ describe('normalizeWrites — Codex apply_patch', () => {
       [
         {
           tool: 'Write',
-          file_path: '/repo/0-inbox/note.md',
+          file_path: at('0-inbox/note.md'),
           content: '---\ntags: [a]\n---\n\nA claim.\n',
         },
       ],
@@ -79,7 +84,7 @@ describe('normalizeWrites — Codex apply_patch', () => {
       [
         {
           tool: 'Edit',
-          file_path: '/repo/0-inbox/note.md',
+          file_path: at('0-inbox/note.md'),
           old_string: '\ncontext line\nold text\ntrailing context\n',
           new_string: '\ncontext line\nnew text\ntrailing context\n',
           context: null,
@@ -137,9 +142,9 @@ describe('normalizeWrites — Codex apply_patch', () => {
     assert.deepEqual(
       out.map((w) => [w.tool, w.file_path]),
       [
-        ['Write', '/repo/new.md'],
-        ['Edit', '/repo/old.md'],
-        ['Delete', '/repo/gone.md'],
+        ['Write', at('new.md')],
+        ['Edit', at('old.md')],
+        ['Delete', at('gone.md')],
       ],
     );
   });
@@ -163,7 +168,7 @@ describe('normalizeWrites — Codex apply_patch', () => {
     assert.deepEqual(out, [
       {
         tool: 'Edit',
-        file_path: '/repo/3-permanent/note.md',
+        file_path: at('3-permanent/note.md'),
         old_string: '\ndraft\n',
         new_string: '\nfinal\n',
         context: null,
@@ -190,7 +195,7 @@ describe('normalizeWrites — regressions found by adversarial review', () => {
 
   it('reads a CRLF patch rather than silently seeing no writes at all', () => {
     const body = ['*** Begin Patch', '*** Add File: a.md', '+x', '*** End Patch'].join('\r\n');
-    assert.deepEqual(patch(body), [{ tool: 'Write', file_path: '/repo/a.md', content: 'x\n' }]);
+    assert.deepEqual(patch(body), [{ tool: 'Write', file_path: at('a.md'), content: 'x\n' }]);
   });
 
   it('line-anchors old_string so a hunk cannot bind mid-line', () => {
