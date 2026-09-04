@@ -1,6 +1,6 @@
 [package]
 name = "ll-search"
-version = "1.41.0"
+version = "1.41.1"
 edition.workspace = true
 description = "Learning loop search binary -- SQLite + ONNX embeddings"
 license = "Apache-2.0"

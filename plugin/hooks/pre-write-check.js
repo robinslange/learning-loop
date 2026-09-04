@@ -101,9 +101,9 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
     const socket = createConnection({ path: socketPath });
     let buffer = '';
 
-    // Short timer (not QUERY_TIMEOUT_MS): the warm daemon answers in ~430ms,
-    // and the subprocess fallback needs the rest of the hook budget. A wedged
-    // daemon must not eat the window the fallback would run in.
+    // Short timer: the warm daemon answers in ~430ms, and the subprocess
+    // fallback needs the rest of the hook budget. A wedged daemon must not eat
+    // the window the fallback would run in.
     const timer = setTimeout(() => {
       settle({ ok: false, reason: 'timeout' });
     }, HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS);
@@ -310,7 +310,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
       {
         encoding: 'utf-8',
-        timeout: Math.min(HookConfig.QUERY_TIMEOUT_MS, remainingMs),
+        timeout: remainingMs,
         env: ortSpawnEnv(binary.binDir),
       },
     );

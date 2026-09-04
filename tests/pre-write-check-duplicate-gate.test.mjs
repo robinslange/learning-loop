@@ -337,6 +337,20 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
   });
 
+  it('the wall-clock budget governs the subprocess deadline (one clock, not two)', () => {
+    // Regression: the gate used to cap the subprocess at HookConfig.QUERY_TIMEOUT_MS
+    // (2s) as well as the remaining budget. LL_PRE_WRITE_BUDGET_MS raised only the
+    // budget, so under a contended full-suite run a stub that took longer than 2s
+    // was SIGTERMed, the gate logged an error and returned SCAN_FAILED, and these
+    // assertions flaked -- with nothing wrong in the code under test. A binary
+    // slower than the old cap but well inside the raised budget must still warn.
+    const slowStub = envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note')
+      .replace('#!/bin/sh\n', `#!/bin/sh\nsleep ${(HookConfig.QUERY_TIMEOUT_MS + 500) / 1000}\n`);
+    const { result } = runWithStub(slowStub, join(VAULT, '0-inbox', 'new-note.md'));
+    assert.ok(result, 'a stub slower than QUERY_TIMEOUT_MS must still be awaited within the budget');
+    assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+  });
+
   it('socket timeout: logs the distinct duplicate-gate-timeout code, then falls back to subprocess', () => {
     const { result, timeoutCount } = runWithSocket('hang', join(VAULT, '0-inbox', 'new-note.md'), {
       // Working subprocess stub so the gate still produces a warning after the
