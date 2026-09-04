@@ -275,8 +275,8 @@ fn resolve_peers(
     all: bool,
 ) -> Vec<(String, rusqlite::Connection)> {
     let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-    let federated = plugin_data.join("federation").join("config.json").exists()
-        || plugin_data.join("vaults.json").exists();
+    let has_registry = plugin_data.join("vaults.json").exists();
+    let federated = has_registry || plugin_data.join("federation").join("config.json").exists();
     if !federated {
         return Vec::new();
     }
@@ -289,7 +289,7 @@ fn resolve_peers(
         Err(_) => return Vec::new(),
     };
 
-    let scope = if !plugin_data.join("vaults.json").exists() {
+    let scope = if !has_registry {
         ll_search::search::QueryScope { config_dirs: vec![plugin_data.clone()] }
     } else if all {
         ll_search::search::query_scope(&plugin_data, std::path::Path::new(""), true)
@@ -299,8 +299,8 @@ fn resolve_peers(
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var("VAULT_PATH").ok().map(std::path::PathBuf::from))
             .expect(
-                "multiple vaults are registered; pass --vault-path (or set $VAULT_PATH) \
-                 to say which one this query scopes to",
+                "multiple vaults are registered; set $VAULT_PATH (or pass --vault-path, \
+                 if this is `ll query`) to say which one this query scopes to",
             );
         ll_search::search::query_scope(&plugin_data, &vault, false)
             .unwrap_or_else(|e| panic!("failed to resolve vault scope: {e}"))
@@ -742,6 +742,24 @@ mod tests {
             Some("/v/unregistered".to_string()),
             false,
         );
+    }
+
+    /// The branch this whole correction exists for: an unmigrated, real-shaped
+    /// install (`federation/config.json` present, no `vaults.json` at all) must
+    /// still surface its own peer cache with no `vault_path` supplied — the
+    /// direct plugin_data-as-scope path, not the registry.
+    #[test]
+    fn resolve_peers_finds_its_own_peers_on_an_unmigrated_legacy_install() {
+        let d = tempfile::tempdir().unwrap();
+        legacy_install(d.path(), "/home/r/brain");
+        seed_peer(d.path(), "v-someone", "model-x");
+        let conn = conn_with_model("model-x");
+
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false);
+        assert_eq!(peers.len(), 1, "an unmigrated single-vault install must still find its own peers");
+        assert_eq!(peers[0].0, "v-someone");
+        assert!(!d.path().join("vaults.json").exists(),
+            "resolving the legacy scope must not create a registry either");
     }
 
     /// A pre-v5 install: federation/config.json present, no vaults.json.
