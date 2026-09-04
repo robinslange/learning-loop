@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.41.1
+
+### Fixed
+
+- **The pre-write duplicate gate budgeted its subprocess from two clocks, and only one of them was overridable.** The fallback deadline was `min(QUERY_TIMEOUT_MS, remainingMs)`. `remainingMs` already encodes the real limit — the `hooks.json` timeout minus elapsed minus the safety margin — so the flat 2s `QUERY_TIMEOUT_MS` added a second, unrelated clock on top of it. In production it almost never bound; in the test harness it always did, because `LL_PRE_WRITE_BUDGET_MS` raises the budget and cannot raise the cap. Under a contended full-suite run a stub slower than 2s was SIGTERMed, the gate logged an error and returned `SCAN_FAILED`, and the duplicate-gate assertions failed at ~2.1s with nothing wrong in the code under test — the intermittent pre-commit failure that made roughly half of all commits need a retry. The gate now reads one clock, which also hands a real ONNX cold start the room the safety margin was always reserving for it.
+- **`/doctor` read the duplicate-gate timeout count without reading where the timeouts came from.** `checkDuplicateGateHealth` counted every `duplicate-gate-timeout` entry alike and always advised starting `ll-watch`. But a timeout logged against `source: 'daemon'` proves the opposite of an absent daemon: the socket existed, a live daemon accepted the connection, and it simply answered outside the 800ms budget — usually because it was mid-reindex. The check now counts daemon-sourced timeouts separately and reports what the log actually shows, instead of pointing at a daemon that is already running.
+
 ## v1.41.0
 
 A consistency pass over the whole plugin: every documented claim checked against
