@@ -30,6 +30,7 @@ pub struct IndexResult {
 /// One fully-preprocessed note ready for database insertion.
 pub struct EmbedItem {
     pub path: String,
+    pub note_uuid: String,
     pub title: String,
     pub tags: String,
     pub body: String,
@@ -101,17 +102,18 @@ pub fn insert_embedded(
     for (item, vec) in items.iter().zip(vecs.iter()) {
         let note_id: i64 = conn
             .prepare_cached(
-                "INSERT INTO notes (path, content_hash, mtime, title, tags)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(path) DO UPDATE SET
                    content_hash = excluded.content_hash,
                    mtime = excluded.mtime,
                    title = excluded.title,
-                   tags = excluded.tags
+                   tags = excluded.tags,
+                   note_uuid = COALESCE(notes.note_uuid, excluded.note_uuid)
                  RETURNING id",
             )?
             .query_row(
-                params![item.path, item.hash, item.mtime, item.title, item.tags],
+                params![item.path, item.hash, item.mtime, item.title, item.tags, item.note_uuid],
                 |row| row.get(0),
             )?;
 
@@ -238,7 +240,9 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
             }
         }
 
+        let note_uuid = ensure_note_uuid(Path::new(vault_path), &file.rel_path)?;
         to_embed.push(EmbedItem {
+            note_uuid,
             path: file.rel_path.clone(),
             title: result.title,
             tags: result.tags,
@@ -347,6 +351,30 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     })
 }
 
+
+/// Return the note's stable id, assigning and persisting one if absent.
+///
+/// The id lives in the note's own frontmatter because that is the only place
+/// surviving BOTH a rename (which breaks path-derived ids) and an edit (which
+/// breaks content-derived ids).
+///
+/// Writes only when the key is missing. Writing unconditionally would bump
+/// mtime on every pass, and the watcher would reindex forever.
+pub fn ensure_note_uuid(vault_path: &Path, rel_path: &str) -> anyhow::Result<String> {
+    let full = vault_path.join(rel_path);
+    let raw = std::fs::read_to_string(&full)?;
+
+    if let Some(existing) = crate::sync::frontmatter::read_key(&raw, "id") {
+        if !existing.is_empty() {
+            return Ok(existing);
+        }
+    }
+
+    let id = uuid::Uuid::now_v7().to_string();
+    std::fs::write(&full, crate::sync::frontmatter::upsert_key(&raw, "id", &id))?;
+    Ok(id)
+}
+
 pub fn walk_vault(vault_path: &str) -> Vec<WalkEntry> {
     let mut entries = Vec::new();
     walk_dir(Path::new(vault_path), Path::new(vault_path), &mut entries);
@@ -415,9 +443,68 @@ mod tests {
     use crate::db::schema::open_or_create_db;
     use tempfile::TempDir;
 
+
+    #[test]
+    fn assigns_a_uuid_to_a_note_without_one() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("note.md");
+        std::fs::write(&p, "---\ntitle: T\n---\n\nBody.").unwrap();
+
+        let id = ensure_note_uuid(dir.path(), "note.md").unwrap();
+        assert_eq!(id.len(), 36, "uuid v7 hyphenated");
+
+        let raw = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(
+            crate::sync::frontmatter::read_key(&raw, "id").as_deref(),
+            Some(id.as_str())
+        );
+    }
+
+    #[test]
+    fn assignment_is_idempotent_and_does_not_rewrite() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("note.md");
+        std::fs::write(&p, "---\ntitle: T\n---\n\nBody.").unwrap();
+
+        let first = ensure_note_uuid(dir.path(), "note.md").unwrap();
+        let mtime_after_first = std::fs::metadata(&p).unwrap().modified().unwrap();
+
+        let second = ensure_note_uuid(dir.path(), "note.md").unwrap();
+        assert_eq!(first, second);
+        assert_eq!(
+            std::fs::metadata(&p).unwrap().modified().unwrap(),
+            mtime_after_first,
+            "a note that already has an id must not be written again - otherwise \
+             the watcher observes a change, reindexes, and loops"
+        );
+    }
+
+    #[test]
+    fn id_survives_rename() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("old.md"), "---\ntitle: T\n---\n\nBody.").unwrap();
+        let id = ensure_note_uuid(dir.path(), "old.md").unwrap();
+
+        std::fs::rename(dir.path().join("old.md"), dir.path().join("new.md")).unwrap();
+        assert_eq!(ensure_note_uuid(dir.path(), "new.md").unwrap(), id);
+    }
+
+    #[test]
+    fn id_survives_body_edit() {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path().join("note.md");
+        std::fs::write(&p, "---\ntitle: T\n---\n\nBody.").unwrap();
+        let id = ensure_note_uuid(dir.path(), "note.md").unwrap();
+
+        let raw = std::fs::read_to_string(&p).unwrap();
+        std::fs::write(&p, raw.replace("Body.", "Rewritten body, entirely different.")).unwrap();
+        assert_eq!(ensure_note_uuid(dir.path(), "note.md").unwrap(), id);
+    }
+
     fn make_item(path: &str, title: &str, body: &str) -> EmbedItem {
         EmbedItem {
             path: path.to_string(),
+            note_uuid: uuid::Uuid::now_v7().to_string(),
             title: title.to_string(),
             tags: String::new(),
             body: body.to_string(),

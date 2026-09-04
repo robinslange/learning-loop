@@ -148,8 +148,11 @@ pub(crate) fn create_schema(conn: &Connection) {
             mtime REAL NOT NULL,
             title TEXT,
             tags TEXT,
-            visibility TEXT DEFAULT 'private'
+            visibility TEXT DEFAULT 'private',
+            note_uuid TEXT
         );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_uuid
+            ON notes(note_uuid) WHERE note_uuid IS NOT NULL;
 
         CREATE TABLE IF NOT EXISTS notes_content (
             id INTEGER PRIMARY KEY,
