@@ -107,6 +107,15 @@ enum Commands {
         #[arg(long)]
         orphans: bool,
     },
+    /// One-shot: make today's glob-derived `public` set explicit in frontmatter.
+    VisibilityBackfill {
+        vault_path: String,
+        #[arg(long)]
+        config_dir: Option<String>,
+        /// Report what would change without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
     Export {
         db_path: String,
         output: String,
@@ -354,6 +363,24 @@ async fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let result = ll_search::db::link_stats(&conn, folder.as_deref(), orphans);
             out(&result);
+        }
+        Commands::VisibilityBackfill { vault_path, config_dir, dry_run } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let config = ll_search::sync::config::load_config(&config_dir)
+                .expect("failed to load federation config");
+            let report = ll_search::sync::backfill::backfill_public(
+                std::path::Path::new(&vault_path),
+                &config,
+                dry_run,
+            )
+            .expect("backfill failed");
+            eprintln!(
+                "{} {} of {} scanned ({} already explicit)",
+                if dry_run { "Would write" } else { "Wrote" },
+                report.written,
+                report.scanned,
+                report.already_explicit,
+            );
         }
         Commands::Export { db_path, output, vault_path, config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);

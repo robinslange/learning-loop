@@ -47,6 +47,18 @@ impl VisibilityEngine {
         if tier == "public" { "listed" } else { tier }
     }
 
+    /// Rule application WITHOUT the `public` clamp.
+    ///
+    /// Used only by the one-shot backfill, which must reproduce pre-inversion
+    /// behaviour to decide which notes to make explicitly public. Not for use
+    /// on the export path.
+    pub fn evaluate_uncapped<'a>(&'a self, path: &str, fm: Option<&'a str>) -> &'a str {
+        if let Some(tier) = Self::explicit(fm) {
+            return tier;
+        }
+        self.evaluate_globs(path)
+    }
+
     fn evaluate_globs(&self, path: &str) -> &str {
         let mut tier = self.default_tier.as_str();
         for (glob_set, rule_tier) in &self.rules {

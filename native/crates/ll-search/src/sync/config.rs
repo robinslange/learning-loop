@@ -46,6 +46,33 @@ pub struct PeerConfig {
     pub endpoint: String,
 }
 
+
+impl FederationConfig {
+    /// Construct a config in-memory for tests, without touching disk.
+    #[cfg(test)]
+    pub fn test_fixture(default: &str, rules: Vec<(String, String)>) -> Self {
+        FederationConfig {
+            identity: Identity {
+                display_name: "test".into(),
+                pubkey: "ed25519:AAAA".into(),
+            },
+            visibility: VisibilityConfig {
+                default: default.to_string(),
+                rules: rules
+                    .into_iter()
+                    .map(|(pattern, tier)| VisibilityRule { pattern, tier })
+                    .collect(),
+            },
+            hub: HubEndpoint {
+                endpoint: "wss://example.invalid/ws".into(),
+                pubkey: None,
+            },
+            peers: Vec::new(),
+            graph: false,
+        }
+    }
+}
+
 pub fn load_config(config_dir: &Path) -> anyhow::Result<FederationConfig> {
     let config_path = config_dir.join("federation").join("config.json");
     let text = std::fs::read_to_string(&config_path)?;
