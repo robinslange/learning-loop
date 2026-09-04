@@ -1,10 +1,44 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::config::TOP_K_FEDERATION;
+use crate::sync::registry;
 use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
+
+/// Which vault profiles a query may read.
+///
+/// Default: exactly the one the vault path resolves to. Widening requires
+/// `--all`, because the only edges between vaults are `follow` (which is
+/// already reflected in that profile's own peer cache) and `assoc`, which
+/// grants no authority at all — association cannot imply read access.
+pub struct QueryScope {
+    pub config_dirs: Vec<PathBuf>,
+}
+
+pub fn query_scope(plugin_data: &Path, vault: &Path, all: bool) -> anyhow::Result<QueryScope> {
+    if all {
+        return Ok(QueryScope {
+            config_dirs: registry::load(plugin_data)?.into_iter().map(|p| p.config_dir).collect(),
+        });
+    }
+    Ok(QueryScope {
+        config_dirs: vec![registry::resolve_by_vault_path(plugin_data, vault)?.config_dir],
+    })
+}
+
+/// Peer indexes visible within a resolved [`QueryScope`] — the union of
+/// `discover_peer_dbs` over every config dir the scope names. With the
+/// default (non-`--all`) scope that's exactly one config dir, so a peer
+/// cached under a different profile never enters the result.
+pub fn discover_peer_dbs_for(scope: &QueryScope, local_model_id: &str) -> Vec<(String, Connection)> {
+    scope
+        .config_dirs
+        .iter()
+        .flat_map(|dir| discover_peer_dbs(dir, local_model_id))
+        .collect()
+}
 
 pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
     let peers_dir = config_dir.join("federation").join("data").join("peers");
@@ -211,6 +245,97 @@ mod tests {
     use super::*;
     use super::super::test_helpers::helpers::*;
     use rusqlite::Connection;
+
+    /// Registers two independent vault profiles, each with its own config
+    /// dir and empty peer-cache directory, under a shared plugin_data root.
+    fn two_profiles(plugin_data: &Path, personal_vault: &str, work_vault: &str) {
+        for (id, vault) in [("personal", personal_vault), ("work", work_vault)] {
+            let config_dir = plugin_data.join(id);
+            std::fs::create_dir_all(config_dir.join("federation").join("data").join("peers")).unwrap();
+            registry::add(plugin_data, registry::VaultProfile {
+                id: id.to_string(),
+                config_dir,
+                vault_path: PathBuf::from(vault),
+            }).unwrap();
+        }
+    }
+
+    /// Records an `assoc` grant from one registered profile to another.
+    ///
+    /// No production code reads this file — nothing in v5 models `assoc`
+    /// yet. It exists purely so `an_assoc_edge_alone_never_widens_the_scope`
+    /// pins a real on-disk artifact a future implementation might be
+    /// tempted to consult, rather than asserting against nothing.
+    fn add_assoc_grant(plugin_data: &Path, from_id: &str, to_id: &str) {
+        let profiles = registry::load(plugin_data).unwrap();
+        let from = profiles.iter().find(|p| p.id == from_id).unwrap();
+        std::fs::write(
+            from.config_dir.join("federation").join("assoc.json"),
+            serde_json::json!({"assoc": [to_id]}).to_string(),
+        ).unwrap();
+    }
+
+    /// Seeds a peer index (model_id "model-x") into one profile's peer cache.
+    fn seed_peer_cache(plugin_data: &Path, profile_id: &str, peer_id: &str) {
+        let profiles = registry::load(plugin_data).unwrap();
+        let profile = profiles.iter().find(|p| p.id == profile_id).unwrap();
+        let peer_dir = profile.config_dir.join("federation").join("data").join("peers").join(peer_id);
+        std::fs::create_dir_all(&peer_dir).unwrap();
+        let conn = Connection::open(peer_dir.join("index.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', 'model-x');",
+        ).unwrap();
+    }
+
+    #[test]
+    fn query_resolves_to_one_profile_and_searches_only_it() {
+        let d = tempfile::tempdir().unwrap();
+        two_profiles(d.path(), "/v/personal", "/v/work");
+        let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
+        assert_eq!(scope.config_dirs.len(), 1);
+        assert!(scope.config_dirs[0].ends_with("personal") || scope.config_dirs[0] == d.path());
+    }
+
+    #[test]
+    fn the_all_flag_widens_to_every_registered_profile() {
+        let d = tempfile::tempdir().unwrap();
+        two_profiles(d.path(), "/v/personal", "/v/work");
+        let scope = query_scope(d.path(), Path::new("/v/personal"), true).unwrap();
+        assert_eq!(scope.config_dirs.len(), 2);
+    }
+
+    #[test]
+    fn an_assoc_edge_alone_never_widens_the_scope() {
+        let d = tempfile::tempdir().unwrap();
+        two_profiles(d.path(), "/v/personal", "/v/work");
+        add_assoc_grant(d.path(), "personal", "work");
+        let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
+        assert_eq!(scope.config_dirs.len(), 1,
+            "assoc is attribution only — if it widened queries, an agent composing \
+             a work artifact could silently surface personal notes");
+    }
+
+    #[test]
+    fn peer_indexes_come_only_from_the_resolved_profile() {
+        let d = tempfile::tempdir().unwrap();
+        two_profiles(d.path(), "/v/personal", "/v/work");
+        seed_peer_cache(d.path(), "work", "v-someone");
+        let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
+        let peers = discover_peer_dbs_for(&scope, "model-x");
+        assert!(peers.is_empty(), "the work profile's peer cache is out of scope");
+    }
+
+    #[test]
+    fn discover_peer_dbs_for_unions_every_config_dir_in_an_all_scope() {
+        let d = tempfile::tempdir().unwrap();
+        two_profiles(d.path(), "/v/personal", "/v/work");
+        seed_peer_cache(d.path(), "work", "v-someone");
+        let scope = query_scope(d.path(), Path::new("/v/personal"), true).unwrap();
+        let peers = discover_peer_dbs_for(&scope, "model-x");
+        assert_eq!(peers.len(), 1, "--all must still surface the work profile's peer cache");
+        assert_eq!(peers[0].0, "v-someone");
+    }
 
     #[test]
     fn test_discover_peer_dbs_empty_dir() {

@@ -26,6 +26,11 @@ enum Commands {
         top: usize,
         #[arg(long)]
         config_dir: Option<String>,
+        #[arg(long, help = "Vault this query runs against; falls back to $VAULT_PATH. \
+                             Resolves which registered vault profile scopes federation lookups.")]
+        vault_path: Option<String>,
+        #[arg(long, help = "Widen federation lookups to every registered vault, not just this one")]
+        all: bool,
         #[arg(long, help = "Recency decay half-life in days")]
         recency: Option<f64>,
         #[arg(long, help = "Only notes after this unix timestamp (seconds)")]
@@ -244,10 +249,29 @@ fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app:
     ll_search::app::AppState::from_db(db_path, config_dir).expect("failed to build AppState")
 }
 
-fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec<(String, rusqlite::Connection)> {
-    let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-    let fed_config_path = config_dir.join("federation").join("config.json");
-    if !fed_config_path.exists() {
+/// Resolve which vault(s) a query's federation lookups may read, then collect
+/// their peer indexes.
+///
+/// `config_dir` here is the plugin_data root (the registry's home), matching
+/// `ll vault add`/`ll vault list`. A legacy single-vault install has no
+/// registry at all, so this never touches the registry unless a federation
+/// config or a `vaults.json` already exists there — reading is never a write,
+/// and a non-federated install pays no registry cost.
+///
+/// If scope resolution itself fails (no matching profile, unreadable
+/// registry), federation lookups fall back to the plugin_data root directly —
+/// the pre-registry behavior — rather than silently dropping peers or
+/// crashing a query that used to work.
+fn resolve_peers(
+    conn: &rusqlite::Connection,
+    config_dir: Option<String>,
+    vault_path: Option<String>,
+    all: bool,
+) -> Vec<(String, rusqlite::Connection)> {
+    let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+    let federated = plugin_data.join("federation").join("config.json").exists()
+        || plugin_data.join("vaults.json").exists();
+    if !federated {
         return Vec::new();
     }
     let model_id: String = match conn.query_row(
@@ -258,7 +282,25 @@ fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec
         Ok(id) => id,
         Err(_) => return Vec::new(),
     };
-    ll_search::search::discover_peer_dbs(&config_dir, &model_id)
+
+    let vault = vault_path
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var("VAULT_PATH").ok().map(std::path::PathBuf::from));
+
+    let scope = if all {
+        ll_search::search::query_scope(&plugin_data, std::path::Path::new(""), true)
+    } else {
+        match &vault {
+            Some(v) => ll_search::search::query_scope(&plugin_data, v, false),
+            None => Ok(ll_search::search::QueryScope { config_dirs: vec![plugin_data.clone()] }),
+        }
+    };
+    let scope = scope.unwrap_or_else(|e| {
+        eprintln!("vault scope resolution failed ({e}); falling back to unscoped federation lookup");
+        ll_search::search::QueryScope { config_dirs: vec![plugin_data] }
+    });
+
+    ll_search::search::discover_peer_dbs_for(&scope, &model_id)
 }
 
 fn vault_add(plugin_data: &std::path::Path, vault_path: &std::path::Path, id: &str) -> anyhow::Result<()> {
@@ -304,7 +346,7 @@ async fn main() {
                 }
             }
         }
-        Commands::Query { db_path, text, top, config_dir, recency, after, before, session, project, threshold } => {
+        Commands::Query { db_path, text, top, config_dir, vault_path, all, recency, after, before, session, project, threshold } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             init_embedding();
             let app = build_app_state(&db_path, config_dir.clone());
@@ -316,7 +358,7 @@ async fn main() {
                 session_id: session,
                 project_tag: project,
             };
-            let peers = resolve_peers(&conn, config_dir);
+            let peers = resolve_peers(&conn, config_dir, vault_path, all);
             let results = if peers.is_empty() {
                 ll_search::search::hybrid_query_with_ctx(&ctx, &conn, &text, top, &temporal)
             } else {
@@ -350,7 +392,7 @@ async fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
-            let peers = resolve_peers(&conn, config_dir);
+            let peers = resolve_peers(&conn, config_dir, None, false);
             let result = if peers.is_empty() {
                 ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold, &store)
             } else {
@@ -478,7 +520,7 @@ async fn main() {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
-            let peers = resolve_peers(&conn, config_dir);
+            let peers = resolve_peers(&conn, config_dir, None, false);
             let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store);
             out(&scored);
         }
@@ -602,7 +644,79 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
+
+    /// A connection with just enough `meta` to satisfy resolve_peers' model_id lookup.
+    fn conn_with_model(model_id: &str) -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', '{model_id}');"
+        )).unwrap();
+        conn
+    }
+
+    /// Registers two vault profiles under `plugin_data`, each with its own
+    /// (initially peer-less) federation config dir.
+    fn two_vault_profiles(plugin_data: &Path) {
+        for (id, vault) in [("personal", "/v/personal"), ("work", "/v/work")] {
+            let config_dir = plugin_data.join(id);
+            std::fs::create_dir_all(config_dir.join("federation")).unwrap();
+            ll_search::sync::registry::add(plugin_data, ll_search::sync::registry::VaultProfile {
+                id: id.to_string(),
+                config_dir,
+                vault_path: PathBuf::from(vault),
+            }).unwrap();
+        }
+    }
+
+    fn seed_peer(config_dir: &Path, peer: &str, model_id: &str) {
+        let peer_dir = config_dir.join("federation").join("data").join("peers").join(peer);
+        std::fs::create_dir_all(&peer_dir).unwrap();
+        let conn = rusqlite::Connection::open(peer_dir.join("index.db")).unwrap();
+        conn.execute_batch(&format!(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', '{model_id}');"
+        )).unwrap();
+    }
+
+    #[test]
+    fn resolve_peers_returns_empty_when_nothing_is_federated() {
+        let d = tempfile::tempdir().unwrap();
+        let conn = conn_with_model("model-x");
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false);
+        assert!(peers.is_empty());
+        assert!(!d.path().join("vaults.json").exists(),
+            "a plain, never-federated query must not create a registry — reading is never a write");
+    }
+
+    #[test]
+    fn resolve_peers_stays_scoped_to_the_named_vault() {
+        let d = tempfile::tempdir().unwrap();
+        two_vault_profiles(d.path());
+        seed_peer(&d.path().join("work"), "v-someone", "model-x");
+        let conn = conn_with_model("model-x");
+
+        let peers = resolve_peers(
+            &conn,
+            Some(d.path().to_string_lossy().to_string()),
+            Some("/v/personal".to_string()),
+            false,
+        );
+        assert!(peers.is_empty(), "personal has no peer cache of its own — work's must not leak in");
+    }
+
+    #[test]
+    fn resolve_peers_all_widens_across_every_registered_vault() {
+        let d = tempfile::tempdir().unwrap();
+        two_vault_profiles(d.path());
+        seed_peer(&d.path().join("work"), "v-someone", "model-x");
+        let conn = conn_with_model("model-x");
+
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, true);
+        assert_eq!(peers.len(), 1, "--all must surface the work profile's peer cache too");
+        assert_eq!(peers[0].0, "v-someone");
+    }
 
     /// A pre-v5 install: federation/config.json present, no vaults.json.
     fn legacy_install(plugin_data: &Path, vault: &str) {
