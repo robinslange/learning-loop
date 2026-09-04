@@ -254,14 +254,20 @@ fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app:
 ///
 /// `config_dir` here is the plugin_data root (the registry's home), matching
 /// `ll vault add`/`ll vault list`. A legacy single-vault install has no
-/// registry at all, so this never touches the registry unless a federation
-/// config or a `vaults.json` already exists there — reading is never a write,
-/// and a non-federated install pays no registry cost.
+/// registry at all, so this never touches it unless a federation config or a
+/// `vaults.json` already exists there — reading is never a write, and a
+/// non-federated install pays no registry cost.
 ///
-/// If scope resolution itself fails (no matching profile, unreadable
-/// registry), federation lookups fall back to the plugin_data root directly —
-/// the pre-registry behavior — rather than silently dropping peers or
-/// crashing a query that used to work.
+/// The one branch that matters is whether `vaults.json` exists:
+///
+/// - It doesn't → there is by definition exactly one vault, and its config
+///   dir is `plugin_data` itself. No `vault_path` is needed to know that, and
+///   none is required — this is the zero-migration single-vault case working
+///   correctly, not a fallback rescuing an error.
+/// - It does → genuinely multi-vault, so guessing which one the caller meant
+///   is exactly the case where being wrong leaks across vaults. Resolution
+///   failures here fail loud (panic with an actionable message) rather than
+///   widening the search — scoping must never fail open.
 fn resolve_peers(
     conn: &rusqlite::Connection,
     config_dir: Option<String>,
@@ -283,22 +289,22 @@ fn resolve_peers(
         Err(_) => return Vec::new(),
     };
 
-    let vault = vault_path
-        .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var("VAULT_PATH").ok().map(std::path::PathBuf::from));
-
-    let scope = if all {
+    let scope = if !plugin_data.join("vaults.json").exists() {
+        ll_search::search::QueryScope { config_dirs: vec![plugin_data.clone()] }
+    } else if all {
         ll_search::search::query_scope(&plugin_data, std::path::Path::new(""), true)
+            .expect("failed to load the vault registry for --all")
     } else {
-        match &vault {
-            Some(v) => ll_search::search::query_scope(&plugin_data, v, false),
-            None => Ok(ll_search::search::QueryScope { config_dirs: vec![plugin_data.clone()] }),
-        }
+        let vault = vault_path
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var("VAULT_PATH").ok().map(std::path::PathBuf::from))
+            .expect(
+                "multiple vaults are registered; pass --vault-path (or set $VAULT_PATH) \
+                 to say which one this query scopes to",
+            );
+        ll_search::search::query_scope(&plugin_data, &vault, false)
+            .unwrap_or_else(|e| panic!("failed to resolve vault scope: {e}"))
     };
-    let scope = scope.unwrap_or_else(|e| {
-        eprintln!("vault scope resolution failed ({e}); falling back to unscoped federation lookup");
-        ll_search::search::QueryScope { config_dirs: vec![plugin_data] }
-    });
 
     ll_search::search::discover_peer_dbs_for(&scope, &model_id)
 }
@@ -716,6 +722,26 @@ mod tests {
         let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, true);
         assert_eq!(peers.len(), 1, "--all must surface the work profile's peer cache too");
         assert_eq!(peers[0].0, "v-someone");
+    }
+
+    /// With more than one vault registered, guessing which one the caller
+    /// meant is exactly the case where being wrong leaks across vaults —
+    /// so an unresolvable vault must fail loud, never silently widen or
+    /// silently return nothing that could be mistaken for "no peers exist".
+    #[test]
+    #[should_panic(expected = "no vault profile")]
+    fn resolve_peers_fails_loud_rather_than_search_the_wrong_vault() {
+        let d = tempfile::tempdir().unwrap();
+        two_vault_profiles(d.path());
+        seed_peer(&d.path().join("work"), "v-someone", "model-x");
+        let conn = conn_with_model("model-x");
+
+        let _ = resolve_peers(
+            &conn,
+            Some(d.path().to_string_lossy().to_string()),
+            Some("/v/unregistered".to_string()),
+            false,
+        );
     }
 
     /// A pre-v5 install: federation/config.json present, no vaults.json.
