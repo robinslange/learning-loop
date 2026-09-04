@@ -211,6 +211,12 @@ jobs:
       - name: Lint (eslint custom rules)
         run: npx eslint .
 
+      # The custom rules' own tests need the `eslint` devDependency, so they run
+      # here rather than in the `node` job, which installs nothing and exercises
+      # the plugin on bare node the way a user's Claude Code does.
+      - name: Test eslint custom rules
+        run: node --test eslint-plugin-learning-loop/rules/*.test.mjs
+
       - name: Code-fence tag check
         run: |
           if grep -rEn '^```(sh|shell|typescript)( |$)' \
