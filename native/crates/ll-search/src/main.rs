@@ -128,19 +128,10 @@ enum Commands {
         vault_path: String,
         #[arg(long)]
         config_dir: Option<String>,
-        /// Override the hub endpoint URL. When provided, sync skips reading
-        /// federation/config.json from disk. Falls back to LL_HUB_ENDPOINT env
-        /// var if the flag is absent. Skills calling this during onboarding
-        /// (before config is written) MUST provide one of the two.
+        /// Override the hub endpoint URL. Falls back to LL_HUB_ENDPOINT env
+        /// var if the flag is absent.
         #[arg(long)]
         hub_endpoint: Option<String>,
-        /// Override the peer_id. When provided together with --hub-endpoint,
-        /// sync uses this identity instead of reading federation/config.json.
-        /// Skills calling this during onboarding (before config is written)
-        /// pass the peer_id returned by the redeem response. Falls back to
-        /// LL_PEER_ID env var if the flag is absent.
-        #[arg(long)]
-        peer_id: Option<String>,
     },
     Identity {
         #[arg(long)]
@@ -395,29 +386,16 @@ async fn main() {
             .expect("export failed");
             out(&result);
         }
-        Commands::Sync { db_path, vault_path, config_dir, hub_endpoint, peer_id } => {
+        Commands::Sync { db_path, vault_path, config_dir, hub_endpoint } => {
             let hub_override = hub_endpoint
                 .or_else(|| std::env::var("LL_HUB_ENDPOINT").ok());
-            let peer_id_override = peer_id
-                .or_else(|| std::env::var("LL_PEER_ID").ok());
-            // Validate before touching the embedding model — a misconfigured
-            // invocation should fail fast with a clear error, not after a
-            // network round-trip to huggingface.
-            if hub_override.is_some() && peer_id_override.is_none() {
-                eprintln!(
-                    "--hub-endpoint provided without --peer-id; pass --peer-id <id> \
-                     (or set LL_PEER_ID) when bypassing federation/config.json"
-                );
-                std::process::exit(2);
-            }
             init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let config = ll_search::sync::config::load_config_with_override(
-                &config_dir,
-                hub_override.as_deref(),
-                peer_id_override.as_deref(),
-            )
-            .expect("failed to load federation config");
+            let mut config = ll_search::sync::config::load_config(&config_dir)
+                .expect("failed to load federation config");
+            if let Some(endpoint) = hub_override {
+                config.hub.endpoint = endpoint;
+            }
             let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),

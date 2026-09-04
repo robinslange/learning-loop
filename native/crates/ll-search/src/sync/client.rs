@@ -275,7 +275,7 @@ async fn connect_and_authenticate(
     let negotiated_protocol: u32 = match challenge {
         HubMessage::SyncReject { reason } => anyhow::bail!("hub rejected: {reason}"),
         HubMessage::AuthChallenge { nonce, hub_pubkey } => {
-            match config.hub.pubkey.as_deref() {
+            match config.hub.key_id.as_deref() {
                 Some(pinned) if pinned == hub_pubkey => {}
                 Some(pinned) => anyhow::bail!(
                     "hub pubkey mismatch: pinned {pinned:?} but hub presented {hub_pubkey:?}"
