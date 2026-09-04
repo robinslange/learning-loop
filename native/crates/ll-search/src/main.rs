@@ -199,7 +199,27 @@ enum Commands {
         #[arg(long, help = "Cap the number of queries (random sample)")]
         limit: Option<usize>,
     },
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
 
+}
+
+#[derive(Subcommand)]
+enum VaultCommand {
+    /// Register a vault under a config dir isolated from every other vault.
+    Add {
+        vault_path: String,
+        id: String,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// List registered vaults: id, vault path, config dir, federation status.
+    List {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
 }
 
 fn parse_model(s: &str) -> ll_search::model::KnownModel {
@@ -239,6 +259,21 @@ fn resolve_peers(conn: &rusqlite::Connection, config_dir: Option<String>) -> Vec
         Err(_) => return Vec::new(),
     };
     ll_search::search::discover_peer_dbs(&config_dir, &model_id)
+}
+
+fn vault_add(plugin_data: &std::path::Path, vault_path: &std::path::Path, id: &str) -> anyhow::Result<()> {
+    if ll_search::sync::registry::resolve_by_vault_path(plugin_data, vault_path).is_ok() {
+        anyhow::bail!("{} is already registered", vault_path.display());
+    }
+    let config_dir = plugin_data.join(id);
+    std::fs::create_dir_all(config_dir.join("federation"))?;
+    ll_search::sync::registry::add(plugin_data, ll_search::sync::registry::VaultProfile {
+        id: id.to_string(),
+        config_dir,
+        vault_path: vault_path.to_path_buf(),
+    })?;
+    eprintln!("Registered vault '{id}'. Run `ll join` in it to create its identity.");
+    Ok(())
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -529,6 +564,26 @@ async fn main() {
             out(&result);
         }
 
+        Commands::Vault { command } => match command {
+            VaultCommand::Add { vault_path, id, config_dir } => {
+                let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                vault_add(&plugin_data, std::path::Path::new(&vault_path), &id).expect("vault add failed");
+            }
+            VaultCommand::List { config_dir } => {
+                let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                let profiles = ll_search::sync::registry::load(&plugin_data).expect("failed to load vault registry");
+                for p in profiles {
+                    let configured = p.config_dir.join("federation").join("config.json").exists();
+                    println!(
+                        "{}\t{}\t{}\t{}",
+                        p.id,
+                        p.vault_path.display(),
+                        p.config_dir.display(),
+                        if configured { "configured" } else { "not configured" },
+                    );
+                }
+            }
+        },
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a);
             let mb = parse_model(&model_b);
@@ -541,5 +596,61 @@ async fn main() {
             .expect("benchmark failed");
             out(&result);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// A pre-v5 install: federation/config.json present, no vaults.json.
+    fn legacy_install(plugin_data: &Path, vault: &str) {
+        std::fs::create_dir_all(plugin_data.join("federation")).unwrap();
+        std::fs::write(
+            plugin_data.join("federation/config.json"),
+            serde_json::json!({
+                "identity": {"displayName": "robin", "pubkey": "ed25519:AAAA"},
+                "visibility": {"default": "private", "rules": []},
+                "hub": {"endpoint": "wss://h.example/ws"},
+                "vault_path": vault
+            }).to_string(),
+        ).unwrap();
+    }
+
+    #[test]
+    fn vault_add_creates_an_isolated_config_dir() {
+        let d = tempfile::tempdir().unwrap();
+        legacy_install(d.path(), "/home/r/brain");
+
+        vault_add(d.path(), Path::new("/home/r/work-vault"), "work").unwrap();
+
+        let profiles = ll_search::sync::registry::load(d.path()).unwrap();
+        let work = profiles.iter().find(|p| p.id == "work").unwrap();
+        assert!(work.config_dir.exists());
+        assert_ne!(work.config_dir, d.path(),
+            "a second vault must not share the first's seed entry or sync state");
+    }
+
+    #[test]
+    fn vault_add_refuses_a_duplicate_vault_path() {
+        let d = tempfile::tempdir().unwrap();
+        legacy_install(d.path(), "/home/r/brain");
+        let err = vault_add(d.path(), Path::new("/home/r/brain"), "dupe").unwrap_err();
+        assert!(err.to_string().contains("already"));
+    }
+
+    /// `registry::add` also rejects a duplicate vault_path, and its error also
+    /// contains "already" — so the test above passes even if vault_add's own
+    /// upfront check is deleted. What that upfront check actually buys is
+    /// failing before `create_dir_all` runs, so a rejected `vault_add` leaves
+    /// no orphan config dir behind. Pin that directly.
+    #[test]
+    fn vault_add_refuses_a_duplicate_vault_path_before_creating_its_config_dir() {
+        let d = tempfile::tempdir().unwrap();
+        legacy_install(d.path(), "/home/r/brain");
+        let _ = vault_add(d.path(), Path::new("/home/r/brain"), "dupe");
+        assert!(!d.path().join("dupe").exists(),
+            "a rejected vault_add must not leave a half-registered config dir on disk");
     }
 }
