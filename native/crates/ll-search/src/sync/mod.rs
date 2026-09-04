@@ -1,6 +1,7 @@
 pub mod config;
 pub mod error;
 pub mod export;
+pub mod frontmatter;
 pub mod visibility;
 pub mod auth;
 pub mod protocol;

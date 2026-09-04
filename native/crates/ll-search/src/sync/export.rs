@@ -129,7 +129,12 @@ pub fn export_index(
     // Build visibility inputs once: (path, frontmatter_visibility).
     let vis_inputs: Vec<(String, Option<String>)> = all_rows
         .iter()
-        .map(|r| (r.path.clone(), read_frontmatter_visibility(vault_path, &r.path)))
+        .map(|r| {
+            let fm = std::fs::read_to_string(vault_path.join(&r.path))
+                .ok()
+                .and_then(|raw| crate::sync::frontmatter::read_key(&raw, "visibility"));
+            (r.path.clone(), fm)
+        })
         .collect();
 
     // Evaluate the whole batch — O(n) glob matching, no per-row disk I/O.
@@ -242,28 +247,6 @@ pub fn export_index(
     export.execute("COMMIT", [])?;
 
     Ok(ExportResult { exported, skipped, model_id })
-}
-
-/// Read the `visibility:` frontmatter key from a vault file.
-///
-/// Returns `None` if the file is missing, has no YAML frontmatter, or has no
-/// `visibility` key.  Called once per note during the pre-compute phase.
-fn read_frontmatter_visibility(vault_path: &Path, rel_path: &str) -> Option<String> {
-    let full_path = vault_path.join(rel_path);
-    let raw = std::fs::read_to_string(full_path).ok()?;
-    let raw = raw.strip_prefix('\u{FEFF}').unwrap_or(&raw);
-    let after_open = raw
-        .strip_prefix("---\n")
-        .or_else(|| raw.strip_prefix("---\r\n"))?;
-    let end = after_open.find("\n---")?;
-    let fm = &after_open[..end];
-    for line in fm.lines() {
-        let trimmed = line.trim();
-        if let Some(val) = trimmed.strip_prefix("visibility:") {
-            return Some(val.trim().to_string());
-        }
-    }
-    None
 }
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
@@ -411,66 +394,6 @@ mod tests {
         let result = summarize(&text, 40);
         assert!(result.ends_with("..."), "expected the truncated branch: {result}");
         assert!(!result.contains("AKIA"), "AWS key shape leaked on truncated path: {result}");
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_returns_value() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "---\nvisibility: public\ntitle: Test\n---\n\nBody.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result.as_deref(), Some("public"));
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_handles_bom() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "\u{FEFF}---\nvisibility: private\n---\n\nBody.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result.as_deref(), Some("private"));
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_handles_crlf() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "---\r\nvisibility: private\r\n---\r\n\r\nBody.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result.as_deref(), Some("private"));
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_missing_key_returns_none() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "---\ntitle: No visibility key\n---\n\nBody.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_no_frontmatter_returns_none() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "Just plain content without frontmatter.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result, None);
-    }
-
-    #[test]
-    fn read_frontmatter_visibility_trims_whitespace() {
-        let mut f = NamedTempFile::new().unwrap();
-        write!(f, "---\nvisibility:  listed  \n---\n\nBody.").unwrap();
-        let dir = f.path().parent().unwrap();
-        let name = f.path().file_name().unwrap().to_str().unwrap();
-        let result = read_frontmatter_visibility(dir, name);
-        assert_eq!(result.as_deref(), Some("listed"));
     }
 
     fn build_minimal_export_db(path: &Path) {
