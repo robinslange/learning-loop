@@ -61,7 +61,22 @@ pub fn backfill_public(
 
         report.written += 1;
         if !dry_run {
-            std::fs::write(&full, frontmatter::upsert_key(&raw, "visibility", "public"))?;
+            let updated = frontmatter::upsert_key(&raw, "visibility", "public");
+            // Fail closed. A bulk rewrite of thousands of notes must not
+            // continue past the first sign that the writer is doing more than
+            // inserting one line. Everything already written passed this check.
+            frontmatter::verify_insertion(&raw, &updated, "visibility", "public").map_err(
+                |why| {
+                    anyhow::anyhow!(
+                        "ABORTED at {}: {why}\n\
+                         {} note(s) were written before this and are verified correct.\n\
+                         Nothing further was touched.",
+                        entry.rel_path,
+                        report.written - 1
+                    )
+                },
+            )?;
+            std::fs::write(&full, updated)?;
         }
     }
 

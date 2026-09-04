@@ -371,7 +371,10 @@ pub fn ensure_note_uuid(vault_path: &Path, rel_path: &str) -> anyhow::Result<Str
     }
 
     let id = uuid::Uuid::now_v7().to_string();
-    std::fs::write(&full, crate::sync::frontmatter::upsert_key(&raw, "id", &id))?;
+    let updated = crate::sync::frontmatter::upsert_key(&raw, "id", &id);
+    crate::sync::frontmatter::verify_insertion(&raw, &updated, "id", &id)
+        .map_err(|why| anyhow::anyhow!("refusing to rewrite {rel_path}: {why}"))?;
+    std::fs::write(&full, updated)?;
     Ok(id)
 }
 
