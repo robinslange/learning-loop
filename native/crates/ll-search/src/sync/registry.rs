@@ -56,6 +56,13 @@ pub fn add(plugin_data: &Path, profile: VaultProfile) -> anyhow::Result<()> {
     if existing.iter().any(|p| p.id == profile.id) {
         anyhow::bail!("vault id {} is already registered", profile.id);
     }
+    if existing.iter().any(|p| p.vault_path == profile.vault_path) {
+        anyhow::bail!(
+            "vault_path {} is already registered under another profile; \
+             resolve_by_vault_path would not know which one to return",
+            profile.vault_path.display()
+        );
+    }
     existing.push(profile);
     let doc = RegistryDoc { vaults: existing };
     std::fs::write(plugin_data.join(REGISTRY), serde_json::to_string_pretty(&doc)?)?;
@@ -162,5 +169,46 @@ mod tests {
             "vaults": [{"id":"a","config_dir":"/x/a","vault_path":"/v/a"}]
         }).to_string()).unwrap();
         assert_eq!(load(d.path()).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn profiles_never_share_a_vault_path() {
+        let d = tempfile::tempdir().unwrap();
+        legacy(d.path(), "/home/r/brain");
+        let err = add(d.path(), VaultProfile {
+            id: "duplicate".into(),
+            config_dir: d.path().join("duplicate"),
+            vault_path: "/home/r/brain".into(),
+        }).unwrap_err();
+        assert!(err.to_string().contains("vault_path"),
+            "two profiles pointing at the same vault_path make resolve_by_vault_path \
+             ambiguous — it would silently return whichever one comes first");
+    }
+
+    #[test]
+    fn a_legacy_config_missing_vault_path_errors_naming_the_fix() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("federation")).unwrap();
+        fs::write(
+            d.path().join("federation/config.json"),
+            serde_json::json!({
+                "identity": {"displayName": "robin", "pubkey": "ed25519:AAAA"},
+                "visibility": {"default": "private", "rules": []},
+                "hub": {"endpoint": "wss://h.example/ws"}
+            }).to_string(),
+        ).unwrap();
+
+        let err = load(d.path()).unwrap_err();
+        assert!(err.to_string().contains("ll vault add"),
+            "an operator hitting this needs to be told the command that fixes it");
+    }
+
+    #[test]
+    fn a_corrupt_registry_errors_instead_of_looking_empty() {
+        let d = tempfile::tempdir().unwrap();
+        fs::write(d.path().join("vaults.json"), "{not valid json").unwrap();
+        assert!(load(d.path()).is_err(),
+            "a corrupt registry must not be silently read as zero vaults — that \
+             looks exactly like a fresh install");
     }
 }
