@@ -389,13 +389,14 @@ async fn main() {
         Commands::Sync { db_path, vault_path, config_dir, hub_endpoint } => {
             let hub_override = hub_endpoint
                 .or_else(|| std::env::var("LL_HUB_ENDPOINT").ok());
-            init_embedding();
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let mut config = ll_search::sync::config::load_config(&config_dir)
                 .expect("failed to load federation config");
             if let Some(endpoint) = hub_override {
                 config.hub.endpoint = endpoint;
             }
+            config.validate().expect("invalid federation config");
+            init_embedding();
             let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),
