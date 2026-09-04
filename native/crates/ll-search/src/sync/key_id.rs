@@ -63,11 +63,17 @@ mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
 
+    fn key() -> SigningKey { SigningKey::generate(&mut rand::thread_rng()) }
+
     #[test]
     fn matches_the_hub_encoding_for_a_known_key() {
         // Pinned vector. If this changes, every deployed client's pin breaks
         // and the failure surfaces as an auth error, not an encoding error.
         // Must match the identical literal in sync-hub/src/v5/key.rs.
+        //
+        // To regenerate after a deliberate encoding change: run
+        // `KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key())`
+        // and print `.as_str()` — update the literal on both sides together.
         let seed = [7u8; 32];
         let sk = SigningKey::from_bytes(&seed);
         let id = KeyId::from_pubkey(&sk.verifying_key());
@@ -78,7 +84,7 @@ mod tests {
 
     #[test]
     fn round_trips_through_parse() {
-        let sk = SigningKey::generate(&mut rand::thread_rng());
+        let sk = key();
         let id = KeyId::from_pubkey(&sk.verifying_key());
         assert_eq!(KeyId::parse(id.as_str()).unwrap().verifying_key().unwrap(),
                    sk.verifying_key());
@@ -88,5 +94,31 @@ mod tests {
     fn rejects_malformed_input() {
         assert!(KeyId::parse("nope").is_err());
         assert!(KeyId::parse("z!!!!").is_err());
+    }
+
+    #[test]
+    fn rejects_a_wrong_length_payload() {
+        // 31 bytes rather than the 34 a prefixed ed25519 key needs.
+        let short = format!("z{}", bs58::encode(&[7u8; 31]).into_string());
+        assert!(KeyId::parse(&short).is_err());
+    }
+
+    #[test]
+    fn rejects_a_well_formed_payload_with_the_wrong_multicodec_prefix() {
+        // A genuinely valid ed25519 public key, right length (34 bytes total),
+        // but tagged with the wrong 2-byte multicodec — so this can only be
+        // caught by the tag check, not by length or by curve-point validation.
+        let vk = key().verifying_key();
+        let mut bytes = vec![0x00u8, 0x00u8];
+        bytes.extend_from_slice(vk.as_bytes());
+        let wrong_prefix = format!("z{}", bs58::encode(&bytes).into_string());
+        assert!(KeyId::parse(&wrong_prefix).is_err());
+    }
+
+    #[test]
+    fn distinct_keys_never_collide() {
+        let a = KeyId::from_pubkey(&key().verifying_key());
+        let b = KeyId::from_pubkey(&key().verifying_key());
+        assert_ne!(a, b);
     }
 }
