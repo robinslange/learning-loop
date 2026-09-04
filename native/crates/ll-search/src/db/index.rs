@@ -372,10 +372,54 @@ pub fn ensure_note_uuid(vault_path: &Path, rel_path: &str) -> anyhow::Result<Str
 
     let id = uuid::Uuid::now_v7().to_string();
     let updated = crate::sync::frontmatter::upsert_key(&raw, "id", &id);
-    crate::sync::frontmatter::verify_insertion(&raw, &updated, "id", &id)
+    crate::sync::frontmatter::verify_upsert(&raw, &updated, "id", &id)
         .map_err(|why| anyhow::anyhow!("refusing to rewrite {rel_path}: {why}"))?;
     std::fs::write(&full, updated)?;
     Ok(id)
+}
+
+/// Resolve a stable id for every walked note, reassigning collisions.
+///
+/// Returns `(rel_path -> note_uuid, reassigned)` where `reassigned` lists the
+/// `(rel_path, colliding_id)` of every note that had to be given a new id.
+///
+/// `id:` is user-visible frontmatter and travels when a note body is copied,
+/// so two notes sharing an id is a thing that happens, not a thing to assume
+/// away - silently collapsing them would point one resolver URL at two
+/// different notes. First writer keeps the id; the later note is reassigned on
+/// disk, so the collision is resolved rather than merely reported.
+pub fn resolve_note_uuids(
+    vault_path: &Path,
+    entries: &[WalkEntry],
+) -> Result<(HashMap<String, String>, Vec<(String, String)>)> {
+    let mut ids: HashMap<String, String> = HashMap::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut reassigned: Vec<(String, String)> = Vec::new();
+
+    for entry in entries {
+        let mut id = ensure_note_uuid(vault_path, &entry.rel_path)?;
+
+        if !seen.insert(id.clone()) {
+            eprintln!(
+                "WARNING: duplicate note id {id} on {} - reassigning; first writer keeps it",
+                entry.rel_path
+            );
+            reassigned.push((entry.rel_path.clone(), id.clone()));
+
+            let full = vault_path.join(&entry.rel_path);
+            let raw = std::fs::read_to_string(&full)?;
+            id = uuid::Uuid::now_v7().to_string();
+            let updated = crate::sync::frontmatter::upsert_key(&raw, "id", &id);
+            crate::sync::frontmatter::verify_upsert(&raw, &updated, "id", &id)
+                .map_err(|why| anyhow::anyhow!("refusing to rewrite {}: {why}", entry.rel_path))?;
+            std::fs::write(&full, updated)?;
+            seen.insert(id.clone());
+        }
+
+        ids.insert(entry.rel_path.clone(), id);
+    }
+
+    Ok((ids, reassigned))
 }
 
 pub fn walk_vault(vault_path: &str) -> Vec<WalkEntry> {
@@ -502,6 +546,64 @@ mod tests {
         let raw = std::fs::read_to_string(&p).unwrap();
         std::fs::write(&p, raw.replace("Body.", "Rewritten body, entirely different.")).unwrap();
         assert_eq!(ensure_note_uuid(dir.path(), "note.md").unwrap(), id);
+    }
+
+
+    #[test]
+    fn resolves_a_uuid_per_entry() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.md"), "---\ntitle: A\n---\n\nA.").unwrap();
+        std::fs::write(dir.path().join("b.md"), "---\ntitle: B\n---\n\nB.").unwrap();
+
+        let entries = walk_vault(dir.path().to_str().unwrap());
+        let (ids, dupes) = resolve_note_uuids(dir.path(), &entries).unwrap();
+
+        assert_eq!(ids.len(), 2);
+        assert!(dupes.is_empty());
+        assert_ne!(ids["a.md"], ids["b.md"]);
+    }
+
+    #[test]
+    fn duplicate_ids_are_detected_and_the_later_note_is_reassigned() {
+        let dir = TempDir::new().unwrap();
+        let shared = "01926d7e-0000-7000-8000-000000000001";
+        std::fs::write(
+            dir.path().join("a.md"),
+            format!("---\nid: {shared}\ntitle: A\n---\n\nBody A."),
+        ).unwrap();
+        std::fs::write(
+            dir.path().join("b.md"),
+            format!("---\nid: {shared}\ntitle: B\n---\n\nBody B."),
+        ).unwrap();
+
+        let entries = walk_vault(dir.path().to_str().unwrap());
+        let (ids, dupes) = resolve_note_uuids(dir.path(), &entries).unwrap();
+
+        assert_eq!(dupes.len(), 1, "exactly one loser reported");
+        assert_ne!(ids["a.md"], ids["b.md"], "collision resolved");
+
+        let a = std::fs::read_to_string(dir.path().join("a.md")).unwrap();
+        let b = std::fs::read_to_string(dir.path().join("b.md")).unwrap();
+        let id_a = crate::sync::frontmatter::read_key(&a, "id").unwrap();
+        let id_b = crate::sync::frontmatter::read_key(&b, "id").unwrap();
+        assert_ne!(id_a, id_b, "resolved on disk, not just in memory");
+        assert!(id_a == shared || id_b == shared, "first writer keeps the id");
+    }
+
+    #[test]
+    fn resolution_is_idempotent_across_runs() {
+        let dir = TempDir::new().unwrap();
+        let shared = "01926d7e-0000-7000-8000-000000000002";
+        std::fs::write(dir.path().join("a.md"), format!("---\nid: {shared}\n---\nA.")).unwrap();
+        std::fs::write(dir.path().join("b.md"), format!("---\nid: {shared}\n---\nB.")).unwrap();
+
+        let entries = walk_vault(dir.path().to_str().unwrap());
+        let (first, dupes1) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        assert_eq!(dupes1.len(), 1);
+
+        let (second, dupes2) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        assert!(dupes2.is_empty(), "a resolved collision must not re-report forever");
+        assert_eq!(first, second, "ids stay put once assigned");
     }
 
     fn make_item(path: &str, title: &str, body: &str) -> EmbedItem {

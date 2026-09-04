@@ -65,7 +65,7 @@ pub fn backfill_public(
             // Fail closed. A bulk rewrite of thousands of notes must not
             // continue past the first sign that the writer is doing more than
             // inserting one line. Everything already written passed this check.
-            frontmatter::verify_insertion(&raw, &updated, "visibility", "public").map_err(
+            frontmatter::verify_upsert(&raw, &updated, "visibility", "public").map_err(
                 |why| {
                     anyhow::anyhow!(
                         "ABORTED at {}: {why}\n\

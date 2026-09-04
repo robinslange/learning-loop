@@ -144,6 +144,77 @@ pub fn verify_insertion(
     Ok(())
 }
 
+/// Verify a `upsert_key` write, whichever of its two modes applied.
+///
+/// `upsert_key` inserts when the key is absent and replaces when it is
+/// present. A guard covering only one mode refuses correct writes in the
+/// other — which is exactly what happened the first time this was wired into
+/// the duplicate-id path.
+pub fn verify_upsert(before: &str, after: &str, key: &str, value: &str) -> Result<(), String> {
+    if read_key(before, key).is_some() {
+        verify_replacement(before, after, key, value)
+    } else {
+        verify_insertion(before, after, key, value)
+    }
+}
+
+/// Verify that `after` is `before` with exactly one line's value changed —
+/// same line count, same terminators, one differing line, and that line is the
+/// key we asked for.
+pub fn verify_replacement(
+    before: &str,
+    after: &str,
+    key: &str,
+    value: &str,
+) -> Result<(), String> {
+    let entry = format!("{key}: {value}");
+    let b: Vec<&str> = before.split_inclusive('\n').collect();
+    let a: Vec<&str> = after.split_inclusive('\n').collect();
+
+    if a.len() != b.len() {
+        return Err(format!(
+            "line count went {} -> {}, expected no change on a replacement",
+            b.len(),
+            a.len()
+        ));
+    }
+
+    let differing: Vec<usize> = (0..b.len()).filter(|&i| a[i] != b[i]).collect();
+    if differing.len() != 1 {
+        return Err(format!(
+            "{} line(s) differ, expected exactly one",
+            differing.len()
+        ));
+    }
+
+    let i = differing[0];
+    if a[i].trim_end_matches(['\r', '\n']) != entry {
+        return Err(format!(
+            "the changed line is {:?}, expected {entry:?}",
+            a[i]
+        ));
+    }
+
+    let term_of = |seg: &str| {
+        if seg.ends_with("\r\n") {
+            "\r\n"
+        } else if seg.ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        }
+    };
+    if term_of(a[i]) != term_of(b[i]) {
+        return Err(format!(
+            "line terminator changed from {:?} to {:?}",
+            term_of(b[i]),
+            term_of(a[i])
+        ));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,6 +315,43 @@ mod tests {
         let before = "Just a body.";
         let tampered = "---\nvisibility: public\n---\nJust a BODY.";
         assert!(verify_insertion(before, tampered, "visibility", "public").is_err());
+    }
+
+
+    #[test]
+    fn guard_accepts_a_clean_value_replacement() {
+        let before = "---\nid: old\ntitle: X\n---\n\nBody.";
+        let after = upsert_key(before, "id", "new");
+        assert!(verify_upsert(before, &after, "id", "new").is_ok());
+    }
+
+    #[test]
+    fn guard_rejects_a_replacement_that_changes_a_neighbour() {
+        let before = "---\nid: old\ntitle: X\n---\n\nBody.";
+        let tampered = "---\nid: new\ntitle: Y\n---\n\nBody.";
+        assert!(verify_upsert(before, tampered, "id", "new").is_err());
+    }
+
+    #[test]
+    fn guard_rejects_a_replacement_that_drops_a_line() {
+        let before = "---\nid: old\ntitle: X\n---\n\nBody.";
+        let tampered = "---\nid: new\n---\n\nBody.";
+        assert!(verify_upsert(before, tampered, "id", "new").is_err());
+    }
+
+    #[test]
+    fn guard_rejects_a_replacement_that_reterminates_the_line() {
+        let before = "---\r\nid: old\r\ntitle: X\r\n---\r\n\r\nBody.";
+        let tampered = "---\r\nid: new\ntitle: X\r\n---\r\n\r\nBody.";
+        assert!(verify_upsert(before, tampered, "id", "new").is_err());
+    }
+
+    #[test]
+    fn verify_upsert_dispatches_on_whether_the_key_was_present() {
+        let absent = "---\ntitle: X\n---\n\nBody.";
+        assert!(verify_upsert(absent, &upsert_key(absent, "id", "v"), "id", "v").is_ok());
+        let present = "---\nid: old\n---\n\nBody.";
+        assert!(verify_upsert(present, &upsert_key(present, "id", "v"), "id", "v").is_ok());
     }
 
     #[test]
