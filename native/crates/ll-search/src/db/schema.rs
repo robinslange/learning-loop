@@ -109,6 +109,24 @@ pub(crate) fn run_migrations(conn: &Connection) -> Result<()> {
             .context("add session_id column")?;
     }
 
+    // note_uuid: stable note identity. An index built before v5 has no such
+    // column, and every insert would fail with "no such column: note_uuid".
+    // Probed rather than shipped as a versioned migration because SQLite has
+    // no `ADD COLUMN IF NOT EXISTS`, and a fresh DB already has it from
+    // `create_schema` — same reason `session_id` above is handled this way.
+    let has_note_uuid = conn.prepare("SELECT note_uuid FROM notes LIMIT 0").is_ok();
+    if !has_note_uuid {
+        conn.execute_batch("ALTER TABLE notes ADD COLUMN note_uuid TEXT;")
+            .context("add note_uuid column")?;
+    }
+    // Two notes must not be able to claim the same id: one resolver URL would
+    // then point at two different notes.
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_notes_uuid
+             ON notes(note_uuid) WHERE note_uuid IS NOT NULL;",
+    )
+    .context("create note_uuid uniqueness index")?;
+
     for (version, name, sql) in MIGRATIONS {
         if applied.contains(version) {
             continue;
@@ -384,4 +402,70 @@ pub fn drop_old_embeddings(conn: &Connection) {
     conn.execute_batch("DROP TABLE IF EXISTS embeddings_old;")
         .ok();
     conn.execute_batch("VACUUM;").ok();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migrations_add_note_uuid_to_a_pre_existing_index() {
+        // The live index predates note ids: its `notes` table has no
+        // `note_uuid`. Without this, every insert fails with "no such column".
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (
+                 id INTEGER PRIMARY KEY,
+                 path TEXT UNIQUE NOT NULL,
+                 content_hash TEXT NOT NULL,
+                 mtime REAL NOT NULL,
+                 title TEXT,
+                 tags TEXT,
+                 visibility TEXT DEFAULT 'private'
+             );",
+        )
+        .unwrap();
+
+        run_migrations(&conn).unwrap();
+
+        assert!(
+            conn.prepare("SELECT note_uuid FROM notes LIMIT 0").is_ok(),
+            "note_uuid column must be added to an existing index"
+        );
+    }
+
+    #[test]
+    fn migrations_are_idempotent_on_a_fresh_schema() {
+        // A fresh DB already has note_uuid from create_schema; migrating must
+        // not blow up on the second definition, nor on a repeat run.
+        let conn = Connection::open_in_memory().unwrap();
+        create_schema(&conn);
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        assert!(conn.prepare("SELECT note_uuid FROM notes LIMIT 0").is_ok());
+    }
+
+    #[test]
+    fn the_note_uuid_uniqueness_index_exists_after_migration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE notes (id INTEGER PRIMARY KEY, path TEXT UNIQUE NOT NULL,
+                 content_hash TEXT NOT NULL, mtime REAL NOT NULL,
+                 title TEXT, tags TEXT);",
+        )
+        .unwrap();
+        run_migrations(&conn).unwrap();
+
+        let n: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type='index' AND name='idx_notes_uuid'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "two notes must not be able to claim the same id");
+    }
 }
