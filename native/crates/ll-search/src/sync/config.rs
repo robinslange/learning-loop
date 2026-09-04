@@ -219,16 +219,21 @@ mod tests {
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
     }
 
-    /// Files still legitimately mentioning `peer_id`: the wire protocol
-    /// (`SyncHello`/`AuthChallenge`/envelope meta in `client.rs`, `auth.rs`,
-    /// `protocol/messages.rs`) and the search-side peer iteration that reads
-    /// it (`export.rs`, `search/federation.rs`, `search/query.rs`,
-    /// `search/reflect.rs`). Plan 6 (client handshake and sync) removes it
-    /// from `client.rs`; nothing currently scheduled removes it from the
-    /// rest — that gap is real, and this allowlist exists to keep it visible
-    /// rather than let it pass silently. Shrink this list as each file drops
-    /// `peer_id`; once it's empty, delete the allowlist and assert directly
-    /// against the whole tree.
+    /// The identity field this guard hunts for, assembled from parts so
+    /// this file's own source — including this comment and the assertion
+    /// message below — never spells it out as a literal, contiguous match.
+    const NEEDLE: &str = concat!("peer", "_id");
+
+    /// Files still legitimately mentioning the peer-id field: the wire
+    /// protocol (`SyncHello`/`AuthChallenge`/envelope meta in `client.rs`,
+    /// `auth.rs`, `protocol/messages.rs`) and the search-side peer iteration
+    /// variable of the same name (`export.rs`, `search/federation.rs`,
+    /// `search/query.rs`, `search/reflect.rs`). Plan 6 (client handshake and
+    /// sync) removes it from `client.rs`; nothing currently scheduled
+    /// removes it from the rest — that gap is real, and this allowlist
+    /// exists to keep it visible rather than let it pass silently. Shrink
+    /// this list as each file drops the field; once it's empty, delete the
+    /// allowlist and assert directly against the whole tree.
     const PEER_ID_ALLOWLIST: &[&str] = &[
         "sync/client.rs",
         "sync/auth.rs",
@@ -240,26 +245,22 @@ mod tests {
     ];
 
     #[test]
-    fn no_source_file_mentions_peer_id() {
-        // This file (the guard itself) necessarily names the string it hunts
-        // for, both here and in the allowlist doc comment above — skip it.
-        const SELF: &str = "sync/config.rs";
+    fn legacy_identity_field_does_not_reappear_in_source() {
         let src_root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src"));
         let mut offenders = Vec::new();
         for entry in walkdir::WalkDir::new(src_root) {
             let entry = entry.unwrap();
             if entry.path().extension().is_none_or(|e| e != "rs") { continue; }
+            let src = std::fs::read_to_string(entry.path()).unwrap();
+            if !src.contains(NEEDLE) { continue; }
             let rel = entry.path().strip_prefix(src_root).unwrap()
                 .to_string_lossy().replace('\\', "/");
-            if rel == SELF { continue; }
-            let src = std::fs::read_to_string(entry.path()).unwrap();
-            if !src.contains("peer_id") { continue; }
             if !PEER_ID_ALLOWLIST.contains(&rel.as_str()) {
                 offenders.push(rel);
             }
         }
         assert!(offenders.is_empty(),
-            "peer_id found outside the allowlist (update PEER_ID_ALLOWLIST if this \
+            "{NEEDLE} found outside the allowlist (update PEER_ID_ALLOWLIST if this \
              file's removal was scheduled, otherwise fix it): {offenders:?}");
     }
 }
