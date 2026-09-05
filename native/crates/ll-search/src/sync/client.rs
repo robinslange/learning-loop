@@ -144,7 +144,9 @@ pub async fn sync_all_async(
             state::OUTCOME_ERROR,
             Some(e.to_string()),
             // A failure must not erase when this vault last synced: how long
-            // the outage has been running is the whole question.
+            // the outage has been running is the whole question. Best-effort
+            // by construction — `read_state` reports a corrupt file as
+            // missing, so one corruption loses the answer permanently.
             state::read_state(config_dir)
                 .ok()
                 .flatten()

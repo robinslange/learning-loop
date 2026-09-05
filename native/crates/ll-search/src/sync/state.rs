@@ -24,16 +24,14 @@ pub const OUTCOME_ERROR: &str = "error";
 /// cycle. One field, so "holds nothing" and "holds 3578 notes" cannot both be
 /// recorded at once.
 ///
-/// Where the numbers come from differs by path, and a reader rendering them
-/// needs to know which:
+/// `sha256` is always the hub's own word: its handshake report, or the sha it
+/// echoed in `UploadAck`, checked against the bytes we hashed before it is
+/// recorded. `note_count` is whoever last counted the notes behind that sha —
+/// the hub on the skip and failure paths, us on the upload path, because v5's
+/// `UploadAck` carries no count.
 ///
-/// - upload accepted — what the hub acknowledged. `note_count` is the count
-///   we declared, because v5's `UploadAck` carries none; the sha is checked
-///   against the bytes we hashed before it is recorded.
-/// - upload skipped, or a failure after the handshake — the hub's own report,
-///   its own count.
-/// - a failure before the handshake — `None` on the enclosing field. We never
-///   got far enough to ask, which is not the same as the hub holding nothing.
+/// `None` on the enclosing field means the cycle died before the handshake.
+/// That is not the same as the hub holding nothing.
 ///
 /// Recording the end of the cycle rather than the handshake is deliberate: a
 /// first sync against a cold hub uploads successfully and would otherwise
@@ -237,5 +235,16 @@ mod tests {
         assert!(v.get("note_count").is_none(),
             "the count lives inside hub_holds; a loose one beside it is the field \
              that let 'holds nothing' and 'holds 3578 notes' be recorded together");
+
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000, last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(), detail: None,
+            hub_holds: Some(HubHolds::Nothing),
+        }).unwrap();
+        let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["hub_holds"]["kind"], "nothing",
+            "the outage signature is the one tag an out-of-process reader must not \
+             have renamed under it");
     }
 }
