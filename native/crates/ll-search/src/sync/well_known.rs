@@ -172,6 +172,26 @@ mod tests {
     use super::*;
     use crate::sync::test_hub;
 
+    /// rustls panics rather than erroring when no crypto provider is
+    /// installed, and `tokio-tungstenite` pulls it with default features off,
+    /// which selects none. Naming rustls in this crate's manifest with `ring`
+    /// is the only thing installing one — drop that feature and every `wss://`
+    /// connection this client makes aborts before the socket, which is how it
+    /// shipped until it was caught by hand.
+    ///
+    /// This builds the same `ClientConfig` the production path builds, so the
+    /// panic surfaces here instead of at a user's first `ll join`. It needs no
+    /// server, no certificate and no socket: the failure is a property of the
+    /// crate graph, not of any connection.
+    #[test]
+    fn a_crypto_provider_is_installed_so_tls_configs_can_be_built() {
+        let mut roots = rustls::RootCertStore::empty();
+        roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+        let _config = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+    }
+
     #[test]
     fn wss_maps_to_https_on_443_and_ws_to_http_on_80() {
         let secure = Origin::parse("wss://hub.example/ws").unwrap();
