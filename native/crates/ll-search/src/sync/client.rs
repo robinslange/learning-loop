@@ -854,17 +854,16 @@ mod tests {
             "a hub that never mentions the vault has not confirmed it holds the index");
     }
 
-    /// Blind spot: the positive control looks for `state`, which appears in
-    /// the SIGNATURE. A slice that captured the signature and then truncated
-    /// before the body would satisfy the control while checking none of the
-    /// logic. The control catches a slice that missed the function; it cannot
-    /// catch one that found only its first line.
+    /// The positive control deliberately looks for a token that exists only
+    /// in the body. `state` would not do: it appears in the signature too, so
+    /// a slice that captured the signature and truncated before the body
+    /// would satisfy the control while checking none of the logic.
     #[test]
     fn the_local_hash_file_is_never_consulted_for_the_decision() {
         let src = include_str!("client.rs");
         let idx = src.find("pub fn upload_decision").expect("function exists");
         let body = src[idx..].split("\n}\n").next().expect("function has a closing brace");
-        assert!(body.contains("state"),
+        assert!(body.contains("UploadDecision::Skip"),
             "positive control: if this slice missed the function body, the assertion below \
              would pass by reading nothing");
         assert!(!body.contains("last-export-hash"),
