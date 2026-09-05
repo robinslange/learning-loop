@@ -109,6 +109,10 @@ pub struct SyncResult {
     /// The vaults it was entitled to read and could not. One failure does not
     /// abort the others, so this is how they stay visible.
     pub skipped_fetches: Vec<String>,
+    /// Grants the hub answered and refused. They stay owed and the next cycle
+    /// offers them again — but the hub's answer will be the same, so unlike a
+    /// dropped connection this is worth saying out loud.
+    pub refused_grants: Vec<String>,
 }
 
 /// Run one sync cycle and record what it did, whether it worked or not.
@@ -132,8 +136,14 @@ pub async fn sync_all_async(
     // `None` on the error path rather than 0: the read half runs last, so a
     // cycle that failed never reached it and "nothing was skipped" would be a
     // claim it is in no position to make.
-    let (outcome_label, detail, last_success_at, skipped_fetches) = match &outcome {
-        Ok(result) => (state::OUTCOME_OK, None, Some(now), Some(result.skipped_fetches.len())),
+    let (outcome_label, detail, last_success_at, skipped_fetches, refused_grants) = match &outcome {
+        Ok(result) => (
+            state::OUTCOME_OK,
+            None,
+            Some(now),
+            Some(result.skipped_fetches.len()),
+            Some(result.refused_grants.len()),
+        ),
         Err(e) => (
             state::OUTCOME_ERROR,
             Some(e.to_string()),
@@ -146,6 +156,7 @@ pub async fn sync_all_async(
                 .flatten()
                 .and_then(|prev| prev.last_success_at),
             None,
+            None,
         ),
     };
     // Failing to record the cycle must never mask the cycle's own error.
@@ -156,6 +167,7 @@ pub async fn sync_all_async(
         detail,
         hub_holds: known_holds,
         skipped_fetches,
+        refused_grants,
     });
 
     outcome
@@ -192,7 +204,8 @@ async fn run_cycle(
     // owes the other half of that link and may hold nothing else worth
     // uploading; settling the key graph first means an upload problem cannot
     // leave a person's second machine half-joined.
-    super::link::reconcile(&mut ws, config_dir, config, &ready.grants, unix_now()).await?;
+    let links =
+        super::link::reconcile(&mut ws, config_dir, config, &ready.grants, unix_now()).await?;
 
     let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
     // What the hub reported at the handshake. Everything after this point
@@ -221,6 +234,7 @@ async fn run_cycle(
         fetched: read.fetched,
         unchanged_fetches: read.unchanged,
         skipped_fetches: read.skipped,
+        refused_grants: links.refused.into_iter().map(|r| r.grant_id).collect(),
     })
 }
 

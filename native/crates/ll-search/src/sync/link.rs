@@ -474,7 +474,19 @@ pub async fn approve(
     confirm: &mut dyn Approve,
 ) -> anyhow::Result<()> {
     approve_offline(config_dir, code, confirm)?;
-    connect_and_reconcile(config_dir).await?;
+    // A refusal is tolerable inside a sync cycle and is not tolerable here:
+    // this command exists to admit a machine, and reporting success for a
+    // grant the hub declined would leave someone waiting at a keyboard for a
+    // link that is never coming.
+    let outcome = connect_and_reconcile(config_dir).await?;
+    if let Some(first) = outcome.refused.first() {
+        anyhow::bail!(
+            "the hub refused this grant: {}. It is signed and kept, and the next \
+             connection offers it again — but the new machine is not admitted until \
+             the hub accepts it.",
+            first.reason
+        );
+    }
     Ok(())
 }
 
@@ -552,55 +564,108 @@ fn ensure_recovery_link(
 // The hub half
 // ---------------------------------------------------------------------------
 
-async fn lodge_one(ws: &mut WsStream, stored: &StoredGrant) -> anyhow::Result<()> {
-    let signed = stored.signed()?;
+/// What one cycle's link half did.
+///
+/// Shaped after [`super::fetch::FetchOutcome`], and for the same reason: one
+/// counterparty saying no is not the cycle failing. A refused grant is
+/// recorded and counted so `sync-state.json` can carry it and `ll status` can
+/// say it, rather than the user meeting it as silence.
+#[derive(Debug, Default)]
+pub struct LinkOutcome {
+    /// Grants the hub acknowledged this cycle.
+    pub lodged: usize,
+    /// Grants the hub answered and refused. They stay owed.
+    pub refused: Vec<Refusal>,
+}
+
+#[derive(Debug)]
+pub struct Refusal {
+    pub grant_id: String,
+    pub reason: String,
+}
+
+/// What the hub said about one grant.
+///
+/// **The split that matters is "did the hub answer", not "did it say yes".**
+/// A refusal is a decision: the hub is alive, the request/reply stream is in
+/// step, and the same answer is coming next time — so it is data, and the
+/// cycle carries on to upload and read. A dead socket is not a decision:
+/// nothing else in the cycle can happen over it, so it is an error and it
+/// propagates. Conflating the two is what made one refused grant wedge every
+/// subsequent cycle — no upload, no fetch, permanently.
+enum Lodged {
+    Acknowledged,
+    Refused(String),
+}
+
+async fn lodge_one(
+    ws: &mut WsStream,
+    statement_b64: &str,
+    signature_b64: &str,
+    grant_id: &str,
+) -> anyhow::Result<Lodged> {
     send_json(
         ws,
         &ClientMsg::PutGrant {
-            statement_b64: stored.statement_b64.clone(),
-            signature_b64: stored.signature_b64.clone(),
+            statement_b64: statement_b64.to_string(),
+            signature_b64: signature_b64.to_string(),
         },
     )
     .await?;
     match recv_json::<HubMsg>(ws).await? {
-        HubMsg::GrantAck { grant_id } => {
-            let expected = grant::grant_id(&signed.statement);
-            if grant_id != expected {
-                anyhow::bail!(
-                    "hub acknowledged {grant_id} for a grant whose id is {expected}; \
-                     it stored something other than what was sent"
-                );
-            }
-            Ok(())
-        }
-        HubMsg::Reject { reason } => anyhow::bail!("hub refused a grant: {reason}"),
+        HubMsg::GrantAck { grant_id: acked } if acked == grant_id => Ok(Lodged::Acknowledged),
+        // The hub answered this request, one for one, so the stream is still
+        // in step — it just did not store what it was sent. That is a refusal
+        // with a worse reason, not a broken connection.
+        HubMsg::GrantAck { grant_id: acked } => Ok(Lodged::Refused(format!(
+            "hub acknowledged {acked} for a grant whose id is {grant_id}; it stored \
+             something other than what was sent"
+        ))),
+        HubMsg::Reject { reason } => Ok(Lodged::Refused(reason)),
+        // Not an answer to this request. The next read in this cycle would be
+        // reading the wrong reply, so the connection cannot carry the rest of
+        // it and this is fatal rather than counted.
         other => anyhow::bail!("expected grant-ack, got {other:?}"),
     }
 }
 
-/// Send every grant the hub has not acknowledged yet.
-async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<usize> {
+/// Offer the hub every grant it has not acknowledged yet.
+async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkOutcome> {
     let mut grants = load_grants(config_dir)?;
-    let mut lodged = 0usize;
-    let mut outcome = Ok(());
+    let mut out = LinkOutcome::default();
+    let mut transport = Ok(());
     for stored in grants.iter_mut().filter(|g| !g.lodged) {
-        match lodge_one(ws, stored).await {
-            Ok(()) => {
+        let Ok(signed) = stored.signed() else {
+            // One unreadable row must not stop the others, and must certainly
+            // not stop the upload half that comes after this.
+            eprintln!("skipping an unreadable row in the grant store");
+            continue;
+        };
+        let grant_id = grant::grant_id(&signed.statement);
+        match lodge_one(ws, &stored.statement_b64, &stored.signature_b64, &grant_id).await {
+            Ok(Lodged::Acknowledged) => {
                 stored.lodged = true;
-                lodged += 1;
+                out.lodged += 1;
+            }
+            Ok(Lodged::Refused(reason)) => {
+                // Left owed, deliberately. Marking it lodged would make the
+                // complaint go away and lose the grant with it, and the link
+                // it is half of would stay half-built forever.
+                eprintln!("Hub refused a grant ({grant_id}): {reason}");
+                out.refused.push(Refusal { grant_id, reason });
             }
             Err(e) => {
-                outcome = Err(e);
+                transport = Err(e);
                 break;
             }
         }
     }
-    // Record the acknowledgements even on the way out of a failure. Re-sending
-    // a lodged grant is a no-op on the hub, but a machine that forgets an ack
-    // it received keeps a row marked owed forever.
+    // Record the acknowledgements even on the way out of a transport failure.
+    // Re-sending a lodged grant is a no-op on the hub, but a machine that
+    // forgets an ack it received keeps a row marked owed forever.
     save_grants(config_dir, &grants)?;
-    outcome?;
-    Ok(lodged)
+    transport?;
+    Ok(out)
 }
 
 /// Everything a connection owes this person's key graph, over a connection
@@ -615,7 +680,7 @@ pub(super) async fn reconcile(
     config: &FederationConfig,
     grants: &[GrantWire],
     now: i64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<LinkOutcome> {
     let me = local_key_id(config_dir)?;
     for wire in grants {
         if wire.state != "active" {
@@ -652,16 +717,16 @@ pub(super) async fn reconcile(
         }
     }
     ensure_recovery_link(config_dir, config, now)?;
-    let lodged = lodge_all(ws, config_dir).await?;
-    if lodged > 0 {
-        eprintln!("Lodged {lodged} grant(s) with the hub");
+    let outcome = lodge_all(ws, config_dir).await?;
+    if outcome.lodged > 0 {
+        eprintln!("Lodged {} grant(s) with the hub", outcome.lodged);
     }
-    Ok(())
+    Ok(outcome)
 }
 
 /// [`reconcile`] over a connection of its own, for the commands that are not
 /// a sync cycle.
-pub async fn connect_and_reconcile(config_dir: &Path) -> anyhow::Result<()> {
+pub async fn connect_and_reconcile(config_dir: &Path) -> anyhow::Result<LinkOutcome> {
     let config = config::load_config(config_dir)?;
     let signing_key = local_signing_key(config_dir)?;
     let (mut ws, ready) = connect_and_authenticate(
@@ -1548,25 +1613,64 @@ mod tests {
 
     // -- lodging -----------------------------------------------------------
 
+    /// A refusal is the hub's decision, and the cycle carries on.
+    ///
+    /// `reconcile` runs before the upload and the read half, so propagating a
+    /// refusal here wedged every subsequent cycle: no upload, no fetch,
+    /// permanently, for one grant the hub was never going to accept. The read
+    /// half in the same cycle already tolerates a refused fetch; this is the
+    /// grant half behaving the same way.
     #[tokio::test]
-    async fn a_grant_the_hub_refuses_stays_owed() {
+    async fn a_grant_the_hub_refuses_is_counted_not_propagated() {
         let _env = test_hub::insecure_ws_env();
         let approver = seeded_dir();
         approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
 
         let (hub, _lodged) =
-            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("grant rejected: nope")]).await;
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no room at the inn")])
+                .await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = connect_and_reconcile(approver.path()).await.unwrap_err().to_string();
-        assert!(err.contains("hub refused"), "{err}");
+        let outcome = connect_and_reconcile(approver.path()).await.expect(
+            "a hub that answers is a hub the rest of the cycle can still use",
+        );
+        assert_eq!(outcome.lodged, 0);
+        assert_eq!(outcome.refused.len(), 1);
+        assert!(outcome.refused[0].reason.contains("no room at the inn"),
+            "the hub's own words reach the caller: {:?}", outcome.refused[0]);
         assert!(
             load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged),
-            "a refused grant must stay owed — the recoverable failure is the one \
-             where the client remembers more than the hub does"
+            "a refused grant must stay owed — marking it lodged to make the complaint \
+             go away loses the grant and leaves the link half-built forever"
         );
     }
 
+    /// One counterparty saying no does not lose the others, exactly as one
+    /// failed fetch does not lose the others.
+    #[tokio::test]
+    async fn a_refused_grant_does_not_stop_the_grants_behind_it() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+        approve_offline(approver.path(), &pairing_code(&key(13)), &mut Yes::default()).unwrap();
+
+        let (hub, sent) =
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("nope"), GrantAnswer::Ack])
+                .await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+        let outcome = connect_and_reconcile(approver.path()).await.unwrap();
+
+        assert_eq!(sent.lock().unwrap().len(), 2, "both were offered");
+        assert_eq!(outcome.lodged, 1);
+        assert_eq!(outcome.refused.len(), 1);
+        let stored = load_grants(approver.path()).unwrap();
+        assert_eq!(stored.iter().filter(|g| g.lodged).count(), 1,
+            "the accepted one is settled and the refused one is still owed");
+    }
+
+    /// An ack naming a different grant is a refusal with a worse reason, not a
+    /// broken connection: the hub answered this request, one for one, so the
+    /// stream is still in step — it just did not store what it was sent.
     #[tokio::test]
     async fn an_ack_naming_a_different_grant_is_not_an_ack() {
         let _env = test_hub::insecure_ws_env();
@@ -1576,9 +1680,111 @@ mod tests {
         let (hub, _lodged) = test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::AckWrongId]).await;
         write_hub_config(approver.path(), &hub.ws_url(), None);
 
-        let err = connect_and_reconcile(approver.path()).await.unwrap_err().to_string();
-        assert!(err.contains("stored something other than what was sent"), "{err}");
+        let outcome = connect_and_reconcile(approver.path()).await.unwrap();
+        assert_eq!(outcome.lodged, 0);
+        assert_eq!(outcome.refused.len(), 1);
+        assert!(outcome.refused[0].reason.contains("stored something other than what was sent"),
+            "{:?}", outcome.refused[0]);
         assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+    }
+
+    /// What a mock hub does with the first `PutGrant` it is handed, for the
+    /// two answers `spawn_grant_hub`'s table cannot express.
+    #[derive(Clone, Copy)]
+    enum Mishandle {
+        /// No answer at all — the socket goes away.
+        Drop,
+        /// An answer to a question nobody asked.
+        AnswerSomethingElse,
+    }
+
+    async fn hub_that_mishandles_the_first_grant(what: Mishandle) -> test_hub::MockHub {
+        test_hub::spawn_mock_hub(move |mut ws| async move {
+            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else { return };
+            let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
+            test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
+            let _auth = test_hub::recv_client_msg(&mut ws).await;
+            if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
+                protocol_version: PROTOCOL_VERSION,
+                vault_state: vec![],
+                grants: vec![],
+                revocations: vec![],
+            })
+            .await
+            {
+                return;
+            }
+            let Some(_put) = test_hub::recv_client_msg(&mut ws).await else { return };
+            match what {
+                Mishandle::Drop => {}
+                Mishandle::AnswerSomethingElse => {
+                    test_hub::send_hub_msg(&mut ws, &HubMsg::UploadAck {
+                        vault_id: "v1".into(),
+                        sha256: "abc".into(),
+                    })
+                    .await;
+                }
+            }
+        })
+        .await
+    }
+
+    /// The other side of the split, and the one that must NOT be swallowed.
+    ///
+    /// A refusal is a decision that will repeat; a dead socket is not a
+    /// decision at all, and nothing else in the cycle — no upload, no fetch —
+    /// can happen over it. Counting it as a refusal would report a healthy
+    /// cycle over a connection that is gone.
+    #[tokio::test]
+    async fn a_dropped_connection_is_an_error_not_a_refusal() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+
+        let hub = hub_that_mishandles_the_first_grant(Mishandle::Drop).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        assert!(connect_and_reconcile(approver.path()).await.is_err());
+        assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+    }
+
+    /// A reply that is not an answer to this request leaves the stream out of
+    /// step: the upload half's next read would take this message as its own
+    /// reply. Fatal for the cycle rather than counted, for that reason and not
+    /// because the hub was rude.
+    #[tokio::test]
+    async fn a_reply_that_is_not_an_answer_ends_the_cycle() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        approve_offline(approver.path(), &pairing_code(&key(11)), &mut Yes::default()).unwrap();
+
+        let hub = hub_that_mishandles_the_first_grant(Mishandle::AnswerSomethingElse).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        let err = connect_and_reconcile(approver.path()).await.unwrap_err().to_string();
+        assert!(err.contains("expected grant-ack"), "{err}");
+        assert!(load_grants(approver.path()).unwrap().iter().all(|g| !g.lodged));
+    }
+
+    /// `ll link approve` is not a sync cycle. A refusal there is the whole
+    /// answer to the command, and reporting success would leave someone
+    /// waiting at a keyboard for a link that is never coming.
+    #[tokio::test]
+    async fn approve_fails_loudly_when_the_hub_refuses_the_grant_it_just_signed() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        let (hub, _lodged) =
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("not a member")]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        let err = approve(approver.path(), &pairing_code(&key(11)), &mut Yes::default())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("hub refused this grant"), "{err}");
+        assert!(err.contains("not a member"), "the hub's reason reaches the user: {err}");
+        assert_eq!(load_grants(approver.path()).unwrap().len(), 1,
+            "and the grant is kept, so the next connection offers it again");
     }
 
     // -- the store ---------------------------------------------------------

@@ -124,6 +124,17 @@ fn sync_block(state: &SyncState, now: i64) -> String {
              whatever the last successful fetch left; the next sync retries them."
         )));
     }
+    // Same `Some(0)` / `None` distinction as above, and a stronger warning:
+    // a refused fetch may be a hiccup, but a refused grant is the hub's
+    // decision and the next cycle gets the same answer.
+    if let Some(n) = state.refused_grants.filter(|n| *n > 0) {
+        out.push_str(&row("WARNING", &format!(
+            "the hub refused {n} grant(s) in that cycle. They are still signed and still \
+             offered on every sync, but whatever they were for — a linked machine, a \
+             follow — is not in effect until the hub accepts them. Retrying alone will \
+             not change its answer."
+        )));
+    }
     out
 }
 
@@ -361,12 +372,57 @@ mod tests {
             detail: None,
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  nothing"), "got:\n{out}");
         assert!(out.contains("WARNING"),
             "'the hub holds nothing' is the outage signature and must be loud; got:\n{out}");
+    }
+
+    #[test]
+    fn status_says_how_many_grants_the_hub_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: Some(0),
+            refused_grants: Some(1),
+        }).unwrap();
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("refused 1 grant(s)"),
+            "the cycle succeeded overall — this line is the only place a refused grant \
+             is ever visible, and without it the user meets it as a machine that never \
+             finishes linking; got:\n{out}");
+    }
+
+    /// The other side, and the reason it needs saying: a check on `> 0` that
+    /// was written as `is_some()` would report a refusal on every healthy
+    /// cycle, and a warning that is always on is one nobody reads.
+    #[test]
+    fn status_says_nothing_when_the_hub_refused_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        for refused_grants in [Some(0), None] {
+            write_state(dir.path(), &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+                skipped_fetches: Some(0),
+                refused_grants,
+            }).unwrap();
+            let out = render_status(dir.path(), 1_100).unwrap();
+            assert!(!out.contains("refused"),
+                "refused_grants={refused_grants:?} got:\n{out}");
+        }
     }
 
     #[test]
@@ -380,6 +436,7 @@ mod tests {
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: Some(2),
+            refused_grants: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
@@ -402,6 +459,7 @@ mod tests {
                 detail: None,
                 hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
                 skipped_fetches,
+                refused_grants: None,
             }).unwrap();
             let out = render_status(dir.path(), 1_100).unwrap();
             assert!(!out.contains("could not be read"),
@@ -420,6 +478,7 @@ mod tests {
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
         assert!(out.contains("STALE"), "got:\n{out}");
@@ -441,6 +500,7 @@ mod tests {
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 7 * 86_400 - 60).unwrap();
         assert!(!out.contains("STALE"),
@@ -473,6 +533,7 @@ mod tests {
                 note_count: 3578,
             }),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  sha 9f2b1c0d4e5a… (3578 notes)"), "got:\n{out}");
@@ -518,6 +579,7 @@ mod tests {
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("Nothing here contacted the hub"), "got:\n{out}");
@@ -553,6 +615,7 @@ mod tests {
             detail: Some("hub key mismatch".into()),
             hub_holds: None,
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 9 * 86_400).unwrap();
         assert!(out.contains("error: hub key mismatch"), "got:\n{out}");
@@ -574,6 +637,7 @@ mod tests {
             detail: Some("hub unreachable".into()),
             hub_holds: None,
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("last ok:    never"), "got:\n{out}");

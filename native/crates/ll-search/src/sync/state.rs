@@ -68,6 +68,12 @@ pub struct SyncState {
     /// sync history rather than fail loudly. `an_old_state_file_still_reads`
     /// is what holds that for the struct as a whole.
     pub skipped_fetches: Option<usize>,
+    /// How many grants the hub answered and refused in that cycle. They stay
+    /// owed and the next cycle offers them again — but the hub's answer will
+    /// be the same, which is what makes this worth recording where a dropped
+    /// connection is not. `None` means the cycle never reached the link half,
+    /// the same distinction `skipped_fetches` draws.
+    pub refused_grants: Option<usize>,
 }
 
 /// Read the recorded state, or `None` when there is nothing readable there.
@@ -148,6 +154,7 @@ mod tests {
             detail: Some("hub key mismatch".into()),
             hub_holds: None,
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
 
         let s = read_state(dir.path()).unwrap().unwrap();
@@ -166,6 +173,7 @@ mod tests {
             outcome: "ok".into(), detail: None,
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds,
                    Some(HubHolds::Nothing));
@@ -198,6 +206,7 @@ mod tests {
             detail: Some("no federation seed found".into()),
             hub_holds: None,
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
 
         assert_eq!(read_state(dir.path()).unwrap().unwrap().outcome, OUTCOME_ERROR);
@@ -211,6 +220,7 @@ mod tests {
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc".into(), note_count: 1 }),
             skipped_fetches: None,
+            refused_grants: None,
         };
         write_state(dir.path(), &first).unwrap();
         let second = SyncState {
@@ -218,6 +228,7 @@ mod tests {
             outcome: OUTCOME_ERROR.into(), detail: Some("hub unreachable".into()),
             hub_holds: None,
             skipped_fetches: None,
+            refused_grants: None,
         };
         write_state(dir.path(), &second).unwrap();
 
@@ -255,6 +266,8 @@ mod tests {
             "the history this file exists to carry survives the upgrade");
         assert_eq!(s.skipped_fetches, None,
             "a cycle that ran before the read half existed skipped an unknown number, not zero");
+        assert_eq!(s.refused_grants, None,
+            "and one that ran before the link half existed refused an unknown number too");
     }
 
     /// The file is a contract with every reader of `federation/`, not just
@@ -267,6 +280,7 @@ mod tests {
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
             skipped_fetches: Some(2),
+            refused_grants: Some(1),
         }).unwrap();
 
         assert!(dir.path().join("federation/sync-state.json").exists(),
@@ -281,6 +295,7 @@ mod tests {
         assert_eq!(v["skipped_fetches"], 2,
             "`ll status` reads this key out of the file; a rename that only touched \
              the struct would leave every out-of-process reader behind");
+        assert_eq!(v["refused_grants"], 1, "same contract, same reason");
         assert!(v.get("note_count").is_none(),
             "the count lives inside hub_holds; a loose one beside it is the field \
              that let 'holds nothing' and 'holds 3578 notes' be recorded together");
@@ -290,6 +305,7 @@ mod tests {
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
+            refused_grants: None,
         }).unwrap();
         let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();

@@ -114,11 +114,24 @@ enum OnUpload {
     AckWrongSha,
 }
 
+/// Whether the mock accepts the grants it is offered. A refusal is the hub's
+/// decision and the cycle must survive it; only a broken connection ends one.
+#[derive(Clone, Copy)]
+enum OnGrant {
+    Ack,
+    Reject(&'static str),
+}
+
 /// A hub that completes the v5 handshake advertising `holds` for vault `v1`,
-/// takes an upload if one is offered, and carries no grants — so the client
-/// has nothing it may read and must close without asking for anything.
+/// takes an upload if one is offered, acknowledges any grant it is handed,
+/// and lists no vault but `v1` — so the client has nothing it may read and
+/// must close without asking for anything.
+///
+/// The listing is what decides that, not the grants: since the client takes
+/// its read list from `SyncReady.vault_state`, a hub that lists only the
+/// client's own vault is asked for nothing whatever grants it carries.
 async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr {
-    spawn_hub_with(holds, on_upload, vec![], vec![]).await.0
+    spawn_hub_with(holds, on_upload, OnGrant::Ack, vec![], vec![]).await.0
 }
 
 /// The same, with `grants` in the `SyncReady`, a scripted answer for each
@@ -142,6 +155,7 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
 async fn spawn_hub_with(
     holds: Option<HeldIndex>,
     on_upload: OnUpload,
+    on_grant: OnGrant,
     grants: Vec<GrantWire>,
     fetches: Vec<(String, Fetch)>,
 ) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
@@ -233,11 +247,13 @@ async fn spawn_hub_with(
                         return note("put-grant carried an undecodable statement".into());
                     };
                     note(format!("put-grant:{statement_b64}"));
-                    if !send_hub(&mut ws, &HubMsg::GrantAck {
-                        grant_id: hex::encode(sha2::Sha256::digest(&statement)),
-                    })
-                    .await
-                    {
+                    let reply = match on_grant {
+                        OnGrant::Ack => HubMsg::GrantAck {
+                            grant_id: hex::encode(sha2::Sha256::digest(&statement)),
+                        },
+                        OnGrant::Reject(reason) => HubMsg::Reject { reason: reason.into() },
+                    };
+                    if !send_hub(&mut ws, &reply).await {
                         return;
                     }
                 }
@@ -267,9 +283,10 @@ async fn spawn_hub_with(
                         return;
                     }
                 }
-                // The read half. v5 asks only for what a grant names, so a hub
-                // that carried none must see the connection close rather than
-                // a request to list anything.
+                // The read half. The client asks for exactly the vaults the
+                // hub listed in `SyncReady.vault_state` and no others, so a
+                // hub that listed only `v1` must see the connection close
+                // rather than a request for anything.
                 ClientMsg::FetchIndex { vault_id } => {
                     note(vault_id.clone());
                     let Some((_, answer)) = fetches.iter().find(|(id, _)| *id == vault_id) else {
@@ -638,7 +655,7 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
     let served = b"pretend-this-is-a-peer-index".to_vec();
     let (addr, asked) = spawn_hub_with(
         stale(),
-        OnUpload::Ack,
+        OnUpload::Ack, OnGrant::Ack,
         vec![follow_grant(&me, "v-refused"), follow_grant(&me, "v-served")],
         vec![
             ("v-refused".to_string(), Fetch::Refuse),
@@ -680,7 +697,7 @@ async fn a_cycle_that_read_everything_records_no_skips() {
     let me = client_key_id(dir.path());
     let (addr, asked) = spawn_hub_with(
         stale(),
-        OnUpload::Ack,
+        OnUpload::Ack, OnGrant::Ack,
         vec![follow_grant(&me, "v-served")],
         vec![("v-served".to_string(), Fetch::Serve(b"peer-index".to_vec()))],
     )
@@ -714,7 +731,7 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
     let served = b"pretend-this-is-the-other-machines-index".to_vec();
     let (addr, seen) = spawn_hub_with(
         stale(),
-        OnUpload::Ack,
+        OnUpload::Ack, OnGrant::Ack,
         vec![inbound],
         vec![("v-other-machine".to_string(), Fetch::Serve(served.clone()))],
     )
@@ -752,7 +769,7 @@ async fn a_cycle_whose_hub_lists_only_this_vault_asks_for_nothing() {
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
     place_export(dir.path());
-    let (addr, asked) = spawn_hub_with(stale(), OnUpload::Ack, vec![], vec![]).await;
+    let (addr, asked) = spawn_hub_with(stale(), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
 
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
@@ -800,7 +817,7 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
         note_count: HUB_NOTE_COUNT,
         uploaded_at: 1,
     };
-    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, vec![inbound], vec![]).await;
+    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, OnGrant::Ack, vec![inbound], vec![]).await;
     let config = config_for(dir.path(), addr);
 
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
@@ -835,7 +852,7 @@ async fn a_cycle_with_nothing_owed_lodges_nothing() {
         note_count: HUB_NOTE_COUNT,
         uploaded_at: 1,
     };
-    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, vec![], vec![]).await;
+    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
 
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
@@ -847,4 +864,75 @@ async fn a_cycle_with_nothing_owed_lodges_nothing() {
         "{:?}",
         seen.lock().unwrap()
     );
+}
+
+/// A refused grant must not wedge the cycle.
+///
+/// `link::reconcile` runs before the upload and the read half. When it
+/// propagated the hub's first `Reject`, one grant the hub was never going to
+/// accept stopped every subsequent cycle — no upload, no fetch, permanently,
+/// and the owed row was never cleared so it happened again next time. The read
+/// half in this same cycle has always tolerated a refused fetch; this pins the
+/// grant half behaving the same way, end to end.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_refused_grant_does_not_stop_the_upload_or_the_read_half() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (_approver, inbound) = link_grant(&me);
+    let (addr, seen) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack,
+        OnGrant::Reject("not a member"),
+        vec![inbound],
+        vec![],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+
+    let result =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect("a hub that answers is a hub the rest of the cycle can still use");
+
+    assert!(!result.skipped_upload,
+        "the hub holds a stale index, so the upload had to happen — and it comes AFTER \
+         the grant half, which is the whole point");
+    assert_eq!(result.refused_grants.len(), 1);
+
+    let record = seen.lock().unwrap().clone();
+    assert!(record.iter().any(|l| l.starts_with("put-grant:")), "{record:?}");
+
+    let state = read_state(dir.path()).unwrap().unwrap();
+    assert_eq!(state.outcome, OUTCOME_OK, "the cycle succeeded; one grant did not");
+    assert_eq!(state.refused_grants, Some(1),
+        "and `ll status` can say so, rather than the user meeting it as a machine that \
+         never finishes linking");
+    assert_eq!(state.skipped_fetches, Some(0), "the read half ran");
+}
+
+/// The other side: a cycle whose grants were all accepted records zero, not
+/// `None` and not one. An implementation that always recorded a refusal would
+/// satisfy the test above on its own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (_approver, inbound) = link_grant(&me);
+    let (addr, _seen) =
+        spawn_hub_with(stale(), OnUpload::Ack, OnGrant::Ack, vec![inbound], vec![]).await;
+    let config = config_for(dir.path(), addr);
+
+    let result =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .unwrap();
+
+    assert!(result.refused_grants.is_empty());
+    assert_eq!(read_state(dir.path()).unwrap().unwrap().refused_grants, Some(0));
 }

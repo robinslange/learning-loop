@@ -235,8 +235,17 @@ pub async fn send_hub_msg(ws: &mut WsServer, msg: &HubMsg) -> bool {
 /// Sign and send a genuine `HubChallenge` for the `nonce_c` a client offered.
 /// `exporter` is `[0u8; 32]` for every non-TLS mock, matching the client's
 /// `LL_ALLOW_INSECURE_WS` fallback.
-pub async fn send_signed_challenge(ws: &mut WsServer, signer: &SigningKey, nonce_c_b64: &str) {
-    let nonce_c = unb64(nonce_c_b64).unwrap();
+///
+/// `false` when the nonce did not decode or the send failed. Both are the
+/// client's doing, and neither is a panic: this runs inside `tokio::spawn`,
+/// where a panic does not fail the test that spawned it — see
+/// [`recv_client_msg`].
+pub async fn send_signed_challenge(
+    ws: &mut WsServer,
+    signer: &SigningKey,
+    nonce_c_b64: &str,
+) -> bool {
+    let Ok(nonce_c) = unb64(nonce_c_b64) else { return false };
     let nonce_h = random_nonce();
     let exporter = [0u8; 32];
     let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
@@ -245,7 +254,7 @@ pub async fn send_signed_challenge(ws: &mut WsServer, signer: &SigningKey, nonce
         hub_key_id: KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string(),
         sig_h: b64(&sig_h.to_bytes()),
     })
-    .await;
+    .await
 }
 
 /// The full happy path: challenge, verify nothing, reply `SyncReady` with
