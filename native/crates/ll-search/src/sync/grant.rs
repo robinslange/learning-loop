@@ -55,12 +55,21 @@ pub fn grant_id(statement_bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(statement_bytes))
 }
 
-/// Same pin-then-verify shape as `handshake.rs`'s hub-key check: `from` is
-/// attacker-controlled content inside `statement_bytes`, not the identity
-/// that produced the signature, so it is checked against `expected_from`
-/// BEFORE the cryptographic check. Checking the signature first would let a
-/// genuinely valid signature by the wrong key get further into this function
-/// than it should.
+/// `from` is attacker-controlled content inside `statement_bytes`, and it is
+/// checked against `expected_from` before the cryptographic check.
+///
+/// **This is not the same property as `handshake.rs`'s pin-then-verify, and
+/// the difference is worth knowing.** There, the comparison decides *which
+/// key to trust*, so doing it second would mean trusting a key because it
+/// signed something — a hostile hub can always do that. Here the signature is
+/// verified against `expected_from`, the caller's parameter, never against
+/// `st.from`, so no ordering of these two checks can admit a wrong key. The
+/// caller already decided whose signature this must be.
+///
+/// What the ordering buys is smaller and real: a string comparison rejects
+/// before Ed25519 verification runs over attacker-supplied bytes, and the
+/// error names the mismatch instead of reporting a signature failure for a
+/// statement whose problem was never the signature.
 pub fn verify(
     statement_bytes: &[u8],
     signature: &[u8],
@@ -218,8 +227,8 @@ mod tests {
     /// The orderings differ in WHICH error comes back: checking `from`
     /// first never touches the malformed signature bytes at all, so the
     /// message names the issuer mismatch specifically, not a signature
-    /// failure. This is what actually pins the ordering `verify`'s doc
-    /// comment claims.
+    /// failure. That error is the whole property — see `verify`'s doc
+    /// comment for why no ordering here can admit a wrong key.
     #[test]
     fn rejects_a_forged_from_field_without_ever_inspecting_the_malformed_signature() {
         let (_, a) = pair();
