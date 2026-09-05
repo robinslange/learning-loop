@@ -305,8 +305,11 @@ pub enum UploadDecision {
 /// happened, never had one because its credentials were absent), the client
 /// kept reporting "no changes" forever and nothing ever re-uploaded.
 ///
-/// `last-export-hash` still exists, but only to skip recomputing the export.
-/// It has no say in whether to send it.
+/// `last-export-hash` is gone — nothing read it once the hub became the
+/// authority, and a file in `federation/` that looks authoritative and is
+/// read by nothing is how this bug got written in the first place. The
+/// separate `last-export-mtime` decides whether to re-export; it never
+/// decides whether to send.
 pub fn upload_decision(export_hash: &str, state: Option<&VaultState>) -> UploadDecision {
     match state.and_then(|s| s.holds.as_ref()) {
         Some(held) if held.sha256 == export_hash => UploadDecision::Skip,
@@ -352,10 +355,8 @@ async fn upload_index(
         other => anyhow::bail!("expected upload-ack, got: {other:?}"),
     }
 
-    let fed_dir = config_dir.join("federation");
-    std::fs::write(fed_dir.join("last-export-hash"), &prepared.hash)?;
     std::fs::write(
-        fed_dir.join("last-export-mtime"),
+        config_dir.join("federation").join("last-export-mtime"),
         prepared.current_max_mtime.to_string(),
     )?;
 
@@ -930,6 +931,12 @@ mod tests {
 
         let outcome = upload_index(&mut ws, dir.path(), &config, &prepared, &[]).await.unwrap();
         assert_eq!(outcome, (42, false));
+        // The counterpart to the reject test: "must not advance" only means
+        // something if a successful upload does advance it.
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("federation/last-export-mtime")).unwrap(),
+            "7",
+        );
 
         let (declared, frame) = rx.await.unwrap();
         assert_eq!(frame, body,
@@ -958,6 +965,8 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        let mtime_path = dir.path().join("federation").join("last-export-mtime");
+        std::fs::write(&mtime_path, "1").unwrap();
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.vault_id = Some("v1".into());
         let mut ws = client_to(addr).await;
@@ -967,8 +976,9 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("not authorized to write this vault"), "{err}");
-        assert!(!dir.path().join("federation/last-export-hash").exists(),
-            "a rejected upload must not record itself as sent");
+        // The fixture's mtime is 7, so a swallowed reject would advance this to "7".
+        assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
+            "a rejected upload must not advance the re-export watermark");
     }
 
     /// The declared metadata must describe the bytes on the wire, so it is

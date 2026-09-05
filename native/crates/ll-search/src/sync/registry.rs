@@ -158,7 +158,7 @@ mod tests {
             vault_path: "/home/r/other".into(),
         }).unwrap_err();
         assert!(err.to_string().contains("config_dir"),
-            "sharing a config dir means sharing last-export-hash and the seed \
+            "sharing a config dir means sharing last-export-mtime and the seed \
              entry — two vaults would silently clobber each other");
     }
 
