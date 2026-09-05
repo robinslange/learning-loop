@@ -14,7 +14,11 @@
 //! - **No separate vault registration.** The hub creates the `vaults` row for
 //!   every `vault_id` declared in `ClientHello`, once the client signature
 //!   verifies. Declaring it IS registering it; there is no wire message for
-//!   anything else and no round trip to add.
+//!   anything else and no round trip to add. Locally, `join` does not write a
+//!   vault profile either — writing `config.json` registers the root vault,
+//!   `ll vault add` registers every other one, and the case in between is
+//!   refused rather than joined: see
+//!   `require_a_profile_if_this_is_not_the_root`.
 //! - **No recovery grant.** `Confirm::recovery_phrase` shows the words and
 //!   `recovery_key_id` keeps the public half, because neither can be
 //!   reconstructed later. The mutual `link` grant that would make the
@@ -33,7 +37,7 @@ use super::config::{
 };
 use super::key_id::KeyId;
 use super::protocol_v5::PROTOCOL_VERSION;
-use super::{auth, seed_store, well_known, words};
+use super::{auth, registry, seed_store, well_known, words};
 
 /// What a completed join produced. `recovery_phrase` is the only copy of the
 /// recovery secret that will ever exist; the caller shows it and forgets it.
@@ -119,6 +123,7 @@ pub async fn join(
             config_path.display()
         );
     }
+    require_a_profile_if_this_is_not_the_root(config_dir)?;
 
     check_hub_scheme(hub_endpoint)?;
 
@@ -189,6 +194,51 @@ pub async fn join(
         hub_fingerprint: fingerprint,
         vault_id,
     })
+}
+
+/// Refuse a config dir that sits under a plugin data root without a vault
+/// profile naming it.
+///
+/// `join` cannot create the profile itself — `registry::add` needs the plugin
+/// data root and `join` is handed a config dir — and for the root vault there
+/// is nothing to create: `registry::load`'s legacy branch reads
+/// `federation/config.json` directly, so writing that file registers it. What
+/// is left is the middle case, a second vault whose `ll vault add` never ran.
+/// It would otherwise produce a perfectly working config in a directory the
+/// registry cannot see, which is the kind of thing found months later.
+///
+/// The parent tells the three cases apart. A plugin data root holds a registry,
+/// a legacy config, or both; a directory whose parent holds neither IS the
+/// root.
+fn require_a_profile_if_this_is_not_the_root(config_dir: &Path) -> anyhow::Result<()> {
+    let Some(parent) = config_dir.parent() else { return Ok(()) };
+    let has_registry = parent.join("vaults.json").exists();
+    if !has_registry && !config::config_path(parent).exists() {
+        return Ok(());
+    }
+    // With a registry present `registry::load` reads only the registry doc, so
+    // this cannot trip over a legacy config that has no vault_path.
+    let named = has_registry
+        && registry::load(parent)?.iter().any(|p| same_dir(&p.config_dir, config_dir));
+    if !named {
+        anyhow::bail!(
+            "{} sits under the plugin data root {} but no vault profile names it. \
+             Run `ll vault add <vault-path> <id>` first — that is what creates the \
+             registry entry, and `ll join` only creates the identity. A vault the \
+             registry cannot see is one no later command can find.",
+            config_dir.display(),
+            parent.display(),
+        );
+    }
+    Ok(())
+}
+
+/// Compare two directory paths by their canonical form where the filesystem
+/// can supply one, so a symlinked or trailing-slash `--config-dir` still
+/// matches the profile that names it.
+fn same_dir(a: &Path, b: &Path) -> bool {
+    let canonical = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    canonical(a) == canonical(b)
 }
 
 /// A label for this vault, from its directory name. Reduced to ASCII
@@ -554,6 +604,110 @@ mod tests {
 
         assert_eq!(out.key_id, first_key,
             "the retry must present the identity the first attempt created");
+    }
+
+    /// A plugin data root that already holds a joined vault: the shape every
+    /// second-vault case starts from.
+    fn plugin_data_with_a_root_vault(pd: &Path) {
+        std::fs::create_dir_all(pd.join("federation")).unwrap();
+        std::fs::write(
+            config::config_path(pd),
+            serde_json::json!({
+                "identity": {"displayName": "brain", "pubkey": "ed25519:AAAA"},
+                "visibility": {"default": "private", "rules": []},
+                "hub": {"endpoint": "wss://h.example/ws", "key_id": "zAbc"},
+                "vault_path": "/home/r/brain"
+            })
+            .to_string(),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_root_vault_joins_with_no_registry_entry_because_its_config_is_the_entry() {
+        let _env = insecure_ws_env();
+        let hub = fake_hub_happy_path(vec![]).await;
+        // A plugin data root is a directory whose parent holds neither a
+        // registry nor a config — nothing has registered anything yet.
+        let home = tempfile::tempdir().unwrap();
+        let plugin_data = home.path().join("plugin-data");
+        std::fs::create_dir_all(&plugin_data).unwrap();
+
+        join(&plugin_data, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/brain"), &mut Yes::default())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            registry::load(&plugin_data).unwrap().len(),
+            1,
+            "writing config.json with a vault_path is what registers the root vault; \
+             registry::load reads it directly and creates no vaults.json"
+        );
+    }
+
+    #[tokio::test]
+    async fn joins_a_config_dir_a_vault_profile_already_names() {
+        let _env = insecure_ws_env();
+        let hub = fake_hub_happy_path(vec![]).await;
+        let pd = tempfile::tempdir().unwrap();
+        plugin_data_with_a_root_vault(pd.path());
+        let work = pd.path().join("work");
+        std::fs::create_dir_all(&work).unwrap();
+        registry::add(pd.path(), registry::VaultProfile {
+            id: "work".into(),
+            config_dir: work.clone(),
+            vault_path: "/home/r/work-vault".into(),
+        })
+        .unwrap();
+
+        join(&work, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/work-vault"), &mut Yes::default())
+            .await
+            .unwrap();
+
+        assert!(config::config_path(&work).exists());
+    }
+
+    #[tokio::test]
+    async fn refuses_a_config_dir_the_registry_does_not_name() {
+        let _env = insecure_ws_env();
+        let hub = fake_hub_happy_path(vec![]).await;
+        let pd = tempfile::tempdir().unwrap();
+        plugin_data_with_a_root_vault(pd.path());
+        registry::add(pd.path(), registry::VaultProfile {
+            id: "work".into(),
+            config_dir: pd.path().join("work"),
+            vault_path: "/home/r/work-vault".into(),
+        })
+        .unwrap();
+        let unregistered = pd.path().join("side-project");
+
+        let err = join(&unregistered, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/side"), &mut Yes::default())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("ll vault add"),
+            "the operator has to be told the command that fixes it: {err}");
+        assert!(hub.last_hello().is_none(), "nothing should have reached the hub");
+        assert!(!config::config_path(&unregistered).exists());
+    }
+
+    /// The exact scenario: a second vault dir under a plugin data root whose
+    /// only marker is the first vault's config. No registry exists yet, so
+    /// there is nothing that could name this directory.
+    #[tokio::test]
+    async fn refuses_a_second_vault_dir_when_no_registry_exists_at_all() {
+        let _env = insecure_ws_env();
+        let hub = fake_hub_happy_path(vec![]).await;
+        let pd = tempfile::tempdir().unwrap();
+        plugin_data_with_a_root_vault(pd.path());
+        let work = pd.path().join("work");
+
+        let err = join(&work, &hub.ws_url(), "GOOD-CODE", Path::new("/home/r/work-vault"), &mut Yes::default())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("ll vault add"), "{err}");
+        assert!(!config::config_path(&work).exists());
     }
 
     #[test]
