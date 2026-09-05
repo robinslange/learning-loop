@@ -152,6 +152,13 @@ pub fn export_db_path(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("local-export.db")
 }
 
+/// Highest `.md` mtime seen at the last export. `prepare_export` compares the
+/// vault against it to decide whether to re-export; it has no say in whether
+/// to upload — that is the hub's, via `upload_decision`.
+pub fn last_export_mtime_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("last-export-mtime")
+}
+
 pub fn peers_dir(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("peers")
 }

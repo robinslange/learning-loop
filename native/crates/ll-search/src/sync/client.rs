@@ -9,7 +9,9 @@ use sha2::{Sha256, Digest};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
-use super::config::{export_db_path, peers_dir, seed_path, FederationConfig};
+use super::config::{
+    export_db_path, last_export_mtime_path, peers_dir, seed_path, FederationConfig,
+};
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
 use super::handshake::SyncReadyPayload;
@@ -171,9 +173,8 @@ async fn prepare_export(
     config: &FederationConfig,
 ) -> anyhow::Result<PreparedExport> {
     let export_path = export_db_path(config_dir);
-    let fed_dir = config_dir.join("federation");
-    std::fs::create_dir_all(&fed_dir)?;
-    let mtime_path = fed_dir.join("last-export-mtime");
+    std::fs::create_dir_all(config_dir.join("federation"))?;
+    let mtime_path = last_export_mtime_path(config_dir);
 
     let last_mtime: u64 = std::fs::read_to_string(&mtime_path)
         .ok()
@@ -331,9 +332,9 @@ async fn upload_index(
     let vault_id = config.vault_id.as_deref().ok_or_else(|| {
         anyhow::anyhow!("no vault_id in this federation config; run `ll join` in this vault")
     })?;
-    let held = vault_state.iter().find(|v| v.vault_id == vault_id);
+    let this_vault = vault_state.iter().find(|v| v.vault_id == vault_id);
 
-    if upload_decision(&prepared.hash, held) == UploadDecision::Skip {
+    if upload_decision(&prepared.hash, this_vault) == UploadDecision::Skip {
         eprintln!("Hub already holds this index, skipping upload");
         return Ok((0, true));
     }
@@ -347,16 +348,22 @@ async fn upload_index(
     })
     .await?;
     send_binary(ws, prepared.bytes.clone()).await?;
-    eprintln!("Sent local index ({} KB)", prepared.bytes.len() / 1024);
+    eprintln!(
+        "Sent local index ({} KB, {} notes declared)",
+        prepared.bytes.len() / 1024,
+        prepared.note_count
+    );
 
     match recv_json::<HubMsg>(ws).await? {
-        HubMsg::UploadAck { .. } => eprintln!("Hub acknowledged: {} notes", prepared.note_count),
+        // v5's UploadAck carries no count, so this line must not imply the hub
+        // agreed with ours.
+        HubMsg::UploadAck { vault_id, .. } => eprintln!("Hub stored the index for {vault_id}"),
         HubMsg::Reject { reason } => anyhow::bail!("hub rejected upload: {reason}"),
         other => anyhow::bail!("expected upload-ack, got: {other:?}"),
     }
 
     std::fs::write(
-        config_dir.join("federation").join("last-export-mtime"),
+        last_export_mtime_path(config_dir),
         prepared.current_max_mtime.to_string(),
     )?;
 
@@ -847,10 +854,11 @@ mod tests {
             "a hub that never mentions the vault has not confirmed it holds the index");
     }
 
-    /// Blind spot: `find` returns the FIRST match in the file, so moving
-    /// `upload_decision` below this test module would silently make the
-    /// slice scan the string literal on the line below instead of the
-    /// function, and the guard would go on passing.
+    /// Blind spot: the positive control looks for `state`, which appears in
+    /// the SIGNATURE. A slice that captured the signature and then truncated
+    /// before the body would satisfy the control while checking none of the
+    /// logic. The control catches a slice that missed the function; it cannot
+    /// catch one that found only its first line.
     #[test]
     fn the_local_hash_file_is_never_consulted_for_the_decision() {
         let src = include_str!("client.rs");
@@ -934,7 +942,7 @@ mod tests {
         // The counterpart to the reject test: "must not advance" only means
         // something if a successful upload does advance it.
         assert_eq!(
-            std::fs::read_to_string(dir.path().join("federation/last-export-mtime")).unwrap(),
+            std::fs::read_to_string(last_export_mtime_path(dir.path())).unwrap(),
             "7",
         );
 
@@ -965,7 +973,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
-        let mtime_path = dir.path().join("federation").join("last-export-mtime");
+        let mtime_path = last_export_mtime_path(dir.path());
         std::fs::write(&mtime_path, "1").unwrap();
         let mut config = FederationConfig::test_fixture("private", vec![]);
         config.vault_id = Some("v1".into());
@@ -979,6 +987,79 @@ mod tests {
         // The fixture's mtime is 7, so a swallowed reject would advance this to "7".
         assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
             "a rejected upload must not advance the re-export watermark");
+    }
+
+    /// The upload writes the re-export watermark and the next export reads
+    /// it. Nothing checked that the two ends agreed on the file: if they ever
+    /// name different paths the client re-exports on every single sync,
+    /// forever, and no test and no log line says anything is wrong.
+    #[tokio::test]
+    async fn the_watermark_the_upload_writes_is_the_one_the_next_export_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let vault = dir.path().join("vault");
+        super::super::export::build_source_db(
+            &source,
+            Some("01926d7e-0000-7000-8000-00000000000a"),
+        );
+        super::super::export::public_vault_with_note(&vault);
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v1".into());
+
+        let first = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(first.result.is_some(), "precondition: a cold config dir exports");
+
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let Message::Text(t) = ws.next().await.unwrap().unwrap() else { panic!("no decl") };
+            let ClientMsg::UploadIndex { vault_id, sha256, .. } =
+                serde_json::from_str(t.as_str()).unwrap()
+            else {
+                panic!("expected upload-index")
+            };
+            let _frame = ws.next().await.unwrap().unwrap();
+            let ack = HubMsg::UploadAck { vault_id, sha256 };
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+        })
+        .await;
+        let mut ws = client_to(addr).await;
+        upload_index(&mut ws, dir.path(), &config, &first, &[]).await.unwrap();
+
+        let second = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(second.result.is_none(),
+            "the vault has not changed, so the watermark the upload just wrote must \
+             satisfy the next export's check");
+    }
+
+    /// Ties the three keys `prepare_export` reads to the three
+    /// `export_index` writes, by running the real export instead of
+    /// hand-building the table. Rename a key in `export.rs`, or change
+    /// `params![exported.to_string()]` to `params![exported]` so it lands as
+    /// INTEGER, and this goes red — a hand-built fixture agrees with whatever
+    /// the reader expects and would stay green while every real sync failed.
+    ///
+    /// It cannot replace the hand-built test below: `export_index` always
+    /// writes `schema_version = 2`, which is also `META_FILE_VERSION`, so the
+    /// trap that test exists for is invisible from here.
+    #[tokio::test]
+    async fn the_upload_metadata_matches_what_the_export_actually_wrote() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let vault = dir.path().join("vault");
+        super::super::export::build_source_db(
+            &source,
+            Some("01926d7e-0000-7000-8000-00000000000a"),
+        );
+        super::super::export::public_vault_with_note(&vault);
+
+        let config = FederationConfig::test_fixture("private", vec![]);
+        let prepared =
+            prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+
+        let exported = prepared.result.as_ref().expect("the export ran").exported;
+        assert_eq!(exported, 1, "precondition: the fixture note is public and exports");
+        assert_eq!(prepared.note_count, exported as i64);
+        assert_eq!(prepared.model_id, "test-model");
+        assert_eq!(prepared.schema_version, "2");
     }
 
     /// The declared metadata must describe the bytes on the wire, so it is

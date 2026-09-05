@@ -345,6 +345,56 @@ pub fn compute_patchset(base_db: &Path, current_db: &Path) -> anyhow::Result<Vec
     Ok(buf)
 }
 
+/// Build a SOURCE index in the shape `db/schema.rs` produces.
+///
+/// Lives outside `mod tests` because `sync::client`'s tests need a real
+/// export to read metadata back out of, and a second copy of this schema
+/// there would be free to drift from the one `export_index` actually reads.
+#[cfg(test)]
+pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
+    let c = Connection::open(path).unwrap();
+    c.execute_batch(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+         CREATE TABLE notes (
+             id INTEGER PRIMARY KEY,
+             path TEXT UNIQUE NOT NULL,
+             content_hash TEXT NOT NULL,
+             mtime REAL NOT NULL,
+             title TEXT,
+             tags TEXT,
+             visibility TEXT DEFAULT 'private',
+             note_uuid TEXT
+         );
+         CREATE TABLE notes_content (
+             id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT
+         );
+         CREATE TABLE embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+         CREATE TABLE links (
+             source_id INTEGER NOT NULL, target_path TEXT NOT NULL,
+             UNIQUE(source_id, target_path)
+         );
+         INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO notes (id, path, content_hash, mtime, title, tags, note_uuid)
+         VALUES (1, 'n.md', 'h', 0.0, 'N', '', ?1)",
+        rusqlite::params![note_uuid],
+    )
+    .unwrap();
+    c.execute(
+        "INSERT INTO notes_content (id, title, tags, body) VALUES (1, 'N', '', 'Body.')",
+        [],
+    )
+    .unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn public_vault_with_note(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -404,50 +454,6 @@ mod tests {
         assert!(!result.contains("AKIA"), "AWS key shape leaked on truncated path: {result}");
     }
 
-
-    /// Build a SOURCE index in the shape `db/schema.rs` produces.
-    fn build_source_db(path: &Path, note_uuid: Option<&str>) {
-        let c = Connection::open(path).unwrap();
-        c.execute_batch(
-            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-             CREATE TABLE notes (
-                 id INTEGER PRIMARY KEY,
-                 path TEXT UNIQUE NOT NULL,
-                 content_hash TEXT NOT NULL,
-                 mtime REAL NOT NULL,
-                 title TEXT,
-                 tags TEXT,
-                 visibility TEXT DEFAULT 'private',
-                 note_uuid TEXT
-             );
-             CREATE TABLE notes_content (
-                 id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT
-             );
-             CREATE TABLE embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
-             CREATE TABLE links (
-                 source_id INTEGER NOT NULL, target_path TEXT NOT NULL,
-                 UNIQUE(source_id, target_path)
-             );
-             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
-        )
-        .unwrap();
-        c.execute(
-            "INSERT INTO notes (id, path, content_hash, mtime, title, tags, note_uuid)
-             VALUES (1, 'n.md', 'h', 0.0, 'N', '', ?1)",
-            rusqlite::params![note_uuid],
-        )
-        .unwrap();
-        c.execute(
-            "INSERT INTO notes_content (id, title, tags, body) VALUES (1, 'N', '', 'Body.')",
-            [],
-        )
-        .unwrap();
-    }
-
-    fn public_vault_with_note(dir: &Path) {
-        std::fs::create_dir_all(dir).unwrap();
-        std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
-    }
 
     #[test]
     fn export_carries_note_uuid() {
