@@ -17,10 +17,19 @@ use super::protocol_v5::{
     PROTOCOL_VERSION,
 };
 
-/// TLS exporter label per RFC 9266-style channel binding. Must match the
-/// hub's `tls::EXPORTER_LABEL` (`sync-hub/src/tls.rs`) byte-for-byte — a
-/// mismatch here fails every signature verification with nothing to
-/// diagnose but "invalid signature".
+/// TLS exporter label per RFC 9266-style channel binding.
+///
+/// Three things must match the hub's `tls::exporter` byte-for-byte, and only
+/// the first of them is a named constant: this label, the 32-byte output
+/// length, and the `None` context passed to `export_keying_material`. Get any
+/// of the three wrong and every signature verification fails with nothing to
+/// diagnose but "invalid signature" — the two sides derive different bytes
+/// and neither can tell you why.
+///
+/// `exporter_label_is_stable` below pins the label here; the hub pins the
+/// same literal in its own test. Neither test can see the other repo, so the
+/// literal IS the contract: changing the constant fails the local test, which
+/// is what puts the person who changed it in front of this comment.
 pub const EXPORTER_LABEL: &[u8] = b"EXPORTER-ll-federation-v5";
 
 /// What a successful handshake hands back to the sync pipeline.
@@ -140,6 +149,15 @@ mod tests {
     /// Config with no hub key pinned at all (the `test_fixture` default).
     fn test_config() -> FederationConfig {
         FederationConfig::test_fixture("private", vec![])
+    }
+
+    /// The twin of the hub's `exporter_label_is_stable`. Neither repo can see
+    /// the other, so the literal is the contract — changing the constant on
+    /// one side fails that side's test rather than silently breaking every
+    /// channel binding while both halves still compile and still "work".
+    #[test]
+    fn exporter_label_is_stable() {
+        assert_eq!(EXPORTER_LABEL, b"EXPORTER-ll-federation-v5");
     }
 
     async fn run_handshake(hub: &MockHub, config: &FederationConfig) -> anyhow::Result<SyncReadyPayload> {
