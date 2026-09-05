@@ -52,9 +52,9 @@ fn permits_read(kind: GrantKind) -> bool {
     kind.transfers_authority() || matches!(kind, GrantKind::Follow | GrantKind::Peer)
 }
 
-/// A `vault_id` that is safe to use as a single path component. Grant
-/// statements are signed by their issuer, not by us, and this one lands in a
-/// directory name.
+/// A `vault_id` that is safe to use as a single path component. These arrive
+/// in the hub's `vault_state`, off the wire and verified by nothing, and this
+/// one lands in a directory name.
 pub(super) fn is_safe_vault_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128
@@ -113,29 +113,45 @@ fn live_grants(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<GrantStatement
     out
 }
 
-/// Whether every grant this client holds that names `vault_id` is an `assoc`.
+/// Whether the only thing this client holds bearing on `vault_id` is an
+/// `assoc`.
 ///
 /// Belt and braces. The hub computes `vault_state` through the same matcher
 /// `FetchIndex` authorises with and will not list a vault reachable only
 /// across an `assoc` edge — but a client that would ask for one if it were
-/// listed is a client one hub bug away from asking, and two independent
-/// reasons not to send are better than one.
+/// listed is a client one hub bug away from asking.
 ///
-/// A vault no grant here names is not suppressed: that is the ordinary case
-/// for an unscoped `link`, which names no vault at all and is the reason this
-/// function cannot be the thing that chooses what to fetch. The brace only
-/// ever refuses, so it errs towards refusing — an issuer that has said
-/// `assoc` about a vault and nothing else about it has said the one thing
-/// that means "not through me".
+/// **Who issued the `assoc` decides whether it may veto.** An extra layer of
+/// defence has to be at least as trustworthy as the one it backs, and a bare
+/// "does anyone say `assoc` about this vault" test is not: the hub lodges an
+/// `assoc` as `active` with no acceptance step and does not check that the
+/// issuer owns the scope, so any key at all could name a stranger's vault and
+/// silence it here for good. A key that has said nothing else to us has no
+/// standing over a vault we reach through somebody else's grant.
+///
+/// So an `assoc` naming this vault is outranked by any read grant that could
+/// cover it: one scoped to it, or an unscoped one — "every vault I own" —
+/// from an issuer that is not itself vetoing it. What is left suppressed is
+/// the case the brace is for: nobody has offered us a way in but the `assoc`.
+///
+/// One issuer saying both about the same vault is saying contradictory things
+/// — `assoc` exists precisely to withhold what `link` transfers — and that
+/// contradiction resolves in favour of refusing. Deliberate: this brace only
+/// ever refuses, so erring costs a read and never leaks one.
 fn only_assoc_names(held: &[GrantStatement], vault_id: &str) -> bool {
-    let mut named = false;
-    for st in held.iter().filter(|st| st.scope.as_deref() == Some(vault_id)) {
-        if permits_read(st.kind) {
-            return false;
-        }
-        named = true;
+    let names_it = |st: &GrantStatement| st.scope.as_deref() == Some(vault_id);
+    let vetoing: Vec<&KeyId> = held
+        .iter()
+        .filter(|st| names_it(st) && !permits_read(st.kind))
+        .map(|st| &st.from)
+        .collect();
+    if vetoing.is_empty() {
+        return false;
     }
-    named
+    !held.iter().filter(|st| permits_read(st.kind)).any(|st| match st.scope {
+        Some(_) => names_it(st),
+        None => !vetoing.contains(&&st.from),
+    })
 }
 
 /// The vaults this client may read, in the order the hub listed them.
@@ -454,6 +470,12 @@ mod tests {
         pair(9)
     }
 
+    /// A key with no relationship to this client and none to any vault it
+    /// reads. Anyone can lodge a grant naming anyone's vault.
+    fn stranger() -> (SigningKey, KeyId) {
+        pair(7)
+    }
+
     struct GrantFixture {
         kind: GrantKind,
         scope: Option<&'static str>,
@@ -648,6 +670,51 @@ mod tests {
             "the hub listed it; the grant naming no vault is not a reason to stay quiet");
         assert_eq!(out.fetched.len(), 1);
         assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(), body);
+    }
+
+    /// The brace must not be a veto anyone can exercise. The hub lodges an
+    /// `assoc` as `active` with no acceptance step and does not check that the
+    /// issuer owns the scope, so this grant costs a stranger nothing — and
+    /// without the issuer test it would silence a linked machine's read of
+    /// somebody else's vault for good.
+    #[tokio::test]
+    async fn an_assoc_from_a_stranger_cannot_veto_a_vault_the_hub_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("v-other");
+        let (out, asked) = run(
+            dir.path(),
+            &["v-other"],
+            vec![
+                to_me(unscoped(GrantKind::Link)),
+                wire(&stranger(), &me().1, &of_kind(GrantKind::Assoc, "v-other")),
+            ],
+            vec![("v-other", FetchAnswer::Index(body.clone()))],
+        )
+        .await;
+
+        assert_eq!(asked, vec!["v-other".to_string()],
+            "a key that has said nothing else to us has no say over what we read");
+        assert_eq!(out.fetched.len(), 1);
+    }
+
+    /// The other side of the issuer test, and the deliberate half. One issuer
+    /// saying both `assoc(v)` and "any vault I own" is contradicting itself —
+    /// `assoc` exists to withhold exactly what `link` transfers — and the
+    /// brace resolves that in favour of refusing. It only ever refuses, so
+    /// erring here costs a read and never leaks one.
+    #[tokio::test]
+    async fn an_assoc_and_an_unscoped_grant_from_one_issuer_resolve_to_refusing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (out, asked) = run(
+            dir.path(),
+            &["v-work"],
+            vec![to_me(unscoped(GrantKind::Link)), to_me(of_kind(GrantKind::Assoc, "v-work"))],
+            vec![("v-work", FetchAnswer::Index(index_bytes("v-work")))],
+        )
+        .await;
+
+        assert!(asked.is_empty(), "the issuer withheld this vault by name: {asked:?}");
+        assert!(out.fetched.is_empty());
     }
 
     /// The hub lists this client's own vault, because it owns it. The upload
