@@ -19,10 +19,9 @@ use super::export::{export_index, ExportResult};
 use super::protocol::{
     manifest_root, ChunkedFrame, ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp,
     CHUNK_MAX_BODY_SIZE, ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP, PROTOCOL_VERSION_CHUNKED,
-    PROTOCOL_VERSION_FRAMED, PROTOCOL_VERSION_LATEST,
+    PROTOCOL_VERSION_FRAMED,
 };
 
-const SCHEMA_VERSION: u32 = 1;
 const META_FILE_VERSION: u32 = 2;
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
@@ -46,7 +45,7 @@ fn send_timeout() -> Duration {
         .unwrap_or(SEND_TIMEOUT)
 }
 
-type WsStream = tokio_tungstenite::WebSocketStream<
+pub(super) type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
@@ -258,53 +257,32 @@ async fn connect_and_authenticate(
     } else {
         format!("{}/ws", hub_url.trim_end_matches('/'))
     };
-    eprintln!("Connecting to hub at {connect_url}...");
+    eprintln!("Connecting to hub at {connect_url} as {peer_id} (model {model_id})...");
     let (mut ws, _response) = tokio_tungstenite::connect_async(&connect_url)
         .await
         .context("failed to connect to hub")?;
 
-    send_json(&mut ws, &ClientMessage::SyncHello {
-        peer_id: peer_id.to_string(),
-        supported_models: vec![model_id.to_string()],
-        model_id: model_id.to_string(),
-        schema_version: SCHEMA_VERSION,
-        protocol_version: Some(PROTOCOL_VERSION_LATEST),
-    }).await?;
-
-    let challenge = recv_json::<HubMessage>(&mut ws).await?;
-    let negotiated_protocol: u32 = match challenge {
-        HubMessage::SyncReject { reason } => anyhow::bail!("hub rejected: {reason}"),
-        HubMessage::AuthChallenge { nonce, hub_pubkey } => {
-            match config.hub.key_id.as_deref() {
-                Some(pinned) if pinned == hub_pubkey => {}
-                Some(pinned) => anyhow::bail!(
-                    "hub pubkey mismatch: pinned {pinned:?} but hub presented {hub_pubkey:?}"
-                ),
-                None => eprintln!(
-                    "warning: no hub pubkey pinned in config; the hub is unauthenticated (MITM-vulnerable)"
-                ),
-            }
-            let sig = auth::sign_challenge(seed, &nonce, peer_id, &hub_pubkey)?;
-            send_json(&mut ws, &ClientMessage::AuthResponse { signature: sig }).await?;
-
-            let ready = recv_json::<HubMessage>(&mut ws).await?;
-            match ready {
-                HubMessage::SyncReady { protocol_version, .. } => {
-                    eprintln!("Authenticated (protocol v{protocol_version})");
-                    protocol_version
-                }
-                HubMessage::SyncReject { reason } => anyhow::bail!("auth failed: {reason}"),
-                other => anyhow::bail!("unexpected: {other:?}"),
-            }
+    // Channel binding: the exporter ties a completed handshake to this exact
+    // TLS session, so relaying it onto a different connection fails
+    // signature verification. `LL_ALLOW_INSECURE_WS` is the local test
+    // harness escape hatch only (`check_hub_scheme` already restricts
+    // cleartext `ws://` to loopback/tailnet hosts).
+    let exporter = match ws.get_ref() {
+        tokio_tungstenite::MaybeTlsStream::Rustls(tls) => {
+            let (_io, conn) = tls.get_ref();
+            let mut out = [0u8; 32];
+            conn.export_keying_material(&mut out, super::handshake::EXPORTER_LABEL, None)?;
+            out
         }
-        HubMessage::SyncReady { protocol_version, .. } => {
-            eprintln!("Hub ready (no auth, protocol v{protocol_version})");
-            protocol_version
-        }
-        other => anyhow::bail!("unexpected: {other:?}"),
+        _ if std::env::var("LL_ALLOW_INSECURE_WS").is_ok() => [0u8; 32],
+        _ => anyhow::bail!("hub connection is not TLS; refusing to authenticate"),
     };
 
-    Ok((ws, negotiated_protocol))
+    let vault_ids: Vec<String> = config.vault_id.clone().into_iter().collect();
+    let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, None).await?;
+    eprintln!("Authenticated (protocol v{})", ready.protocol_version);
+
+    Ok((ws, ready.protocol_version))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -756,7 +734,7 @@ fn max_md_mtime(dir: &Path) -> u64 {
     max
 }
 
-async fn send_json<T: serde::Serialize>(
+pub(super) async fn send_json<T: serde::Serialize>(
     ws: &mut WsStream,
     msg: &T,
 ) -> anyhow::Result<()> {
@@ -778,7 +756,7 @@ async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> 
     Ok(())
 }
 
-async fn recv_json<T: serde::de::DeserializeOwned>(
+pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
     ws: &mut WsStream,
 ) -> anyhow::Result<T> {
     loop {
@@ -990,6 +968,18 @@ mod tests {
     fn is_safe_peer_id_rejects_unicode() {
         assert!(!is_safe_peer_id("peer\u{200B}id"));
         assert!(!is_safe_peer_id("café"));
+    }
+
+    #[test]
+    fn no_source_file_accepts_an_unauthenticated_hub() {
+        // Needles assembled from parts so `include_str!` below — which pulls
+        // in this very test — can't match its own assertion literals.
+        let no_auth = concat!("no ", "auth");
+        let mitm = concat!("MITM", "-vulnerable");
+        let src = include_str!("client.rs");
+        assert!(!src.contains(no_auth));
+        assert!(!src.contains(mitm),
+            "an unpinned hub is now an error, so there is nothing left to warn about");
     }
 
     #[test]

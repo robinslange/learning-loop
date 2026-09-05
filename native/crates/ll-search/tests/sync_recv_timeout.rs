@@ -19,6 +19,11 @@ async fn silent_hub_triggers_recv_timeout() {
     // SAFETY (Rust 2024): set_var requires unsafe because env modification is a global side effect.
     unsafe {
         std::env::set_var("LL_SYNC_RECV_TIMEOUT_MS", "1000");
+        // This mock hub is exactly the "local test harness" LL_ALLOW_INSECURE_WS
+        // exists for: a plain ws:// connection to 127.0.0.1 with no TLS. The
+        // hub never responds, so the handshake never reaches the pin/verify
+        // checks either way — this only needs to get past the transport gate.
+        std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
     }
 
     let (hub_addr, _obs, _h) = spawn_hub(HubBehaviour::SilentAfterHello).await;

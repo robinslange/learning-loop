@@ -21,6 +21,9 @@ async fn churn_hub_produces_only_typed_errors() {
     // Shorten the recv timeout so iterations don't each take 30 s.
     unsafe {
         std::env::set_var("LL_SYNC_RECV_TIMEOUT_MS", "500");
+        // This mock hub is exactly the "local test harness" LL_ALLOW_INSECURE_WS
+        // exists for: a plain ws:// connection to 127.0.0.1 with no TLS.
+        std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
     }
 
     let started = Instant::now();
