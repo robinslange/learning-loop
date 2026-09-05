@@ -115,8 +115,11 @@ mod tests {
         assert_eq!(seed_from_phrase(&phrase).unwrap(), seed);
     }
 
+    /// Inserting a word makes this 25 words, so it is the word-count check
+    /// that rejects it. The two tests below cover the paths a real typo takes
+    /// — a wrong-but-valid word, and a word off the list — at 24 words each.
     #[test]
-    fn a_phrase_with_a_typo_is_rejected_not_silently_wrong() {
+    fn a_phrase_with_the_wrong_word_count_is_rejected() {
         let phrase = recovery_phrase(&[42u8; 32]).unwrap();
         let broken = phrase.replacen(' ', " zzzz ", 1);
         assert!(seed_from_phrase(&broken).is_err(),
