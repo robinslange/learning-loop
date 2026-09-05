@@ -1,13 +1,27 @@
-//! FROZEN at sync-hub commit 5c36b487d4ba5d7045bb8f7227123cd6c85ec132 (Plan 3
-//! Task 3). Copied verbatim from `sync-hub/src/v5/handshake.rs`: the message
-//! structs, the wire constant, and the two message-framing functions that
-//! define the exact bytes each role signs.
+//! The shared wire contract, copied verbatim from
+//! `sync-hub/src/v5/handshake.rs`: the message structs, the wire constant, and
+//! the two framing functions that define the exact bytes each role signs.
 //!
-//! Deliberately duplicated rather than shared across a workspace dependency —
-//! the two repos have independent release cycles. Any change to an item
-//! below requires the same change in sync-hub and a `PROTOCOL_VERSION` bump
-//! in both repos, in one change. The pinned wire-format and exact-byte tests
-//! below guard against silent divergence.
+//! Deliberately duplicated rather than shared through a workspace dependency —
+//! the two repos have independent release cycles. Nothing here fails to
+//! compile when the two drift; the first real handshake fails instead, with
+//! "invalid signature" or an unknown variant and nothing to diagnose. The
+//! pinned tag and exact-byte tests below are the only thing that turns drift
+//! into a red test, so change both repos in one pass and re-run the byte
+//! comparison of this region against the hub's.
+//!
+//! This file was frozen after the handshake landed and before any consumer of
+//! the rest of the protocol existed. That was backwards: you freeze an
+//! interface once a second implementation has told you what it is missing, not
+//! before the first one is written. The freeze held only because everything
+//! that needed to change was forbidden from changing — the grant, decision,
+//! revocation and read paths were all built, unit-tested, and left with no
+//! wire message that could reach them.
+//!
+//! `PROTOCOL_VERSION` stays at 5 through that correction, deliberately. A
+//! version number keeps two deployed peers from misunderstanding each other,
+//! and v5 has never been spoken outside these two test suites. It bumps when
+//! something is deployed.
 
 use serde::{Deserialize, Serialize};
 
@@ -43,6 +57,40 @@ pub enum ClientMsg {
         schema_version: String,
         model_id: String,
     },
+    /// Submit a signed grant. The bytes are self-authenticating — the hub
+    /// verifies the signature against the `from` key named inside the
+    /// statement and stores the bytes verbatim, so it never vouches for a
+    /// grant, it only carries one.
+    ///
+    /// The submitter must be the statement's `from` or its `to`: you may
+    /// lodge a grant you issued, or one issued to you offline through a door
+    /// the hub was never part of. Any other key submitting is rejected — not
+    /// because the grant would be forged, it cannot be, but because there is
+    /// no reason for a third party to be filling this table.
+    PutGrant {
+        statement_b64: String,
+        signature_b64: String,
+    },
+    /// Revoke a grant. Only the issuer may: revocation is the `from` key
+    /// withdrawing its own statement, and a `to` key that wants out simply
+    /// stops using it.
+    RevokeGrant {
+        grant_id: String,
+    },
+    /// Accept or deny a `follow`. Signed by the key the grant names as `to`,
+    /// so a follower can prove its access was granted without the hub
+    /// vouching for it.
+    PutDecision {
+        statement_b64: String,
+        signature_b64: String,
+    },
+    /// Ask for a vault's current index. Authorised by `authz::may_read`:
+    /// ownership, or a `link`/`follow`/`peer` grant. Never by membership —
+    /// a principal reached across a `peer` edge is not a member of the hub
+    /// it is reaching.
+    FetchIndex {
+        vault_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +113,25 @@ pub enum HubMsg {
     UploadAck {
         vault_id: String,
         sha256: String,
+    },
+    /// Acknowledges `PutGrant`, `RevokeGrant` and `PutDecision` alike. All
+    /// three name one grant and all three answer with its id, so there is one
+    /// ack shape rather than three that differ only in which word precedes
+    /// the same field.
+    GrantAck {
+        grant_id: String,
+    },
+    /// Answers `FetchIndex`. `holds: Some(..)` means exactly one binary frame
+    /// follows carrying the index bytes; `None` means the hub has nothing for
+    /// that vault and sends no frame.
+    ///
+    /// Deliberately the same `Option<HeldIndex>` that `VaultState` carries: a
+    /// hub holding nothing must say so in one shape everywhere, because the
+    /// two months this project exists to undo were a client reading "nothing"
+    /// as "no change".
+    IndexHeader {
+        vault_id: String,
+        holds: Option<HeldIndex>,
     },
 }
 
@@ -124,6 +191,57 @@ pub fn client_auth_message(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The wire tags are the contract between two repos that cannot see each
+    /// other. Nothing fails to compile when one side renames a variant; the
+    /// first real connection fails instead. Pinning the tags as literals here,
+    /// and identically in the hub's copy, is what turns that into a red test
+    /// on whichever side made the change.
+    #[test]
+    fn every_message_tag_is_pinned() {
+        let tag = |v: serde_json::Value| v["type"].as_str().unwrap().to_string();
+
+        assert_eq!(tag(serde_json::to_value(ClientMsg::PutGrant {
+            statement_b64: "s".into(), signature_b64: "g".into(),
+        }).unwrap()), "put-grant");
+        assert_eq!(tag(serde_json::to_value(ClientMsg::RevokeGrant {
+            grant_id: "g1".into(),
+        }).unwrap()), "revoke-grant");
+        assert_eq!(tag(serde_json::to_value(ClientMsg::PutDecision {
+            statement_b64: "s".into(), signature_b64: "g".into(),
+        }).unwrap()), "put-decision");
+        assert_eq!(tag(serde_json::to_value(ClientMsg::FetchIndex {
+            vault_id: "v1".into(),
+        }).unwrap()), "fetch-index");
+
+        assert_eq!(tag(serde_json::to_value(HubMsg::GrantAck {
+            grant_id: "g1".into(),
+        }).unwrap()), "grant-ack");
+        let header = serde_json::to_value(HubMsg::IndexHeader {
+            vault_id: "v1".into(), holds: None,
+        }).unwrap();
+        assert_eq!(tag(header.clone()), "index-header");
+        assert!(header["holds"].is_null(),
+            "a hub holding nothing says so with an explicit null, not by omitting the field");
+    }
+
+    /// `IndexHeader.holds` must deserialise from the same JSON `SyncReady`'s
+    /// `vault_state` entries carry. One shape for "what the hub holds",
+    /// everywhere it is said.
+    #[test]
+    fn index_header_holds_is_the_same_shape_as_vault_state_holds() {
+        let json = r#"{"type":"index-header","vault_id":"v1",
+                       "holds":{"sha256":"abc","note_count":7,"uploaded_at":10}}"#;
+        match serde_json::from_str::<HubMsg>(json).unwrap() {
+            HubMsg::IndexHeader { holds, .. } => {
+                let held = holds.expect("holds must be Some");
+                assert_eq!(held.sha256, "abc");
+                assert_eq!(held.note_count, 7);
+                assert_eq!(held.uploaded_at, 10);
+            }
+            other => panic!("expected index-header, got {other:?}"),
+        }
+    }
 
     #[test]
     fn hub_challenge_deserialises_from_the_hub_wire_format() {
