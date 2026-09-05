@@ -15,3 +15,4 @@ pub mod key_id;
 pub mod seed_store;
 pub mod seed_migrate;
 pub mod registry;
+pub mod state;

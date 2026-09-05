@@ -20,6 +20,7 @@ use super::protocol::{
     HUB_INBOUND_CAP, PROTOCOL_VERSION_FRAMED,
 };
 use super::protocol_v5::{ClientMsg, HubMsg, VaultState};
+use super::state::{self, HubHolds, SyncState};
 
 const META_FILE_VERSION: u32 = 2;
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
@@ -119,12 +120,67 @@ pub struct DownloadedPeer {
     pub note_count: i64,
 }
 
+/// What `run_cycle` hands back. `hub_holds` is recorded in `sync-state.json`
+/// and does not belong in `SyncResult` — that struct is the serialized CLI
+/// output, a separate contract.
+struct CycleOutcome {
+    result: SyncResult,
+    hub_holds: HubHolds,
+}
+
+/// Run one sync cycle and record what it did, whether it worked or not.
+///
+/// Every way the cycle can fail lives inside `run_cycle`, so a cycle that
+/// dies before it ever reaches the hub still leaves a state file behind —
+/// that is precisely the cycle nobody noticed for two months.
 pub async fn sync_all_async(
     source_db: &Path,
     vault_path: &Path,
     config_dir: &Path,
     config: &FederationConfig,
 ) -> anyhow::Result<SyncResult> {
+    let outcome = run_cycle(source_db, vault_path, config_dir, config).await;
+    let now = unix_now();
+    let state = match &outcome {
+        Ok(cycle) => SyncState {
+            last_attempt_at: now,
+            last_success_at: Some(now),
+            outcome: state::OUTCOME_OK.to_string(),
+            detail: None,
+            hub_holds: Some(cycle.hub_holds.clone()),
+        },
+        Err(e) => SyncState {
+            last_attempt_at: now,
+            // A failure must not erase when this vault last synced: how long
+            // the outage has been running is the whole question.
+            last_success_at: state::read_state(config_dir)
+                .ok()
+                .flatten()
+                .and_then(|prev| prev.last_success_at),
+            outcome: state::OUTCOME_ERROR.to_string(),
+            detail: Some(e.to_string()),
+            hub_holds: None,
+        },
+    };
+    // Failing to record the cycle must never mask the cycle's own error.
+    let _ = state::write_state(config_dir, &state);
+
+    outcome.map(|cycle| cycle.result)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+async fn run_cycle(
+    source_db: &Path,
+    vault_path: &Path,
+    config_dir: &Path,
+    config: &FederationConfig,
+) -> anyhow::Result<CycleOutcome> {
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
     // Pre-flight upload size check (R12). Frame overhead is 36 bytes.
@@ -139,20 +195,26 @@ pub async fn sync_all_async(
         connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id).await?;
     let framed_path = ready.protocol_version >= PROTOCOL_VERSION_FRAMED;
 
+    let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
+    let hub_holds = hub_holds(this_vault);
+
     let (uploaded_notes, skipped_upload) =
-        upload_index(&mut ws, config_dir, config, &prepared, &ready.vault_state).await?;
+        upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
 
     let (downloaded, skipped) = download_peers(&mut ws, config_dir, framed_path).await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
 
-    Ok(SyncResult {
-        export: prepared.result,
-        uploaded_notes,
-        skipped_upload,
-        downloaded,
-        skipped,
+    Ok(CycleOutcome {
+        result: SyncResult {
+            export: prepared.result,
+            uploaded_notes,
+            skipped_upload,
+            downloaded,
+            skipped,
+        },
+        hub_holds,
     })
 }
 
@@ -318,6 +380,32 @@ pub fn upload_decision(export_hash: &str, state: Option<&VaultState>) -> UploadD
     }
 }
 
+/// The hub's report for the vault this config is joined to, resolved once.
+///
+/// The upload decision and `sync-state.json` describe the same entry; two
+/// lookups is how they would come to describe different ones.
+fn this_vault_state<'c, 'v>(
+    config: &'c FederationConfig,
+    vault_state: &'v [VaultState],
+) -> anyhow::Result<(&'c str, Option<&'v VaultState>)> {
+    let vault_id = config.vault_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("no vault_id in this federation config; run `ll join` in this vault")
+    })?;
+    Ok((vault_id, vault_state.iter().find(|v| v.vault_id == vault_id)))
+}
+
+/// What the hub reports it holds, in the form the state file records. The
+/// count is the hub's, never the local one.
+fn hub_holds(state: Option<&VaultState>) -> HubHolds {
+    match state.and_then(|s| s.holds.as_ref()) {
+        Some(held) => HubHolds::Index {
+            sha256: held.sha256.clone(),
+            note_count: held.note_count,
+        },
+        None => HubHolds::Nothing,
+    }
+}
+
 /// Send the export to the hub over the v5 wire: a JSON `UploadIndex`
 /// declaring what follows, then the raw export bytes as one binary frame,
 /// then the hub's `UploadAck`. No envelope, no compression, no chunking —
@@ -325,15 +413,10 @@ pub fn upload_decision(export_hash: &str, state: Option<&VaultState>) -> UploadD
 async fn upload_index(
     ws: &mut WsStream,
     config_dir: &Path,
-    config: &FederationConfig,
+    vault_id: &str,
+    this_vault: Option<&VaultState>,
     prepared: &PreparedExport,
-    vault_state: &[VaultState],
 ) -> anyhow::Result<(i64, bool)> {
-    let vault_id = config.vault_id.as_deref().ok_or_else(|| {
-        anyhow::anyhow!("no vault_id in this federation config; run `ll join` in this vault")
-    })?;
-    let this_vault = vault_state.iter().find(|v| v.vault_id == vault_id);
-
     if upload_decision(&prepared.hash, this_vault) == UploadDecision::Skip {
         eprintln!("Hub already holds this index, skipping upload");
         return Ok((0, true));
@@ -936,7 +1019,10 @@ mod tests {
         let prepared = prepared_fixture(body.clone());
         let mut ws = client_to(addr).await;
 
-        let outcome = upload_index(&mut ws, dir.path(), &config, &prepared, &[]).await.unwrap();
+        let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
+        let outcome = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared)
+            .await
+            .unwrap();
         assert_eq!(outcome, (42, false));
         // The counterpart to the reject test: "must not advance" only means
         // something if a successful upload does advance it.
@@ -978,10 +1064,12 @@ mod tests {
         config.vault_id = Some("v1".into());
         let mut ws = client_to(addr).await;
 
-        let err = upload_index(&mut ws, dir.path(), &config, &prepared_fixture(b"x".to_vec()), &[])
-            .await
-            .unwrap_err()
-            .to_string();
+        let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
+        let err =
+            upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared_fixture(b"x".to_vec()))
+                .await
+                .unwrap_err()
+                .to_string();
         assert!(err.contains("not authorized to write this vault"), "{err}");
         // The fixture's mtime is 7, so a swallowed reject would advance this to "7".
         assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
@@ -1021,7 +1109,8 @@ mod tests {
         })
         .await;
         let mut ws = client_to(addr).await;
-        upload_index(&mut ws, dir.path(), &config, &first, &[]).await.unwrap();
+        let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
+        upload_index(&mut ws, dir.path(), vault_id, this_vault, &first).await.unwrap();
 
         let second = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
         assert!(second.result.is_none(),
@@ -1093,19 +1182,48 @@ mod tests {
         assert_eq!(prepared.model_id, "from-the-export");
     }
 
-    #[tokio::test]
-    async fn a_missing_vault_id_is_an_error_naming_ll_join() {
-        let addr = spawn_mock_hub(|mut ws| async move { let _ = ws.next().await; }).await;
-        let dir = tempfile::tempdir().unwrap();
+    #[test]
+    fn a_missing_vault_id_is_an_error_naming_ll_join() {
         let config = FederationConfig::test_fixture("private", vec![]);
         assert!(config.vault_id.is_none(), "fixture precondition");
-        let mut ws = client_to(addr).await;
 
-        let err = upload_index(&mut ws, dir.path(), &config, &prepared_fixture(b"x".to_vec()), &[])
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = this_vault_state(&config, &[]).unwrap_err().to_string();
         assert!(err.contains("ll join"),
             "ambiguous scope fails loud and names the fix, never defaults or skips: {err}");
+    }
+
+    #[test]
+    fn the_hub_holding_nothing_is_recorded_as_nothing() {
+        assert_eq!(hub_holds(None), HubHolds::Nothing,
+            "a hub that never mentions the vault holds nothing for it");
+        assert_eq!(
+            hub_holds(Some(&VaultState { vault_id: "v1".into(), holds: None })),
+            HubHolds::Nothing,
+        );
+    }
+
+    #[test]
+    fn the_recorded_count_is_the_hubs_not_the_local_one() {
+        let state = VaultState { vault_id: "v1".into(), holds: Some(held("abc123")) };
+        assert_eq!(
+            hub_holds(Some(&state)),
+            HubHolds::Index { sha256: "abc123".into(), note_count: 10 },
+            "note_count is what the hub reports it holds; the local export's count \
+             is a different number and answers a different question",
+        );
+    }
+
+    #[test]
+    fn the_vault_entry_is_the_one_matching_this_config() {
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v2".into());
+        let states = vec![
+            VaultState { vault_id: "v1".into(), holds: Some(held("wrong")) },
+            VaultState { vault_id: "v2".into(), holds: Some(held("right")) },
+        ];
+
+        let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
+        assert_eq!(vault_id, "v2");
+        assert_eq!(this_vault.unwrap().holds.as_ref().unwrap().sha256, "right");
     }
 }

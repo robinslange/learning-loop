@@ -1,0 +1,201 @@
+//! `federation/sync-state.json`: what the last sync cycle actually did.
+//!
+//! Two outages on this client ran for months apiece — an upload that silently
+//! skipped, and a download half talking to messages the hub had deleted —
+//! and neither was visible because nothing on disk recorded the outcome of a
+//! cycle. v4 planned this file and never shipped it.
+
+use std::path::Path;
+
+use anyhow::Context;
+use serde::{Deserialize, Serialize};
+
+use super::config::sync_state_path;
+
+/// `SyncState::outcome` for a cycle that finished. Readers match on these
+/// rather than retyping the literal, so a rename is a compile error in the
+/// reader instead of a signal that silently stops being recognised.
+pub const OUTCOME_OK: &str = "ok";
+/// `SyncState::outcome` for a cycle that did not finish.
+pub const OUTCOME_ERROR: &str = "error";
+
+/// What the hub reported it holds for this vault, as of the handshake that
+/// opened the cycle — never a local count. One field, so "holds nothing" and
+/// "holds 3578 notes" cannot both be recorded at once.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+pub enum HubHolds {
+    Nothing,
+    Index { sha256: String, note_count: i64 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncState {
+    pub last_attempt_at: i64,
+    /// Carried forward across failures: how long an outage has been running
+    /// is the question this file exists to answer.
+    pub last_success_at: Option<i64>,
+    pub outcome: String,
+    pub detail: Option<String>,
+    /// `None` means the cycle never got far enough to ask the hub.
+    pub hub_holds: Option<HubHolds>,
+}
+
+/// Read the recorded state, or `None` when there is nothing readable there.
+///
+/// A state file we cannot parse is reported as missing, not as an error: the
+/// sync that would rewrite it must not be blocked by it. The corrupt case is
+/// named on stderr so it does not look identical to "never synced" to whoever
+/// is reading the logs.
+pub fn read_state(config_dir: &Path) -> anyhow::Result<Option<SyncState>> {
+    let path = sync_state_path(config_dir);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    match serde_json::from_str(&text) {
+        Ok(state) => Ok(Some(state)),
+        Err(e) => {
+            eprintln!(
+                "warning: {} exists but does not parse ({e}); reporting this vault as \
+                 never synced until the next cycle rewrites it",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Write the state, creating `federation/` if the cycle failed before
+/// anything else did. Written to a sibling temp file and renamed, so a crash
+/// mid-write leaves the previous state intact rather than a truncated file.
+pub fn write_state(config_dir: &Path, state: &SyncState) -> anyhow::Result<()> {
+    let path = sync_state_path(config_dir);
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("invalid config dir: {}", config_dir.display()))?;
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("creating {}", parent.display()))?;
+
+    let tmp = path.with_extension("json.tmp");
+    let json = serde_json::to_vec_pretty(state)?;
+    std::fs::write(&tmp, &json).with_context(|| format!("writing {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("renaming {} into place", tmp.display()))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_cycle_still_writes_state() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000, last_success_at: None,
+            outcome: "error".into(),
+            detail: Some("hub key mismatch".into()),
+            hub_holds: None,
+        }).unwrap();
+
+        let s = read_state(dir.path()).unwrap().unwrap();
+        assert_eq!(s.outcome, "error");
+        assert_eq!(s.detail.as_deref(), Some("hub key mismatch"));
+        // A cycle that fails silently is the failure mode this file exists to
+        // prevent. v4 planned this file and never shipped it.
+    }
+
+    #[test]
+    fn state_records_that_the_hub_holds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000, last_success_at: Some(1_000),
+            outcome: "ok".into(), detail: None,
+            hub_holds: Some(HubHolds::Nothing),
+        }).unwrap();
+        assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds,
+                   Some(HubHolds::Nothing));
+    }
+
+    #[test]
+    fn missing_state_is_reported_as_missing_not_as_healthy() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        assert!(read_state(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_corrupt_state_file_reads_as_missing_rather_than_erroring() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        std::fs::write(dir.path().join("federation/sync-state.json"), "{not json").unwrap();
+        assert!(read_state(dir.path()).unwrap().is_none(),
+            "a bad state file must not break the sync that would rewrite it");
+    }
+
+    #[test]
+    fn a_cycle_that_fails_before_anything_creates_federation_still_records() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!dir.path().join("federation").exists(), "precondition: a cold config dir");
+
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000, last_success_at: None,
+            outcome: OUTCOME_ERROR.into(),
+            detail: Some("no federation seed found".into()),
+            hub_holds: None,
+        }).unwrap();
+
+        assert_eq!(read_state(dir.path()).unwrap().unwrap().outcome, OUTCOME_ERROR);
+    }
+
+    #[test]
+    fn a_second_write_replaces_the_first_and_leaves_it_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = SyncState {
+            last_attempt_at: 1_000, last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(), detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc".into(), note_count: 1 }),
+        };
+        write_state(dir.path(), &first).unwrap();
+        let second = SyncState {
+            last_attempt_at: 2_000, last_success_at: Some(1_000),
+            outcome: OUTCOME_ERROR.into(), detail: Some("hub unreachable".into()),
+            hub_holds: None,
+        };
+        write_state(dir.path(), &second).unwrap();
+
+        assert_eq!(read_state(dir.path()).unwrap().unwrap(), second);
+        assert!(!sync_state_path(dir.path()).with_extension("json.tmp").exists(),
+            "the temp file is renamed into place, not left beside the target");
+    }
+
+    /// The file is a contract with every reader of `federation/`, not just
+    /// with this module's own serde. Pin the keys and the tag.
+    #[test]
+    fn the_file_on_disk_carries_the_hubs_count_under_a_tagged_hub_holds() {
+        let dir = tempfile::tempdir().unwrap();
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000, last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(), detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
+        }).unwrap();
+
+        assert!(dir.path().join("federation/sync-state.json").exists(),
+            "every reader of federation/ finds this file by name; without this the \
+             path helper is free to move it and only the readers would find out");
+        let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["outcome"], "ok");
+        assert_eq!(v["hub_holds"]["kind"], "index");
+        assert_eq!(v["hub_holds"]["sha256"], "abc123");
+        assert_eq!(v["hub_holds"]["note_count"], 3578);
+        assert!(v.get("note_count").is_none(),
+            "the count lives inside hub_holds; a loose one beside it is the field \
+             that let 'holds nothing' and 'holds 3578 notes' be recorded together");
+    }
+}

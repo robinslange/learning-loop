@@ -163,6 +163,14 @@ pub fn peers_dir(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("peers")
 }
 
+/// What the last sync cycle did — written on every cycle, succeeded or not.
+/// A missing file means no cycle has ever finished writing one, which is a
+/// different report from "the last cycle was fine" and must not be rendered
+/// as one.
+pub fn sync_state_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("sync-state.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
