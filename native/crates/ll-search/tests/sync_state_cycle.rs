@@ -177,6 +177,7 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
         graph: false,
         vault_id: Some("v1".into()),
         vault_path: None,
+        recovery_key_id: None,
     }
 }
 

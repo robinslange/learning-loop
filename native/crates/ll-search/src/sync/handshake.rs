@@ -32,16 +32,16 @@ pub struct SyncReadyPayload {
     pub revocations: Vec<String>,
 }
 
-fn random_nonce() -> [u8; 32] {
+pub(super) fn random_nonce() -> [u8; 32] {
     rand::random()
 }
 
-fn b64(bytes: &[u8]) -> String {
+pub(super) fn b64(bytes: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn unb64(s: &str) -> anyhow::Result<Vec<u8>> {
+pub(super) fn unb64(s: &str) -> anyhow::Result<Vec<u8>> {
     use base64::Engine;
     Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
 }
@@ -120,21 +120,14 @@ pub async fn authenticate(
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::{SinkExt, StreamExt};
-    use tokio::net::TcpListener;
-    use tokio_tungstenite::accept_async;
-    use tokio_tungstenite::tungstenite::Message;
-
-    fn hub_signing_key() -> SigningKey {
-        SigningKey::from_bytes(&[3u8; 32])
-    }
-
-    fn hub_key_id_str() -> String {
-        KeyId::from_pubkey(&hub_signing_key().verifying_key()).as_str().to_string()
-    }
+    use crate::sync::test_hub::{
+        fake_hub_happy_path, hub_key_id_str, hub_signing_key, recv_client_msg,
+        send_hub_msg, send_signed_challenge, spawn_mock_hub, MockHub,
+    };
 
     /// Config with the hub key pinned to `hub_signing_key()`'s identity —
     /// what a real client would have after `ll join` against this mock hub.
@@ -149,43 +142,6 @@ mod tests {
         FederationConfig::test_fixture("private", vec![])
     }
 
-    struct MockHub {
-        addr: std::net::SocketAddr,
-    }
-
-    type WsServer = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
-
-    async fn spawn_mock_hub<F, Fut>(handler: F) -> MockHub
-    where
-        F: FnOnce(WsServer) -> Fut + Send + 'static,
-        Fut: std::future::Future<Output = ()> + Send + 'static,
-    {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        tokio::spawn(async move {
-            if let Ok((stream, _)) = listener.accept().await {
-                if let Ok(ws) = accept_async(stream).await {
-                    handler(ws).await;
-                }
-            }
-        });
-        MockHub { addr }
-    }
-
-    async fn recv_client_msg(ws: &mut WsServer) -> ClientMsg {
-        loop {
-            match ws.next().await.expect("connection closed early").expect("ws error") {
-                Message::Text(t) => return serde_json::from_str(t.as_str()).expect("valid ClientMsg json"),
-                Message::Ping(d) => { let _ = ws.send(Message::Pong(d)).await; }
-                _ => continue,
-            }
-        }
-    }
-
-    async fn send_hub_msg(ws: &mut WsServer, msg: &HubMsg) {
-        ws.send(Message::text(serde_json::to_string(msg).unwrap())).await.unwrap();
-    }
-
     async fn run_handshake(hub: &MockHub, config: &FederationConfig) -> anyhow::Result<SyncReadyPayload> {
         run_handshake_with_exporter(hub, config, &[0u8; 32]).await
     }
@@ -195,7 +151,7 @@ mod tests {
         config: &FederationConfig,
         exporter: &[u8; 32],
     ) -> anyhow::Result<SyncReadyPayload> {
-        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{}", hub.addr))
+        let (mut ws, _) = tokio_tungstenite::connect_async(hub.ws_url())
             .await
             .expect("mock hub connection failed");
         let seed = SigningKey::generate(&mut rand::thread_rng());
@@ -233,33 +189,6 @@ mod tests {
                 nonce_h: b64(&[1u8; 32]),
                 hub_key_id: hub_key_id_str(),
                 sig_h: b64(&[0xffu8; 64]),
-            }).await;
-        }).await
-    }
-
-    async fn fake_hub_happy_path(vaults: Vec<(&'static str, Option<super::super::protocol_v5::HeldIndex>)>) -> MockHub {
-        spawn_mock_hub(move |mut ws| async move {
-            let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
-                panic!("expected client-hello")
-            };
-            let nonce_c_raw = unb64(&nonce_c).unwrap();
-            let nonce_h = random_nonce();
-            let exporter = [0u8; 32];
-            let sig_h = hub_signing_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &exporter));
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&nonce_h),
-                hub_key_id: hub_key_id_str(),
-                sig_h: b64(&sig_h.to_bytes()),
-            }).await;
-
-            let _auth = recv_client_msg(&mut ws).await;
-            send_hub_msg(&mut ws, &HubMsg::SyncReady {
-                protocol_version: PROTOCOL_VERSION,
-                vault_state: vaults.into_iter()
-                    .map(|(id, holds)| VaultState { vault_id: id.to_string(), holds })
-                    .collect(),
-                grants: vec![],
-                revocations: vec![],
             }).await;
         }).await
     }
@@ -314,21 +243,12 @@ mod tests {
     #[tokio::test]
     async fn aborts_on_a_hub_challenge_whose_key_is_genuinely_signed_but_not_the_pinned_one() {
         let attacker_sk = SigningKey::from_bytes(&[9u8; 32]);
-        let attacker_key_id = KeyId::from_pubkey(&attacker_sk.verifying_key()).as_str().to_string();
 
         let hub = spawn_mock_hub(move |mut ws| async move {
             let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
                 panic!("expected client-hello")
             };
-            let nonce_c_raw = unb64(&nonce_c).unwrap();
-            let nonce_h = random_nonce();
-            let exporter = [0u8; 32];
-            let sig_h = attacker_sk.sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &exporter));
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&nonce_h),
-                hub_key_id: attacker_key_id.clone(),
-                sig_h: b64(&sig_h.to_bytes()),
-            }).await;
+            send_signed_challenge(&mut ws, &attacker_sk, &nonce_c).await;
         }).await;
 
         let err = run_handshake(&hub, &pinned_config()).await.unwrap_err();
@@ -382,15 +302,7 @@ mod tests {
             let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
                 panic!("expected client-hello")
             };
-            let nonce_c_raw = unb64(&nonce_c).unwrap();
-            let nonce_h = random_nonce();
-            let exporter = [0u8; 32];
-            let sig_h = hub_signing_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &exporter));
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&nonce_h),
-                hub_key_id: hub_key_id_str(),
-                sig_h: b64(&sig_h.to_bytes()),
-            }).await;
+            send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
             let _auth = recv_client_msg(&mut ws).await;
             send_hub_msg(&mut ws, &HubMsg::Reject { reason: "vault not permitted".into() }).await;
         }).await;
@@ -404,15 +316,7 @@ mod tests {
             let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
                 panic!("expected client-hello")
             };
-            let nonce_c_raw = unb64(&nonce_c).unwrap();
-            let nonce_h = random_nonce();
-            let exporter = [0u8; 32];
-            let sig_h = hub_signing_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &exporter));
-            send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&nonce_h),
-                hub_key_id: hub_key_id_str(),
-                sig_h: b64(&sig_h.to_bytes()),
-            }).await;
+            send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
         }).await;
 
         let err = run_handshake(&hub, &test_config()).await.unwrap_err();

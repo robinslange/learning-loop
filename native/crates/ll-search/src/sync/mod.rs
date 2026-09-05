@@ -17,3 +17,7 @@ pub mod seed_store;
 pub mod seed_migrate;
 pub mod registry;
 pub mod state;
+pub mod well_known;
+pub mod join;
+#[cfg(test)]
+pub mod test_hub;

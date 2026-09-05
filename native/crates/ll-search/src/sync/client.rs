@@ -66,7 +66,7 @@ fn is_tailscale_cgnat_ip(host: &str) -> bool {
 /// for loopback hosts (127.0.0.1 / ::1 / localhost) and Tailscale tailnet
 /// hosts (100.64.0.0/10 CGNAT range, or `.ts.net` MagicDNS names), where
 /// ws:// is allowed since those transports are already encrypted.
-fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
+pub(super) fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
     let rest = endpoint.trim();
     if let Some(after) = rest.strip_prefix("wss://") {
         let _ = after;
@@ -190,7 +190,7 @@ async fn run_cycle(
     let peer_id = config.identity.display_name.clone();
 
     let (mut ws, ready) =
-        connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id).await?;
+        connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id, None).await?;
     let framed_path = ready.protocol_version >= PROTOCOL_VERSION_FRAMED;
 
     let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
@@ -311,11 +311,12 @@ async fn prepare_export(
     })
 }
 
-async fn connect_and_authenticate(
+pub(super) async fn connect_and_authenticate(
     config: &FederationConfig,
     seed: &SigningKey,
     peer_id: &str,
     model_id: &str,
+    invite: Option<&str>,
 ) -> anyhow::Result<(WsStream, SyncReadyPayload)> {
     let hub_url = &config.hub.endpoint;
     check_hub_scheme(hub_url)?;
@@ -346,7 +347,7 @@ async fn connect_and_authenticate(
     };
 
     let vault_ids: Vec<String> = config.vault_id.clone().into_iter().collect();
-    let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, None).await?;
+    let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, invite).await?;
     eprintln!("Authenticated (protocol v{})", ready.protocol_version);
 
     Ok((ws, ready))

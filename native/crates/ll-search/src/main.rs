@@ -138,6 +138,17 @@ enum Commands {
         #[arg(long)]
         hub_endpoint: Option<String>,
     },
+    /// Enroll this vault on a hub with an invite code. Writes nothing unless
+    /// the hub proves its identity and admits ours.
+    Join {
+        /// Hub endpoint, e.g. wss://hub.example.
+        hub: String,
+        /// Invite code, from an existing member.
+        invite: String,
+        vault_path: String,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
     Identity {
         #[arg(long)]
         config_dir: Option<String>,
@@ -489,6 +500,36 @@ async fn main() {
             .await
             .expect("sync failed");
             out(&result);
+        }
+        Commands::Join { hub, invite, vault_path, config_dir } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let outcome = ll_search::sync::join::join(
+                &config_dir,
+                &hub,
+                &invite,
+                std::path::Path::new(&vault_path),
+                &mut ll_search::sync::join::TtyConfirm,
+            )
+            .await;
+            match outcome {
+                Ok(o) => {
+                    eprintln!("Joined. Run `ll-search sync` to upload this vault's index.");
+                    // No recovery_phrase here. TtyConfirm already showed it once;
+                    // putting it on stdout would put it in every log and pipe that
+                    // captures this command's output.
+                    out(&serde_json::json!({
+                        "key_id": o.key_id,
+                        "vault_id": o.vault_id,
+                        "hub_key_id": o.hub_key_id,
+                        "hub_fingerprint": o.hub_fingerprint,
+                        "recovery_key_id": o.recovery_key_id,
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("join failed: {e:#}");
+                    std::process::exit(1);
+                }
+            }
         }
         Commands::Identity { config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);

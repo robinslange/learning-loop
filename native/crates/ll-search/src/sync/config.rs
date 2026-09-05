@@ -12,6 +12,11 @@ pub struct FederationConfig {
     pub vault_id: Option<String>,
     #[serde(default)]
     pub vault_path: Option<String>,
+    /// The `key_id` of the recovery keypair `ll join` generated. The public
+    /// half only — the secret exists exactly once, as the 24 words shown at
+    /// join time, and is never written anywhere.
+    #[serde(default)]
+    pub recovery_key_id: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -80,15 +85,31 @@ impl FederationConfig {
             },
             vault_id: None,
             vault_path: None,
+            recovery_key_id: None,
             graph: false,
         }
     }
 }
 
+pub fn config_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("config.json")
+}
+
 pub fn load_config(config_dir: &Path) -> anyhow::Result<FederationConfig> {
-    let config_path = config_dir.join("federation").join("config.json");
-    let text = std::fs::read_to_string(&config_path)?;
+    let text = std::fs::read_to_string(config_path(config_dir))?;
     Ok(serde_json::from_str(&text)?)
+}
+
+/// Write `config.json` through a temp file and a rename. `ll join` treats
+/// this file's existence as proof the whole enrollment worked, so a
+/// half-written one would be a lie told to every later run.
+pub fn write_config(config_dir: &Path, config: &FederationConfig) -> anyhow::Result<()> {
+    let path = config_path(config_dir);
+    std::fs::create_dir_all(config_dir.join("federation"))?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(config)?)?;
+    std::fs::rename(&tmp, &path)?;
+    Ok(())
 }
 
 pub fn resolve_config_dir_opt(opt: Option<String>) -> PathBuf {
@@ -210,6 +231,7 @@ mod tests {
 
     #[test]
     fn a_ws_endpoint_is_rejected_unless_the_test_escape_hatch_is_set() {
+        let _env = crate::sync::test_hub::env_lock();
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
         let mut c = FederationConfig::test_fixture("private", vec![]);
         c.hub.endpoint = "ws://insecure.example/ws".into();
