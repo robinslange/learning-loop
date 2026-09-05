@@ -12,6 +12,7 @@ pub mod client;
 pub mod compression;
 pub mod watch;
 pub mod key_id;
+pub mod words;
 pub mod seed_store;
 pub mod seed_migrate;
 pub mod registry;
