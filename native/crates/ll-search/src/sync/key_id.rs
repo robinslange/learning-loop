@@ -7,7 +7,7 @@
 //! cycles. The pinned vector test below guards against silent divergence;
 //! change both sides together.
 
-use ed25519_dalek::VerifyingKey;
+use ed25519_dalek::{Signature, VerifyingKey};
 
 /// Multicodec prefix for an ed25519 public key (0xed 0x01), so the encoding is
 /// self-describing and a future key type does not need a new format.
@@ -55,13 +55,23 @@ impl KeyId {
         Ok(VerifyingKey::from_bytes(&arr)?)
     }
 
+    /// Verify a signature against this key. Uses `verify_strict` (not
+    /// `verify`) — it rejects small-order/malleable-point signatures that
+    /// plain `verify` accepts, which matters here because this is the exact
+    /// check a hostile hub's forged or replayed `sig_h`/`sig_c` must fail.
+    pub fn verify(&self, message: &[u8], signature: &[u8]) -> anyhow::Result<()> {
+        let sig = Signature::from_slice(signature)?;
+        self.verifying_key()?.verify_strict(message, &sig)?;
+        Ok(())
+    }
+
     pub fn as_str(&self) -> &str { &self.0 }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ed25519_dalek::SigningKey;
+    use ed25519_dalek::{Signer, SigningKey};
 
     fn key() -> SigningKey { SigningKey::generate(&mut rand::thread_rng()) }
 
@@ -120,5 +130,25 @@ mod tests {
         let a = KeyId::from_pubkey(&key().verifying_key());
         let b = KeyId::from_pubkey(&key().verifying_key());
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn verifies_a_signature_made_by_the_matching_key() {
+        let sk = key();
+        let id = KeyId::from_pubkey(&sk.verifying_key());
+        let sig = sk.sign(b"payload");
+        assert!(id.verify(b"payload", &sig.to_bytes()).is_ok());
+        assert!(id.verify(b"tampered", &sig.to_bytes()).is_err());
+    }
+
+    #[test]
+    fn rejects_a_signature_made_by_a_different_key() {
+        // A real, well-formed signature — just over the right bytes with the
+        // wrong key. Distinguishes "checks the signature" from "checks that
+        // some signature-shaped bytes were supplied".
+        let signer = key();
+        let other_id = KeyId::from_pubkey(&key().verifying_key());
+        let sig = signer.sign(b"payload");
+        assert!(other_id.verify(b"payload", &sig.to_bytes()).is_err());
     }
 }
