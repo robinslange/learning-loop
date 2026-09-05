@@ -5,6 +5,19 @@
 //! `#[ignore]` so it runs only via `cargo test --test sync_soak -- --ignored`.
 //! Production budget per the 2J plan is 1 hour; for CI we run a shorter
 //! synthetic burst (60 iterations) gated behind the ignore flag.
+//!
+//! KNOWN BROKEN as of the v5 handshake (federation-v5 Plan 6 Task 2):
+//! `LL_ALLOW_INSECURE_WS=1` below gets the client past the new TLS-exporter
+//! gate, but `HubBehaviour::Churn`'s mock hub (shared `tests/common/mod.rs`)
+//! still speaks the full v4 wire protocol end-to-end — it sends
+//! `{"type":"auth-challenge",...}`, which the v5 client can no longer parse
+//! at all (`unknown variant "auth-challenge"`). This is not a config gap
+//! like `sync_recv_timeout.rs` had (that hub never responds, so it never
+//! reaches any message-shape code); this one actively speaks the wrong
+//! protocol. Fixing it for real means teaching the shared mock hub to speak
+//! v5 (challenge/sign/verify, with a churn-disconnect worked into that
+//! flow) — a v5 integration harness, deliberately out of scope for Task 2
+//! (ruling 4) and tracked as its own outstanding gap rather than fixed here.
 
 #[path = "common/mod.rs"]
 mod common;
