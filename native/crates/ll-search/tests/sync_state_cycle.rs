@@ -125,6 +125,13 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
 /// `FetchIndex` the client is expected to send as a result, and the record of
 /// everything the hub saw and everything it wants to complain about.
 ///
+/// `vault_state` is `v1` — the client's own — plus exactly the vaults
+/// `fetches` scripts, because that is what a real hub does: it lists what it
+/// will authorise and answers for what it listed, both out of the same
+/// matcher. The client's read list comes from that listing and from nothing
+/// else, so a hub that served a vault it had not listed would be testing an
+/// arrangement that cannot occur.
+///
 /// **This mock never panics.** It runs inside `tokio::spawn`, where a panic
 /// does not fail the test that spawned it: it unwinds the hub, drops the
 /// socket, and reaches the client as a transport error that looks like an
@@ -175,9 +182,16 @@ async fn spawn_hub_with(
         if recv_json(&mut ws).await.is_none() {
             return note("no client-auth".into());
         }
+        let vault_state = std::iter::once(VaultState { vault_id: "v1".into(), holds })
+            .chain(
+                fetches
+                    .iter()
+                    .map(|(id, _)| VaultState { vault_id: id.clone(), holds: None }),
+            )
+            .collect();
         if !send_hub(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
-            vault_state: vec![VaultState { vault_id: "v1".into(), holds }],
+            vault_state,
             grants,
             revocations: vec![],
         })
@@ -681,11 +695,59 @@ async fn a_cycle_that_read_everything_records_no_skips() {
     assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, Some(0));
 }
 
-/// The v4 download half opened with `list-peers` on every cycle, grant or no
-/// grant. v5 asks for what a grant names and nothing else, so a hub carrying
-/// none must see the connection close without a word.
+/// Plan 7 end to end: link a second machine and see the first one's notes.
+///
+/// The only grant this machine holds is the unscoped `link` that joined it,
+/// and an unscoped grant names no vault — the hub's `vault_state` is the only
+/// thing here that says which vault to read. Every unit test of the read half
+/// drives `fetch_all` directly, so a `run_cycle` that handed it anything but
+/// the hub's own listing would leave all of them green. This is the test that
+/// notices.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_cycle_with_no_grants_asks_the_hub_for_nothing() {
+async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (_approver, inbound) = link_grant(&me);
+    let served = b"pretend-this-is-the-other-machines-index".to_vec();
+    let (addr, seen) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack,
+        vec![inbound],
+        vec![("v-other-machine".to_string(), Fetch::Serve(served.clone()))],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+
+    let result =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect("the cycle completes");
+
+    assert_eq!(result.fetched.len(), 1, "the vault the hub listed was read");
+    assert_eq!(
+        std::fs::read(dir.path().join("federation/data/peers/v-other-machine/index.db")).unwrap(),
+        served,
+    );
+    let fetched: Vec<String> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|line| !line.starts_with("put-grant:"))
+        .cloned()
+        .collect();
+    assert_eq!(fetched, vec!["v-other-machine".to_string()],
+        "exactly the listing, less this machine's own vault");
+}
+
+/// The v4 download half opened with `list-peers` on every cycle, listing or
+/// no listing. v5 asks for the vaults the hub named and nothing else, so a
+/// hub that named only this client's own must see the connection close
+/// without a word.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_whose_hub_lists_only_this_vault_asks_for_nothing() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();

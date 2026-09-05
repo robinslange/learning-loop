@@ -1,15 +1,23 @@
-//! The read half of a sync cycle: fetch the index of every vault a grant
-//! lets this client read, and write it into the peer cache.
+//! The read half of a sync cycle: fetch the index of every vault this client
+//! may read, and write it into the peer cache.
 //!
 //! v4 asked the hub to list its peers and hand each one over. The hub deleted
 //! those messages on 2026-06-14 and this client kept sending them for three
 //! months, so its download half has been failing on its first message ever
-//! since. v5 inverts the flow: the handshake already carried every grant the
-//! hub holds for this key, so the client decides what it may read and asks
-//! for exactly that.
+//! since. v5 inverts the flow: the handshake already named every vault this
+//! key may read, so the client asks for exactly those and never asks the hub
+//! to list anything.
 //!
-//! **The client asks only for what a grant entitles it to.** Not "ask and let
-//! the hub refuse" — the two produce the same visible outcome today and the
+//! **Which vaults exist and who owns them is hub state.** A grant verifies
+//! offline, and a scoped one names its vault — but a `link`, the grant that
+//! joins a person's own machines, is unscoped. It means "any vault this
+//! issuer owns", and which vaults an issuer owns is not something a grant can
+//! say. A client deriving its read list from `grant.scope` reads nothing at
+//! all on a machine whose only grant is the `link` that joined it, which is
+//! what this one did.
+//!
+//! **It still asks for less than it is offered.** Not "ask and let the hub
+//! refuse" — the two produce the same visible outcome today and the
 //! difference is the whole point: `assoc` joins a person's work and personal
 //! identities and carries no authority at all, and a client that asks anyway
 //! is one hub-side bug away from getting an answer.
@@ -24,7 +32,7 @@ use super::client::{recv_binary, recv_json, send_json, WsStream};
 use super::config::{peer_dir, peer_index_path};
 use super::grant::{self, GrantKind, GrantStatement};
 use super::key_id::KeyId;
-use super::protocol_v5::{ClientMsg, GrantWire, HubMsg};
+use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, VaultState};
 
 /// One vault whose index this cycle fetched and wrote.
 #[derive(Debug, Serialize)]
@@ -53,24 +61,21 @@ pub(super) fn is_safe_vault_id(id: &str) -> bool {
         && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// The vaults this client may read, in the order the hub listed their grants.
+/// The grants this client currently holds, verified and in force.
 ///
-/// Everything that decides "may we ask?" happens here, before a single byte
-/// goes out. Five things disqualify a grant:
+/// Nothing here chooses what to fetch any more — the hub's `vault_state` does
+/// that. What is left for these grants is the `assoc` brace below, and every
+/// one of these four checks is in the direction of NOT silencing a read the
+/// hub authorised:
 ///
 /// - it is not addressed to us. `SyncReady.grants` carries the grants this
-///   key ISSUED as well as the ones it holds, and reading through one of
-///   those would have this client fetch its own vault and file it away as a
-///   peer's.
+///   key ISSUED as well as the ones it holds, and an `assoc` between two
+///   other keys is not this client's reason to stay quiet.
 /// - its signature does not check out against the key it names as issuer.
-/// - it is not `active`. A `follow` starts `pending` and is not a licence to
-///   read until the followee accepts it.
+///   The hub carries grants; it does not vouch for them.
+/// - it is not `active`. A `follow` starts `pending`.
 /// - it has expired.
-/// - its kind carries no read authority — `assoc`.
-///
-/// A grant with no `scope` names no vault, and this client has no way to
-/// enumerate the vaults its issuer owns, so there is nothing to ask for.
-fn readable_vaults(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<String> {
+fn live_grants(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<GrantStatement> {
     let b64 = base64::engine::general_purpose::STANDARD;
     let mut out = Vec::new();
     for wire in grants {
@@ -100,16 +105,76 @@ fn readable_vaults(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<String> {
                 continue;
             }
         };
-        if &st.to != me || !permits_read(st.kind) || st.expires_at <= now {
+        if &st.to != me || st.expires_at <= now {
             continue;
         }
-        let Some(vault_id) = st.scope else { continue };
-        if !is_safe_vault_id(&vault_id) {
-            eprintln!("skipping a grant naming an unusable vault_id: {vault_id:?}");
+        out.push(st);
+    }
+    out
+}
+
+/// Whether every grant this client holds that names `vault_id` is an `assoc`.
+///
+/// Belt and braces. The hub computes `vault_state` through the same matcher
+/// `FetchIndex` authorises with and will not list a vault reachable only
+/// across an `assoc` edge — but a client that would ask for one if it were
+/// listed is a client one hub bug away from asking, and two independent
+/// reasons not to send are better than one.
+///
+/// A vault no grant here names is not suppressed: that is the ordinary case
+/// for an unscoped `link`, which names no vault at all and is the reason this
+/// function cannot be the thing that chooses what to fetch. The brace only
+/// ever refuses, so it errs towards refusing — an issuer that has said
+/// `assoc` about a vault and nothing else about it has said the one thing
+/// that means "not through me".
+fn only_assoc_names(held: &[GrantStatement], vault_id: &str) -> bool {
+    let mut named = false;
+    for st in held.iter().filter(|st| st.scope.as_deref() == Some(vault_id)) {
+        if permits_read(st.kind) {
+            return false;
+        }
+        named = true;
+    }
+    named
+}
+
+/// The vaults this client may read, in the order the hub listed them.
+///
+/// The hub decides this, not the client: `SyncReady.vault_state` carries
+/// exactly the vaults this key owns or may read, computed through the same
+/// matcher `FetchIndex` authorises with. Three things disqualify an entry:
+///
+/// - it is this client's own vault. The hub lists it because we own it, the
+///   upload half already has it, and filing our own index under
+///   `data/peers/` is the bug the old grant-direction check caught.
+/// - its id is not usable as a single path component. These ids now arrive
+///   off the wire rather than out of a grant this client verified itself, and
+///   `config.rs`'s path helpers assume a validated id and do not check one.
+/// - every grant we hold that names it is an `assoc`.
+fn readable_vaults(
+    vault_state: &[VaultState],
+    grants: &[GrantWire],
+    me: &KeyId,
+    my_vault_id: &str,
+    now: i64,
+) -> Vec<String> {
+    let held = live_grants(grants, me, now);
+    let mut out = Vec::new();
+    for state in vault_state {
+        let vault_id = &state.vault_id;
+        if vault_id == my_vault_id {
             continue;
         }
-        if !out.contains(&vault_id) {
-            out.push(vault_id);
+        if !is_safe_vault_id(vault_id) {
+            eprintln!("skipping a listed vault whose id is unusable: {vault_id:?}");
+            continue;
+        }
+        if only_assoc_names(&held, vault_id) {
+            eprintln!("not asking for {vault_id}: assoc carries no read authority");
+            continue;
+        }
+        if !out.contains(vault_id) {
+            out.push(vault_id.clone());
         }
     }
     out
@@ -143,12 +208,14 @@ pub struct FetchOutcome {
 pub async fn fetch_all(
     ws: &mut WsStream,
     config_dir: &Path,
+    vault_state: &[VaultState],
     grants: &[GrantWire],
     me: &KeyId,
+    my_vault_id: &str,
     now: i64,
 ) -> anyhow::Result<FetchOutcome> {
     let mut out = FetchOutcome::default();
-    for vault_id in readable_vaults(grants, me, now) {
+    for vault_id in readable_vaults(vault_state, grants, me, my_vault_id, now) {
         match fetch_one(ws, config_dir, &vault_id).await {
             Ok(Outcome::Written(one)) => {
                 eprintln!("Fetched {} ({} notes)", one.vault_id, one.note_count);
@@ -407,6 +474,12 @@ mod tests {
         GrantFixture { kind, ..follow(scope) }
     }
 
+    /// A grant that names no vault. What `ll link` issues: "any vault this
+    /// issuer owns", a set only the hub can enumerate.
+    fn unscoped(kind: GrantKind) -> GrantFixture {
+        GrantFixture { kind, scope: None, ..follow("unused") }
+    }
+
     /// Sign `fixture` as a grant from `from` to `to`, in the wire shape the
     /// handshake delivers.
     fn wire(from: &(SigningKey, KeyId), to: &KeyId, fixture: &GrantFixture) -> GrantWire {
@@ -443,17 +516,33 @@ mod tests {
         format!("pretend-this-is-a-sqlite-file-{marker}").into_bytes()
     }
 
-    /// Run `fetch_all` against a hub scripted with `answers`, and return what
-    /// it produced alongside everything the hub recorded — every `vault_id` it
-    /// was asked for, and any complaint of its own.
+    /// This client's own vault. The hub lists it because we own it, and the
+    /// read half must leave it to the upload half.
+    const MY_VAULT: &str = "v-mine";
+
+    /// Run `fetch_all` against a hub that listed `listed` at the handshake and
+    /// is scripted with `answers`, and return what it produced alongside
+    /// everything the hub recorded — every `vault_id` it was asked for, and
+    /// any complaint of its own.
+    ///
+    /// `listed` is the fact under test in most of what follows: it is the
+    /// hub's ruling on what this key may read, and the client's job is to ask
+    /// for exactly it.
     async fn run(
         dir: &Path,
+        listed: &[&str],
         grants: Vec<GrantWire>,
         answers: Vec<(&'static str, FetchAnswer)>,
     ) -> (FetchOutcome, Vec<String>) {
+        let vault_state: Vec<VaultState> = listed
+            .iter()
+            .map(|id| VaultState { vault_id: id.to_string(), holds: None })
+            .collect();
         let (hub, asked) = spawn_fetch_hub(answers).await;
         let mut ws = connect(hub.addr).await;
-        let out = fetch_all(&mut ws, dir, &grants, &me().1, NOW).await.unwrap();
+        let out = fetch_all(&mut ws, dir, &vault_state, &grants, &me().1, MY_VAULT, NOW)
+            .await
+            .unwrap();
         // Close so the hub's recorder stops before the assertion reads it.
         let _ = futures_util::SinkExt::close(&mut ws).await;
         let asked = asked.lock().unwrap().clone();
@@ -466,6 +555,7 @@ mod tests {
         let body = index_bytes("v-other");
         let (out, asked) = run(
             dir.path(),
+            &["v-other"],
             vec![to_me(follow("v-other"))],
             vec![("v-other", FetchAnswer::Index(body.clone()))],
         )
@@ -483,14 +573,19 @@ mod tests {
         );
     }
 
-    /// R-B. The assertion is on nothing having been SENT. A filter that
-    /// admits `assoc` and leans on the hub to refuse produces the same
-    /// visible outcome and is still wrong.
+    /// R-B, and the belt-and-braces case. The hub here LISTS `v-work` — a
+    /// real one would not, because it computes the list through the same
+    /// matcher `FetchIndex` authorises with, and `assoc` authorises nothing.
+    /// This is the hub bug, and the client must not be one bug away from
+    /// asking. The assertion is on nothing having been SENT: a client that
+    /// asks and leans on the hub to refuse produces the same visible outcome
+    /// and is still wrong.
     #[tokio::test]
-    async fn an_assoc_grant_is_never_even_asked_about() {
+    async fn an_assoc_only_vault_is_not_asked_for_even_when_the_hub_lists_it() {
         let dir = tempfile::tempdir().unwrap();
         let (out, asked) = run(
             dir.path(),
+            &["v-work"],
             vec![to_me(of_kind(GrantKind::Assoc, "v-work"))],
             vec![("v-work", FetchAnswer::Index(index_bytes("v-work")))],
         )
@@ -509,6 +604,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (out, asked) = run(
             dir.path(),
+            &["v-follow", "v-link", "v-peer", "v-assoc"],
             vec![
                 to_me(of_kind(GrantKind::Follow, "v-follow")),
                 to_me(of_kind(GrantKind::Link, "v-link")),
@@ -529,73 +625,101 @@ mod tests {
         assert_eq!(out.fetched.len(), 3);
     }
 
+    /// The property the whole of Plan 7 exists for: link a second machine and
+    /// see the first one's notes.
+    ///
+    /// The grant is a `link` and a `link` is unscoped — it says "any vault
+    /// this issuer owns", which is a set no grant can enumerate and only the
+    /// hub knows. A client deriving its read list from `grant.scope` asks for
+    /// nothing here, which is what a freshly linked machine used to do.
     #[tokio::test]
-    async fn a_pending_follow_is_not_a_licence_to_read() {
+    async fn an_unscoped_link_on_a_vault_the_hub_lists_is_fetched() {
         let dir = tempfile::tempdir().unwrap();
-        let pending = GrantFixture { state: "pending", ..follow("v-other") };
-        let (_out, asked) = run(
+        let body = index_bytes("v-other");
+        let (out, asked) = run(
             dir.path(),
-            vec![to_me(pending)],
+            &["v-other"],
+            vec![to_me(unscoped(GrantKind::Link))],
+            vec![("v-other", FetchAnswer::Index(body.clone()))],
+        )
+        .await;
+
+        assert_eq!(asked, vec!["v-other".to_string()],
+            "the hub listed it; the grant naming no vault is not a reason to stay quiet");
+        assert_eq!(out.fetched.len(), 1);
+        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(), body);
+    }
+
+    /// The hub lists this client's own vault, because it owns it. The upload
+    /// half already has it, and a copy of our own index under `data/peers/`
+    /// would be searched as somebody else's.
+    #[tokio::test]
+    async fn the_vault_this_client_owns_is_not_fetched_into_peers() {
+        let dir = tempfile::tempdir().unwrap();
+        let (out, asked) = run(
+            dir.path(),
+            &[MY_VAULT, "v-other"],
+            vec![to_me(unscoped(GrantKind::Link))],
             vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
         )
         .await;
-        assert!(asked.is_empty(), "a follow is pending until the followee accepts it: {asked:?}");
+
+        assert_eq!(asked, vec!["v-other".to_string()], "our own vault is not ours to fetch");
+        assert!(!peer_dir(dir.path(), MY_VAULT).exists());
+        assert_eq!(out.fetched.len(), 1, "the vault that is not ours still lands");
     }
 
+    /// The hub's list is the authority in both directions. A grant this
+    /// client still holds for a vault the hub no longer lists — revoked at
+    /// the hub, or issued by a key that has since given the vault up — is not
+    /// a licence to ask.
     #[tokio::test]
-    async fn an_expired_grant_is_not_asked_about() {
+    async fn a_vault_the_hub_does_not_list_is_not_asked_for_even_with_a_grant() {
         let dir = tempfile::tempdir().unwrap();
-        let lapsed = GrantFixture { expires_at: NOW, ..follow("v-other") };
         let (_out, asked) = run(
             dir.path(),
-            vec![to_me(lapsed)],
-            vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
+            &["v-listed"],
+            vec![to_me(follow("v-stale")), to_me(follow("v-listed"))],
+            vec![
+                ("v-stale", FetchAnswer::Index(index_bytes("v-stale"))),
+                ("v-listed", FetchAnswer::Index(index_bytes("v-listed"))),
+            ],
         )
         .await;
-        assert!(asked.is_empty(), "expiry is a boundary, not a suggestion: {asked:?}");
+
+        assert_eq!(asked, vec!["v-listed".to_string()],
+            "a grant the hub did not back with a listing buys nothing: {asked:?}");
+        assert!(!peer_dir(dir.path(), "v-stale").exists());
     }
 
-    /// `SyncReady.grants` carries both directions. A grant this client issued
-    /// grants the OTHER key a read, and following it back would fetch our own
-    /// vault and file it away as somebody else's.
+    /// The `assoc` brace only ever refuses, so what it accepts as an `assoc`
+    /// matters: a grant that is not this client's live one must not silence a
+    /// read the hub authorised. Four ways a grant fails to be ours, all
+    /// naming the listed vault, and none of them may suppress it.
     #[tokio::test]
-    async fn a_grant_this_client_issued_is_not_read_back() {
-        let dir = tempfile::tempdir().unwrap();
-        let issued_by_me = wire(&me(), &them().1, &follow("v-mine"));
-        let (_out, asked) = run(
-            dir.path(),
-            vec![issued_by_me],
-            vec![("v-mine", FetchAnswer::Index(index_bytes("v-mine")))],
-        )
-        .await;
-        assert!(asked.is_empty(), "this grant is addressed to somebody else: {asked:?}");
-    }
-
-    #[tokio::test]
-    async fn a_grant_whose_signature_does_not_check_out_is_not_asked_about() {
+    async fn a_grant_that_is_not_this_clients_live_assoc_does_not_silence_a_listed_vault() {
         let dir = tempfile::tempdir().unwrap();
         let b64 = base64::engine::general_purpose::STANDARD;
-        let mut forged = to_me(follow("v-other"));
+        let assoc = || of_kind(GrantKind::Assoc, "v-listed");
+        let mut forged = to_me(assoc());
         forged.signature_b64 = b64.encode([0u8; 64]);
 
-        let (_out, asked) = run(
+        let (out, asked) = run(
             dir.path(),
-            vec![forged],
-            vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
+            &["v-listed"],
+            vec![
+                to_me(GrantFixture { state: "pending", ..assoc() }),
+                to_me(GrantFixture { expires_at: NOW, ..assoc() }),
+                wire(&me(), &them().1, &assoc()),
+                forged,
+            ],
+            vec![("v-listed", FetchAnswer::Index(index_bytes("v-listed")))],
         )
         .await;
-        assert!(asked.is_empty(), "the hub carries grants, it does not vouch for them: {asked:?}");
-    }
 
-    /// An unscoped grant names no vault, and this client cannot enumerate the
-    /// vaults its issuer owns, so there is nothing to ask for. See the report:
-    /// unscoped `link` grants are unreachable from the client for this reason.
-    #[tokio::test]
-    async fn an_unscoped_grant_names_no_vault_to_ask_for() {
-        let dir = tempfile::tempdir().unwrap();
-        let unscoped = GrantFixture { scope: None, ..follow("unused") };
-        let (_out, asked) = run(dir.path(), vec![to_me(unscoped)], vec![]).await;
-        assert!(asked.is_empty(), "{asked:?}");
+        assert_eq!(asked, vec!["v-listed".to_string()],
+            "pending, expired, addressed elsewhere, unsigned: none of these is our assoc");
+        assert_eq!(out.fetched.len(), 1);
     }
 
     #[tokio::test]
@@ -603,6 +727,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (out, asked) = run(
             dir.path(),
+            &["v-empty"],
             vec![to_me(follow("v-empty"))],
             vec![("v-empty", FetchAnswer::Nothing)],
         )
@@ -639,6 +764,7 @@ mod tests {
 
         let (out, asked) = run(
             dir.path(),
+            &["v-same"],
             vec![to_me(follow("v-same"))],
             vec![("v-same", FetchAnswer::Index(body.clone()))],
         )
@@ -665,6 +791,7 @@ mod tests {
 
         let (out, _asked) = run(
             dir.path(),
+            &["v-moved"],
             vec![to_me(follow("v-moved"))],
             vec![("v-moved", FetchAnswer::Index(fresh.clone()))],
         )
@@ -681,6 +808,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (out, asked) = run(
             dir.path(),
+            &["v-liar"],
             vec![to_me(follow("v-liar"))],
             vec![("v-liar", FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar")))],
         )
@@ -701,6 +829,7 @@ mod tests {
         let body = index_bytes("v-good");
         let (out, asked) = run(
             dir.path(),
+            &["v-bad", "v-good"],
             vec![to_me(follow("v-bad")), to_me(follow("v-good"))],
             vec![
                 ("v-bad", FetchAnswer::Reject("not authorized to read this vault")),
@@ -727,6 +856,7 @@ mod tests {
         let body = index_bytes("v-good");
         let (out, _asked) = run(
             dir.path(),
+            &["v-liar", "v-good"],
             vec![to_me(follow("v-liar")), to_me(follow("v-good"))],
             vec![
                 ("v-liar", FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar"))),
@@ -752,6 +882,7 @@ mod tests {
         let good = index_bytes("v-good");
         let (out, asked) = run(
             dir.path(),
+            &["v-asked", "v-good"],
             vec![to_me(follow("v-asked")), to_me(follow("v-good"))],
             vec![
                 ("v-asked", FetchAnswer::HeaderFor("v-else", index_bytes("v-else"))),
@@ -770,11 +901,15 @@ mod tests {
         assert!(!peer_dir(dir.path(), "v-asked").exists());
     }
 
+    /// The id now arrives off the wire rather than out of a grant this client
+    /// verified itself, and it lands in a directory name: `config.rs`'s path
+    /// helpers document that they assume a validated id and do not check one.
     #[tokio::test]
-    async fn a_vault_id_that_is_not_a_safe_path_component_is_never_asked_for() {
+    async fn a_listed_vault_id_that_is_not_a_safe_path_component_is_never_asked_for() {
         let dir = tempfile::tempdir().unwrap();
-        let traversal = GrantFixture { scope: Some("../../escaped"), ..follow("unused") };
-        let (_out, asked) = run(dir.path(), vec![to_me(traversal)], vec![]).await;
+        let (_out, asked) =
+            run(dir.path(), &["../../escaped"], vec![to_me(unscoped(GrantKind::Link))], vec![])
+                .await;
         assert!(asked.is_empty(), "{asked:?}");
         assert!(!dir.path().join("../../escaped").exists());
     }

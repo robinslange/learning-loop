@@ -202,11 +202,14 @@ async fn run_cycle(
     let uploaded = upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
     *known_holds = Some(uploaded.hub_holds);
 
-    // The read half asks for exactly the vaults this key's grants entitle it
-    // to. The hub named them at the handshake; nothing here asks it to list
-    // anything.
+    // The read half asks for exactly the vaults the hub named at the
+    // handshake, less this one. Nothing here asks it to list anything, and
+    // nothing here derives the list from a grant: a `link` is unscoped, so a
+    // client that tried would read nothing on a machine that was just linked.
     let me = KeyId::from_pubkey(&seed.verifying_key());
-    let read = fetch_all(&mut ws, config_dir, &ready.grants, &me, unix_now()).await?;
+    let read =
+        fetch_all(&mut ws, config_dir, &ready.vault_state, &ready.grants, &me, vault_id, unix_now())
+            .await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
