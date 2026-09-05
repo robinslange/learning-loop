@@ -182,8 +182,13 @@ pub async fn recv_client_msg(ws: &mut WsServer) -> ClientMsg {
     }
 }
 
-pub async fn send_hub_msg(ws: &mut WsServer, msg: &HubMsg) {
-    ws.send(Message::text(serde_json::to_string(msg).unwrap())).await.unwrap();
+/// `false` when the send failed, which only happens because the client hung
+/// up. Deliberately not a panic: this runs inside a spawned task, where a
+/// panic unwinds the hub and the client sees an ordinary transport error, so
+/// the loudest thing a mock can do about a dead socket is stop.
+pub async fn send_hub_msg(ws: &mut WsServer, msg: &HubMsg) -> bool {
+    let text = serde_json::to_string(msg).expect("HubMsg is always serialisable");
+    ws.send(Message::text(text)).await.is_ok()
 }
 
 /// Sign and send a genuine `HubChallenge` for the `nonce_c` a client offered.
@@ -333,15 +338,20 @@ fn index_header(vault_id: &str, sha256: String) -> HubMsg {
 }
 
 /// A hub that answers `FetchIndex` from a scripted table, and the record of
-/// every `vault_id` it was asked for.
+/// everything it was asked, in order.
 ///
-/// The record is the point. `assoc` grants no authority, and the invariant is
-/// that the client does not ASK — a hub that merely refused would leave that
-/// untested, because refusing everything looks identical from the outside.
-///
-/// A `FetchIndex` for a vault the table does not name is a panic, not a
-/// reject: it means the client asked for something no test set up, which is
-/// the failure a silent reject would hide.
+/// The record is the point twice over. `assoc` grants no authority and the
+/// invariant is that the client does not ASK, which a hub that merely refused
+/// would leave untested — refusing everything looks identical from the
+/// outside. And this runs inside `tokio::spawn`, where a panic does not fail
+/// the test that spawned it: it unwinds the hub, drops the socket, and
+/// reaches the client as a transport error indistinguishable from an ordinary
+/// refused read. So the mock never panics. Anything it wants to complain
+/// about — an unparseable message, a message that is not `FetchIndex`, a
+/// `vault_id` the table does not name — goes into the record as
+/// `unparseable:` / `unexpected:` / `unscripted:` and the hub stops. A test
+/// that asserts on the record sees the complaint; one that does not, would
+/// not have seen a panic either.
 pub async fn spawn_fetch_hub(
     answers: Vec<(&'static str, FetchAnswer)>,
 ) -> (MockHub, Arc<Mutex<Vec<String>>>) {
@@ -351,11 +361,10 @@ pub async fn spawn_fetch_hub(
     let recorder = Arc::clone(&asked);
     let hub = spawn_mock_hub(move |mut ws| async move {
         let mut answers = answers;
+        let note = |what: String| recorder.lock().unwrap().push(what);
         loop {
-            let msg = match ws.next().await {
-                Some(Ok(Message::Text(t))) => {
-                    serde_json::from_str::<ClientMsg>(t.as_str()).expect("valid ClientMsg json")
-                }
+            let text = match ws.next().await {
+                Some(Ok(Message::Text(t))) => t,
                 Some(Ok(Message::Ping(d))) => {
                     let _ = ws.send(Message::Pong(d)).await;
                     continue;
@@ -363,40 +372,44 @@ pub async fn spawn_fetch_hub(
                 Some(Ok(_)) => continue,
                 Some(Err(_)) | None => return,
             };
-            let ClientMsg::FetchIndex { vault_id } = msg else {
-                panic!("this hub serves fetch-index and nothing else, got {msg:?}")
+            let msg: ClientMsg = match serde_json::from_str(text.as_str()) {
+                Ok(msg) => msg,
+                Err(e) => return note(format!("unparseable:{e}")),
             };
-            recorder.lock().unwrap().push(vault_id.clone());
+            let ClientMsg::FetchIndex { vault_id } = msg else {
+                return note(format!("unexpected:{msg:?}"));
+            };
+            note(vault_id.clone());
 
-            let position = answers
-                .iter()
-                .position(|(id, _)| *id == vault_id)
-                .unwrap_or_else(|| panic!("no scripted answer for {vault_id}"));
+            let Some(position) = answers.iter().position(|(id, _)| *id == vault_id) else {
+                return note(format!("unscripted:{vault_id}"));
+            };
             let (_, answer) = answers.remove(position);
-            match answer {
+            let (header, frame) = match answer {
                 FetchAnswer::Index(bytes) => {
                     let sha = hex::encode(Sha256::digest(&bytes));
-                    send_hub_msg(&mut ws, &index_header(&vault_id, sha)).await;
-                    ws.send(Message::binary(bytes)).await.unwrap();
+                    (index_header(&vault_id, sha), Some(bytes))
                 }
                 FetchAnswer::IndexUnderADifferentSha(bytes) => {
-                    send_hub_msg(&mut ws, &index_header(&vault_id, "be".repeat(32))).await;
-                    ws.send(Message::binary(bytes)).await.unwrap();
+                    (index_header(&vault_id, "be".repeat(32)), Some(bytes))
                 }
                 FetchAnswer::HeaderFor(other, bytes) => {
                     let sha = hex::encode(Sha256::digest(&bytes));
-                    send_hub_msg(&mut ws, &index_header(other, sha)).await;
-                    ws.send(Message::binary(bytes)).await.unwrap();
+                    (index_header(other, sha), Some(bytes))
                 }
                 FetchAnswer::Nothing => {
-                    send_hub_msg(&mut ws, &HubMsg::IndexHeader {
-                        vault_id: vault_id.clone(),
-                        holds: None,
-                    })
-                    .await;
+                    (HubMsg::IndexHeader { vault_id: vault_id.clone(), holds: None }, None)
                 }
                 FetchAnswer::Reject(reason) => {
-                    send_hub_msg(&mut ws, &HubMsg::Reject { reason: reason.into() }).await;
+                    (HubMsg::Reject { reason: reason.into() }, None)
+                }
+            };
+            if !send_hub_msg(&mut ws, &header).await {
+                return;
+            }
+            if let Some(bytes) = frame {
+                if ws.send(Message::binary(bytes)).await.is_err() {
+                    return;
                 }
             }
         }

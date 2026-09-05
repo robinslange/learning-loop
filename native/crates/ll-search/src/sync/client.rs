@@ -100,8 +100,12 @@ pub struct SyncResult {
     pub export: Option<ExportResult>,
     pub uploaded_notes: i64,
     pub skipped_upload: bool,
-    /// The vaults this cycle read through a grant, and wrote.
+    /// The vaults this cycle read through a grant and wrote. A vault whose
+    /// index the hub served unchanged is in `unchanged_fetches`, not here —
+    /// nothing on disk moved, so nothing downstream needs to rerun.
     pub fetched: Vec<Fetched>,
+    /// The vaults whose local copy was already the index the hub holds.
+    pub unchanged_fetches: Vec<String>,
     /// The vaults it was entitled to read and could not. One failure does not
     /// abort the others, so this is how they stay visible.
     pub skipped_fetches: Vec<String>,
@@ -196,8 +200,7 @@ async fn run_cycle(
     // to. The hub named them at the handshake; nothing here asks it to list
     // anything.
     let me = KeyId::from_pubkey(&seed.verifying_key());
-    let (fetched, skipped_fetches) =
-        fetch_all(&mut ws, config_dir, &ready.grants, &me, unix_now()).await?;
+    let read = fetch_all(&mut ws, config_dir, &ready.grants, &me, unix_now()).await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
@@ -206,8 +209,9 @@ async fn run_cycle(
         export: prepared.result,
         uploaded_notes: uploaded.note_count,
         skipped_upload: uploaded.skipped,
-        fetched,
-        skipped_fetches,
+        fetched: read.fetched,
+        unchanged_fetches: read.unchanged,
+        skipped_fetches: read.skipped,
     })
 }
 

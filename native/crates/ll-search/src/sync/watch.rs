@@ -305,9 +305,10 @@ async fn do_sync(
     match super::client::sync_all_async(db_path, vault_path, config_dir, config).await {
         Ok(result) => {
             eprintln!(
-                "Sync: {} uploaded, {} fetched, {} could not be fetched",
+                "Sync: {} uploaded, {} fetched, {} already current, {} could not be fetched",
                 result.uploaded_notes,
                 result.fetched.len(),
+                result.unchanged_fetches.len(),
                 result.skipped_fetches.len()
             );
             if !result.fetched.is_empty() {

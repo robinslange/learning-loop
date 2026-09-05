@@ -138,7 +138,7 @@ const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
 
 (Or invoke the binary via the existing helper and pass the same 15s deadline.)
 
-On success: report counts (notes exported, peers downloaded). Proceed to G.
+On success: report counts (notes exported, vaults fetched). If the sync line reports vaults it could not fetch, say so and say which — the client was entitled to read them and could not, and that is the only place it surfaces. Proceed to G.
 
 On failure or timeout: **do not write config**. Surface the specific error and offer the user a choice:
 
@@ -190,7 +190,7 @@ Federation configured.
 
   Identity:   [pubkey_b64 first 12 chars]
   Hub:        [endpoint]
-  Peers:      [N] downloaded
+  Vaults:     [N] fetched, [N] already current, [N] could not be fetched
   Visibility: [public/listed/private folder counts]
   Graph:      [yes/no]
 ```

@@ -67,20 +67,24 @@ fn unb64(s: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode(s).unwrap()
 }
 
-async fn recv_client(ws: &mut WsServer) -> ClientMsg {
-    serde_json::from_value(recv_json(ws).await).expect("valid ClientMsg")
-}
-
+/// The next JSON text frame, or `None` if the connection ended or carried
+/// something that is not one.
+///
 /// Untyped, because the upload half's first message is read before the mock
 /// knows whether the client decided to upload at all.
-async fn recv_json(ws: &mut WsServer) -> serde_json::Value {
+///
+/// Fallible rather than panicking for the reason the whole mock is: it runs
+/// inside `tokio::spawn`, and a panic there does not fail the test that
+/// spawned it — it unwinds the hub and reaches the client as an ordinary
+/// transport error.
+async fn recv_json(ws: &mut WsServer) -> Option<serde_json::Value> {
     loop {
-        match ws.next().await.expect("connection closed early").expect("ws error") {
-            Message::Text(t) => return serde_json::from_str(t.as_str()).expect("valid json"),
+        match ws.next().await?.ok()? {
+            Message::Text(t) => return serde_json::from_str(t.as_str()).ok(),
             Message::Ping(d) => {
-                let _ = ws.send(Message::Pong(d)).await;
+                ws.send(Message::Pong(d)).await.ok()?;
             }
-            other => panic!("expected a JSON client message, got {other:?}"),
+            _ => return None,
         }
     }
 }
@@ -92,8 +96,11 @@ enum Fetch {
     Refuse,
 }
 
-async fn send_hub(ws: &mut WsServer, msg: &HubMsg) {
-    ws.send(Message::text(serde_json::to_string(msg).unwrap())).await.unwrap();
+/// `false` when the client has hung up, which is not the mock's complaint to
+/// make — it just stops.
+async fn send_hub(ws: &mut WsServer, msg: &HubMsg) -> bool {
+    let text = serde_json::to_string(msg).expect("HubMsg is always serialisable");
+    ws.send(Message::text(text)).await.is_ok()
 }
 
 /// Whether the mock accepts the upload it is offered.
@@ -114,11 +121,14 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
 
 /// The same, with `grants` in the `SyncReady`, a scripted answer for each
 /// `FetchIndex` the client is expected to send as a result, and the record of
-/// everything the client said after the upload half.
+/// everything the hub saw and everything it wants to complain about.
 ///
-/// The record exists because a panic inside this spawned task does not fail
-/// the test that spawned it. Anything the mock wants to complain about goes
-/// into the log instead, where an assertion can see it.
+/// **This mock never panics.** It runs inside `tokio::spawn`, where a panic
+/// does not fail the test that spawned it: it unwinds the hub, drops the
+/// socket, and reaches the client as a transport error that looks like an
+/// ordinary failed read. Every complaint goes into the record instead, and a
+/// test that asserts on the record sees it. Nothing is exempt — not an
+/// assertion, not an unscripted lookup, not a setup failure.
 async fn spawn_hub_with(
     holds: Option<HeldIndex>,
     on_upload: OnUpload,
@@ -130,55 +140,81 @@ async fn spawn_hub_with(
     let asked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&asked);
     tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.unwrap();
-        let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let note = |what: String| recorder.lock().unwrap().push(what);
+        let Ok((stream, _)) = listener.accept().await else {
+            return note("accept failed".into());
+        };
+        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else {
+            return note("websocket upgrade failed".into());
+        };
 
-        let ClientMsg::ClientHello { nonce_c, .. } = recv_client(&mut ws).await else {
-            panic!("expected client-hello")
+        let Some(hello) = recv_json(&mut ws).await else {
+            return note("no client-hello".into());
+        };
+        let Ok(ClientMsg::ClientHello { nonce_c, .. }) = serde_json::from_value(hello) else {
+            return note("first message was not a client-hello".into());
         };
         let nonce_h: [u8; 32] = rand::random();
         let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &unb64(&nonce_c), &[0u8; 32]));
-        send_hub(&mut ws, &HubMsg::HubChallenge {
+        if !send_hub(&mut ws, &HubMsg::HubChallenge {
             nonce_h: b64(&nonce_h),
             hub_key_id: hub_key_id(),
             sig_h: b64(&sig_h.to_bytes()),
         })
-        .await;
+        .await
+        {
+            return;
+        }
 
-        let _auth = recv_client(&mut ws).await;
-        send_hub(&mut ws, &HubMsg::SyncReady {
+        if recv_json(&mut ws).await.is_none() {
+            return note("no client-auth".into());
+        }
+        if !send_hub(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![VaultState { vault_id: "v1".into(), holds }],
             grants,
             revocations: vec![],
         })
-        .await;
+        .await
+        {
+            return;
+        }
 
-        // The client uploads or goes straight to the download half depending
-        // on what this hub just said it holds; the mock does not get to
-        // assume which, or it would decide the outcome it is measuring.
-        let first = recv_json(&mut ws).await;
+        // The client uploads or goes straight to the read half depending on
+        // what this hub just said it holds; the mock does not get to assume
+        // which, or it would decide the outcome it is measuring.
+        let Some(first) = recv_json(&mut ws).await else {
+            return note("nothing after sync-ready".into());
+        };
         let mut pending = if first["type"] == "upload-index" {
-            let ClientMsg::UploadIndex { vault_id, sha256, .. } =
-                serde_json::from_value(first).expect("valid upload-index")
+            let Ok(ClientMsg::UploadIndex { vault_id, sha256, .. }) =
+                serde_json::from_value(first)
             else {
-                unreachable!("matched on the tag")
+                return note("an upload-index that does not parse".into());
             };
-            let _frame = ws.next().await.unwrap().unwrap();
-            match on_upload {
+            if ws.next().await.is_none() {
+                return note("upload-index with no frame behind it".into());
+            }
+            let ack = match on_upload {
                 OnUpload::Reject => {
-                    send_hub(&mut ws, &HubMsg::Reject {
+                    let _ = send_hub(&mut ws, &HubMsg::Reject {
                         reason: "not authorized to write this vault".into(),
                     })
                     .await;
                     return;
                 }
-                OnUpload::Ack => send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256 }).await,
+                OnUpload::Ack => HubMsg::UploadAck { vault_id, sha256 },
                 OnUpload::AckWrongSha => {
-                    send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256: WRONG_SHA.into() })
-                        .await;
+                    let _ = send_hub(&mut ws, &HubMsg::UploadAck {
+                        vault_id,
+                        sha256: WRONG_SHA.into(),
+                    })
+                    .await;
                     return;
                 }
+            };
+            if !send_hub(&mut ws, &ack).await {
+                return;
             }
             None
         } else {
@@ -192,47 +228,53 @@ async fn spawn_hub_with(
             let msg = match pending.take() {
                 Some(v) => v,
                 None => match ws.next().await {
-                    Some(Ok(Message::Text(t))) => {
-                        serde_json::from_str(t.as_str()).expect("valid json")
-                    }
+                    Some(Ok(Message::Text(t))) => match serde_json::from_str(t.as_str()) {
+                        Ok(v) => v,
+                        Err(e) => return note(format!("unparseable:{e}")),
+                    },
                     Some(Ok(Message::Ping(d))) => {
-                        let _ = ws.send(Message::Pong(d)).await;
+                        if ws.send(Message::Pong(d)).await.is_err() {
+                            return;
+                        }
                         continue;
                     }
                     Some(Ok(Message::Close(_))) | None => return,
-                    Some(Ok(other)) => panic!("unexpected frame after the upload half: {other:?}"),
-                    Some(Err(e)) => panic!("ws error after the upload half: {e}"),
+                    Some(Ok(other)) => return note(format!("unexpected-frame:{other:?}")),
+                    Some(Err(e)) => return note(format!("ws-error:{e}")),
                 },
             };
             let tag = msg["type"].as_str().unwrap_or("?").to_string();
             let Ok(ClientMsg::FetchIndex { vault_id }) = serde_json::from_value(msg) else {
-                recorder.lock().unwrap().push(format!("unexpected:{tag}"));
-                return;
+                return note(format!("unexpected:{tag}"));
             };
-            recorder.lock().unwrap().push(vault_id.clone());
+            note(vault_id.clone());
             let Some((_, answer)) = fetches.iter().find(|(id, _)| *id == vault_id) else {
-                recorder.lock().unwrap().push(format!("unscripted:{vault_id}"));
-                return;
+                return note(format!("unscripted:{vault_id}"));
             };
-            match answer {
+            let (header, frame) = match answer {
                 Fetch::Serve(bytes) => {
                     use sha2::Digest;
-                    send_hub(&mut ws, &HubMsg::IndexHeader {
+                    let header = HubMsg::IndexHeader {
                         vault_id,
                         holds: Some(HeldIndex {
                             sha256: hex::encode(sha2::Sha256::digest(bytes)),
                             note_count: 3,
                             uploaded_at: 1,
                         }),
-                    })
-                    .await;
-                    ws.send(Message::binary(bytes.clone())).await.unwrap();
+                    };
+                    (header, Some(bytes.clone()))
                 }
-                Fetch::Refuse => {
-                    send_hub(&mut ws, &HubMsg::Reject {
-                        reason: "not authorized to read this vault".into(),
-                    })
-                    .await;
+                Fetch::Refuse => (
+                    HubMsg::Reject { reason: "not authorized to read this vault".into() },
+                    None,
+                ),
+            };
+            if !send_hub(&mut ws, &header).await {
+                return;
+            }
+            if let Some(bytes) = frame {
+                if ws.send(Message::binary(bytes)).await.is_err() {
+                    return;
                 }
             }
         }

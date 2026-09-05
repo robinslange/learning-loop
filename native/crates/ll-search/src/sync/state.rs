@@ -59,11 +59,14 @@ pub struct SyncState {
     /// means the cycle never reached the read half at all, which is a
     /// different report from "none failed" and must not be rendered as one.
     ///
-    /// `#[serde(default)]` so a state file written before the read half
-    /// existed still parses; `read_state` treats a parse failure as a missing
-    /// file, so a new required field would silently erase one vault's whole
-    /// sync history.
-    #[serde(default)]
+    /// An `Option` is also what keeps a state file written before this field
+    /// existed readable: serde resolves a missing `Option` to `None` on its
+    /// own, with no `#[serde(default)]` — the attribute was here and did
+    /// nothing. That compatibility matters more than it looks, because
+    /// `read_state` reports a parse failure as a missing file, so any field
+    /// added here without a default would silently erase one vault's whole
+    /// sync history rather than fail loudly. `an_old_state_file_still_reads`
+    /// is what holds that for the struct as a whole.
     pub skipped_fetches: Option<usize>,
 }
 
@@ -227,6 +230,33 @@ mod tests {
             "each write renames its temp file into place; none is left beside the target");
     }
 
+    /// Every other test here builds a `SyncState` in Rust and round-trips it
+    /// through `write_state`, which always emits every field — so none of
+    /// them can see a file that predates one. This one is written by hand.
+    ///
+    /// It guards the struct, not one field: `read_state` turns a parse
+    /// failure into `Ok(None)`, and `sync_all_async` then reads
+    /// `last_success_at` out of that `None` and drops it. So the cost of
+    /// adding a field with no default is not an error, it is one vault's
+    /// entire sync history, silently, on the first read after upgrade.
+    #[test]
+    fn an_old_state_file_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        std::fs::write(
+            sync_state_path(dir.path()),
+            r#"{"last_attempt_at":1000,"last_success_at":900,"outcome":"ok",
+                "detail":null,"hub_holds":null}"#,
+        )
+        .unwrap();
+
+        let s = read_state(dir.path()).unwrap().expect("an old state file is not a missing one");
+        assert_eq!(s.last_success_at, Some(900),
+            "the history this file exists to carry survives the upgrade");
+        assert_eq!(s.skipped_fetches, None,
+            "a cycle that ran before the read half existed skipped an unknown number, not zero");
+    }
+
     /// The file is a contract with every reader of `federation/`, not just
     /// with this module's own serde. Pin the keys and the tag.
     #[test]
@@ -236,7 +266,7 @@ mod tests {
             last_attempt_at: 1_000, last_success_at: Some(1_000),
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
-            skipped_fetches: None,
+            skipped_fetches: Some(2),
         }).unwrap();
 
         assert!(dir.path().join("federation/sync-state.json").exists(),
@@ -248,6 +278,9 @@ mod tests {
         assert_eq!(v["hub_holds"]["kind"], "index");
         assert_eq!(v["hub_holds"]["sha256"], "abc123");
         assert_eq!(v["hub_holds"]["note_count"], 3578);
+        assert_eq!(v["skipped_fetches"], 2,
+            "`ll status` reads this key out of the file; a rename that only touched \
+             the struct would leave every out-of-process reader behind");
         assert!(v.get("note_count").is_none(),
             "the count lives inside hub_holds; a loose one beside it is the field \
              that let 'holds nothing' and 'holds 3578 notes' be recorded together");

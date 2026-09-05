@@ -115,8 +115,25 @@ fn readable_vaults(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<String> {
     out
 }
 
-/// Fetch every readable vault's index. Returns what was written and the ids
-/// of the vaults that could not be.
+/// What one cycle's read half did, per vault.
+///
+/// Three outcomes, three fields, because three things can happen to a vault
+/// and a caller needs to tell them apart: `watch.rs` recomputes sessions over
+/// the local database when a peer index actually changes, and folding
+/// "already current" in with "written" would have it recompute on every tick
+/// forever.
+#[derive(Debug, Default)]
+pub struct FetchOutcome {
+    /// Vaults whose local index this cycle replaced.
+    pub fetched: Vec<Fetched>,
+    /// Vaults the hub served an index for that is byte-identical to the copy
+    /// already on disk. Nothing was written and nothing was reindexed.
+    pub unchanged: Vec<String>,
+    /// Vaults this client was entitled to read and could not.
+    pub skipped: Vec<String>,
+}
+
+/// Fetch every readable vault's index.
 ///
 /// One vault failing must not lose the others: a hub that refuses one read,
 /// or serves one index whose bytes do not match its own header, has said
@@ -129,33 +146,41 @@ pub async fn fetch_all(
     grants: &[GrantWire],
     me: &KeyId,
     now: i64,
-) -> anyhow::Result<(Vec<Fetched>, Vec<String>)> {
-    let mut fetched = Vec::new();
-    let mut skipped = Vec::new();
+) -> anyhow::Result<FetchOutcome> {
+    let mut out = FetchOutcome::default();
     for vault_id in readable_vaults(grants, me, now) {
         match fetch_one(ws, config_dir, &vault_id).await {
-            Ok(Some(one)) => {
+            Ok(Outcome::Written(one)) => {
                 eprintln!("Fetched {} ({} notes)", one.vault_id, one.note_count);
-                fetched.push(one);
+                out.fetched.push(one);
             }
-            Ok(None) => eprintln!("Hub holds no index for {vault_id} yet"),
+            Ok(Outcome::AlreadyCurrent) => {
+                eprintln!("Local copy of {vault_id} is already the index the hub holds");
+                out.unchanged.push(vault_id);
+            }
+            Ok(Outcome::HubHoldsNothing) => eprintln!("Hub holds no index for {vault_id} yet"),
             Err(e) => {
                 eprintln!("Fetch for {vault_id} failed: {e}");
-                skipped.push(vault_id);
+                out.skipped.push(vault_id);
             }
         }
     }
-    Ok((fetched, skipped))
+    Ok(out)
 }
 
-/// `Ok(None)` means the hub holds no index for this vault — a followed vault
-/// that has never uploaded, which is the ordinary state of a new peer and not
-/// a failure of anything.
+enum Outcome {
+    Written(Fetched),
+    AlreadyCurrent,
+    /// A followed vault that has never uploaded — the ordinary state of a new
+    /// peer, and not a failure of anything.
+    HubHoldsNothing,
+}
+
 async fn fetch_one(
     ws: &mut WsStream,
     config_dir: &Path,
     vault_id: &str,
-) -> anyhow::Result<Option<Fetched>> {
+) -> anyhow::Result<Outcome> {
     send_json(ws, &ClientMsg::FetchIndex { vault_id: vault_id.to_string() }).await?;
 
     let (answered, holds) = match recv_json::<HubMsg>(ws).await? {
@@ -176,7 +201,7 @@ async fn fetch_one(
     if answered != vault_id {
         anyhow::bail!("asked for {vault_id}, the hub answered for {answered}");
     }
-    let (Some(held), Some(bytes)) = (holds, body) else { return Ok(None) };
+    let (Some(held), Some(bytes)) = (holds, body) else { return Ok(Outcome::HubHoldsNothing) };
 
     // The header is the hub's claim about what it is sending; the bytes are
     // what it sent. Hash them and compare — the same check the hub runs on
@@ -191,8 +216,37 @@ async fn fetch_one(
         );
     }
 
+    // v4 skipped a peer whose cached timestamp matched before it asked for
+    // anything. v5 cannot: the hub sends the header and the frame back to
+    // back, so by the time this client knows the sha it is already holding
+    // the bytes. What it can still decline is the expensive half — the
+    // truncating overwrite of a good file, and the full FTS5 rebuild over
+    // every note behind it, on a 1500 ms debounce.
+    //
+    // Hashing the file on disk rather than trusting a recorded sha beside it:
+    // a sidecar can disagree with the file it describes, and the thing being
+    // decided is whether these exact bytes are already there.
+    if on_disk_sha(config_dir, vault_id).await? == Some(actual) {
+        return Ok(Outcome::AlreadyCurrent);
+    }
+
     write_index(config_dir, vault_id, bytes).await?;
-    Ok(Some(Fetched { vault_id: vault_id.to_string(), note_count: held.note_count }))
+    Ok(Outcome::Written(Fetched {
+        vault_id: vault_id.to_string(),
+        note_count: held.note_count,
+    }))
+}
+
+/// The sha256 of the index already cached for `vault_id`, or `None` when
+/// there is no readable file there. An unreadable one is `None` rather than
+/// an error: the fetch that would replace it is in hand.
+async fn on_disk_sha(config_dir: &Path, vault_id: &str) -> anyhow::Result<Option<String>> {
+    let path = peer_index_path(config_dir, vault_id);
+    tokio::task::spawn_blocking(move || {
+        std::fs::read(&path).ok().map(|bytes| hex::encode(Sha256::digest(&bytes)))
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("cached-index hash task panicked: {e}"))
 }
 
 async fn write_index(config_dir: &Path, vault_id: &str, bytes: Vec<u8>) -> anyhow::Result<()> {
@@ -390,12 +444,13 @@ mod tests {
     }
 
     /// Run `fetch_all` against a hub scripted with `answers`, and return what
-    /// it produced alongside every `vault_id` the hub was actually asked for.
+    /// it produced alongside everything the hub recorded — every `vault_id` it
+    /// was asked for, and any complaint of its own.
     async fn run(
         dir: &Path,
         grants: Vec<GrantWire>,
         answers: Vec<(&'static str, FetchAnswer)>,
-    ) -> ((Vec<Fetched>, Vec<String>), Vec<String>) {
+    ) -> (FetchOutcome, Vec<String>) {
         let (hub, asked) = spawn_fetch_hub(answers).await;
         let mut ws = connect(hub.addr).await;
         let out = fetch_all(&mut ws, dir, &grants, &me().1, NOW).await.unwrap();
@@ -409,7 +464,7 @@ mod tests {
     async fn an_active_follow_is_fetched_and_written() {
         let dir = tempfile::tempdir().unwrap();
         let body = index_bytes("v-other");
-        let ((fetched, skipped), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![to_me(follow("v-other"))],
             vec![("v-other", FetchAnswer::Index(body.clone()))],
@@ -417,10 +472,10 @@ mod tests {
         .await;
 
         assert_eq!(asked, vec!["v-other".to_string()]);
-        assert_eq!(skipped, Vec::<String>::new());
-        assert_eq!(fetched.len(), 1);
-        assert_eq!(fetched[0].vault_id, "v-other");
-        assert_eq!(fetched[0].note_count, 42);
+        assert_eq!(out.skipped, Vec::<String>::new());
+        assert_eq!(out.fetched.len(), 1);
+        assert_eq!(out.fetched[0].vault_id, "v-other");
+        assert_eq!(out.fetched[0].note_count, 42);
         assert_eq!(
             std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(),
             body,
@@ -434,7 +489,7 @@ mod tests {
     #[tokio::test]
     async fn an_assoc_grant_is_never_even_asked_about() {
         let dir = tempfile::tempdir().unwrap();
-        let ((fetched, skipped), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![to_me(of_kind(GrantKind::Assoc, "v-work"))],
             vec![("v-work", FetchAnswer::Index(index_bytes("v-work")))],
@@ -442,8 +497,8 @@ mod tests {
         .await;
 
         assert!(asked.is_empty(), "assoc carries no authority: the client must not ask, {asked:?}");
-        assert!(fetched.is_empty());
-        assert!(skipped.is_empty(), "not asking is not a failure to report");
+        assert!(out.fetched.is_empty());
+        assert!(out.skipped.is_empty(), "not asking is not a failure to report");
         assert!(!peer_dir(dir.path(), "v-work").exists());
     }
 
@@ -452,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn every_kind_that_authorises_a_read_is_asked_for_and_assoc_is_not() {
         let dir = tempfile::tempdir().unwrap();
-        let ((fetched, _), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![
                 to_me(of_kind(GrantKind::Follow, "v-follow")),
@@ -471,14 +526,14 @@ mod tests {
 
         assert_eq!(asked, vec!["v-follow", "v-link", "v-peer"],
             "link transfers full authority, follow and peer authorise reads, assoc nothing");
-        assert_eq!(fetched.len(), 3);
+        assert_eq!(out.fetched.len(), 3);
     }
 
     #[tokio::test]
     async fn a_pending_follow_is_not_a_licence_to_read() {
         let dir = tempfile::tempdir().unwrap();
         let pending = GrantFixture { state: "pending", ..follow("v-other") };
-        let ((_, _), asked) = run(
+        let (_out, asked) = run(
             dir.path(),
             vec![to_me(pending)],
             vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
@@ -491,7 +546,7 @@ mod tests {
     async fn an_expired_grant_is_not_asked_about() {
         let dir = tempfile::tempdir().unwrap();
         let lapsed = GrantFixture { expires_at: NOW, ..follow("v-other") };
-        let ((_, _), asked) = run(
+        let (_out, asked) = run(
             dir.path(),
             vec![to_me(lapsed)],
             vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
@@ -507,7 +562,7 @@ mod tests {
     async fn a_grant_this_client_issued_is_not_read_back() {
         let dir = tempfile::tempdir().unwrap();
         let issued_by_me = wire(&me(), &them().1, &follow("v-mine"));
-        let ((_, _), asked) = run(
+        let (_out, asked) = run(
             dir.path(),
             vec![issued_by_me],
             vec![("v-mine", FetchAnswer::Index(index_bytes("v-mine")))],
@@ -523,7 +578,7 @@ mod tests {
         let mut forged = to_me(follow("v-other"));
         forged.signature_b64 = b64.encode([0u8; 64]);
 
-        let ((_, _), asked) = run(
+        let (_out, asked) = run(
             dir.path(),
             vec![forged],
             vec![("v-other", FetchAnswer::Index(index_bytes("v-other")))],
@@ -539,14 +594,14 @@ mod tests {
     async fn an_unscoped_grant_names_no_vault_to_ask_for() {
         let dir = tempfile::tempdir().unwrap();
         let unscoped = GrantFixture { scope: None, ..follow("unused") };
-        let ((_, _), asked) = run(dir.path(), vec![to_me(unscoped)], vec![]).await;
+        let (_out, asked) = run(dir.path(), vec![to_me(unscoped)], vec![]).await;
         assert!(asked.is_empty(), "{asked:?}");
     }
 
     #[tokio::test]
     async fn a_hub_holding_nothing_writes_nothing_and_is_not_an_error() {
         let dir = tempfile::tempdir().unwrap();
-        let ((fetched, skipped), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![to_me(follow("v-empty"))],
             vec![("v-empty", FetchAnswer::Nothing)],
@@ -554,17 +609,77 @@ mod tests {
         .await;
 
         assert_eq!(asked, vec!["v-empty".to_string()], "it is asked for");
-        assert!(fetched.is_empty());
-        assert!(skipped.is_empty(),
+        assert!(out.fetched.is_empty());
+        assert!(out.skipped.is_empty(),
             "a peer that has never uploaded is the ordinary state of a new peer, not a failure");
         assert!(!peer_dir(dir.path(), "v-empty").exists());
+    }
+
+    /// v4 skipped a peer whose cached timestamp matched. v5 cannot decline
+    /// the download — the hub sends the header and frame back to back — but
+    /// it can decline the overwrite and the FTS rebuild behind it, which is
+    /// the expensive half on a 1500 ms debounce.
+    ///
+    /// The cached file is made read-only, so "it was not rewritten" is proved
+    /// rather than inferred: a `write_index` that ran would fail on EACCES
+    /// and land the vault in `skipped`. An mtime comparison would be the
+    /// obvious alternative and a weaker one — filesystem timestamp
+    /// granularity decides whether it can tell a same-second rewrite apart.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_index_identical_to_the_cached_copy_is_not_rewritten() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("v-same");
+        std::fs::create_dir_all(peer_dir(dir.path(), "v-same")).unwrap();
+        let path = peer_index_path(dir.path(), "v-same");
+        std::fs::write(&path, &body).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+
+        let (out, asked) = run(
+            dir.path(),
+            vec![to_me(follow("v-same"))],
+            vec![("v-same", FetchAnswer::Index(body.clone()))],
+        )
+        .await;
+
+        assert_eq!(asked, vec!["v-same".to_string()], "it is still asked for and still verified");
+        assert_eq!(out.unchanged, vec!["v-same".to_string()]);
+        assert!(out.fetched.is_empty(), "nothing was written, so nothing downstream should rerun");
+        assert!(out.skipped.is_empty(),
+            "an already-current vault is not a failure — and a write that was attempted \
+             would have failed on the read-only file and landed here");
+        assert_eq!(std::fs::read(&path).unwrap(), body);
+    }
+
+    /// The other side. A gate that reports everything as already-current
+    /// would satisfy the test above and quietly stop updating peer indexes
+    /// altogether.
+    #[tokio::test]
+    async fn an_index_that_differs_from_the_cached_copy_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(peer_dir(dir.path(), "v-moved")).unwrap();
+        std::fs::write(peer_index_path(dir.path(), "v-moved"), index_bytes("old")).unwrap();
+        let fresh = index_bytes("new");
+
+        let (out, _asked) = run(
+            dir.path(),
+            vec![to_me(follow("v-moved"))],
+            vec![("v-moved", FetchAnswer::Index(fresh.clone()))],
+        )
+        .await;
+
+        assert!(out.unchanged.is_empty());
+        assert_eq!(out.fetched.len(), 1);
+        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-moved")).unwrap(), fresh);
     }
 
     /// R-C. The header is a claim; the bytes are the fact.
     #[tokio::test]
     async fn a_frame_that_does_not_match_the_header_is_refused_and_nothing_is_written() {
         let dir = tempfile::tempdir().unwrap();
-        let ((fetched, skipped), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![to_me(follow("v-liar"))],
             vec![("v-liar", FetchAnswer::IndexUnderADifferentSha(index_bytes("v-liar")))],
@@ -572,8 +687,8 @@ mod tests {
         .await;
 
         assert_eq!(asked, vec!["v-liar".to_string()]);
-        assert!(fetched.is_empty());
-        assert_eq!(skipped, vec!["v-liar".to_string()]);
+        assert!(out.fetched.is_empty());
+        assert_eq!(out.skipped, vec!["v-liar".to_string()]);
         assert!(!peer_index_path(dir.path(), "v-liar").exists(),
             "written and repaired later is not a thing: nothing would know to come back");
     }
@@ -584,7 +699,7 @@ mod tests {
     async fn one_failed_fetch_does_not_lose_the_others() {
         let dir = tempfile::tempdir().unwrap();
         let body = index_bytes("v-good");
-        let ((fetched, skipped), asked) = run(
+        let (out, asked) = run(
             dir.path(),
             vec![to_me(follow("v-bad")), to_me(follow("v-good"))],
             vec![
@@ -596,9 +711,9 @@ mod tests {
 
         assert_eq!(asked, vec!["v-bad".to_string(), "v-good".to_string()],
             "the second vault is still asked for");
-        assert_eq!(skipped, vec!["v-bad".to_string()]);
-        assert_eq!(fetched.len(), 1);
-        assert_eq!(fetched[0].vault_id, "v-good");
+        assert_eq!(out.skipped, vec!["v-bad".to_string()]);
+        assert_eq!(out.fetched.len(), 1);
+        assert_eq!(out.fetched[0].vault_id, "v-good");
         assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), body);
     }
 
@@ -610,7 +725,7 @@ mod tests {
     async fn a_refused_frame_does_not_desynchronise_the_vault_after_it() {
         let dir = tempfile::tempdir().unwrap();
         let body = index_bytes("v-good");
-        let ((fetched, skipped), _) = run(
+        let (out, _asked) = run(
             dir.path(),
             vec![to_me(follow("v-liar")), to_me(follow("v-good"))],
             vec![
@@ -620,23 +735,36 @@ mod tests {
         )
         .await;
 
-        assert_eq!(skipped, vec!["v-liar".to_string()]);
-        assert_eq!(fetched.len(), 1, "the rejected frame was consumed, not left in the stream");
+        assert_eq!(out.skipped, vec!["v-liar".to_string()]);
+        assert_eq!(out.fetched.len(), 1, "the rejected frame was consumed, not left in the stream");
         assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), body);
     }
 
+    /// Every assertion here except `asked` and the trailing good vault is
+    /// satisfied by any failure at all, including the mock never having
+    /// started — which is what a hub that panicked in its spawned task looks
+    /// like from the client. So the record and the vault after it are what
+    /// make this test about the header rather than about something going
+    /// wrong.
     #[tokio::test]
     async fn a_header_naming_a_different_vault_is_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let ((fetched, skipped), _) = run(
+        let good = index_bytes("v-good");
+        let (out, asked) = run(
             dir.path(),
-            vec![to_me(follow("v-asked"))],
-            vec![("v-asked", FetchAnswer::HeaderFor("v-else", index_bytes("v-else")))],
+            vec![to_me(follow("v-asked")), to_me(follow("v-good"))],
+            vec![
+                ("v-asked", FetchAnswer::HeaderFor("v-else", index_bytes("v-else"))),
+                ("v-good", FetchAnswer::Index(good.clone())),
+            ],
         )
         .await;
 
-        assert!(fetched.is_empty());
-        assert_eq!(skipped, vec!["v-asked".to_string()]);
+        assert_eq!(asked, vec!["v-asked".to_string(), "v-good".to_string()],
+            "the hub answered both and complained about neither");
+        assert_eq!(out.skipped, vec!["v-asked".to_string()]);
+        assert_eq!(out.fetched.len(), 1, "the misdirected frame was consumed, not left in the stream");
+        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), good);
         assert!(!peer_dir(dir.path(), "v-else").exists(),
             "an answer for a vault nobody asked for must not create a cache for it");
         assert!(!peer_dir(dir.path(), "v-asked").exists());
@@ -646,7 +774,7 @@ mod tests {
     async fn a_vault_id_that_is_not_a_safe_path_component_is_never_asked_for() {
         let dir = tempfile::tempdir().unwrap();
         let traversal = GrantFixture { scope: Some("../../escaped"), ..follow("unused") };
-        let ((_, _), asked) = run(dir.path(), vec![to_me(traversal)], vec![]).await;
+        let (_out, asked) = run(dir.path(), vec![to_me(traversal)], vec![]).await;
         assert!(asked.is_empty(), "{asked:?}");
         assert!(!dir.path().join("../../escaped").exists());
     }

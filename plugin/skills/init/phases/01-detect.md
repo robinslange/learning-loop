@@ -68,7 +68,7 @@ Learning Loop Setup
   Dependencies:  all satisfied
   Search index:  2,031 notes indexed
   Federation:    configured (peer registered, hub connected)
-  Hub sync:      working (1,200 notes exported, 1 peer downloaded)
+  Hub sync:      working (1,200 notes exported, 1 vault fetched)
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   AGENTS.md:     ~/.codex/AGENTS.md (learning-loop section present)
   Librarian:     [status]
@@ -88,7 +88,7 @@ Everything looks good. Nothing to set up.
 **Federation status rules:**
 
 - Only report what the connectivity test actually returned. Never infer or guess peer registration status.
-- If sync succeeded: report note counts and peers downloaded.
+- If sync succeeded: report note counts and vaults fetched. A non-zero "could not be fetched" count means the client holds a grant it could not read through; report it rather than folding it into success.
 - If sync failed with auth error: report "auth failed: your pubkey may not be registered on the hub."
 - If sync failed with connection error: report "hub unreachable: check Tailscale and hub endpoint."
 - If no federation config: report "not configured."
