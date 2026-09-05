@@ -34,6 +34,9 @@ type WsServer = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 const LOCAL_NOTE_COUNT: i64 = 7;
 const HUB_NOTE_COUNT: i64 = 3578;
 
+/// An index the client never sent, for the hub to acknowledge instead.
+const WRONG_SHA: &str = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeefbeef";
+
 fn test_env() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     ONCE.call_once(|| {
@@ -89,6 +92,8 @@ async fn send_hub(ws: &mut WsServer, msg: &HubMsg) {
 enum OnUpload {
     Ack,
     Reject,
+    /// Acknowledge an index other than the one that was sent.
+    AckWrongSha,
 }
 
 /// A hub that completes the v5 handshake advertising `holds` for vault `v1`,
@@ -141,6 +146,11 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
                     return;
                 }
                 OnUpload::Ack => send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256 }).await,
+                OnUpload::AckWrongSha => {
+                    send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256: WRONG_SHA.into() })
+                        .await;
+                    return;
+                }
             }
             recv_json(&mut ws).await
         } else {
@@ -368,4 +378,39 @@ async fn a_failure_after_a_success_keeps_the_last_success_time() {
     let state = read_state(dir.path()).unwrap().unwrap();
     assert_eq!(state.outcome, OUTCOME_ERROR);
     assert_eq!(state.last_success_at, succeeded_at);
+}
+
+/// We hashed the bytes, so a hub acknowledging a different index is
+/// contradicting the side that knows. The cycle fails, and — the part that
+/// matters here — the hub's claim never reaches our own state file.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_index_the_hub_acked_but_we_never_sent_is_not_recorded() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let addr = spawn_hub(stale(), OnUpload::AckWrongSha).await;
+    let config = config_for(dir.path(), addr);
+    place_export(dir.path());
+
+    let err =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect_err("an unaccountable ack fails the cycle");
+    assert!(err.to_string().contains(&export_sha(dir.path())), "names what we sent: {err}");
+    assert!(err.to_string().contains(WRONG_SHA), "names what the hub acked: {err}");
+
+    let holds = read_state(dir.path()).unwrap().unwrap().hub_holds;
+    assert_ne!(
+        holds,
+        Some(HubHolds::Index { sha256: WRONG_SHA.into(), note_count: LOCAL_NOTE_COUNT }),
+        "the hub's claim must not become our record of what it holds",
+    );
+    assert_eq!(
+        holds,
+        Some(HubHolds::Index {
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            note_count: HUB_NOTE_COUNT,
+        }),
+        "what stands is the handshake report, unchanged by a failed upload",
+    );
 }

@@ -458,6 +458,18 @@ async fn upload_index(
         other => anyhow::bail!("expected upload-ack, got: {other:?}"),
     };
 
+    // We hashed these bytes ourselves, so we are the side holding ground
+    // truth. A hub acknowledging a different index has stored something we
+    // cannot account for; fail loud rather than write its claim into our own
+    // state file.
+    if acked_sha != prepared.hash {
+        anyhow::bail!(
+            "hub acknowledged a different index than we sent: we declared {}, it acked \
+             {acked_sha}",
+            prepared.hash,
+        );
+    }
+
     std::fs::write(
         last_export_mtime_path(config_dir),
         prepared.current_max_mtime.to_string(),
@@ -466,10 +478,13 @@ async fn upload_index(
     Ok(Uploaded {
         note_count: prepared.note_count,
         skipped: false,
-        // The sha is the hub's own acknowledgement of what it stored. The
-        // count cannot be: v5's UploadAck carries none, so it is the count we
-        // declared alongside those bytes.
-        hub_holds: HubHolds::Index { sha256: acked_sha, note_count: prepared.note_count },
+        // Checked against the ack just above, so this is the index the hub
+        // confirmed. The count is not: v5's UploadAck carries none, so it is
+        // the count we declared alongside those bytes.
+        hub_holds: HubHolds::Index {
+            sha256: prepared.hash.clone(),
+            note_count: prepared.note_count,
+        },
     })
 }
 
@@ -1094,6 +1109,39 @@ mod tests {
         // The fixture's mtime is 7, so a swallowed reject would advance this to "7".
         assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
             "a rejected upload must not advance the re-export watermark");
+    }
+
+    #[tokio::test]
+    async fn a_hub_that_acks_a_different_index_fails_the_upload() {
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let _decl = ws.next().await;
+            let _frame = ws.next().await;
+            let ack = HubMsg::UploadAck {
+                vault_id: "v1".into(),
+                sha256: "beef".repeat(16),
+            };
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+        })
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        let mtime_path = last_export_mtime_path(dir.path());
+        std::fs::write(&mtime_path, "1").unwrap();
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v1".into());
+        let prepared = prepared_fixture(b"x".to_vec());
+        let mut ws = client_to(addr).await;
+
+        let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
+        let err = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(&prepared.hash), "the error names what we sent: {err}");
+        assert!(err.contains(&"beef".repeat(16)), "and what the hub acked: {err}");
+        assert_eq!(std::fs::read_to_string(&mtime_path).unwrap(), "1",
+            "an unaccountable ack must not advance the re-export watermark either");
     }
 
     /// The upload writes the re-export watermark and the next export reads
