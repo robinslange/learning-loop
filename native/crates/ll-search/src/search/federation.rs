@@ -41,8 +41,7 @@ pub fn discover_peer_dbs_for(scope: &QueryScope, local_model_id: &str) -> Vec<(S
 }
 
 pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
-    let peers_dir = config_dir.join("federation").join("data").join("peers");
-    let entries = match std::fs::read_dir(&peers_dir) {
+    let entries = match std::fs::read_dir(crate::sync::config::peers_dir(config_dir)) {
         Ok(e) => e,
         Err(_) => return Vec::new(),
     };
@@ -53,7 +52,7 @@ pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String
             continue;
         }
         let peer_id = entry.file_name().to_string_lossy().to_string();
-        let db_path = entry.path().join("index.db");
+        let db_path = crate::sync::config::peer_index_path(config_dir, &peer_id);
         if !db_path.exists() {
             continue;
         }

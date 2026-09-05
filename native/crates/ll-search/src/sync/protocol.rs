@@ -1,14 +1,11 @@
 //! Sync protocol surface: cross-cutting constants and re-exports of the
-//! control-plane messages (`messages`), data-plane frames (`frame`), and
-//! wire timestamp (`time`).
+//! control-plane messages (`messages`) and data-plane frames (`frame`).
 
 mod frame;
 mod messages;
-mod time;
 
 pub use frame::{manifest_root, ChunkedFrame, Envelope};
-pub use messages::{ClientMessage, EnvelopeMeta, HubMessage, PeerInfo};
-pub use time::PeerTimestamp;
+pub use messages::{ClientMessage, HubMessage};
 
 /// Maximum envelope size accepted on either send or receive.
 ///

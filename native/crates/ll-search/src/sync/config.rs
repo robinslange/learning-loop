@@ -184,6 +184,24 @@ pub fn peers_dir(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("peers")
 }
 
+/// The cache directory for one vault this client may read. Keyed by
+/// `vault_id`, which is what a grant names — v4 keyed it by display name and
+/// nothing in v5 knows a peer by that.
+///
+/// `vault_id` reaches this from a grant statement and lands in a path, so
+/// callers validate it first; `sync::fetch::is_safe_vault_id` is that check
+/// and the only producer of the ids this is called with.
+pub fn peer_dir(config_dir: &Path, vault_id: &str) -> PathBuf {
+    peers_dir(config_dir).join(vault_id)
+}
+
+/// The index a fetch writes and `discover_peer_dbs` reads back. One helper
+/// for both ends: a bare `index.db` literal at two call sites has already
+/// cost this branch one defect.
+pub fn peer_index_path(config_dir: &Path, vault_id: &str) -> PathBuf {
+    peer_dir(config_dir, vault_id).join("index.db")
+}
+
 /// What the last sync cycle did — written on every cycle, succeeded or not.
 /// A missing file means no cycle has ever finished writing one, which is a
 /// different report from "the last cycle was fine" and must not be rendered

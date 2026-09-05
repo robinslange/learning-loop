@@ -302,3 +302,105 @@ pub async fn fake_hub_that_rejects_the_invite() -> MockHub {
     hub.hellos = hellos;
     hub
 }
+
+/// The count every [`spawn_fetch_hub`] index header declares. Arbitrary, and
+/// deliberately not the length of anything, so a test asserting on it is
+/// reading the hub's claim rather than recomputing it.
+pub const FETCH_NOTE_COUNT: i64 = 42;
+
+/// How a [`spawn_fetch_hub`] answers one `FetchIndex`.
+pub enum FetchAnswer {
+    /// `IndexHeader` declaring the sha256 of these bytes, then the bytes as
+    /// one binary frame — what a healthy hub does.
+    Index(Vec<u8>),
+    /// The same, with a header declaring a sha256 that is not these bytes'.
+    /// The frame still follows, because that is what the header promised.
+    IndexUnderADifferentSha(Vec<u8>),
+    /// A header for a vault other than the one asked for, honestly hashed,
+    /// with its frame. A hub that answers the wrong question.
+    HeaderFor(&'static str, Vec<u8>),
+    /// `IndexHeader { holds: None }` and no frame: the hub has nothing for
+    /// this vault yet.
+    Nothing,
+    Reject(&'static str),
+}
+
+fn index_header(vault_id: &str, sha256: String) -> HubMsg {
+    HubMsg::IndexHeader {
+        vault_id: vault_id.to_string(),
+        holds: Some(HeldIndex { sha256, note_count: FETCH_NOTE_COUNT, uploaded_at: 1 }),
+    }
+}
+
+/// A hub that answers `FetchIndex` from a scripted table, and the record of
+/// every `vault_id` it was asked for.
+///
+/// The record is the point. `assoc` grants no authority, and the invariant is
+/// that the client does not ASK — a hub that merely refused would leave that
+/// untested, because refusing everything looks identical from the outside.
+///
+/// A `FetchIndex` for a vault the table does not name is a panic, not a
+/// reject: it means the client asked for something no test set up, which is
+/// the failure a silent reject would hide.
+pub async fn spawn_fetch_hub(
+    answers: Vec<(&'static str, FetchAnswer)>,
+) -> (MockHub, Arc<Mutex<Vec<String>>>) {
+    use sha2::{Digest, Sha256};
+
+    let asked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&asked);
+    let hub = spawn_mock_hub(move |mut ws| async move {
+        let mut answers = answers;
+        loop {
+            let msg = match ws.next().await {
+                Some(Ok(Message::Text(t))) => {
+                    serde_json::from_str::<ClientMsg>(t.as_str()).expect("valid ClientMsg json")
+                }
+                Some(Ok(Message::Ping(d))) => {
+                    let _ = ws.send(Message::Pong(d)).await;
+                    continue;
+                }
+                Some(Ok(_)) => continue,
+                Some(Err(_)) | None => return,
+            };
+            let ClientMsg::FetchIndex { vault_id } = msg else {
+                panic!("this hub serves fetch-index and nothing else, got {msg:?}")
+            };
+            recorder.lock().unwrap().push(vault_id.clone());
+
+            let position = answers
+                .iter()
+                .position(|(id, _)| *id == vault_id)
+                .unwrap_or_else(|| panic!("no scripted answer for {vault_id}"));
+            let (_, answer) = answers.remove(position);
+            match answer {
+                FetchAnswer::Index(bytes) => {
+                    let sha = hex::encode(Sha256::digest(&bytes));
+                    send_hub_msg(&mut ws, &index_header(&vault_id, sha)).await;
+                    ws.send(Message::binary(bytes)).await.unwrap();
+                }
+                FetchAnswer::IndexUnderADifferentSha(bytes) => {
+                    send_hub_msg(&mut ws, &index_header(&vault_id, "be".repeat(32))).await;
+                    ws.send(Message::binary(bytes)).await.unwrap();
+                }
+                FetchAnswer::HeaderFor(other, bytes) => {
+                    let sha = hex::encode(Sha256::digest(&bytes));
+                    send_hub_msg(&mut ws, &index_header(other, sha)).await;
+                    ws.send(Message::binary(bytes)).await.unwrap();
+                }
+                FetchAnswer::Nothing => {
+                    send_hub_msg(&mut ws, &HubMsg::IndexHeader {
+                        vault_id: vault_id.clone(),
+                        holds: None,
+                    })
+                    .await;
+                }
+                FetchAnswer::Reject(reason) => {
+                    send_hub_msg(&mut ws, &HubMsg::Reject { reason: reason.into() }).await;
+                }
+            }
+        }
+    })
+    .await;
+    (hub, asked)
+}

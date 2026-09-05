@@ -11,6 +11,7 @@
 
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
@@ -19,9 +20,10 @@ use ll_search::sync::client::sync_all_async;
 use ll_search::sync::config::{
     export_db_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig,
 };
+use ll_search::sync::grant::{canonical_bytes, GrantKind, GrantStatement};
 use ll_search::sync::key_id::KeyId;
 use ll_search::sync::protocol_v5::{
-    hub_challenge_message, ClientMsg, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
+    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
 };
 use ll_search::sync::state::{read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
 use tokio::net::TcpListener;
@@ -69,8 +71,8 @@ async fn recv_client(ws: &mut WsServer) -> ClientMsg {
     serde_json::from_value(recv_json(ws).await).expect("valid ClientMsg")
 }
 
-/// Untyped, because the download half still speaks v4 and its messages are
-/// not `ClientMsg` variants.
+/// Untyped, because the upload half's first message is read before the mock
+/// knows whether the client decided to upload at all.
 async fn recv_json(ws: &mut WsServer) -> serde_json::Value {
     loop {
         match ws.next().await.expect("connection closed early").expect("ws error") {
@@ -81,6 +83,13 @@ async fn recv_json(ws: &mut WsServer) -> serde_json::Value {
             other => panic!("expected a JSON client message, got {other:?}"),
         }
     }
+}
+
+/// How the hub answers a `FetchIndex` for one vault.
+#[derive(Clone)]
+enum Fetch {
+    Serve(Vec<u8>),
+    Refuse,
 }
 
 async fn send_hub(ws: &mut WsServer, msg: &HubMsg) {
@@ -97,10 +106,29 @@ enum OnUpload {
 }
 
 /// A hub that completes the v5 handshake advertising `holds` for vault `v1`,
-/// takes an upload if one is offered, and reports no peers.
+/// takes an upload if one is offered, and carries no grants — so the client
+/// has nothing it may read and must close without asking for anything.
 async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr {
+    spawn_hub_with(holds, on_upload, vec![], vec![]).await.0
+}
+
+/// The same, with `grants` in the `SyncReady`, a scripted answer for each
+/// `FetchIndex` the client is expected to send as a result, and the record of
+/// everything the client said after the upload half.
+///
+/// The record exists because a panic inside this spawned task does not fail
+/// the test that spawned it. Anything the mock wants to complain about goes
+/// into the log instead, where an assertion can see it.
+async fn spawn_hub_with(
+    holds: Option<HeldIndex>,
+    on_upload: OnUpload,
+    grants: Vec<GrantWire>,
+    fetches: Vec<(String, Fetch)>,
+) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let asked: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&asked);
     tokio::spawn(async move {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
@@ -121,7 +149,7 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
         send_hub(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![VaultState { vault_id: "v1".into(), holds }],
-            grants: vec![],
+            grants,
             revocations: vec![],
         })
         .await;
@@ -129,10 +157,10 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
         // The client uploads or goes straight to the download half depending
         // on what this hub just said it holds; the mock does not get to
         // assume which, or it would decide the outcome it is measuring.
-        let next = recv_json(&mut ws).await;
-        let next = if next["type"] == "upload-index" {
+        let first = recv_json(&mut ws).await;
+        let mut pending = if first["type"] == "upload-index" {
             let ClientMsg::UploadIndex { vault_id, sha256, .. } =
-                serde_json::from_value(next).expect("valid upload-index")
+                serde_json::from_value(first).expect("valid upload-index")
             else {
                 unreachable!("matched on the tag")
             };
@@ -152,16 +180,97 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
                     return;
                 }
             }
-            recv_json(&mut ws).await
+            None
         } else {
-            next
+            Some(first)
         };
 
-        // The download half is still v4 on the wire and untouched here.
-        assert_eq!(next["type"], "list-peers", "unexpected message after the upload half");
-        let _ = ws.send(Message::text(r#"{"type":"peer-list","peers":[]}"#)).await;
+        // The read half. v5 asks only for what a grant names, so a hub that
+        // carried none must see the connection close here rather than a
+        // request to list anything.
+        loop {
+            let msg = match pending.take() {
+                Some(v) => v,
+                None => match ws.next().await {
+                    Some(Ok(Message::Text(t))) => {
+                        serde_json::from_str(t.as_str()).expect("valid json")
+                    }
+                    Some(Ok(Message::Ping(d))) => {
+                        let _ = ws.send(Message::Pong(d)).await;
+                        continue;
+                    }
+                    Some(Ok(Message::Close(_))) | None => return,
+                    Some(Ok(other)) => panic!("unexpected frame after the upload half: {other:?}"),
+                    Some(Err(e)) => panic!("ws error after the upload half: {e}"),
+                },
+            };
+            let tag = msg["type"].as_str().unwrap_or("?").to_string();
+            let Ok(ClientMsg::FetchIndex { vault_id }) = serde_json::from_value(msg) else {
+                recorder.lock().unwrap().push(format!("unexpected:{tag}"));
+                return;
+            };
+            recorder.lock().unwrap().push(vault_id.clone());
+            let Some((_, answer)) = fetches.iter().find(|(id, _)| *id == vault_id) else {
+                recorder.lock().unwrap().push(format!("unscripted:{vault_id}"));
+                return;
+            };
+            match answer {
+                Fetch::Serve(bytes) => {
+                    use sha2::Digest;
+                    send_hub(&mut ws, &HubMsg::IndexHeader {
+                        vault_id,
+                        holds: Some(HeldIndex {
+                            sha256: hex::encode(sha2::Sha256::digest(bytes)),
+                            note_count: 3,
+                            uploaded_at: 1,
+                        }),
+                    })
+                    .await;
+                    ws.send(Message::binary(bytes.clone())).await.unwrap();
+                }
+                Fetch::Refuse => {
+                    send_hub(&mut ws, &HubMsg::Reject {
+                        reason: "not authorized to read this vault".into(),
+                    })
+                    .await;
+                }
+            }
+        }
     });
-    addr
+    (addr, asked)
+}
+
+/// A signed, active `follow` from a fresh key to `to`, scoped to `vault_id` —
+/// the wire shape the handshake delivers.
+fn follow_grant(to: &KeyId, vault_id: &str) -> GrantWire {
+    let issuer = SigningKey::from_bytes(&[19u8; 32]);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let statement = GrantStatement {
+        v: 5,
+        kind: GrantKind::Follow,
+        from: KeyId::from_pubkey(&issuer.verifying_key()),
+        to: to.clone(),
+        scope: Some(vault_id.to_string()),
+        issued_at: now - 1,
+        expires_at: now + 86_400,
+        nonce: "ZmFrZS1ub25jZQ".into(),
+    };
+    let bytes = canonical_bytes(&statement);
+    let sig = issuer.sign(&bytes);
+    GrantWire {
+        statement_b64: b64(&bytes),
+        signature_b64: b64(&sig.to_bytes()),
+        state: "active".into(),
+    }
+}
+
+/// This client's own key id, from the seed `config_for` generated.
+fn client_key_id(config_dir: &Path) -> KeyId {
+    let seed = ll_search::sync::seed_store::load_or_create(config_dir).expect("seed");
+    KeyId::from_pubkey(&seed.signing_key.verifying_key())
 }
 
 fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
@@ -414,4 +523,112 @@ async fn an_index_the_hub_acked_but_we_never_sent_is_not_recorded() {
         }),
         "what stands is the handshake report, unchanged by a failed upload",
     );
+}
+
+/// R-D, end to end. One followed vault the hub refuses, one it serves. The
+/// refusal must not cost the other vault its fetch, and the count must reach
+/// the state file — a read half that quietly fetched nothing is the shape of
+/// the outage this project exists to undo.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let served = b"pretend-this-is-a-peer-index".to_vec();
+    let (addr, asked) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack,
+        vec![follow_grant(&me, "v-refused"), follow_grant(&me, "v-served")],
+        vec![
+            ("v-refused".to_string(), Fetch::Refuse),
+            ("v-served".to_string(), Fetch::Serve(served.clone())),
+        ],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+
+    let result =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect("one refused read does not fail the cycle");
+
+    assert_eq!(result.skipped_fetches, vec!["v-refused".to_string()]);
+    assert_eq!(result.fetched.len(), 1, "the second vault was still fetched");
+    assert_eq!(
+        std::fs::read(dir.path().join("federation/data/peers/v-served/index.db")).unwrap(),
+        served,
+    );
+
+    assert_eq!(*asked.lock().unwrap(), vec!["v-refused".to_string(), "v-served".to_string()],
+        "the refusal did not stop the client asking for the next one");
+
+    let state = read_state(dir.path()).unwrap().unwrap();
+    assert_eq!(state.outcome, OUTCOME_OK);
+    assert_eq!(state.skipped_fetches, Some(1),
+        "a partial read failure is recorded, not swallowed");
+}
+
+/// The other side of it. `Some(1)` above only means something if a cycle that
+/// read everything records `Some(0)` rather than the same number.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_read_everything_records_no_skips() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (addr, asked) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack,
+        vec![follow_grant(&me, "v-served")],
+        vec![("v-served".to_string(), Fetch::Serve(b"peer-index".to_vec()))],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes");
+
+    assert_eq!(*asked.lock().unwrap(), vec!["v-served".to_string()]);
+    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, Some(0));
+}
+
+/// The v4 download half opened with `list-peers` on every cycle, grant or no
+/// grant. v5 asks for what a grant names and nothing else, so a hub carrying
+/// none must see the connection close without a word.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_with_no_grants_asks_the_hub_for_nothing() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let (addr, asked) = spawn_hub_with(stale(), OnUpload::Ack, vec![], vec![]).await;
+    let config = config_for(dir.path(), addr);
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes");
+
+    assert!(asked.lock().unwrap().is_empty(),
+        "nothing was said after the upload: {:?}", asked.lock().unwrap());
+    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, Some(0));
+}
+
+/// A cycle that never reached the read half must not report "none failed".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_died_before_the_read_half_records_nothing_about_it() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let config = config_for(dir.path(), "127.0.0.1:1".parse().unwrap());
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect_err("precondition: this cycle cannot succeed");
+
+    assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, None,
+        "unknown is a different report from zero and must not be rendered as one");
 }

@@ -55,6 +55,16 @@ pub struct SyncState {
     pub detail: Option<String>,
     /// `None` means the cycle never got far enough to ask the hub.
     pub hub_holds: Option<HubHolds>,
+    /// How many vaults this cycle was entitled to read and could not. `None`
+    /// means the cycle never reached the read half at all, which is a
+    /// different report from "none failed" and must not be rendered as one.
+    ///
+    /// `#[serde(default)]` so a state file written before the read half
+    /// existed still parses; `read_state` treats a parse failure as a missing
+    /// file, so a new required field would silently erase one vault's whole
+    /// sync history.
+    #[serde(default)]
+    pub skipped_fetches: Option<usize>,
 }
 
 /// Read the recorded state, or `None` when there is nothing readable there.
@@ -134,6 +144,7 @@ mod tests {
             outcome: "error".into(),
             detail: Some("hub key mismatch".into()),
             hub_holds: None,
+            skipped_fetches: None,
         }).unwrap();
 
         let s = read_state(dir.path()).unwrap().unwrap();
@@ -151,6 +162,7 @@ mod tests {
             last_attempt_at: 1_000, last_success_at: Some(1_000),
             outcome: "ok".into(), detail: None,
             hub_holds: Some(HubHolds::Nothing),
+            skipped_fetches: None,
         }).unwrap();
         assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds,
                    Some(HubHolds::Nothing));
@@ -182,6 +194,7 @@ mod tests {
             outcome: OUTCOME_ERROR.into(),
             detail: Some("no federation seed found".into()),
             hub_holds: None,
+            skipped_fetches: None,
         }).unwrap();
 
         assert_eq!(read_state(dir.path()).unwrap().unwrap().outcome, OUTCOME_ERROR);
@@ -194,12 +207,14 @@ mod tests {
             last_attempt_at: 1_000, last_success_at: Some(1_000),
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc".into(), note_count: 1 }),
+            skipped_fetches: None,
         };
         write_state(dir.path(), &first).unwrap();
         let second = SyncState {
             last_attempt_at: 2_000, last_success_at: Some(1_000),
             outcome: OUTCOME_ERROR.into(), detail: Some("hub unreachable".into()),
             hub_holds: None,
+            skipped_fetches: None,
         };
         write_state(dir.path(), &second).unwrap();
 
@@ -221,6 +236,7 @@ mod tests {
             last_attempt_at: 1_000, last_success_at: Some(1_000),
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
+            skipped_fetches: None,
         }).unwrap();
 
         assert!(dir.path().join("federation/sync-state.json").exists(),
@@ -240,6 +256,7 @@ mod tests {
             last_attempt_at: 1_000, last_success_at: Some(1_000),
             outcome: OUTCOME_OK.into(), detail: None,
             hub_holds: Some(HubHolds::Nothing),
+            skipped_fetches: None,
         }).unwrap();
         let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();

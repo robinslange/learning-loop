@@ -364,8 +364,8 @@ async fn main() {
                         &config_dir,
                         &config,
                     ).await {
-                        Ok(sync_result) => eprintln!("Sync: uploaded {} notes, downloaded {} peers",
-                            sync_result.uploaded_notes, sync_result.downloaded.len()),
+                        Ok(sync_result) => eprintln!("Sync: uploaded {} notes, fetched {} vaults",
+                            sync_result.uploaded_notes, sync_result.fetched.len()),
                         Err(e) => eprintln!("Sync failed: {e}"),
                     }
                 }

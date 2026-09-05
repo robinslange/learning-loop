@@ -10,6 +10,7 @@ pub mod protocol_v5;
 pub mod grant;
 pub mod handshake;
 pub mod client;
+pub mod fetch;
 pub mod compression;
 pub mod watch;
 pub mod key_id;

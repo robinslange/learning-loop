@@ -9,20 +9,16 @@ use sha2::{Sha256, Digest};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
-use super::config::{
-    export_db_path, last_export_mtime_path, peers_dir, seed_path, FederationConfig,
-};
+use super::config::{export_db_path, last_export_mtime_path, seed_path, FederationConfig};
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
+use super::fetch::{fetch_all, Fetched};
 use super::handshake::SyncReadyPayload;
-use super::protocol::{
-    ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp, ENVELOPE_HEADER_LEN,
-    HUB_INBOUND_CAP, PROTOCOL_VERSION_FRAMED,
-};
+use super::key_id::KeyId;
+use super::protocol::{ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP};
 use super::protocol_v5::{ClientMsg, HubMsg, VaultState};
 use super::state::{self, HubHolds, SyncState};
 
-const META_FILE_VERSION: u32 = 2;
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -99,25 +95,16 @@ pub(super) fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
     )
 }
 
-fn is_safe_peer_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 128
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
 #[derive(Debug, Serialize)]
 pub struct SyncResult {
     pub export: Option<ExportResult>,
     pub uploaded_notes: i64,
     pub skipped_upload: bool,
-    pub downloaded: Vec<DownloadedPeer>,
-    pub skipped: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DownloadedPeer {
-    pub peer_id: String,
-    pub note_count: i64,
+    /// The vaults this cycle read through a grant, and wrote.
+    pub fetched: Vec<Fetched>,
+    /// The vaults it was entitled to read and could not. One failure does not
+    /// abort the others, so this is how they stay visible.
+    pub skipped_fetches: Vec<String>,
 }
 
 /// Run one sync cycle and record what it did, whether it worked or not.
@@ -138,8 +125,11 @@ pub async fn sync_all_async(
     let outcome = run_cycle(source_db, vault_path, config_dir, config, &mut known_holds).await;
 
     let now = unix_now();
-    let (outcome_label, detail, last_success_at) = match &outcome {
-        Ok(_) => (state::OUTCOME_OK, None, Some(now)),
+    // `None` on the error path rather than 0: the read half runs last, so a
+    // cycle that failed never reached it and "nothing was skipped" would be a
+    // claim it is in no position to make.
+    let (outcome_label, detail, last_success_at, skipped_fetches) = match &outcome {
+        Ok(result) => (state::OUTCOME_OK, None, Some(now), Some(result.skipped_fetches.len())),
         Err(e) => (
             state::OUTCOME_ERROR,
             Some(e.to_string()),
@@ -151,6 +141,7 @@ pub async fn sync_all_async(
                 .ok()
                 .flatten()
                 .and_then(|prev| prev.last_success_at),
+            None,
         ),
     };
     // Failing to record the cycle must never mask the cycle's own error.
@@ -160,6 +151,7 @@ pub async fn sync_all_async(
         outcome: outcome_label.to_string(),
         detail,
         hub_holds: known_holds,
+        skipped_fetches,
     });
 
     outcome
@@ -191,7 +183,6 @@ async fn run_cycle(
 
     let (mut ws, ready) =
         connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id, None).await?;
-    let framed_path = ready.protocol_version >= PROTOCOL_VERSION_FRAMED;
 
     let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
     // What the hub reported at the handshake. Everything after this point
@@ -201,7 +192,12 @@ async fn run_cycle(
     let uploaded = upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
     *known_holds = Some(uploaded.hub_holds);
 
-    let (downloaded, skipped) = download_peers(&mut ws, config_dir, framed_path).await?;
+    // The read half asks for exactly the vaults this key's grants entitle it
+    // to. The hub named them at the handshake; nothing here asks it to list
+    // anything.
+    let me = KeyId::from_pubkey(&seed.verifying_key());
+    let (fetched, skipped_fetches) =
+        fetch_all(&mut ws, config_dir, &ready.grants, &me, unix_now()).await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
@@ -210,8 +206,8 @@ async fn run_cycle(
         export: prepared.result,
         uploaded_notes: uploaded.note_count,
         skipped_upload: uploaded.skipped,
-        downloaded,
-        skipped,
+        fetched,
+        skipped_fetches,
     })
 }
 
@@ -491,165 +487,6 @@ async fn upload_index(
     })
 }
 
-async fn download_peers(
-    ws: &mut WsStream,
-    config_dir: &Path,
-    framed_path: bool,
-) -> anyhow::Result<(Vec<DownloadedPeer>, Vec<String>)> {
-    send_json(ws, &ClientMessage::ListPeers).await?;
-    let peer_list = recv_json::<HubMessage>(ws).await?;
-    let peers = match peer_list {
-        HubMessage::PeerList { peers } => peers,
-        other => anyhow::bail!("expected peer-list, got: {other:?}"),
-    };
-    eprintln!("{} peers available", peers.len());
-
-    let peers_base = peers_dir(config_dir);
-    let mut downloaded = Vec::new();
-    let mut skipped = Vec::new();
-
-    for peer in &peers {
-        if !is_safe_peer_id(&peer.peer_id) {
-            eprintln!("rejecting peer with unsafe peer_id: {:?}", peer.peer_id);
-            continue;
-        }
-        let peer_dir = peers_base.join(&peer.peer_id);
-        let meta_path = peer_dir.join("index.db.meta");
-
-        if peer_is_fresh(&meta_path, &peer.updated_at) {
-            eprintln!("Peer {} up to date, skipping", peer.peer_id);
-            skipped.push(peer.peer_id.clone());
-            continue;
-        }
-
-        let peer_framed = framed_path
-            && peer.protocol_version.map(|v| v >= PROTOCOL_VERSION_FRAMED).unwrap_or(true);
-
-        eprintln!("Fetching index for {} (framed={peer_framed})...", peer.peer_id);
-
-        send_json(ws, &ClientMessage::GetPeerEnvelope {
-            peer_id: peer.peer_id.clone(),
-        }).await?;
-        let envelope_msg = recv_json::<HubMessage>(ws).await?;
-        let envelope_meta = match envelope_msg {
-            HubMessage::PeerEnvelope { envelope: Some(ref env) } => {
-                EnvelopeMeta::from_value(env).ok()
-            }
-            _ => None,
-        };
-
-        send_json(ws, &ClientMessage::GetPeerIndex {
-            peer_id: peer.peer_id.clone(),
-        }).await?;
-
-        let raw = match recv_binary_or_reject(ws).await? {
-            Some(bytes) => bytes,
-            None => continue,
-        };
-
-        let data = if peer_framed {
-            match Envelope::decode(&raw) {
-                Ok(env) => {
-                    if let Some(ref meta) = envelope_meta {
-                        if !hash_matches(&env.hash, &meta.sha256) {
-                            eprintln!("Peer {} frame-vs-meta hash mismatch, skipping", peer.peer_id);
-                            continue;
-                        }
-                    }
-                    env.body
-                }
-                Err(e) => {
-                    eprintln!("Peer {} frame decode failed: {e}, skipping", peer.peer_id);
-                    continue;
-                }
-            }
-        } else {
-            if raw.len() > 100 * 1024 * 1024 {
-                eprintln!("Peer {} index too large ({}MB), skipping",
-                    peer.peer_id, raw.len() / 1024 / 1024);
-                continue;
-            }
-            if let Some(ref meta) = envelope_meta {
-                let actual = hex::encode(Sha256::digest(&raw));
-                if actual != meta.sha256 {
-                    eprintln!("Peer {} hash mismatch, skipping", peer.peer_id);
-                    continue;
-                }
-            }
-            raw
-        };
-
-        std::fs::create_dir_all(&peer_dir)?;
-        let peer_db_path = peer_dir.join("index.db");
-        let peer_db_owned = peer_db_path.clone();
-        tokio::task::spawn_blocking(move || std::fs::write(&peer_db_owned, &data))
-            .await
-            .map_err(|e| anyhow::anyhow!("peer write task panicked: {e}"))??;
-        let peer_db_owned = peer_db_path.clone();
-        let peer_id_owned = peer.peer_id.clone();
-        if let Err(e) = tokio::task::spawn_blocking(move || ensure_peer_fts(&peer_db_owned))
-            .await
-            .map_err(|e| anyhow::anyhow!("ensure_peer_fts task panicked: {e}"))?
-        {
-            eprintln!("FTS rebuild for {} failed: {e}", peer.peer_id);
-        }
-        let peer_db_owned = peer_db_path.clone();
-        let peer_id_for_embed = peer_id_owned.clone();
-        if let Err(e) = tokio::task::spawn_blocking(move || {
-            ensure_peer_embeddings(&peer_db_owned, &peer_id_for_embed)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("ensure_peer_embeddings task panicked: {e}"))?
-        {
-            eprintln!("Embedding generation for {} failed: {e}", peer.peer_id);
-        }
-        let updated_at_unix = PeerTimestamp::parse(&peer.updated_at).ok().map(|t| t.0);
-        let meta = serde_json::json!({
-            "schema_version": META_FILE_VERSION,
-            "updated_at": peer.updated_at,
-            "updated_at_unix": updated_at_unix,
-            "note_count": peer.note_count,
-        });
-        std::fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
-        eprintln!("Saved {} ({} notes)", peer.peer_id, peer.note_count);
-        downloaded.push(DownloadedPeer {
-            peer_id: peer.peer_id.clone(),
-            note_count: peer.note_count,
-        });
-    }
-
-    Ok((downloaded, skipped))
-}
-
-fn hash_matches(in_frame: &[u8; 32], hex_hash: &str) -> bool {
-    match hex::decode(hex_hash) {
-        Ok(bytes) if bytes.len() == 32 => bytes[..] == in_frame[..],
-        _ => false,
-    }
-}
-
-fn peer_is_fresh(meta_path: &Path, peer_updated_at: &str) -> bool {
-    let Ok(meta_text) = std::fs::read_to_string(meta_path) else {
-        return false;
-    };
-    let Ok(meta) = serde_json::from_str::<serde_json::Value>(&meta_text) else {
-        return false;
-    };
-
-    let schema_version = meta.get("schema_version").and_then(|v| v.as_u64()).unwrap_or(1);
-    let peer_unix = match PeerTimestamp::parse(peer_updated_at) {
-        Ok(t) => t.0,
-        Err(_) => return false,
-    };
-    if schema_version >= 2 {
-        if let Some(stored_unix) = meta.get("updated_at_unix").and_then(|v| v.as_u64()) {
-            return stored_unix == peer_unix;
-        }
-    }
-    let stored_at = meta.get("updated_at").and_then(|v| v.as_str()).unwrap_or("");
-    PeerTimestamp::parse(stored_at).ok().map(|t| t.0) == Some(peer_unix)
-}
-
 fn max_md_mtime(dir: &Path) -> u64 {
     let mut max = 0u64;
     if let Ok(entries) = std::fs::read_dir(dir) {
@@ -721,10 +558,12 @@ pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
     }
 }
 
-/// Read the next binary message from the websocket. If the hub sends a `SyncReject`
-/// text frame in place of binary (peer-not-found etc.), surface that as `Ok(None)`
-/// so the caller can skip the peer without aborting the loop.
-async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u8>>> {
+/// Read the next binary frame, answering pings while it waits.
+///
+/// An `IndexHeader` that holds something promises exactly one binary frame,
+/// so a text frame here is the hub breaking that promise rather than a
+/// message to interpret.
+pub(super) async fn recv_binary(ws: &mut WsStream) -> anyhow::Result<Vec<u8>> {
     loop {
         let recv_to = recv_timeout();
         let send_to = send_timeout();
@@ -734,16 +573,8 @@ async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u
             .ok_or(SyncError::ClosedUnexpected)?
             .map_err(SyncError::from)?;
         match msg {
-            Message::Binary(data) => return Ok(Some(data.into())),
-            Message::Text(text) => {
-                if let Ok(HubMessage::SyncReject { reason }) =
-                    serde_json::from_str::<HubMessage>(text.as_str())
-                {
-                    eprintln!("hub rejected: {reason}");
-                    return Ok(None);
-                }
-                continue;
-            }
+            Message::Binary(data) => return Ok(data.into()),
+            Message::Text(_) => return Err(SyncError::FrameKind.into()),
             Message::Ping(data) => {
                 tokio::time::timeout(send_to, ws.send(Message::Pong(data)))
                     .await
@@ -754,84 +585,6 @@ async fn recv_binary_or_reject(ws: &mut WsStream) -> anyhow::Result<Option<Vec<u
             _ => continue,
         }
     }
-}
-
-fn ensure_peer_fts(db_path: &Path) -> anyhow::Result<()> {
-    let conn = Connection::open(db_path)?;
-    conn.execute_batch(
-        "CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
-            title, tags, body,
-            content='notes_content',
-            content_rowid='id',
-            tokenize='porter unicode61 remove_diacritics 1'
-        );
-        INSERT INTO notes_fts(notes_fts) VALUES('rebuild');"
-    )?;
-    Ok(())
-}
-
-fn ensure_peer_embeddings(db_path: &Path, peer_id: &str) -> anyhow::Result<()> {
-    let conn = Connection::open(db_path)?;
-
-    let has_table: bool = conn
-        .query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embeddings'",
-            [],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0) > 0;
-
-    let has_data = has_table && conn
-        .query_row("SELECT COUNT(*) FROM embeddings", [], |row| row.get::<_, i64>(0))
-        .unwrap_or(0) > 0;
-
-    if has_data {
-        return Ok(());
-    }
-
-    let mut stmt = conn.prepare(
-        "SELECT nc.id, nc.body FROM notes_content nc WHERE nc.body IS NOT NULL AND nc.body != ''"
-    )?;
-    let notes: Vec<(i64, String)> = stmt.query_map([], |row| {
-        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-    })?
-    .filter_map(|r| r.ok())
-    .collect();
-    drop(stmt);
-
-    if notes.is_empty() {
-        return Ok(());
-    }
-
-    eprintln!("Generating embeddings for peer {} ({} notes)...", peer_id, notes.len());
-
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);"
-    )?;
-
-    let batch_size = 32;
-    let mut embedded = 0;
-
-    for chunk in notes.chunks(batch_size) {
-        let texts: Vec<String> = chunk.iter().map(|(_, body)| body.clone()).collect();
-        let vecs = crate::embed::try_embed_documents(&texts)?;
-
-        conn.execute_batch("BEGIN TRANSACTION;")?;
-        for ((id, _), vec) in chunk.iter().zip(vecs.iter()) {
-            let blob: Vec<u8> = vec.iter().flat_map(|f| f.to_le_bytes()).collect();
-            conn.execute(
-                "INSERT OR REPLACE INTO embeddings (id, data) VALUES (?1, ?2)",
-                rusqlite::params![id, blob],
-            )?;
-        }
-        conn.execute_batch("COMMIT;")?;
-
-        embedded += chunk.len();
-        eprintln!("  Embedded {}/{}", embedded, notes.len());
-    }
-
-    eprintln!("Peer {} embeddings complete", peer_id);
-    Ok(())
 }
 
 #[cfg(test)]
@@ -880,36 +633,9 @@ mod tests {
         assert!(check_hub_scheme("ws://hub.example.com:8787").is_err());
     }
 
-    #[test]
-    fn is_safe_peer_id_accepts_valid() {
-        assert!(is_safe_peer_id("abc123"));
-        assert!(is_safe_peer_id("peer-01"));
-        assert!(is_safe_peer_id("peer_01"));
-        assert!(is_safe_peer_id("ABC_123-xyz"));
-    }
 
-    #[test]
-    fn is_safe_peer_id_rejects_traversal() {
-        assert!(!is_safe_peer_id("../etc"));
-        assert!(!is_safe_peer_id(".."));
-        assert!(!is_safe_peer_id("foo/bar"));
-        assert!(!is_safe_peer_id("foo\\bar"));
-        assert!(!is_safe_peer_id(""));
-        assert!(!is_safe_peer_id("foo bar"));
-    }
 
-    #[test]
-    fn is_safe_peer_id_rejects_overlong() {
-        let long = "a".repeat(129);
-        assert!(!is_safe_peer_id(&long));
-        assert!(is_safe_peer_id(&"a".repeat(128)));
-    }
 
-    #[test]
-    fn is_safe_peer_id_rejects_unicode() {
-        assert!(!is_safe_peer_id("peer\u{200B}id"));
-        assert!(!is_safe_peer_id("café"));
-    }
 
     #[test]
     fn no_source_file_accepts_an_unauthenticated_hub() {
@@ -923,17 +649,6 @@ mod tests {
             "an unpinned hub is now an error, so there is nothing left to warn about");
     }
 
-    #[test]
-    fn hash_matches_pairs() {
-        let mut h = [0u8; 32];
-        for (i, b) in h.iter_mut().enumerate() {
-            *b = i as u8;
-        }
-        assert!(hash_matches(&h, &hex::encode(h)));
-        assert!(!hash_matches(&h, &hex::encode([0u8; 32])));
-        assert!(!hash_matches(&h, "not_hex"));
-        assert!(!hash_matches(&h, &hex::encode([0u8; 31])));
-    }
 
     fn held(sha256: &str) -> HeldIndex {
         HeldIndex { sha256: sha256.into(), note_count: 10, uploaded_at: 1 }
@@ -1197,8 +912,8 @@ mod tests {
     /// the reader expects and would stay green while every real sync failed.
     ///
     /// It cannot replace the hand-built test below: `export_index` always
-    /// writes `schema_version = 2`, which is also `META_FILE_VERSION`, so the
-    /// trap that test exists for is invisible from here.
+    /// writes `schema_version = 2`, so a reader that returned the constant
+    /// instead of the row would look right from here.
     #[tokio::test]
     async fn the_upload_metadata_matches_what_the_export_actually_wrote() {
         let dir = tempfile::tempdir().unwrap();
@@ -1223,9 +938,9 @@ mod tests {
 
     /// The declared metadata must describe the bytes on the wire, so it is
     /// read from the export DB — never from the source index, and never from
-    /// a version constant. `META_FILE_VERSION` and the export's own
-    /// `SCHEMA_VERSION` both happen to be 2, so a fixture using 2 would pass
-    /// no matter which of the three the code read. This one uses 9.
+    /// a version constant. The export's own `SCHEMA_VERSION` is 2, so a
+    /// fixture using 2 would pass whichever of the two the code read. This
+    /// one uses 9.
     #[tokio::test]
     async fn the_upload_metadata_is_read_from_the_export_db() {
         let dir = tempfile::tempdir().unwrap();

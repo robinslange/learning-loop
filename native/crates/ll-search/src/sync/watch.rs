@@ -305,12 +305,12 @@ async fn do_sync(
     match super::client::sync_all_async(db_path, vault_path, config_dir, config).await {
         Ok(result) => {
             eprintln!(
-                "Sync: {} uploaded, {} downloaded, {} skipped",
+                "Sync: {} uploaded, {} fetched, {} could not be fetched",
                 result.uploaded_notes,
-                result.downloaded.len(),
-                result.skipped.len()
+                result.fetched.len(),
+                result.skipped_fetches.len()
             );
-            if !result.downloaded.is_empty() {
+            if !result.fetched.is_empty() {
                 let db = db_path.to_path_buf();
                 let _ = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
                     let db_str = db.to_string_lossy();

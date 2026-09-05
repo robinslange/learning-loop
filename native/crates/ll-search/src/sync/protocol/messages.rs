@@ -1,9 +1,6 @@
-//! Control-plane JSON messages: `ClientMessage`, `HubMessage`, `PeerInfo`,
-//! and the `EnvelopeMeta` projection of the JSON `PeerEnvelope` field.
+//! Control-plane JSON messages: `ClientMessage` and `HubMessage`.
 
 use serde::{Deserialize, Serialize};
-
-use crate::sync::error::SyncError;
 
 /// Default for `SyncReady.protocol_version` when the hub omits the field
 /// (legacy hub pre-2J).
@@ -24,13 +21,6 @@ pub enum ClientMessage {
     },
     AuthResponse {
         signature: String,
-    },
-    ListPeers,
-    GetPeerIndex {
-        peer_id: String,
-    },
-    GetPeerEnvelope {
-        peer_id: String,
     },
     UploadEnvelope {
         envelope: serde_json::Value,
@@ -62,56 +52,7 @@ pub enum HubMessage {
         #[serde(default)]
         stored_sha256: Option<String>,
     },
-    PeerList {
-        peers: Vec<PeerInfo>,
-    },
-    PeerEnvelope {
-        envelope: Option<serde_json::Value>,
-    },
     SyncSkipAck,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PeerInfo {
-    pub peer_id: String,
-    pub updated_at: String,
-    pub note_count: i64,
-    pub pub_key: Option<String>,
-    #[serde(default)]
-    pub protocol_version: Option<u32>,
-}
-
-/// Decoded view of the JSON `PeerEnvelope` control-plane message.
-///
-/// The wire form is `serde_json::Value`; this struct provides a structured
-/// projection so callers can compare in-frame `[u8; 32]` hash against the hex
-/// string field without re-decoding ad-hoc.
-#[derive(Debug)]
-pub struct EnvelopeMeta {
-    pub peer_id: String,
-    pub sha256: String,
-    pub signature: String,
-    pub pub_key: String,
-    pub signed_at: String,
-    pub graph: bool,
-    pub size: Option<u32>,
-}
-
-impl EnvelopeMeta {
-    pub fn from_value(v: &serde_json::Value) -> std::result::Result<Self, SyncError> {
-        let bad = |field: &str| SyncError::Json(serde::de::Error::custom(format!(
-            "EnvelopeMeta missing or invalid {field}"
-        )));
-        Ok(EnvelopeMeta {
-            peer_id: v.get("peer_id").and_then(|x| x.as_str()).ok_or_else(|| bad("peer_id"))?.to_string(),
-            sha256: v.get("sha256").and_then(|x| x.as_str()).ok_or_else(|| bad("sha256"))?.to_string(),
-            signature: v.get("signature").and_then(|x| x.as_str()).ok_or_else(|| bad("signature"))?.to_string(),
-            pub_key: v.get("pub_key").and_then(|x| x.as_str()).ok_or_else(|| bad("pub_key"))?.to_string(),
-            signed_at: v.get("signed_at").and_then(|x| x.as_str()).ok_or_else(|| bad("signed_at"))?.to_string(),
-            graph: v.get("graph").and_then(|x| x.as_bool()).unwrap_or(false),
-            size: v.get("size").and_then(|x| x.as_u64()).and_then(|n| u32::try_from(n).ok()),
-        })
-    }
 }
 
 #[cfg(test)]
@@ -191,21 +132,11 @@ mod tests {
 
     #[test]
     fn unit_variants_serialize_without_extra_fields() {
-        let list_peers = round_trip_client(&ClientMessage::ListPeers);
-        assert_eq!(list_peers["type"].as_str(), Some("list-peers"));
-        assert!(list_peers.as_object().is_some_and(|o| o.len() == 1));
-
         let skip = round_trip_client(&ClientMessage::SyncSkipUpload);
         assert_eq!(skip["type"].as_str(), Some("sync-skip-upload"));
+        assert!(skip.as_object().is_some_and(|o| o.len() == 1));
     }
 
-    #[test]
-    fn get_peer_index_includes_peer_id() {
-        let msg = ClientMessage::GetPeerIndex { peer_id: "peer-x".into() };
-        let v = round_trip_client(&msg);
-        assert_eq!(v["type"].as_str(), Some("get-peer-index"));
-        assert_eq!(v["peer_id"].as_str(), Some("peer-x"));
-    }
 
     #[test]
     fn hub_auth_challenge_deserializes() {
@@ -230,19 +161,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn hub_peer_list_deserializes_peers() {
-        let json = r#"{"type":"peer-list","peers":[{"peer_id":"p1","updated_at":"2024-01-01","note_count":10,"pub_key":null}]}"#;
-        let msg: HubMessage = serde_json::from_str(json).expect("deserialize");
-        match msg {
-            HubMessage::PeerList { peers } => {
-                assert_eq!(peers.len(), 1);
-                assert_eq!(peers[0].peer_id, "p1");
-                assert_eq!(peers[0].note_count, 10);
-            }
-            other => panic!("unexpected variant: {other:?}"),
-        }
-    }
 
     #[test]
     fn hub_sync_reject_deserializes_reason() {
@@ -261,93 +179,10 @@ mod tests {
         assert!(matches!(msg, HubMessage::SyncSkipAck));
     }
 
-    #[test]
-    fn envelope_meta_from_value_happy_path_all_fields() {
-        let v = serde_json::json!({
-            "peer_id": "p1",
-            "sha256": "deadbeef",
-            "signature": "sig",
-            "pub_key": "pk",
-            "signed_at": "2026-05-14T12:00:00Z",
-            "graph": true,
-            "size": 4096,
-            "extra_field_for_forward_compat": "ignored",
-        });
-        let meta = EnvelopeMeta::from_value(&v).expect("happy path must parse");
-        assert_eq!(meta.peer_id, "p1");
-        assert_eq!(meta.sha256, "deadbeef");
-        assert_eq!(meta.signature, "sig");
-        assert_eq!(meta.pub_key, "pk");
-        assert_eq!(meta.signed_at, "2026-05-14T12:00:00Z");
-        assert!(meta.graph);
-        assert_eq!(meta.size, Some(4096));
-    }
 
-    #[test]
-    fn envelope_meta_graph_defaults_to_false_when_absent() {
-        let v = serde_json::json!({
-            "peer_id": "p1",
-            "sha256": "x",
-            "signature": "s",
-            "pub_key": "k",
-            "signed_at": "t",
-        });
-        let meta = EnvelopeMeta::from_value(&v).expect("missing graph must default, not error");
-        assert!(!meta.graph);
-        assert!(meta.size.is_none(), "missing size must yield None");
-    }
 
-    #[test]
-    fn envelope_meta_size_oversized_for_u32_becomes_none() {
-        // u64::MAX > u32::MAX → u32::try_from fails → size = None.
-        // Behaviour-preserving guard against silent truncation.
-        let v = serde_json::json!({
-            "peer_id": "p", "sha256": "x", "signature": "s", "pub_key": "k", "signed_at": "t",
-            "size": u64::MAX,
-        });
-        let meta = EnvelopeMeta::from_value(&v).expect("oversized size must not error");
-        assert!(meta.size.is_none(), "value beyond u32::MAX must become None, not truncate");
-    }
 
-    #[test]
-    fn envelope_meta_missing_peer_id_errors() {
-        let v = serde_json::json!({
-            "sha256": "x", "signature": "s", "pub_key": "k", "signed_at": "t",
-        });
-        let err = EnvelopeMeta::from_value(&v).expect_err("missing peer_id must error");
-        assert!(matches!(err, SyncError::Json(_)));
-        assert!(format!("{err}").contains("peer_id"), "error must name the missing field");
-    }
 
-    #[test]
-    fn envelope_meta_missing_sha256_errors() {
-        let v = serde_json::json!({
-            "peer_id": "p", "signature": "s", "pub_key": "k", "signed_at": "t",
-        });
-        let err = EnvelopeMeta::from_value(&v).expect_err("missing sha256 must error");
-        assert!(format!("{err}").contains("sha256"));
-    }
 
-    #[test]
-    fn envelope_meta_wrong_type_for_required_field_errors() {
-        // peer_id present but as a number — as_str() returns None, same path as missing.
-        let v = serde_json::json!({
-            "peer_id": 42,
-            "sha256": "x", "signature": "s", "pub_key": "k", "signed_at": "t",
-        });
-        let err = EnvelopeMeta::from_value(&v).expect_err("non-string peer_id must error");
-        assert!(format!("{err}").contains("peer_id"));
-    }
 
-    #[test]
-    fn envelope_meta_graph_wrong_type_falls_back_to_false() {
-        // graph: "yes" — as_bool() returns None → unwrap_or(false). Best-effort,
-        // documented behaviour: only `true`/`false` count, anything else = false.
-        let v = serde_json::json!({
-            "peer_id": "p", "sha256": "x", "signature": "s", "pub_key": "k", "signed_at": "t",
-            "graph": "yes",
-        });
-        let meta = EnvelopeMeta::from_value(&v).expect("non-bool graph must not error");
-        assert!(!meta.graph);
-    }
 }

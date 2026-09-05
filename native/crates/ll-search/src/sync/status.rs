@@ -115,6 +115,15 @@ fn sync_block(state: &SyncState, now: i64) -> String {
     if state.hub_holds == Some(HubHolds::Nothing) {
         out.push_str(&row("WARNING", "as of that sync the hub held no index for this vault. The next sync will upload it. If this persists, check the hub's /health."));
     }
+    // Only when there were some. `Some(0)` is the healthy read half and has
+    // nothing to say; `None` is a cycle that never reached it, and the
+    // outcome line above has already said why.
+    if let Some(n) = state.skipped_fetches.filter(|n| *n > 0) {
+        out.push_str(&row("WARNING", &format!(
+            "{n} followed vault(s) could not be read in that cycle. Their local copies are \
+             whatever the last successful fetch left; the next sync retries them."
+        )));
+    }
     out
 }
 
@@ -351,12 +360,53 @@ mod tests {
             outcome: OUTCOME_OK.into(),
             detail: None,
             hub_holds: Some(HubHolds::Nothing),
+            skipped_fetches: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  nothing"), "got:\n{out}");
         assert!(out.contains("WARNING"),
             "'the hub holds nothing' is the outage signature and must be loud; got:\n{out}");
+    }
+
+    #[test]
+    fn status_names_the_followed_vaults_the_last_cycle_could_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: Some(2),
+        }).unwrap();
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("2 followed vault(s) could not be read"),
+            "the cycle succeeded overall, so this is the only place it shows; got:\n{out}");
+    }
+
+    /// The other side of it. A renderer that prints the line unconditionally
+    /// would satisfy the test above and report an outage on every healthy
+    /// cycle — which is most of how the original one went unread.
+    #[test]
+    fn status_says_nothing_when_every_followed_vault_was_read() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        for skipped_fetches in [Some(0), None] {
+            write_state(dir.path(), &SyncState {
+                last_attempt_at: 1_000,
+                last_success_at: Some(1_000),
+                outcome: OUTCOME_OK.into(),
+                detail: None,
+                hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+                skipped_fetches,
+            }).unwrap();
+            let out = render_status(dir.path(), 1_100).unwrap();
+            assert!(!out.contains("could not be read"),
+                "skipped_fetches={skipped_fetches:?} got:\n{out}");
+        }
     }
 
     #[test]
@@ -369,6 +419,7 @@ mod tests {
             outcome: OUTCOME_OK.into(),
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
         assert!(out.contains("STALE"), "got:\n{out}");
@@ -389,6 +440,7 @@ mod tests {
             outcome: OUTCOME_OK.into(),
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 7 * 86_400 - 60).unwrap();
         assert!(!out.contains("STALE"),
@@ -420,6 +472,7 @@ mod tests {
                 sha256: "9f2b1c0d4e5a6b7c8d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e".into(),
                 note_count: 3578,
             }),
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  sha 9f2b1c0d4e5a… (3578 notes)"), "got:\n{out}");
@@ -464,6 +517,7 @@ mod tests {
             outcome: OUTCOME_OK.into(),
             detail: None,
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("Nothing here contacted the hub"), "got:\n{out}");
@@ -498,6 +552,7 @@ mod tests {
             outcome: OUTCOME_ERROR.into(),
             detail: Some("hub key mismatch".into()),
             hub_holds: None,
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 9 * 86_400).unwrap();
         assert!(out.contains("error: hub key mismatch"), "got:\n{out}");
@@ -518,6 +573,7 @@ mod tests {
             outcome: OUTCOME_ERROR.into(),
             detail: Some("hub unreachable".into()),
             hub_holds: None,
+            skipped_fetches: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("last ok:    never"), "got:\n{out}");

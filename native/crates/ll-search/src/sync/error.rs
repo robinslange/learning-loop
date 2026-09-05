@@ -18,8 +18,6 @@ pub enum SyncError {
     HashMismatch,
     #[error("envelope exceeds hard cap {cap} bytes")]
     EnvelopeOversize { cap: usize },
-    #[error("invalid peer timestamp {raw:?}")]
-    BadTimestamp { raw: String },
     #[error("websocket closed unexpectedly")]
     ClosedUnexpected,
     #[error("non-binary frame received where binary expected")]
