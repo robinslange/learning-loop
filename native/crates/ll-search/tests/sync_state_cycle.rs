@@ -63,9 +63,15 @@ fn unb64(s: &str) -> Vec<u8> {
 }
 
 async fn recv_client(ws: &mut WsServer) -> ClientMsg {
+    serde_json::from_value(recv_json(ws).await).expect("valid ClientMsg")
+}
+
+/// Untyped, because the download half still speaks v4 and its messages are
+/// not `ClientMsg` variants.
+async fn recv_json(ws: &mut WsServer) -> serde_json::Value {
     loop {
         match ws.next().await.expect("connection closed early").expect("ws error") {
-            Message::Text(t) => return serde_json::from_str(t.as_str()).expect("valid ClientMsg"),
+            Message::Text(t) => return serde_json::from_str(t.as_str()).expect("valid json"),
             Message::Ping(d) => {
                 let _ = ws.send(Message::Pong(d)).await;
             }
@@ -78,9 +84,16 @@ async fn send_hub(ws: &mut WsServer, msg: &HubMsg) {
     ws.send(Message::text(serde_json::to_string(msg).unwrap())).await.unwrap();
 }
 
+/// Whether the mock accepts the upload it is offered.
+#[derive(Clone, Copy)]
+enum OnUpload {
+    Ack,
+    Reject,
+}
+
 /// A hub that completes the v5 handshake advertising `holds` for vault `v1`,
-/// takes one upload, and reports no peers.
-async fn spawn_hub(holds: Option<HeldIndex>) -> SocketAddr {
+/// takes an upload if one is offered, and reports no peers.
+async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -108,14 +121,34 @@ async fn spawn_hub(holds: Option<HeldIndex>) -> SocketAddr {
         })
         .await;
 
-        let ClientMsg::UploadIndex { vault_id, sha256, .. } = recv_client(&mut ws).await else {
-            panic!("expected upload-index")
+        // The client uploads or goes straight to the download half depending
+        // on what this hub just said it holds; the mock does not get to
+        // assume which, or it would decide the outcome it is measuring.
+        let next = recv_json(&mut ws).await;
+        let next = if next["type"] == "upload-index" {
+            let ClientMsg::UploadIndex { vault_id, sha256, .. } =
+                serde_json::from_value(next).expect("valid upload-index")
+            else {
+                unreachable!("matched on the tag")
+            };
+            let _frame = ws.next().await.unwrap().unwrap();
+            match on_upload {
+                OnUpload::Reject => {
+                    send_hub(&mut ws, &HubMsg::Reject {
+                        reason: "not authorized to write this vault".into(),
+                    })
+                    .await;
+                    return;
+                }
+                OnUpload::Ack => send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256 }).await,
+            }
+            recv_json(&mut ws).await
+        } else {
+            next
         };
-        let _frame = ws.next().await.unwrap().unwrap();
-        send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256 }).await;
 
         // The download half is still v4 on the wire and untouched here.
-        let _list_peers = ws.next().await;
+        assert_eq!(next["type"], "list-peers", "unexpected message after the upload half");
         let _ = ws.send(Message::text(r#"{"type":"peer-list","peers":[]}"#)).await;
     });
     addr
@@ -150,6 +183,13 @@ fn place_export(config_dir: &Path) {
                                  ('schema_version', '2'), ('model_id', 'test-model');"
     ))
     .unwrap();
+}
+
+/// The sha the client will declare for the export just placed: the hub acks
+/// exactly this, and on the skip path it is what the hub must already hold.
+fn export_sha(config_dir: &Path) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(std::fs::read(export_db_path(config_dir)).unwrap()))
 }
 
 fn stale() -> Option<HeldIndex> {
@@ -191,7 +231,7 @@ async fn a_successful_cycle_writes_a_different_state() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    let addr = spawn_hub(stale()).await;
+    let addr = spawn_hub(stale(), OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
     place_export(dir.path());
 
@@ -212,20 +252,25 @@ async fn a_successful_cycle_writes_a_different_state() {
     assert_eq!(
         state.hub_holds,
         Some(HubHolds::Index {
-            sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
-            note_count: HUB_NOTE_COUNT,
+            sha256: export_sha(dir.path()),
+            note_count: LOCAL_NOTE_COUNT,
         }),
-        "note_count is the hub's report, not this client's {LOCAL_NOTE_COUNT}",
+        "the upload was acked, so the hub now holds the index we just sent — not the \
+         stale one it reported at the handshake",
     );
 }
 
-/// The outage signature: the cycle worked, and the hub still holds nothing.
+/// The false alarm this cost a round to get right. A hub that held nothing,
+/// then accepted the upload, holds something; recording the handshake's
+/// `Nothing` would print the outage warning immediately after the cycle that
+/// fixed the outage, and a warning that cries wolf is how the real one went
+/// unread for two months.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn a_successful_cycle_against_an_empty_hub_records_nothing_held() {
+async fn a_cold_hub_that_accepted_the_upload_is_not_recorded_as_holding_nothing() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    let addr = spawn_hub(None).await;
+    let addr = spawn_hub(None, OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
     place_export(dir.path());
 
@@ -233,7 +278,71 @@ async fn a_successful_cycle_against_an_empty_hub_records_nothing_held() {
         .await
         .expect("the cycle completes");
 
-    assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds, Some(HubHolds::Nothing));
+    let holds = read_state(dir.path()).unwrap().unwrap().hub_holds;
+    assert_ne!(holds, Some(HubHolds::Nothing),
+        "the hub acked the upload in this very cycle");
+    assert_eq!(
+        holds,
+        Some(HubHolds::Index { sha256: export_sha(dir.path()), note_count: LOCAL_NOTE_COUNT }),
+    );
+}
+
+/// The skip path is the one where the count in the file is the hub's own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_skipped_upload_records_what_the_hub_reported() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let held = HeldIndex {
+        sha256: export_sha(dir.path()),
+        note_count: HUB_NOTE_COUNT,
+        uploaded_at: 1,
+    };
+    let addr = spawn_hub(Some(held.clone()), OnUpload::Ack).await;
+    let config = config_for(dir.path(), addr);
+
+    let result =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect("the cycle completes");
+    assert!(result.skipped_upload, "precondition: the hub holds this exact index");
+
+    assert_eq!(
+        read_state(dir.path()).unwrap().unwrap().hub_holds,
+        Some(HubHolds::Index { sha256: held.sha256, note_count: HUB_NOTE_COUNT }),
+        "nothing was uploaded, so the record is the hub's own report — including \
+         its count, which is not this client's {LOCAL_NOTE_COUNT}",
+    );
+}
+
+/// A cycle that authenticated and then died still knows what the hub said.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_fails_after_the_handshake_records_what_the_hub_reported() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    let addr = spawn_hub(stale(), OnUpload::Reject).await;
+    let config = config_for(dir.path(), addr);
+    place_export(dir.path());
+
+    let err =
+        sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+            .await
+            .expect_err("the hub rejects the upload");
+    assert!(err.to_string().contains("not authorized"), "{err}");
+
+    let state = read_state(dir.path()).unwrap().unwrap();
+    assert_eq!(state.outcome, OUTCOME_ERROR);
+    assert_eq!(
+        state.hub_holds,
+        Some(HubHolds::Index {
+            sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            note_count: HUB_NOTE_COUNT,
+        }),
+        "the rejected upload must not be recorded as held, and the handshake's \
+         report must not be thrown away either",
+    );
 }
 
 /// A failure must not erase when this vault last synced. How long the outage
@@ -243,7 +352,7 @@ async fn a_failure_after_a_success_keeps_the_last_success_time() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    let addr = spawn_hub(stale()).await;
+    let addr = spawn_hub(stale(), OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
     place_export(dir.path());
 

@@ -6,6 +6,7 @@
 //! cycle. v4 planned this file and never shipped it.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -67,9 +68,21 @@ pub fn read_state(config_dir: &Path) -> anyhow::Result<Option<SyncState>> {
     }
 }
 
+/// Sequence number for temp filenames. With the pid it makes every write's
+/// temp path unique, so a manual `ll sync` and the watch daemon writing at
+/// the same moment cannot land on each other's half-written file.
+static WRITE_SEQ: AtomicU64 = AtomicU64::new(0);
+
 /// Write the state, creating `federation/` if the cycle failed before
-/// anything else did. Written to a sibling temp file and renamed, so a crash
-/// mid-write leaves the previous state intact rather than a truncated file.
+/// anything else did.
+///
+/// Written to a uniquely named sibling and renamed over the target. What
+/// that buys is exactly `rename(2)`'s guarantee — within one filesystem a
+/// reader sees either the whole old file or the whole new one — plus the
+/// certainty that two writers are never using the same temp path. What it
+/// does not buy is a tested crash window: nothing here exercises a kill
+/// between the write and the rename, and the safety of that gap is the
+/// filesystem's promise, not ours.
 pub fn write_state(config_dir: &Path, state: &SyncState) -> anyhow::Result<()> {
     let path = sync_state_path(config_dir);
     let parent = path
@@ -78,11 +91,17 @@ pub fn write_state(config_dir: &Path, state: &SyncState) -> anyhow::Result<()> {
     std::fs::create_dir_all(parent)
         .with_context(|| format!("creating {}", parent.display()))?;
 
-    let tmp = path.with_extension("json.tmp");
+    let tmp = path.with_extension(format!(
+        "json.{}.{}.tmp",
+        std::process::id(),
+        WRITE_SEQ.fetch_add(1, Ordering::Relaxed),
+    ));
     let json = serde_json::to_vec_pretty(state)?;
     std::fs::write(&tmp, &json).with_context(|| format!("writing {}", tmp.display()))?;
-    std::fs::rename(&tmp, &path)
-        .with_context(|| format!("renaming {} into place", tmp.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, &path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("renaming {} into place", tmp.display()));
+    }
     Ok(())
 }
 
@@ -170,8 +189,12 @@ mod tests {
         write_state(dir.path(), &second).unwrap();
 
         assert_eq!(read_state(dir.path()).unwrap().unwrap(), second);
-        assert!(!sync_state_path(dir.path()).with_extension("json.tmp").exists(),
-            "the temp file is renamed into place, not left beside the target");
+        let left: Vec<String> = std::fs::read_dir(dir.path().join("federation"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["sync-state.json".to_string()],
+            "each write renames its temp file into place; none is left beside the target");
     }
 
     /// The file is a contract with every reader of `federation/`, not just

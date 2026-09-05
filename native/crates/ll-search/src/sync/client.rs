@@ -120,14 +120,6 @@ pub struct DownloadedPeer {
     pub note_count: i64,
 }
 
-/// What `run_cycle` hands back. `hub_holds` is recorded in `sync-state.json`
-/// and does not belong in `SyncResult` — that struct is the serialized CLI
-/// output, a separate contract.
-struct CycleOutcome {
-    result: SyncResult,
-    hub_holds: HubHolds,
-}
-
 /// Run one sync cycle and record what it did, whether it worked or not.
 ///
 /// Every way the cycle can fail lives inside `run_cycle`, so a cycle that
@@ -139,33 +131,36 @@ pub async fn sync_all_async(
     config_dir: &Path,
     config: &FederationConfig,
 ) -> anyhow::Result<SyncResult> {
-    let outcome = run_cycle(source_db, vault_path, config_dir, config).await;
+    // The last thing this cycle knew the hub to hold. `run_cycle` fills it in
+    // as it learns, so a cycle that dies halfway records what it had learned
+    // by then rather than nothing at all.
+    let mut known_holds = None;
+    let outcome = run_cycle(source_db, vault_path, config_dir, config, &mut known_holds).await;
+
     let now = unix_now();
-    let state = match &outcome {
-        Ok(cycle) => SyncState {
-            last_attempt_at: now,
-            last_success_at: Some(now),
-            outcome: state::OUTCOME_OK.to_string(),
-            detail: None,
-            hub_holds: Some(cycle.hub_holds.clone()),
-        },
-        Err(e) => SyncState {
-            last_attempt_at: now,
+    let (outcome_label, detail, last_success_at) = match &outcome {
+        Ok(_) => (state::OUTCOME_OK, None, Some(now)),
+        Err(e) => (
+            state::OUTCOME_ERROR,
+            Some(e.to_string()),
             // A failure must not erase when this vault last synced: how long
             // the outage has been running is the whole question.
-            last_success_at: state::read_state(config_dir)
+            state::read_state(config_dir)
                 .ok()
                 .flatten()
                 .and_then(|prev| prev.last_success_at),
-            outcome: state::OUTCOME_ERROR.to_string(),
-            detail: Some(e.to_string()),
-            hub_holds: None,
-        },
+        ),
     };
     // Failing to record the cycle must never mask the cycle's own error.
-    let _ = state::write_state(config_dir, &state);
+    let _ = state::write_state(config_dir, &SyncState {
+        last_attempt_at: now,
+        last_success_at,
+        outcome: outcome_label.to_string(),
+        detail,
+        hub_holds: known_holds,
+    });
 
-    outcome.map(|cycle| cycle.result)
+    outcome
 }
 
 fn unix_now() -> i64 {
@@ -180,7 +175,8 @@ async fn run_cycle(
     vault_path: &Path,
     config_dir: &Path,
     config: &FederationConfig,
-) -> anyhow::Result<CycleOutcome> {
+    known_holds: &mut Option<HubHolds>,
+) -> anyhow::Result<SyncResult> {
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
     // Pre-flight upload size check (R12). Frame overhead is 36 bytes.
@@ -196,25 +192,24 @@ async fn run_cycle(
     let framed_path = ready.protocol_version >= PROTOCOL_VERSION_FRAMED;
 
     let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
-    let hub_holds = hub_holds(this_vault);
+    // What the hub reported at the handshake. Everything after this point
+    // can fail, and if it does this is the last thing we knew.
+    *known_holds = Some(hub_holds(this_vault));
 
-    let (uploaded_notes, skipped_upload) =
-        upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
+    let uploaded = upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
+    *known_holds = Some(uploaded.hub_holds);
 
     let (downloaded, skipped) = download_peers(&mut ws, config_dir, framed_path).await?;
 
     let _ = ws.close(None).await;
     eprintln!("Sync complete");
 
-    Ok(CycleOutcome {
-        result: SyncResult {
-            export: prepared.result,
-            uploaded_notes,
-            skipped_upload,
-            downloaded,
-            skipped,
-        },
-        hub_holds,
+    Ok(SyncResult {
+        export: prepared.result,
+        uploaded_notes: uploaded.note_count,
+        skipped_upload: uploaded.skipped,
+        downloaded,
+        skipped,
     })
 }
 
@@ -394,6 +389,17 @@ fn this_vault_state<'c, 'v>(
     Ok((vault_id, vault_state.iter().find(|v| v.vault_id == vault_id)))
 }
 
+/// What the upload half did, and what the hub holds once it has done it.
+#[derive(Debug)]
+struct Uploaded {
+    note_count: i64,
+    skipped: bool,
+    /// After an accepted upload, the index the hub acknowledged. On the skip
+    /// path, what the hub reported at the handshake — which is the same
+    /// index, since that is what skipping means.
+    hub_holds: HubHolds,
+}
+
 /// What the hub reports it holds, in the form the state file records. The
 /// count is the hub's, never the local one.
 fn hub_holds(state: Option<&VaultState>) -> HubHolds {
@@ -416,10 +422,14 @@ async fn upload_index(
     vault_id: &str,
     this_vault: Option<&VaultState>,
     prepared: &PreparedExport,
-) -> anyhow::Result<(i64, bool)> {
+) -> anyhow::Result<Uploaded> {
     if upload_decision(&prepared.hash, this_vault) == UploadDecision::Skip {
         eprintln!("Hub already holds this index, skipping upload");
-        return Ok((0, true));
+        return Ok(Uploaded {
+            note_count: 0,
+            skipped: true,
+            hub_holds: hub_holds(this_vault),
+        });
     }
 
     send_json(ws, &ClientMsg::UploadIndex {
@@ -437,20 +447,30 @@ async fn upload_index(
         prepared.note_count
     );
 
-    match recv_json::<HubMsg>(ws).await? {
+    let acked_sha = match recv_json::<HubMsg>(ws).await? {
         // v5's UploadAck carries no count, so this line must not imply the hub
         // agreed with ours.
-        HubMsg::UploadAck { vault_id, .. } => eprintln!("Hub stored the index for {vault_id}"),
+        HubMsg::UploadAck { vault_id, sha256 } => {
+            eprintln!("Hub stored the index for {vault_id}");
+            sha256
+        }
         HubMsg::Reject { reason } => anyhow::bail!("hub rejected upload: {reason}"),
         other => anyhow::bail!("expected upload-ack, got: {other:?}"),
-    }
+    };
 
     std::fs::write(
         last_export_mtime_path(config_dir),
         prepared.current_max_mtime.to_string(),
     )?;
 
-    Ok((prepared.note_count, false))
+    Ok(Uploaded {
+        note_count: prepared.note_count,
+        skipped: false,
+        // The sha is the hub's own acknowledgement of what it stored. The
+        // count cannot be: v5's UploadAck carries none, so it is the count we
+        // declared alongside those bytes.
+        hub_holds: HubHolds::Index { sha256: acked_sha, note_count: prepared.note_count },
+    })
 }
 
 async fn download_peers(
@@ -1023,7 +1043,7 @@ mod tests {
         let outcome = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared)
             .await
             .unwrap();
-        assert_eq!(outcome, (42, false));
+        assert_eq!((outcome.note_count, outcome.skipped), (42, false));
         // The counterpart to the reject test: "must not advance" only means
         // something if a successful upload does advance it.
         assert_eq!(
