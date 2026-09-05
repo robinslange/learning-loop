@@ -514,9 +514,23 @@ mod tests {
         let written = std::fs::read_to_string(config::config_path(dir.path())).unwrap();
         assert!(!written.contains(&out.recovery_phrase),
             "the recovery secret must never be written to disk in usable form");
-        for word in out.recovery_phrase.split_whitespace() {
-            assert!(!written.contains(&format!("\"{word}")),
-                "no fragment of the phrase belongs in the config either");
+        // A single BIP-39 word is an ordinary English word, and every
+        // `config.json` this writes legitimately contains seven of them inside
+        // quoted keys and values: display, end, hub, key, private, rule, vault.
+        // Searching for `"<word>` therefore went red whenever a drawn phrase
+        // happened to include one of the seven — 1 - (1 - 7/2048)^24, about one
+        // run in thirteen, and it does not depend on parallelism or on anything
+        // else in the suite.
+        //
+        // Two ADJACENT words in order cannot appear by coincidence, and they
+        // are also the smallest thing that is genuinely a fragment of the
+        // secret rather than a word that happens to be in both places. A
+        // truncated or partial write still fails here.
+        let words: Vec<&str> = out.recovery_phrase.split_whitespace().collect();
+        for pair in words.windows(2) {
+            let fragment = pair.join(" ");
+            assert!(!written.contains(&fragment),
+                "a fragment of the recovery phrase ({fragment:?}) reached the config");
         }
     }
 

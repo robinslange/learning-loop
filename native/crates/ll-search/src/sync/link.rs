@@ -354,32 +354,6 @@ fn local_key_id(config_dir: &Path) -> anyhow::Result<KeyId> {
     Ok(KeyId::from_pubkey(&local_signing_key(config_dir)?.verifying_key()))
 }
 
-/// Whether some established key has admitted this machine.
-///
-/// An *inbound* link, deliberately: what makes a machine one of a person's is
-/// that another of them said so. What this machine has issued says nothing
-/// about its own standing.
-pub fn has_active_link(config_dir: &Path) -> anyhow::Result<bool> {
-    let me = local_key_id(config_dir)?;
-    Ok(active_grants(config_dir, unix_now())?
-        .iter()
-        .any(|(_, st)| st.kind == GrantKind::Link && st.to == me))
-}
-
-/// Whether both halves of the link between this machine and `other` exist
-/// here. A machine holding only the inbound half has been admitted and has
-/// not yet answered; it cannot act for `other` until it has said so itself.
-pub fn is_mutual(config_dir: &Path, other: &KeyId) -> anyhow::Result<bool> {
-    let me = local_key_id(config_dir)?;
-    let grants = active_grants(config_dir, unix_now())?;
-    let links_to = |from: &KeyId, to: &KeyId| {
-        grants
-            .iter()
-            .any(|(_, st)| st.kind == GrantKind::Link && &st.from == from && &st.to == to)
-    };
-    Ok(links_to(other, &me) && links_to(&me, other))
-}
-
 /// Make sure this machine has issued an active `link` to `other`, signing one
 /// if it has not.
 ///
@@ -832,6 +806,39 @@ mod tests {
         }
     }
 
+    /// Whether some established key has admitted this machine.
+    ///
+    /// An *inbound* link, deliberately: what makes a machine one of a
+    /// person's is that another of them said so, and what this machine has
+    /// issued says nothing about its own standing.
+    ///
+    /// A test helper rather than module surface. It was `pub` and no
+    /// production code called it — an abstraction with no concrete caller.
+    /// `ll doctor` (Plan 8) is the caller it is waiting for; it belongs back
+    /// in the module the day that exists, and not before.
+    fn has_active_link(config_dir: &Path) -> anyhow::Result<bool> {
+        let me = local_key_id(config_dir)?;
+        Ok(active_grants(config_dir, unix_now())?
+            .iter()
+            .any(|(_, st)| st.kind == GrantKind::Link && st.to == me))
+    }
+
+    /// Whether both halves of the link between this machine and `other`
+    /// exist here. A machine holding only the inbound half has been admitted
+    /// and has not yet answered; it cannot act for `other` until it has said
+    /// so itself. Same story as `has_active_link`: no production caller, so
+    /// it lives with the tests that assert on it.
+    fn is_mutual(config_dir: &Path, other: &KeyId) -> anyhow::Result<bool> {
+        let me = local_key_id(config_dir)?;
+        let grants = active_grants(config_dir, unix_now())?;
+        let links_to = |from: &KeyId, to: &KeyId| {
+            grants
+                .iter()
+                .any(|(_, st)| st.kind == GrantKind::Link && &st.from == from && &st.to == to)
+        };
+        Ok(links_to(other, &me) && links_to(&me, other))
+    }
+
     fn wire_to_signed(wire: &GrantWire) -> SignedGrant {
         SignedGrant {
             statement: B64.decode(&wire.statement_b64).unwrap(),
@@ -1206,6 +1213,227 @@ mod tests {
             second.lock().unwrap().is_empty(),
             "a grant the hub has acknowledged is not owed again, and re-signing one \
              would put a second row on the hub for the same relationship"
+        );
+    }
+
+    // -- what `reconcile` refuses from the hub -----------------------------
+
+    /// A `GrantWire` naming `from -> to` as a `link`, signed however the
+    /// caller likes. The hostile shapes below need a statement that says all
+    /// the right things and a signature that does not stand behind it.
+    fn link_wire(sk: &SigningKey, from: &KeyId, to: &KeyId, signature: Vec<u8>, state: &str) -> GrantWire {
+        let now = unix_now();
+        let st = GrantStatement {
+            v: 5,
+            kind: GrantKind::Link,
+            from: from.clone(),
+            to: to.clone(),
+            scope: None,
+            issued_at: now - 1,
+            expires_at: now + 86_400,
+            nonce: b64(&random_nonce()),
+        };
+        let statement = canonical_bytes(&st);
+        let signature = if signature.is_empty() {
+            sk.sign(&statement).to_bytes().to_vec()
+        } else {
+            signature
+        };
+        GrantWire {
+            statement_b64: B64.encode(&statement),
+            signature_b64: B64.encode(&signature),
+            state: state.to_string(),
+        }
+    }
+
+    /// The door an attacker can actually reach.
+    ///
+    /// `SyncReady.grants` is whatever the hub chose to send. If this client
+    /// answers an inbound `link` without checking the signature, a hostile hub
+    /// forges one and gets back a genuine, correctly signed, **full-authority**
+    /// grant from this machine's own key — and every other machine in the
+    /// person's set will verify that reciprocal happily, because it is real.
+    ///
+    /// Two shapes, because they fail for different reasons: a signature that is
+    /// not a signature, and a real signature made by a key other than the one
+    /// the statement names as issuer. Only the second distinguishes "verifies
+    /// the signature" from "checks that some signature-shaped bytes arrived" —
+    /// a hostile hub can always sign something.
+    ///
+    /// The accepting side of this boundary is
+    /// `the_hub_door_answers_the_inbound_half_on_the_joiners_next_connection`:
+    /// a properly signed inbound link IS answered, so this is not satisfied by
+    /// an implementation that answers nothing.
+    #[tokio::test]
+    async fn a_forged_inbound_link_gets_no_reciprocal() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let impostor_sk = SigningKey::from_bytes(&[41u8; 32]);
+        let impostor = KeyId::from_pubkey(&impostor_sk.verifying_key());
+        let somebody_else = SigningKey::from_bytes(&[43u8; 32]);
+
+        let unsigned = link_wire(&impostor_sk, &impostor, &me, vec![0u8; 64], "active");
+        let signed_by_the_wrong_key = {
+            let bytes = B64.decode(
+                link_wire(&impostor_sk, &impostor, &me, vec![], "active").statement_b64,
+            )
+            .unwrap();
+            GrantWire {
+                statement_b64: B64.encode(&bytes),
+                signature_b64: B64.encode(somebody_else.sign(&bytes).to_bytes()),
+                state: "active".into(),
+            }
+        };
+
+        let (hub, lodged) =
+            test_hub::spawn_grant_hub(vec![unsigned, signed_by_the_wrong_key], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "this machine signed a full-authority link in answer to bytes nobody stands \
+             behind: {:?}",
+            lodged.lock().unwrap()
+        );
+        assert!(
+            load_grants(machine.path()).unwrap().is_empty(),
+            "and it must not be stored either — a forged grant in the local store is one \
+             `ll link list` reports as real"
+        );
+    }
+
+    /// A grant the hub does not call `active` is not one to act on. Revocation
+    /// is the issuer withdrawing its own statement, and the withdrawn statement
+    /// keeps verifying forever — the signature is still good, which is exactly
+    /// why the state has to be read. Answering one would bring a revoked link
+    /// back to life from the side that did not revoke it.
+    #[tokio::test]
+    async fn a_grant_the_hub_does_not_call_active_gets_no_reciprocal() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let issuer = SigningKey::from_bytes(&[41u8; 32]);
+        let issuer_id = KeyId::from_pubkey(&issuer.verifying_key());
+        let revoked = link_wire(&issuer, &issuer_id, &me, vec![], "revoked");
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![revoked], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(lodged.lock().unwrap().is_empty(), "{:?}", lodged.lock().unwrap());
+        assert!(load_grants(machine.path()).unwrap().is_empty());
+    }
+
+    /// `assoc` exists precisely to join a person's work and personal
+    /// identities WITHOUT transferring authority. Answering one with a `link`
+    /// would hand an employer-governed key the ability to act as a personal
+    /// one — the single thing the two-key model exists to prevent — and it
+    /// would do it from this side, unasked.
+    #[tokio::test]
+    async fn an_inbound_grant_that_is_not_a_link_is_never_answered_with_one() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let issuer = SigningKey::from_bytes(&[41u8; 32]);
+        let issuer_id = KeyId::from_pubkey(&issuer.verifying_key());
+        let now = unix_now();
+
+        let mut served = Vec::new();
+        for kind in [GrantKind::Assoc, GrantKind::Follow, GrantKind::Peer] {
+            let st = GrantStatement {
+                v: 5,
+                kind,
+                from: issuer_id.clone(),
+                to: me.clone(),
+                scope: None,
+                issued_at: now - 1,
+                expires_at: now + 86_400,
+                nonce: b64(&random_nonce()),
+            };
+            let bytes = canonical_bytes(&st);
+            served.push(GrantWire {
+                statement_b64: B64.encode(&bytes),
+                signature_b64: B64.encode(issuer.sign(&bytes).to_bytes()),
+                state: "active".into(),
+            });
+        }
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(served, vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "an assoc, a follow or a peer edge was answered with a link: {:?}",
+            lodged.lock().unwrap()
+        );
+    }
+
+    /// A lapsed link is not renewed from this side.
+    ///
+    /// The hub filters expired rows out of `SyncReady`, so this needs a hub
+    /// that does not — which is the point: `state` is the hub's word and the
+    /// expiry is the issuer's, carried inside bytes the issuer signed. Without
+    /// this check a link that lapsed on disuse comes back the moment the other
+    /// machine connects, because this one answers it with a fresh year.
+    #[tokio::test]
+    async fn a_lapsed_inbound_link_gets_no_reciprocal() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let issuer = SigningKey::from_bytes(&[41u8; 32]);
+        let issuer_id = KeyId::from_pubkey(&issuer.verifying_key());
+        let st = GrantStatement {
+            v: 5,
+            kind: GrantKind::Link,
+            from: issuer_id,
+            to: me,
+            scope: None,
+            issued_at: 1_000_000,
+            expires_at: 1_000_001,
+            nonce: b64(&random_nonce()),
+        };
+        let bytes = canonical_bytes(&st);
+        let lapsed = GrantWire {
+            statement_b64: B64.encode(&bytes),
+            signature_b64: B64.encode(issuer.sign(&bytes).to_bytes()),
+            state: "active".into(),
+        };
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![lapsed], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "a link that lapsed on disuse was answered with a fresh year: {:?}",
+            lodged.lock().unwrap()
+        );
+        assert!(load_grants(machine.path()).unwrap().is_empty());
+    }
+
+    /// `SyncReady.grants` carries what the hub holds, and a hub is free to put
+    /// anything in it. A grant between two keys that are not this one is not
+    /// this machine's business to store or to answer.
+    #[tokio::test]
+    async fn a_link_between_two_other_keys_is_neither_stored_nor_answered() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let a_sk = SigningKey::from_bytes(&[41u8; 32]);
+        let a = KeyId::from_pubkey(&a_sk.verifying_key());
+        let b = key(43);
+        let theirs = link_wire(&a_sk, &a, &b, vec![], "active");
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![theirs], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(lodged.lock().unwrap().is_empty(), "{:?}", lodged.lock().unwrap());
+        assert!(
+            load_grants(machine.path()).unwrap().is_empty(),
+            "somebody else's link is not this machine's record to keep"
         );
     }
 
