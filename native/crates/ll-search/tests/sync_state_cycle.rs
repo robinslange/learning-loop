@@ -63,8 +63,10 @@ fn b64(bytes: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(bytes)
 }
 
-fn unb64(s: &str) -> Vec<u8> {
-    base64::engine::general_purpose::STANDARD.decode(s).unwrap()
+/// `None` rather than a panic on undecodable input: the only caller runs
+/// inside the spawned mock, where a panic is invisible to the test.
+fn unb64(s: &str) -> Option<Vec<u8>> {
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
 }
 
 /// The next JSON text frame, or `None` if the connection ended or carried
@@ -128,7 +130,8 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
 /// socket, and reaches the client as a transport error that looks like an
 /// ordinary failed read. Every complaint goes into the record instead, and a
 /// test that asserts on the record sees it. Nothing is exempt — not an
-/// assertion, not an unscripted lookup, not a setup failure.
+/// assertion, not an unscripted lookup, not a setup failure, and not a
+/// helper it calls: `unb64` returns `None` here for the same reason.
 async fn spawn_hub_with(
     holds: Option<HeldIndex>,
     on_upload: OnUpload,
@@ -155,7 +158,10 @@ async fn spawn_hub_with(
             return note("first message was not a client-hello".into());
         };
         let nonce_h: [u8; 32] = rand::random();
-        let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &unb64(&nonce_c), &[0u8; 32]));
+        let Some(nonce_c_raw) = unb64(&nonce_c) else {
+            return note("client-hello carried an undecodable nonce_c".into());
+        };
+        let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &[0u8; 32]));
         if !send_hub(&mut ws, &HubMsg::HubChallenge {
             nonce_h: b64(&nonce_h),
             hub_key_id: hub_key_id(),

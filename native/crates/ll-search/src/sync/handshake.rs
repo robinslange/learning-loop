@@ -263,8 +263,10 @@ mod tests {
         let attacker_sk = SigningKey::from_bytes(&[9u8; 32]);
 
         let hub = spawn_mock_hub(move |mut ws| async move {
-            let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
-                panic!("expected client-hello")
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+                // Stop rather than panic: this runs in a spawned task, where a
+                // panic never fails the test that spawned it.
+                return;
             };
             send_signed_challenge(&mut ws, &attacker_sk, &nonce_c).await;
         }).await;
@@ -285,8 +287,10 @@ mod tests {
         let client_exporter = [8u8; 32];
 
         let hub = spawn_mock_hub(move |mut ws| async move {
-            let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
-                panic!("expected client-hello")
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+                // Stop rather than panic: this runs in a spawned task, where a
+                // panic never fails the test that spawned it.
+                return;
             };
             let nonce_c_raw = unb64(&nonce_c).unwrap();
             let nonce_h = random_nonce();
@@ -317,8 +321,10 @@ mod tests {
     #[tokio::test]
     async fn aborts_when_the_hub_rejects_after_client_auth() {
         let hub = spawn_mock_hub(|mut ws| async move {
-            let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
-                panic!("expected client-hello")
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+                // Stop rather than panic: this runs in a spawned task, where a
+                // panic never fails the test that spawned it.
+                return;
             };
             send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
             let _auth = recv_client_msg(&mut ws).await;
@@ -331,8 +337,10 @@ mod tests {
     #[tokio::test]
     async fn aborts_when_no_hub_key_is_pinned_locally() {
         let hub = spawn_mock_hub(|mut ws| async move {
-            let ClientMsg::ClientHello { nonce_c, .. } = recv_client_msg(&mut ws).await else {
-                panic!("expected client-hello")
+            let Some(ClientMsg::ClientHello { nonce_c, .. }) = recv_client_msg(&mut ws).await else {
+                // Stop rather than panic: this runs in a spawned task, where a
+                // panic never fails the test that spawned it.
+                return;
             };
             send_signed_challenge(&mut ws, &hub_signing_key(), &nonce_c).await;
         }).await;

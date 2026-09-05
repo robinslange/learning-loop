@@ -168,12 +168,20 @@ async fn serve_well_known(
     let _ = stream.shutdown().await;
 }
 
-pub async fn recv_client_msg(ws: &mut WsServer) -> ClientMsg {
+/// `None` when nothing more is coming, or when what came was not a message
+/// this mock can read.
+///
+/// It returns rather than panicking for the same reason `send_hub_msg` does:
+/// **a panic cannot be a mock's error channel.** These run inside
+/// `tokio::spawn`, and a panic in a spawned task does not fail the test that
+/// spawned it — the test sees a closed socket or a timeout and its assertions
+/// are then satisfied by any failure, including the mock never having started.
+/// A handler that stops here leaves the connection to close, and the test's
+/// own assertions catch it.
+pub async fn recv_client_msg(ws: &mut WsServer) -> Option<ClientMsg> {
     loop {
-        match ws.next().await.expect("connection closed early").expect("ws error") {
-            Message::Text(t) => {
-                return serde_json::from_str(t.as_str()).expect("valid ClientMsg json")
-            }
+        match ws.next().await?.ok()? {
+            Message::Text(t) => return serde_json::from_str(t.as_str()).ok(),
             Message::Ping(d) => {
                 let _ = ws.send(Message::Pong(d)).await;
             }
@@ -187,6 +195,11 @@ pub async fn recv_client_msg(ws: &mut WsServer) -> ClientMsg {
 /// panic unwinds the hub and the client sees an ordinary transport error, so
 /// the loudest thing a mock can do about a dead socket is stop.
 pub async fn send_hub_msg(ws: &mut WsServer, msg: &HubMsg) -> bool {
+    // The one panic left in this file, and the only one that can be defended:
+    // `HubMsg` is a plain enum of owned strings and integers, so serialising
+    // it cannot fail. Every other complaint a mock has goes into a record,
+    // because a panic in a spawned task is invisible to the test that spawned
+    // it — see `recv_client_msg`.
     let text = serde_json::to_string(msg).expect("HubMsg is always serialisable");
     ws.send(Message::text(text)).await.is_ok()
 }
@@ -225,9 +238,9 @@ pub async fn fake_hub_happy_path_signed_by(
     let hellos = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&hellos);
     let mut hub = spawn_mock_hub_publishing(published_key_id, PROTOCOL_VERSION, move |mut ws| async move {
-        let hello = recv_client_msg(&mut ws).await;
+        let Some(hello) = recv_client_msg(&mut ws).await else { return };
         let ClientMsg::ClientHello { ref nonce_c, ref vault_ids, .. } = hello else {
-            panic!("expected client-hello")
+            return
         };
         let nonce_c = nonce_c.clone();
         let declared = vault_ids.clone();
@@ -275,10 +288,8 @@ pub async fn fake_hub_happy_path_signed_by(
 pub async fn fake_hub_that_forgets_the_vault() -> MockHub {
     let signer = hub_signing_key();
     spawn_mock_hub_publishing(&hub_key_id_str(), PROTOCOL_VERSION, move |mut ws| async move {
-        let hello = recv_client_msg(&mut ws).await;
-        let ClientMsg::ClientHello { nonce_c, .. } = hello else {
-            panic!("expected client-hello")
-        };
+        let Some(hello) = recv_client_msg(&mut ws).await else { return };
+        let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
         send_signed_challenge(&mut ws, &signer, &nonce_c).await;
         let _auth = recv_client_msg(&mut ws).await;
         send_hub_msg(&mut ws, &HubMsg::SyncReady {
@@ -299,7 +310,7 @@ pub async fn fake_hub_that_rejects_the_invite() -> MockHub {
     let hellos = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&hellos);
     let mut hub = spawn_mock_hub(move |mut ws| async move {
-        let hello = recv_client_msg(&mut ws).await;
+        let Some(hello) = recv_client_msg(&mut ws).await else { return };
         recorder.lock().unwrap().push(hello);
         send_hub_msg(&mut ws, &HubMsg::Reject { reason: "invite redemption failed".into() }).await;
     })
