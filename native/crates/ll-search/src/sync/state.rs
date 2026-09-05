@@ -74,8 +74,8 @@ pub fn read_state(config_dir: &Path) -> anyhow::Result<Option<SyncState>> {
         Ok(state) => Ok(Some(state)),
         Err(e) => {
             eprintln!(
-                "warning: {} exists but does not parse ({e}); reporting this vault as \
-                 never synced until the next cycle rewrites it",
+                "warning: {} exists but does not parse ({e}); this vault's sync history \
+                 is unreadable, not absent, until the next cycle rewrites it",
                 path.display()
             );
             Ok(None)

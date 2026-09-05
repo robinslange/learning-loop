@@ -143,9 +143,24 @@ async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
     stream.write_all(request.as_bytes()).await?;
     stream.flush().await?;
 
+    // A TLS peer that closes TCP without sending `close_notify` surfaces here
+    // as `UnexpectedEof`, even when the whole response arrived. Treat that as
+    // end-of-body once we have a complete header, and let `parse_response`
+    // judge what came back: this is the one fetch that gates enrolment, and
+    // failing it on a protocol nicety would look to the user like the hub was
+    // unreachable. A truncated body still fails, in the parse, where the
+    // error can say what was wrong with it.
     let mut buf = Vec::new();
-    stream.take(MAX_RESPONSE).read_to_end(&mut buf).await?;
+    match stream.take(MAX_RESPONSE).read_to_end(&mut buf).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof && has_header(&buf) => {}
+        Err(e) => return Err(e.into()),
+    }
     Ok(buf)
+}
+
+fn has_header(buf: &[u8]) -> bool {
+    buf.windows(4).any(|w| w == b"\r\n\r\n")
 }
 
 fn parse_response(raw: &[u8]) -> anyhow::Result<HubIdentity> {

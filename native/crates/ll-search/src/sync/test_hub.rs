@@ -221,20 +221,37 @@ pub async fn fake_hub_happy_path_signed_by(
     let recorder = Arc::clone(&hellos);
     let mut hub = spawn_mock_hub_publishing(published_key_id, PROTOCOL_VERSION, move |mut ws| async move {
         let hello = recv_client_msg(&mut ws).await;
-        let ClientMsg::ClientHello { ref nonce_c, .. } = hello else {
+        let ClientMsg::ClientHello { ref nonce_c, ref vault_ids, .. } = hello else {
             panic!("expected client-hello")
         };
         let nonce_c = nonce_c.clone();
+        let declared = vault_ids.clone();
         recorder.lock().unwrap().push(hello);
         send_signed_challenge(&mut ws, &signer, &nonce_c).await;
 
         let _auth = recv_client_msg(&mut ws).await;
+
+        // The real hub registers every vault the hello declared and reports
+        // each one back, holding nothing until an upload arrives. A mock that
+        // answered with an empty `vault_state` would model a hub that admits
+        // the key and silently drops the registration — which is precisely
+        // the failure the client now refuses to write a config for, so the
+        // mock has to do what the hub does or the two disagree about what
+        // success looks like.
+        let mut state: Vec<VaultState> = declared
+            .into_iter()
+            .map(|vault_id| VaultState { vault_id, holds: None })
+            .collect();
+        for (id, holds) in vaults {
+            match state.iter_mut().find(|v| v.vault_id == id) {
+                Some(existing) => existing.holds = holds,
+                None => state.push(VaultState { vault_id: id.to_string(), holds }),
+            }
+        }
+
         send_hub_msg(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
-            vault_state: vaults
-                .into_iter()
-                .map(|(id, holds)| VaultState { vault_id: id.to_string(), holds })
-                .collect(),
+            vault_state: state,
             grants: vec![],
             revocations: vec![],
         })
@@ -243,6 +260,31 @@ pub async fn fake_hub_happy_path_signed_by(
     .await;
     hub.hellos = hellos;
     hub
+}
+
+/// A hub that authenticates the key and then reports no vaults at all — the
+/// registration silently dropped. Reachable in production if the hub's
+/// `put_vault` fails in a way its handler swallows, or if a future hub stops
+/// registering from the hello; either way the client must not write a config
+/// for a vault that will refuse its first upload.
+pub async fn fake_hub_that_forgets_the_vault() -> MockHub {
+    let signer = hub_signing_key();
+    spawn_mock_hub_publishing(&hub_key_id_str(), PROTOCOL_VERSION, move |mut ws| async move {
+        let hello = recv_client_msg(&mut ws).await;
+        let ClientMsg::ClientHello { nonce_c, .. } = hello else {
+            panic!("expected client-hello")
+        };
+        send_signed_challenge(&mut ws, &signer, &nonce_c).await;
+        let _auth = recv_client_msg(&mut ws).await;
+        send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            protocol_version: PROTOCOL_VERSION,
+            vault_state: vec![],
+            grants: vec![],
+            revocations: vec![],
+        })
+        .await;
+    })
+    .await
 }
 
 /// A hub that rejects the invite. The real hub redeems the code while

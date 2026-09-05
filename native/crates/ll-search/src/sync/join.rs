@@ -41,7 +41,12 @@ use super::{auth, registry, seed_store, well_known, words};
 
 /// What a completed join produced. `recovery_phrase` is the only copy of the
 /// recovery secret that will ever exist; the caller shows it and forgets it.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is hand-written to redact that field. The derived one would put 24
+/// recovery words into any log line that formatted this struct, on a `pub`
+/// type, while the seed it came from is carefully `Zeroizing` three lines
+/// away.
+#[derive(Clone)]
 pub struct JoinOutcome {
     pub key_id: String,
     pub recovery_phrase: String,
@@ -49,6 +54,19 @@ pub struct JoinOutcome {
     pub hub_key_id: String,
     pub hub_fingerprint: String,
     pub vault_id: String,
+}
+
+impl std::fmt::Debug for JoinOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("JoinOutcome")
+            .field("key_id", &self.key_id)
+            .field("recovery_phrase", &"<redacted>")
+            .field("recovery_key_id", &self.recovery_key_id)
+            .field("hub_key_id", &self.hub_key_id)
+            .field("hub_fingerprint", &self.hub_fingerprint)
+            .field("vault_id", &self.vault_id)
+            .finish()
+    }
 }
 
 /// The two checks `join` cannot make on the user's behalf. Both are
@@ -182,7 +200,19 @@ pub async fn join(
     )
     .await?;
     let _ = futures_util::SinkExt::close(&mut ws).await;
-    let _ = ready;
+
+    // The hub creates the `vaults` row from the id declared in `ClientHello`,
+    // after the signature verifies, and `SyncReady` is its own statement that
+    // it did. Discarding that turns the registration into a hope: a hub that
+    // admits the key without creating the row produces a join that looks
+    // entirely successful and a first sync that is refused, with the cause a
+    // repository away.
+    if !ready.vault_state.iter().any(|v| v.vault_id == vault_id) {
+        anyhow::bail!(
+            "hub authenticated this key but did not register vault {vault_id}; \
+             refusing to write a config for a vault it will not accept uploads for"
+        );
+    }
 
     config::write_config(config_dir, &config)?;
 
@@ -263,7 +293,7 @@ mod tests {
     use crate::sync::config::load_config;
     use crate::sync::test_hub::{
         self, fake_hub_happy_path, fake_hub_happy_path_signed_by,
-        fake_hub_that_rejects_the_invite, hub_key_id_str, MockHub,
+        fake_hub_that_forgets_the_vault, fake_hub_that_rejects_the_invite, hub_key_id_str, MockHub,
     };
     use crate::sync::protocol_v5::ClientMsg;
     use std::path::Path;
@@ -321,11 +351,30 @@ mod tests {
     /// client needs before it will authenticate over the non-TLS mock. Hold
     /// the shared lock for the duration rather than racing every other test
     /// that reads either one.
-    fn insecure_ws_env() -> MutexGuard<'static, ()> {
-        test_hub::force_encrypted_seed_backend();
+    /// Both writes happen under the guard. `force_encrypted_seed_backend`
+    /// sets `LL_SEED_BACKEND`, so calling it before taking the lock puts the
+    /// one env write the lock exists for outside the lock — which is the
+    /// ordering bug this shape is meant to prevent, committed by the helper
+    /// that prevents it everywhere else.
+    fn insecure_ws_env() -> InsecureWsEnv {
         let guard = test_hub::env_lock();
+        test_hub::force_encrypted_seed_backend();
         std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
-        guard
+        InsecureWsEnv { _guard: guard }
+    }
+
+    /// Clears the variable when the lock is released, so a later test in this
+    /// binary sees the environment it expects rather than the one the last
+    /// join test happened to leave. Leaving it set is harmless for the tests
+    /// that exist today and is a trap for the next one that reads it.
+    struct InsecureWsEnv {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Drop for InsecureWsEnv {
+        fn drop(&mut self) {
+            std::env::remove_var("LL_ALLOW_INSECURE_WS");
+        }
     }
 
     fn hello_of(hub: &MockHub) -> Option<(Vec<String>, Option<String>, String)> {
@@ -350,6 +399,27 @@ mod tests {
         assert!(err.to_string().contains("invite redemption failed"), "{err}");
         assert!(!config::config_path(dir.path()).exists(),
             "a failed join must leave no config, so re-running enters cleanly");
+    }
+
+    /// Authentication succeeding is not registration succeeding. Under v5 the
+    /// hello IS the registration, and `SyncReady` is the hub's own statement
+    /// that it happened — so a hub that admits the key and reports no vaults
+    /// has dropped it, and a config written here would produce a join that
+    /// looked entirely successful and a first upload refused for a reason
+    /// living in another repository.
+    #[tokio::test]
+    async fn a_hub_that_authenticates_but_registers_nothing_is_not_a_successful_join() {
+        let _env = insecure_ws_env();
+        let hub = fake_hub_that_forgets_the_vault().await;
+        let dir = tempfile::tempdir().unwrap();
+
+        let err = join(dir.path(), &hub.ws_url(), "CODE", Path::new("/v"), &mut Yes::default())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("did not register vault"), "{err}");
+        assert!(!config::config_path(dir.path()).exists(),
+            "no config for a vault the hub will not accept uploads for");
     }
 
     #[tokio::test]
