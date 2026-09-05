@@ -7,6 +7,7 @@ pub mod visibility;
 pub mod auth;
 pub mod protocol;
 pub mod protocol_v5;
+pub mod grant;
 pub mod handshake;
 pub mod client;
 pub mod compression;
