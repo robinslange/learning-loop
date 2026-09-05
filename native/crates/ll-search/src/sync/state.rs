@@ -20,9 +20,26 @@ pub const OUTCOME_OK: &str = "ok";
 /// `SyncState::outcome` for a cycle that did not finish.
 pub const OUTCOME_ERROR: &str = "error";
 
-/// What the hub reported it holds for this vault, as of the handshake that
-/// opened the cycle — never a local count. One field, so "holds nothing" and
-/// "holds 3578 notes" cannot both be recorded at once.
+/// What we last knew the hub to hold for this vault, as of the END of the
+/// cycle. One field, so "holds nothing" and "holds 3578 notes" cannot both be
+/// recorded at once.
+///
+/// Where the numbers come from differs by path, and a reader rendering them
+/// needs to know which:
+///
+/// - upload accepted — what the hub acknowledged. `note_count` is the count
+///   we declared, because v5's `UploadAck` carries none; the sha is checked
+///   against the bytes we hashed before it is recorded.
+/// - upload skipped, or a failure after the handshake — the hub's own report,
+///   its own count.
+/// - a failure before the handshake — `None` on the enclosing field. We never
+///   got far enough to ask, which is not the same as the hub holding nothing.
+///
+/// Recording the end of the cycle rather than the handshake is deliberate: a
+/// first sync against a cold hub uploads successfully and would otherwise
+/// record `Nothing`, firing the outage warning immediately after the sync
+/// that fixed it. A false alarm on that warning is most of how the original
+/// outage stayed invisible for two months.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum HubHolds {
