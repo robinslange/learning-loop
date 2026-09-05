@@ -24,17 +24,19 @@ ll-search discriminate <db-path> [--threshold 0.85] [paths...]
 ll-search reflect-scan <db-path> "query1" "query2" ... [--top N] [--candidates N] [--threshold 0.85]
 ll-search rerank <db-path> "query" [--top N] [--candidates N]
 ll-search embed "text"
-ll-search status <db-path> <vault-path>
+ll-search index-status <db-path> <vault-path>
 ll-search tags <db-path> [--min-count N]
 ll-search export <db-path> <output> <vault-path> [--config-dir PATH]
 ll-search sync <db-path> <vault-path> [--config-dir PATH]
+ll-search join <hub> <invite-code> <vault-path> [--config-dir PATH]
+ll-search status [--config-dir PATH]
 ll-search watch <vault-path> <db-path> [--sync-interval SECS] [--config-dir PATH] [--pid-file PATH]
 ll-search migrate <db-path> --model NAME [--drop-old]
 ll-search benchmark <db-path> --model-a NAME --model-b NAME "query1" "query2" ...
 ll-search version
 ```
 
-All commands output JSON to stdout, errors to stderr. Exit 0 on success, 1 on error.
+All commands output JSON to stdout, errors to stderr, except `status`, which prints plain text for a person to read. Exit 0 on success, 1 on error.
 
 ## CI
 

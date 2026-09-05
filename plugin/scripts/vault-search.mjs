@@ -250,7 +250,7 @@ try {
 
     case 'status': {
       ensureBinary();
-      out(run(['status', DB_PATH, VAULT_PATH]));
+      out(run(['index-status', DB_PATH, VAULT_PATH]));
       break;
     }
 

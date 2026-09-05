@@ -87,7 +87,15 @@ enum Commands {
         config_dir: Option<String>,
     },
     Version,
+    /// Federation status: what the last sync cycle did, and whether the hub
+    /// holds an index for this vault. Reads local files only.
     Status {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// Index health for the local search index, as JSON. Was `ll status`
+    /// before v5 gave that name to federation status.
+    IndexStatus {
         db_path: String,
         vault_path: String,
     },
@@ -422,7 +430,17 @@ async fn main() {
             let vec = ll_search::embed::embed_query(&text);
             out(&vec);
         }
-        Commands::Status { db_path, vault_path } => {
+        Commands::Status { config_dir } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock is before 1970")
+                .as_secs() as i64;
+            let text = ll_search::sync::status::render_status(&config_dir, now)
+                .expect("failed to read federation status");
+            print!("{text}");
+        }
+        Commands::IndexStatus { db_path, vault_path } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
             let status = ll_search::db::get_status(&conn, &vault_path);
             out(&status);

@@ -46,14 +46,14 @@ fn query_with_missing_db_does_not_create_file() {
 }
 
 #[test]
-fn status_with_missing_db_does_not_create_file() {
+fn index_status_with_missing_db_does_not_create_file() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let bogus_db = tmp.path().join("missing.db");
     let bogus_vault = tmp.path().join("vault");
 
     let out = Command::new(ll_search_bin())
         .args([
-            "status",
+            "index-status",
             bogus_db.to_str().unwrap(),
             bogus_vault.to_str().unwrap(),
         ])

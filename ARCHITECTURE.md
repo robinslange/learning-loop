@@ -391,7 +391,7 @@ ll-search reflect-scan <db> <queries...> [--top N] [--candidates N] [--threshold
 **Index management**
 ```
 ll-search index  <vault> <db> [--force] [--sync]
-ll-search status <db> <vault>
+ll-search index-status <db> <vault>
 ll-search embed  <text>
 ll-search link-stats <db> [--folder DIR] [--orphans]
 ```
@@ -422,6 +422,8 @@ ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane 
 **Federation**
 ```
 ll-search sync          <db> <vault> [--hub-endpoint URL] [--peer-id ID]
+ll-search status        [--config-dir DIR]              # federation status, plain text, local files only
+ll-search join          <hub> <invite> <vault> [--config-dir DIR]
 ll-search identity      [--config-dir DIR]
 ll-search migrate-seed  [--config-dir DIR] [--rollback]
 ll-search version
