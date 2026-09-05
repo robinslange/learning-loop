@@ -240,7 +240,7 @@ pub async fn join(
 /// The parent tells the three cases apart. A plugin data root holds a registry,
 /// a legacy config, or both; a directory whose parent holds neither IS the
 /// root.
-fn require_a_profile_if_this_is_not_the_root(config_dir: &Path) -> anyhow::Result<()> {
+pub(super) fn require_a_profile_if_this_is_not_the_root(config_dir: &Path) -> anyhow::Result<()> {
     let Some(parent) = config_dir.parent() else { return Ok(()) };
     let has_registry = parent.join("vaults.json").exists();
     if !has_registry && !config::config_path(parent).exists() {
@@ -275,7 +275,7 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 /// alphanumerics, `-` and `_`, which is what the sync client's peer-name
 /// validator accepts — this string travels in peer metadata and a name it
 /// rejects would be dropped there with no explanation here.
-fn display_name_for(vault_path: &Path) -> String {
+pub(super) fn display_name_for(vault_path: &Path) -> String {
     let cleaned: String = vault_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())

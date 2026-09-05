@@ -45,6 +45,7 @@ notify = "7"
 ctrlc = "3"
 zstd = "0.13"
 regex = "1"
+qrcode = { version = "0.14", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"

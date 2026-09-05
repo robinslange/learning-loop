@@ -227,7 +227,55 @@ enum Commands {
         #[command(subcommand)]
         command: VaultCommand,
     },
+    /// Add a machine to this identity. Four doors, one grant.
+    Link {
+        #[command(subcommand)]
+        command: LinkCommand,
+    },
 
+}
+
+#[derive(Subcommand)]
+enum LinkCommand {
+    /// On the new machine: show its pairing code and QR, over no network at
+    /// all. Doors 2 and 3 start here.
+    Code {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// On the new machine: the same pairing code, plus the hub this identity
+    /// will reach once an established machine has admitted it. Door 1.
+    Request {
+        /// Hub endpoint, e.g. wss://hub.example.
+        hub: String,
+        vault_path: String,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// On an established machine: admit the key a pairing code names.
+    /// Lodges the grant with the hub unless --offline.
+    Approve {
+        /// The pairing code the new machine is showing.
+        code: String,
+        /// Sign the grant and print it instead of lodging it, for a machine
+        /// with no network path to this one.
+        #[arg(long)]
+        offline: bool,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// On the new machine: take a grant handed over offline. Door 3.
+    Accept {
+        /// The grant blob `ll link approve --offline` printed.
+        grant: String,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// The machines this one is linked to, and which halves exist.
+    List {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -262,6 +310,22 @@ fn init_embedding() {
 
 fn out<T: serde::Serialize>(data: &T) {
     ll_search::app::emit(data, true).expect("emit");
+}
+
+/// What the joining machine puts on its screen. The six words go to stderr
+/// beside the code because they are read aloud, not piped anywhere.
+fn show_pending(pending: &ll_search::sync::link::PendingLink) {
+    eprintln!();
+    match pending.qr() {
+        Ok(qr) => eprintln!("{qr}"),
+        Err(e) => eprintln!("(no QR: {e})"),
+    }
+    eprintln!("  this machine: {}", pending.fingerprint);
+    eprintln!();
+    eprintln!("Type or scan the code below on a machine you already use, then check");
+    eprintln!("that the six words it shows are the six words above.");
+    eprintln!();
+    println!("{}", pending.code);
 }
 
 fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app::AppState {
@@ -691,6 +755,56 @@ async fn main() {
                 }
             }
         },
+        Commands::Link { command } => {
+            use ll_search::sync::link;
+            let fail = |e: anyhow::Error| -> ! {
+                eprintln!("link failed: {e:#}");
+                std::process::exit(1);
+            };
+            match command {
+                LinkCommand::Code { config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    show_pending(&link::pending_offline(&dir).unwrap_or_else(|e| fail(e)));
+                }
+                LinkCommand::Request { hub, vault_path, config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    let pending = link::request(
+                        &dir,
+                        &hub,
+                        std::path::Path::new(&vault_path),
+                        &mut link::TtyApprove,
+                    )
+                    .await
+                    .unwrap_or_else(|e| fail(e));
+                    show_pending(&pending);
+                }
+                LinkCommand::Approve { code, offline, config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    if offline {
+                        let blob = link::approve_offline(&dir, &code, &mut link::TtyApprove)
+                            .unwrap_or_else(|e| fail(e));
+                        eprintln!();
+                        eprintln!("Give this to the new machine — `ll-search link accept <grant>`:");
+                        eprintln!();
+                        println!("{blob}");
+                    } else {
+                        link::approve(&dir, &code, &mut link::TtyApprove)
+                            .await
+                            .unwrap_or_else(|e| fail(e));
+                        eprintln!("Admitted. The new machine collects the grant on its next sync.");
+                    }
+                }
+                LinkCommand::Accept { grant, config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
+                    eprintln!("Linked. This machine is now one of yours.");
+                }
+                LinkCommand::List { config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    out(&link::list(&dir).unwrap_or_else(|e| fail(e)));
+                }
+            }
+        }
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
             let ma = parse_model(&model_a);
             let mb = parse_model(&model_b);

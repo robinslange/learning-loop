@@ -22,5 +22,6 @@ pub mod state;
 pub mod status;
 pub mod well_known;
 pub mod join;
+pub mod link;
 #[cfg(test)]
 pub mod test_hub;

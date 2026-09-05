@@ -161,7 +161,7 @@ pub async fn sync_all_async(
     outcome
 }
 
-fn unix_now() -> i64 {
+pub(super) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -187,6 +187,12 @@ async fn run_cycle(
 
     let (mut ws, ready) =
         connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id, None).await?;
+
+    // Before anything vault-shaped. A machine that was linked a minute ago
+    // owes the other half of that link and may hold nothing else worth
+    // uploading; settling the key graph first means an upload problem cannot
+    // leave a person's second machine half-joined.
+    super::link::reconcile(&mut ws, config_dir, config, &ready.grants, unix_now()).await?;
 
     let (vault_id, this_vault) = this_vault_state(config, &ready.vault_state)?;
     // What the hub reported at the handshake. Everything after this point

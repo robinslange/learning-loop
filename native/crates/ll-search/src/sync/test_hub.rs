@@ -51,6 +51,34 @@ pub fn force_encrypted_seed_backend() {
     INIT.call_once(|| std::env::set_var("LL_SEED_BACKEND", "encrypted"));
 }
 
+/// The two process-wide variables a test that opens a WebSocket to one of
+/// these mocks depends on: `LL_SEED_BACKEND`, so no test reaches the OS
+/// keyring, and `LL_ALLOW_INSECURE_WS`, which `connect_and_authenticate`
+/// needs before it will derive an exporter for a non-TLS connection.
+///
+/// Both writes happen under the guard, in this order. Calling
+/// [`force_encrypted_seed_backend`] before taking the lock would put the one
+/// env write the lock exists for outside the lock.
+pub fn insecure_ws_env() -> InsecureWsEnv {
+    let guard = env_lock();
+    force_encrypted_seed_backend();
+    std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
+    InsecureWsEnv { _guard: guard }
+}
+
+/// Clears `LL_ALLOW_INSECURE_WS` when the lock is released, so a later test
+/// in this binary sees the environment it expects rather than the one the
+/// last connecting test happened to leave.
+pub struct InsecureWsEnv {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for InsecureWsEnv {
+    fn drop(&mut self) {
+        std::env::remove_var("LL_ALLOW_INSECURE_WS");
+    }
+}
+
 pub struct MockHub {
     pub addr: SocketAddr,
     /// The `hub_key_id` this hub publishes at `/.well-known/ll-hub`.
@@ -427,4 +455,102 @@ pub async fn spawn_fetch_hub(
     })
     .await;
     (hub, asked)
+}
+
+/// How a [`spawn_grant_hub`] answers one `PutGrant`.
+pub enum GrantAnswer {
+    /// `GrantAck` carrying the sha256 of the statement — what the real hub
+    /// replies, and the id the client recomputes for itself.
+    Ack,
+    Reject(&'static str),
+    /// An ack naming a different grant than the one submitted. A hub that
+    /// stored something other than what it was sent looks exactly like a
+    /// healthy one from the outside unless the client checks the id.
+    AckWrongId,
+}
+
+/// A hub that completes the v5 handshake, reports `serve` as the grants it
+/// holds for this key, and then answers `PutGrant` from a scripted table —
+/// `Ack` once the table runs out. The record is every grant it was handed, in
+/// order.
+///
+/// Like [`spawn_fetch_hub`], nothing here panics: this runs inside
+/// `tokio::spawn`, where a panic unwinds the hub and reaches the test as an
+/// ordinary transport error indistinguishable from a refused connection.
+/// Complaints go into the record as `unexpected:` / `unparseable:` and the
+/// hub stops.
+pub async fn spawn_grant_hub(
+    serve: Vec<super::protocol_v5::GrantWire>,
+    answers: Vec<GrantAnswer>,
+) -> (MockHub, Arc<Mutex<Vec<super::protocol_v5::GrantWire>>>) {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    let lodged: Arc<Mutex<Vec<super::protocol_v5::GrantWire>>> = Arc::new(Mutex::new(Vec::new()));
+    let recorder = Arc::clone(&lodged);
+    let signer = hub_signing_key();
+    let hub = spawn_mock_hub(move |mut ws| async move {
+        let mut answers = answers.into_iter();
+        let note = |wire: super::protocol_v5::GrantWire| recorder.lock().unwrap().push(wire);
+
+        let Some(hello) = recv_client_msg(&mut ws).await else { return };
+        let ClientMsg::ClientHello { nonce_c, vault_ids, .. } = hello else {
+            return note(complaint("unexpected:not-a-hello"));
+        };
+        send_signed_challenge(&mut ws, &signer, &nonce_c).await;
+        let _auth = recv_client_msg(&mut ws).await;
+        let state: Vec<VaultState> = vault_ids
+            .into_iter()
+            .map(|vault_id| VaultState { vault_id, holds: None })
+            .collect();
+        if !send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            protocol_version: PROTOCOL_VERSION,
+            vault_state: state,
+            grants: serve,
+            revocations: vec![],
+        })
+        .await
+        {
+            return;
+        }
+
+        loop {
+            let Some(msg) = recv_client_msg(&mut ws).await else { return };
+            let ClientMsg::PutGrant { statement_b64, signature_b64 } = msg else {
+                return note(complaint(&format!("unexpected:{msg:?}")));
+            };
+            let Ok(statement) = base64::engine::general_purpose::STANDARD.decode(&statement_b64)
+            else {
+                return note(complaint("unparseable:statement-not-base64"));
+            };
+            note(super::protocol_v5::GrantWire {
+                statement_b64: statement_b64.clone(),
+                signature_b64,
+                state: "active".into(),
+            });
+            let reply = match answers.next().unwrap_or(GrantAnswer::Ack) {
+                GrantAnswer::Ack => HubMsg::GrantAck {
+                    grant_id: hex::encode(Sha256::digest(&statement)),
+                },
+                GrantAnswer::AckWrongId => HubMsg::GrantAck { grant_id: "00".repeat(32) },
+                GrantAnswer::Reject(reason) => HubMsg::Reject { reason: reason.into() },
+            };
+            if !send_hub_msg(&mut ws, &reply).await {
+                return;
+            }
+        }
+    })
+    .await;
+    (hub, lodged)
+}
+
+/// A complaint, in the one shape the record can carry. `statement_b64` holds
+/// the text and the state says it is not a grant, so a test that decodes the
+/// record sees the complaint rather than a base64 error.
+fn complaint(what: &str) -> super::protocol_v5::GrantWire {
+    super::protocol_v5::GrantWire {
+        statement_b64: what.to_string(),
+        signature_b64: String::new(),
+        state: "complaint".into(),
+    }
 }

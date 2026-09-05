@@ -186,102 +186,109 @@ async fn spawn_hub_with(
             return;
         }
 
-        // The client uploads or goes straight to the read half depending on
-        // what this hub just said it holds; the mock does not get to assume
-        // which, or it would decide the outcome it is measuring.
-        let Some(first) = recv_json(&mut ws).await else {
-            return note("nothing after sync-ready".into());
-        };
-        let mut pending = if first["type"] == "upload-index" {
-            let Ok(ClientMsg::UploadIndex { vault_id, sha256, .. }) =
-                serde_json::from_value(first)
-            else {
-                return note("an upload-index that does not parse".into());
-            };
-            if ws.next().await.is_none() {
-                return note("upload-index with no frame behind it".into());
-            }
-            let ack = match on_upload {
-                OnUpload::Reject => {
-                    let _ = send_hub(&mut ws, &HubMsg::Reject {
-                        reason: "not authorized to write this vault".into(),
-                    })
-                    .await;
-                    return;
-                }
-                OnUpload::Ack => HubMsg::UploadAck { vault_id, sha256 },
-                OnUpload::AckWrongSha => {
-                    let _ = send_hub(&mut ws, &HubMsg::UploadAck {
-                        vault_id,
-                        sha256: WRONG_SHA.into(),
-                    })
-                    .await;
-                    return;
-                }
-            };
-            if !send_hub(&mut ws, &ack).await {
-                return;
-            }
-            None
-        } else {
-            Some(first)
-        };
-
-        // The read half. v5 asks only for what a grant names, so a hub that
-        // carried none must see the connection close here rather than a
-        // request to list anything.
+        // Everything after `SyncReady`, in one loop. A cycle settles its link
+        // grants first, uploads or skips depending on what this hub just said
+        // it holds, and then reads — and which of the three arrives when is
+        // the client's decision, not the mock's to assume. Assuming it is how
+        // a mock ends up deciding the outcome it is measuring.
         loop {
-            let msg = match pending.take() {
-                Some(v) => v,
-                None => match ws.next().await {
-                    Some(Ok(Message::Text(t))) => match serde_json::from_str(t.as_str()) {
-                        Ok(v) => v,
-                        Err(e) => return note(format!("unparseable:{e}")),
-                    },
-                    Some(Ok(Message::Ping(d))) => {
-                        if ws.send(Message::Pong(d)).await.is_err() {
-                            return;
-                        }
-                        continue;
-                    }
-                    Some(Ok(Message::Close(_))) | None => return,
-                    Some(Ok(other)) => return note(format!("unexpected-frame:{other:?}")),
-                    Some(Err(e)) => return note(format!("ws-error:{e}")),
+            let msg = match ws.next().await {
+                Some(Ok(Message::Text(t))) => match serde_json::from_str::<serde_json::Value>(t.as_str()) {
+                    Ok(v) => v,
+                    Err(e) => return note(format!("unparseable:{e}")),
                 },
+                Some(Ok(Message::Ping(d))) => {
+                    if ws.send(Message::Pong(d)).await.is_err() {
+                        return;
+                    }
+                    continue;
+                }
+                Some(Ok(Message::Close(_))) | None => return,
+                Some(Ok(other)) => return note(format!("unexpected-frame:{other:?}")),
+                Some(Err(e)) => return note(format!("ws-error:{e}")),
             };
             let tag = msg["type"].as_str().unwrap_or("?").to_string();
-            let Ok(ClientMsg::FetchIndex { vault_id }) = serde_json::from_value(msg) else {
-                return note(format!("unexpected:{tag}"));
+            let parsed: ClientMsg = match serde_json::from_value(msg) {
+                Ok(m) => m,
+                Err(e) => return note(format!("unparseable:{tag}:{e}")),
             };
-            note(vault_id.clone());
-            let Some((_, answer)) = fetches.iter().find(|(id, _)| *id == vault_id) else {
-                return note(format!("unscripted:{vault_id}"));
-            };
-            let (header, frame) = match answer {
-                Fetch::Serve(bytes) => {
+            match parsed {
+                ClientMsg::PutGrant { statement_b64, .. } => {
                     use sha2::Digest;
-                    let header = HubMsg::IndexHeader {
-                        vault_id,
-                        holds: Some(HeldIndex {
-                            sha256: hex::encode(sha2::Sha256::digest(bytes)),
-                            note_count: 3,
-                            uploaded_at: 1,
-                        }),
+                    let Some(statement) = unb64(&statement_b64) else {
+                        return note("put-grant carried an undecodable statement".into());
                     };
-                    (header, Some(bytes.clone()))
+                    note(format!("put-grant:{statement_b64}"));
+                    if !send_hub(&mut ws, &HubMsg::GrantAck {
+                        grant_id: hex::encode(sha2::Sha256::digest(&statement)),
+                    })
+                    .await
+                    {
+                        return;
+                    }
                 }
-                Fetch::Refuse => (
-                    HubMsg::Reject { reason: "not authorized to read this vault".into() },
-                    None,
-                ),
-            };
-            if !send_hub(&mut ws, &header).await {
-                return;
-            }
-            if let Some(bytes) = frame {
-                if ws.send(Message::binary(bytes)).await.is_err() {
-                    return;
+                ClientMsg::UploadIndex { vault_id, sha256, .. } => {
+                    if ws.next().await.is_none() {
+                        return note("upload-index with no frame behind it".into());
+                    }
+                    let ack = match on_upload {
+                        OnUpload::Reject => {
+                            let _ = send_hub(&mut ws, &HubMsg::Reject {
+                                reason: "not authorized to write this vault".into(),
+                            })
+                            .await;
+                            return;
+                        }
+                        OnUpload::Ack => HubMsg::UploadAck { vault_id, sha256 },
+                        OnUpload::AckWrongSha => {
+                            let _ = send_hub(&mut ws, &HubMsg::UploadAck {
+                                vault_id,
+                                sha256: WRONG_SHA.into(),
+                            })
+                            .await;
+                            return;
+                        }
+                    };
+                    if !send_hub(&mut ws, &ack).await {
+                        return;
+                    }
                 }
+                // The read half. v5 asks only for what a grant names, so a hub
+                // that carried none must see the connection close rather than
+                // a request to list anything.
+                ClientMsg::FetchIndex { vault_id } => {
+                    note(vault_id.clone());
+                    let Some((_, answer)) = fetches.iter().find(|(id, _)| *id == vault_id) else {
+                        return note(format!("unscripted:{vault_id}"));
+                    };
+                    let (header, frame) = match answer {
+                        Fetch::Serve(bytes) => {
+                            use sha2::Digest;
+                            let header = HubMsg::IndexHeader {
+                                vault_id,
+                                holds: Some(HeldIndex {
+                                    sha256: hex::encode(sha2::Sha256::digest(bytes)),
+                                    note_count: 3,
+                                    uploaded_at: 1,
+                                }),
+                            };
+                            (header, Some(bytes.clone()))
+                        }
+                        Fetch::Refuse => (
+                            HubMsg::Reject { reason: "not authorized to read this vault".into() },
+                            None,
+                        ),
+                    };
+                    if !send_hub(&mut ws, &header).await {
+                        return;
+                    }
+                    if let Some(bytes) = frame {
+                        if ws.send(Message::binary(bytes)).await.is_err() {
+                            return;
+                        }
+                    }
+                }
+                _ => return note(format!("unexpected:{tag}")),
             }
         }
     });
@@ -313,6 +320,36 @@ fn follow_grant(to: &KeyId, vault_id: &str) -> GrantWire {
         signature_b64: b64(&sig.to_bytes()),
         state: "active".into(),
     }
+}
+
+/// A signed, active, unscoped `link` from a fresh key to `to` — what an
+/// established machine lodges when it admits a new one.
+fn link_grant(to: &KeyId) -> (SigningKey, GrantWire) {
+    let issuer = SigningKey::from_bytes(&[29u8; 32]);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let statement = GrantStatement {
+        v: 5,
+        kind: GrantKind::Link,
+        from: KeyId::from_pubkey(&issuer.verifying_key()),
+        to: to.clone(),
+        scope: None,
+        issued_at: now - 1,
+        expires_at: now + 86_400,
+        nonce: "ZmFrZS1saW5r".into(),
+    };
+    let bytes = canonical_bytes(&statement);
+    let sig = issuer.sign(&bytes);
+    (
+        issuer,
+        GrantWire {
+            statement_b64: b64(&bytes),
+            signature_b64: b64(&sig.to_bytes()),
+            state: "active".into(),
+        },
+    )
 }
 
 /// This client's own key id, from the seed `config_for` generated.
@@ -679,4 +716,73 @@ async fn a_cycle_that_died_before_the_read_half_records_nothing_about_it() {
 
     assert_eq!(read_state(dir.path()).unwrap().unwrap().skipped_fetches, None,
         "unknown is a different report from zero and must not be rendered as one");
+}
+
+/// The `link` half of a cycle, at the wire.
+///
+/// A machine that was admitted a minute ago owes the other half of that link,
+/// and a sync cycle is the only place a normal day produces one. Every unit
+/// test of that behaviour drives `reconcile` directly, so deleting the one
+/// line in `run_cycle` that calls it leaves all of them green — this is the
+/// test that notices.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (approver, inbound) = link_grant(&me);
+    let held = HeldIndex {
+        sha256: export_sha(dir.path()),
+        note_count: HUB_NOTE_COUNT,
+        uploaded_at: 1,
+    };
+    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, vec![inbound], vec![]).await;
+    let config = config_for(dir.path(), addr);
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes");
+
+    let lodged: Vec<GrantStatement> = seen
+        .lock()
+        .unwrap()
+        .iter()
+        .filter_map(|line| line.strip_prefix("put-grant:"))
+        .map(|b| serde_json::from_slice(&unb64(b).expect("base64")).expect("a grant statement"))
+        .collect();
+    assert_eq!(lodged.len(), 1, "the cycle owed exactly one grant: {:?}", seen.lock().unwrap());
+    assert_eq!(lodged[0].kind, GrantKind::Link);
+    assert_eq!(lodged[0].from, me, "each key signs only its own sentence");
+    assert_eq!(lodged[0].to, KeyId::from_pubkey(&approver.verifying_key()));
+    assert!(lodged[0].scope.is_none(), "a device link is unscoped");
+}
+
+/// The other side of that boundary: a cycle with nothing owed sends no
+/// `PutGrant` at all. An implementation that lodged on every connection would
+/// satisfy the test above and put a fresh row on the hub every five minutes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_with_nothing_owed_lodges_nothing() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let held = HeldIndex {
+        sha256: export_sha(dir.path()),
+        note_count: HUB_NOTE_COUNT,
+        uploaded_at: 1,
+    };
+    let (addr, seen) = spawn_hub_with(Some(held), OnUpload::Ack, vec![], vec![]).await;
+    let config = config_for(dir.path(), addr);
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes");
+
+    assert!(
+        seen.lock().unwrap().iter().all(|line| !line.starts_with("put-grant:")),
+        "{:?}",
+        seen.lock().unwrap()
+    );
 }

@@ -202,6 +202,16 @@ pub fn peer_index_path(config_dir: &Path, vault_id: &str) -> PathBuf {
     peer_dir(config_dir, vault_id).join("index.db")
 }
 
+/// Every grant this machine signed or was handed, stored verbatim.
+///
+/// Verbatim because a signature covers exact bytes: a store that kept a
+/// parsed form and re-serialised it would produce a statement that no longer
+/// verifies, and the failure would surface as "invalid signature" a long way
+/// from here.
+pub fn grants_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("grants.json")
+}
+
 /// What the last sync cycle did — written on every cycle, succeeded or not.
 /// A missing file means no cycle has ever finished writing one, which is a
 /// different report from "the last cycle was fine" and must not be rendered
