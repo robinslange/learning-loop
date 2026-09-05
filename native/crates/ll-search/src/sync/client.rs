@@ -9,18 +9,15 @@ use sha2::{Sha256, Digest};
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
-use super::config::{
-    base_export_db_path, base_export_sha_path, export_db_path, peers_dir, seed_path,
-    FederationConfig,
-};
-use super::export::compute_patchset;
+use super::config::{export_db_path, peers_dir, seed_path, FederationConfig};
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
+use super::handshake::SyncReadyPayload;
 use super::protocol::{
-    manifest_root, ChunkedFrame, ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp,
-    CHUNK_MAX_BODY_SIZE, ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP, PROTOCOL_VERSION_CHUNKED,
-    PROTOCOL_VERSION_FRAMED,
+    ClientMessage, Envelope, EnvelopeMeta, HubMessage, PeerTimestamp, ENVELOPE_HEADER_LEN,
+    HUB_INBOUND_CAP, PROTOCOL_VERSION_FRAMED,
 };
+use super::protocol_v5::{ClientMsg, HubMsg, VaultState};
 
 const META_FILE_VERSION: u32 = 2;
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
@@ -136,24 +133,12 @@ pub async fn sync_all_async(
     let seed = auth::load_seed(&seed_path(config_dir))?;
     let peer_id = config.identity.display_name.clone();
 
-    let (mut ws, negotiated_protocol) =
+    let (mut ws, ready) =
         connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id).await?;
-    let framed_path = negotiated_protocol >= PROTOCOL_VERSION_FRAMED;
+    let framed_path = ready.protocol_version >= PROTOCOL_VERSION_FRAMED;
 
-    let export_path = export_db_path(config_dir);
-    let (uploaded_notes, skipped_upload) = upload_index(
-        &mut ws,
-        config_dir,
-        config,
-        &export_path,
-        &prepared.bytes,
-        &prepared.hash,
-        &seed,
-        &peer_id,
-        negotiated_protocol,
-        prepared.current_max_mtime,
-    )
-    .await?;
+    let (uploaded_notes, skipped_upload) =
+        upload_index(&mut ws, config_dir, config, &prepared, &ready.vault_state).await?;
 
     let (downloaded, skipped) = download_peers(&mut ws, config_dir, framed_path).await?;
 
@@ -173,6 +158,8 @@ struct PreparedExport {
     bytes: Vec<u8>,
     hash: String,
     current_max_mtime: u64,
+    note_count: i64,
+    schema_version: String,
     model_id: String,
     result: Option<ExportResult>,
 }
@@ -226,22 +213,42 @@ async fn prepare_export(
     };
     let hash = hex::encode(Sha256::digest(&bytes));
 
-    let model_id = if let Some(ref r) = result {
-        r.model_id.clone()
-    } else {
-        let source_owned = source_db.to_path_buf();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let source = Connection::open_with_flags(
-                &source_owned,
+    // Read the upload metadata from the export we are about to send, never
+    // from the source index or from `ExportResult`. When the export is reused
+    // from disk, a re-index in between would make the source's `model_id`
+    // describe different bytes than the ones on the wire.
+    let export_owned = export_path.clone();
+    let (note_count, schema_version, model_id) = tokio::task::spawn_blocking(
+        move || -> anyhow::Result<(i64, String, String)> {
+            let export = Connection::open_with_flags(
+                &export_owned,
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
             )?;
-            Ok(source.query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))?)
-        })
-        .await
-        .map_err(|e| anyhow::anyhow!("model_id lookup panicked: {e}"))??
-    };
+            let meta = |key: &str| -> anyhow::Result<String> {
+                Ok(export.query_row(
+                    "SELECT value FROM meta WHERE key = ?1",
+                    [key],
+                    |r| r.get::<_, String>(0),
+                )?)
+            };
+            let note_count = meta("note_count")?
+                .parse()
+                .context("export meta note_count is not an integer")?;
+            Ok((note_count, meta("schema_version")?, meta("model_id")?))
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("export meta lookup panicked: {e}"))??;
 
-    Ok(PreparedExport { bytes, hash, current_max_mtime, model_id, result })
+    Ok(PreparedExport {
+        bytes,
+        hash,
+        current_max_mtime,
+        note_count,
+        schema_version,
+        model_id,
+        result,
+    })
 }
 
 async fn connect_and_authenticate(
@@ -249,7 +256,7 @@ async fn connect_and_authenticate(
     seed: &SigningKey,
     peer_id: &str,
     model_id: &str,
-) -> anyhow::Result<(WsStream, u32)> {
+) -> anyhow::Result<(WsStream, SyncReadyPayload)> {
     let hub_url = &config.hub.endpoint;
     check_hub_scheme(hub_url)?;
     let connect_url = if hub_url.ends_with("/ws") {
@@ -282,273 +289,77 @@ async fn connect_and_authenticate(
     let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, None).await?;
     eprintln!("Authenticated (protocol v{})", ready.protocol_version);
 
-    Ok((ws, ready.protocol_version))
+    Ok((ws, ready))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, PartialEq, Eq)]
+pub enum UploadDecision {
+    Upload,
+    Skip,
+}
+
+/// Decide whether to upload, using ONLY what the hub reports it holds.
+///
+/// v4 read `federation/last-export-hash` — a local file describing what this
+/// client believed it had once uploaded. When the hub lost its index (or, as
+/// happened, never had one because its credentials were absent), the client
+/// kept reporting "no changes" forever and nothing ever re-uploaded.
+///
+/// `last-export-hash` still exists, but only to skip recomputing the export.
+/// It has no say in whether to send it.
+pub fn upload_decision(export_hash: &str, state: Option<&VaultState>) -> UploadDecision {
+    match state.and_then(|s| s.holds.as_ref()) {
+        Some(held) if held.sha256 == export_hash => UploadDecision::Skip,
+        _ => UploadDecision::Upload,
+    }
+}
+
+/// Send the export to the hub over the v5 wire: a JSON `UploadIndex`
+/// declaring what follows, then the raw export bytes as one binary frame,
+/// then the hub's `UploadAck`. No envelope, no compression, no chunking —
+/// the hub hashes exactly the bytes in that frame.
 async fn upload_index(
     ws: &mut WsStream,
     config_dir: &Path,
     config: &FederationConfig,
-    export_path: &Path,
-    export_bytes: &[u8],
-    export_hash: &str,
-    seed: &SigningKey,
-    peer_id: &str,
-    negotiated_protocol: u32,
-    current_max_mtime: u64,
+    prepared: &PreparedExport,
+    vault_state: &[VaultState],
 ) -> anyhow::Result<(i64, bool)> {
-    let fed_dir = config_dir.join("federation");
-    let hash_path = fed_dir.join("last-export-hash");
-    let mtime_path = fed_dir.join("last-export-mtime");
+    let vault_id = config.vault_id.as_deref().ok_or_else(|| {
+        anyhow::anyhow!("no vault_id in this federation config; run `ll join` in this vault")
+    })?;
+    let held = vault_state.iter().find(|v| v.vault_id == vault_id);
 
-    let upload_unchanged = std::fs::read_to_string(&hash_path)
-        .map(|stored| stored.trim() == export_hash)
-        .unwrap_or(false);
-
-    if upload_unchanged {
-        eprintln!("Index unchanged since last sync, skipping upload");
-        send_json(ws, &ClientMessage::SyncSkipUpload).await?;
-        let skip_ack = recv_json::<HubMessage>(ws).await?;
-        match skip_ack {
-            HubMessage::SyncSkipAck => eprintln!("Hub acknowledged skip"),
-            other => anyhow::bail!("expected sync-skip-ack, got: {other:?}"),
-        }
+    if upload_decision(&prepared.hash, held) == UploadDecision::Skip {
+        eprintln!("Hub already holds this index, skipping upload");
         return Ok((0, true));
     }
 
-    // Try patchset upload first when v3 negotiated + base on disk.
-    let patchset_outcome = if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
-        try_patchset_upload(ws, config_dir, config, export_path, export_bytes, seed, peer_id).await?
-    } else {
-        None
-    };
+    send_json(ws, &ClientMsg::UploadIndex {
+        vault_id: vault_id.to_string(),
+        sha256: prepared.hash.clone(),
+        note_count: prepared.note_count,
+        schema_version: prepared.schema_version.clone(),
+        model_id: prepared.model_id.clone(),
+    })
+    .await?;
+    send_binary(ws, prepared.bytes.clone()).await?;
+    eprintln!("Sent local index ({} KB)", prepared.bytes.len() / 1024);
 
-    let (notes, hub_stored_sha) = if let Some((n, sha)) = patchset_outcome {
-        (n, sha)
-    } else {
-        upload_full(ws, config, export_bytes, seed, peer_id, negotiated_protocol).await?
-    };
-
-    // Rotate the local base when v3 succeeded. SQLite session apply
-    // on the hub side produces a row-equivalent but not byte-equivalent
-    // DB compared to our local-export.db, so the next patchset upload
-    // must advertise the HUB's post-apply sha as base_export_sha256, not
-    // ours. The hub echoes its stored hash in SyncAck.stored_sha256;
-    // fall back to our local export_hash when the field is absent (older
-    // hub or full-upload path).
-    if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
-        let base_db_path = base_export_db_path(config_dir);
-        let base_sha_path = base_export_sha_path(config_dir);
-        if let Some(parent) = base_db_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        std::fs::copy(export_path, &base_db_path)?;
-        let base_sha = hub_stored_sha.as_deref().unwrap_or(export_hash);
-        std::fs::write(&base_sha_path, base_sha)?;
+    match recv_json::<HubMsg>(ws).await? {
+        HubMsg::UploadAck { .. } => eprintln!("Hub acknowledged: {} notes", prepared.note_count),
+        HubMsg::Reject { reason } => anyhow::bail!("hub rejected upload: {reason}"),
+        other => anyhow::bail!("expected upload-ack, got: {other:?}"),
     }
 
-    std::fs::write(&hash_path, export_hash)?;
-    std::fs::write(&mtime_path, current_max_mtime.to_string())?;
+    let fed_dir = config_dir.join("federation");
+    std::fs::write(fed_dir.join("last-export-hash"), &prepared.hash)?;
+    std::fs::write(
+        fed_dir.join("last-export-mtime"),
+        prepared.current_max_mtime.to_string(),
+    )?;
 
-    Ok((notes, false))
-}
-
-/// Try a patchset (incremental) upload. Returns `Ok(Some(..))` on hub-acked
-/// success, `Ok(None)` when we should fall through to a full upload
-/// (no stored base, empty patchset, patchset larger than full, compute
-/// failure, or base mismatch on the hub side). Bails on any other reject.
-async fn try_patchset_upload(
-    ws: &mut WsStream,
-    config_dir: &Path,
-    config: &FederationConfig,
-    export_path: &Path,
-    export_bytes: &[u8],
-    seed: &SigningKey,
-    peer_id: &str,
-) -> anyhow::Result<Option<(i64, Option<String>)>> {
-    let base_db_path = base_export_db_path(config_dir);
-    let base_sha_path = base_export_sha_path(config_dir);
-    let base_sha = std::fs::read_to_string(&base_sha_path)
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    let (Some(base_sha), true) = (base_sha, base_db_path.exists()) else {
-        return Ok(None);
-    };
-
-    let base_owned = base_db_path.clone();
-    let cur_owned = export_path.to_path_buf();
-    let patchset_res = tokio::task::spawn_blocking(move || compute_patchset(&base_owned, &cur_owned))
-        .await
-        .map_err(|e| anyhow::anyhow!("patchset compute panicked: {e}"))?;
-
-    let patchset = match patchset_res {
-        Ok(p) if p.is_empty() => {
-            eprintln!("Patchset empty (no row-level changes); using full");
-            return Ok(None);
-        }
-        Ok(ref p) if p.len() >= export_bytes.len() => {
-            eprintln!("Patchset larger than full body; using full");
-            return Ok(None);
-        }
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("Patchset compute failed ({e}); falling back to full");
-            return Ok(None);
-        }
-    };
-
-    // Compress before chunking so the zstd dictionary spans the whole
-    // patchset (per-chunk compression would cost 10-15% of the ratio).
-    let raw_patchset_len = patchset.len();
-    let body = super::compression::zstd_encode(&patchset)?;
-    eprintln!(
-        "Compressed patchset {} -> {} bytes ({}%)",
-        raw_patchset_len,
-        body.len(),
-        if raw_patchset_len == 0 { 0 } else { 100 * body.len() / raw_patchset_len }
-    );
-
-    let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
-    let total_len = body.len();
-    let chunk_count = (((total_len + chunk_size_max - 1) / chunk_size_max).max(1)) as u32;
-    let chunk_hashes: Vec<[u8; 32]> = body
-        .chunks(chunk_size_max.max(1))
-        .map(|s| Sha256::digest(s).into())
-        .collect();
-    let merkle = manifest_root(&chunk_hashes);
-
-    let mut envelope = auth::create_envelope_v3(
-        seed,
-        &body,
-        peer_id,
-        config.graph,
-        "patchset",
-        "zstd",
-        chunk_count,
-        &merkle,
-        chunk_size_max as u32,
-    );
-    envelope["base_export_sha256"] = serde_json::json!(base_sha);
-    envelope["base_export_id"] = serde_json::json!(base_sha);
-    send_json(ws, &ClientMessage::UploadEnvelope { envelope }).await?;
-    eprintln!(
-        "Sent patchset ({} bytes compressed, {} chunks @ {} KiB max, vs full export {} bytes)",
-        total_len,
-        chunk_count,
-        chunk_size_max / 1024,
-        export_bytes.len()
-    );
-    for (seq, slice) in body.chunks(chunk_size_max.max(1)).enumerate() {
-        let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
-        send_binary(ws, frame.encode()).await?;
-    }
-
-    let ack = recv_json::<HubMessage>(ws).await?;
-    match ack {
-        HubMessage::SyncAck { note_count, stored_sha256 } => {
-            eprintln!("Hub acknowledged patchset: {note_count} notes");
-            Ok(Some((note_count, stored_sha256)))
-        }
-        HubMessage::SyncReject { reason } if reason.contains("patchset base mismatch") => {
-            eprintln!("Patchset rejected (base mismatch); falling back to full");
-            Ok(None)
-        }
-        HubMessage::SyncReject { reason } => {
-            anyhow::bail!("hub rejected patchset: {reason}")
-        }
-        other => anyhow::bail!("expected sync-ack after patchset, got: {other:?}"),
-    }
-}
-
-/// Send the full export body. Chunked (v3+) or single-frame legacy (v1/v2).
-async fn upload_full(
-    ws: &mut WsStream,
-    config: &FederationConfig,
-    export_bytes: &[u8],
-    seed: &SigningKey,
-    peer_id: &str,
-    negotiated_protocol: u32,
-) -> anyhow::Result<(i64, Option<String>)> {
-    if negotiated_protocol >= PROTOCOL_VERSION_CHUNKED {
-        // Compress whole-body before chunking so the zstd dictionary context
-        // spans the entire payload.
-        let raw_len = export_bytes.len();
-        let body = super::compression::zstd_encode(export_bytes)?;
-        eprintln!(
-            "Compressed export {} -> {} bytes ({}%)",
-            raw_len,
-            body.len(),
-            if raw_len == 0 { 0 } else { 100 * body.len() / raw_len }
-        );
-
-        let chunk_size_max: usize = (4 * 1024 * 1024).min(CHUNK_MAX_BODY_SIZE);
-        let total_len = body.len();
-        let chunk_count = if total_len == 0 {
-            1
-        } else {
-            ((total_len + chunk_size_max - 1) / chunk_size_max) as u32
-        };
-
-        let chunk_hashes: Vec<[u8; 32]> = body
-            .chunks(chunk_size_max.max(1))
-            .map(|slice| Sha256::digest(slice).into())
-            .collect();
-        let merkle = manifest_root(&chunk_hashes);
-
-        let envelope = auth::create_envelope_v3(
-            seed,
-            &body,
-            peer_id,
-            config.graph,
-            "full",
-            "zstd",
-            chunk_count,
-            &merkle,
-            chunk_size_max as u32,
-        );
-        send_json(ws, &ClientMessage::UploadEnvelope { envelope }).await?;
-        eprintln!(
-            "Sent envelope ({} bytes compressed, {} chunks @ {} KiB max)",
-            total_len,
-            chunk_count,
-            chunk_size_max / 1024
-        );
-
-        for (seq, slice) in body.chunks(chunk_size_max.max(1)).enumerate() {
-            let frame = ChunkedFrame::from_body(seq as u32, chunk_count, slice.to_vec())?;
-            send_binary(ws, frame.encode()).await?;
-            eprintln!(
-                "  chunk {}/{} ({} KiB)",
-                seq as u32 + 1,
-                chunk_count,
-                slice.len() / 1024
-            );
-        }
-    } else {
-        let framed_path = negotiated_protocol >= PROTOCOL_VERSION_FRAMED;
-        let payload_size_kb = export_bytes.len() / 1024;
-        let envelope = auth::create_envelope(seed, export_bytes, peer_id, config.graph);
-        send_json(ws, &ClientMessage::UploadEnvelope { envelope }).await?;
-
-        let payload = if framed_path {
-            Envelope::from_body(export_bytes.to_vec())?.encode()
-        } else {
-            export_bytes.to_vec()
-        };
-        send_binary(ws, payload).await?;
-        eprintln!("Sent local index ({payload_size_kb} KB, framed={framed_path})");
-    }
-
-    let ack = recv_json::<HubMessage>(ws).await?;
-    match ack {
-        HubMessage::SyncAck { note_count, stored_sha256 } => {
-            eprintln!("Hub acknowledged: {note_count} notes");
-            Ok((note_count, stored_sha256))
-        }
-        other => anyhow::bail!("expected sync-ack, got: {other:?}"),
-    }
+    Ok((prepared.note_count, false))
 }
 
 async fn download_peers(
@@ -897,6 +708,7 @@ fn ensure_peer_embeddings(db_path: &Path, peer_id: &str) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::protocol_v5::HeldIndex;
 
     #[test]
     fn check_hub_scheme_accepts_wss() {
@@ -992,5 +804,218 @@ mod tests {
         assert!(!hash_matches(&h, &hex::encode([0u8; 32])));
         assert!(!hash_matches(&h, "not_hex"));
         assert!(!hash_matches(&h, &hex::encode([0u8; 31])));
+    }
+
+    fn held(sha256: &str) -> HeldIndex {
+        HeldIndex { sha256: sha256.into(), note_count: 10, uploaded_at: 1 }
+    }
+
+    #[test]
+    fn uploads_when_the_hub_holds_nothing_even_if_the_local_hash_matches() {
+        let decision = upload_decision("abc123", Some(&VaultState {
+            vault_id: "v1".into(),
+            holds: None,
+        }));
+
+        assert_eq!(decision, UploadDecision::Upload,
+            "THE 2026-07 OUTAGE: the client said 'no changes' from its own file \
+             while the hub held nothing, for two months, at INFO level");
+    }
+
+    #[test]
+    fn skips_only_when_the_hub_confirms_it_holds_this_exact_index() {
+        let decision = upload_decision("abc123", Some(&VaultState {
+            vault_id: "v1".into(),
+            holds: Some(held("abc123")),
+        }));
+        assert_eq!(decision, UploadDecision::Skip);
+    }
+
+    #[test]
+    fn uploads_when_the_hub_holds_a_different_index() {
+        let decision = upload_decision("abc123", Some(&VaultState {
+            vault_id: "v1".into(),
+            holds: Some(held("stale999")),
+        }));
+        assert_eq!(decision, UploadDecision::Upload);
+    }
+
+    #[test]
+    fn uploads_when_the_hub_does_not_mention_this_vault_at_all() {
+        assert_eq!(upload_decision("abc123", None), UploadDecision::Upload,
+            "a hub that never mentions the vault has not confirmed it holds the index");
+    }
+
+    /// Blind spot: `find` returns the FIRST match in the file, so moving
+    /// `upload_decision` below this test module would silently make the
+    /// slice scan the string literal on the line below instead of the
+    /// function, and the guard would go on passing.
+    #[test]
+    fn the_local_hash_file_is_never_consulted_for_the_decision() {
+        let src = include_str!("client.rs");
+        let idx = src.find("pub fn upload_decision").expect("function exists");
+        let body = src[idx..].split("\n}\n").next().expect("function has a closing brace");
+        assert!(body.contains("state"),
+            "positive control: if this slice missed the function body, the assertion below \
+             would pass by reading nothing");
+        assert!(!body.contains("last-export-hash"),
+            "the upload decision must depend only on what the hub reports");
+    }
+
+    type WsServer = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
+
+    async fn spawn_mock_hub<F, Fut>(handler: F) -> std::net::SocketAddr
+    where
+        F: FnOnce(WsServer) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = ()> + Send + 'static,
+    {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((stream, _)) = listener.accept().await {
+                if let Ok(ws) = tokio_tungstenite::accept_async(stream).await {
+                    handler(ws).await;
+                }
+            }
+        });
+        addr
+    }
+
+    fn prepared_fixture(bytes: Vec<u8>) -> PreparedExport {
+        let hash = hex::encode(Sha256::digest(&bytes));
+        PreparedExport {
+            bytes,
+            hash,
+            current_max_mtime: 7,
+            note_count: 42,
+            schema_version: "2".into(),
+            model_id: "m".into(),
+            result: None,
+        }
+    }
+
+    async fn client_to(addr: std::net::SocketAddr) -> WsStream {
+        tokio_tungstenite::connect_async(format!("ws://{addr}")).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn the_upload_is_a_json_declaration_then_one_raw_binary_frame() {
+        let body = b"pretend-this-is-a-sqlite-file".to_vec();
+        let expected_hash = hex::encode(Sha256::digest(&body));
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let declared = match ws.next().await.unwrap().unwrap() {
+                Message::Text(t) => serde_json::from_str::<ClientMsg>(t.as_str()).unwrap(),
+                other => panic!("expected the upload-index declaration, got {other:?}"),
+            };
+            let frame = match ws.next().await.unwrap().unwrap() {
+                Message::Binary(b) => b.to_vec(),
+                other => panic!("expected one raw binary frame, got {other:?}"),
+            };
+            let ClientMsg::UploadIndex { ref vault_id, ref sha256, .. } = declared else {
+                panic!("expected upload-index, got {declared:?}")
+            };
+            let ack = HubMsg::UploadAck { vault_id: vault_id.clone(), sha256: sha256.clone() };
+            ws.send(Message::text(serde_json::to_string(&ack).unwrap())).await.unwrap();
+            let _ = tx.send((declared, frame));
+        })
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v1".into());
+        let prepared = prepared_fixture(body.clone());
+        let mut ws = client_to(addr).await;
+
+        let outcome = upload_index(&mut ws, dir.path(), &config, &prepared, &[]).await.unwrap();
+        assert_eq!(outcome, (42, false));
+
+        let (declared, frame) = rx.await.unwrap();
+        assert_eq!(frame, body,
+            "the hub runs Sha256 over exactly this frame: no envelope header, no zstd, no chunking");
+        match declared {
+            ClientMsg::UploadIndex { vault_id, sha256, note_count, schema_version, model_id } => {
+                assert_eq!(vault_id, "v1");
+                assert_eq!(sha256, expected_hash);
+                assert_eq!(note_count, 42);
+                assert_eq!(schema_version, "2");
+                assert_eq!(model_id, "m");
+            }
+            other => panic!("expected upload-index, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_hub_reject_fails_the_sync_with_the_hubs_reason() {
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let _decl = ws.next().await;
+            let _frame = ws.next().await;
+            let reject = HubMsg::Reject { reason: "not authorized to write this vault".into() };
+            ws.send(Message::text(serde_json::to_string(&reject).unwrap())).await.unwrap();
+        })
+        .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v1".into());
+        let mut ws = client_to(addr).await;
+
+        let err = upload_index(&mut ws, dir.path(), &config, &prepared_fixture(b"x".to_vec()), &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not authorized to write this vault"), "{err}");
+        assert!(!dir.path().join("federation/last-export-hash").exists(),
+            "a rejected upload must not record itself as sent");
+    }
+
+    /// The declared metadata must describe the bytes on the wire, so it is
+    /// read from the export DB — never from the source index, and never from
+    /// a version constant. `META_FILE_VERSION` and the export's own
+    /// `SCHEMA_VERSION` both happen to be 2, so a fixture using 2 would pass
+    /// no matter which of the three the code read. This one uses 9.
+    #[tokio::test]
+    async fn the_upload_metadata_is_read_from_the_export_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let export_path = export_db_path(dir.path());
+        std::fs::create_dir_all(export_path.parent().unwrap()).unwrap();
+        let conn = Connection::open(&export_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta VALUES ('note_count', '7'), ('schema_version', '9'),
+                                     ('model_id', 'from-the-export');",
+        )
+        .unwrap();
+        drop(conn);
+
+        let vault = tempfile::tempdir().unwrap();
+        let config = FederationConfig::test_fixture("private", vec![]);
+        let prepared =
+            prepare_export(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+                .await
+                .unwrap();
+
+        assert!(prepared.result.is_none(), "precondition: the export was reused, not rebuilt");
+        assert_eq!(prepared.note_count, 7);
+        assert_eq!(prepared.schema_version, "9");
+        assert_eq!(prepared.model_id, "from-the-export");
+    }
+
+    #[tokio::test]
+    async fn a_missing_vault_id_is_an_error_naming_ll_join() {
+        let addr = spawn_mock_hub(|mut ws| async move { let _ = ws.next().await; }).await;
+        let dir = tempfile::tempdir().unwrap();
+        let config = FederationConfig::test_fixture("private", vec![]);
+        assert!(config.vault_id.is_none(), "fixture precondition");
+        let mut ws = client_to(addr).await;
+
+        let err = upload_index(&mut ws, dir.path(), &config, &prepared_fixture(b"x".to_vec()), &[])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("ll join"),
+            "ambiguous scope fails loud and names the fix, never defaults or skips: {err}");
     }
 }
