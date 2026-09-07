@@ -12,27 +12,47 @@ const { sessionSurfaced, usageReport, loadNoteUsageEvents, loadUnevidencedInform
   pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
 );
 
-const NOW = new Date('2026-06-12T00:00:00Z').getTime();
+// The fixtures below were pinned to an absolute NOW while the report measures
+// its window from the real clock, so they aged out of it: on 2026-09-07
+// daysAgo(3) landed exactly 90 days back, on the boundary of the report's
+// 90-day window, and the suite began failing for reasons no commit caused.
+// A fixture that encodes "recently" must be built from the same clock the code
+// under test reads.
+const NOW = Date.now();
 const daysAgo = (n) => new Date(NOW - n * 86_400_000).toISOString();
+const monthOf = (iso) => iso.slice(0, 7);
+
+// Log files are sharded by month, so an entry three days old can belong to the
+// previous month's shard. Bucket by each entry's own timestamp rather than
+// writing every record into one hardcoded month.
+function writeMonthlyShards(dir, prefix, entries) {
+  const byMonth = new Map();
+  for (const e of entries) {
+    const month = monthOf(e.ts);
+    if (!byMonth.has(month)) byMonth.set(month, []);
+    byMonth.get(month).push(e);
+  }
+  if (byMonth.size === 0) byMonth.set(monthOf(new Date(NOW).toISOString()), []);
+  for (const [month, group] of byMonth) {
+    writeFileSync(
+      join(dir, `${prefix}-${month}.jsonl`),
+      group.map((e) => JSON.stringify(e)).join('\n'),
+    );
+  }
+}
 
 function makePluginData({ queries = [], dedupe = {}, provenance = [] } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'll-usage-'));
   mkdirSync(join(root, 'retrieval', 'session-dedupe'), { recursive: true });
   mkdirSync(join(root, 'provenance'), { recursive: true });
-  writeFileSync(
-    join(root, 'retrieval', 'queries-2026-06.jsonl'),
-    queries.map((q) => JSON.stringify(q)).join('\n'),
-  );
+  writeMonthlyShards(join(root, 'retrieval'), 'queries', queries);
   for (const [sid, entries] of Object.entries(dedupe)) {
     writeFileSync(
       join(root, 'retrieval', 'session-dedupe', `${sid}.json`),
       JSON.stringify(entries),
     );
   }
-  writeFileSync(
-    join(root, 'provenance', 'events-2026-06.jsonl'),
-    provenance.map((e) => JSON.stringify(e)).join('\n'),
-  );
+  writeMonthlyShards(join(root, 'provenance'), 'events', provenance);
   return root;
 }
 
@@ -232,7 +252,7 @@ test('CLI default report survives non-string query records and reaches the usage
     queries: [{ ts: daysAgo(1), session_id: 's1', query: { bad: 'shape' }, top_paths: [] }],
   });
   writeFileSync(
-    join(pd, 'retrieval', 'episodic-queries-2026-06.jsonl'),
+    join(pd, 'retrieval', `episodic-queries-${monthOf(daysAgo(1))}.jsonl`),
     JSON.stringify({ ts: daysAgo(1), session_id: 's1', query: 42 }) + '\n',
   );
   try {
