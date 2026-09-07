@@ -1,3 +1,4 @@
+pub mod atomic_file;
 pub mod backfill;
 pub mod config;
 pub mod error;

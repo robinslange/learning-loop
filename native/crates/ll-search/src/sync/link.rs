@@ -35,6 +35,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
 use super::config::{self, grants_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement};
@@ -277,36 +278,57 @@ pub fn load_grants(config_dir: &Path) -> anyhow::Result<Vec<StoredGrant>> {
     }
 }
 
-fn save_grants(config_dir: &Path, grants: &[StoredGrant]) -> anyhow::Result<()> {
+/// Read the store, hand it to `f`, and write back whatever `f` leaves — with
+/// no other writer able to interleave between the read and the write.
+///
+/// Every change to `grants.json` goes through here, **the decisions
+/// included**. This file is read-modify-written whole, and `ll link approve`
+/// and the watch daemon both write it: without the lock two processes each
+/// read 60 rows, each append one, each write 61, and one of the two appends
+/// is gone. That is not hypothetical — 120 grants written, 60 on disk — and
+/// unique temp names alone would only have made it quieter.
+///
+/// It is also why "do I already hold a link to this key?" belongs inside the
+/// closure rather than before the call: the answer stops being true the
+/// moment another writer appends, and a check outside the lock is a check
+/// against a store that has already moved.
+fn update_grants<T>(
+    config_dir: &Path,
+    f: impl FnOnce(&mut Vec<StoredGrant>) -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     let path = grants_path(config_dir);
-    std::fs::create_dir_all(config_dir.join("federation"))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(grants)?)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    let _lock = atomic_file::FileLock::acquire(&path)?;
+    let mut grants = load_grants(config_dir)?;
+    let out = f(&mut grants)?;
+    atomic_file::write_json(&path, &grants)?;
+    Ok(out)
+}
+
+fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
+    StoredGrant {
+        statement_b64: B64.encode(&g.statement),
+        signature_b64: B64.encode(&g.signature),
+        lodged,
+    }
+}
+
+fn has_id(s: &StoredGrant, id: &str) -> bool {
+    s.signed().map(|sg| grant::grant_id(&sg.statement) == id).unwrap_or(false)
 }
 
 /// Add a grant to the store unless the same statement is already there.
 /// Returns whether it was new. Identity is `grant_id` — the hash of the
 /// statement bytes — which is the same identity the hub gives it.
 fn remember(config_dir: &Path, g: &SignedGrant, lodged: bool) -> anyhow::Result<bool> {
-    let mut grants = load_grants(config_dir)?;
     let id = grant::grant_id(&g.statement);
-    if let Some(existing) = grants
-        .iter_mut()
-        .find(|s| s.signed().map(|sg| grant::grant_id(&sg.statement) == id).unwrap_or(false))
-    {
-        existing.lodged |= lodged;
-        save_grants(config_dir, &grants)?;
-        return Ok(false);
-    }
-    grants.push(StoredGrant {
-        statement_b64: B64.encode(&g.statement),
-        signature_b64: B64.encode(&g.signature),
-        lodged,
-    });
-    save_grants(config_dir, &grants)?;
-    Ok(true)
+    update_grants(config_dir, |grants| {
+        if let Some(existing) = grants.iter_mut().find(|s| has_id(s, &id)) {
+            existing.lodged |= lodged;
+            return Ok(false);
+        }
+        grants.push(stored(g, lodged));
+        Ok(true)
+    })
 }
 
 /// Every stored grant whose signature still checks out and whose expiry has
@@ -320,8 +342,14 @@ fn active_grants(
     config_dir: &Path,
     now: i64,
 ) -> anyhow::Result<Vec<(StoredGrant, GrantStatement)>> {
+    Ok(active_among(&load_grants(config_dir)?, now))
+}
+
+/// The same, over rows already in hand — which is what a caller holding the
+/// store's lock has, and what it must use rather than reading the file again.
+fn active_among(grants: &[StoredGrant], now: i64) -> Vec<(StoredGrant, GrantStatement)> {
     let mut out = Vec::new();
-    for stored in load_grants(config_dir)? {
+    for stored in grants {
         let signed = match stored.signed() {
             Ok(s) => s,
             Err(e) => {
@@ -330,12 +358,12 @@ fn active_grants(
             }
         };
         match verify_grant(&signed) {
-            Ok(st) if st.expires_at > now => out.push((stored, st)),
+            Ok(st) if st.expires_at > now => out.push((stored.clone(), st)),
             Ok(_) => {}
             Err(e) => eprintln!("skipping a stored grant that does not verify: {e}"),
         }
     }
-    Ok(out)
+    out
 }
 
 fn local_signing_key(config_dir: &Path) -> anyhow::Result<SigningKey> {
@@ -366,15 +394,20 @@ fn ensure_link_to(config_dir: &Path, other: &KeyId, now: i64) -> anyhow::Result<
     if &me == other {
         return Ok(false);
     }
-    let already = active_grants(config_dir, now)?
-        .iter()
-        .any(|(_, st)| st.kind == GrantKind::Link && st.from == me && &st.to == other);
-    if already {
-        return Ok(false);
-    }
-    let signed = issue_link_grant(&local_signing_key(config_dir)?, other, now)?;
-    remember(config_dir, &signed, false)?;
-    Ok(true)
+    let key = local_signing_key(config_dir)?;
+    // The look and the mint are one locked section. Split across two, two
+    // processes both find nothing and both sign — a second full-authority
+    // link for a relationship that already had one.
+    update_grants(config_dir, |grants| {
+        let already = active_among(grants, now)
+            .iter()
+            .any(|(_, st)| st.kind == GrantKind::Link && st.from == me && &st.to == other);
+        if already {
+            return Ok(false);
+        }
+        grants.push(stored(&issue_link_grant(&key, other, now)?, false));
+        Ok(true)
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -631,10 +664,11 @@ async fn lodge_one(
 
 /// Offer the hub every grant it has not acknowledged yet.
 async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkOutcome> {
-    let mut grants = load_grants(config_dir)?;
+    let grants = load_grants(config_dir)?;
     let mut out = LinkOutcome::default();
+    let mut acked: Vec<String> = Vec::new();
     let mut transport = Ok(());
-    for stored in grants.iter_mut().filter(|g| !g.lodged) {
+    for stored in grants.iter().filter(|g| !g.lodged) {
         let Ok(signed) = stored.signed() else {
             // One unreadable row must not stop the others, and must certainly
             // not stop the upload half that comes after this.
@@ -644,7 +678,7 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
         let grant_id = grant::grant_id(&signed.statement);
         match lodge_one(ws, &stored.statement_b64, &stored.signature_b64, &grant_id).await {
             Ok(Lodged::Acknowledged) => {
-                stored.lodged = true;
+                acked.push(grant_id);
                 out.lodged += 1;
             }
             Ok(Lodged::Refused(reason)) => {
@@ -663,7 +697,19 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
     // Record the acknowledgements even on the way out of a transport failure.
     // Re-sending a lodged grant is a no-op on the hub, but a machine that
     // forgets an ack it received keeps a row marked owed forever.
-    save_grants(config_dir, &grants)?;
+    //
+    // Merged into the store as it stands NOW, not written back as the
+    // snapshot this loop opened with. A grant `ll link approve` signed while
+    // these round-trips were in flight is a row we never read, and writing
+    // our copy over it would delete it.
+    update_grants(config_dir, |on_disk| {
+        for row in on_disk.iter_mut().filter(|r| !r.lodged) {
+            if acked.iter().any(|id| has_id(row, id)) {
+                row.lodged = true;
+            }
+        }
+        Ok(())
+    })?;
     transport?;
     Ok(out)
 }
@@ -1838,6 +1884,84 @@ mod tests {
         let current = issue_link_grant(&sk, &key(11), unix_now()).unwrap();
         remember(dir.path(), &current, false).unwrap();
         assert_eq!(active_grants(dir.path(), unix_now()).unwrap().len(), 1);
+    }
+
+    /// The store is read-modify-written whole, and two writers are ordinary
+    /// here: `ll link approve` and the watch daemon run at once by design.
+    /// Without a lock across the read and the write they each read the same
+    /// rows, each append one, each write back, and one append is gone — half
+    /// the grants, and a half-built link nobody can see is missing.
+    ///
+    /// Threads rather than processes because the lock is a file either way:
+    /// what this exercises is the same `create_new` on the same path that a
+    /// second `ll` process would contend for.
+    #[test]
+    fn every_grant_written_at_once_survives() {
+        const WRITERS: usize = 8;
+        const EACH: usize = 15;
+
+        let dir = seeded_dir();
+        let sk = local_signing_key(dir.path()).unwrap();
+        let now = unix_now();
+        // Signed up front so the threads race on the store and nothing else.
+        // Seeds start past the approver's own so no grant is a self-link.
+        let batches: Vec<Vec<SignedGrant>> = (0..WRITERS)
+            .map(|w| {
+                (0..EACH)
+                    .map(|i| {
+                        issue_link_grant(&sk, &key((8 + w * EACH + i) as u8), now).unwrap()
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let store = dir.path();
+        std::thread::scope(|s| {
+            for batch in &batches {
+                s.spawn(move || {
+                    for g in batch {
+                        remember(store, g, false)
+                            .expect("a write that loses the race must wait, not fail");
+                    }
+                });
+            }
+        });
+
+        assert_eq!(
+            load_grants(dir.path()).unwrap().len(),
+            WRITERS * EACH,
+            "every grant this machine signed has to still be here: a lost one is a link \
+             half-built forever, and nothing on disk says which"
+        );
+    }
+
+    /// The same race one layer up. `ensure_link_to` asks "do I already hold a
+    /// link to this key?" and mints if not — so the look and the mint have to
+    /// be one locked section, or two runs both find nothing and both sign a
+    /// full-authority link for a relationship that already had one.
+    #[test]
+    fn a_link_is_minted_once_even_when_two_writers_ask_at_once() {
+        const WRITERS: usize = 8;
+
+        let dir = seeded_dir();
+        let other = key(11);
+        let now = unix_now();
+
+        let store = dir.path();
+        std::thread::scope(|s| {
+            for _ in 0..WRITERS {
+                s.spawn(|| {
+                    ensure_link_to(store, &other, now).unwrap();
+                });
+            }
+        });
+
+        let links: Vec<_> = active_grants(dir.path(), now)
+            .unwrap()
+            .into_iter()
+            .filter(|(_, st)| st.kind == GrantKind::Link && st.to == other)
+            .collect();
+        assert_eq!(links.len(), 1, "one relationship, one grant, {} minted", links.len());
     }
 
     #[test]
