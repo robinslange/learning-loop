@@ -1092,6 +1092,71 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
     assert_eq!(read_state(dir.path()).unwrap().unwrap().refused_grants, Some(0));
 }
 
+/// **Before the upload, not after.** `run_cycle` writes the hub's listing
+/// down before it offers the index, and the comment beside that call says why:
+/// a cycle that dies uploading must still have stopped serving what the hub no
+/// longer lists. Moving the call to sit beside `fetch_all` — where it reads as
+/// tidier, next to the half that uses the list — left all 680 tests green.
+///
+/// Two cycles, and the second one fails on purpose. The hub lists
+/// `v-other-machine` and takes the upload; then it stops listing it and
+/// rejects the upload. The rejection is the point: it aborts the cycle after
+/// the handshake and before `fetch_all`, so the only thing that can have
+/// rewritten the list is a write that happens before the upload.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_dies_uploading_has_already_stopped_serving_what_the_hub_dropped() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (_approver, inbound) = link_grant(&me);
+
+    let (addr, _seen) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack, OnGrant::Ack,
+        vec![inbound],
+        vec![("v-other-machine".to_string(), Fetch::Serve(peer_index_bytes()))],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the first cycle completes");
+
+    let listed = read_readable_vaults(dir.path()).unwrap().expect("the first cycle recorded");
+    assert!(listed.contains("v-other-machine"),
+        "precondition: there is something on the list for the second cycle to remove");
+    assert!(served_vaults(dir.path()).contains(&"v-other-machine".to_string()),
+        "precondition: and the reader is serving it");
+
+    // The same hub, listing nothing but this client's own vault, refusing the
+    // upload it is offered.
+    let (addr, _seen) = spawn_hub_with(stale(), OnUpload::Reject, OnGrant::Ack, vec![], vec![]).await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect_err("precondition: the second cycle dies on the rejected upload");
+
+    let listed = read_readable_vaults(dir.path()).unwrap()
+        .expect("a cycle that reached the hub still wrote the list");
+    assert!(!listed.contains("v-other-machine"),
+        "the hub stopped listing it, so this machine stopped serving it — a failed \
+         upload is not a reason to go on serving what the hub dropped");
+    assert_eq!(served_vaults(dir.path()), Vec::<String>::new(),
+        "and the reader agrees, which is where it would have been noticed");
+}
+
+/// What `ll search` would serve out of the peer caches right now, judged
+/// against the recorded list.
+fn served_vaults(config_dir: &Path) -> Vec<String> {
+    let Some(listed) = read_readable_vaults(config_dir).unwrap() else { return Vec::new() };
+    ll_search::search::discover_peer_dbs(config_dir, "test-model", listed.at)
+        .into_iter()
+        .map(|(id, _)| id)
+        .collect()
+}
+
 /// The read half's mirror: a cycle must act on the revocations the handshake
 /// served, and deleting the local copy is what revocation MEANS here.
 ///
@@ -1151,6 +1216,53 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
         "data already read cannot be recalled, but continuing to serve it is not revocation");
     assert!(untouched.join("index.db").exists(),
         "no grant named it, so no revocation may remove it");
+}
+
+/// The sibling rule, and the one the listing test above was written beside.
+/// `apply_revocations` runs before the upload for the same reason the listing
+/// write does — and moving it after `upload_index` left every test green,
+/// including the revocation test above, because that one drives a cycle whose
+/// upload succeeds.
+///
+/// Same two cycles as that test, with the second cycle's upload rejected.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_that_dies_uploading_has_already_dropped_what_a_revocation_withdrew() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let issuer = SigningKey::from_bytes(&[31u8; 32]);
+    let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
+
+    let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
+
+    let (addr, _) = spawn_hub_revoking(stale(), vec![granted], vec![]).await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the first cycle completes");
+    assert!(cache.join("index.db").exists(), "precondition: an active grant keeps its cache");
+
+    let (addr, _) = spawn_hub_full(
+        stale(),
+        OnUpload::Reject,
+        OnGrant::Ack,
+        vec![],
+        vec![revocation_of(&issuer, &grant_id, Some("v-other"))],
+        vec![],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect_err("precondition: the second cycle dies on the rejected upload");
+
+    assert!(!cache.exists(),
+        "the revocation arrived and was acted on before the upload was offered; a \
+         failed upload is not a reason to go on serving a withdrawn grant");
 }
 
 /// The same cycle, with the revocation signed by someone who never issued the
