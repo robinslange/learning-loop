@@ -19,11 +19,17 @@
 //!   `ll vault add` registers every other one, and the case in between is
 //!   refused rather than joined: see
 //!   `require_a_profile_if_this_is_not_the_root`.
-//! - **No recovery grant.** `Confirm::recovery_phrase` shows the words and
-//!   `recovery_key_id` keeps the public half, because neither can be
-//!   reconstructed later. The mutual `link` grant that would make the
-//!   recovery key usable cannot be created yet: the frozen `ClientMsg` has no
-//!   variant that submits a grant, and there is no local grant store either.
+//! - **No recovery grant is signed here, and it is not signed never.**
+//!   `Confirm::recovery_phrase` shows the words and `recovery_key_id` keeps
+//!   the public half, because neither can be reconstructed later. The `link`
+//!   that makes the recovery key usable is `link.rs`'s
+//!   `ensure_recovery_link`: it reads `recovery_key_id` back out of
+//!   `config.json` and issues the grant on the next reconcile, so the words
+//!   are real from the moment they are shown and usable from this machine's
+//!   first sync. This bullet used to say that grant *could not* be created —
+//!   `ClientMsg` had no variant submitting one and there was no local grant
+//!   store. Both exist, and the prompt below says so to the person deciding
+//!   how carefully to keep the words.
 
 use std::path::Path;
 
@@ -116,9 +122,11 @@ impl Confirm for TtyConfirm {
         eprintln!();
         eprintln!("  {phrase}");
         eprintln!();
-        eprintln!("Write it down offline. Restoring an identity from it is not");
-        eprintln!("implemented yet; keeping the words is what makes that possible");
-        eprintln!("later, and losing them makes it impossible.");
+        eprintln!("Write it down offline. They are a key of your own: run");
+        eprintln!("`ll-search recover \"<the 24 words>\"` on a machine that has lost its");
+        eprintln!("identity, and this machine's next sync is what lodges the grant that");
+        eprintln!("lets that key in. Nothing on disk holds the words, so losing them is");
+        eprintln!("final.");
         Self::ask("Have you written it down?")
     }
 }
