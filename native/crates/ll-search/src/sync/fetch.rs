@@ -174,7 +174,7 @@ fn only_assoc_names(held: &[GrantStatement], vault_id: &str) -> bool {
 ///   off the wire rather than out of a grant this client verified itself, and
 ///   `config.rs`'s path helpers assume a validated id and do not check one.
 /// - every grant we hold that names it is an `assoc`.
-fn readable_vaults(
+pub(super) fn readable_vaults(
     vault_state: &[VaultState],
     grants: &[GrantWire],
     me: &KeyId,

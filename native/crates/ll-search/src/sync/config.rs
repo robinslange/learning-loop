@@ -233,6 +233,20 @@ pub fn sync_state_path(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("sync-state.json")
 }
 
+/// The vaults the hub last said this key may read, and when it said so.
+///
+/// A file of its own rather than a field on `sync-state.json`, because the
+/// two have opposite failure requirements. That file is a report, written at
+/// the END of a cycle, and `read_state` turns a corrupt one into "no
+/// information" precisely so a bad copy cannot block the sync that would
+/// rewrite it. This one is an input to what the reader will serve, written
+/// EARLY — before the upload half, which can fail — and a copy it cannot read
+/// has to mean "serve nothing" rather than "carry on". Sharing a file would
+/// have forced one of those two rules onto the other.
+pub fn readable_vaults_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("readable-vaults.json")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

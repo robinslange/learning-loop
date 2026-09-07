@@ -980,15 +980,16 @@ mod tests {
         }
     }
 
-    /// A peer index on disk, **and the identity and live grant that make it
-    /// readable**.
+    /// A peer index on disk, **and the identity, live grant, and hub listing
+    /// that make it readable**.
     ///
-    /// All three, because `discover_peer_dbs` serves a cache only when a live
-    /// grant covers it. A fixture that planted the directory alone would make
-    /// every assertion below pass or fail for the wrong reason: the two
-    /// scoping tests would assert an absence that grant filtering already
-    /// guarantees, and the two that expect a hit would be asserting against a
-    /// cache no key was ever entitled to read.
+    /// All four, because `discover_peer_dbs` serves a cache only when the hub
+    /// last listed that vault AND a live grant covers it. A fixture that
+    /// planted the directory alone would make every assertion below pass or
+    /// fail for the wrong reason: the two scoping tests would assert an
+    /// absence the read filter already guarantees, and the two that expect a
+    /// hit would be asserting against a cache no key was ever entitled to
+    /// read.
     fn seed_peer(config_dir: &Path, peer: &str, model_id: &str) {
         use base64::Engine as _;
         use ed25519_dalek::{Signer, SigningKey};
@@ -1034,6 +1035,14 @@ mod tests {
             signature_b64: b64.encode(issuer.sign(&statement).to_bytes()),
             state: "active".to_string(),
         }]).unwrap();
+
+        let mut listed = ll_search::sync::state::read_readable_vaults(config_dir)
+            .unwrap()
+            .unwrap_or(ll_search::sync::state::ReadableVaults { at: 0, vault_ids: Vec::new() });
+        if !listed.contains(peer) {
+            listed.vault_ids.push(peer.to_string());
+        }
+        ll_search::sync::state::write_readable_vaults(config_dir, &listed).unwrap();
     }
 
     #[test]

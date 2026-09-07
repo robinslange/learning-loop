@@ -27,7 +27,7 @@ use ll_search::sync::protocol_v5::{
     hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, RevocationWire, VaultState,
     PROTOCOL_VERSION,
 };
-use ll_search::sync::state::{read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
+use ll_search::sync::state::{read_readable_vaults, read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
 use tokio::net::TcpListener;
 use tokio_tungstenite::tungstenite::Message;
 
@@ -836,6 +836,83 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
         .collect();
     assert_eq!(fetched, vec!["v-other-machine".to_string()],
         "exactly the listing, less this machine's own vault");
+}
+
+/// A real peer index, as bytes a hub can serve. `model_id` matches what
+/// `discover_peer_dbs` is asked for, so a cache written from these bytes is
+/// one the search path will actually open.
+fn peer_index_bytes() -> Vec<u8> {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("index.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+         INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+    )
+    .unwrap();
+    drop(conn);
+    std::fs::read(&path).unwrap()
+}
+
+/// The read filter, end to end, on the machine where the grant store alone
+/// cannot help.
+///
+/// The only grant here is the unscoped `link` that joined this machine, and
+/// an unscoped grant covers **every** vault — so `grants::covers` says yes to
+/// both caches below and the orphan would be served. The hub's listing is the
+/// only thing on this disk that distinguishes them, and this is the cycle
+/// that writes it down.
+///
+/// Every unit test of the filter plants `readable-vaults.json` by hand, so
+/// deleting the `write_readable_vaults` call in `run_cycle` leaves all of them
+/// green — the same hazard `a_cycle_deletes_the_peer_cache_a_revocation_withdraws`
+/// exists for. This is the test that notices.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_it() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let (_approver, inbound) = link_grant(&me);
+
+    // A cache for a vault this hub does not list — four months old, nothing
+    // on this machine names it, and nothing can delete it: an unscoped
+    // withdrawal names no cache, and there is no withdrawal here anyway.
+    let orphan = ll_search::sync::config::peer_dir(dir.path(), "v-thomas-kirk");
+    std::fs::create_dir_all(&orphan).unwrap();
+    std::fs::write(orphan.join("index.db"), peer_index_bytes()).unwrap();
+
+    let (addr, _seen) = spawn_hub_with(
+        stale(),
+        OnUpload::Ack, OnGrant::Ack,
+        vec![inbound],
+        vec![("v-other-machine".to_string(), Fetch::Serve(peer_index_bytes()))],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes");
+
+    let listed = read_readable_vaults(dir.path()).unwrap()
+        .expect("the cycle records what the hub listed");
+    assert!(listed.contains("v-other-machine"));
+    assert!(!listed.contains("v-thomas-kirk"),
+        "the hub did not list it, so nothing may put it on the record");
+    assert!(!listed.contains("v1"),
+        "this machine's own vault is not a peer cache and never was");
+
+    let served: Vec<String> =
+        ll_search::search::discover_peer_dbs(dir.path(), "test-model", listed.at)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+    assert_eq!(served, vec!["v-other-machine".to_string()],
+        "the unscoped link covers both caches; only one of them is a vault the hub listed");
+    assert!(orphan.join("index.db").exists(),
+        "and the orphan is hidden without being deleted — deletion is disk hygiene now");
 }
 
 /// The v4 download half opened with `list-peers` on every cycle, listing or

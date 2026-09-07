@@ -1,13 +1,13 @@
 // Derive a row's origin from the ll-search `peer:`-prefixed path. The Rust binary
-// emits `path: "peer:{peer_id}/{rest}"` for federated hits and parses it back
+// emits `path: "peer:{vault_id}/{rest}"` for federated hits and parses it back
 // internally, so the prefix STAYS on path; Node reads `origin` instead of
-// re-sniffing the string. sourceId carries the peer id for peer rows, null local.
+// re-sniffing the string. sourceId carries that vault id for peer rows, null local.
 export function deriveOrigin(row) {
   const p = row && (row.path || row.note || row.id);
   if (typeof p === 'string' && p.startsWith('peer:')) {
     const rest = p.slice('peer:'.length);
-    const peerId = rest.split('/')[0] || null;
-    return { origin: 'peer', sourceId: peerId };
+    const vaultId = rest.split('/')[0] || null;
+    return { origin: 'peer', sourceId: vaultId };
   }
   return { origin: 'local', sourceId: null };
 }

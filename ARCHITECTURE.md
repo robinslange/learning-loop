@@ -421,12 +421,27 @@ ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane 
 
 **Federation**
 ```
-ll-search sync          <db> <vault> [--hub-endpoint URL] [--peer-id ID]
+ll-search sync          <db> <vault> [--hub-endpoint URL] [--config-dir DIR]
 ll-search status        [--config-dir DIR]              # federation status, plain text, local files only
 ll-search join          <hub> <invite> <vault> [--config-dir DIR]
 ll-search identity      [--config-dir DIR]
+ll-search recover       <phrase> [--force] [--config-dir DIR]
 ll-search migrate-seed  [--config-dir DIR] [--rollback]
+ll-search graph-opt-in  <true|false> [--config-dir DIR]
+ll-search visibility-backfill <vault> [--dry-run] [--config-dir DIR]
 ll-search version
+```
+
+**Vaults and machines**
+```
+ll-search vault add    <vault> <id> [--config-dir DIR]  # register a second vault under its own config dir
+ll-search vault list   [--config-dir DIR]
+
+ll-search link code    [--config-dir DIR]               # new machine, no network: show pairing code + QR
+ll-search link request <hub> <vault> [--config-dir DIR] # new machine, hub reachable
+ll-search link approve <code> [--offline] [--config-dir DIR]   # established machine admits the code's key
+ll-search link accept  <grant> [--config-dir DIR]       # new machine takes an offline grant blob
+ll-search link list    [--config-dir DIR]
 ```
 
 **Long-running (spawned once at SessionStart)**

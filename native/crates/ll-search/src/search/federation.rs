@@ -318,7 +318,8 @@ mod tests {
     use crate::sync::grant::{self, GrantKind, GrantStatement};
     use crate::sync::key_id::KeyId;
     use crate::sync::protocol_v5::GrantWire;
-    use crate::sync::{grants, seed_store, test_hub};
+    use crate::sync::state::ReadableVaults;
+    use crate::sync::{grants, seed_store, state, test_hub};
 
     const B64: base64::engine::general_purpose::GeneralPurpose =
         base64::engine::general_purpose::STANDARD;
@@ -377,6 +378,20 @@ mod tests {
         .unwrap();
     }
 
+    /// Record the hub's answer: these are the vaults it last said this key
+    /// may read, as of `NOW`.
+    ///
+    /// Every test that expects a cache to be HIDDEN for some *other* reason
+    /// lists it here anyway. A cache missing from the list is hidden by the
+    /// list, and a test where two reasons apply at once pins neither.
+    fn plant_listed(config_dir: &Path, vault_ids: &[&str]) {
+        state::write_readable_vaults(config_dir, &ReadableVaults {
+            at: NOW,
+            vault_ids: vault_ids.iter().map(|s| s.to_string()).collect(),
+        })
+        .unwrap();
+    }
+
     /// A peer index (model_id "test-model") on disk under `config_dir`, with
     /// no grant behind it. What an orphaned cache looks like.
     fn plant_cache(config_dir: &Path, peer_id: &str) {
@@ -390,15 +405,19 @@ mod tests {
         .unwrap();
     }
 
-    /// A config dir holding an identity, one cached peer, and the live
-    /// `follow` that justifies it. The servable baseline every test that
-    /// asserts a cache is HIDDEN has to be able to reach first — a cache that
-    /// was never servable proves nothing about the filter.
+    /// A config dir holding an identity, one cached peer, the live `follow`
+    /// that justifies it, and the hub's list naming it. **All three**, which
+    /// is what a servable cache costs.
+    ///
+    /// The servable baseline every test that asserts a cache is HIDDEN has to
+    /// be able to reach first — a cache that was never servable proves nothing
+    /// about the filter.
     fn served_setup(peer_id: &str) -> (tempfile::TempDir, KeyId) {
         let dir = tempfile::tempdir().unwrap();
         let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), peer_id);
         plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some(peer_id), LATER);
+        plant_listed(dir.path(), &[peer_id]);
         (dir, me)
     }
 
@@ -462,6 +481,7 @@ mod tests {
             .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()))
             .expect("two_profiles plants a seed in every profile");
         plant_grant(&profile.config_dir, 9, &me, GrantKind::Follow, Some(peer_id), LATER);
+        plant_listed(&profile.config_dir, &[peer_id]);
     }
 
     #[test]
@@ -534,6 +554,7 @@ mod tests {
         ).unwrap();
         drop(conn);
         plant_grant(tmp.path(), 2, &me, GrantKind::Follow, Some("alice"), LATER);
+        plant_listed(tmp.path(), &["alice"]);
 
         let peers = discover_peer_dbs(tmp.path(), "test-model", NOW);
         assert_eq!(peers.len(), 1);
@@ -576,6 +597,8 @@ mod tests {
     fn a_cache_nothing_ever_granted_is_not_searched_beside_one_that_was() {
         let (dir, _me) = served_setup("alice");
         plant_cache(dir.path(), "thomas-kirk");
+        // Listed, so the ONLY thing keeping it out is that no grant covers it.
+        plant_listed(dir.path(), &["alice", "thomas-kirk"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
             "the granted cache is served and the orphan beside it is not");
@@ -588,6 +611,8 @@ mod tests {
         let (dir, me) = served_setup("alice");
         plant_cache(dir.path(), "bob");
         plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("carol"), LATER);
+        // Both listed. `bob` is out on scope alone, not on the hub's list.
+        plant_listed(dir.path(), &["alice", "bob"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
     }
@@ -615,6 +640,7 @@ mod tests {
         plant_cache(dir.path(), "alice");
         let someone_else = KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key());
         plant_grant(dir.path(), 2, &someone_else, GrantKind::Follow, Some("alice"), LATER);
+        plant_listed(dir.path(), &["alice"]);
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
     }
@@ -629,6 +655,7 @@ mod tests {
             let me = plant_seed(dir.path(), 1);
             plant_cache(dir.path(), "alice");
             plant_grant(dir.path(), 2, &me, kind, Some("alice"), LATER);
+            plant_listed(dir.path(), &["alice"]);
             assert_eq!(discover_peer_dbs(dir.path(), "test-model", NOW).len(), expected,
                 "{kind:?} should have produced {expected} peer(s)");
         }
@@ -664,6 +691,7 @@ mod tests {
         plant_cache(dir.path(), "alice");
         let issuer = SigningKey::from_bytes(&[2u8; 32]);
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
+        plant_listed(dir.path(), &["alice"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
             "an unscoped link covers every cache — which is exactly why its \
@@ -697,6 +725,125 @@ mod tests {
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
             "and it is no longer served — the reader is what makes the revocation \
              mean something");
+    }
+
+    /// The half `covers` cannot supply. The grant is live and covers this
+    /// vault — it is the same `served_setup` that serves it two tests up —
+    /// and the hub has simply stopped listing it. That is the revoked-`follow`
+    /// and removed-from-a-vault case, and it is invisible to the grant store,
+    /// because the grant the hub withdrew is absent from `SyncReady.grants`
+    /// rather than present as something to check.
+    #[test]
+    fn a_cache_the_hub_no_longer_lists_is_not_searched() {
+        let (dir, _me) = served_setup("alice");
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+
+        plant_listed(dir.path(), &["someone-else"]);
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "the grant still covers it; the hub no longer lists it, and that is enough");
+        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "hidden without being deleted, the same as every other reason here");
+    }
+
+    /// The case an unscoped `link` made unreachable for `covers` alone: the
+    /// link says yes to every vault, so before the list this cache was served
+    /// on a machine that had simply been linked to another. Now the list is
+    /// what says which vaults that link was ever about.
+    #[test]
+    fn an_unscoped_link_no_longer_covers_a_vault_the_hub_never_listed() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "mine");
+        plant_cache(dir.path(), "thomas-kirk");
+        plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
+        plant_listed(dir.path(), &["mine"]);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["mine"],
+            "the link covers both caches; only one of them is a vault the hub listed");
+    }
+
+    /// A machine that has never completed a handshake has never been told it
+    /// may read anything. Whatever is under `peers/` predates the rule, which
+    /// is exactly the orphan this filter exists to hide. Absence is not
+    /// permission.
+    #[test]
+    fn a_machine_that_has_never_synced_serves_nothing() {
+        let (dir, _me) = served_setup("alice");
+        std::fs::remove_file(
+            crate::sync::config::readable_vaults_path(dir.path())).unwrap();
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
+    }
+
+    /// And an unreadable list is absent, not ignored. The opposite rule from
+    /// `sync-state.json`, whose corrupt case must NOT block the cycle that
+    /// rewrites it — here refusing to guess is the fail-closed direction.
+    #[test]
+    fn an_unreadable_list_serves_nothing() {
+        let (dir, _me) = served_setup("alice");
+        std::fs::write(
+            crate::sync::config::readable_vaults_path(dir.path()), "{not json").unwrap();
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
+    }
+
+    /// **The staleness answer, pinned: the list carries no expiry of its own,
+    /// and the grants do.** An offline machine can evaluate `expires_at`
+    /// without a hub, and `grant.rs` refuses a statement that does not have
+    /// one — so every stored grant lapses on a schedule, and a machine offline
+    /// long enough goes dark by itself. No second clock over the list, and no
+    /// constant invented for the purpose.
+    ///
+    /// A `follow` is 90 days. A month shut takes nothing.
+    #[test]
+    fn a_follow_keeps_serving_for_its_ninety_days_and_then_stops() {
+        const DAY: i64 = 86_400;
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "followed");
+        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("followed"),
+            NOW + GrantKind::Follow.default_ttl_secs());
+        plant_listed(dir.path(), &["followed"]);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 30 * DAY)), ["followed"],
+            "a laptop shut for a month must not lose federated search");
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY).is_empty(),
+            "and past the follow's own TTL it goes dark with no hub consulted");
+    }
+
+    /// **The worst case, stated rather than wished away.** An unscoped `link`
+    /// covers every vault, so on a linked machine the offline set decays at
+    /// the pace of the LINK — 365 days — not of the individual `follow` whose
+    /// vault it happens to be. The list bounds *which* vaults survive; it does
+    /// not say which grant justified each, because which vaults an issuer owns
+    /// is still hub state.
+    ///
+    /// The knob for that worst case is `GrantKind::Link.default_ttl_secs()`,
+    /// which already exists. Adding a staleness timer over the list would be a
+    /// second answer to the same question, and the two would disagree.
+    #[test]
+    fn a_live_link_holds_the_whole_listed_set_open_until_the_link_itself_lapses() {
+        const DAY: i64 = 86_400;
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "followed");
+        plant_cache(dir.path(), "linked");
+        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("followed"),
+            NOW + GrantKind::Follow.default_ttl_secs());
+        plant_grant(dir.path(), 3, &me, GrantKind::Link, None,
+            NOW + GrantKind::Link.default_ttl_secs());
+        plant_listed(dir.path(), &["followed", "linked"]);
+
+        let mut past_the_follow =
+            ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY));
+        past_the_follow.sort();
+        assert_eq!(past_the_follow, ["followed", "linked"],
+            "the follow lapsed, and the live link still covers its vault — the residual \
+             an unscoped grant leaves, now bounded to vaults the hub actually listed");
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW + 400 * DAY).is_empty(),
+            "past the link's TTL there is nothing left to cover anything");
     }
 
     /// A machine with caches and no identity cannot tell whether any grant is

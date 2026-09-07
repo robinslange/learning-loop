@@ -30,6 +30,7 @@ use super::fetch::{is_safe_vault_id, permits_read};
 use super::grant::{self, GrantStatement};
 use super::key_id::KeyId;
 use super::link::{self, SignedGrant, StoredGrant};
+use super::state::{self, ReadableVaults};
 use super::protocol_v5::{GrantWire, RevocationWire};
 
 const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
@@ -61,47 +62,65 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 /// per candidate would let it change mid-sweep, and half a sweep against each
 /// of two stores is an answer neither of them gave.
 ///
-/// # This does not authorize reads. It narrows them, and here is the gap.
+/// # The two questions a cache has to answer, and neither is enough alone.
 ///
-/// **On a machine that has ever been linked, this filter passes everything.**
-/// `covers` answers true for every `vault_id` when the grant is unscoped;
-/// a `link` is unscoped; and `link.rs::reconcile` mints a reciprocal `link`
-/// for every inbound one, storing the inbound half too — which is a row with
-/// `to == me` and `scope: None`. One such row covers every directory under
-/// `peers/`. Multi-machine is the normal case for this feature, so the normal
-/// case is a no-op. Do not read this type as "reads are now authorized".
+/// 1. **Did the hub last say this key may read that vault?** — the persisted
+///    [`ReadableVaults`] list. This is not a second opinion about authority:
+///    a cache exists on disk only because the hub listed that vault and served
+///    its index, so filtering on the hub's latest list is the same authority
+///    that produced the cache, applied later.
+/// 2. **Does a live grant cover it?** — [`covers`], over the local store.
 ///
-/// **The same gap sits one layer down in [`withdraw`]**, which keeps a cache
-/// whenever `remaining` holds anything `covers` says yes to. So revoking a
-/// scoped `follow` while any live link stands deletes nothing *and* filters
-/// nothing. Both layers are approximating one fact neither of them has —
-/// which vaults an issuer actually owns — and they will stop approximating
-/// together or not at all.
+/// **Neither alone is a boundary, and the pair is not belt-and-braces — each
+/// bounds the other's exact failure.**
 ///
-/// **What it does close**, all three by there being no covering row at all:
-/// a machine with no grant store; a machine whose grants every one name the
-/// identity a recovery replaced (`to == me` matches nothing, and the deletion
-/// path could never have reached those caches); and a withdrawn `link` that
-/// was the only grant, which is the case an unscoped revocation deliberately
-/// deletes nothing for.
+/// `covers` alone is over-permissive: an unscoped grant answers true for every
+/// `vault_id`, a `link` is unscoped, and `link.rs::reconcile` stores one
+/// addressed to this key for every machine that has ever linked to it — so on
+/// a linked machine one row would cover every directory under `peers/`, and
+/// multi-machine is the normal case. The list is the fact `covers` is
+/// approximating and does not have: which vaults the issuer actually owns.
 ///
-/// **The honest predicate is the hub's `vault_state`**, which names precisely
-/// the vaults this key may read and which `fetch.rs` already derives its read
-/// list from. It is not persisted, so the reader cannot ask it yet. Filtering
-/// on it would not be a new trust assumption: a cache exists on this disk only
-/// because the hub listed that vault and served its index, so the hub's latest
-/// list is the same authority that produced the cache, not a weaker one. It
-/// belongs in conjunction with this predicate rather than instead of it — the
-/// list bounds an unscoped grant to vaults the hub actually named, and grant
-/// expiry bounds a list this machine has been too long offline to refresh.
+/// The list alone is over-permissive the other way: it does not expire, so a
+/// client that has been offline for a year would go on serving from an answer
+/// a year old. Grant expiry is what bounds that, and it needs no hub —
+/// `grant.rs` refuses a statement whose `expires_at` is not after its
+/// `issued_at`, so every grant lapses on a schedule an offline machine can
+/// evaluate for itself. **No staleness timer over the list, deliberately.**
+/// A second clock would be an arbitrary constant standing in for one that
+/// already exists, a second thing to tune, and a second answer to reconcile
+/// when the two disagree. The list says which vaults; the grants say for how
+/// long.
+///
+/// What neither closes: a long-lived grant plus a client offline past a
+/// revocation it never received. Nothing local can close that — it is the
+/// CRL/OCSP problem — so `ll status` says how old this machine's read
+/// authority is rather than pretending the question does not exist.
+///
+/// **Absence is not permission.** No identity, no readable store, no live
+/// grant, and no list all end in nothing served. A machine that has never
+/// completed a handshake has never been told it may read anything, and any
+/// cache it holds is from before this rule — which is exactly the orphan this
+/// exists to hide.
+///
+/// Loaded once per config dir and then asked repeatedly. Re-reading per
+/// candidate would let the answer change mid-sweep, and half a sweep against
+/// each of two answers is an answer neither of them gave.
+///
+/// **[`withdraw`] deliberately still asks only [`covers`].** A stale list
+/// makes a reader serve less, which is unavailability and recoverable by one
+/// `ll sync`; it would make a deleter destroy more, which is not recoverable
+/// at all. The asymmetry is the same one that makes `covers` a safe "maybe"
+/// for deletion and an unsafe one for reading, pointing the other way.
 pub struct ReadAuthority {
     me: KeyId,
     live: Vec<GrantStatement>,
+    listed: Option<ReadableVaults>,
 }
 
 impl ReadAuthority {
-    /// Everything `config_dir` holds that verifies and has not expired by
-    /// `now`.
+    /// Both halves as of `now`: the hub's last list, and every stored grant
+    /// that verifies and has not expired.
     ///
     /// Fails when this machine has no identity. That is not a machine with
     /// nothing to read — it is a machine that cannot tell whether a grant is
@@ -115,13 +134,22 @@ impl ReadAuthority {
                 .filter(|(_, _, st)| st.expires_at > now)
                 .map(|(_, _, st)| st)
                 .collect(),
+            listed: state::read_readable_vaults(config_dir)?,
         })
     }
 
-    /// Whether a live grant is this machine's reason to hold a cached copy of
-    /// `vault_id`.
+    /// Whether this machine may still hold a cached copy of `vault_id`: the
+    /// hub last listed it, **and** a live grant covers it.
     pub fn covers(&self, vault_id: &str) -> bool {
-        self.live.iter().any(|st| covers(st, &self.me, vault_id))
+        self.listed.as_ref().is_some_and(|listed| listed.contains(vault_id))
+            && self.live.iter().any(|st| covers(st, &self.me, vault_id))
+    }
+
+    /// How old the hub's answer is, as of `now`. `None` when there is no
+    /// answer — which is not a fresh one, and callers must not render it as
+    /// one.
+    pub fn age(&self, now: i64) -> Option<i64> {
+        self.listed.as_ref().map(|listed| listed.age(now))
     }
 }
 

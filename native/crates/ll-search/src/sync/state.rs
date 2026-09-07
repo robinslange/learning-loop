@@ -11,7 +11,7 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 
 use super::atomic_file;
-use super::config::sync_state_path;
+use super::config::{readable_vaults_path, sync_state_path};
 
 /// `SyncState::outcome` for a cycle that finished. Readers match on these
 /// rather than retyping the literal, so a rename is a compile error in the
@@ -76,6 +76,80 @@ pub struct SyncState {
     pub refused_grants: Option<usize>,
 }
 
+/// The vaults the hub last named as readable by this key, and when.
+///
+/// **This is not a second opinion about authority — it is the authority that
+/// produced the caches, written down.** A directory under
+/// `federation/data/peers/` can only exist because the hub listed that vault
+/// in `SyncReady.vault_state` and then served its index: `fetch.rs` asks for
+/// exactly the vaults the handshake named and never asks the hub to list
+/// anything. So keeping the list and filtering reads through it is the same
+/// authority applied later, not a new party being trusted. It is what stops a
+/// cache outliving the answer that created it.
+///
+/// The client cannot compute this itself, and that is the whole reason the
+/// file exists. An unscoped `link` means "every vault this issuer owns", and
+/// which vaults an issuer owns is hub state — so `grants::covers` has to
+/// answer yes to everything for an unscoped grant, and on a linked machine
+/// that is every cache on disk.
+///
+/// `at` is when the hub said it, not when the cycle finished. Those differ:
+/// a cycle can take the handshake and then die uploading, and the list it was
+/// handed is still the newest answer this machine has.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReadableVaults {
+    pub at: i64,
+    pub vault_ids: Vec<String>,
+}
+
+impl ReadableVaults {
+    pub fn contains(&self, vault_id: &str) -> bool {
+        self.vault_ids.iter().any(|id| id == vault_id)
+    }
+
+    /// How stale this answer is, as of `now`. Never negative: a clock that
+    /// went backwards is not an answer from the future.
+    pub fn age(&self, now: i64) -> i64 {
+        (now - self.at).max(0)
+    }
+}
+
+/// Read the recorded list, or `None` when there is nothing readable there.
+///
+/// **Unreadable reads as absent, and absent means serve nothing.** That is
+/// the opposite of [`read_state`]'s rule for the report file, deliberately:
+/// there, refusing to guess keeps a corrupt file from blocking the cycle that
+/// would fix it; here, refusing to guess is the fail-closed direction, because
+/// the only thing a caller does with this answer is decide what to hand a
+/// reader. A machine that cannot say what it may read serves nothing and says
+/// so, which costs a person one `ll sync`.
+pub fn read_readable_vaults(config_dir: &Path) -> anyhow::Result<Option<ReadableVaults>> {
+    let path = readable_vaults_path(config_dir);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    match serde_json::from_str(&text) {
+        Ok(listed) => Ok(Some(listed)),
+        Err(e) => {
+            eprintln!(
+                "warning: {} exists but does not parse ({e}); no cached peer index will be \
+                 searched until the next `ll sync` rewrites it",
+                path.display()
+            );
+            Ok(None)
+        }
+    }
+}
+
+/// Record what the hub just said. Written before the upload half, for the
+/// same reason `apply_revocations` runs there: a cycle that dies uploading
+/// must still have stopped serving what the hub no longer lists.
+pub fn write_readable_vaults(config_dir: &Path, listed: &ReadableVaults) -> anyhow::Result<()> {
+    atomic_file::write_json(&readable_vaults_path(config_dir), listed)
+}
+
 /// Read the recorded state, or `None` when there is nothing readable there.
 ///
 /// A state file we cannot parse is reported as missing, not as an error: the
@@ -120,6 +194,69 @@ pub fn write_state(config_dir: &Path, state: &SyncState) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hubs_list_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        write_readable_vaults(dir.path(), &ReadableVaults {
+            at: 1_000,
+            vault_ids: vec!["v-a".into(), "v-b".into()],
+        }).unwrap();
+
+        let listed = read_readable_vaults(dir.path()).unwrap().unwrap();
+        assert!(listed.contains("v-a"));
+        assert!(listed.contains("v-b"));
+        assert!(!listed.contains("v-c"));
+        assert_eq!(listed.at, 1_000);
+    }
+
+    /// The opposite rule from [`read_state`], and the reason it is opposite:
+    /// a corrupt report must not block the cycle that rewrites it, but a
+    /// corrupt read-authority record must not be treated as an answer. Both
+    /// collapse to `None`; what differs is what the caller does with `None`,
+    /// and the caller here serves nothing.
+    #[test]
+    fn an_unreadable_list_reads_as_absent_rather_than_as_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        std::fs::write(
+            dir.path().join("federation").join("readable-vaults.json"), "{not json").unwrap();
+
+        assert!(read_readable_vaults(dir.path()).unwrap().is_none());
+    }
+
+    #[test]
+    fn a_missing_list_is_none_and_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_readable_vaults(dir.path()).unwrap().is_none());
+    }
+
+    /// A clock that went backwards is not an answer from the future. Without
+    /// the clamp a negative age would render as freshness.
+    #[test]
+    fn age_never_reads_as_negative() {
+        let listed = ReadableVaults { at: 9_000, vault_ids: Vec::new() };
+        assert_eq!(listed.age(9_500), 500);
+        assert_eq!(listed.age(1_000), 0);
+    }
+
+    /// The record must survive a round trip through a file written by a build
+    /// that had one fewer field, the same way `SyncState` does — this file is
+    /// read on the query path and a parse failure there is federated search
+    /// going dark, not a warning.
+    #[test]
+    fn a_list_file_with_only_the_two_fields_still_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        std::fs::write(
+            dir.path().join("federation").join("readable-vaults.json"),
+            r#"{"at":1,"vault_ids":["v-a"]}"#,
+        ).unwrap();
+
+        let listed = read_readable_vaults(dir.path()).unwrap().unwrap();
+        assert!(listed.contains("v-a"));
+    }
 
     #[test]
     fn a_failed_cycle_still_writes_state() {

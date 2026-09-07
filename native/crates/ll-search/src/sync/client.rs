@@ -247,6 +247,24 @@ async fn run_cycle(
     // can fail, and if it does this is the last thing we knew.
     *known_holds = Some(hub_holds(this_vault));
 
+    // The same list the read half is about to fetch, written down so the
+    // SEARCH path can filter on it — `readable_vaults` is called here and
+    // again inside `fetch_all` rather than being computed twice in two
+    // shapes, because a cache the reader serves and a cache the fetcher
+    // writes must be the same set or the difference is somebody's notes.
+    //
+    // Here, before the upload, for the reason `apply_revocations` is: a cycle
+    // that dies uploading must still have stopped serving what the hub no
+    // longer lists. And stamped with `at`, because how old this answer is is
+    // the only honest thing a long-offline machine can say about it.
+    let listed_at = unix_now();
+    state::write_readable_vaults(config_dir, &state::ReadableVaults {
+        at: listed_at,
+        vault_ids: super::fetch::readable_vaults(
+            &ready.vault_state, &ready.grants, &me, vault_id, listed_at,
+        ),
+    })?;
+
     let uploaded = upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
     *known_holds = Some(uploaded.hub_holds);
 

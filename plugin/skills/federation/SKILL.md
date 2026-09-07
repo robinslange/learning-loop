@@ -1,203 +1,325 @@
 ---
 name: federation
-description: "Set up or repair learning-loop federation: identity creation, token redemption, Tailscale, visibility rules, and the first sync test. Run when /init asked you to defer federation, when sync is broken, or when rotating identity. Safe to re-run."
+description: "Set up or repair learning-loop federation: enrolling a vault on a hub, linking a second machine, visibility rules, graph opt-in, and reading sync status. Run when /init asked you to defer federation, when sync is broken, or when adding a machine. Safe to re-run."
 ---
 
 # Federation Setup
 
-Federation lets you share vault notes with other learning-loop users via interchange.live. The setup is non-trivial because it spans cryptography (Ed25519 keypair), single-use redemption tokens, an overlay network (Tailscale via headscale), and a hub round-trip that must succeed before any config is written.
+Federation is three nouns. A **key** is a principal — a person or a machine.
+The key *is* the identifier: there is no registry and no name to allocate. A
+**vault** is a corpus with an owning key and a visibility policy; one key may
+own several. A **grant** is a signed statement by one key about another —
+`follow` (read a vault), `link` (these machines are the same person), `assoc`
+(these identities are the same human, no authority), `peer` (two hubs bridge).
 
-This skill is invoked from `/init` Phase 4 when the user opts in, but is safe to run standalone any time you have a token from robin.
+A **hub** decides who may connect. It never decides trust between keys: every
+grant is signed by the key that made it and verifies offline against nothing
+but the bytes and that key's public half.
+
+This skill is invoked from `/init` Phase 4 when the user opts in, and is safe
+to run standalone.
 
 ## Paths
 
 Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply).
 
+`ll-search` writes everything federation owns under a **config dir**. For a
+single-vault install that is `PLUGIN_DATA` itself, and `--config-dir
+$PLUGIN_DATA` is what every command below passes. For a multi-vault install
+each vault has its own config dir under `PLUGIN_DATA`, listed by `ll-search
+vault list`.
+
 ## Process
 
-Detect, then walk the steps in order. Do not write the federation config until the sync test in step F succeeds: failed runs leave nothing on disk so re-running starts fresh.
+Detect first, then walk the steps in order. Nothing writes `config.json` until
+the hub has proved its identity and admitted this key, so a run that dies
+part-way leaves a directory the next run enters cleanly.
 
 ## A: Detect
 
-If `PLUGIN_DATA/federation/config.json` already exists, report identity and peer count, and ask: "Federation is already configured. Re-run setup anyway?" Default no. If the user says no, exit cleanly.
+- If `PLUGIN_DATA/vaults.json` exists, this is a multi-vault install. Run
+  `ll-search vault list` and ask which vault this run is about; use that
+  profile's config dir for everything below.
+- Otherwise read `PLUGIN_DATA/federation/config.json`.
 
-## B: Token
+If a config exists, federation is already set up for that vault. Run
 
-Ask: "Do you have an invite token?"
-
-**If no:**
-
-```
-You'll need an invitation to join the federation. Apply at:
-  https://interchange.live/apply
-
-Once your application is approved, you'll receive a redeem URL.
-Re-run /learning-loop:federation when you have it.
+```bash
+ll-search status --config-dir <config_dir>
 ```
 
-Exit cleanly.
+and report what it says. **Do not re-enroll.** `ll-search join` refuses a
+config dir that already holds a config, and deleting the config to get past
+that costs the vault its `vault_id` — the hub's copy of the old one is not
+carried across.
 
-**If yes:** proceed to identity setup.
+`ll-search status` reads local files only. It opens no socket and reads no
+clock, so nothing it prints can imply a check that did not run. It reports:
+the vault and its `vault_id`, this machine's key, the hub and its pinned key,
+the graph opt-in setting, when the last cycle ran and whether it succeeded,
+what the hub held as of that cycle, and a `BLOCKED` line if `ll-search sync`
+would refuse the config.
 
-## C: Identity
+## B: Invite code
 
-The identity is an Ed25519 seed managed by the `ll-search` binary's seed store. Backends in priority order: the OS keyring (macOS Keychain / Linux Secret Service / Windows Credential Manager), then an encrypted-at-rest file under `PLUGIN_DATA/federation/` (machine-derived key, used where no keyring daemon runs). A plaintext `PLUGIN_DATA/federation/.seed` file is a pre-v1.18 legacy format: still readable as a migration source, never created by the binary. On a fresh install no `.seed` file will exist — that is normal, not an error.
+Enrollment needs an invite code — twelve Crockford base32 characters grouped
+`XXXX-XXXX-XXXX`. A code is single-use, expires seven days after it is minted,
+and is spent only when a key successfully authenticates with it.
 
-**Plugin-root migration check (before running `identity`):** if a legacy plaintext seed exists at `${CLAUDE_PLUGIN_ROOT}/federation/.seed` (very old installs; that location gets wiped on reinstall):
+**Say this plainly if the user does not have one:** minting an invite is not
+exposed anywhere yet. The hub can redeem a code but has no shipped command or
+route that produces one, so today a machine reaches a hub two ways: it is
+named in the hub's own `BOOTSTRAP_MEMBERS` at boot, or it is linked from a
+machine that is already a member (section G). If the user has neither, stop
+here rather than sending them to look for a code that nobody can currently
+issue.
 
-1. Copy it to `PLUGIN_DATA/federation/.seed` (mode 0o600) — the binary's plaintext-legacy reader looks there
-2. Delete the old one from the marketplace directory
-3. Verify the pubkey matches `config.identity.pubkey` if a previous federation config exists. If it does not match, warn and offer to update the hub.
+## C: Join
 
-Run `ll-search identity --config-dir $PLUGIN_DATA` to load or create the Ed25519 keypair. Output is JSON:
+Run, and show the user the output as it appears — the two confirmations are
+theirs to make, not yours:
+
+```bash
+ll-search join <hub-endpoint> <invite-code> <vault-path> --config-dir <config_dir>
+```
+
+The three are positional and in that order. The endpoint must be `wss://`.
+
+The command, in order:
+
+1. Fetches the hub's advertised identity and prints its `key_id` and a
+   **six-word fingerprint**, then asks whether those are the six words the hub
+   operator gave the user. Anyone who can answer for that address can present
+   a key; the words are how the real hub is told from that. **The invite code
+   has not left the machine at this point** — the hub redeems it while
+   handling the hello, so a code offered to an impostor is a code already
+   burned. Answering anything but yes sends nothing and writes nothing.
+2. Loads this machine's Ed25519 identity, or creates one.
+3. Generates a recovery key and prints its **24-word recovery phrase once**,
+   then asks whether the user has written it down. The words are the only copy
+   that will ever exist; nothing on disk holds them.
+4. Connects, authenticates, and checks the hub's `SyncReady` names the new
+   `vault_id`. Declaring the vault in the hello *is* registering it — there is
+   no second round trip — but a hub that admits the key without creating the
+   row is refused here rather than at a first sync a repository away.
+5. Writes `config.json` last.
+
+**Never echo the recovery phrase back, never write it to a file, and never put
+it in your response.** It is the user's to record.
+
+`join` does **not** sync. It enrolls. The first upload is a separate step:
+
+```bash
+ll-search sync <db-path> <vault-path> --config-dir <config_dir>
+```
+
+Report what it returns (notes uploaded, vaults fetched). If it names vaults it
+could not fetch, say which — the client was entitled to read them and could
+not, and that is the only place it surfaces.
+
+If `join` fails, no config is written and the skill re-runs cleanly. The invite
+is spent only on success.
+
+**A second vault on this machine needs `ll-search vault add <vault-path> <id>`
+first.** `join` creates the identity; `vault add` creates the registry entry.
+A config dir under `PLUGIN_DATA` that no vault profile names is refused rather
+than joined, because a vault the registry cannot see is one no later command
+can find.
+
+## D: Visibility rules
+
+Three tiers: `public` (full content shared), `listed` (title, tags and summary
+only), `private` (not shared at all). A fresh config is `private` by default
+with no rules.
+
+**Frontmatter is the only route to `public`.** A note is published in full
+only when it says so itself:
+
+```yaml
+visibility: public
+```
+
+Glob rules may restrict, never publish: a rule naming `public` is clamped to
+`listed`. A misspelled frontmatter value (`visibility: pubic`) falls through to
+the glob rules *and their clamp* rather than to an uncapped tier, so a typo
+cannot publish a note.
+
+Rules live in `config.json` under `visibility.rules` as `{ "pattern": "...",
+"tier": "..." }`, last match wins. There is no CLI to edit them; write the file
+directly. Suggested starting point, if the user wants one:
 
 ```json
-{ "pubkey_b64": "0JuQ...r5o=", "backend": "keyring", "created": false }
+"visibility": {
+  "default": "private",
+  "rules": [{ "pattern": "1-fleeting/**", "tier": "listed" }]
+}
 ```
 
-- `pubkey_b64` is the raw 32-byte public key as base64, ready to send to `/api/redeem` as-is. It becomes `pubkey` in config.json (written in step G).
-- `backend` is `"keyring"`, `"encrypted"`, or `"plaintext-legacy"` — where the seed was loaded from (or stored, on first run). There is no `seed_path` field.
-- `created` is `true` only when no seed existed in any backend and a fresh one was generated (into the keyring, or the encrypted file as fallback — never plaintext). The command is idempotent: existing seeds are reused, so re-runs return the same pubkey.
-
-**If `backend` is `"plaintext-legacy"`:** offer to upgrade the seed into a secure backend:
+**If this vault federated before this rule existed**, its published set was
+derived from folder globs and is now capped to `listed`. To keep exactly the
+notes that were public before, run once:
 
 ```bash
-ll-search migrate-seed --config-dir $PLUGIN_DATA
+ll-search visibility-backfill <vault-path> --config-dir <config_dir> --dry-run
 ```
 
-The migration is fail-closed: the plaintext file is deleted only after the new backend has been written and verified, and re-running against an already-migrated seed is a no-op. Never migrate between backends by hand-copying files — the only manual file copy in this skill is the plugin-root relocation above, which exists solely to put the legacy file where `migrate-seed` and the legacy reader can find it.
+It reports what it would write. Re-run without `--dry-run` to stamp
+`visibility: public` into the frontmatter of those notes. On a vault that has
+never federated there is nothing to preserve — skip it.
 
-## D: Redeem
+## E: Knowledge graph opt-in
 
-Ask for the token. POST to `https://interchange.live/api/redeem` with a **30-second timeout** so a hung connection cannot stall the whole flow:
+Ask: "Would you like this vault to be drawn on the federation-wide knowledge
+graph?"
 
-```js
-const res = await fetch('https://interchange.live/api/redeem', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ token, peer_id, pubkey: pubkey_b64 }),
-  signal: AbortSignal.timeout(30_000),
-});
-```
-
-The `peer_id` is bound to the token server-side: the user does not choose it. The redeem response returns the `peer_id` along with the headscale auth key and hub endpoint. Store these in memory for the rest of the flow. Do NOT write config yet: wait for the sync test to succeed.
-
-Handle server errors:
-
-- `404`: "invalid token, check the URL you were sent"
-- `409`: "this token was already redeemed. If a previous setup redeemed but failed at sync, contact robin for a fresh token; the burned one cannot be replayed."
-- `410`: "this token has expired, contact robin for a new one"
-- `502`: "provisioning service is unreachable, try again later"
-
-On `AbortError` (timeout) or any network error: surface "interchange.live unreachable, retry later" and exit without writing config. The token has not been spent on a connection failure: the same token will work on the next run.
-
-On HTTP failure: exit without writing config.
-
-## E: Network Connection
-
-Check for Tailscale. If not installed, guide installation (brew for macOS, curl for Linux). Run:
+It is off unless the user says otherwise, and it is declared on every
+connection, so this is a choice and not a default anybody drifted into.
 
 ```bash
-tailscale up --auth-key <headscale_auth_key> --login-server https://hs.interchange.live
+ll-search graph-opt-in true  --config-dir <config_dir>   # publish
+ll-search graph-opt-in false --config-dir <config_dir>   # withdraw
 ```
 
-Verify with `tailscale status`. If it fails, the auth key may have expired (24-hour window): surface the error and exit without writing config. The redeem token has already been consumed, so retrying needs a fresh token from robin (the same `409` rule as step D applies).
+The value is spelled out rather than being a bare `--publish` flag: the absence
+of a flag is how the value nobody chose gets mistaken for a choice, and this is
+the setting that mistake already cost two months. `ll-search status` shows the
+current value.
 
-## E.5: Visibility Rules
+## F: Summary
 
-Present defaults:
-
-- `3-permanent/` -> public (full content shared)
-- `1-fleeting/` -> listed (title + tags + summary)
-- Everything else -> private
-
-Ask: "Does that work for you?" Allow pattern customization if not.
-
-## E.7: Knowledge Graph Opt-in
-
-Ask: "Would you like your public note titles to appear on the interchange.live knowledge graph? (This only shares titles of notes marked public or listed, no content.)"
-
-If yes, set `"graph": true` in the generated config. If no, set `"graph": false`.
-
-## E.8: Provenance Consent
-
-Ask: "Share anonymized pipeline stats? (Tier 1: action counts only)"
-
-## F: First Sync Test
-
-The federation config is **not yet on disk**. Run the sync test against the in-memory identity and the hub endpoint from the redeem response, with a **15-second timeout** so a stalled connection cannot hang setup:
-
-```js
-const { spawn } = await import('node:child_process');
-const child = spawn(LL_SEARCH, ['sync', dbPath, vaultPath, '--hub-endpoint', hubEndpoint, '--peer-id', peerId], {
-  env: { ...process.env },
-});
-const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
-// await close, clearTimeout(timer) on exit
-```
-
-(Or invoke the binary via the existing helper and pass the same 15s deadline.)
-
-On success: report counts (notes exported, vaults fetched). If the sync line reports vaults it could not fetch, say so and say which — the client was entitled to read them and could not, and that is the only place it surfaces. Proceed to G.
-
-On failure or timeout: **do not write config**. Surface the specific error and offer the user a choice:
-
-1. **Retry sync now**: re-run F against the same in-memory identity (no token re-burn, no re-redeem). Useful for transient network blips.
-2. **Exit setup**: leave federation unconfigured. The redeem token has been spent. To complete federation later the user must contact robin for a fresh token; a re-run of this skill will see no `PLUGIN_DATA/federation/config.json` and start from scratch, but the burned token will return `409` on redeem.
-
-Be explicit about the trade: "The token is single-use and was consumed. If sync keeps failing, you can either retry now or get a new token from robin: there is no way to replay this one."
-
-## G: Write Config
-
-Only reached if F succeeded. Write `PLUGIN_DATA/federation/config.json` with identity (using the `peer_id` returned from D), visibility, `graph`, `share_provenance` fields, and hub endpoint from the redeem response.
-
-Immediately after the config write, stamp the seed with version metadata so SessionStart can surface a one-shot notice on a future plugin major upgrade. Read the current plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` and write `PLUGIN_DATA/federation/.seed-meta.json`:
-
-```javascript
-const PLUGIN = process.env.CLAUDE_PLUGIN_ROOT;
-const PLUGIN_DATA = process.env.CLAUDE_PLUGIN_DATA;
-const pluginVersion = JSON.parse(
-  readFileSync(join(PLUGIN, '.claude-plugin', 'plugin.json'), 'utf-8'),
-).version;
-const metaPath = join(PLUGIN_DATA, 'federation', '.seed-meta.json');
-// Merge: the binary writes a `backend` field into this sidecar; preserve it.
-const existing = existsSync(metaPath)
-  ? JSON.parse(readFileSync(metaPath, 'utf-8'))
-  : {};
-const meta = {
-  ...existing,
-  created_at: new Date().toISOString(),
-  plugin_version: pluginVersion,
-  plugin_major: parseInt(pluginVersion.split('.')[0], 10),
-};
-writeFileSync(metaPath, JSON.stringify(meta, null, 2));
-
-// Successful (re-)setup clears any prior version-mismatch notice
-const noticePath = join(PLUGIN_DATA, 'federation', '.seed-notice-shown');
-if (existsSync(noticePath)) unlinkSync(noticePath);
-```
-
-**Why:** the SessionStart hook compares `meta.plugin_major` against the running plugin's major version and emits a single stderr line when they differ, suggesting `/learning-loop:federation` to rotate. Resetting `.seed-notice-shown` on every successful re-setup guarantees a future major bump (e.g. v2.x -> v3.x after the user already cleared a v1.x -> v2.x notice) re-fires correctly. The notice is informational only: nothing auto-rotates.
-
-**Key behavioural detail:** the federation config file is the canonical "federation is set up" marker, and it is only written once a sync round-trip has actually worked. Failed setup runs leave no config behind, so re-running this skill from a fresh shell always re-enters cleanly. The seed in the seed store (keyring / encrypted file / legacy plaintext) is reused across re-runs (it is the user's identity, not federation state), so a re-run produces the same pubkey: the user will need a fresh token if the previous one was already redeemed.
-
-## Summary
-
-After F succeeds and G writes config, report:
+After `join` and the first `sync`, report:
 
 ```
 Federation configured.
 
-  Identity:   [pubkey_b64 first 12 chars]
-  Hub:        [endpoint]
-  Vaults:     [N] fetched, [N] already current, [N] could not be fetched
-  Visibility: [public/listed/private folder counts]
-  Graph:      [yes/no]
+  Key:        [key_id]
+  Vault id:   [vault_id]
+  Hub:        [endpoint]  ([six-word fingerprint])
+  Uploaded:   [N] notes
+  Visibility: [public/listed/private counts]
+  Graph:      [opted in / opted out]
 ```
+
+Then remind the user, once, that the 24 words are the only way back to this
+identity.
+
+## G: Additional machines
+
+A person is a set of machines joined by `link` grants. Four doors, and the
+**six-word fingerprint is the security boundary in every one of them** — the
+transport is not. Both ends print six words over the joining machine's key;
+the approver confirms they match before approving. If they do not match, stop:
+something is relaying the pairing.
+
+**Both machines on a network, hub reachable** — on the new machine:
+
+```bash
+ll-search link request <hub-endpoint> <vault-path> --config-dir <config_dir>
+```
+
+It prints a pairing code and a QR, plus the hub this identity will reach once
+admitted. On a machine already enrolled:
+
+```bash
+ll-search link approve <code> --config-dir <config_dir>
+```
+
+The approver lodges the grant with the hub; the new machine collects it on its
+next sync.
+
+**No hub, or no network path between the machines** — on the new machine:
+
+```bash
+ll-search link code --config-dir <config_dir>
+```
+
+which needs no network at all. Then on the established machine:
+
+```bash
+ll-search link approve <code> --offline --config-dir <config_dir>
+```
+
+which signs the grant and prints it instead of lodging it. Carry that blob to
+the new machine:
+
+```bash
+ll-search link accept <grant> --config-dir <config_dir>
+```
+
+The grant verifies against nothing but its own bytes and the issuer's public
+key. The new machine can act as itself immediately, and reaches the hub once
+the approver next connects and lodges what it signed.
+
+**What the machines are linked to:**
+
+```bash
+ll-search link list --config-dir <config_dir>
+```
+
+A link is two grants, not one signed twice: the approver signs A→B, and the
+new machine signs B→A itself on finding it. Neither machine can speak for the
+other before it has agreed to. `link list` shows which halves exist.
+
+## H: Recovering an identity
+
+The 24 words from step C restore this machine's key:
+
+```bash
+ll-search recover "<24 words>" --config-dir <config_dir>
+```
+
+Recovering the identity already on this machine needs nothing extra — nothing
+is replaced, so there is nothing to authorise. Recovering a **different**
+identity over an existing one requires `--force`, and the guard is the loss,
+not the write: every grant naming the old key stays signed, valid, and
+unreachable, while the machine still looks enrolled.
+
+`recover` writes the seed and deliberately leaves `config.json` alone — the
+hub pin and `vault_id` in it describe an enrollment the new key was never part
+of. `ll-search status` prints a `RECOVERED` line when the two disagree.
+
+## I: Where the seed lives, and repairing it
+
+The identity is an Ed25519 seed held by the binary's seed store. Backends, in
+priority order: the OS keyring (macOS Keychain, Linux Secret Service, Windows
+Credential Manager), then a file encrypted at rest under
+`<config_dir>/federation/` for machines where no keyring daemon runs. A
+plaintext `.seed` file is a pre-v1.18 format — still readable as a migration
+source, never written by the binary. On a fresh install no `.seed` exists, and
+that is normal.
+
+```bash
+ll-search identity --config-dir <config_dir>
+```
+
+reports `pubkey_b64`, `backend` (`keyring`, `encrypted`, or
+`plaintext-legacy`), and `created`. It is idempotent: an existing seed is
+reused, so re-runs return the same key.
+
+If `backend` is `plaintext-legacy`, offer to move it into a secure backend:
+
+```bash
+ll-search migrate-seed --config-dir <config_dir>
+```
+
+Fail-closed: the plaintext file is deleted only after the new backend has been
+written and verified, and re-running against a migrated seed is a no-op.
+`--rollback` reverses it. Never move a seed between backends by copying files
+by hand.
+
+**Very old installs** may have a plaintext seed at
+`${CLAUDE_PLUGIN_ROOT}/federation/.seed` — a location wiped on reinstall. Copy
+it to `<config_dir>/federation/.seed` (mode 0600) so the legacy reader and
+`migrate-seed` can find it, delete the marketplace-directory copy, then run
+`migrate-seed`. This is the only manual file move in this skill.
 
 ## Rules
 
-- Never write the federation config until the sync test passes. Failed runs must leave no state on disk.
-- Tokens are single-use and consumed on redeem (step D). Network failures BEFORE redeem are recoverable; failures AFTER redeem require a fresh token.
-- The seed is the user's identity. Never delete it from its store — keyring entry, encrypted file, or legacy `PLUGIN_DATA/federation/.seed` — without explicit user request.
-- Tailscale auth keys expire in 24 hours. If step E fails for that reason, the token is already spent.
+- Never write or edit `config.json` before `join` has succeeded. A failed run
+  must leave no state on disk.
+- Never echo, store, or log the 24-word recovery phrase.
+- The seed is the user's identity. Never delete it from its store — keyring
+  entry or encrypted file — without an explicit request.
+- The hub's key must be pinned. An unpinned hub is an error, not a warning:
+  `ll-search sync` refuses the config and `ll-search status` says `BLOCKED`.
+- One vault, one config dir. Never point two vaults at the same one.

@@ -172,7 +172,7 @@ For `bundle`, point it at a `harvest-bundle-<date>/` directory that `/learning-l
 
 ```
 first time → /learning-loop:init       → vault path, persona, folder structure
-federation → /learning-loop:federation  → identity, token redeem, visibility, sync test
+federation → /learning-loop:federation  → enroll a vault on a hub, link machines, visibility
 external   → /learning-loop:ingest     → auto-memory + inbox notes
 curiosity  → /learning-loop:discovery   → inbox notes  → /learning-loop:deepen  → permanent notes
 deep dive  → /learning-loop:research    → verified, cited report
@@ -191,11 +191,13 @@ librarian  → /learning-loop:health --librarian → approve links + tags, revie
 
 ### Federation
 
-If you've configured federation via `/learning-loop:federation` (also reachable from `/learning-loop:init`), search results automatically include notes from connected peers. Peer results appear with a `peer:<name>/` prefix in their path.
+If you've configured federation via `/learning-loop:federation` (also reachable from `/learning-loop:init`), search results include notes from vaults you follow. Those results carry a `peer:<vault_id>/` prefix in their path.
 
-- **Manual sync:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` refreshes peer indexes from the hub
+- **Manual sync:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` uploads this vault's index and refreshes the ones it may read
+- **Status:** `ll-search status` says when the last cycle ran, whether it worked, and what the hub held. It reads local files only
 - **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
-- **Visibility:** you control what peers see of your vault (public/listed/private tiers, configured during init)
+- **Visibility:** you control what others see of your vault (public/listed/private). `public` requires `visibility: public` in the note's own frontmatter; a folder rule grants at most `listed`
+- **More machines:** `ll-search link` pairs a second machine to the same identity. Both ends print six words; they must match
 - **Details:** see [guide/federation.md](https://github.com/robinslange/learning-loop/blob/main/guide/federation.md) (the `guide/` tree is not shipped with the plugin)
 
 ### Quick reference
@@ -203,7 +205,7 @@ If you've configured federation via `/learning-loop:federation` (also reachable 
 | Command | What it does |
 |---------|-------------|
 | `/learning-loop:init` | First-time setup: vault path, persona, folder structure |
-| `/learning-loop:federation` | Configure federation: identity, token redeem, peers, visibility, sync |
+| `/learning-loop:federation` | Configure federation: enroll a vault on a hub, link machines, visibility, sync |
 | `/learning-loop:discovery "topic"` | Interactive research journey: explore something new or go deeper |
 | `/learning-loop:research "question"` | Deep research: local librarian does the token-heavy gathering, Claude verifies and synthesizes a cited report |
 | `/learning-loop:quick "question"` | Fast verified answer: vault + web, auto-captures if novel |
