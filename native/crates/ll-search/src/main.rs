@@ -760,8 +760,17 @@ async fn main() {
                 &config_dir,
                 &config,
             )
-            .await
-            .expect("sync failed");
+            .await;
+            let result = match result {
+                Ok(result) => result,
+                // Every failure here is the user's to act on -- a wrong db
+                // path, an unbuilt index, a hub that refused. A panic buries
+                // that under a backtrace note.
+                Err(e) => {
+                    eprintln!("sync failed: {e:#}");
+                    std::process::exit(1);
+                }
+            };
             out(&result);
         }
         Commands::Join { hub, invite, vault_path, config_dir } => {

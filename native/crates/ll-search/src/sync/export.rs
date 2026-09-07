@@ -21,6 +21,13 @@ const INSERT_CHUNK: usize = 240;
 pub struct ExportResult {
     pub exported: usize,
     pub skipped: usize,
+    /// Rows the SELECT below never returned, because they carry no
+    /// `note_uuid`. Counted separately from `skipped`, which is a visibility
+    /// decision: this one is not a decision at all, and a vault indexed before
+    /// stable identity can have most of itself in here. Reporting it as zero
+    /// skipped would say the export considered every note and chose to send
+    /// these, when it never saw them.
+    pub unindexed: usize,
     #[serde(skip)]
     pub model_id: String,
 }
@@ -43,7 +50,21 @@ pub fn export_index(
 
     let model_id: String = source
         .query_row("SELECT value FROM meta WHERE key = 'model_id'", [], |r| r.get(0))
-        .context("source index has no model_id")?;
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => anyhow::anyhow!(
+                "this index has never been built: it carries no model_id, so there is \
+                 nothing to export. Run `ll-search index <vault-path> <db-path>` against \
+                 it first, and check the db path is the one the watcher maintains \
+                 (`<vault>/.vault-search/vault-index.db`) rather than an empty file."
+            ),
+            other => anyhow::Error::new(other).context("failed to read the source index's model_id"),
+        })?;
+
+    // Counted before the SELECT filters them out, so the caller can say how
+    // much of the vault the export never considered.
+    let unindexed: usize = source
+        .query_row("SELECT count(*) FROM notes WHERE note_uuid IS NULL", [], |r| r.get::<_, i64>(0))
+        .unwrap_or(0) as usize;
 
     let rules: Vec<(String, String)> = config
         .visibility
@@ -254,7 +275,7 @@ pub fn export_index(
 
     export.execute("COMMIT", [])?;
 
-    Ok(ExportResult { exported, skipped, model_id })
+    Ok(ExportResult { exported, skipped, unindexed, model_id })
 }
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
@@ -489,9 +510,39 @@ mod tests {
         let result = export_index(&source, &vault, &out, &config).unwrap();
 
         assert_eq!(result.exported, 0);
+        // The row is not `skipped` either: skipping is a visibility decision
+        // and this one was never offered to it. Counting it as zero-of-both
+        // would report an export that considered the whole vault.
+        assert_eq!(result.skipped, 0, "a missing id is not a visibility decision");
+        assert_eq!(result.unindexed, 1, "the row the SELECT never returned must still be counted");
         let c = Connection::open(&out).unwrap();
         let n: i64 = c.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0)).unwrap();
         assert_eq!(n, 0);
+    }
+
+    /// The count is of rows the export could not address, not of rows it chose
+    /// not to send — so an index where every note has an id reports zero even
+    /// when notes are held back for being `private`.
+    #[test]
+    fn an_indexed_note_held_back_by_visibility_is_skipped_and_not_unindexed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
+        public_vault_with_note(&vault);
+
+        // Default `private` with no rule that lifts it: the note is addressable
+        // and withheld, which is the other column.
+        let config = FederationConfig::test_fixture("private", vec![]);
+        let result = export_index(&source, &vault, &out, &config).unwrap();
+
+        assert_eq!(result.unindexed, 0, "every row had an id; nothing was unaddressable");
+        assert_eq!(
+            result.exported + result.skipped,
+            1,
+            "an addressable note is either exported or skipped, and counted exactly once"
+        );
     }
 
     fn build_minimal_export_db(path: &Path) {

@@ -427,6 +427,15 @@ async fn prepare_export(
         .await
         .map_err(|e| anyhow::anyhow!("export task panicked: {e}"))??;
         eprintln!("Export complete: {} exported, {} skipped", result.exported, result.skipped);
+        if result.unindexed > 0 {
+            eprintln!(
+                "  {} note(s) carry no stable id and were not considered. They are not \
+                 private and were not skipped -- the export cannot address them. \
+                 `ll-search index <vault> <db>` assigns one to each and they arrive on the \
+                 next sync.",
+                result.unindexed
+            );
+        }
         let export_owned = export_path.clone();
         let bytes = tokio::task::spawn_blocking(move || std::fs::read(&export_owned))
             .await
