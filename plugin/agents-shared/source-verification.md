@@ -65,14 +65,14 @@ For sources cited by name without a URL:
 
 These are the specific failure modes observed in vault audits:
 
-| Pattern | Example | How to Catch |
-|---------|---------|-------------|
-| Real PMID + wrong author | "Schwarcz & Bhatt 2014 (PMC3915289)" — actual authors are Campbell et al. | Fetch PMC page, extract author list |
-| First/last author swap | "Enshell-Seijffers et al. 2020" — Enshell-Seijffers is the senior author; first author is Harshuk-Shabso | Check author order on the page |
-| Wrong year, right authors | "Cortese & Phan 2020" — the paper is from 2005 | Check publication date on the page |
-| Impossible journal | "Cho et al. 2013 (Science Advances)" — Science Advances launched in 2015 | Check journal founding date |
+| Pattern                                           | Example                                                                                                  | How to Catch                                                  |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Real PMID + wrong author                          | "Schwarcz & Bhatt 2014 (PMC3915289)" — actual authors are Campbell et al.                                | Fetch PMC page, extract author list                           |
+| First/last author swap                            | "Enshell-Seijffers et al. 2020" — Enshell-Seijffers is the senior author; first author is Harshuk-Shabso | Check author order on the page                                |
+| Wrong year, right authors                         | "Cortese & Phan 2020" — the paper is from 2005                                                           | Check publication date on the page                            |
+| Impossible journal                                | "Cho et al. 2013 (Science Advances)" — Science Advances launched in 2015                                 | Check journal founding date                                   |
 | Qualitative review cited for quantitative results | "effect size g=0.12 (Battleday & Brem 2015)" — paper is a qualitative review with no pooled effect sizes | Read abstract; confirm the paper type supports the claim type |
-| Study population mismatch | "sleep-deprived effect sizes (Kløve & Petersen 2025)" — study only examined rested subjects | Check inclusion criteria in abstract |
+| Study population mismatch                         | "sleep-deprived effect sizes (Kløve & Petersen 2025)" — study only examined rested subjects              | Check inclusion criteria in abstract                          |
 
 ## Check Claims Against Sources
 
@@ -107,11 +107,17 @@ The temp-file steps below use the Write tool — they are the variant for Write-
 2. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
 3. Parse the JSON output. For each source:
    - `verified: true` -- no action needed
-   - `wrong_author` -- replace with the resolver's `metadata.firstAuthor` surname + "et al."
-   - `wrong_year` -- replace with the resolver's `metadata.year`
-   - `author_not_first` -- replace with the correct first author
-   - `error: "No identifiable source information"` -- skip (non-academic source)
+   - `wrong_author` (high) -- the only claimed surname is absent from the resolved work; replace with the resolver's `metadata.firstAuthor` surname + "et al."
+   - `missing_claimed_author` (high) -- one name in an `X & Y` citation is absent; the `claimed` field names which
+   - `wrong_first_author` (high) -- the citation says "et al.", which names the FIRST author, but the resolved work lists `actual_first`
+   - `wrong_year` (high) -- claimed and resolved years differ by more than one; replace with the resolver's `metadata.year`
+   - `year_off_by_one` (low) -- consistent with online-first vs print; informational, does not demote
+   - `unverifiable_author` (low) -- the resolver returned no author metadata, so nothing was confirmed or contradicted
+   - `error: "No identifiable source information"` -- skip (non-academic source, or a cited URL carrying no extractable identifier)
    - `error: "Source not found in any database"` -- add `[unresolved]` marker inline
+
+   A bare `Author Year` mention is graded only on what its form asserts: "X et al." asserts first authorship, "X & Y" asserts both are authors, "X" asserts authorship in any position. A short form repeating a work the note already cites with an identifier is not re-resolved.
+
 4. If fixes were made, rewrite the temp file using the Write tool and re-run verify-note once. Max 2 calls total.
 5. If issues remain after retry, mark with `[unverified]` inline.
 

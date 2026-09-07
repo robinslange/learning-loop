@@ -4,12 +4,16 @@ import { extractSourcesFromNote, extractNoteTopicKeywords } from '../lib/sources
 import { findAdapter, resolveSource } from '../lib/sources/registry.mjs';
 import { updateCitationIndex, loadCitationIndex } from '../lib/sources/citation-index.mjs';
 import unpaywall from '../lib/sources/adapters/unpaywall.mjs';
-import { authorMatches, firstAuthorMatches } from '../lib/sources/author-match.mjs';
+import { citationAssertionIssues } from './citation-assertions.mjs';
 
 // A source that failed to verify returns `{verified:false, error}` and no
 // `issues` array, so every consumer that grades by `issues[].severity` — the
 // promotion gate among them — counted zero problems and let the note through.
 // A verification that could not run is not a verification that passed.
+//
+// The mirror failure lives in the bare author-year branch below: a search that
+// always returns something made a resolution that could not be trusted read as
+// one that had been checked. See citation-assertions.mjs.
 //
 // Graded by kind: an identifier or author+year that resolves to nothing is the
 // fabrication case the check exists for, while a bare link carrying no citation
@@ -45,31 +49,18 @@ export async function verifyNote(notePath, config = {}) {
 
     if (adapter) {
       result = await adapter.verify(src);
+    } else if (src.url) {
+      // The note cited a specific document. No adapter means no identifier was
+      // extractable from it, and searching for its author and year would verify
+      // some other work that happens to share them — not the thing cited.
+      result = { verified: false, error: UNCHECKABLE, metadata: null };
     } else if (src.claimedAuthor && src.claimedYear) {
       const query = topicKeywords
         ? `${src.claimedAuthor} ${src.claimedYear} ${topicKeywords}`
         : `${src.claimedAuthor} ${src.claimedYear}`;
       const resolved = await resolveSource(query);
       if (resolved.resolved) {
-        const issues = [];
-        const resolvedAuthors = resolved.authors || [];
-        if (resolvedAuthors.length === 0) {
-          issues.push({
-            type: 'unverifiable_author',
-            severity: 'low',
-            claimed: src.claimedAuthor,
-            reason: 'no author metadata from resolver',
-          });
-        } else if (!firstAuthorMatches(src.claimedAuthor, resolvedAuthors)) {
-          if (!authorMatches(src.claimedAuthor, resolvedAuthors)) {
-            issues.push({
-              type: 'wrong_author',
-              severity: 'high',
-              claimed: src.claimedAuthor,
-              actual_first: resolved.firstAuthor,
-            });
-          }
-        }
+        const issues = citationAssertionIssues(src.claimedAuthor, src.claimedYear, resolved);
         result = { verified: issues.length === 0, issues, metadata: resolved };
       } else {
         result = { verified: false, error: 'Source not found in any database', metadata: null };

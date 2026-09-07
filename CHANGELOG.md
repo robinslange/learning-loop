@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **`verify-note` graded a bare author-year mention by whether the resolver answered, not by whether it was right.** With no identifier to dispatch on, the branch searched `<author> <year> <topic>`, took the first hit whose author list contained the claimed surname anywhere, and discarded the claimed year entirely — it was spent building the query and never compared. A search like that cannot fail: given `Haskell 2005 caffeine` PubMed returns a paper by some Haskell about something. On real vault notes `Rogers 2014` resolved to a 2016 paper on older adults' perceptions of computers, `James & Rogers 2005` to paediatric cochlear implantation, and `Haskell et al. 2005` to Tai Chi hemodynamics — every one `verified: true` with an empty `issues` array, so the promotion gate counted zero problems and promoted notes whose citations pointed at strangers' papers. Resolutions are now graded against what the citation form actually asserts, and against nothing more: `X et al.` asserts X is the FIRST author, `X & Y` asserts both are authors in no particular position, a bare `X` asserts authorship only, and the year asserts the publication year (a one-year gap is online-first lag and stays low severity; more is `wrong_year` at high). A senior author cited alone still sits last by convention without being flagged.
+- **The same notes' correctly-formed citations were failing while the loose ones passed.** DOI extraction anchored on `doi.org/`, so a paper linked at `journals.sagepub.com/doi/full/10.1089/jcr.2014.0009` yielded no identifier and came back "No identifiable source information". Extraction now anchors on the DOI's own shape and stops at `?`/`#`, so publisher-hosted DOIs resolve.
+- **A short form of a work the note already cited was resolved again as if it were a separate claim.** Link-text parsing required the year to follow the author directly, so `Rogers, "Caffeine and Alertness" (2014)` parsed as `author: null` and the author+year dedup below it could not match a later bare `Rogers 2014` to it. Once bare mentions are graded, that would have demoted correctly-sourced notes for citing themselves twice. The year is now found across an intervening title, preferring a parenthesised year over one inside the title.
+- **A cited URL with no extractable identifier is no longer re-resolved by author-year search.** Searching for a work by author and year verifies some work that shares them, not the document the note linked. `Institute of Medicine (US), "Caffeine..." (2001)` parsed as author "Institute" and matched a 2001 paper listing "Institute O R" (Oregon Research Institute) among its authors. Such sources return `unverifiable_source` at low severity, as a bare link always has.
+- **A test fixture pinned to an absolute date raced the real clock and started failing on its own.** `tests/retrieval-usage.test.mjs` built its log fixtures from a hardcoded `2026-06-12`, while `retrieval-report` measures its window from `Date.now()`. On 2026-09-07 the oldest fixture entry landed exactly 90 days back — the boundary of the report's 90-day window — and the suite began failing with nothing wrong in the code under test. Fixtures now derive from the same clock the code reads, and shard by each entry's own month so a three-day-old record still lands in the right file across a month boundary.
+
 ## v1.41.1
 
 ### Fixed
@@ -122,7 +130,7 @@ a check reported a result it had not actually computed.
   `verify-note` already used for that case.
 
 - **`check-claims` silently dropped every source it could not read.** `if
-  (!metadata?.abstract) continue;` produced no row, so a caller saw only the
+(!metadata?.abstract) continue;` produced no row, so a caller saw only the
   checkable claims and read that as "all claims checked". Now reports
   `in_abstract: null` with an `unchecked_reason`; `source-verification.md`
   documents the third state.
