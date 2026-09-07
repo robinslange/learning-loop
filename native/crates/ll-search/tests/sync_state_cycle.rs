@@ -1102,6 +1102,13 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
 ///
 /// It could not be written at all until `SyncReady.revocations` stopped being
 /// hardcoded `vec![]` in this mock.
+///
+/// **The first cycle fetches `v-other` rather than the test planting it.** A
+/// peer cache exists only because the hub listed that vault and served its
+/// index — this mock's own rule, and `withdraw` now reads the same listing
+/// before it deletes anything. A hand-planted cache for a vault this hub had
+/// never listed was an arrangement that cannot occur, and the deletion would
+/// have been refused for that reason rather than tested.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     test_env();
@@ -1114,8 +1121,6 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
 
     // The cache the grant justified, and one nothing in this cycle names.
     let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
     let untouched = ll_search::sync::config::peer_dir(dir.path(), "v-unrelated");
     std::fs::create_dir_all(&untouched).unwrap();
     std::fs::write(untouched.join("index.db"), b"peer data").unwrap();
@@ -1130,7 +1135,15 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     // is the step the whole rule depends on — a revoked grant never comes
     // back in `grants`, so a client that had not already kept it has nothing
     // to resolve the revocation against.
-    let (addr, _) = spawn_hub_revoking(Some(held.clone()), vec![granted], vec![]).await;
+    let (addr, _) = spawn_hub_full(
+        Some(held.clone()),
+        OnUpload::Ack,
+        OnGrant::Ack,
+        vec![granted],
+        vec![],
+        vec![("v-other".to_string(), Fetch::Serve(peer_index_bytes()))],
+    )
+    .await;
     let config = config_for(dir.path(), addr);
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await
