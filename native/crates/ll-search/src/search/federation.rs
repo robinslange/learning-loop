@@ -62,18 +62,18 @@ pub fn discover_peer_dbs_for(
 ///
 /// Asking the grant store instead makes an orphaned cache invisible without
 /// being deleted, and demotes deletion to disk hygiene. It fails closed on
-/// absence: no identity, no readable store, or no live grant all end in
-/// nothing served.
+/// absence: no identity, no readable store, no live grant, and no list all end
+/// in nothing served.
 ///
-/// **It does not fail closed in general, and the steady state is the case it
-/// misses.** An unscoped grant covers every vault, a `link` is unscoped, and
-/// `link.rs::reconcile` stores a `link` addressed to this key for every
-/// machine that has ever linked to it — so on a linked machine one row covers
-/// every directory here and nothing is filtered out. This is a narrowing, not
-/// an authorization boundary, and the next person to read it needs to know
-/// that before they treat spec:334 as satisfied. The predicate that closes it
-/// is the hub's `vault_state`; [`ReadAuthority`] carries the argument for why
-/// persisting that is safe, and what a stale copy of it has to do.
+/// **The grant store alone would not be a boundary, and the steady state is
+/// the case it misses.** An unscoped grant covers every vault, a `link` is
+/// unscoped, and `link.rs::reconcile` stores a `link` addressed to this key
+/// for every machine that has ever linked to it — so on a linked machine one
+/// row covers every directory here. What closes that is the second half of
+/// [`ReadAuthority::covers`]: the hub's own list of the vaults this key may
+/// read, persisted. `an_unscoped_link_no_longer_covers_a_vault_the_hub_never_listed`
+/// below is the test that says so. [`ReadAuthority`] carries the argument for
+/// why persisting the list is safe, and what a stale copy of it has to do.
 ///
 /// Nothing here reads the seed unless there is a cache to decide about. A
 /// keyring read can prompt on macOS, and a query on a machine with no cached
@@ -109,8 +109,8 @@ pub fn discover_peer_dbs(
 
     let mut peers = Vec::new();
     for peer_id in cached {
-        // Not "is this read authorized" — see `ReadAuthority`. On a linked
-        // machine an unscoped `link` says yes to every id that reaches here.
+        // Both halves: the hub last listed it, and a live grant covers it.
+        // Either alone is over-permissive — `ReadAuthority` says how.
         if !authority.covers(&peer_id) {
             eprintln!(
                 "Peer {peer_id}: no live grant covers this cache, so it is not searched. \
@@ -908,6 +908,31 @@ mod tests {
         let bodies = batch_load_bodies_federated(&local, &peers, &paths);
         assert_eq!(bodies.get("local.md").unwrap(), "local body text");
         assert_eq!(bodies.get("peer:eve/peer-note.md").unwrap(), "peer body text");
+    }
+
+    /// **A `peer:` path resolves against a whole peer id, never a prefix of
+    /// one.** Both sides of that comparison are directory names read off disk
+    /// — `discover_peer_dbs` builds the peer list from `peers/`, and the path
+    /// comes back out of the RRF map keyed by the same names — so a near-miss
+    /// is not a near-miss, it is a title read out of a different vault's
+    /// index. The equality is the only thing that says so.
+    #[test]
+    fn a_federated_title_resolves_against_a_whole_peer_id_and_never_a_prefix() {
+        let emb = norm(&[1.0, 0.0, 0.0]);
+        let local = create_test_db(&[("local.md", "local", "local body", &emb)]);
+        let held = |id: &str| vec![(id.to_string(),
+            create_peer_db(&[("p.md", "a peer's title", "peer body", &emb)]))];
+
+        assert_eq!(load_title_federated("peer:v-a/p.md", &local, &held("v-alice")), None,
+            "the id asked for is a prefix of the peer we hold");
+        assert_eq!(load_title_federated("peer:v-alice/p.md", &local, &held("v-a")), None,
+            "and the peer we hold is a prefix of the id asked for");
+        assert_eq!(load_title_federated("peer:v-a/p.md", &local, &held("V-A")), None,
+            "nor does case fold");
+        assert_eq!(
+            load_title_federated("peer:v-a/p.md", &local, &held("v-a")).as_deref(),
+            Some("a peer's title"),
+            "and the whole-id match does resolve, so the three above are about the id");
     }
 
     #[test]

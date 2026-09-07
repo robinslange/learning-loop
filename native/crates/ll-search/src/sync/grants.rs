@@ -136,10 +136,6 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 /// cache it holds is from before this rule — which is exactly the orphan this
 /// exists to hide.
 ///
-/// Loaded once per config dir and then asked repeatedly. Re-reading per
-/// candidate would let the answer change mid-sweep, and half a sweep against
-/// each of two answers is an answer neither of them gave.
-///
 /// **[`withdraw`] deliberately still asks only [`covers`], and the reason is
 /// mechanical rather than stylistic.** `withdraw` uses `covers` in a
 /// *protective* position — it bails out of deleting when something still
@@ -178,13 +174,6 @@ impl ReadAuthority {
     pub fn covers(&self, vault_id: &str) -> bool {
         self.listed.as_ref().is_some_and(|listed| listed.contains(vault_id))
             && self.live.iter().any(|st| covers(st, &self.me, vault_id))
-    }
-
-    /// How old the hub's answer is, as of `now`. `None` when there is no
-    /// answer — which is not a fresh one, and callers must not render it as
-    /// one.
-    pub fn age(&self, now: i64) -> Option<i64> {
-        self.listed.as_ref().map(|listed| listed.age(now))
     }
 }
 
@@ -303,6 +292,14 @@ fn verified(rows: &[StoredGrant]) -> Vec<(usize, String, GrantStatement)> {
 /// nothing forever.
 ///
 /// Lodged on arrival: the hub has these by definition, it just sent them.
+///
+/// **No expiry filter here, unlike `link::reconcile` and `fetch::live_grants`,
+/// and not by omission.** Those two are asking what a grant still entitles
+/// this machine to, where a lapsed one must answer nothing. This is asking
+/// what the store should hold, and a lapsed statement is exactly what
+/// [`prune_expired`] needs to find in order to take the cache that statement
+/// named — `run_cycle` runs it seven lines after this. A grant refused at the
+/// door names nothing, so filtering here would leave its cache in place.
 ///
 /// Creates no peer cache. Nothing here touches `federation/data/`, which is
 /// what makes an `assoc` unable to produce one — not a check that could be
@@ -519,8 +516,7 @@ mod tests {
     }
 
     fn revoking(by: &SigningKey, g: &SignedGrant) -> RevocationWire {
-        let st: GrantStatement = serde_json::from_slice(&g.statement).unwrap();
-        revocation(by, &grant::grant_id(&g.statement), st.scope.as_deref())
+        revocation(by, &grant::grant_id(&g.statement), statement(g).scope.as_deref())
     }
 
     /// A peer cache with a file in it, so "the directory is gone" is a claim
@@ -546,6 +542,31 @@ mod tests {
 
     fn rows(dir: &Path) -> usize {
         link::load_grants(dir).unwrap().len()
+    }
+
+    fn statement(g: &SignedGrant) -> GrantStatement {
+        serde_json::from_slice(&g.statement).unwrap()
+    }
+
+    // -- what a grant is about ---------------------------------------------
+
+    /// **`covers` compares the whole scope, never a prefix or a substring.**
+    /// The id it is asked about is a directory name read off disk, not a value
+    /// the issuer signed, so a name that merely starts with the scope a grant
+    /// carries was never that grant's business.
+    ///
+    /// `ReadableVaults::contains` is the other half of the same conjunction
+    /// and has had this test since a mutation found it there; this comparison
+    /// one file away had none.
+    #[test]
+    fn covers_matches_a_whole_scope_and_never_a_prefix_of_one() {
+        let me = id(&key(9));
+        let st = statement(&issue(&key(1), &me, GrantKind::Follow, Some("v-a"), LATER));
+
+        assert!(covers(&st, &me, "v-a"));
+        assert!(!covers(&st, &me, "v-alice"), "a longer id that starts with the scope");
+        assert!(!covers(&st, &me, "v-"), "a shorter id the scope starts with");
+        assert!(!covers(&st, &me, "V-A"), "and it is not case-insensitive either");
     }
 
     // -- the store ---------------------------------------------------------
@@ -786,6 +807,30 @@ mod tests {
             "revoking one person's follow must not delete what another person's link justifies");
     }
 
+    /// The other side of that bail-out's midpoint: the survivor has to be
+    /// LIVE. Only the `covers` half was measured, and an unscoped grant
+    /// covers every vault — so without the expiry half a lapsed `link` sitting
+    /// in the store protects this cache from the revocation that should take
+    /// it, and protects it forever: `prune_expired` runs next and names
+    /// nothing for an unscoped grant, while the revoked row is already gone,
+    /// so the hub's next copy of the revocation resolves against nothing.
+    #[test]
+    fn a_lapsed_survivor_does_not_protect_a_cache_from_a_revocation() {
+        let a = key(1);
+        let c = key(2);
+        let me = id(&key(9));
+        let revoked = issue(&a, &me, GrantKind::Follow, Some("v-x"), LATER);
+        let lapsed_link = issue(&c, &me, GrantKind::Link, None, NOW - 1);
+        let (dir, me) = store(&[&revoked, &lapsed_link]);
+        cache(dir.path(), "v-x");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
+
+        assert_eq!(deleted, vec!["v-x".to_string()]);
+        assert!(!cached(dir.path(), "v-x"),
+            "a grant that has stopped meaning anything cannot be a reason to keep a cache");
+    }
+
     /// The other half of the `assoc` rule. It carries no read authority, so
     /// it cannot be the reason a cache survives a revocation that would
     /// otherwise take it.
@@ -874,6 +919,39 @@ mod tests {
         assert_eq!(rows(dir.path()), 0, "it is still withdrawn from the store");
     }
 
+    /// The `NotFound` arm, and it is the only thing between an ordinary
+    /// revocation and a sync cycle that aborts before the upload — every
+    /// cycle, for good. `apply_revocations(...)?` in `run_cycle` is not
+    /// best-effort, and a grant lodged for a vault this client never fetched
+    /// is ordinary: the grant is issued and stored before any index is served,
+    /// and `fetch_all` skips a vault the hub reports as holding nothing.
+    ///
+    /// **The removal has to be reachable for this to test the arm.**
+    /// `applying_the_same_revocation_twice_is_idempotent` is named for the
+    /// same property and never gets there: after the first call the row is
+    /// gone, so the second returns at "holds no grant for" without entering
+    /// `withdraw`. Here the grant is scoped, addressed to this key and a
+    /// usable id, no survivor covers it, and `peers/` is on disk — so
+    /// `remove_dir_all` really runs, and the one reason it fails is that this
+    /// directory was never written.
+    #[test]
+    fn revoking_a_grant_whose_cache_was_never_written_is_not_a_failure() {
+        let a = key(1);
+        let me = id(&key(9));
+        let never_fetched = issue(&a, &me, GrantKind::Follow, Some("v-never"), LATER);
+        let (dir, me) = store(&[&never_fetched]);
+        let sibling = cache(dir.path(), "v-other");
+        assert!(!peer_dir(dir.path(), "v-never").exists(),
+            "precondition: nothing was ever fetched for the vault being revoked");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &never_fetched)], &me, NOW)
+            .expect("a revocation for a vault this client never read is not a failure");
+
+        assert!(deleted.is_empty());
+        assert_eq!(rows(dir.path()), 0, "and the row still goes, so the cycle settles");
+        assert!(sibling.exists(), "peers/ was there to walk: the deletion was reachable");
+    }
+
     #[test]
     fn applying_the_same_revocation_twice_is_idempotent() {
         let a = key(1);
@@ -907,6 +985,37 @@ mod tests {
         assert_eq!(deleted, vec!["v-other".to_string()]);
         assert!(!cached(dir.path(), "v-other"), "lapsing must have the same effect as revoking");
         assert!(cached(dir.path(), "v-keep"));
+        assert_eq!(rows(dir.path()), 1);
+    }
+
+    /// The boundary itself. `expires_at` is the first instant the grant does
+    /// not cover, not the last one it does — `prune_expired` reads
+    /// `expires_at <= now`. Nothing pinned which side `now` fell on, so a
+    /// comparison one second out in either direction was free.
+    #[test]
+    fn a_grant_that_expires_at_this_very_instant_is_lapsed() {
+        let a = key(1);
+        let me = id(&key(9));
+        let g = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW);
+        let (dir, me) = store(&[&g]);
+        cache(dir.path(), "v-other");
+
+        assert_eq!(prune_expired(dir.path(), &me, NOW).unwrap(), vec!["v-other".to_string()]);
+        assert!(!cached(dir.path(), "v-other"));
+        assert_eq!(rows(dir.path()), 0);
+    }
+
+    /// And the other side of it, one second out.
+    #[test]
+    fn a_grant_that_expires_one_second_from_now_is_not_pruned_yet() {
+        let a = key(1);
+        let me = id(&key(9));
+        let g = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW + 1);
+        let (dir, me) = store(&[&g]);
+        cache(dir.path(), "v-other");
+
+        assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
+        assert!(cached(dir.path(), "v-other"));
         assert_eq!(rows(dir.path()), 1);
     }
 
