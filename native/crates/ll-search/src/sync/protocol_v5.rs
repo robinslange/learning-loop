@@ -408,29 +408,90 @@ mod tests {
         }
     }
 
+    /// The exact bytes a hello is, character for character, and the same
+    /// literal the hub asserts in `client_hello_wire_bytes_are_pinned_exactly_
+    /// and_graph_opt_in_is_required`. Both repos compare against one string,
+    /// so a rename or a reorder on either side reddens that side.
+    ///
+    /// Was a `serde_json::Value` comparison, which is order-insensitive and
+    /// therefore cannot see a reorder at all — and field order is what a
+    /// whole-string pin is for.
     #[test]
-    fn client_hello_serialises_to_the_exact_hub_expected_wire_format() {
-        // Not a self-round-trip: this literal is what a hub-side
-        // `serde_json::from_str::<ClientMsg>` must accept, so it pins the
-        // client's output against the hub's input contract rather than just
-        // proving the client agrees with itself.
+    fn client_hello_wire_bytes_are_pinned_exactly() {
         let msg = ClientMsg::ClientHello {
-            key_id: "zAbc".into(),
-            nonce_c: "AAAA".into(),
+            key_id: "zK".into(),
+            nonce_c: "bm9uY2U".into(),
             vault_ids: vec!["v1".into()],
-            protocol_version: 5,
+            protocol_version: PROTOCOL_VERSION,
             model_id: "m".into(),
             invite_code: None,
             graph_opt_in: true,
         };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"type":"client-hello","key_id":"zK","nonce_c":"bm9uY2U","vault_ids":["v1"],"protocol_version":5,"model_id":"m","invite_code":null,"graph_opt_in":true}"#
+        );
+    }
+
+    /// The exact bytes a `revoke-grant` is on the wire, spelled out as a
+    /// literal rather than round-tripped. `every_message_tag_is_pinned` above
+    /// pins only `type`; a round-trip through these same types proves this
+    /// file's serialiser agrees with this file's deserialiser, which is true
+    /// of any encoding both halves share — including one the hub does not
+    /// speak. The hub asserts this same string.
+    #[test]
+    fn revoke_grant_wire_bytes_are_pinned_exactly() {
+        let msg = ClientMsg::RevokeGrant {
+            statement_b64: "c3RtdA".into(),
+            signature_b64: "c2ln".into(),
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"type":"revoke-grant","statement_b64":"c3RtdA","signature_b64":"c2ln"}"#
+        );
+        // And no vestigial `grant_id` beside the bytes: the id lives inside
+        // the statement the signature covers, so there is no second copy that
+        // could name a different grant than the one that was signed for.
         let json = serde_json::to_value(&msg).unwrap();
-        let expected: serde_json::Value = serde_json::from_str(
-            r#"{"type":"client-hello","key_id":"zAbc","nonce_c":"AAAA",
-               "vault_ids":["v1"],"protocol_version":5,"model_id":"m",
-               "invite_code":null,"graph_opt_in":true}"#,
-        )
-        .unwrap();
-        assert_eq!(json, expected);
+        assert!(json.get("grant_id").is_none(), "the grant_id is inside the signed statement");
+    }
+
+    /// The whole `sync-ready` payload as bytes, including a `revocations[]`
+    /// entry — the message this client parses first, and the one carrying
+    /// every other pinned struct (`VaultState`, `HeldIndex`, `GrantWire`,
+    /// `RevocationWire`), so pinning it once pins their field names and order
+    /// together, in the order the hub actually emits them.
+    ///
+    /// This client only ever deserialises a `SyncReady`, so a parse test can
+    /// be satisfied by a shape the hub does not emit — every field the client
+    /// happens not to read is invisible to it. Serialising our own type and
+    /// comparing against the hub's literal is what makes the two directions
+    /// one assertion.
+    #[test]
+    fn sync_ready_wire_bytes_are_pinned_exactly() {
+        let msg = HubMsg::SyncReady {
+            protocol_version: PROTOCOL_VERSION,
+            vault_state: vec![
+                VaultState { vault_id: "v1".into(), holds: None },
+                VaultState {
+                    vault_id: "v2".into(),
+                    holds: Some(HeldIndex { sha256: "abc".into(), note_count: 7, uploaded_at: 10 }),
+                },
+            ],
+            grants: vec![GrantWire {
+                statement_b64: "Zw".into(),
+                signature_b64: "Z3M".into(),
+                state: "active".into(),
+            }],
+            revocations: vec![RevocationWire {
+                statement_b64: "cg".into(),
+                signature_b64: "cnM".into(),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_string(&msg).unwrap(),
+            r#"{"type":"sync-ready","protocol_version":5,"vault_state":[{"vault_id":"v1","holds":null},{"vault_id":"v2","holds":{"sha256":"abc","note_count":7,"uploaded_at":10}}],"grants":[{"statement_b64":"Zw","signature_b64":"Z3M","state":"active"}],"revocations":[{"statement_b64":"cg","signature_b64":"cnM"}]}"#
+        );
     }
 
     /// `graph_opt_in` is a required field with no serde default, mirroring the

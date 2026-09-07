@@ -529,6 +529,37 @@ mod tests {
         }
     }
 
+    /// The exact bytes a client signs and the hub verifies, spelled out as a
+    /// literal rather than round-tripped through these same types. A
+    /// round-trip proves only that this file's serialiser agrees with this
+    /// file's deserialiser, which holds under ANY encoding both sides share —
+    /// including one the hub does not speak. Renaming a field, or reordering
+    /// two, changes these bytes and turns a silent "invalid signature" at the
+    /// first real revocation into a red test here.
+    ///
+    /// `by` is the pinned key from `key_id.rs`'s own
+    /// `matches_the_hub_encoding_for_a_known_key` vector, so this literal is
+    /// reproducible, and it is the same string the hub asserts.
+    #[test]
+    fn revocation_canonical_bytes_are_pinned_exactly() {
+        let by = KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key());
+        let scoped = revocation("abc123", &by, Some("v1"), 1_757_000_000);
+        assert_eq!(
+            String::from_utf8(canonical_bytes(&scoped)).unwrap(),
+            r#"{"v":5,"kind":"revoke","grant_id":"abc123","by":"z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z","scope":"v1","at":1757000000}"#
+        );
+
+        // An unscoped revocation carries an explicit `null`, not an omitted
+        // field: "every vault this issuer owns" is a value the client must
+        // read, and a missing key is indistinguishable from a truncated
+        // message.
+        let unscoped = revocation("abc123", &by, None, 1_757_000_000);
+        assert_eq!(
+            String::from_utf8(canonical_bytes(&unscoped)).unwrap(),
+            r#"{"v":5,"kind":"revoke","grant_id":"abc123","by":"z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z","scope":null,"at":1757000000}"#
+        );
+    }
+
     #[test]
     fn verifies_a_well_formed_revocation() {
         let (sk_a, a) = pair();
