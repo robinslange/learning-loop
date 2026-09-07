@@ -434,6 +434,26 @@ mod tests {
         );
     }
 
+    /// Storing over a machine still on the pre-2K plaintext file leaves that
+    /// file where it is — shredding belongs to `seed_migrate`, which verifies
+    /// before it destroys. The consequence is real and deliberate: the
+    /// *previous* private key stays readable on disk until `migrate-seed`
+    /// runs, so pin it here rather than leave it to be discovered.
+    #[test]
+    fn store_seed_outranks_a_legacy_plaintext_seed_without_deleting_it() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        let legacy = tmp.path().join("federation").join(".seed");
+        std::fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        std::fs::write(&legacy, [9u8; 32]).unwrap();
+
+        store_seed(tmp.path(), &[5u8; 32]).unwrap();
+
+        assert_eq!(load_only(tmp.path()).unwrap().unwrap().signing_key.to_bytes(), [5u8; 32]);
+        assert_eq!(std::fs::read(&legacy).unwrap(), [9u8; 32],
+            "still there, and still the old key: `migrate-seed` shreds it, `store_seed` does not");
+    }
+
     // NOTE: `keyring_roundtrip_when_available` removed. It wrote `[11u8; 32]`
     // to the globally-namespaced production keyring service+account, then
     // deleted it. `#[ignore]` was insufficient: `cargo test --ignored` or

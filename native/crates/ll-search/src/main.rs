@@ -1183,14 +1183,20 @@ mod tests {
         assert_eq!(outcome.key_id, key_id_of(&[42u8; 32]));
     }
 
+    /// Order, not just outcome: the phrase is read before the machine's own
+    /// identity is. Checking `--force` first would answer a typo with the
+    /// flag that destroys an identity, which is the last place a confused
+    /// user should be pointed.
     #[test]
-    fn a_phrase_that_is_not_a_phrase_writes_nothing() {
+    fn a_phrase_that_is_not_a_phrase_is_refused_before_the_seed_is_touched() {
         let dir = seeded_dir([7u8; 32]);
-        let err = recover(dir.path(), "zzzz not a recovery phrase", true).unwrap_err();
-        assert!(!err.to_string().contains("--force"));
-        assert_eq!(loaded_seed(dir.path()), [7u8; 32],
-            "an unreadable phrase must be refused before the existing seed is touched, \
-             even under --force");
+        for force in [false, true] {
+            let err = recover(dir.path(), "zzzz not a recovery phrase", force).unwrap_err();
+            assert!(!err.to_string().contains("--force"),
+                "an unreadable phrase is not a --force question (force={force})");
+            assert_eq!(loaded_seed(dir.path()), [7u8; 32],
+                "an unreadable phrase must leave the existing seed untouched (force={force})");
+        }
     }
 
     fn key_id_of(seed: &[u8; 32]) -> String {
