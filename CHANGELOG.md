@@ -74,11 +74,14 @@ rather than best-effort. **It is met for a scoped `follow` and not for the
 main case, and this release does not close that.** Three separate gaps, stated
 because a changelog is what people believe without checking:
 
-- **Nothing in this client can revoke anything.** `ClientMsg::RevokeGrant`
-  exists in the protocol and has no production sender; there is no
-  `ll-search link revoke`. Revocations are applied when the hub serves them,
-  but this end cannot originate one. Uninstalling withdraws nothing either —
-  grants lapse on their own at the TTLs above.
+- **A client can withdraw a `link` it issued, and nothing else.**
+  `ll-search link revoke <key_id>` signs a revocation, tells the hub, and then
+  drops the local row — in that order, because this store is the only record
+  of what this key issued and dropping it first would leave nothing to sign a
+  revocation for. It withdraws **one half**: the grant the other machine
+  issued to this one is that machine's statement about its own key, and only
+  that machine can withdraw it. There is no way from here to withdraw a
+  `follow` a peer holds on this vault; those lapse at their TTL.
 - **An unscoped revocation deletes nothing, and a `link` is unscoped.** A
   withdrawal removes exactly the cache its own `scope` names. "Every vault
   this issuer owns" names no single directory, and which vaults an issuer owns
@@ -87,7 +90,8 @@ because a changelog is what people believe without checking:
   under-delete, recorded and reported rather than papered over: the
   alternative on offer was to sweep every cache no surviving grant justifies,
   which is a garbage collector wearing a revocation's clothes and would
-  dispose of directories written by an earlier protocol version.
+  dispose of directories written by an earlier protocol version. So
+  `link revoke` deletes nothing from disk, and says so.
 - **The reader-side check narrows what is served; it is not a boundary.** A
   cached peer index is searched only while the hub's last list still names it
   and a live grant covers it. But an unscoped grant covers every vault, and

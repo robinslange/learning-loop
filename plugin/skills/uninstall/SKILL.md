@@ -33,17 +33,36 @@ dir. This skill walks the full removal with operator confirmation.
    ll-search link list --config-dir <config_dir>
    ```
 
-   b. **Uninstalling does not withdraw anything.** There is no command that
-   revokes a grant from this client — the wire message exists but nothing
-   sends it. Every `link` grant naming this machine, and every `follow` a peer
-   holds on this vault, stays signed and stays valid at the hub until it
-   expires on its own: **a year for a `link`, ninety days for a `follow`.**
-   Grants renew on use, so once this machine stops syncing they run down from
-   whenever it last did.
+   b. **Withdraw the links this machine issued**, one per machine listed, and
+   do it while the hub is still reachable:
 
-   That is the honest state, and the operator should hear it before they
-   delete the identity rather than after. If they want a grant gone sooner
-   than its expiry, the person who signed it has to be told out of band.
+   ```bash
+   ll-search link revoke <key_id> --config-dir <config_dir>
+   ```
+
+   It tells the hub first and drops the local row second. That order is not
+   arbitrary: this store is this key's only record of what it issued, so
+   dropping the row while the hub still serves the grant leaves nothing to
+   sign a revocation *for*, and the other machine keeps full authority until
+   the grant expires a year later.
+
+   **Only the half this machine signed.** A link is two grants. The one the
+   other machine issued to this one is that machine's statement about its own
+   key, and only that machine can withdraw it — `link revoke` reports when one
+   is still standing, and so should you. Saying "revoked" while half the door
+   is open is worse than saying nothing.
+
+   **What this still does not withdraw.** There is no way from here to
+   withdraw a `follow` a peer holds on this vault; no command sends one. Those
+   stay signed and valid at the hub until they lapse — **ninety days for a
+   `follow`, a year for a `link`** — counted from the last sync that renewed
+   them. If the operator wants one gone sooner, the key that signed it has to
+   be told out of band.
+
+   **And revoking deletes nothing from this disk.** A `link` is unscoped —
+   "every vault this issuer owns" — so it names no single directory to remove.
+   Step c is what actually clears the data, and it is not optional because
+   step b ran.
 
    c. **Delete the cached peer indices** — this part is real, and nothing else
    will do it:
@@ -84,5 +103,6 @@ dir. This skill walks the full removal with operator confirmation.
    is being purged.
 
 Report what was removed and what (if anything) the operator chose to keep —
-including, explicitly, the grants that are still live because nothing here
-could withdraw them.
+including, explicitly, which grants are still live: any inbound link half
+another machine must withdraw itself, and every `follow` a peer holds, which
+nothing here can touch.

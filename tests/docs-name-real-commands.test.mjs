@@ -305,19 +305,30 @@ test('the CLI list is derived, and the derivation actually works', () => {
 });
 
 test('the extraction catches a command that is absent, and one hiding under a group', () => {
-  // Before believing a green run, check it against names known NOT to exist.
-  // A green extractor that matches nothing is indistinguishable from a green
-  // extractor that matches everything.
-  assert.equal(parseSpan('ll-search unfollow --all').name, 'unfollow');
-  assert.ok(!('unfollow' in CLI), 'unfollow must not exist for this check to mean anything');
+  // Before believing a green run, check the extractor against names that are
+  // NOT in the CLI. A green extractor that matches nothing is
+  // indistinguishable from a green extractor that matches everything.
+  //
+  // The fixtures are deliberately synthetic. An earlier version used
+  // `ll-search link revoke` as the absent name and went red the day that
+  // command landed — a true report about the CLI, but this test is about the
+  // extractor, and coupling it to which commands happen not to exist yet
+  // makes every future subcommand a failure here.
+  const absent = 'zzz-not-a-command';
+  assert.ok(!(absent in CLI), 'the negative fixture must stay absent');
+  assert.equal(parseSpan(`ll-search ${absent} --now`).name, absent);
 
   // `link` IS a real command, so an invented subcommand under it must not be
-  // allowed to resolve to the group and pass.
-  assert.equal(parseSpan('ll-search link revoke <key>').name, 'link revoke');
-  assert.ok(!('link revoke' in CLI), 'll link revoke is Plan 7 slice 3 and is not written');
+  // allowed to resolve to the group and pass. This is the case that matters:
+  // without it, any invented subcommand inherits its group's existence.
+  assert.ok(GROUPS.has('link'), 'link must be a group for this check to mean anything');
+  assert.ok(!(`link ${absent}` in CLI));
+  assert.equal(parseSpan(`ll-search link ${absent} <key>`).name, `link ${absent}`);
 
+  // Flags are checked against the command they are written on, not the union.
   assert.deepEqual(parseSpan('ll-search sync <db> <vault> [--peer-id ID]').flags, ['--peer-id']);
   assert.ok(!CLI['sync'].has('--peer-id'), 'Plan 5 removed peer_id from Commands::Sync');
+  assert.ok(CLI['link approve'].has('--offline'), 'and a real flag on a real command passes');
 
   // A sentence about the binary is not an invocation of it.
   assert.equal(parseSpan('  ✗ ll-search binary            missing at /x/bin/ll-search'), null);

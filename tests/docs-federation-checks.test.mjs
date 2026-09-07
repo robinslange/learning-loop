@@ -12,6 +12,12 @@ import { join } from 'node:path';
 const ROOT = join(import.meta.dirname, '..');
 const SKILLS = join(ROOT, 'plugin', 'skills');
 
+// These files are hard-wrapped markdown prose. Matching them as written pins
+// where the lines happen to break, not what they say — a reflow then fails a
+// test about a claim that did not change. Collapse the whitespace first and
+// assert on the sentence.
+const flat = (text) => text.replace(/\s+/g, ' ');
+
 test('doctor documents the four federation checks', () => {
   const doc = readFileSync(join(SKILLS, 'doctor', 'SKILL.md'), 'utf8');
   const missing = [
@@ -61,16 +67,26 @@ test('the changelog states the revocation gap rather than claiming it closed', (
 
   // The three facts. A changelog is what a person believes without checking,
   // so this is the one place an overstatement costs the most.
-  for (const gap of [
-    'Nothing in this client can revoke anything',
-    'An unscoped revocation deletes nothing, and a `link` is unscoped',
-    'it is not a boundary',
+  for (const [gap, pattern] of [
+    // `link revoke` landed mid-plan and withdraws one half of one kind of
+    // grant. The remaining three limits are what a reader would otherwise
+    // round up to "revocation works".
+    ['only the issuer can withdraw its own half', /only that machine can withdraw it/i],
+    ['a follow cannot be withdrawn from here', /no way from here to withdraw a `follow`/i],
+    [
+      'an unscoped revocation deletes nothing',
+      /An unscoped revocation deletes nothing, and a `link` is unscoped/,
+    ],
+    ['the reader-side check does not bound', /it is not a boundary/],
   ]) {
-    assert.ok(unreleased.includes(gap), `the changelog must state the gap: ${gap}`);
+    assert.match(flat(unreleased), pattern, `the changelog must state the gap: ${gap}`);
   }
+  // No lookahead games: the phrase is false for the main case whatever follows
+  // it, and an assertion that only fires on one continuation is an assertion
+  // with a hole shaped like every other continuation.
   assert.doesNotMatch(
-    unreleased,
-    /revocation (removes|deletes) local data(?! )/i,
+    flat(unreleased),
+    /revocation (removes|deletes) local data/i,
     'a bare claim that revocation removes local data would be false for the main case',
   );
 });
@@ -82,19 +98,35 @@ test('uninstall clears the peer caches and says the grants outlive it', () => {
     "uninstall must delete the cached peer indices — they are other people's notes, " +
       'and nothing else on the machine will remove them',
   );
-  // The teardown this plan was written to describe — revoke, then sweep — is
-  // not available: `ClientMsg::RevokeGrant` exists in the protocol enum and
-  // has no production sender, and there is no `link revoke` subcommand. A
-  // skill that said "revoke" would name a command that does not exist. So the
-  // requirement here is the opposite one: say that the grants survive, and
-  // say for how long.
-  assert.match(
-    doc,
-    /does not withdraw anything/i,
-    'uninstall must say that removing the plugin revokes nothing',
+  // `ll-search link revoke` landed mid-plan, so the teardown can now withdraw
+  // — but only the half this machine signed, and it deletes nothing from disk.
+  // Each of those three is a separate claim and the skill has to carry all
+  // three: a teardown that says "revoked" while the inbound half stands, or
+  // that lets the sweep look optional because revoke ran, is worse than one
+  // that says nothing.
+  assert.ok(
+    doc.includes('ll-search link revoke'),
+    'uninstall must withdraw the links this machine issued',
   );
-  for (const fact of ['a year for a `link`', 'ninety days for a `follow`']) {
-    assert.ok(doc.includes(fact), `uninstall must say how long an orphaned grant lives: ${fact}`);
+  assert.match(
+    flat(doc),
+    /only the half this machine signed/i,
+    'a link is two grants; only the issuer can withdraw its own',
+  );
+  assert.match(
+    flat(doc),
+    /revoking deletes nothing from this disk/i,
+    'a link is unscoped, so it names no cache to remove — the sweep is not optional',
+  );
+  // What still cannot be withdrawn from here, and for how long it survives.
+  assert.match(flat(doc), /no way from here to withdraw a `follow`/i);
+  // Matched across a line wrap: these are prose in a hard-wrapped markdown
+  // file, so a literal with a newline in it pins the wrap, not the claim.
+  for (const [what, fact] of [
+    ['a follow', /ninety days for a `follow`/i],
+    ['a link', /a year for a `link`/i],
+  ]) {
+    assert.match(flat(doc), fact, `uninstall must say how long ${what} survives the uninstall`);
   }
 });
 

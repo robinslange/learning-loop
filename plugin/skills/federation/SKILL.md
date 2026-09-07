@@ -66,13 +66,29 @@ Enrollment needs an invite code — twelve Crockford base32 characters grouped
 `XXXX-XXXX-XXXX`. A code is single-use, expires seven days after it is minted,
 and is spent only when a key successfully authenticates with it.
 
-**Say this plainly if the user does not have one:** minting an invite is not
-exposed anywhere yet. The hub can redeem a code but has no shipped command or
-route that produces one, so today a machine reaches a hub two ways: it is
-named in the hub's own `BOOTSTRAP_MEMBERS` at boot, or it is linked from a
-machine that is already a member (section G). If the user has neither, stop
-here rather than sending them to look for a code that nobody can currently
-issue.
+**Where a code comes from.** Any member may mint one, capped at five
+outstanding unused invites each; there is no admin role and no `role` column.
+That is the authorization rule. The *surface* today is operator-side: the hub
+operator runs `sync-hub mint-invite <key_id>` on the box, minting as a named
+member, and hands the code over. A remote surface — a member asking the hub
+for a code over the wire, and signing the request — does not exist yet.
+
+**What `created_by` does and does not mean.** It records the member an invite
+was minted *as*. It is not evidence that member asked for it: the command
+proves the operator has a shell on the box, not that anyone consented. This
+grants the operator no authority they lacked — with the database they could
+write a `members` row by hand — but do not tell a user their invite was
+authorised by the member it names.
+
+So there are three doors onto a hub:
+
+1. named in the hub's own `BOOTSTRAP_MEMBERS` at boot;
+2. an invite code from the hub operator (this section);
+3. a `link` grant from a machine already enrolled (section G) — which needs no
+   invite at all, because membership follows the link.
+
+If the user has none of the three, stop here rather than starting a `join`
+that cannot complete.
 
 ## C: Join
 
@@ -258,7 +274,33 @@ ll-search link list --config-dir <config_dir>
 
 A link is two grants, not one signed twice: the approver signs A→B, and the
 new machine signs B→A itself on finding it. Neither machine can speak for the
-other before it has agreed to. `link list` shows which halves exist.
+other before it has agreed to. `link list` shows which halves exist — a row
+reading `outbound` was admitted by this machine and never answered, which is
+what an approval nobody picked up looks like.
+
+**Cutting a machine off:**
+
+```bash
+ll-search link revoke <key_id> --config-dir <config_dir>
+```
+
+It signs a revocation, lodges it with the hub, and then drops the local row —
+in that order, because this store is this key's only record of what it issued,
+and dropping the row first would leave nothing to sign a revocation *for*.
+
+Two limits to state to the user rather than let them assume past:
+
+- **It withdraws only the half this machine signed.** The grant the other
+  machine issued to this one is that machine's statement about its own key;
+  only that machine can withdraw it. `link revoke` says when one is still
+  standing, and so should you.
+- **It deletes nothing from disk.** A `link` is unscoped — "every vault this
+  issuer owns" — so it names no directory under `federation/data/peers/` to
+  remove. What stops the data being served is the hub dropping those vaults
+  from this key's listing on the next sync, not the revocation.
+
+There is no equivalent for a `follow` a peer holds on this vault. Nothing here
+sends one; those lapse at their own expiry.
 
 ## H: Recovering an identity
 
