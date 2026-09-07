@@ -92,6 +92,17 @@ fn identity_block(config: &FederationConfig) -> String {
     out.push_str(&row("key:", &client_key(&config.identity.pubkey)));
     out.push_str(&row("hub:", &config.hub.endpoint));
     out.push_str(&row("hub key:", &hub_key(config.hub.key_id.as_deref())));
+    // A setting nobody can see is the same shape of problem as a setting
+    // nobody can set, and this one decides whether a person's notes are drawn
+    // on a shared graph. Both states say so in full: "opted out" alone reads
+    // like a fact about the hub rather than a choice this vault made.
+    out.push_str(&row("graph:", if config.graph_opt_in {
+        "opted IN — this vault may be drawn on the federation-wide graph. \
+         `ll-search graph-opt-in false` withdraws it."
+    } else {
+        "opted out — this vault is not drawn on the federation-wide graph. \
+         `ll-search graph-opt-in true` publishes it."
+    }));
     // Ask the validator rather than restating its rules: this is the exact
     // check `sync` runs before it will talk to anything, so a config that
     // fails it cannot sync no matter how healthy the rest of the page looks.
@@ -354,11 +365,32 @@ mod tests {
                 endpoint: "wss://hub.interchange.live".into(),
                 key_id: Some(hub_key_id()),
             },
-            graph: false,
+            graph_opt_in: false,
             vault_id: Some("0192f3c1-8a2e-7c3d-9f10-1a2b3c4d5e6f".into()),
             vault_path: Some("/Users/robin/brain/brain".into()),
             recovery_key_id: None,
         }).unwrap();
+    }
+
+    /// A setting nobody can see is the same shape of problem as a setting
+    /// nobody can set, and this one decides whether a person's notes are drawn
+    /// on a shared graph. Both states must be legible on the page — asserting
+    /// only the opted-out line would pass against a status that never renders
+    /// the value at all.
+    #[test]
+    fn status_shows_whether_this_vault_is_published_on_the_graph() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("graph:"), "got:\n{out}");
+        assert!(out.contains("opted out"), "got:\n{out}");
+
+        let mut config = crate::sync::config::load_config(dir.path()).unwrap();
+        config.graph_opt_in = true;
+        write_config(dir.path(), &config).unwrap();
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("opted IN"), "got:\n{out}");
+        assert!(!out.contains("opted out"), "got:\n{out}");
     }
 
     #[test]

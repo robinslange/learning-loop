@@ -399,7 +399,7 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
         },
         visibility: VisibilityConfig { default: "private".into(), rules: vec![] },
         hub: HubEndpoint { endpoint: format!("ws://{addr}"), key_id: Some(hub_key_id()) },
-        graph: false,
+        graph_opt_in: false,
         vault_id: Some("v1".into()),
         vault_path: None,
         recovery_key_id: None,

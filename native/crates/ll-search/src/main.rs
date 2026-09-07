@@ -93,6 +93,20 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
+    /// Publish this vault on the federation-wide knowledge graph, or withdraw
+    /// it. Off until you say otherwise — this publishes your own notes, so
+    /// nothing but this command decides it. `ll-search status` shows the
+    /// current value.
+    GraphOptIn {
+        /// `true` to publish this vault on the graph, `false` to withdraw it.
+        /// Spelled out rather than a bare `--publish` flag: the absence of a
+        /// flag is how the value nobody chose gets confused for a choice, and
+        /// this is the setting that mistake already cost two months.
+        #[arg(action = clap::ArgAction::Set)]
+        publish: bool,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
     /// Index health for the local search index, as JSON. Was `ll status`
     /// before v5 gave that name to federation status.
     IndexStatus {
@@ -503,6 +517,15 @@ async fn main() {
             let text = ll_search::sync::status::render_status(&config_dir, now)
                 .expect("failed to read federation status");
             print!("{text}");
+        }
+        Commands::GraphOptIn { publish, config_dir } => {
+            let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let mut config = ll_search::sync::config::load_config(&config_dir)
+                .expect("failed to load federation config");
+            config.graph_opt_in = publish;
+            ll_search::sync::config::write_config(&config_dir, &config)
+                .expect("failed to write federation config");
+            out(&serde_json::json!({ "graph_opt_in": publish }));
         }
         Commands::IndexStatus { db_path, vault_path } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
@@ -983,5 +1006,34 @@ mod tests {
         let _ = vault_add(d.path(), Path::new("/home/r/brain"), "dupe");
         assert!(!d.path().join("dupe").exists(),
             "a rejected vault_add must not leave a half-registered config dir on disk");
+    }
+
+    /// clap builds the parser at runtime, so a malformed argument definition
+    /// is a panic on first invocation, not a compile error — `graph-opt-in`
+    /// shipped green through the whole suite with a positional `bool` clap
+    /// refuses to build. `debug_assert` runs every check clap would run when
+    /// the command is actually invoked, over every subcommand at once.
+    #[test]
+    fn the_cli_definition_is_one_clap_will_build() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
+    /// The value is a word the caller types, not the presence of a flag: an
+    /// omitted `--publish` is exactly the "value nobody chose" this setting
+    /// exists to stop being mistaken for a choice.
+    #[test]
+    fn graph_opt_in_takes_an_explicit_true_or_false() {
+        use clap::Parser;
+        let publish_of = |arg: &str| {
+            match Cli::parse_from(["ll-search", "graph-opt-in", arg]).command {
+                Commands::GraphOptIn { publish, .. } => publish,
+                other => panic!("wrong subcommand for {arg}: {:?}", std::mem::discriminant(&other)),
+            }
+        };
+        assert!(publish_of("true"));
+        assert!(!publish_of("false"));
+        assert!(Cli::try_parse_from(["ll-search", "graph-opt-in"]).is_err(),
+            "a bare `graph-opt-in` must not mean either answer");
     }
 }

@@ -39,6 +39,20 @@ pub enum ClientMsg {
         protocol_version: u32,
         model_id: String,
         invite_code: Option<String>,
+        /// Whether this member's vaults may be drawn on the federation-wide
+        /// graph. A publication choice its owner makes, so the owner's client
+        /// is the only thing entitled to state it, and it is restated on
+        /// every hello — the same way `vault_ids` is — rather than being set
+        /// once and remembered.
+        ///
+        /// Required, with no serde default, deliberately. The v4 hub ran two
+        /// months with `graph_opt_in=0` on its only member and every social
+        /// graph feature that had ever been built holding zero rows, because
+        /// v4 wrote the flag only as a side effect of an upload and defaulted
+        /// it to off. A default is a value nobody chose that nothing
+        /// distinguishes from a value someone did. Here every connection
+        /// carries an answer, or it is not a hello this hub can parse.
+        graph_opt_in: bool,
     },
     ClientAuth {
         sig_c: String,
@@ -407,15 +421,32 @@ mod tests {
             protocol_version: 5,
             model_id: "m".into(),
             invite_code: None,
+            graph_opt_in: true,
         };
         let json = serde_json::to_value(&msg).unwrap();
         let expected: serde_json::Value = serde_json::from_str(
             r#"{"type":"client-hello","key_id":"zAbc","nonce_c":"AAAA",
                "vault_ids":["v1"],"protocol_version":5,"model_id":"m",
-               "invite_code":null}"#,
+               "invite_code":null,"graph_opt_in":true}"#,
         )
         .unwrap();
         assert_eq!(json, expected);
+    }
+
+    /// `graph_opt_in` is a required field with no serde default, mirroring the
+    /// hub's own assertion. A `#[serde(default)]` here would compile, pass
+    /// every round-trip test, and reproduce v4's two-month outage exactly — a
+    /// hub whose members all look opted out because nobody ever said
+    /// otherwise. The client parses hellos in its own mock hubs, so the
+    /// property is testable on this side too, and it is the side that would
+    /// quietly add the default.
+    #[test]
+    fn a_client_hello_without_graph_opt_in_fails_to_parse() {
+        let without = r#"{"type":"client-hello","key_id":"zK","nonce_c":"bm9uY2U",
+                          "vault_ids":["v1"],"protocol_version":5,"model_id":"m",
+                          "invite_code":null}"#;
+        let err = serde_json::from_str::<ClientMsg>(without).unwrap_err();
+        assert!(err.to_string().contains("graph_opt_in"), "got {err}");
     }
 
     #[test]
