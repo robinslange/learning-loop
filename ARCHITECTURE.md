@@ -447,6 +447,7 @@ ll-search link request <hub> <vault> [--config-dir DIR] # new machine, hub reach
 ll-search link approve <code> [--offline] [--config-dir DIR]   # established machine admits the code's key
 ll-search link accept  <grant> [--config-dir DIR]       # new machine takes an offline grant blob
 ll-search link list    [--config-dir DIR]
+ll-search link revoke  <key_id> [--config-dir DIR]      # withdraw a link this machine issued
 ```
 
 **Long-running (spawned once at SessionStart)**
