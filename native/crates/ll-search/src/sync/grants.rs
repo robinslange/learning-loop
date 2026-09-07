@@ -20,6 +20,39 @@
 //! removed from here, whatever else goes wrong.
 //!
 //! That is also why an unscoped withdrawal deletes nothing — see [`names`].
+//!
+//! # The rule this file keeps rediscovering
+//!
+//! **A predicate built on possibly-absent information may gate KEEPING. It
+//! must never gate DELETING.**
+//!
+//! Three pairs in this codebase are that one rule, and each was argued from
+//! scratch before anyone noticed it was the same argument:
+//!
+//! - [`covers`] vs [`names`]. Both ask what a grant is about. `covers` admits
+//!   a maybe, because an unscoped grant *might* be the reason for any cache
+//!   and admitting it only ever keeps one. `names` refuses the same maybe,
+//!   because its answer deletes.
+//! - [`ReadAuthority`] vs [`withdraw`]. Both ask whether a cache is still
+//!   justified. The reader adds the hub's persisted list to `covers`; the
+//!   deleter does not, and must not. The list can be stale, and a stale list
+//!   is *missing entries* — so gating the reader on it serves less, while
+//!   gating `withdraw`'s bail-out on it would stop protecting a vault that
+//!   fell off the list and **delete** it.
+//! - `read_state` vs `read_readable_vaults` (`state.rs`). Both turn an
+//!   unreadable file into `None`. One is a report whose corrupt case must not
+//!   block the cycle that rewrites it; the other is a read-authority record
+//!   whose corrupt case must mean serve nothing.
+//!
+//! **Two questions with opposite safety senses are not two answers to one
+//! question.** Making them agree looks like removing a duplicate and is
+//! actually removing the asymmetry that keeps one of them safe. Moving
+//! `withdraw` onto the reader's predicate is caught by
+//! `a_revocation_keeps_a_cache_another_grant_still_justifies` and
+//! `a_lapsed_grant_does_not_take_a_cache_another_grant_still_covers`, both of
+//! which then delete a cache a live grant covers — verified by running that
+//! change, not by reasoning about it. If those two ever fail together, this
+//! is what happened.
 
 use std::path::Path;
 
@@ -107,11 +140,13 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 /// candidate would let the answer change mid-sweep, and half a sweep against
 /// each of two answers is an answer neither of them gave.
 ///
-/// **[`withdraw`] deliberately still asks only [`covers`].** A stale list
-/// makes a reader serve less, which is unavailability and recoverable by one
-/// `ll sync`; it would make a deleter destroy more, which is not recoverable
-/// at all. The asymmetry is the same one that makes `covers` a safe "maybe"
-/// for deletion and an unsafe one for reading, pointing the other way.
+/// **[`withdraw`] deliberately still asks only [`covers`], and the reason is
+/// mechanical rather than stylistic.** `withdraw` uses `covers` in a
+/// *protective* position — it bails out of deleting when something still
+/// covers. A stale list is missing entries, so adding it to that bail-out
+/// makes the bail-out false and the deletion happen. The same staleness that
+/// makes a reader serve less makes a deleter destroy more, because the two
+/// use the predicate with opposite polarity. See the module doc's rule.
 pub struct ReadAuthority {
     me: KeyId,
     live: Vec<GrantStatement>,
@@ -729,6 +764,11 @@ mod tests {
     /// A scoped revocation must not take a cache somebody else's grant still
     /// justifies. `covers` is asked of the survivors, so an unscoped `link`
     /// from anyone counts as a reason to keep it — uncertainty protects.
+    ///
+    /// **Also the guard on the reader/deleter asymmetry.** There is no
+    /// `readable-vaults.json` here, so adding the reader's list to this
+    /// bail-out would make it false, and this cache would be deleted rather
+    /// than kept. See the module doc.
     #[test]
     fn a_revocation_keeps_a_cache_another_grant_still_justifies() {
         let a = key(1);
@@ -886,6 +926,9 @@ mod tests {
     /// Two grants covering one vault, one lapsed and one not. Expiry is a
     /// backstop, not a sweep: it removes the reason that ran out, and the
     /// cache goes only when no reason is left.
+    ///
+    /// The other guard on the reader/deleter asymmetry, for the same reason
+    /// as `a_revocation_keeps_a_cache_another_grant_still_justifies`.
     #[test]
     fn a_lapsed_grant_does_not_take_a_cache_another_grant_still_covers() {
         let a = key(1);
