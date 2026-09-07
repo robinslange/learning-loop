@@ -89,8 +89,9 @@ Everything looks good. Nothing to set up.
 
 - Only report what the connectivity test actually returned. Never infer or guess peer registration status.
 - If sync succeeded: report note counts and vaults fetched. A non-zero "could not be fetched" count means the client holds a grant it could not read through; report it rather than folding it into success.
-- If sync failed with auth error: report "auth failed: your pubkey may not be registered on the hub."
-- If sync failed with connection error: report "hub unreachable: check Tailscale and hub endpoint."
+- If sync failed with auth error: report "auth failed: this key may not be a member of the hub."
+- If sync failed with connection error: report "hub unreachable: check the network and the hub endpoint."
+- If sync refused the config: report it verbatim. An unpinned `hub.key_id`, or an endpoint that is not `wss://`, is an error in v5 rather than a warning.
 - If no federation config: report "not configured."
 - Never tell the user that a remote peer "needs to register" you unless the hub explicitly rejected auth with that reason.
 

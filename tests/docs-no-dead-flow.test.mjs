@@ -23,6 +23,11 @@ const DEAD = [
   'LL_PEER_ID',
 ];
 
+// Case-insensitively: the surviving reference this test first shipped without
+// catching was a prose "check Tailscale and hub endpoint", capitalised. A
+// needle list that only matches one casing is a list with a hole in it.
+const hits = (text) => DEAD.filter((needle) => text.toLowerCase().includes(needle));
+
 function walk(dir) {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const p = join(dir, e.name);
@@ -34,9 +39,8 @@ function walk(dir) {
 test('no shipped plugin file references the pre-v5 onboarding flow', () => {
   const offenders = [];
   for (const file of walk(PLUGIN)) {
-    const text = readFileSync(file, 'utf8');
-    for (const needle of DEAD) {
-      if (text.includes(needle)) offenders.push(`${relative(ROOT, file)}: ${needle}`);
+    for (const needle of hits(readFileSync(file, 'utf8'))) {
+      offenders.push(`${relative(ROOT, file)}: ${needle}`);
     }
   }
   assert.deepEqual(offenders, [], `stale references:\n${offenders.join('\n')}`);
@@ -45,9 +49,8 @@ test('no shipped plugin file references the pre-v5 onboarding flow', () => {
 test('the root docs a reader starts from reference the pre-v5 flow nowhere either', () => {
   const offenders = [];
   for (const name of ['ARCHITECTURE.md', 'README.md']) {
-    const text = readFileSync(join(ROOT, name), 'utf8');
-    for (const needle of DEAD) {
-      if (text.includes(needle)) offenders.push(`${name}: ${needle}`);
+    for (const needle of hits(readFileSync(join(ROOT, name), 'utf8'))) {
+      offenders.push(`${name}: ${needle}`);
     }
   }
   assert.deepEqual(offenders, [], `stale references:\n${offenders.join('\n')}`);
