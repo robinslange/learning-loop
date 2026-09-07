@@ -22,23 +22,37 @@ use super::state::{self, HubHolds, SyncState};
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
 const SEND_TIMEOUT: Duration = Duration::from_secs(60);
 
+/// Read `var` as a millisecond count, once. `std::env::set_var` is not
+/// thread-safe against a concurrent `std::env::var`, and a test binary is one
+/// process running its tests in parallel threads — so these two were read on
+/// every frame the client sent or received while some other test in the same
+/// binary was writing the environment. That race is why a mutation in one file
+/// could redden a test in another: the coupling was the process environment,
+/// not the code.
+///
+/// Reading once puts every read before the first connection in the binaries
+/// that set these (`sync_recv_timeout.rs`, `sync_soak.rs`, both of which set
+/// the value at the top of their single test), which is the whole window the
+/// override needs.
+fn env_millis(var: &str, fallback: Duration) -> Duration {
+    std::env::var(var)
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(fallback)
+}
+
 /// Test-only override for `RECV_TIMEOUT` via `LL_SYNC_RECV_TIMEOUT_MS` env var.
 /// Production callers ignore this; it exists so integration tests can shorten
 /// the silent-hub timeout from 30s to ~1s without changing source code.
 fn recv_timeout() -> Duration {
-    std::env::var("LL_SYNC_RECV_TIMEOUT_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(RECV_TIMEOUT)
+    static RESOLVED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *RESOLVED.get_or_init(|| env_millis("LL_SYNC_RECV_TIMEOUT_MS", RECV_TIMEOUT))
 }
 
 fn send_timeout() -> Duration {
-    std::env::var("LL_SYNC_SEND_TIMEOUT_MS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .map(Duration::from_millis)
-        .unwrap_or(SEND_TIMEOUT)
+    static RESOLVED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
+    *RESOLVED.get_or_init(|| env_millis("LL_SYNC_SEND_TIMEOUT_MS", SEND_TIMEOUT))
 }
 
 pub(super) type WsStream = tokio_tungstenite::WebSocketStream<
