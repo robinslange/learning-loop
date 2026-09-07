@@ -9,27 +9,23 @@
 //!
 //! **A signed revocation is not self-sufficient, and the mistake is an easy
 //! one.** A signature proves *someone* signed those bytes; only the stored
-//! grant says who was entitled to. And an unscoped revocation cannot say
-//! which vaults to delete on its own: `scope: None` means "every vault this
-//! issuer owns", and which vaults an issuer owns is hub state this client has
-//! never held. A `link` — the grant that joins a person's own machines, and
-//! the whole second-machine story — is exactly that case.
+//! grant says who was entitled to. So: **the revocation says which grant is
+//! withdrawn; the stored grant says what that means on disk.**
 //!
-//! So: **the revocation says which grant is withdrawn; the stored grant says
-//! what that means on disk.**
+//! **Nothing here enumerates `federation/data/peers/`.** That is the whole
+//! containment, and it is structural rather than a rule anyone has to keep:
+//! the only directory this module can name is the one a withdrawn grant's own
+//! `scope` names, so there is no expression of "every cache that is no longer
+//! justified" for a bug to reach. A cache directory nothing named cannot be
+//! removed from here, whatever else goes wrong.
 //!
-//! **Nothing else in this crate deletes a peer cache.** The `remove_dir_all`
-//! below is the first, so it is deliberately narrow: it only ever removes a
-//! directory it found by reading `federation/data/peers/` whose name passes
-//! the same `is_safe_vault_id` that gates what `fetch.rs` may create, and it
-//! removes nothing at all when no local grant stands behind the revocation.
+//! That is also why an unscoped withdrawal deletes nothing — see [`names`].
 
 use std::path::Path;
 
-use anyhow::Context as _;
 use base64::Engine;
 
-use super::config::{peer_dir, peers_dir};
+use super::config::peer_dir;
 use super::fetch::{is_safe_vault_id, permits_read};
 use super::grant::{self, GrantStatement};
 use super::key_id::KeyId;
@@ -38,59 +34,50 @@ use super::protocol_v5::{GrantWire, RevocationWire};
 
 const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
-/// Whether `st` is a reason for **this** key to be holding a cached copy of
-/// `vault_id`.
+/// Whether `st` could be this key's reason to hold a cached copy of
+/// `vault_id`. Used to decide what **survives** a withdrawal.
 ///
-/// The whole module turns on this one predicate, and that is the point: the
-/// scoped and unscoped cases are not two branches here, they are two readings
-/// of the same sentence. A scoped grant names one vault. An unscoped one —
-/// "every vault I own" — names every cache on disk, which is the honest local
-/// reading when ownership is hub state we do not hold. An `assoc` names none,
-/// ever, because it carries no read authority: that is `permits_read`, and it
-/// is what makes "an `assoc` never produces a peer cache and never keeps one
-/// alive" one rule rather than two.
-///
-/// It answers for both sides of a withdrawal. What a revoked grant *covers*
-/// is what must go; what a surviving grant *covers* is what stays. Asking the
-/// same question of both is what stops a revoked `link` from deleting a vault
-/// some unrelated `follow` still entitles us to read.
+/// An unscoped grant — "every vault I own" — could be the reason for any of
+/// them, so it answers true for all. That only ever protects a cache, which
+/// is the safe direction to be uncertain in.
 fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
     &st.to == me
         && permits_read(st.kind)
         && st.scope.as_deref().is_none_or(|scope| scope == vault_id)
 }
 
-/// The vault ids this client currently caches.
+/// The one cache `st` **names**, which is the only one its withdrawal may
+/// remove. `None` when it names none.
 ///
-/// Names that `is_safe_vault_id` rejects are not returned, so they are never
-/// deleted either. `fetch.rs` is the only thing that creates these
-/// directories and it validates the id before it does, so a name that fails
-/// here came from somewhere this module has no business acting on.
-fn cached_vaults(config_dir: &Path) -> anyhow::Result<Vec<String>> {
-    let dir = peers_dir(config_dir);
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(entries) => entries,
-        // No peer directory is no caches. Every other read error is real.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(anyhow::Error::new(e).context(format!("reading {}", dir.display()))),
-    };
-    let mut out = Vec::new();
-    for entry in entries {
-        let entry = entry.with_context(|| format!("reading an entry of {}", dir.display()))?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        match entry.file_name().to_str() {
-            Some(name) if is_safe_vault_id(name) => out.push(name.to_string()),
-            _ => {}
-        }
+/// Deliberately narrower than [`covers`], and the gap between them is the
+/// honest one. `covers` answers "could this grant justify that cache?" —
+/// a maybe is enough, because the answer only ever keeps data. This answers
+/// "which cache did this grant justify?", and a maybe is not enough, because
+/// the answer deletes. For an unscoped grant there is no answer to give:
+/// `scope: None` means "every vault this issuer owns", and which vaults an
+/// issuer owns is hub state this client has never held.
+///
+/// So an unscoped withdrawal removes nothing, and says so. **A `link` is
+/// exactly that case**, which means the second-machine story currently leaves
+/// its caches in place — an under-deletion, recorded and reported rather than
+/// papered over. The alternative on offer was to delete every cache no
+/// surviving grant justifies, and that is a garbage collector wearing a
+/// revocation's clothes: it would silently dispose of directories written by
+/// a previous protocol version, which is a migration decision and not this
+/// one's to make. An under-delete is a follow-up task. An over-delete is
+/// somebody's notes.
+///
+/// `assoc` names nothing either, by `permits_read` — it carries no read
+/// authority, so it never justified a cache and its withdrawal takes none.
+fn names<'a>(st: &'a GrantStatement, me: &KeyId) -> Option<&'a str> {
+    if &st.to != me || !permits_read(st.kind) {
+        return None;
     }
-    out.sort();
-    Ok(out)
+    st.scope.as_deref()
 }
 
-/// Delete the caches `gone` was this client's reason for holding, keeping any
-/// that a still-live grant among `remaining` also justifies.
+/// Remove the cache `gone` named, unless a still-live grant among `remaining`
+/// also justifies it. Returns the vault id if one was removed.
 ///
 /// Deletion is not best-effort. Spec:334 makes removing
 /// `federation/data/peers/<vault_id>/` a hard requirement, and a client that
@@ -112,21 +99,37 @@ fn withdraw(
     remaining: &[GrantStatement],
     me: &KeyId,
     now: i64,
-) -> anyhow::Result<Vec<String>> {
-    let mut deleted = Vec::new();
-    for vault_id in cached_vaults(config_dir)? {
-        if !covers(gone, me, &vault_id) {
-            continue;
+) -> anyhow::Result<Option<String>> {
+    let Some(vault_id) = names(gone, me) else {
+        if &gone.to == me && permits_read(gone.kind) {
+            eprintln!(
+                "a withdrawn unscoped grant from {} names no cache to remove — \"every vault \
+                 this issuer owns\" is hub state this client has never held. Anything cached \
+                 only because of it is left in place.",
+                gone.from.as_str()
+            );
         }
-        if remaining.iter().any(|st| st.expires_at > now && covers(st, me, &vault_id)) {
-            continue;
-        }
-        let dir = peer_dir(config_dir, &vault_id);
-        std::fs::remove_dir_all(&dir)
-            .with_context(|| format!("removing the peer cache at {}", dir.display()))?;
-        deleted.push(vault_id);
+        return Ok(None);
+    };
+    // This id came out of a signed statement and is about to become a path
+    // component. `config.rs`'s helpers assume a validated one and do not
+    // check.
+    if !is_safe_vault_id(vault_id) {
+        eprintln!("refusing to act on a grant whose scope is not a usable vault id");
+        return Ok(None);
     }
-    Ok(deleted)
+    if remaining.iter().any(|st| st.expires_at > now && covers(st, me, vault_id)) {
+        return Ok(None);
+    }
+    let dir = peer_dir(config_dir, vault_id);
+    match std::fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(Some(vault_id.to_string())),
+        // Nothing cached for it. Applying the same revocation twice, or one
+        // for a vault this client never read, is not a failure.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(anyhow::Error::new(e)
+            .context(format!("removing the peer cache at {}", dir.display()))),
+    }
 }
 
 /// Every stored row that parses and verifies, with its `grant_id` and its
@@ -153,7 +156,9 @@ fn verified(rows: &[StoredGrant]) -> Vec<(usize, String, GrantStatement)> {
 /// `link` rows alone because a link is all it acts on, and a store holding
 /// only links has nothing to resolve a revoked `follow` against — the grant
 /// is absent from `SyncReady.grants` by then and present only as a signed
-/// revocation, so if it was never stored it can never be resolved.
+/// revocation, so if it was never stored it can never be resolved, and every
+/// `follow` and `peer` revocation would correctly-but-uselessly delete
+/// nothing forever.
 ///
 /// Lodged on arrival: the hub has these by definition, it just sent them.
 ///
@@ -202,20 +207,19 @@ pub fn apply_grants(config_dir: &Path, grants: &[GrantWire]) -> anyhow::Result<u
 /// The rule, and every line of it is load-bearing:
 ///
 /// - **no stored grant with this `grant_id`** — delete nothing. There is no
-///   grant to say who could revoke it, and for an unscoped revocation no way
-///   to know what it meant on disk.
+///   grant to say who could revoke it, nor what it justified.
 /// - **not signed by that grant's `from`** — reject. Only the issuer may
 ///   withdraw its own statement. This is not written as a branch: the stored
 ///   grant's `from` is what gets passed to `verify_revocation` as
 ///   `expected_by`, so a revocation signed by anyone else simply matches no
-///   row.
+///   row, and the line above stops being a rule anyone has to remember.
 /// - **`scope` disagrees with the stored grant's `scope`** — refuse, and do
 ///   *not* fall back to the broader reading. An issuer signing a revocation
 ///   naming a scope its grant never carried is either a bug or an attempt to
 ///   widen a withdrawal into vaults it was never owed, and "when in doubt,
 ///   delete more" is not a safe default when the two readings differ by
 ///   "every vault on this disk".
-/// - **otherwise** — delete using the *stored* grant's scope.
+/// - **otherwise** — delete the cache the *stored* grant names, if any.
 ///
 /// One locked section over the whole list: resolving a revocation against a
 /// store another writer is appending to gives an answer that has already
@@ -269,7 +273,7 @@ pub fn apply_revocations(
 }
 
 /// Expiry is the backstop: a grant nobody withdrew still stops meaning
-/// anything, and the cache it justified has to go with it (spec:332).
+/// anything, and the cache it named has to go with it (spec:332).
 ///
 /// The lapsed rows go too. A grant that can never again justify a read is
 /// dead weight in a file every sync reads, and `link.rs` already treats an
@@ -299,6 +303,7 @@ mod tests {
     use ed25519_dalek::{Signer, SigningKey};
     use tempfile::TempDir;
 
+    use super::super::config::peers_dir;
     use super::super::grant::{GrantKind, RevocationStatement};
     use super::*;
 
@@ -562,6 +567,7 @@ mod tests {
         assert!(deleted.is_empty());
         assert!(cached(dir.path(), "v-other"), "the narrow reading is not applied either");
         assert!(cached(dir.path(), "v-elsewhere"));
+        assert_eq!(rows(dir.path()), 1, "and the grant is not withdrawn on a refusal");
         assert_eq!(rows(dir.path()), 1);
     }
 
@@ -586,12 +592,18 @@ mod tests {
         assert_eq!(rows(dir.path()), 1);
     }
 
-    /// The fourth line, and the case the whole rule exists for. `scope: None`
-    /// means "every vault this issuer owns" — ownership is hub state this
-    /// client has never held, so the only thing that can say what the link
-    /// was justifying is the set of caches nothing else justifies.
+    /// The fourth line, in the case that has no answer. `scope: None` means
+    /// "every vault this issuer owns", and ownership is hub state this client
+    /// has never held — so an unscoped withdrawal names no cache and removes
+    /// none.
+    ///
+    /// This is a deliberate under-deletion and it is the `link` case, which
+    /// is to say the second-machine story. The alternative was to delete
+    /// every cache no surviving grant justifies; that is a garbage collector
+    /// wearing a revocation's clothes, and revoking a link is an arbitrary
+    /// moment to run one over directories a previous protocol version wrote.
     #[test]
-    fn an_unscoped_revocation_deletes_every_cache_its_link_justified() {
+    fn an_unscoped_revocation_names_no_cache_and_removes_none() {
         let a = key(1);
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Link, None, LATER);
@@ -601,27 +613,30 @@ mod tests {
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
-        assert_eq!(deleted, vec!["v-one".to_string(), "v-two".to_string()]);
-        assert!(!cached(dir.path(), "v-one"));
-        assert!(!cached(dir.path(), "v-two"));
+        assert!(deleted.is_empty());
+        assert!(cached(dir.path(), "v-one"));
+        assert!(cached(dir.path(), "v-two"));
+        assert_eq!(rows(dir.path()), 0, "the grant is still withdrawn from the store");
     }
 
+    /// A scoped revocation must not take a cache somebody else's grant still
+    /// justifies. `covers` is asked of the survivors, so an unscoped `link`
+    /// from anyone counts as a reason to keep it — uncertainty protects.
     #[test]
-    fn an_unscoped_revocation_keeps_a_cache_another_grant_still_justifies() {
+    fn a_revocation_keeps_a_cache_another_grant_still_justifies() {
         let a = key(1);
         let c = key(2);
         let me = id(&key(9));
-        let held = issue(&a, &me, GrantKind::Link, None, LATER);
-        let follow = issue(&c, &me, GrantKind::Follow, Some("v-two"), LATER);
-        let (dir, me) = store(&[&held, &follow]);
-        cache(dir.path(), "v-one");
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-two"), LATER);
+        let link_from_c = issue(&c, &me, GrantKind::Link, None, LATER);
+        let (dir, me) = store(&[&held, &link_from_c]);
         cache(dir.path(), "v-two");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
-        assert_eq!(deleted, vec!["v-one".to_string()]);
+        assert!(deleted.is_empty());
         assert!(cached(dir.path(), "v-two"),
-            "revoking one person's link must not delete what another person's follow justifies");
+            "revoking one person's follow must not delete what another person's link justifies");
     }
 
     /// The other half of the `assoc` rule. It carries no read authority, so
@@ -632,7 +647,7 @@ mod tests {
         let a = key(1);
         let c = key(2);
         let me = id(&key(9));
-        let held = issue(&a, &me, GrantKind::Link, None, LATER);
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-two"), LATER);
         let assoc = issue(&c, &me, GrantKind::Assoc, Some("v-two"), LATER);
         let (dir, me) = store(&[&held, &assoc]);
         cache(dir.path(), "v-two");
@@ -640,7 +655,7 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-two".to_string()]);
-        assert!(!cached(dir.path(), "v-two"));
+        assert!(!cached(dir.path(), "v-two"), "an assoc is not a reason to keep a cache");
     }
 
     /// A grant this machine ISSUED gives this machine no read, so it is not
@@ -728,6 +743,21 @@ mod tests {
         assert_eq!(rows(dir.path()), 1, "the lapsed row still goes");
     }
 
+    /// Expiry names what a revocation names — no more. A lapsed `link` is
+    /// unscoped, so it takes nothing, for the reason `names` gives.
+    #[test]
+    fn a_lapsed_unscoped_grant_takes_no_cache_either() {
+        let a = key(1);
+        let me = id(&key(9));
+        let lapsed = issue(&a, &me, GrantKind::Link, None, NOW - 1);
+        let (dir, me) = store(&[&lapsed]);
+        cache(dir.path(), "v-other");
+
+        assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
+        assert!(cached(dir.path(), "v-other"));
+        assert_eq!(rows(dir.path()), 0, "the lapsed row still goes");
+    }
+
     /// Two lapsed grants, one cache each. Stopping after the first would
     /// leave the second being served with nothing behind it.
     #[test]
@@ -772,15 +802,25 @@ mod tests {
 
     // -- the first remove_dir_all in this crate ----------------------------
 
-    /// Nothing outside `federation/data/peers/` is reachable from here, and
-    /// nothing inside it whose name `fetch.rs` could not have created.
+    /// The only directory a withdrawal can name is the one its own grant
+    /// named. Everything else in `peers/` is untouchable from here, because
+    /// nothing in this module enumerates the directory at all.
+    ///
+    /// **The v4 display-name cache is the one that matters**, and it is the
+    /// regression test for the ruling rather than for the code: a v4
+    /// directory is content from a different protocol version, and disposing
+    /// of it is a migration decision with a different blast radius from a
+    /// revocation. The instinct to "also clean up the obviously stale one"
+    /// is exactly what this forbids.
     #[test]
-    fn only_directories_named_like_a_vault_id_are_ever_removed() {
+    fn a_withdrawal_removes_the_cache_its_grant_named_and_nothing_else() {
         let a = key(1);
         let me = id(&key(9));
-        let held = issue(&a, &me, GrantKind::Link, None, LATER);
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-one"), LATER);
         let (dir, me) = store(&[&held]);
         cache(dir.path(), "v-one");
+        let v4 = cache(dir.path(), "thomas_kirk");
+        let unrelated = cache(dir.path(), "v-two");
         let stray = peers_dir(dir.path()).join("not a vault id");
         std::fs::create_dir_all(&stray).unwrap();
         let sibling = super::super::config::data_dir(dir.path()).join("local-export.db");
@@ -791,9 +831,27 @@ mod tests {
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert_eq!(deleted, vec!["v-one".to_string()]);
-        assert!(stray.exists(), "a name fetch.rs could not have written is not ours to delete");
+        assert!(v4.exists(),
+            "a v4 display-name cache is a migration decision, not a revocation's to make");
+        assert!(unrelated.exists(), "no grant named it, so nothing may remove it");
+        assert!(stray.exists());
         assert!(sibling.exists(), "nothing outside peers/ is reachable");
         assert!(loose.exists(), "a file is not a peer cache");
+    }
+
+    /// The same, for the widest thing a revocation can be. An unscoped
+    /// withdrawal is the case an earlier draft answered by deleting every
+    /// unjustified cache; here it must leave a directory it cannot name.
+    #[test]
+    fn an_unscoped_withdrawal_leaves_a_v4_display_name_cache_alone() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Link, None, LATER);
+        let (dir, me) = store(&[&held]);
+        let v4 = cache(dir.path(), "thomas_kirk");
+
+        assert!(apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap().is_empty());
+        assert!(v4.exists(), "revoking a link is an arbitrary moment to run a garbage collector");
     }
 
     /// A deletion and its row removal are one transaction. The failure this
