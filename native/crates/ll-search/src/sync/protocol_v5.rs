@@ -212,6 +212,7 @@ pub fn client_auth_message(
 
 #[cfg(test)]
 mod tests {
+    use crate::b64;
     use super::*;
 
     /// The wire tags are the contract between two repos that cannot see each
@@ -285,15 +286,13 @@ mod tests {
     /// A regression to a placeholder that only looks like a key_id fails here.
     #[test]
     fn hub_challenge_deserialises_from_the_hub_wire_format() {
-        use base64::Engine;
-
+        
         const HUB_KEY_ID: &str = "z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3";
         let wire = format!(
             r#"{{"type":"hub-challenge","nonce_h":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
                  "hub_key_id":"{HUB_KEY_ID}",
                  "sig_h":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=="}}"#
         );
-        let b64 = base64::engine::general_purpose::STANDARD;
         match serde_json::from_str::<HubMsg>(&wire).unwrap() {
             HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => {
                 assert_eq!(hub_key_id, HUB_KEY_ID);
@@ -302,8 +301,8 @@ mod tests {
                     "the hub sends a real key_id; a fixture whose value this client \
                      would reject is not the hub's wire format"
                 );
-                assert_eq!(b64.decode(&nonce_h).unwrap().len(), 32);
-                assert_eq!(b64.decode(&sig_h).unwrap().len(), 64);
+                assert_eq!(b64::decode(&nonce_h).unwrap().len(), 32);
+                assert_eq!(b64::decode(&sig_h).unwrap().len(), 64);
             }
             other => panic!("wrong variant: {other:?}"),
         }

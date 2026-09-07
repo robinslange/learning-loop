@@ -1,6 +1,5 @@
+use crate::b64;
 use std::path::Path;
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as B64;
 use ed25519_dalek::{SigningKey, Signer};
 use sha2::{Sha256, Digest};
 
@@ -46,7 +45,7 @@ pub fn load_or_create_seed(seed_path: &Path) -> anyhow::Result<LoadOrCreate> {
 }
 
 pub fn pubkey_b64(signing_key: &SigningKey) -> String {
-    B64.encode(signing_key.verifying_key().as_bytes())
+    b64::encode(signing_key.verifying_key().as_bytes())
 }
 
 pub fn sign_challenge(
@@ -55,13 +54,13 @@ pub fn sign_challenge(
     peer_id: &str,
     hub_pubkey: &str,
 ) -> anyhow::Result<String> {
-    let nonce = B64.decode(nonce_b64)?;
+    let nonce = b64::decode(nonce_b64)?;
     let mut message = Vec::with_capacity(nonce.len() + peer_id.len() + hub_pubkey.len());
     message.extend_from_slice(&nonce);
     message.extend_from_slice(peer_id.as_bytes());
     message.extend_from_slice(hub_pubkey.as_bytes());
     let sig = signing_key.sign(&message);
-    Ok(B64.encode(sig.to_bytes()))
+    Ok(b64::encode(sig.to_bytes()))
 }
 
 pub fn sign_download(
@@ -71,7 +70,7 @@ pub fn sign_download(
 ) -> String {
     let message = format!("download:{peer_id}:{timestamp}");
     let sig = signing_key.sign(message.as_bytes());
-    B64.encode(sig.to_bytes())
+    b64::encode(sig.to_bytes())
 }
 
 pub fn create_envelope(
@@ -87,8 +86,8 @@ pub fn create_envelope(
     serde_json::json!({
         "peer_id": peer_id,
         "sha256": hex::encode(hash),
-        "signature": B64.encode(sig.to_bytes()),
-        "pub_key": B64.encode(pubkey.as_bytes()),
+        "signature": b64::encode(sig.to_bytes()),
+        "pub_key": b64::encode(pubkey.as_bytes()),
         "signed_at": crate::db::chrono_iso_now(),
         "graph": graph,
     })
@@ -139,7 +138,7 @@ mod tests {
     fn pubkey_b64_roundtrip() {
         let key = fixed_key();
         let encoded = pubkey_b64(&key);
-        let decoded = B64.decode(&encoded).expect("valid base64");
+        let decoded = b64::decode(&encoded).expect("valid base64");
         let bytes: [u8; 32] = decoded.try_into().expect("32 bytes");
         let recovered = VerifyingKey::from_bytes(&bytes).expect("valid key");
         assert_eq!(recovered.as_bytes(), key.verifying_key().as_bytes());
@@ -149,14 +148,14 @@ mod tests {
     fn sign_challenge_produces_valid_signature() {
         let key = fixed_key();
         let nonce_bytes = b"testnonce123";
-        let nonce_b64 = B64.encode(nonce_bytes);
+        let nonce_b64 = b64::encode(nonce_bytes);
         let peer_id = "peer-abc";
         let hub_pubkey = "hubkey-xyz";
 
         let sig_b64 = sign_challenge(&key, &nonce_b64, peer_id, hub_pubkey)
             .expect("sign_challenge succeeds");
 
-        let sig_bytes = B64.decode(&sig_b64).expect("valid base64");
+        let sig_bytes = b64::decode(&sig_b64).expect("valid base64");
         let sig = Signature::try_from(sig_bytes.as_slice()).expect("valid signature bytes");
 
         let mut message = Vec::new();
@@ -170,11 +169,11 @@ mod tests {
     #[test]
     fn sign_challenge_wrong_nonce_fails_verification() {
         let key = fixed_key();
-        let nonce_b64 = B64.encode(b"originalnonce");
+        let nonce_b64 = b64::encode(b"originalnonce");
         let sig_b64 = sign_challenge(&key, &nonce_b64, "peer", "hub")
             .expect("sign_challenge succeeds");
 
-        let sig_bytes = B64.decode(&sig_b64).expect("valid base64");
+        let sig_bytes = b64::decode(&sig_b64).expect("valid base64");
         let sig = Signature::try_from(sig_bytes.as_slice()).expect("valid signature bytes");
 
         let mut tampered = Vec::new();
@@ -216,7 +215,7 @@ mod tests {
         let data = b"payload data";
         let env = create_envelope(&key, data, "p", false);
 
-        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig_bytes = b64::decode(env["signature"].as_str().unwrap()).unwrap();
         let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
 
         let hash = Sha256::digest(data);
@@ -230,7 +229,7 @@ mod tests {
         let data = b"original";
         let env = create_envelope(&key, data, "p", false);
 
-        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig_bytes = b64::decode(env["signature"].as_str().unwrap()).unwrap();
         let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
 
         let tampered_hash = Sha256::digest(b"tampered");
@@ -241,7 +240,7 @@ mod tests {
     fn sign_download_is_base64_encoded_signature() {
         let key = fixed_key();
         let sig_b64 = sign_download(&key, "peer-1", 1000000);
-        let decoded = B64.decode(&sig_b64).expect("valid base64");
+        let decoded = b64::decode(&sig_b64).expect("valid base64");
         assert_eq!(decoded.len(), 64, "Ed25519 signature is 64 bytes");
     }
 
@@ -284,7 +283,7 @@ mod tests {
         assert_eq!(mr, hex::encode(merkle_root));
         // The v2 signature on sha256(body) should still verify — adding new
         // fields doesn't touch the body, so re-signing isn't required.
-        let sig_bytes = B64.decode(env["signature"].as_str().unwrap()).unwrap();
+        let sig_bytes = b64::decode(env["signature"].as_str().unwrap()).unwrap();
         let sig = Signature::try_from(sig_bytes.as_slice()).unwrap();
         let hash = Sha256::digest(body);
         key.verifying_key()

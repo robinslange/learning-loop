@@ -248,9 +248,9 @@ pub fn verify_revocation(
 
 #[cfg(test)]
 mod tests {
+    use crate::b64;
     use super::*;
-    use base64::Engine;
-    use ed25519_dalek::{Signer, SigningKey};
+        use ed25519_dalek::{Signer, SigningKey};
 
     fn pair() -> (SigningKey, KeyId) {
         let sk = SigningKey::generate(&mut rand::thread_rng());
@@ -705,8 +705,8 @@ mod tests {
         let from = KeyId::parse("z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3").unwrap();
         let statement_b64 = "eyJ2Ijo1LCJraW5kIjoiZm9sbG93IiwiZnJvbSI6Ino2TWt3VkRmQ2c5TGJiWTZ4akgzRVprOFlTRlFadWpWNVk0eTFaV2VFUjl0RGlOMyIsInRvIjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwic2NvcGUiOm51bGwsImlzc3VlZF9hdCI6MTc1NzAwMDAwMCwiZXhwaXJlc19hdCI6MTc2NDc3NjAwMCwibm9uY2UiOiJabUZyWlMxdWIyNWpaUSJ9";
         let signature_b64 = "8jkQzbKFN753a17HTnXHuOreoh9EaHTZuwQfQLv2WhsR7tvoamK/mOlQbtQTWv4Ji2mQUUXhB5eEd4PPaHjABw==";
-        let bytes = base64::engine::general_purpose::STANDARD.decode(statement_b64).unwrap();
-        let sig = base64::engine::general_purpose::STANDARD.decode(signature_b64).unwrap();
+        let bytes = b64::decode(statement_b64).unwrap();
+        let sig = b64::decode(signature_b64).unwrap();
         let st = verify(&bytes, &sig, &from).unwrap();
         assert_eq!(st.to.as_str(), "z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX");
         assert_eq!(st.kind, GrantKind::Follow);

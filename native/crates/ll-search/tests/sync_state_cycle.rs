@@ -13,7 +13,6 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use ll_search::sync::client::sync_all_async;
@@ -63,13 +62,13 @@ fn hub_key_id() -> String {
 }
 
 fn b64(bytes: &[u8]) -> String {
-    base64::engine::general_purpose::STANDARD.encode(bytes)
+    ll_search::b64::encode(bytes)
 }
 
 /// `None` rather than a panic on undecodable input: the only caller runs
 /// inside the spawned mock, where a panic is invisible to the test.
 fn unb64(s: &str) -> Option<Vec<u8>> {
-    base64::engine::general_purpose::STANDARD.decode(s).ok()
+    ll_search::b64::decode(s).ok()
 }
 
 /// The next JSON text frame, or `None` if the connection ended or carried

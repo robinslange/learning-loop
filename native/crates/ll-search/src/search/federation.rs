@@ -307,10 +307,10 @@ pub fn batch_load_bodies_federated(
 
 #[cfg(test)]
 mod tests {
+    use crate::b64;
     use std::sync::atomic::{AtomicI64, Ordering};
 
-    use base64::Engine as _;
-    use ed25519_dalek::{Signer, SigningKey};
+        use ed25519_dalek::{Signer, SigningKey};
     use rusqlite::Connection;
 
     use super::*;
@@ -321,9 +321,7 @@ mod tests {
     use crate::sync::state::ReadableVaults;
     use crate::sync::{grants, seed_store, state, test_hub};
 
-    const B64: base64::engine::general_purpose::GeneralPurpose =
-        base64::engine::general_purpose::STANDARD;
-
+    
     /// The clock every test in this module reads. `LATER` is after it, so a
     /// grant expiring at `LATER` is live at `NOW` and lapsed at `MUCH_LATER`.
     const NOW: i64 = 5_000;
@@ -371,8 +369,8 @@ mod tests {
         });
         let signature = signer.sign(&statement).to_bytes().to_vec();
         grants::apply_grants(config_dir, &[GrantWire {
-            statement_b64: B64.encode(&statement),
-            signature_b64: B64.encode(&signature),
+            statement_b64: b64::encode(&statement),
+            signature_b64: b64::encode(&signature),
             state: "active".to_string(),
         }])
         .unwrap();
@@ -790,7 +788,7 @@ mod tests {
 
         let stored = crate::sync::link::load_grants(dir.path()).unwrap();
         assert_eq!(stored.len(), 1);
-        let statement = B64.decode(&stored[0].statement_b64).unwrap();
+        let statement = b64::decode(&stored[0].statement_b64).unwrap();
         let revocation = grant::canonical_bytes(&crate::sync::grant::RevocationStatement {
             v: 5,
             kind: "revoke",
@@ -802,8 +800,8 @@ mod tests {
         let swept = grants::apply_revocations(
             dir.path(),
             &[crate::sync::protocol_v5::RevocationWire {
-                statement_b64: B64.encode(&revocation),
-                signature_b64: B64.encode(issuer.sign(&revocation).to_bytes()),
+                statement_b64: b64::encode(&revocation),
+                signature_b64: b64::encode(issuer.sign(&revocation).to_bytes()),
             }],
             &me,
             NOW,

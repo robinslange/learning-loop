@@ -61,9 +61,9 @@
 //! reason to still not write it is that it states a rule the opposite way
 //! round from the one that holds.
 
+use crate::b64;
 use std::path::Path;
 
-use base64::Engine;
 
 use super::config::peer_dir;
 use super::fetch::{is_safe_vault_id, permits_read};
@@ -73,7 +73,6 @@ use super::link::{self, SignedGrant, StoredGrant};
 use super::state::{self, ReadableVaults};
 use super::protocol_v5::{GrantWire, RevocationWire};
 
-const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 /// Whether `st` could be this key's reason to hold a cached copy of
 /// `vault_id`. Used to decide what **survives** a withdrawal, and by
@@ -375,7 +374,7 @@ pub fn apply_grants(config_dir: &Path, grants: &[GrantWire]) -> anyhow::Result<u
             continue;
         }
         let (Ok(statement), Ok(signature)) =
-            (B64.decode(&wire.statement_b64), B64.decode(&wire.signature_b64))
+            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
         else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
@@ -436,7 +435,7 @@ pub fn apply_revocations(
     let mut parsed: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     for wire in revocations {
         let (Ok(statement), Ok(signature)) =
-            (B64.decode(&wire.statement_b64), B64.decode(&wire.signature_b64))
+            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
         else {
             eprintln!("skipping a revocation that is not valid base64");
             continue;
@@ -556,8 +555,8 @@ mod tests {
 
     fn wire(g: &SignedGrant) -> GrantWire {
         GrantWire {
-            statement_b64: B64.encode(&g.statement),
-            signature_b64: B64.encode(&g.signature),
+            statement_b64: b64::encode(&g.statement),
+            signature_b64: b64::encode(&g.signature),
             state: "active".to_string(),
         }
     }
@@ -576,8 +575,8 @@ mod tests {
         });
         let signature = by.sign(&statement).to_bytes().to_vec();
         RevocationWire {
-            statement_b64: B64.encode(&statement),
-            signature_b64: B64.encode(&signature),
+            statement_b64: b64::encode(&statement),
+            signature_b64: b64::encode(&signature),
         }
     }
 
@@ -715,8 +714,8 @@ mod tests {
         let me = id(&key(9));
         let g = issue(&key(1), &me, GrantKind::Follow, Some("v-other"), LATER);
         let forged = GrantWire {
-            statement_b64: B64.encode(&g.statement),
-            signature_b64: B64.encode(key(2).sign(&g.statement).to_bytes()),
+            statement_b64: b64::encode(&g.statement),
+            signature_b64: b64::encode(key(2).sign(&g.statement).to_bytes()),
             state: "active".to_string(),
         };
         let dir = tempfile::tempdir().unwrap();

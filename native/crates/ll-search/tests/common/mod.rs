@@ -97,7 +97,7 @@ async fn run_session(ws: &mut WsServer, behaviour: HubBehaviour, obs: Arc<Mutex<
     // AuthChallenge with random nonce + arbitrary pubkey string. Client signs it but we never
     // verify — we're a mock.
     let nonce = rand::random::<[u8; 32]>();
-    let nonce_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, nonce);
+    let nonce_b64 = ll_search::b64::encode(nonce);
     let challenge = serde_json::json!({
         "type": "auth-challenge",
         "nonce": nonce_b64,

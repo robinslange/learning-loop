@@ -1,5 +1,6 @@
 //! OS-keyring backend (macOS Keychain / Linux Secret Service).
 
+use crate::b64;
 use std::path::Path;
 
 use anyhow::Context as _;
@@ -87,8 +88,7 @@ fn decode_seed_hex(hex_str: &str) -> anyhow::Result<[u8; 32]> {
 /// re-introducing the same global-namespace stomping the migration is meant
 /// to prevent.
 fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Result<Option<[u8; 32]>> {
-    use base64::Engine as _;
-    let legacy = ::keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
+        let legacy = ::keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER_LEGACY)
         .context("failed to create legacy keyring entry")?;
     let hex_str = Zeroizing::new(match legacy.get_password() {
         Ok(s) => s,
@@ -106,7 +106,7 @@ fn try_legacy_migration(config_dir: &Path, namespaced_user: &str) -> anyhow::Res
     let derived_pubkey = SigningKey::from_bytes(&seed)
         .verifying_key()
         .to_bytes();
-    let expected_bytes = match base64::engine::general_purpose::STANDARD.decode(
+    let expected_bytes = match b64::decode(
         expected_pubkey.strip_prefix("ed25519:").unwrap_or(&expected_pubkey),
     ) {
         Ok(b) => b,

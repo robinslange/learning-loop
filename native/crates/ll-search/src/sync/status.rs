@@ -15,9 +15,9 @@
 
 use std::path::Path;
 
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine as _;
 use ed25519_dalek::VerifyingKey;
+
+use crate::b64;
 
 use super::config::{config_path, load_config, FederationConfig};
 use super::key_id::KeyId;
@@ -326,8 +326,8 @@ fn key_and_fingerprint(id: &KeyId) -> String {
 /// prefix. Refusing the older one would report a perfectly readable key as
 /// unreadable on exactly the installs most likely to be broken.
 fn key_id_from_b64(pubkey: &str) -> Option<KeyId> {
-    let b64 = pubkey.strip_prefix("ed25519:").unwrap_or(pubkey);
-    let bytes: [u8; 32] = B64.decode(b64).ok()?.try_into().ok()?;
+    let encoded = pubkey.strip_prefix("ed25519:").unwrap_or(pubkey);
+    let bytes: [u8; 32] = b64::decode(encoded).ok()?.try_into().ok()?;
     Some(KeyId::from_pubkey(&VerifyingKey::from_bytes(&bytes).ok()?))
 }
 

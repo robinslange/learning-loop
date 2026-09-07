@@ -1,3 +1,4 @@
+pub mod b64;
 pub mod preprocess;
 pub mod embed;
 pub mod model;

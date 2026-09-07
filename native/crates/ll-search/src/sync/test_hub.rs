@@ -9,6 +9,7 @@
 //! The shared v4 mock in `tests/common/mod.rs` is a different thing and is
 //! not v5-aware; nothing here replaces it.
 
+use crate::b64;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -20,7 +21,7 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::grant::{GrantKind, GrantStatement};
-use super::handshake::{b64, random_nonce, unb64};
+use super::handshake::random_nonce;
 use super::key_id::KeyId;
 use super::protocol_v5::{
     hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
@@ -154,13 +155,11 @@ fn permits_read(kind: GrantKind) -> bool {
 /// `vault_state` claim is its own to make. What cannot be honoured is a
 /// statement that does not parse: no hub could have a row for it.
 fn active_grants_to(grants: &[GrantWire], reader: &KeyId, now: i64) -> Vec<GrantStatement> {
-    let b64 = base64::engine::general_purpose::STANDARD;
     grants
         .iter()
         .filter(|w| w.state == "active")
         .filter_map(|w| {
-            use base64::Engine as _;
-            serde_json::from_slice::<GrantStatement>(&b64.decode(&w.statement_b64).ok()?).ok()
+                        serde_json::from_slice::<GrantStatement>(&b64::decode(&w.statement_b64).ok()?).ok()
         })
         .filter(|st| &st.to == reader && st.expires_at > now)
         .collect()
@@ -416,14 +415,14 @@ pub async fn send_signed_challenge(
     signer: &SigningKey,
     nonce_c_b64: &str,
 ) -> bool {
-    let Ok(nonce_c) = unb64(nonce_c_b64) else { return false };
+    let Ok(nonce_c) = b64::decode(nonce_c_b64) else { return false };
     let nonce_h = random_nonce();
     let exporter = [0u8; 32];
     let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
     send_hub_msg(ws, &HubMsg::HubChallenge {
-        nonce_h: b64(&nonce_h),
+        nonce_h: b64::encode(&nonce_h),
         hub_key_id: KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string(),
-        sig_h: b64(&sig_h.to_bytes()),
+        sig_h: b64::encode(&sig_h.to_bytes()),
     })
     .await
 }
@@ -677,8 +676,7 @@ pub async fn spawn_grant_hub_over(
     serve: Vec<GrantWire>,
     answers: Vec<GrantAnswer>,
 ) -> (MockHub, Arc<Mutex<Vec<GrantWire>>>) {
-    use base64::Engine;
-    use sha2::{Digest, Sha256};
+        use sha2::{Digest, Sha256};
 
     let lodged: Arc<Mutex<Vec<GrantWire>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&lodged);
@@ -739,7 +737,7 @@ pub async fn spawn_grant_hub_over(
             // hashed both would ack every revocation with an id no client
             // ever asked about, and the client's own check would be the only
             // thing left saying so.
-            let decode = |b64: &str| base64::engine::general_purpose::STANDARD.decode(b64).ok();
+            let decode = |b64: &str| b64::decode(b64).ok();
             let (statement_b64, signature_b64, acked, state) = match msg {
                 ClientMsg::PutGrant { statement_b64, signature_b64 } => {
                     let Some(bytes) = decode(&statement_b64) else {

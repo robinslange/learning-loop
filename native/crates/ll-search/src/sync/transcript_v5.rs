@@ -34,8 +34,7 @@
 //!
 //! which writes both copies or neither.
 
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as B64;
+use crate::b64;
 use ed25519_dalek::{Signer, SigningKey};
 use serde_json::Value;
 
@@ -118,7 +117,7 @@ fn this_client_produces_every_message_in_the_transcript() {
         "client_hello",
         serde_json::to_string(&ClientMsg::ClientHello {
             key_id: text(keys, "issuer").into(),
-            nonce_c: B64.encode(bytes(inp, "nonce_c_hex")),
+            nonce_c: b64::encode(bytes(inp, "nonce_c_hex")),
             vault_ids: vec![vault_one.into(), vault_two.into()],
             protocol_version: PROTOCOL_VERSION,
             model_id: text(inp, "model_id").into(),
@@ -175,7 +174,7 @@ fn this_client_produces_every_message_in_the_transcript() {
     emit(
         "hub_challenge",
         serde_json::to_string(&HubMsg::HubChallenge {
-            nonce_h: B64.encode(bytes(inp, "nonce_h_hex")),
+            nonce_h: b64::encode(bytes(inp, "nonce_h_hex")),
             hub_key_id: text(keys, "hub").into(),
             sig_h: text(hs, "hub_challenge_signature_b64").into(),
         })
@@ -314,8 +313,8 @@ fn this_client_accepts_every_message_in_the_transcript() {
                 KeyId::parse(&hub_key_id).is_ok(),
                 "the hub sends a real key_id; a fixture this client would reject is not one"
             );
-            assert_eq!(B64.decode(&nonce_h).unwrap().len(), 32);
-            assert_eq!(B64.decode(&sig_h).unwrap().len(), 64);
+            assert_eq!(b64::decode(&nonce_h).unwrap().len(), 32);
+            assert_eq!(b64::decode(&sig_h).unwrap().len(), 64);
         }
         other => panic!("wrong variant: {other:?}"),
     }
@@ -370,9 +369,9 @@ fn this_client_produces_every_signed_statement_in_the_transcript() {
             text(entry, "statement_json"),
             "statement `{name}`: {HINT}"
         );
-        assert_eq!(B64.encode(&bytes), text(entry, "statement_b64"), "statement `{name}`");
+        assert_eq!(b64::encode(&bytes), text(entry, "statement_b64"), "statement `{name}`");
         assert_eq!(
-            B64.encode(sig.to_bytes()),
+            b64::encode(sig.to_bytes()),
             text(entry, "signature_b64"),
             "statement `{name}`: same bytes must sign to the same signature"
         );
@@ -458,8 +457,8 @@ fn this_client_verifies_every_signed_statement_in_the_transcript() {
     let vault_one = text(inp, "vault_one");
     let issued_at = num(inp, "issued_at");
 
-    let raw = |name: &str| B64.decode(text(&st[name], "statement_b64")).unwrap();
-    let sig = |name: &str| B64.decode(text(&st[name], "signature_b64")).unwrap();
+    let raw = |name: &str| b64::decode(text(&st[name], "statement_b64")).unwrap();
+    let sig = |name: &str| b64::decode(text(&st[name], "signature_b64")).unwrap();
 
     for (name, kind, scope) in [
         ("grant_follow", GrantKind::Follow, None),
@@ -530,10 +529,10 @@ fn this_client_reproduces_the_transcripts_handshake_bytes() {
     assert_eq!(hex::encode(&hub_bytes), text(hs, "hub_challenge_message_hex"), "{HINT}");
     assert_eq!(hex::encode(&client_bytes), text(hs, "client_auth_message_hex"), "{HINT}");
 
-    hub.verify(&hub_bytes, &B64.decode(text(hs, "hub_challenge_signature_b64")).unwrap())
+    hub.verify(&hub_bytes, &b64::decode(text(hs, "hub_challenge_signature_b64")).unwrap())
         .expect("the hub's own sig_h must verify over the bytes this client builds");
     issuer
-        .verify(&client_bytes, &B64.decode(text(hs, "client_auth_signature_b64")).unwrap())
+        .verify(&client_bytes, &b64::decode(text(hs, "client_auth_signature_b64")).unwrap())
         .expect("a sig_c the hub accepted must verify over the bytes this client builds");
 }
 

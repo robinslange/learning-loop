@@ -27,10 +27,10 @@
 //! linked offline can act as itself immediately and reaches the hub once the
 //! approver next connects and lodges what it signed.
 
+use crate::b64;
 use std::path::Path;
 
 use anyhow::Context as _;
-use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -39,12 +39,11 @@ use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
 use super::config::{self, grants_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
-use super::handshake::{b64, random_nonce};
+use super::handshake::random_nonce;
 use super::key_id::KeyId;
 use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
 use super::{seed_store, well_known, words};
 
-const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 /// Tags the two strings a door puts on a screen. A string that came from
 /// somewhere else fails here, where the error can say what it wanted, rather
@@ -160,7 +159,7 @@ fn issue_link_grant(
         scope: None,
         issued_at: now,
         expires_at: now + GrantKind::Link.default_ttl_secs(),
-        nonce: b64(&random_nonce()),
+        nonce: b64::encode(&random_nonce()),
     };
     let statement = canonical_bytes(&st);
     let signature = approver.sign(&statement).to_bytes().to_vec();
@@ -221,7 +220,7 @@ pub fn parse_pairing_code(code: &str) -> anyhow::Result<KeyId> {
 /// the statement already fails on any corruption, and it fails for the right
 /// reason.
 pub fn grant_blob(g: &SignedGrant) -> String {
-    format!("{GRANT_TAG}.{}.{}", B64.encode(&g.statement), B64.encode(&g.signature))
+    format!("{GRANT_TAG}.{}.{}", b64::encode(&g.statement), b64::encode(&g.signature))
 }
 
 pub fn parse_grant_blob(blob: &str) -> anyhow::Result<SignedGrant> {
@@ -235,8 +234,8 @@ pub fn parse_grant_blob(blob: &str) -> anyhow::Result<SignedGrant> {
         anyhow::bail!("not a grant blob: expected the {GRANT_TAG} tag, got {tag:?}");
     }
     Ok(SignedGrant {
-        statement: B64.decode(statement).context("grant statement is not base64")?,
-        signature: B64.decode(signature).context("grant signature is not base64")?,
+        statement: b64::decode(statement).context("grant statement is not base64")?,
+        signature: b64::decode(signature).context("grant signature is not base64")?,
     })
 }
 
@@ -260,8 +259,8 @@ pub struct StoredGrant {
 impl StoredGrant {
     pub(super) fn signed(&self) -> anyhow::Result<SignedGrant> {
         Ok(SignedGrant {
-            statement: B64.decode(&self.statement_b64).context("stored statement is not base64")?,
-            signature: B64.decode(&self.signature_b64).context("stored signature is not base64")?,
+            statement: b64::decode(&self.statement_b64).context("stored statement is not base64")?,
+            signature: b64::decode(&self.signature_b64).context("stored signature is not base64")?,
         })
     }
 }
@@ -306,8 +305,8 @@ pub(super) fn update_grants<T>(
 
 pub(super) fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
     StoredGrant {
-        statement_b64: B64.encode(&g.statement),
-        signature_b64: B64.encode(&g.signature),
+        statement_b64: b64::encode(&g.statement),
+        signature_b64: b64::encode(&g.signature),
         lodged,
     }
 }
@@ -755,7 +754,7 @@ pub(super) async fn reconcile(
             continue;
         }
         let (Ok(statement), Ok(signature)) =
-            (B64.decode(&wire.statement_b64), B64.decode(&wire.signature_b64))
+            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
         else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
@@ -857,8 +856,8 @@ fn sign_revocation(
     Ok((
         grant::grant_id(&grant.statement),
         ClientMsg::RevokeGrant {
-            statement_b64: B64.encode(&statement),
-            signature_b64: B64.encode(&signature),
+            statement_b64: b64::encode(&statement),
+            signature_b64: b64::encode(&signature),
         },
     ))
 }
@@ -1129,8 +1128,8 @@ mod tests {
 
     fn wire_to_signed(wire: &GrantWire) -> SignedGrant {
         SignedGrant {
-            statement: B64.decode(&wire.statement_b64).unwrap(),
-            signature: B64.decode(&wire.signature_b64).unwrap(),
+            statement: b64::decode(&wire.statement_b64).unwrap(),
+            signature: b64::decode(&wire.signature_b64).unwrap(),
         }
     }
 
@@ -1512,8 +1511,8 @@ mod tests {
             "precondition: a link is unscoped, so B cannot resolve what it reaches"
         );
         let served = vec![GrantWire {
-            statement_b64: B64.encode(&a_to_b.statement),
-            signature_b64: B64.encode(&a_to_b.signature),
+            statement_b64: b64::encode(&a_to_b.statement),
+            signature_b64: b64::encode(&a_to_b.signature),
             state: "active".into(),
         }];
 
@@ -1585,8 +1584,8 @@ mod tests {
             .unwrap();
             let g = parse_grant_blob(&blob).unwrap();
             vec![GrantWire {
-                statement_b64: B64.encode(&g.statement),
-                signature_b64: B64.encode(&g.signature),
+                statement_b64: b64::encode(&g.statement),
+                signature_b64: b64::encode(&g.signature),
                 state: "active".into(),
             }]
         };
@@ -1621,7 +1620,7 @@ mod tests {
             scope: None,
             issued_at: now - 1,
             expires_at: now + 86_400,
-            nonce: b64(&random_nonce()),
+            nonce: b64::encode(&random_nonce()),
         };
         let statement = canonical_bytes(&st);
         let signature = if signature.is_empty() {
@@ -1630,8 +1629,8 @@ mod tests {
             signature
         };
         GrantWire {
-            statement_b64: B64.encode(&statement),
-            signature_b64: B64.encode(&signature),
+            statement_b64: b64::encode(&statement),
+            signature_b64: b64::encode(&signature),
             state: state.to_string(),
         }
     }
@@ -1665,13 +1664,13 @@ mod tests {
 
         let unsigned = link_wire(&impostor_sk, &impostor, &me, vec![0u8; 64], "active");
         let signed_by_the_wrong_key = {
-            let bytes = B64.decode(
+            let bytes = b64::decode(
                 link_wire(&impostor_sk, &impostor, &me, vec![], "active").statement_b64,
             )
             .unwrap();
             GrantWire {
-                statement_b64: B64.encode(&bytes),
-                signature_b64: B64.encode(somebody_else.sign(&bytes).to_bytes()),
+                statement_b64: b64::encode(&bytes),
+                signature_b64: b64::encode(somebody_else.sign(&bytes).to_bytes()),
                 state: "active".into(),
             }
         };
@@ -1740,12 +1739,12 @@ mod tests {
                 scope: None,
                 issued_at: now - 1,
                 expires_at: now + 86_400,
-                nonce: b64(&random_nonce()),
+                nonce: b64::encode(&random_nonce()),
             };
             let bytes = canonical_bytes(&st);
             served.push(GrantWire {
-                statement_b64: B64.encode(&bytes),
-                signature_b64: B64.encode(issuer.sign(&bytes).to_bytes()),
+                statement_b64: b64::encode(&bytes),
+                signature_b64: b64::encode(issuer.sign(&bytes).to_bytes()),
                 state: "active".into(),
             });
         }
@@ -1783,12 +1782,12 @@ mod tests {
             scope: None,
             issued_at: 1_000_000,
             expires_at: 1_000_001,
-            nonce: b64(&random_nonce()),
+            nonce: b64::encode(&random_nonce()),
         };
         let bytes = canonical_bytes(&st);
         let lapsed = GrantWire {
-            statement_b64: B64.encode(&bytes),
-            signature_b64: B64.encode(issuer.sign(&bytes).to_bytes()),
+            statement_b64: b64::encode(&bytes),
+            signature_b64: b64::encode(issuer.sign(&bytes).to_bytes()),
             state: "active".into(),
         };
 
@@ -1859,8 +1858,8 @@ mod tests {
             issue_link_grant(&local_signing_key(machine.path()).unwrap(), &recovery, unix_now() - 10)
                 .unwrap();
         let wire = GrantWire {
-            statement_b64: B64.encode(&existing.statement),
-            signature_b64: B64.encode(&existing.signature),
+            statement_b64: b64::encode(&existing.statement),
+            signature_b64: b64::encode(&existing.signature),
             state: "active".into(),
         };
         assert!(load_grants(machine.path()).unwrap().is_empty(), "precondition: the file is gone");
@@ -2160,8 +2159,8 @@ mod tests {
         assert_eq!(seen.len(), 1, "one link, one revocation, and nothing else: {seen:?}");
         assert_eq!(seen[0].state, "revoked", "the hub was sent a revocation, not another grant");
         let rev = grant::verify_revocation(
-            &B64.decode(&seen[0].statement_b64).unwrap(),
-            &B64.decode(&seen[0].signature_b64).unwrap(),
+            &b64::decode(&seen[0].statement_b64).unwrap(),
+            &b64::decode(&seen[0].signature_b64).unwrap(),
             &key_of(approver.path()),
         )
         .expect("the issuer signs its own withdrawal, and the hub checks that it did");
@@ -2371,7 +2370,7 @@ mod tests {
             scope: Some("v-personal".into()),
             issued_at: now,
             expires_at: now + 100_000,
-            nonce: b64(&random_nonce()),
+            nonce: b64::encode(&random_nonce()),
         });
         let follow = SignedGrant { signature: signer.sign(&statement).to_bytes().to_vec(), statement };
         let follow_id = grant::grant_id(&follow.statement);
@@ -2474,8 +2473,8 @@ mod tests {
             panic!("a withdrawal is a revoke-grant and nothing else");
         };
         let rev = grant::verify_revocation(
-            &B64.decode(&statement_b64).unwrap(),
-            &B64.decode(&signature_b64).unwrap(),
+            &b64::decode(&statement_b64).unwrap(),
+            &b64::decode(&signature_b64).unwrap(),
             &KeyId::from_pubkey(&signer.verifying_key()),
         )
         .expect("the issuer signs its own withdrawal");

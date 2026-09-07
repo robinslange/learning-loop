@@ -1741,7 +1741,8 @@ mod tests {
     ) -> Result<(), String> {
         use ed25519_dalek::Signer;
 
-        use super::super::handshake::{b64, random_nonce, unb64};
+        use crate::b64;
+        use super::super::handshake::random_nonce;
         use super::super::protocol_v5::{
             client_auth_message, hub_challenge_message, PROTOCOL_VERSION,
         };
@@ -1777,15 +1778,15 @@ mod tests {
         let ClientMsg::ClientHello { key_id, nonce_c, .. } = hello else {
             return Err(format!("expected a client-hello, got {hello:?}"));
         };
-        let nonce_c = unb64(&nonce_c).map_err(|e| format!("nonce_c: {e}"))?;
+        let nonce_c = b64::decode(&nonce_c).map_err(|e| format!("nonce_c: {e}"))?;
         let nonce_h = random_nonce();
         let hub_key_id =
             KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string();
         let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
         let challenge = HubMsg::HubChallenge {
-            nonce_h: b64(&nonce_h),
+            nonce_h: b64::encode(&nonce_h),
             hub_key_id: hub_key_id.clone(),
-            sig_h: b64(&sig_h.to_bytes()),
+            sig_h: b64::encode(&sig_h.to_bytes()),
         };
         ws.send(Message::text(serde_json::to_string(&challenge).unwrap()))
             .await
@@ -1806,7 +1807,7 @@ mod tests {
         client_key
             .verify(
                 &client_auth_message(&nonce_h, &nonce_c, &hub_key_id, &exporter),
-                &unb64(&sig_c).map_err(|e| format!("sig_c: {e}"))?,
+                &b64::decode(&sig_c).map_err(|e| format!("sig_c: {e}"))?,
             )
             .map_err(|e| format!("client signature did not verify: {e}"))?;
 

@@ -22,9 +22,9 @@
 //! identities and carries no authority at all, and a client that asks anyway
 //! is one hub-side bug away from getting an answer.
 
+use crate::b64;
 use std::path::Path;
 
-use base64::Engine;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -76,14 +76,13 @@ pub(super) fn is_safe_vault_id(id: &str) -> bool {
 /// - it is not `active`. A `follow` starts `pending`.
 /// - it has expired.
 fn live_grants(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<GrantStatement> {
-    let b64 = base64::engine::general_purpose::STANDARD;
     let mut out = Vec::new();
     for wire in grants {
         if wire.state != "active" {
             continue;
         }
         let (Ok(statement), Ok(signature)) =
-            (b64.decode(&wire.statement_b64), b64.decode(&wire.signature_b64))
+            (b64::decode(&wire.statement_b64), b64::decode(&wire.signature_b64))
         else {
             eprintln!("skipping a grant that is not valid base64");
             continue;
@@ -512,7 +511,6 @@ mod tests {
     /// Sign `fixture` as a grant from `from` to `to`, in the wire shape the
     /// handshake delivers.
     fn wire(from: &(SigningKey, KeyId), to: &KeyId, fixture: &GrantFixture) -> GrantWire {
-        let b64 = base64::engine::general_purpose::STANDARD;
         let statement = GrantStatement {
             v: 5,
             kind: fixture.kind,
@@ -526,8 +524,8 @@ mod tests {
         let bytes = canonical_bytes(&statement);
         let sig = from.0.sign(&bytes);
         GrantWire {
-            statement_b64: b64.encode(&bytes),
-            signature_b64: b64.encode(sig.to_bytes()),
+            statement_b64: b64::encode(&bytes),
+            signature_b64: b64::encode(sig.to_bytes()),
             state: fixture.state.to_string(),
         }
     }
@@ -826,10 +824,9 @@ mod tests {
     #[tokio::test]
     async fn a_grant_that_is_not_this_clients_live_assoc_does_not_silence_a_listed_vault() {
         let dir = tempfile::tempdir().unwrap();
-        let b64 = base64::engine::general_purpose::STANDARD;
         let assoc = || of_kind(GrantKind::Assoc, "v-listed");
         let mut forged = to_me(assoc());
-        forged.signature_b64 = b64.encode([0u8; 64]);
+        forged.signature_b64 = b64::encode([0u8; 64]);
 
         let (out, asked) = run(
             dir.path(),

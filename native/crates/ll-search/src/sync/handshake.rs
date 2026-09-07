@@ -7,6 +7,7 @@
 //! has exactly one acceptable message after `ClientHello`, and every other
 //! message — including that one — is a protocol violation, not a warning.
 
+use crate::b64;
 use ed25519_dalek::{Signer, SigningKey};
 
 use super::client::{recv_json, send_json, WsStream};
@@ -45,16 +46,6 @@ pub(super) fn random_nonce() -> [u8; 32] {
     rand::random()
 }
 
-pub(super) fn b64(bytes: &[u8]) -> String {
-    use base64::Engine;
-    base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-pub(super) fn unb64(s: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine;
-    Ok(base64::engine::general_purpose::STANDARD.decode(s)?)
-}
-
 /// The model id this client's embedding pipeline is running, best-effort.
 /// The provider is normally initialised earlier in the sync pipeline (export
 /// runs before the handshake), but `authenticate` is unit-tested standalone
@@ -82,7 +73,7 @@ pub async fn authenticate(
 
     send_json(ws, &ClientMsg::ClientHello {
         key_id: key_id.as_str().to_string(),
-        nonce_c: b64(&nonce_c),
+        nonce_c: b64::encode(&nonce_c),
         vault_ids: vault_ids.to_vec(),
         protocol_version: PROTOCOL_VERSION,
         model_id: local_model_id(),
@@ -112,14 +103,14 @@ pub async fn authenticate(
         );
     }
 
-    let nonce_h_raw = unb64(&nonce_h)?;
+    let nonce_h_raw = b64::decode(&nonce_h)?;
     let hub_key = KeyId::parse(&hub_key_id)?;
     hub_key
-        .verify(&hub_challenge_message(&nonce_h_raw, &nonce_c, exporter), &unb64(&sig_h)?)
+        .verify(&hub_challenge_message(&nonce_h_raw, &nonce_c, exporter), &b64::decode(&sig_h)?)
         .map_err(|e| anyhow::anyhow!("hub signature did not verify: {e}"))?;
 
     let sig_c = seed.sign(&client_auth_message(&nonce_h_raw, &nonce_c, &hub_key_id, exporter));
-    send_json(ws, &ClientMsg::ClientAuth { sig_c: b64(&sig_c.to_bytes()) }).await?;
+    send_json(ws, &ClientMsg::ClientAuth { sig_c: b64::encode(&sig_c.to_bytes()) }).await?;
 
     match recv_json::<HubMsg>(ws).await? {
         HubMsg::SyncReady { protocol_version, vault_state, grants, revocations } =>
@@ -181,9 +172,9 @@ mod tests {
         spawn_mock_hub(move |mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
             send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&[1u8; 32]),
+                nonce_h: b64::encode(&[1u8; 32]),
                 hub_key_id: key_id,
-                sig_h: b64(&[0u8; 64]),
+                sig_h: b64::encode(&[0u8; 64]),
             }).await;
         }).await
     }
@@ -204,9 +195,9 @@ mod tests {
         spawn_mock_hub(|mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
             send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&[1u8; 32]),
+                nonce_h: b64::encode(&[1u8; 32]),
                 hub_key_id: hub_key_id_str(),
-                sig_h: b64(&[0xffu8; 64]),
+                sig_h: b64::encode(&[0xffu8; 64]),
             }).await;
         }).await
     }
@@ -292,13 +283,13 @@ mod tests {
                 // panic never fails the test that spawned it.
                 return;
             };
-            let nonce_c_raw = unb64(&nonce_c).unwrap();
+            let nonce_c_raw = b64::decode(&nonce_c).unwrap();
             let nonce_h = random_nonce();
             let sig_h = hub_signing_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &hub_exporter));
             send_hub_msg(&mut ws, &HubMsg::HubChallenge {
-                nonce_h: b64(&nonce_h),
+                nonce_h: b64::encode(&nonce_h),
                 hub_key_id: hub_key_id_str(),
-                sig_h: b64(&sig_h.to_bytes()),
+                sig_h: b64::encode(&sig_h.to_bytes()),
             }).await;
         }).await;
 

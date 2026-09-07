@@ -1074,7 +1074,6 @@ mod tests {
     /// hit would be asserting against a cache no key was ever entitled to
     /// read.
     fn seed_peer(config_dir: &Path, peer: &str, model_id: &str) {
-        use base64::Engine as _;
         use ed25519_dalek::{Signer, SigningKey};
         use ll_search::sync::grant::{self, GrantKind, GrantStatement};
         use ll_search::sync::key_id::KeyId;
@@ -1112,10 +1111,9 @@ mod tests {
             expires_at: i64::MAX,
             nonce: format!("{}-{peer}", config_dir.display()),
         });
-        let b64 = base64::engine::general_purpose::STANDARD;
         ll_search::sync::grants::apply_grants(config_dir, &[ll_search::sync::protocol_v5::GrantWire {
-            statement_b64: b64.encode(&statement),
-            signature_b64: b64.encode(issuer.sign(&statement).to_bytes()),
+            statement_b64: ll_search::b64::encode(&statement),
+            signature_b64: ll_search::b64::encode(issuer.sign(&statement).to_bytes()),
             state: "active".to_string(),
         }]).unwrap();
 
