@@ -371,7 +371,43 @@ mod tests {
         let bytes = json.into_bytes();
         let sig = sk_b.sign(&bytes);
         let err = verify_decision(&bytes, &sig.to_bytes(), &b).unwrap_err();
-        assert!(err.to_string().contains("kind"));
+        // Naming the rejected value, not just the word "kind". Every way this
+        // call can fail says "kind" — serde's `missing field \`kind\`` for a
+        // renamed field, and this bail — so the shorter assertion was met by
+        // the very error it was meant to discriminate against.
+        assert!(
+            err.to_string().contains("unsupported decision kind `maybe`"),
+            "expected the unknown kind to be rejected by name, got: {err}"
+        );
+    }
+
+    /// The wire NAME of `kind`, pinned as a literal.
+    ///
+    /// Nothing above pins it. `rejects_an_unrecognised_decision_kind` asserts
+    /// only that the error says "kind", which serde's own `missing field
+    /// \`kind\`` also says; and a round-trip proves our serialiser agrees with
+    /// our deserialiser, which holds for any name the two share. The hub is
+    /// the party that has to agree, and it cannot see this file — so the
+    /// literal is the contract, exactly as it is for `GrantStatement` in
+    /// `serialises_with_the_exact_key_names_and_kind_values_the_hub_emits`.
+    ///
+    /// Whole-string equality rather than `contains`, because `canonical_bytes`
+    /// is what gets SIGNED: field order is part of the wire shape here, not a
+    /// formatting detail.
+    #[test]
+    fn a_decision_serialises_to_the_exact_hub_expected_wire_format() {
+        let (_, b) = pair();
+        let json = String::from_utf8(canonical_bytes(&decision("g1", &b, "accept", 1_050))).unwrap();
+        assert_eq!(
+            json,
+            format!(r#"{{"v":5,"kind":"accept","grant_id":"g1","by":"{}","at":1050}}"#, b.as_str())
+        );
+
+        let denied = String::from_utf8(canonical_bytes(&decision("g1", &b, "deny", 1_050))).unwrap();
+        assert_eq!(
+            denied,
+            format!(r#"{{"v":5,"kind":"deny","grant_id":"g1","by":"{}","at":1050}}"#, b.as_str())
+        );
     }
 
     /// The `by` field is attacker-controlled content, just like `from` on a
