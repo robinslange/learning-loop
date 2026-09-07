@@ -100,6 +100,13 @@ enum Fetch {
     Refuse,
 }
 
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 /// `false` when the client has hung up, which is not the mock's complaint to
 /// make — it just stops.
 async fn send_hub(ws: &mut WsServer, msg: &HubMsg) -> bool {
@@ -891,13 +898,23 @@ async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_
     .await;
     let config = config_for(dir.path(), addr);
 
+    let before = unix_seconds();
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await
         .expect("the cycle completes");
+    let after = unix_seconds();
 
     let listed = read_readable_vaults(dir.path()).unwrap()
         .expect("the cycle records what the hub listed");
     assert!(listed.contains("v-other-machine"));
+    // `at` is the whole of the staleness answer `ll status` renders and the
+    // only thing bounding how old an answer this machine will serve on. It
+    // has to be when the hub said it, not a constant: `at: 0` renders as a
+    // permanent "read authority 20335 days old" on a machine that just
+    // synced, and a false alarm on that warning is most of how the original
+    // outage stayed invisible for two months.
+    assert!((before..=after).contains(&listed.at),
+        "the cycle stamped {} and it ran between {before} and {after}", listed.at);
     assert!(!listed.contains("v-thomas-kirk"),
         "the hub did not list it, so nothing may put it on the record");
     assert!(!listed.contains("v1"),
@@ -1102,6 +1119,13 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
 ///
 /// It could not be written at all until `SyncReady.revocations` stopped being
 /// hardcoded `vec![]` in this mock.
+///
+/// **The first cycle fetches `v-other` rather than the test planting it.** A
+/// peer cache exists only because the hub listed that vault and served its
+/// index — this mock's own rule, and `withdraw` now reads the same listing
+/// before it deletes anything. A hand-planted cache for a vault this hub had
+/// never listed was an arrangement that cannot occur, and the deletion would
+/// have been refused for that reason rather than tested.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     test_env();
@@ -1114,8 +1138,6 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
 
     // The cache the grant justified, and one nothing in this cycle names.
     let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
     let untouched = ll_search::sync::config::peer_dir(dir.path(), "v-unrelated");
     std::fs::create_dir_all(&untouched).unwrap();
     std::fs::write(untouched.join("index.db"), b"peer data").unwrap();
@@ -1130,7 +1152,15 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     // is the step the whole rule depends on — a revoked grant never comes
     // back in `grants`, so a client that had not already kept it has nothing
     // to resolve the revocation against.
-    let (addr, _) = spawn_hub_revoking(Some(held.clone()), vec![granted], vec![]).await;
+    let (addr, _) = spawn_hub_full(
+        Some(held.clone()),
+        OnUpload::Ack,
+        OnGrant::Ack,
+        vec![granted],
+        vec![],
+        vec![("v-other".to_string(), Fetch::Serve(peer_index_bytes()))],
+    )
+    .await;
     let config = config_for(dir.path(), addr);
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await

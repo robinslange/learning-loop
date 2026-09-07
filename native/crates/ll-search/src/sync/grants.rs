@@ -33,12 +33,14 @@
 //!   a maybe, because an unscoped grant *might* be the reason for any cache
 //!   and admitting it only ever keeps one. `names` refuses the same maybe,
 //!   because its answer deletes.
-//! - [`ReadAuthority`] vs [`withdraw`]. Both ask whether a cache is still
-//!   justified. The reader adds the hub's persisted list to `covers`; the
-//!   deleter does not, and must not. The list can be stale, and a stale list
-//!   is *missing entries* — so gating the reader on it serves less, while
-//!   gating `withdraw`'s bail-out on it would stop protecting a vault that
-//!   fell off the list and **delete** it.
+//! - [`ReadAuthority`] vs [`withdraw`]. Both consult the hub's persisted
+//!   list, and where in the expression is the whole of the difference. A
+//!   stale list is *missing entries*. The reader ANDs it into what may be
+//!   served, so missing entries serve less. The deleter uses it as a
+//!   precondition on deleting, so missing entries delete less. What
+//!   `withdraw` must never do is move it into its bail-out: the bail-out
+//!   protects, so a missing entry there makes the bail-out false and the
+//!   deletion **happen**.
 //! - `read_state` vs `read_readable_vaults` (`state.rs`). Both turn an
 //!   unreadable file into `None`. One is a report whose corrupt case must not
 //!   block the cycle that rewrites it; the other is a read-authority record
@@ -46,13 +48,18 @@
 //!
 //! **Two questions with opposite safety senses are not two answers to one
 //! question.** Making them agree looks like removing a duplicate and is
-//! actually removing the asymmetry that keeps one of them safe. Moving
-//! `withdraw` onto the reader's predicate is caught by
+//! actually removing the asymmetry that keeps one of them safe. The bail-out
+//! is measured — deleting it reddens
 //! `a_revocation_keeps_a_cache_another_grant_still_justifies` and
 //! `a_lapsed_grant_does_not_take_a_cache_another_grant_still_covers`, both of
-//! which then delete a cache a live grant covers — verified by running that
-//! change, not by reasoning about it. If those two ever fail together, this
-//! is what happened.
+//! which then delete a cache a live grant covers.
+//!
+//! Adding the list to that bail-out is a different matter and no test will
+//! catch it, because since the deletion gate landed it does nothing: the only
+//! inputs the extra conjunct changes are the ones the gate already refuses
+//! two lines further down. Measured, not assumed — the mutant is green. The
+//! reason to still not write it is that it states a rule the opposite way
+//! round from the one that holds.
 
 use std::path::Path;
 
@@ -101,7 +108,10 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 ///    [`ReadableVaults`] list. This is not a second opinion about authority:
 ///    a cache exists on disk only because the hub listed that vault and served
 ///    its index, so filtering on the hub's latest list is the same authority
-///    that produced the cache, applied later.
+///    that produced the cache, applied later. **"This key" is a field on the
+///    record, not a property of the file's location.** `ll recover` replaces
+///    the seed and leaves the file, so a list matching no key on this machine
+///    is a list this machine was never handed, and [`Self::load`] drops it.
 /// 2. **Does a live grant cover it?** — [`covers`], over the local store.
 ///
 /// **Neither alone is a boundary, and the pair is not belt-and-braces — each
@@ -136,17 +146,14 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 /// cache it holds is from before this rule — which is exactly the orphan this
 /// exists to hide.
 ///
-/// Loaded once per config dir and then asked repeatedly. Re-reading per
-/// candidate would let the answer change mid-sweep, and half a sweep against
-/// each of two answers is an answer neither of them gave.
-///
-/// **[`withdraw`] deliberately still asks only [`covers`], and the reason is
-/// mechanical rather than stylistic.** `withdraw` uses `covers` in a
-/// *protective* position — it bails out of deleting when something still
-/// covers. A stale list is missing entries, so adding it to that bail-out
-/// makes the bail-out false and the deletion happen. The same staleness that
-/// makes a reader serve less makes a deleter destroy more, because the two
-/// use the predicate with opposite polarity. See the module doc's rule.
+/// **[`withdraw`] reads the same list, and the difference is where in the
+/// expression, not whether.** It uses `covers` in a *protective* position —
+/// it bails out of deleting when something still covers the cache — so a
+/// stale list moved into that bail-out would make the bail-out false and the
+/// deletion happen. It goes in as a precondition on the deletion instead,
+/// where a missing entry blocks it. Same file, opposite position, because the
+/// same staleness that makes a reader serve less would make a deleter destroy
+/// more. See the module doc's rule.
 pub struct ReadAuthority {
     me: KeyId,
     live: Vec<GrantStatement>,
@@ -162,14 +169,15 @@ impl ReadAuthority {
     /// addressed to it, so it must be treated as no authority at all rather
     /// than as an empty one.
     pub fn load(config_dir: &Path, now: i64) -> anyhow::Result<Self> {
+        let me = link::local_key_id(config_dir)?;
         Ok(Self {
-            me: link::local_key_id(config_dir)?,
             live: verified(&link::load_grants(config_dir)?)
                 .into_iter()
                 .filter(|(_, _, st)| st.expires_at > now)
                 .map(|(_, _, st)| st)
                 .collect(),
-            listed: state::read_readable_vaults(config_dir)?,
+            listed: listed_for(config_dir, &me)?,
+            me,
         })
     }
 
@@ -179,13 +187,16 @@ impl ReadAuthority {
         self.listed.as_ref().is_some_and(|listed| listed.contains(vault_id))
             && self.live.iter().any(|st| covers(st, &self.me, vault_id))
     }
+}
 
-    /// How old the hub's answer is, as of `now`. `None` when there is no
-    /// answer — which is not a fresh one, and callers must not render it as
-    /// one.
-    pub fn age(&self, now: i64) -> Option<i64> {
-        self.listed.as_ref().map(|listed| listed.age(now))
-    }
+/// The last list the hub gave **this** key, or `None`.
+///
+/// One expression of "whose list is this", because both callers ask the same
+/// question and `ll recover` is what makes the answer ever be no: the file
+/// survives an identity change untouched, so a record naming another key is a
+/// record this machine was never handed.
+fn listed_for(config_dir: &Path, me: &KeyId) -> anyhow::Result<Option<ReadableVaults>> {
+    Ok(state::read_readable_vaults(config_dir)?.filter(|listed| &listed.me == me))
 }
 
 /// The one cache `st` **names**, which is the only one its withdrawal may
@@ -219,7 +230,39 @@ fn names<'a>(st: &'a GrantStatement, me: &KeyId) -> Option<&'a str> {
 }
 
 /// Remove the cache `gone` named, unless a still-live grant among `remaining`
-/// also justifies it. Returns the vault id if one was removed.
+/// also justifies it, or the hub's last list to this key never named it.
+/// Returns the vault id if one was removed.
+///
+/// # Why `listed` gates the deletion
+///
+/// [`names`] returns whatever string the issuer signed into `scope`, and a
+/// signature says who WROTE that string, not that they had any standing over
+/// it. `apply_grants` checks only the signature, and a hub admits its members
+/// to lodge grants addressed to each other — so without this gate any
+/// co-member who knows this key's `KeyId` picks a `remove_dir_all` target on
+/// this disk, by lodging a `peer` grant scoped to whatever it likes and then
+/// revoking its own grant.
+///
+/// The gate is the module's rule in its permitted polarity: absence blocks
+/// the delete, and can never allow one. The ordering it depends on is
+/// `run_cycle`'s — `apply_revocations`, then `prune_expired`, then, six
+/// statements later, `write_readable_vaults` — so what is read here is always
+/// the PREVIOUS cycle's list, which still names a vault the hub is revoking
+/// this cycle. Both callers have exactly one production caller each, and it
+/// is that one.
+///
+/// **What it costs, and it is a real cost.** A revocation that arrives after
+/// the hub has stopped listing the vault is now blocked permanently: the row
+/// is removed on the same pass, so the revocation can never resolve again.
+/// That is a new permanent under-delete, alongside the unscoped one [`names`]
+/// already records. It is the direction this module chose in its own words —
+/// an under-delete is a follow-up task, an over-delete is somebody's notes —
+/// and the caches on both sides of this particular trade are ones
+/// [`ReadAuthority`] refuses to serve, because its live-grant half is the
+/// same predicate as the bail-out below and its list half is this gate. The
+/// bytes stay on disk and nothing reads them. **That is not the same as the
+/// deletion being authorized**, and nothing here should be read as saying a
+/// stranger's grant is a reason to delete anything.
 ///
 /// Deletion is not best-effort. Spec:334 makes removing
 /// `federation/data/peers/<vault_id>/` a hard requirement, and a client that
@@ -239,6 +282,7 @@ fn withdraw(
     config_dir: &Path,
     gone: &GrantStatement,
     remaining: &[GrantStatement],
+    listed: Option<&ReadableVaults>,
     me: &KeyId,
     now: i64,
 ) -> anyhow::Result<Option<String>> {
@@ -261,6 +305,15 @@ fn withdraw(
         return Ok(None);
     }
     if remaining.iter().any(|st| st.expires_at > now && covers(st, me, vault_id)) {
+        return Ok(None);
+    }
+    if !listed.is_some_and(|listed| listed.contains(vault_id)) {
+        eprintln!(
+            "a withdrawn grant from {} names the cache at {vault_id}, which is not on the last \
+             list the hub gave this key. This machine was never told it could read that vault, \
+             so a grant naming it is not authority to delete it. Left in place.",
+            gone.from.as_str()
+        );
         return Ok(None);
     }
     let dir = peer_dir(config_dir, vault_id);
@@ -303,6 +356,14 @@ fn verified(rows: &[StoredGrant]) -> Vec<(usize, String, GrantStatement)> {
 /// nothing forever.
 ///
 /// Lodged on arrival: the hub has these by definition, it just sent them.
+///
+/// **No expiry filter here, unlike `link::reconcile` and `fetch::live_grants`,
+/// and not by omission.** Those two are asking what a grant still entitles
+/// this machine to, where a lapsed one must answer nothing. This is asking
+/// what the store should hold, and a lapsed statement is exactly what
+/// [`prune_expired`] needs to find in order to take the cache that statement
+/// named — `run_cycle` runs it seven lines after this. A grant refused at the
+/// door names nothing, so filtering here would leave its cache in place.
 ///
 /// Creates no peer cache. Nothing here touches `federation/data/`, which is
 /// what makes an `assoc` unable to produce one — not a check that could be
@@ -383,6 +444,7 @@ pub fn apply_revocations(
         parsed.push((statement, signature));
     }
 
+    let listed = listed_for(config_dir, me)?;
     link::update_grants(config_dir, |rows| {
         let mut deleted = Vec::new();
         for (statement, signature) in &parsed {
@@ -407,7 +469,7 @@ pub fn apply_revocations(
             }
             let remaining: Vec<GrantStatement> =
                 held.iter().filter(|(i, _, _)| *i != idx).map(|(_, _, st)| st.clone()).collect();
-            deleted.extend(withdraw(config_dir, gone, &remaining, me, now)?);
+            deleted.extend(withdraw(config_dir, gone, &remaining, listed.as_ref(), me, now)?);
             rows.remove(idx);
         }
         Ok(deleted)
@@ -421,6 +483,7 @@ pub fn apply_revocations(
 /// dead weight in a file every sync reads, and `link.rs` already treats an
 /// expired row as absent everywhere it looks.
 pub fn prune_expired(config_dir: &Path, me: &KeyId, now: i64) -> anyhow::Result<Vec<String>> {
+    let listed = listed_for(config_dir, me)?;
     link::update_grants(config_dir, |rows| {
         let mut deleted = Vec::new();
         loop {
@@ -430,7 +493,7 @@ pub fn prune_expired(config_dir: &Path, me: &KeyId, now: i64) -> anyhow::Result<
             };
             let remaining: Vec<GrantStatement> =
                 held.iter().filter(|(i, _, _)| i != idx).map(|(_, _, st)| st.clone()).collect();
-            deleted.extend(withdraw(config_dir, gone, &remaining, me, now)?);
+            deleted.extend(withdraw(config_dir, gone, &remaining, listed.as_ref(), me, now)?);
             rows.remove(*idx);
         }
         Ok(deleted)
@@ -519,17 +582,42 @@ mod tests {
     }
 
     fn revoking(by: &SigningKey, g: &SignedGrant) -> RevocationWire {
-        let st: GrantStatement = serde_json::from_slice(&g.statement).unwrap();
-        revocation(by, &grant::grant_id(&g.statement), st.scope.as_deref())
+        revocation(by, &grant::grant_id(&g.statement), statement(g).scope.as_deref())
     }
 
     /// A peer cache with a file in it, so "the directory is gone" is a claim
-    /// about content and not just about an empty directory nobody wrote to.
-    fn cache(dir: &Path, vault_id: &str) -> PathBuf {
+    /// about content and not just about an empty directory nobody wrote to —
+    /// **and the hub's list naming it, because in production the two arrive
+    /// together.** `fetch.rs` is the only writer under `peers/` and it writes
+    /// exactly the vaults the handshake listed, so a listed-but-uncached vault
+    /// and a cached-but-unlisted one are two different machines and only one
+    /// of them is ordinary. A test that planted the directory alone would be
+    /// measuring `withdraw`'s deletion gate whatever else it meant to measure.
+    /// Use [`unlisted_cache`] where that is the point.
+    fn cache(dir: &Path, me: &KeyId, vault_id: &str) -> PathBuf {
+        let path = unlisted_cache(dir, vault_id);
+        listed(dir, me, vault_id);
+        path
+    }
+
+    /// A directory under `peers/` that this key's list does not name: a v4
+    /// display-name cache, or one whose vault the hub has stopped listing.
+    fn unlisted_cache(dir: &Path, vault_id: &str) -> PathBuf {
         let path = peer_dir(dir, vault_id);
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join("index.db"), b"peer data").unwrap();
         path
+    }
+
+    /// Put `vault_id` on the last list the hub gave `me`, cache or no cache.
+    fn listed(dir: &Path, me: &KeyId, vault_id: &str) {
+        let mut list = listed_for(dir, me)
+            .unwrap()
+            .unwrap_or(ReadableVaults { me: me.clone(), at: NOW, vault_ids: Vec::new() });
+        if !list.contains(vault_id) {
+            list.vault_ids.push(vault_id.to_string());
+        }
+        state::write_readable_vaults(dir, &list).unwrap();
     }
 
     fn cached(dir: &Path, vault_id: &str) -> bool {
@@ -546,6 +634,31 @@ mod tests {
 
     fn rows(dir: &Path) -> usize {
         link::load_grants(dir).unwrap().len()
+    }
+
+    fn statement(g: &SignedGrant) -> GrantStatement {
+        serde_json::from_slice(&g.statement).unwrap()
+    }
+
+    // -- what a grant is about ---------------------------------------------
+
+    /// **`covers` compares the whole scope, never a prefix or a substring.**
+    /// The id it is asked about is a directory name read off disk, not a value
+    /// the issuer signed, so a name that merely starts with the scope a grant
+    /// carries was never that grant's business.
+    ///
+    /// `ReadableVaults::contains` is the other half of the same conjunction
+    /// and has had this test since a mutation found it there; this comparison
+    /// one file away had none.
+    #[test]
+    fn covers_matches_a_whole_scope_and_never_a_prefix_of_one() {
+        let me = id(&key(9));
+        let st = statement(&issue(&key(1), &me, GrantKind::Follow, Some("v-a"), LATER));
+
+        assert!(covers(&st, &me, "v-a"));
+        assert!(!covers(&st, &me, "v-alice"), "a longer id that starts with the scope");
+        assert!(!covers(&st, &me, "v-"), "a shorter id the scope starts with");
+        assert!(!covers(&st, &me, "V-A"), "and it is not case-insensitive either");
     }
 
     // -- the store ---------------------------------------------------------
@@ -637,8 +750,8 @@ mod tests {
         let revoked = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let kept = issue(&c, &me, GrantKind::Follow, Some("v-keep"), LATER);
         let (dir, me) = store(&[&revoked, &kept]);
-        cache(dir.path(), "v-other");
-        cache(dir.path(), "v-keep");
+        cache(dir.path(), &me, "v-other");
+        cache(dir.path(), &me, "v-keep");
 
         let deleted =
             apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
@@ -659,7 +772,7 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         // Correctly signed by A, correctly scoped — and naming a grant id
         // this machine has never seen.
@@ -680,7 +793,7 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         let forged = revoking(&stranger, &held);
         let deleted = apply_revocations(dir.path(), &[forged], &me, NOW).unwrap();
@@ -700,8 +813,8 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-other");
-        cache(dir.path(), "v-elsewhere");
+        cache(dir.path(), &me, "v-other");
+        cache(dir.path(), &me, "v-elsewhere");
 
         let widened = revocation(&a, &grant::grant_id(&held.statement), None);
         let deleted = apply_revocations(dir.path(), &[widened], &me, NOW).unwrap();
@@ -722,8 +835,8 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Link, None, LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-one");
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-one");
+        cache(dir.path(), &me, "v-two");
 
         let narrowed = revocation(&a, &grant::grant_id(&held.statement), Some("v-one"));
         let deleted = apply_revocations(dir.path(), &[narrowed], &me, NOW).unwrap();
@@ -750,8 +863,8 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Link, None, LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-one");
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-one");
+        cache(dir.path(), &me, "v-two");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
@@ -777,13 +890,37 @@ mod tests {
         let held = issue(&a, &me, GrantKind::Follow, Some("v-two"), LATER);
         let link_from_c = issue(&c, &me, GrantKind::Link, None, LATER);
         let (dir, me) = store(&[&held, &link_from_c]);
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-two");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
         assert!(deleted.is_empty());
         assert!(cached(dir.path(), "v-two"),
             "revoking one person's follow must not delete what another person's link justifies");
+    }
+
+    /// The other side of that bail-out's midpoint: the survivor has to be
+    /// LIVE. Only the `covers` half was measured, and an unscoped grant
+    /// covers every vault — so without the expiry half a lapsed `link` sitting
+    /// in the store protects this cache from the revocation that should take
+    /// it, and protects it forever: `prune_expired` runs next and names
+    /// nothing for an unscoped grant, while the revoked row is already gone,
+    /// so the hub's next copy of the revocation resolves against nothing.
+    #[test]
+    fn a_lapsed_survivor_does_not_protect_a_cache_from_a_revocation() {
+        let a = key(1);
+        let c = key(2);
+        let me = id(&key(9));
+        let revoked = issue(&a, &me, GrantKind::Follow, Some("v-x"), LATER);
+        let lapsed_link = issue(&c, &me, GrantKind::Link, None, NOW - 1);
+        let (dir, me) = store(&[&revoked, &lapsed_link]);
+        cache(dir.path(), &me, "v-x");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &revoked)], &me, NOW).unwrap();
+
+        assert_eq!(deleted, vec!["v-x".to_string()]);
+        assert!(!cached(dir.path(), "v-x"),
+            "a grant that has stopped meaning anything cannot be a reason to keep a cache");
     }
 
     /// The other half of the `assoc` rule. It carries no read authority, so
@@ -797,7 +934,7 @@ mod tests {
         let held = issue(&a, &me, GrantKind::Follow, Some("v-two"), LATER);
         let assoc = issue(&c, &me, GrantKind::Assoc, Some("v-two"), LATER);
         let (dir, me) = store(&[&held, &assoc]);
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-two");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
@@ -816,7 +953,7 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Assoc, Some("v-work"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-work");
+        cache(dir.path(), &me, "v-work");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
 
@@ -843,7 +980,9 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("../secret"), LATER);
         let (dir, me) = store(&[&held]);
-        let innocent = cache(dir.path(), "v-other");
+        let innocent = cache(dir.path(), &me, "v-other");
+        // Listed, so `is_safe_vault_id` is the only thing that can refuse it.
+        listed(dir.path(), &me, "../secret");
         let outside = super::super::config::data_dir(dir.path()).join("secret");
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("keep.db"), b"not a peer cache").unwrap();
@@ -864,7 +1003,7 @@ mod tests {
         let other = id(&key(1));
         let held = issue(&mine, &other, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         let deleted = apply_revocations(dir.path(), &[revoking(&mine, &held)], &me, NOW).unwrap();
 
@@ -874,13 +1013,49 @@ mod tests {
         assert_eq!(rows(dir.path()), 0, "it is still withdrawn from the store");
     }
 
+    /// The `NotFound` arm, and it is the only thing between an ordinary
+    /// revocation and a sync cycle that aborts before the upload — every
+    /// cycle, for good. `apply_revocations(...)?` in `run_cycle` is not
+    /// best-effort, and a grant lodged for a vault this client never fetched
+    /// is ordinary: the grant is issued and stored before any index is served,
+    /// and `fetch_all` skips a vault the hub reports as holding nothing.
+    ///
+    /// **The removal has to be reachable for this to test the arm.**
+    /// `applying_the_same_revocation_twice_is_idempotent` is named for the
+    /// same property and never gets there: after the first call the row is
+    /// gone, so the second returns at "holds no grant for" without entering
+    /// `withdraw`. Here the grant is scoped, addressed to this key and a
+    /// usable id, no survivor covers it, and `peers/` is on disk — so
+    /// `remove_dir_all` really runs, and the one reason it fails is that this
+    /// directory was never written.
+    #[test]
+    fn revoking_a_grant_whose_cache_was_never_written_is_not_a_failure() {
+        let a = key(1);
+        let me = id(&key(9));
+        let never_fetched = issue(&a, &me, GrantKind::Follow, Some("v-never"), LATER);
+        let (dir, me) = store(&[&never_fetched]);
+        let sibling = cache(dir.path(), &me, "v-other");
+        // The hub lists it and we hold the grant; nothing was ever fetched
+        // because the hub reported holding nothing for it.
+        listed(dir.path(), &me, "v-never");
+        assert!(!peer_dir(dir.path(), "v-never").exists(),
+            "precondition: nothing was ever fetched for the vault being revoked");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &never_fetched)], &me, NOW)
+            .expect("a revocation for a vault this client never read is not a failure");
+
+        assert!(deleted.is_empty());
+        assert_eq!(rows(dir.path()), 0, "and the row still goes, so the cycle settles");
+        assert!(sibling.exists(), "peers/ was there to walk: the deletion was reachable");
+    }
+
     #[test]
     fn applying_the_same_revocation_twice_is_idempotent() {
         let a = key(1);
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
         let rev = revoking(&a, &held);
 
         assert_eq!(
@@ -888,6 +1063,128 @@ mod tests {
             vec!["v-other".to_string()]
         );
         assert!(apply_revocations(dir.path(), &[rev], &me, NOW).unwrap().is_empty());
+    }
+
+    // -- the deletion gate: a third party does not choose the target --------
+
+    /// **A stranger picks the `remove_dir_all` target, and the gate is what
+    /// stops it.** `apply_grants` checks a signature and nothing else, and a
+    /// hub lets its members lodge grants addressed to each other — so a
+    /// co-member who knows this key can sign a `peer` grant scoped to any
+    /// string, get it served back to us as active, and then revoke it.
+    /// `names` hands `withdraw` whatever string that was.
+    ///
+    /// Everything before the gate passes here: the grant is a `permits_read`
+    /// kind addressed to this key, the scope is a usable id, and no surviving
+    /// grant covers it — the row is dropped, which is how far the resolution
+    /// got. The one thing that is not true is that the hub ever told this key
+    /// it could read that vault.
+    #[test]
+    fn a_strangers_grant_cannot_name_a_cache_the_hub_never_listed_for_us() {
+        let stranger = key(4);
+        let me = id(&key(9));
+        let bait = issue(&stranger, &me, GrantKind::Peer, Some("thomas_kirk"), LATER);
+        let (dir, me) = store(&[&bait]);
+        // A real list, naming a real vault, so the gate's answer is about
+        // `thomas_kirk` and not about there being no list at all.
+        cache(dir.path(), &me, "v-mine");
+        let victim = unlisted_cache(dir.path(), "thomas_kirk");
+
+        let deleted =
+            apply_revocations(dir.path(), &[revoking(&stranger, &bait)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(victim.join("index.db").exists(),
+            "a signed scope says who wrote that string, not that they had any standing \
+             over the directory it names");
+        assert!(cached(dir.path(), "v-mine"));
+        assert_eq!(rows(dir.path()), 0, "the revocation resolved: the gate is what refused");
+    }
+
+    /// The same attack on a machine with any inbound unscoped `link` — the
+    /// case the code calls normal — where the survivor bail-out gets there
+    /// first. The cache is LISTED, so the gate is open and the bail-out is
+    /// the only thing left to refuse.
+    #[test]
+    fn an_unscoped_live_link_also_refuses_a_strangers_deletion() {
+        let stranger = key(4);
+        let c = key(2);
+        let me = id(&key(9));
+        let bait = issue(&stranger, &me, GrantKind::Peer, Some("v-mine"), LATER);
+        let mine = issue(&c, &me, GrantKind::Link, None, LATER);
+        let (dir, me) = store(&[&bait, &mine]);
+        cache(dir.path(), &me, "v-mine");
+
+        let deleted =
+            apply_revocations(dir.path(), &[revoking(&stranger, &bait)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(cached(dir.path(), "v-mine"),
+            "a link this machine actually holds covers it, whatever a stranger signed");
+    }
+
+    /// The gate reads the list **this** key was handed, not whichever list is
+    /// on disk. `ll recover` leaves the file in place, so without the key on
+    /// the record a vault K1 was listed for would go on authorising deletions
+    /// under K2 — the same stale record C-1 closed on the read side, in the
+    /// direction that destroys instead of the one that serves.
+    #[test]
+    fn a_list_belonging_to_another_key_does_not_open_the_gate() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
+        let (dir, me) = store(&[&held]);
+        let stranded = unlisted_cache(dir.path(), "v-other");
+        listed(dir.path(), &id(&key(8)), "v-other");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(stranded.join("index.db").exists(),
+            "the list names the vault, and it is not this key's list");
+    }
+
+    /// And the gate's other direction, which is what stops it from being a
+    /// switch that turns revocation off: the hub lists the vault, the grant
+    /// this key holds for it is withdrawn, and the cache goes. Without this
+    /// the gate would be indistinguishable from `withdraw` never deleting.
+    #[test]
+    fn a_revocation_of_a_vault_the_hub_listed_still_deletes_its_cache() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-listed"), LATER);
+        let (dir, me) = store(&[&held]);
+        cache(dir.path(), &me, "v-listed");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
+
+        assert_eq!(deleted, vec!["v-listed".to_string()]);
+        assert!(!cached(dir.path(), "v-listed"));
+    }
+
+    /// **The cost of the gate, written down as a test rather than only as a
+    /// doc comment.** A revocation that arrives after the hub stopped listing
+    /// the vault is refused, and refused for good: the row goes on the same
+    /// pass, so the hub's next copy of the revocation resolves against
+    /// nothing. This is a new permanent under-delete, and it is the price of
+    /// the case above it. What bounds it is that `ReadAuthority` will not
+    /// serve the cache either — its list half is this same list.
+    #[test]
+    fn a_revocation_arriving_after_the_hub_stopped_listing_the_vault_is_refused() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Follow, Some("v-dropped"), LATER);
+        let (dir, me) = store(&[&held]);
+        let stranded = unlisted_cache(dir.path(), "v-dropped");
+        cache(dir.path(), &me, "v-still-listed");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(stranded.join("index.db").exists(),
+            "the bytes stay, and nothing on this machine will read them again");
+        assert_eq!(rows(dir.path()), 0,
+            "and the row is gone, so no later cycle can resolve this revocation either");
     }
 
     // -- expiry, the backstop ----------------------------------------------
@@ -899,8 +1196,8 @@ mod tests {
         let lapsed = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW - 1);
         let live = issue(&a, &me, GrantKind::Follow, Some("v-keep"), LATER);
         let (dir, me) = store(&[&lapsed, &live]);
-        cache(dir.path(), "v-other");
-        cache(dir.path(), "v-keep");
+        cache(dir.path(), &me, "v-other");
+        cache(dir.path(), &me, "v-keep");
 
         let deleted = prune_expired(dir.path(), &me, NOW).unwrap();
 
@@ -910,13 +1207,44 @@ mod tests {
         assert_eq!(rows(dir.path()), 1);
     }
 
+    /// The boundary itself. `expires_at` is the first instant the grant does
+    /// not cover, not the last one it does — `prune_expired` reads
+    /// `expires_at <= now`. Nothing pinned which side `now` fell on, so a
+    /// comparison one second out in either direction was free.
+    #[test]
+    fn a_grant_that_expires_at_this_very_instant_is_lapsed() {
+        let a = key(1);
+        let me = id(&key(9));
+        let g = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW);
+        let (dir, me) = store(&[&g]);
+        cache(dir.path(), &me, "v-other");
+
+        assert_eq!(prune_expired(dir.path(), &me, NOW).unwrap(), vec!["v-other".to_string()]);
+        assert!(!cached(dir.path(), "v-other"));
+        assert_eq!(rows(dir.path()), 0);
+    }
+
+    /// And the other side of it, one second out.
+    #[test]
+    fn a_grant_that_expires_one_second_from_now_is_not_pruned_yet() {
+        let a = key(1);
+        let me = id(&key(9));
+        let g = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW + 1);
+        let (dir, me) = store(&[&g]);
+        cache(dir.path(), &me, "v-other");
+
+        assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
+        assert!(cached(dir.path(), "v-other"));
+        assert_eq!(rows(dir.path()), 1);
+    }
+
     #[test]
     fn an_active_grant_keeps_its_cache() {
         let a = key(1);
         let me = id(&key(9));
         let live = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&live]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
         assert!(cached(dir.path(), "v-other"));
@@ -937,7 +1265,7 @@ mod tests {
         let lapsed = issue(&a, &me, GrantKind::Follow, Some("v-other"), NOW - 1);
         let live = issue(&c, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&lapsed, &live]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
         assert!(cached(dir.path(), "v-other"));
@@ -952,7 +1280,7 @@ mod tests {
         let me = id(&key(9));
         let lapsed = issue(&a, &me, GrantKind::Link, None, NOW - 1);
         let (dir, me) = store(&[&lapsed]);
-        cache(dir.path(), "v-other");
+        cache(dir.path(), &me, "v-other");
 
         assert!(prune_expired(dir.path(), &me, NOW).unwrap().is_empty());
         assert!(cached(dir.path(), "v-other"));
@@ -968,8 +1296,8 @@ mod tests {
         let one = issue(&a, &me, GrantKind::Follow, Some("v-one"), NOW - 1);
         let two = issue(&a, &me, GrantKind::Follow, Some("v-two"), NOW - 1);
         let (dir, me) = store(&[&one, &two]);
-        cache(dir.path(), "v-one");
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-one");
+        cache(dir.path(), &me, "v-two");
 
         let mut deleted = prune_expired(dir.path(), &me, NOW).unwrap();
         deleted.sort();
@@ -986,8 +1314,8 @@ mod tests {
         let one = issue(&a, &me, GrantKind::Follow, Some("v-one"), LATER);
         let two = issue(&a, &me, GrantKind::Follow, Some("v-two"), LATER);
         let (dir, me) = store(&[&one, &two]);
-        cache(dir.path(), "v-one");
-        cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-one");
+        cache(dir.path(), &me, "v-two");
 
         let deleted = apply_revocations(
             dir.path(),
@@ -1019,9 +1347,9 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-one"), LATER);
         let (dir, me) = store(&[&held]);
-        cache(dir.path(), "v-one");
-        let v4 = cache(dir.path(), "thomas_kirk");
-        let unrelated = cache(dir.path(), "v-two");
+        cache(dir.path(), &me, "v-one");
+        let v4 = cache(dir.path(), &me, "thomas_kirk");
+        let unrelated = cache(dir.path(), &me, "v-two");
         let stray = peers_dir(dir.path()).join("not a vault id");
         std::fs::create_dir_all(&stray).unwrap();
         let sibling = super::super::config::data_dir(dir.path()).join("local-export.db");
@@ -1049,7 +1377,7 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Link, None, LATER);
         let (dir, me) = store(&[&held]);
-        let v4 = cache(dir.path(), "thomas_kirk");
+        let v4 = cache(dir.path(), &me, "thomas_kirk");
 
         assert!(apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap().is_empty());
         assert!(v4.exists(), "revoking a link is an arbitrary moment to run a garbage collector");
@@ -1079,7 +1407,7 @@ mod tests {
         let me = id(&key(9));
         let held = issue(&a, &me, GrantKind::Follow, Some("v-other"), LATER);
         let (dir, me) = store(&[&held]);
-        let cache_dir = cache(dir.path(), "v-other");
+        let cache_dir = cache(dir.path(), &me, "v-other");
         std::fs::set_permissions(&cache_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
         let outcome = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW);

@@ -1063,7 +1063,7 @@ mod tests {
             v: 5,
             kind: GrantKind::Follow,
             from: KeyId::from_pubkey(&issuer.verifying_key()),
-            to: me,
+            to: me.clone(),
             scope: Some(peer.to_string()),
             issued_at: 1,
             expires_at: i64::MAX,
@@ -1078,7 +1078,10 @@ mod tests {
 
         let mut listed = ll_search::sync::state::read_readable_vaults(config_dir)
             .unwrap()
-            .unwrap_or(ll_search::sync::state::ReadableVaults { at: 0, vault_ids: Vec::new() });
+            .filter(|l| l.me == me)
+            .unwrap_or(ll_search::sync::state::ReadableVaults {
+                me, at: 0, vault_ids: Vec::new(),
+            });
         if !listed.contains(peer) {
             listed.vault_ids.push(peer.to_string());
         }
