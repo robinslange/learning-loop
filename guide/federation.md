@@ -61,7 +61,7 @@ A second vault on the same machine needs `ll-search vault add <vault-path> <id>`
 ll-search status
 ```
 
-Local files only: no socket, no clock, no network, so nothing it prints can imply a check that did not run. It reports the vault and its `vault_id`, this machine's key and fingerprint, the hub and its pinned key, the graph setting, when the last cycle ran and whether it worked, and what the hub held as of that cycle. Four verdicts are worth knowing by name:
+Local files only: no socket, no clock, no network, so nothing it prints can imply a check that did not run. It reports the vault and its `vault_id`, this machine's key and fingerprint, the hub and its pinned key, when the last cycle ran and whether it worked, and what the hub held as of that cycle. Four verdicts are worth knowing by name:
 
 - **`STALE`** -- the last successful sync is more than seven days old, or none has ever succeeded.
 - **`hub holds: nothing`** -- as of that cycle the hub had no index for this vault. The next sync re-uploads it. If it survives a successful sync, the hub is degraded. This is the signature of an outage that ran for two months in 2026 while the client reported itself content.
@@ -191,14 +191,22 @@ visibility: public
 ---
 ```
 
-**A glob rule may restrict, never publish.** A rule naming `public` is clamped to `listed` on the export path. That is deliberate: publishing a whole note's body should be an explicit act by its author, not a consequence of which folder it landed in. A misspelled frontmatter value (`visibility: pubic`) falls through to the glob rules *and their clamp* rather than to an uncapped tier, so a typo cannot publish a note either.
+**A glob rule may restrict, never publish.** A rule naming `public` is clamped to `listed` on the export path. A misspelled frontmatter value (`visibility: pubic`) falls through to the glob rules *and their clamp* rather than to an uncapped tier, so a typo cannot publish a note either.
 
-**If you federated before this rule existed**, your published set was derived from folder globs and is now capped. To keep exactly the notes that were public before, run once:
+**Why the default inverted.** The old policy was a blocklist: `3-permanent/** → public`, then roughly thirty hand-written filename patterns clawing individual notes back to private. That only works if someone anticipates every filename — and promotion into `3-permanent/` is done by an automated pipeline, with filenames generated from note content rather than chosen defensively. Every new sensitive topic needed a new pattern added by hand *before* the note landed. Thirty patches to one missing guard is one design mistake with thirty instances, not thirty problems. Publishing a whole note's body is now an explicit act by its author rather than a consequence of which folder it landed in.
+
+### If you federated before this rule
+
+Your published set was derived from folder globs and is now capped at `listed`. **Notes you believed were shared in full are now shared as title, tags and summary** — less is published than before, not more.
+
+There is a one-time pass that preserves exactly today's published set while leaving the new default in place for everything written afterwards:
 
 ```bash
 ll-search visibility-backfill <vault-path> --dry-run   # report what would change
 ll-search visibility-backfill <vault-path>             # stamp `visibility: public` into those notes
 ```
+
+**Running it is a choice, not a repair.** It re-publishes every note that resolved to public under the old blocklist, which is the set that policy produced rather than a set anyone reviewed. Read the `--dry-run` output first: this is the moment to decide whether those notes should have their bodies published at all, and that decision is deliberately not automated. Doing nothing is a valid answer — it leaves those notes at `listed`.
 
 On a vault that has never federated there is nothing to preserve; skip it.
 
@@ -223,28 +231,6 @@ Rules live in `PLUGIN_DATA/federation/config.json` under `visibility.rules`. The
 
 Globs match the note's vault-relative path. For fuzzier privacy decisions -- a one-off note where a glob would false-positive -- put `visibility: private` in the note's frontmatter: it is more precise and survives a rename.
 
-## Knowledge graph
-
-A shared visualisation of cross-vault connections. The graph shows note titles only -- no content, summaries, or body text leaves your machine. Connections are drawn from shared tags and embedding similarity between notes across vaults.
-
-### Opting in
-
-Off unless you say otherwise, and declared on every connection, so it is a choice rather than a default anyone drifted into:
-
-```bash
-ll-search graph-opt-in true    # publish this vault on the graph
-ll-search graph-opt-in false   # withdraw it
-```
-
-The value is spelled out rather than being a bare `--publish` flag: the absence of a flag is how a value nobody chose gets mistaken for a choice, and this is the setting that mistake already cost two months. It is stored as `graph_opt_in` in `config.json`, and `ll-search status` shows the current value in full -- "opted out" alone would read as a fact about the hub rather than a choice this vault made.
-
-Graph visibility is two-gated. A note appears only if **both** hold:
-
-1. Its tier is `public` or `listed` -- a private note is never included.
-2. This vault has `graph_opt_in` set to `true`.
-
-Withdrawing takes effect on the next sync.
-
 ## Sync commands
 
 ```bash
@@ -267,6 +253,23 @@ ll-search status
 Note that `node scripts/vault-search.mjs status` is the **index** status, not this one — it shells out to `ll-search index-status`. v5 gave the bare name `status` to federation, and the pre-existing command became `index-status`.
 
 Sync runs automatically inside the always-on `ll-search watch` daemon (spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`): the watcher's `tokio::select!` loop runs sync alongside the reindex debounce, the poll tick, and the resync tick (see [Sync wire format](#sync-wire-format)). Nothing syncs at session end -- the Stop hook only emits nudges. The manual commands above cover the cases where the daemon isn't running.
+
+## The public knowledge map
+
+**Withdrawn, pending a revisit.** Earlier versions of this page described a
+shared visualisation of cross-vault connections at `interchange.live/graph`,
+and a `graph_opt_in` toggle for putting your note titles on it. The map is
+being removed rather than fixed: it is not the part of federation that earns
+its keep, and it will be reconsidered from scratch if it comes back.
+
+**The privacy tiers are unaffected.** `private` / `listed` / `public` are the
+federation-member privacy model and they stay exactly as
+[Visibility rules](#visibility-rules) describes. Nothing about what your peers
+can read changes.
+
+Until the removal lands in the binary, `ll-search graph-opt-in` still parses
+and still writes `graph_opt_in` to `config.json`. Do not reach for it: there is
+no longer a map for it to publish to.
 
 ## Retractions
 

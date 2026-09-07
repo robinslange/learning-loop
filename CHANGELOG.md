@@ -53,9 +53,13 @@ may connect and never decides trust between keys.
   recovering a *different* one over it does, and what `--force` authorises is
   the loss — every grant naming the old key survives it, signed and
   unreachable.
-- `ll-search graph-opt-in <true|false>` is the setter for whether this vault
-  may be drawn on the federation-wide graph. It is off unless you say
-  otherwise and is declared on every connection. In v4 nothing could set it.
+- **The public knowledge map is withdrawn, pending a revisit.** The shared
+  cross-vault visualisation and the `graph_opt_in` toggle that fed it are
+  being removed rather than carried into v5 — with no map there is nothing to
+  opt into. The **privacy tiers are unaffected**: `private` / `listed` /
+  `public` are the federation-member model and stay exactly as they are.
+  `ll-search graph-opt-in` still parses until the removal lands in the binary;
+  it now writes a setting nothing reads.
 - Grants renew on use and expire on disuse: `link` and `assoc` 365 days,
   `follow` and `peer` 90 days. A machine in use never asks again; one that
   stopped being used lapses on its own.

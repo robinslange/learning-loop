@@ -1,6 +1,6 @@
 ---
 name: federation
-description: "Set up or repair learning-loop federation: enrolling a vault on a hub, linking a second machine, visibility rules, graph opt-in, and reading sync status. Run when /init asked you to defer federation, when sync is broken, or when adding a machine. Safe to re-run."
+description: "Set up or repair learning-loop federation: enrolling a vault on a hub, linking a second machine, visibility rules, and reading sync status. Run when /init asked you to defer federation, when sync is broken, or when adding a machine. Safe to re-run."
 ---
 
 # Federation Setup
@@ -56,7 +56,7 @@ carried across.
 `ll-search status` reads local files only. It opens no socket and reads no
 clock, so nothing it prints can imply a check that did not run. It reports:
 the vault and its `vault_id`, this machine's key, the hub and its pinned key,
-the graph opt-in setting, when the last cycle ran and whether it succeeded,
+when the last cycle ran and whether it succeeded,
 what the hub held as of that cycle, and a `BLOCKED` line if `ll-search sync`
 would refuse the config.
 
@@ -84,7 +84,7 @@ So there are three doors onto a hub:
 
 1. named in the hub's own `BOOTSTRAP_MEMBERS` at boot;
 2. an invite code from the hub operator (this section);
-3. a `link` grant from a machine already enrolled (section G) — which needs no
+3. a `link` grant from a machine already enrolled (section F) — which needs no
    invite at all, because membership follows the link.
 
 If the user has none of the three, stop here rather than starting a `join`
@@ -183,25 +183,7 @@ It reports what it would write. Re-run without `--dry-run` to stamp
 `visibility: public` into the frontmatter of those notes. On a vault that has
 never federated there is nothing to preserve — skip it.
 
-## E: Knowledge graph opt-in
-
-Ask: "Would you like this vault to be drawn on the federation-wide knowledge
-graph?"
-
-It is off unless the user says otherwise, and it is declared on every
-connection, so this is a choice and not a default anybody drifted into.
-
-```bash
-ll-search graph-opt-in true  --config-dir <config_dir>   # publish
-ll-search graph-opt-in false --config-dir <config_dir>   # withdraw
-```
-
-The value is spelled out rather than being a bare `--publish` flag: the absence
-of a flag is how the value nobody chose gets mistaken for a choice, and this is
-the setting that mistake already cost two months. `ll-search status` shows the
-current value.
-
-## F: Summary
+## E: Summary
 
 After `join` and the first `sync`, report:
 
@@ -213,13 +195,12 @@ Federation configured.
   Hub:        [endpoint]  ([six-word fingerprint])
   Uploaded:   [N] notes
   Visibility: [public/listed/private counts]
-  Graph:      [opted in / opted out]
 ```
 
 Then remind the user, once, that the 24 words are the only way back to this
 identity.
 
-## G: Additional machines
+## F: Additional machines
 
 A person is a set of machines joined by `link` grants. Four doors, and the
 **six-word fingerprint is the security boundary in every one of them** — the
@@ -302,7 +283,7 @@ Two limits to state to the user rather than let them assume past:
 There is no equivalent for a `follow` a peer holds on this vault. Nothing here
 sends one; those lapse at their own expiry.
 
-## H: Recovering an identity
+## G: Recovering an identity
 
 The 24 words from step C restore this machine's key:
 
@@ -320,7 +301,7 @@ unreachable, while the machine still looks enrolled.
 hub pin and `vault_id` in it describe an enrollment the new key was never part
 of. `ll-search status` prints a `RECOVERED` line when the two disagree.
 
-## I: Where the seed lives, and repairing it
+## H: Where the seed lives, and repairing it
 
 The identity is an Ed25519 seed held by the binary's seed store. Backends, in
 priority order: the OS keyring (macOS Keychain, Linux Secret Service, Windows

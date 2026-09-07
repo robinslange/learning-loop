@@ -433,7 +433,7 @@ ll-search join          <hub> <invite> <vault> [--config-dir DIR]
 ll-search identity      [--config-dir DIR]
 ll-search recover       <phrase> [--force] [--config-dir DIR]
 ll-search migrate-seed  [--config-dir DIR] [--rollback]
-ll-search graph-opt-in  <true|false> [--config-dir DIR]
+ll-search graph-opt-in  <true|false> [--config-dir DIR]   # withdrawn: the public map it fed is being removed
 ll-search visibility-backfill <vault> [--dry-run] [--config-dir DIR]
 ll-search version
 ```
