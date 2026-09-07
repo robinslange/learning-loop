@@ -63,8 +63,20 @@ pub fn grant_id(statement_bytes: &[u8]) -> String {
 /// key to trust*, so doing it second would mean trusting a key because it
 /// signed something — a hostile hub can always do that. Here the signature is
 /// verified against `expected_from`, the caller's parameter, never against
-/// `st.from`, so no ordering of these two checks can admit a wrong key. The
-/// caller already decided whose signature this must be.
+/// `st.from`, so no ordering of these two checks can admit a wrong key.
+///
+/// **No production caller of THIS function passes a key it decided on, though.**
+/// `link::verify_grant` and `fetch.rs`'s `live_grants` both read `from` out of
+/// the statement and hand it straight back, which makes a grant
+/// self-authenticating — deliberately, since that is what lets Door 3 mean
+/// anything with no hub consulted — and makes the `from` check a consistency
+/// check on the parse rather than an authorisation. What decides that such a
+/// grant is addressed to anyone sits downstream: `live_grants` requires
+/// `st.to == me`, `link::reconcile` requires `st.to == me || st.from == me`,
+/// and `grants::ReadAuthority` requires the hub's own listing on top of both.
+/// The callers that do decide are `verify_revocation`'s and `verify_ack`'s —
+/// `grants::apply_revocations` passes the `from` of the grant being withdrawn,
+/// read out of a grant it already holds and not out of the revocation.
 ///
 /// What the ordering buys is smaller and real: a string comparison rejects
 /// before Ed25519 verification runs over attacker-supplied bytes, and the
