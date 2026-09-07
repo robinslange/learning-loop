@@ -194,7 +194,7 @@ impl ReadAuthority {
 /// question and `ll recover` is what makes the answer ever be no: the file
 /// survives an identity change untouched, so a record naming another key is a
 /// record this machine was never handed.
-fn listed_for(config_dir: &Path, me: &KeyId) -> anyhow::Result<Option<ReadableVaults>> {
+pub(super) fn listed_for(config_dir: &Path, me: &KeyId) -> anyhow::Result<Option<ReadableVaults>> {
     Ok(state::read_readable_vaults(config_dir)?.filter(|listed| &listed.me == me))
 }
 

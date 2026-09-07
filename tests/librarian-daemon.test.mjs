@@ -137,4 +137,90 @@ describe('librarian-daemon', () => {
     await runDaemon({ configOverride: cfg });
     assert.ok(Date.now() - start < 500, 'should return quickly when disabled');
   });
+  it('investigateNote reports the ollama HTTP status, not a TypeError, on an error response', async () => {
+    const { investigateNote } = await import(
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-httperr-' + runId
+    );
+
+    const origFetch = globalThis.fetch;
+    const origWrite = process.stderr.write.bind(process.stderr);
+    const captured = [];
+    globalThis.fetch = async () => ({
+      ok: false,
+      status: 400,
+      json: async () => ({ error: 'context length exceeded' }),
+    });
+    process.stderr.write = (chunk) => {
+      captured.push(String(chunk));
+      return true;
+    };
+
+    try {
+      await investigateNote(
+        '3-permanent/oversized.md',
+        'link_check',
+        {
+          ollamaUrl: 'http://localhost:11434',
+          model: 'test-model',
+          linkPrompt: 'investigate',
+          keepAlive: '5m',
+        },
+        { exec: () => [{ values: [] }] },
+        () => {},
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+      process.stderr.write = origWrite;
+    }
+
+    const log = captured.join('');
+    assert.ok(
+      !log.includes("Cannot read properties of undefined"),
+      'must not surface a TypeError from destructuring an error body:\n' + log,
+    );
+    assert.match(log, /ollama HTTP 400/, 'must name the HTTP status that actually failed');
+  });
+  it('investigateNote reports a 200 that carries no completion', async () => {
+    const { investigateNote } = await import(
+      '../plugin/scripts/librarian/daemon.mjs?bust=daemon-nomsg-' + runId
+    );
+
+    const origFetch = globalThis.fetch;
+    const origWrite = process.stderr.write.bind(process.stderr);
+    const captured = [];
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ error: 'model not found' }),
+    });
+    process.stderr.write = (chunk) => {
+      captured.push(String(chunk));
+      return true;
+    };
+
+    try {
+      await investigateNote(
+        '3-permanent/no-completion.md',
+        'link_check',
+        {
+          ollamaUrl: 'http://localhost:11434',
+          model: 'test-model',
+          linkPrompt: 'investigate',
+          keepAlive: '5m',
+        },
+        { exec: () => [{ values: [] }] },
+        () => {},
+      );
+    } finally {
+      globalThis.fetch = origFetch;
+      process.stderr.write = origWrite;
+    }
+
+    const log = captured.join('');
+    assert.ok(
+      !log.includes("Cannot read properties of undefined"),
+      'a 200 with no message must not become a TypeError:\n' + log,
+    );
+    assert.match(log, /ollama returned no message: model not found/);
+  });
 });
