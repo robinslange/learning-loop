@@ -45,7 +45,13 @@ export async function run(ctx) {
           const currentMajor = parseInt(ctx.pluginVersion.split('.')[0], 10);
           if (meta.plugin_major !== currentMajor) {
             process.stderr.write(
-              `learning-loop federation: seed created on plugin v${meta.plugin_version} (current: v${ctx.pluginVersion}). Run /learning-loop:federation to rotate.\n`,
+              // Not "run /learning-loop:federation to rotate": nothing rotates
+              // an identity. The seed IS the key, no command replaces one, and
+              // `recover` restores the same key rather than issuing a new one.
+              // What a pre-v5 config actually has is an unpinned `hub.key_id`,
+              // which `validate` now refuses — so `ll status` reports BLOCKED
+              // and sync will not run. That is the real thing to go and check.
+              `learning-loop federation: identity created on plugin v${meta.plugin_version} (current: v${ctx.pluginVersion}). Nothing rotates an identity — but a config written before v5 will not sync. Run \`ll-search status\`: it reports BLOCKED when the hub key is unpinned.\n`,
             );
             writeFileSync(noticePath, new Date().toISOString());
           }

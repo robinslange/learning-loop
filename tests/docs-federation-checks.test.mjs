@@ -130,6 +130,34 @@ test('uninstall clears the peer caches and says the grants outlive it', () => {
   }
 });
 
+test('nothing in the plugin tells a user to rotate an identity', () => {
+  // Nothing rotates one. The seed IS the key, no command replaces it, and
+  // `ll-search recover` restores the same key rather than issuing a new one.
+  // The session-start notice said "Run /learning-loop:federation to rotate"
+  // for a plugin major bump, sending a person to a skill with no such step.
+  const hook = readFileSync(
+    join(ROOT, 'plugin', 'hooks', 'session-start', 'vault-snapshot.mjs'),
+    'utf8',
+  );
+  const notice = hook.slice(hook.indexOf('learning-loop federation:'));
+  // The forbidden thing is the instruction, not the word: the replacement
+  // line says "Nothing rotates an identity", which a bare /rotate/ would
+  // fail. Pin the direction — "to rotate" — and the skill it used to send
+  // people to for a step that skill does not have.
+  const line = notice.split('\n')[0];
+  assert.doesNotMatch(line, /\bto rotate\b/i, 'the notice must not tell anyone to rotate');
+  assert.doesNotMatch(
+    line,
+    /learning-loop:federation/,
+    'nor send them to a skill with no such step',
+  );
+  assert.match(
+    flat(hook),
+    /Run \\`ll-search status\\`/,
+    'the actionable check for a pre-v5 config is `ll-search status`, which reports BLOCKED',
+  );
+});
+
 test('health carries the same signals, and defers the rest to doctor', () => {
   const doc = readFileSync(join(SKILLS, 'health', 'SKILL.md'), 'utf8');
   const missing = ['sync-state.json', 'hub holds: nothing', 'STALE', 'BLOCKED'].filter(
