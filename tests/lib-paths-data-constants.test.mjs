@@ -36,6 +36,7 @@ test('FEDERATION_PATHS resolves federation subtree', () => {
     join(pd, 'federation', 'data', 'peers', 'abc123', 'index.db'),
   );
   assert.equal(FEDERATION_PATHS.syncState(pd), join(pd, 'federation', 'sync-state.json'));
+  assert.equal(FEDERATION_PATHS.readableVaults(pd), join(pd, 'federation', 'readable-vaults.json'));
   assert.equal(FEDERATION_PATHS.vaultRegistry(pd), join(pd, 'vaults.json'));
 });
 

@@ -954,8 +954,10 @@ pub async fn revoke(config_dir: &Path, other: &KeyId) -> anyhow::Result<Revoked>
 
     // Only what the hub acknowledged, and it is dropped even on the way out
     // of a failure over the grants behind it: an acknowledged withdrawal is
-    // withdrawn whatever happened next, and a row kept past that would be
-    // re-offered forever for a grant the hub has already retired.
+    // withdrawn whatever happened next, and a row kept past that would show in
+    // `ll link list` as a live link for the year until its statement expires —
+    // `list` reads `active_grants`, which filters on expiry and not on
+    // `lodged`, so nothing about the row's lodging state would hide it.
     update_grants(config_dir, |rows| {
         rows.retain(|row| !withdrawn.iter().any(|id| has_id(row, id)));
         Ok(())
@@ -2227,6 +2229,163 @@ mod tests {
         assert!(revoke(approver.path(), &joiner).await.is_err());
         assert_eq!(grant_ids(approver.path()), before,
             "the hub acknowledged some other grant; this one is still live");
+    }
+
+    /// A second link this machine issued to the same key, un-lodged.
+    ///
+    /// Reachable, and this is how: `ensure_link_to` dedupes against the LOCAL
+    /// store only, so a machine that lost `grants.json` and re-approved mints
+    /// a second grant for a relationship it already had, and `reconcile`
+    /// remembers the outbound half the hub hands back as well as the inbound
+    /// one. Two rows, one key — which is the batch every ordering test above
+    /// is missing.
+    fn a_second_link_to(dir: &Path, other: &KeyId) -> String {
+        let signed = issue_link_grant(&local_signing_key(dir).unwrap(), other, unix_now()).unwrap();
+        remember(dir, &signed, false).unwrap();
+        grant::grant_id(&signed.statement)
+    }
+
+    /// **The ordering, measured.** The hub acknowledges the first withdrawal
+    /// and refuses the second: the acked row must go and the refused one must
+    /// stay, so the retain has to run over `withdrawn` AFTER the loop rather
+    /// than behind `failure?`.
+    ///
+    /// Every other test on this path leaves `withdrawn` empty — the first
+    /// grant is the one that fails — and an empty retain cannot be told from
+    /// no retain at all. This is the batch where the two rows have to move
+    /// apart.
+    #[tokio::test]
+    async fn a_hub_that_acks_half_a_batch_drops_exactly_the_half_it_acked() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let kept = a_second_link_to(approver.path(), &joiner);
+        let acked = grant_ids(approver.path())[0].clone();
+        assert_ne!(acked, kept, "two distinct grants for one relationship");
+
+        let (hub, seen) = test_hub::spawn_grant_hub(
+            vec![],
+            vec![GrantAnswer::Ack, GrantAnswer::Reject("no such grant")],
+        )
+        .await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
+        assert!(err.contains("refused to withdraw"), "the refusal is the answer: {err}");
+        assert_eq!(seen.lock().unwrap().len(), 2, "both halves were offered before it stopped");
+        assert_eq!(grant_ids(approver.path()), vec![kept],
+            "the acknowledged withdrawal is withdrawn, and the refused grant is still live");
+    }
+
+    /// A refusal ends the command rather than working through what is behind
+    /// it. The hub has just said no to a grant this machine issued; the right
+    /// answer is to stop and report, not to keep signing withdrawals for the
+    /// rest of the batch and hand back a failure that names only the last one.
+    ///
+    /// The mock's table runs out after the refusal and it acks everything
+    /// after that, so a loop that carried on would withdraw the second grant
+    /// — which is exactly the state this must not reach.
+    #[tokio::test]
+    async fn a_refusal_ends_the_batch_instead_of_working_through_it() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        a_second_link_to(approver.path(), &joiner);
+        let before = grant_ids(approver.path());
+        assert_eq!(before.len(), 2, "a batch of one cannot show this");
+
+        let (hub, seen) =
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no such grant")]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
+        assert!(err.contains("refused to withdraw"), "{err}");
+        assert_eq!(seen.lock().unwrap().len(), 1,
+            "the grant behind the refusal was never offered");
+        assert_eq!(grant_ids(approver.path()), before, "and neither row moved");
+    }
+
+    /// The same partial, against the failure that is not a decision: the hub
+    /// acknowledges the first withdrawal and then the socket goes away. An
+    /// acknowledged withdrawal is withdrawn whatever happened next, so the
+    /// answer is the same one — and it is the answer the code intends,
+    /// because the hub has already retired that grant and no later failure
+    /// puts it back.
+    #[tokio::test]
+    async fn a_socket_that_dies_after_one_ack_still_drops_what_the_hub_acknowledged() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let kept = a_second_link_to(approver.path(), &joiner);
+        let acked = grant_ids(approver.path())[0].clone();
+
+        let hub = test_hub::spawn_mock_hub(move |mut ws| async move {
+            let Some(hello) = test_hub::recv_client_msg(&mut ws).await else { return };
+            let ClientMsg::ClientHello { nonce_c, .. } = hello else { return };
+            test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
+            let _auth = test_hub::recv_client_msg(&mut ws).await;
+            if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
+                protocol_version: PROTOCOL_VERSION,
+                vault_state: vec![],
+                grants: vec![],
+                revocations: vec![],
+            })
+            .await
+            {
+                return;
+            }
+            let Some(_first) = test_hub::recv_client_msg(&mut ws).await else { return };
+            test_hub::send_hub_msg(&mut ws, &HubMsg::GrantAck { grant_id: acked }).await;
+        })
+        .await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        assert!(revoke(approver.path(), &joiner).await.is_err(),
+            "a dead socket is not a completed withdrawal");
+        assert_eq!(grant_ids(approver.path()), vec![kept],
+            "what the hub acknowledged is gone; what it never answered for is not");
+    }
+
+    /// `revoke` withdraws links and nothing else, and the filter that says so
+    /// is the only thing between `ll link revoke` and a grant of another kind
+    /// issued to the same key.
+    ///
+    /// No production path puts a non-`link` grant in this store today —
+    /// `approve_offline` mints a link and `reconcile` refuses every other
+    /// kind on the way in — so the row here is planted. What the filter buys
+    /// is that the day one arrives, this command still only takes the link.
+    #[tokio::test]
+    async fn revoking_a_link_leaves_a_grant_of_another_kind_to_the_same_key() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let link_id = grant_ids(approver.path())[0].clone();
+
+        let signer = local_signing_key(approver.path()).unwrap();
+        let now = unix_now();
+        let statement = canonical_bytes(&GrantStatement {
+            v: 5,
+            kind: GrantKind::Follow,
+            from: key_of(approver.path()),
+            to: joiner.clone(),
+            scope: Some("v-personal".into()),
+            issued_at: now,
+            expires_at: now + 100_000,
+            nonce: b64(&random_nonce()),
+        });
+        let follow = SignedGrant { signature: signer.sign(&statement).to_bytes().to_vec(), statement };
+        let follow_id = grant::grant_id(&follow.statement);
+        remember(approver.path(), &follow, true).unwrap();
+
+        let (hub, seen) = test_hub::spawn_grant_hub(vec![], vec![]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+        let done = revoke(approver.path(), &joiner).await.unwrap();
+
+        assert_eq!(done.grant_ids, vec![link_id], "the link, and only the link");
+        assert_eq!(seen.lock().unwrap().len(), 1,
+            "one withdrawal was signed: the follow was never offered");
+        assert_eq!(grant_ids(approver.path()), vec![follow_id],
+            "a follow is not a link and `ll link revoke` does not take it");
     }
 
     /// Only the issuer may revoke, so this withdraws one half. The grant the

@@ -80,6 +80,7 @@ fn bench_cold_preprocess_plus_insert(c: &mut Criterion) {
         let emb = common::deterministic_embedding(i as u64, EMBED_DIM, SEED);
         items.push(EmbedItem {
             path: format!("{i:05}.md"),
+            note_uuid: format!("bench-uuid-{i}"),
             title: result.title,
             tags: result.tags,
             body: result.body,
@@ -146,6 +147,7 @@ fn bench_pre_1f_insert_reference(c: &mut Criterion) {
         let emb = common::deterministic_embedding(i as u64, EMBED_DIM, SEED);
         items.push(EmbedItem {
             path: format!("{i:05}.md"),
+            note_uuid: format!("bench-uuid-{i}"),
             title: result.title,
             tags: result.tags,
             body: result.body,

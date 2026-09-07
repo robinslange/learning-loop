@@ -21,6 +21,7 @@ const FEDERATION_DIR = FEDERATION_PATHS.root(PLUGIN_DATA);
 const OUTBOX_DIR = FEDERATION_PATHS.outbox(PLUGIN_DATA);
 const PEERS_DIR = FEDERATION_PATHS.peersDir(PLUGIN_DATA);
 const CONFIG_PATH = FEDERATION_PATHS.config(PLUGIN_DATA);
+const READABLE_VAULTS_PATH = FEDERATION_PATHS.readableVaults(PLUGIN_DATA);
 
 const args = process.argv.slice(2);
 
@@ -78,6 +79,28 @@ function loadPeers() {
   return config.peers || [];
 }
 
+// The vault ids the hub last named as readable by this key.
+//
+// A directory under federation/data/peers/ is not authority to read it. It
+// records that some cycle was once allowed to fetch that vault, and a grant
+// can be withdrawn between then and now — so this script enumerating the
+// directory and opening each index.db was a second way into the peer caches
+// that answered where the Rust reader refuses. Same list, same gate, so the
+// two funnels agree.
+//
+// Absent or unreadable is NO authority rather than an unknown, matching
+// sync::state::read_readable_vaults: a cache must not outlive the answer that
+// created it.
+//
+// This is the LISTING half only. The Rust side also requires a live grant
+// covering the vault, which needs signature verification that does not belong
+// in this script.
+function readableVaultIds() {
+  const { value, error } = safeLoad(READABLE_VAULTS_PATH, { fallback: null });
+  if (error && error !== 'enoent') logError('retraction-notify.readableVaultIds', error);
+  return new Set(Array.isArray(value?.vault_ids) ? value.vault_ids : []);
+}
+
 function listIndexedPeerIds() {
   if (!existsSync(PEERS_DIR)) return [];
   try {
@@ -98,7 +121,10 @@ async function main() {
   const peers = loadPeers();
   const indexedPeers = listIndexedPeerIds();
 
-  const candidatePeerIds = new Set([...peers.map((p) => p.id), ...indexedPeers]);
+  const readable = readableVaultIds();
+  const candidatePeerIds = new Set(
+    [...peers.map((p) => p.id), ...indexedPeers].filter((id) => readable.has(id)),
+  );
 
   const targets = [];
   for (const peerId of candidatePeerIds) {

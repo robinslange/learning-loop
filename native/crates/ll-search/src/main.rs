@@ -161,8 +161,9 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
-    /// Restore this machine's identity from the 24-word recovery phrase
-    /// `ll-search join` printed once.
+    /// Put the identity a 24-word recovery phrase names onto this machine.
+    /// The phrase decides which key that is — this machine's own only if this
+    /// is the machine `ll-search join` printed it on.
     Recover {
         /// The 24 words, quoted as a single argument.
         phrase: String,
@@ -408,7 +409,13 @@ struct RecoverOutcome {
     replaced: Option<String>,
 }
 
-/// Restore this machine's signing identity from a 24-word recovery phrase.
+/// Put the signing identity a 24-word recovery phrase names onto this machine.
+///
+/// **Not "this machine's identity".** The phrase names one key and this makes
+/// that key the one this machine signs with, whatever key it held before. Run
+/// on a second machine it hands over the FIRST machine's identity, which is a
+/// real use — the machine that held it is gone — and is why the reports here
+/// name keys rather than saying "the identity".
 ///
 /// The guard is `--force`, and what it guards is the *loss*, not the write: a
 /// recovery that would put a different key here orphans every grant naming the
@@ -435,7 +442,13 @@ fn recover(
     let seed = zeroize::Zeroizing::new(words::seed_from_phrase(phrase)?);
     let key_id = KeyId::from_pubkey(&SigningKey::from_bytes(&seed).verifying_key());
 
-    let replaced = seed_store::load_only(config_dir)?
+    let existing = seed_store::load_only(config_dir)?;
+    // Not `replaced.is_none()`. A machine with no readable seed replaces
+    // nothing, and it is also a machine that cannot show it wrote the listing
+    // sitting next to it — which is `ReadAuthority::load`'s rule, that no
+    // identity is no authority rather than an unchanged one.
+    let same_identity = existing.as_ref().is_some_and(|r| r.signing_key.to_bytes() == *seed);
+    let replaced = existing
         .filter(|r| r.signing_key.to_bytes() != *seed)
         .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()).as_str().to_string());
 
@@ -445,6 +458,36 @@ fn recover(
              every grant that names it. Re-run with --force if that is what you mean.",
             config_dir.display(),
         );
+    }
+
+    // Before the seed moves, not after. `readable-vaults.json` is the hub's
+    // answer about what some earlier key was allowed to read, and it survives
+    // a recovery that makes it meaningless — so a reader that trusts it now
+    // serves that key's caches under the new one. It stays only when the
+    // identity now installed is the one that earned it.
+    //
+    // Deleting it rather than teaching each reader to check whose answer it
+    // was: absent already means no authority everywhere it is read, in every
+    // language, including readers nobody has written yet. `ll sync` writes the
+    // new key's answer on the next cycle.
+    //
+    // The order is the recoverable one. Failing here leaves the OLD identity
+    // with no listing, which one sync fixes. The other order leaves the NEW
+    // identity holding the old key's answer, which nothing fixes because
+    // nothing afterwards knows it is wrong.
+    if !same_identity {
+        use anyhow::Context as _;
+        let listed = ll_search::sync::config::readable_vaults_path(config_dir);
+        match std::fs::remove_file(&listed) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("could not drop {}, which names what the identity \
+                             being replaced was allowed to read", listed.display())
+                })
+            }
+        }
     }
 
     let backend = seed_store::store_seed(config_dir, &seed)?;
@@ -1216,41 +1259,68 @@ mod tests {
 
     /// Spec:334 is not met for a link and the report has to say so in every
     /// branch, because the person reading it is deciding whether their notes
-    /// are still on the other machine. It says what did not happen, it does
-    /// not use the word that would imply it did, and it never points at a
-    /// bigger hammer — there is no `--force` on this command, and an error or
-    /// a report that named one would be teaching the reflex.
+    /// are still on the other machine.
+    ///
+    /// **Every branch is pinned as exact text, not as a wordlist.** A list of
+    /// banned words checks that the report avoids five spellings of "deleted"
+    /// and says nothing at all about what it does say — a first sentence
+    /// rewritten to claim the opposite passes it, and the next author reaches
+    /// for a synonym the list has never heard of. `revoke_report` is a
+    /// function rather than a run of `eprintln!`s inside `main`'s arm exactly
+    /// so the lines that must not lie can be compared whole.
+    ///
+    /// The wordlist stays below as a second net over the same four strings.
     #[test]
-    fn the_revoke_report_says_what_it_did_not_do_whatever_else_it_says() {
+    fn the_revoke_report_says_the_same_four_things_and_no_others() {
         use ed25519_dalek::SigningKey;
         use ll_search::sync::key_id::KeyId;
         use ll_search::sync::link::Revoked;
         let other =
             KeyId::from_pubkey(&SigningKey::from_bytes(&[11u8; 32]).verifying_key());
-        for inbound_remains in [false, true] {
-            for grant_ids in [vec![], vec!["abc".to_string()]] {
-                let text = revoke_report(&Revoked { grant_ids, inbound_remains }, &other);
-                assert!(text.contains("Nothing was deleted"), "{text}");
-                assert!(text.contains("federation/data/peers"),
-                    "it names the directory it did not touch: {text}");
-                assert!(text.contains("not recalled"),
-                    "and does not let a reader think the copy came back: {text}");
-                for lie in ["Removed", "wiped", "erased", "purged", "force"] {
-                    assert!(!text.contains(lie), "the report must not say {lie:?}: {text}");
-                }
+        let id = other.as_str();
+        let withdrew = |n: usize| {
+            format!(
+                "Withdrew {n} link grant(s) issued to {id}. The hub acknowledged it and \
+                 stops authorising that key.\n"
+            )
+        };
+        let inbound = format!(
+            "The link {id} issued to THIS machine still stands. It is that machine's own \
+             statement and only it can withdraw it.\n"
+        );
+        let untouched = "Nothing was deleted. A link covers every vault its issuer owns, so it \
+             names no cached directory to take, and federation/data/peers/ is exactly as it \
+             was. Data that machine already fetched is not recalled either — it stops being \
+             served, and it drops what the withdrawal names on its next sync.\n";
+
+        let report = |grant_ids: Vec<String>, inbound_remains: bool| {
+            revoke_report(&Revoked { grant_ids, inbound_remains }, &other)
+        };
+        assert_eq!(report(vec![], false), format!("{}{untouched}", withdrew(0)));
+        assert_eq!(report(vec![], true), format!("{}{inbound}{untouched}", withdrew(0)));
+        assert_eq!(
+            report(vec!["abc".into()], false),
+            format!("{}{untouched}", withdrew(1))
+        );
+        assert_eq!(
+            report(vec!["abc".into(), "def".into()], true),
+            format!("{}{inbound}{untouched}", withdrew(2))
+        );
+
+        // The same four strings, against the words that would make any of
+        // them a claim about somebody's notes coming back — and against a
+        // bigger hammer, because there is no `--force` on this command and a
+        // report that named one would be teaching the reflex.
+        for text in [
+            report(vec![], false),
+            report(vec![], true),
+            report(vec!["abc".into()], false),
+            report(vec!["abc".into()], true),
+        ] {
+            for lie in ["Removed", "wiped", "erased", "purged", "force"] {
+                assert!(!text.contains(lie), "the report must not say {lie:?}: {text}");
             }
         }
-        let half = revoke_report(
-            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: true },
-            &other,
-        );
-        assert!(half.contains("still stands"), "half a door is not a shut one: {half}");
-        let whole = revoke_report(
-            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: false },
-            &other,
-        );
-        assert!(!whole.contains("still stands"),
-            "and there is no other half to warn about here: {whole}");
     }
 
     /// clap builds the parser at runtime, so a malformed argument definition
@@ -1308,6 +1378,142 @@ mod tests {
             "silently replacing a working identity would orphan every grant it holds");
         assert_eq!(loaded_seed(dir.path()), [7u8; 32],
             "a refused recovery must leave the identity it refused to replace exactly as it was");
+    }
+
+    /// Plant the hub's last answer about what this key may read.
+    fn list_one_readable_vault(dir: &Path) {
+        ll_search::sync::state::write_readable_vaults(
+            dir,
+            &ll_search::sync::state::ReadableVaults { at: 1, vault_ids: vec!["v-peer".into()] },
+        )
+        .unwrap();
+    }
+
+    fn a_listing_is_here(dir: &Path) -> bool {
+        ll_search::sync::state::read_readable_vaults(dir).unwrap().is_some()
+    }
+
+    /// **A recovery takes the outgoing key's read authority with it.**
+    ///
+    /// `readable-vaults.json` records what the hub last allowed the key that
+    /// was here to read. Recovering puts a different key on this machine and
+    /// touches nothing else — `config.json` is not rewritten either, which is
+    /// deliberate and is how `ll status` still reports RECOVERED — so the file
+    /// would otherwise outlive the identity that earned it and every reader
+    /// that trusts it would serve the old key's caches under the new one.
+    ///
+    /// Deleted rather than checked, because absent already means no authority
+    /// in every reader, including the ones that hold no key and cannot tell
+    /// whose answer it was. `ll sync` writes the new key's answer next cycle.
+    #[test]
+    fn a_recovery_leaves_no_read_authority_for_any_reader() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+        // The dangerous state has to be reachable, or the assertion below
+        // passes against a file that was never written.
+        assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        recover(dir.path(), &phrase, true).unwrap();
+
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32], "the identity did change");
+        assert!(!a_listing_is_here(dir.path()),
+            "the new key inherited the old key's answer about what it may read");
+    }
+
+    /// The other wrong answer, and the reason this is not an unconditional
+    /// delete. Recovering the identity already here needs no `--force` on
+    /// purpose — checking that the phrase in the drawer is the right one must
+    /// not be the case that trains a reach for it — and that check must not
+    /// silently cost a working machine its read authority until the next sync.
+    #[test]
+    fn recovering_the_identity_already_here_keeps_the_listing() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[7u8; 32]).unwrap();
+        recover(dir.path(), &phrase, false).unwrap();
+
+        assert!(a_listing_is_here(dir.path()),
+            "nothing was replaced, so the hub's answer still describes this key");
+    }
+
+    /// **The quietest path through `recover`, and the one a "was anything
+    /// replaced?" test cannot see.** A config dir holding a listing and no
+    /// readable seed replaces nothing — `load_only` reports every miss as
+    /// `Ok(None)` — so it needs no `--force`, warns about nothing, and would
+    /// keep a listing it cannot show it wrote.
+    ///
+    /// Reachable: a keyring backend whose Keychain item is gone, a config dir
+    /// copied while its seed stayed behind in the source Keychain, an
+    /// encrypted seed deleted while `federation/` survived. The listing is not
+    /// evidence against any of them — it proves an identity existed when the
+    /// cycle wrote it, not that the identity is still here.
+    ///
+    /// So the rule is the identity that earned the listing, not the fact of a
+    /// replacement: `ReadAuthority::load` already refuses to treat a machine
+    /// with no identity as a machine with nothing to read.
+    #[test]
+    fn a_listing_with_no_readable_seed_behind_it_is_dropped_too() {
+        pin_file_backend();
+        let dir = tempfile::tempdir().unwrap();
+        list_one_readable_vault(dir.path());
+        assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
+        assert!(
+            ll_search::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
+            "and no seed, which is what makes this the quiet path"
+        );
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        // No `--force`: there was no identity to replace, which is the point.
+        recover(dir.path(), &phrase, false).unwrap();
+
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32]);
+        assert!(!a_listing_is_here(dir.path()),
+            "a machine that cannot show it wrote this listing must not keep it");
+    }
+
+    /// **The order, and it is the half that cannot be recovered from.** The
+    /// listing is dropped BEFORE the seed moves, so a failure leaves the old
+    /// identity with no listing — one sync away from correct. The other order
+    /// leaves the new identity holding the old key's answer, and nothing
+    /// afterwards knows it is wrong.
+    ///
+    /// Proved by making the drop fail rather than by reading the code's order.
+    /// The mechanism is arbitrary — `readable-vaults.json` is planted as a
+    /// directory, which `remove_file` refuses — and it is chosen so that
+    /// EXACTLY ONE thing fails: `store_seed` writes `.seed-meta.json` and the
+    /// encrypted seed beside it in a directory that is still perfectly
+    /// writable, so a seed that did not move can only be this.
+    #[test]
+    fn a_listing_that_cannot_be_dropped_stops_the_recovery_before_the_seed_moves() {
+        let dir = seeded_dir([7u8; 32]);
+        std::fs::create_dir_all(
+            ll_search::sync::config::readable_vaults_path(dir.path()),
+        )
+        .unwrap();
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        let err = recover(dir.path(), &phrase, true).unwrap_err();
+
+        assert!(err.to_string().contains("read"),
+            "the error says what it could not drop and why that stopped it: {err}");
+        assert_eq!(loaded_seed(dir.path()), [7u8; 32],
+            "the identity moved while its predecessor's read authority stayed behind");
+    }
+
+    /// And a refused recovery changes nothing at all — the identity was
+    /// already pinned above, the listing is pinned here.
+    #[test]
+    fn a_refused_recovery_leaves_the_listing_where_it_was() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        assert!(recover(dir.path(), &phrase, false).is_err());
+
+        assert!(a_listing_is_here(dir.path()),
+            "a recovery that did not happen must not take the read authority with it");
     }
 
     #[test]

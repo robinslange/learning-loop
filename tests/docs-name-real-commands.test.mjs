@@ -369,6 +369,77 @@ test('every command the docs name exists in the CLI', () => {
   );
 });
 
+// ---------------------------------------------------------------------------
+// The other direction.
+// ---------------------------------------------------------------------------
+
+/**
+ * A guard that checks one direction of a two-way property will eventually be
+ * trusted for both. Everything above asks whether a documented command exists;
+ * nothing asked whether an existing command is documented, which is how
+ * `ll link revoke` shipped undocumented through a whole plan of
+ * doc-consistency work and stayed green.
+ *
+ * Same derived `CLI` map, same span parser, read the other way round.
+ */
+
+/** The document that owes a line to every command. */
+const ARCHITECTURE = 'ARCHITECTURE.md';
+
+/**
+ * Commands `ARCHITECTURE.md` is allowed not to name, and why each one is out.
+ *
+ * Same shape as `published-docs.mjs`'s `EXCLUDED`, and checked for rot the
+ * same way: an entry naming a command that no longer exists, or one that the
+ * document has since started naming, is coverage that reads as real and is
+ * not.
+ */
+const UNDOCUMENTED = [];
+
+/**
+ * The commands a document owes a line to: every LEAF of the CLI.
+ *
+ * A group (`link`, `vault`) is not a runnable command — it is named by its
+ * leaves, and requiring a bare `ll-search link` span would be asserting a
+ * sentence nobody has a reason to write.
+ */
+const LEAF_COMMANDS = Object.keys(CLI).filter((name) => !GROUPS.has(name));
+
+/** Every `ll-search <cmd>` invocation `rel` names, by command name. */
+function commandsNamedIn(rel) {
+  return new Set(
+    codeSpans(readFileSync(join(ROOT, rel), 'utf8'))
+      .map(parseSpan)
+      .filter(Boolean)
+      .map((hit) => hit.name),
+  );
+}
+
+test('every command in the CLI is named in ARCHITECTURE.md', () => {
+  const named = commandsNamedIn(ARCHITECTURE);
+  // Sweeping the document and extracting nothing from it would pass the
+  // assertion below by finding no command anywhere. Same failure the include
+  // list was.
+  assert.ok(named.size > 20, `extracted only ${named.size} invocations from ${ARCHITECTURE}`);
+
+  const excused = new Set(UNDOCUMENTED.map((e) => e.name));
+  const missing = LEAF_COMMANDS.filter((name) => !named.has(name) && !excused.has(name));
+  assert.deepEqual(
+    missing.sort(),
+    [],
+    `commands the CLI has and ${ARCHITECTURE} does not name:\n${missing.sort().join('\n')}`,
+  );
+});
+
+test('every exclusion from the ARCHITECTURE sweep still describes something real', () => {
+  const named = commandsNamedIn(ARCHITECTURE);
+  for (const { name, why } of UNDOCUMENTED) {
+    assert.ok(why, `${name} is excluded with no reason`);
+    assert.ok(LEAF_COMMANDS.includes(name), `${name} is excluded and is not a command`);
+    assert.ok(!named.has(name), `${name} is excluded and ${ARCHITECTURE} names it anyway`);
+  }
+});
+
 test('every flag the docs name exists on the command they name it on', () => {
   const unknown = [];
   for (const rel of DOCS()) {

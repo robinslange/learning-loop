@@ -13,6 +13,7 @@ const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
 const PEERS_DIR = join(FEDERATION_DIR, 'data', 'peers');
 const OUTBOX_DIR = join(FEDERATION_DIR, 'outbox');
 const CONFIG_PATH = join(FEDERATION_DIR, 'config.json');
+const READABLE_VAULTS_PATH = join(FEDERATION_DIR, 'readable-vaults.json');
 
 async function makePeerIndex(peerId, notePaths) {
   mkdirSync(join(PEERS_DIR, peerId), { recursive: true });
@@ -34,6 +35,12 @@ async function makePeerIndex(peerId, notePaths) {
   const data = db.export();
   writeFileSync(join(PEERS_DIR, peerId, 'index.db'), Buffer.from(data));
   db.close();
+}
+
+// The hub's last ruling on what this key may read. Every peer cache these
+// tests plant needs a line here, because a cache is not authority on its own.
+function listReadable(vaultIds) {
+  writeFileSync(READABLE_VAULTS_PATH, JSON.stringify({ at: 1, vault_ids: vaultIds }));
 }
 
 function runScript(args) {
@@ -67,6 +74,7 @@ describe('retraction-notify', () => {
   beforeEach(() => {
     if (existsSync(OUTBOX_DIR)) rmSync(OUTBOX_DIR, { recursive: true, force: true });
     if (existsSync(PEERS_DIR)) rmSync(PEERS_DIR, { recursive: true, force: true });
+    rmSync(READABLE_VAULTS_PATH, { force: true });
     mkdirSync(PEERS_DIR, { recursive: true });
   });
 
@@ -77,6 +85,7 @@ describe('retraction-notify', () => {
   it('targets only peers whose index contains the note', async () => {
     await makePeerIndex('alice', ['3-permanent/shared.md', '3-permanent/other.md']);
     await makePeerIndex('bob', ['3-permanent/different.md']);
+    listReadable(['alice', 'bob']);
 
     const result = runScript(['3-permanent/shared.md', '--reason', 'wrong']);
     assert.equal(result.ok, true);
@@ -89,6 +98,7 @@ describe('retraction-notify', () => {
 
   it('writes retraction events to outbox JSONL', async () => {
     await makePeerIndex('alice', ['3-permanent/note.md']);
+    listReadable(['alice']);
     runScript(['3-permanent/note.md', '--reason', 'first']);
     runScript(['3-permanent/note.md', '--reason', 'second']);
     const events = readOutbox();
@@ -99,6 +109,7 @@ describe('retraction-notify', () => {
 
   it('records empty targets when no peer has the note', async () => {
     await makePeerIndex('alice', ['3-permanent/other.md']);
+    listReadable(['alice']);
     const result = runScript(['3-permanent/orphan.md']);
     assert.equal(result.ok, true);
     assert.deepEqual(result.event.targets, []);
@@ -107,6 +118,7 @@ describe('retraction-notify', () => {
 
   it('includes replacement and source_graph in event', async () => {
     await makePeerIndex('alice', ['3-permanent/old.md']);
+    listReadable(['alice']);
     const result = runScript([
       '3-permanent/old.md',
       '--reason', 'corrected',
@@ -127,6 +139,7 @@ describe('retraction-notify', () => {
 
   it('discovers peers from peers/ directory even if not in config', async () => {
     await makePeerIndex('charlie', ['3-permanent/note.md']);
+    listReadable(['charlie']);
     const result = runScript(['3-permanent/note.md']);
     assert.deepEqual(result.event.targets, ['charlie']);
   });
@@ -142,9 +155,40 @@ describe('retraction-notify', () => {
     writeFileSync(peerDb, Buffer.from(db.export()));
     db.close();
 
+    listReadable(['windows_peer']);
     const result = runScript(['3-permanent/sample-note.md', '--reason', 'test']);
     assert.equal(result.ok, true);
     assert.equal(result.targeted_peers, 1);
     assert.deepEqual(result.event.targets, ['windows_peer']);
+  });
+
+  // This script is the SECOND way into federation/data/peers/. The Rust
+  // reader gates every federated read on the hub's last listing; this one
+  // enumerated the directory and opened each index.db, so on a machine whose
+  // authority had been withdrawn it named the peer while the reader served
+  // nothing. Same directory, two answers.
+  //
+  // Nothing delivers federation/outbox/ today, which is what keeps this a
+  // latent trap rather than a live leak — and is exactly why it is worth
+  // closing before something does.
+  it('does not target a cached peer the hub no longer lists', async () => {
+    await makePeerIndex('alice', ['3-permanent/shared.md']);
+    listReadable([]);
+    const result = runScript(['3-permanent/shared.md']);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.event.targets, [], 'the cache is stale, not authority');
+  });
+
+  it('treats a missing listing as no authority rather than as an unknown', async () => {
+    await makePeerIndex('alice', ['3-permanent/shared.md']);
+    const result = runScript(['3-permanent/shared.md']);
+    assert.deepEqual(result.event.targets, []);
+  });
+
+  it('treats an unreadable listing the same way', async () => {
+    await makePeerIndex('alice', ['3-permanent/shared.md']);
+    writeFileSync(READABLE_VAULTS_PATH, '{not json');
+    const result = runScript(['3-permanent/shared.md']);
+    assert.deepEqual(result.event.targets, []);
   });
 });
