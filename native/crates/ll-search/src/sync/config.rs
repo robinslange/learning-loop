@@ -6,21 +6,6 @@ pub struct FederationConfig {
     pub identity: Identity,
     pub visibility: VisibilityConfig,
     pub hub: HubEndpoint,
-    /// Whether this vault may be drawn on the federation-wide graph. Sent on
-    /// every `ClientHello`, where the hub requires it with no serde default.
-    ///
-    /// The default here is `false`, and stays `false`: `opt_in` means off
-    /// until someone says otherwise, and this publishes a person's notes into
-    /// a shared graph. The v4 failure was that nothing could set it at all —
-    /// `ll graph-opt-in` is that missing setter, and `ll status` shows the
-    /// value. A `true` default would be a different bug wearing this one's
-    /// clothes.
-    ///
-    /// Named for the wire field it feeds. It was `graph` while it fed only
-    /// v4's upload envelope, and one flag answering to two names across a
-    /// repo boundary is how the two ends drift.
-    #[serde(default, alias = "graph")]
-    pub graph_opt_in: bool,
     #[serde(default)]
     pub vault_id: Option<String>,
     #[serde(default)]
@@ -99,7 +84,6 @@ impl FederationConfig {
             vault_id: None,
             vault_path: None,
             recovery_key_id: None,
-            graph_opt_in: false,
         }
     }
 }
@@ -274,36 +258,6 @@ mod tests {
         }).to_string();
         let c: FederationConfig = serde_json::from_str(&raw).unwrap();
         assert!(c.vault_id.is_none());
-    }
-
-    /// The hub requires `graph_opt_in` on every hello and counts it, so the
-    /// value this config reports is the one that reaches the graph. Absent
-    /// means opted out — the safe half of a publication decision — and the
-    /// legacy `graph` key means whatever it said, because renaming a field
-    /// must not silently withdraw a vault its owner had published.
-    #[test]
-    fn graph_opt_in_defaults_to_off_and_still_reads_the_legacy_key() {
-        let base = |extra: &str| format!(
-            r#"{{"identity":{{"displayName":"robin","pubkey":"ed25519:AAAA"}},
-                 "visibility":{{"default":"private","rules":[]}},
-                 "hub":{{"endpoint":"wss://h.example/ws","key_id":"zAbc"}}{extra}}}"#
-        );
-
-        let absent: FederationConfig = serde_json::from_str(&base("")).unwrap();
-        assert!(!absent.graph_opt_in, "a vault nobody opted in is not published");
-
-        let legacy: FederationConfig = serde_json::from_str(&base(r#","graph":true"#)).unwrap();
-        assert!(legacy.graph_opt_in, "the pre-rename key still carries its value");
-
-        let current: FederationConfig =
-            serde_json::from_str(&base(r#","graph_opt_in":true"#)).unwrap();
-        assert!(current.graph_opt_in);
-
-        // And it is written back under the new name, so a config that has been
-        // through `ll-search graph-opt-in` names the same field the wire does.
-        let written = serde_json::to_value(&current).unwrap();
-        assert_eq!(written["graph_opt_in"], serde_json::json!(true));
-        assert!(written.get("graph").is_none());
     }
 
     #[test]

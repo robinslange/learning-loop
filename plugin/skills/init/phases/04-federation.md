@@ -18,8 +18,7 @@ If the user says **yes**, hand off:
 
 ```
 Run /learning-loop:federation. The full setup is there: enrolling this vault on
-a hub, the recovery phrase, visibility rules, graph opt-in, and linking a second
-machine.
+a hub, the recovery phrase, visibility rules, and linking a second machine.
 
 Have the hub's endpoint and its six-word fingerprint ready — you confirm those
 words out-of-band before anything is sent.

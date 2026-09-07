@@ -87,7 +87,6 @@ pub async fn authenticate(
         protocol_version: PROTOCOL_VERSION,
         model_id: local_model_id(),
         invite_code: invite.map(str::to_string),
-        graph_opt_in: config.graph_opt_in,
     }).await?;
 
     // Exactly one acceptable message here. There is no branch that treats a
@@ -210,25 +209,6 @@ mod tests {
                 sig_h: b64(&[0xffu8; 64]),
             }).await;
         }).await
-    }
-
-    /// The hub requires `graph_opt_in` on every hello and counts what it
-    /// gets, so the config value has to reach the wire — a hello carrying a
-    /// constant would make `graph_opt_in_count` a fact about this function
-    /// rather than about the people using it. Both values, because a hello
-    /// hard-coded to either one passes a test that only checks the other.
-    #[tokio::test]
-    async fn the_hello_carries_this_vaults_graph_opt_in_choice() {
-        for chosen in [false, true] {
-            let hub = fake_hub_happy_path(HubVaults::new()).await;
-            let mut cfg = pinned_config();
-            cfg.graph_opt_in = chosen;
-            run_handshake(&hub, &cfg).await.expect("handshake");
-            let Some(ClientMsg::ClientHello { graph_opt_in, .. }) = hub.last_hello() else {
-                panic!("the hub recorded no client-hello");
-            };
-            assert_eq!(graph_opt_in, chosen, "the hello must restate what this vault chose");
-        }
     }
 
     #[tokio::test]

@@ -190,7 +190,6 @@ pub async fn join(
             endpoint: hub_endpoint.to_string(),
             key_id: Some(hub.hub_key_id.clone()),
         },
-        graph_opt_in: false,
         vault_id: Some(vault_id.clone()),
         vault_path: Some(vault_path.display().to_string()),
         recovery_key_id: Some(recovery_key_id.as_str().to_string()),

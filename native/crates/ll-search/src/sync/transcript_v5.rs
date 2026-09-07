@@ -123,7 +123,6 @@ fn this_client_produces_every_message_in_the_transcript() {
             protocol_version: PROTOCOL_VERSION,
             model_id: text(inp, "model_id").into(),
             invite_code: None,
-            graph_opt_in: inp["graph_opt_in"].as_bool().expect("graph_opt_in is a bool"),
         })
         .unwrap(),
     );
@@ -280,11 +279,10 @@ fn this_client_accepts_every_message_in_the_transcript() {
 
     // Then the values, on the messages whose contents this client acts on.
     match serde_json::from_str::<ClientMsg>(text(m, "client_hello")).unwrap() {
-        ClientMsg::ClientHello { key_id, protocol_version, invite_code, graph_opt_in, .. } => {
+        ClientMsg::ClientHello { key_id, protocol_version, invite_code, .. } => {
             assert_eq!(key_id, text(&t["key_ids"], "issuer"));
             assert_eq!(protocol_version, PROTOCOL_VERSION);
             assert_eq!(invite_code, None, "an absent invite is null, not an empty string");
-            assert_eq!(graph_opt_in, inp["graph_opt_in"].as_bool().unwrap());
         }
         other => panic!("wrong variant: {other:?}"),
     }

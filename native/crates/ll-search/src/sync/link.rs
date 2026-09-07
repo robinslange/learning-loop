@@ -499,7 +499,6 @@ pub async fn request(
                 endpoint: hub_endpoint.to_string(),
                 key_id: Some(hub.hub_key_id.clone()),
             },
-            graph_opt_in: false,
             vault_id: Some(uuid::Uuid::now_v7().to_string()),
             vault_path: Some(vault_path.display().to_string()),
             // Belongs to the person, and the person already has one. Only the
@@ -1064,8 +1063,7 @@ mod tests {
                     endpoint: ws_url.to_string(),
                     key_id: Some(test_hub::hub_key_id_str()),
                 },
-                graph_opt_in: false,
-                vault_id: Some("v1".into()),
+                    vault_id: Some("v1".into()),
                 vault_path: None,
                 recovery_key_id: recovery.map(|k| k.as_str().to_string()),
             },

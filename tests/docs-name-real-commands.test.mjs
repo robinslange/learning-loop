@@ -290,7 +290,7 @@ test('the CLI list is derived, and the derivation actually works', () => {
     'query',
     'status',
     'index-status',
-    'graph-opt-in',
+    'visibility-backfill',
     'link approve',
     'vault add',
   ]) {

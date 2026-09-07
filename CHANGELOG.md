@@ -55,11 +55,11 @@ may connect and never decides trust between keys.
   unreachable.
 - **The public knowledge map is withdrawn, pending a revisit.** The shared
   cross-vault visualisation and the `graph_opt_in` toggle that fed it are
-  being removed rather than carried into v5 — with no map there is nothing to
-  opt into. The **privacy tiers are unaffected**: `private` / `listed` /
+  removed rather than carried into v5 — with no map there is nothing to opt
+  into. `ll-search graph-opt-in` is gone, the flag is off the wire, and an
+  existing `config.json` that still names it is ignored on load and rewritten
+  without it. The **privacy tiers are unaffected**: `private` / `listed` /
   `public` are the federation-member model and stay exactly as they are.
-  `ll-search graph-opt-in` still parses until the removal lands in the binary;
-  it now writes a setting nothing reads.
 - Grants renew on use and expire on disuse: `link` and `assoc` 365 days,
   `follow` and `peer` 90 days. A machine in use never asks again; one that
   stopped being used lapses on its own.

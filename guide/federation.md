@@ -267,9 +267,9 @@ federation-member privacy model and they stay exactly as
 [Visibility rules](#visibility-rules) describes. Nothing about what your peers
 can read changes.
 
-Until the removal lands in the binary, `ll-search graph-opt-in` still parses
-and still writes `graph_opt_in` to `config.json`. Do not reach for it: there is
-no longer a map for it to publish to.
+The opt-in subcommand is gone with it. An existing `config.json` may still
+carry a `graph_opt_in` key; it is ignored on load and dropped the next time the
+file is written, so there is nothing to clean up by hand.
 
 ## Retractions
 
