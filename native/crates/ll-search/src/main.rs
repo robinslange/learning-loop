@@ -454,6 +454,35 @@ fn recover(
         );
     }
 
+    // Before the seed moves, not after. `readable-vaults.json` is the hub's
+    // answer about what the OUTGOING key was allowed to read, and it survives
+    // a recovery that makes it meaningless — so a reader that trusts it now
+    // serves the old key's caches under the new one.
+    //
+    // Deleting it rather than teaching each reader to check whose answer it
+    // was: absent already means no authority everywhere it is read, in every
+    // language, including readers nobody has written yet. `ll sync` writes the
+    // new key's answer on the next cycle.
+    //
+    // The order is the recoverable one. Failing here leaves the OLD identity
+    // with no listing, which one sync fixes. The other order leaves the NEW
+    // identity holding the old key's answer, which nothing fixes because
+    // nothing afterwards knows it is wrong.
+    if replaced.is_some() {
+        use anyhow::Context as _;
+        let listed = ll_search::sync::config::readable_vaults_path(config_dir);
+        match std::fs::remove_file(&listed) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("could not drop {}, which names what the identity \
+                             being replaced was allowed to read", listed.display())
+                })
+            }
+        }
+    }
+
     let backend = seed_store::store_seed(config_dir, &seed)?;
     Ok(RecoverOutcome { key_id: key_id.as_str().to_string(), backend, replaced })
 }
@@ -1339,6 +1368,107 @@ mod tests {
             "silently replacing a working identity would orphan every grant it holds");
         assert_eq!(loaded_seed(dir.path()), [7u8; 32],
             "a refused recovery must leave the identity it refused to replace exactly as it was");
+    }
+
+    /// Plant the hub's last answer about what this key may read.
+    fn list_one_readable_vault(dir: &Path) {
+        ll_search::sync::state::write_readable_vaults(
+            dir,
+            &ll_search::sync::state::ReadableVaults { at: 1, vault_ids: vec!["v-peer".into()] },
+        )
+        .unwrap();
+    }
+
+    fn a_listing_is_here(dir: &Path) -> bool {
+        ll_search::sync::state::read_readable_vaults(dir).unwrap().is_some()
+    }
+
+    /// **A recovery takes the outgoing key's read authority with it.**
+    ///
+    /// `readable-vaults.json` records what the hub last allowed the key that
+    /// was here to read. Recovering puts a different key on this machine and
+    /// touches nothing else — `config.json` is not rewritten either, which is
+    /// deliberate and is how `ll status` still reports RECOVERED — so the file
+    /// would otherwise outlive the identity that earned it and every reader
+    /// that trusts it would serve the old key's caches under the new one.
+    ///
+    /// Deleted rather than checked, because absent already means no authority
+    /// in every reader, including the ones that hold no key and cannot tell
+    /// whose answer it was. `ll sync` writes the new key's answer next cycle.
+    #[test]
+    fn a_recovery_leaves_no_read_authority_for_any_reader() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+        // The dangerous state has to be reachable, or the assertion below
+        // passes against a file that was never written.
+        assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        recover(dir.path(), &phrase, true).unwrap();
+
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32], "the identity did change");
+        assert!(!a_listing_is_here(dir.path()),
+            "the new key inherited the old key's answer about what it may read");
+    }
+
+    /// The other wrong answer, and the reason this is not an unconditional
+    /// delete. Recovering the identity already here needs no `--force` on
+    /// purpose — checking that the phrase in the drawer is the right one must
+    /// not be the case that trains a reach for it — and that check must not
+    /// silently cost a working machine its read authority until the next sync.
+    #[test]
+    fn recovering_the_identity_already_here_keeps_the_listing() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[7u8; 32]).unwrap();
+        recover(dir.path(), &phrase, false).unwrap();
+
+        assert!(a_listing_is_here(dir.path()),
+            "nothing was replaced, so the hub's answer still describes this key");
+    }
+
+    /// **The order, and it is the half that cannot be recovered from.** The
+    /// listing is dropped BEFORE the seed moves, so a failure leaves the old
+    /// identity with no listing — one sync away from correct. The other order
+    /// leaves the new identity holding the old key's answer, and nothing
+    /// afterwards knows it is wrong.
+    ///
+    /// Proved by making the drop fail rather than by reading the code's order.
+    /// The mechanism is arbitrary — `readable-vaults.json` is planted as a
+    /// directory, which `remove_file` refuses — and it is chosen so that
+    /// EXACTLY ONE thing fails: `store_seed` writes `.seed-meta.json` and the
+    /// encrypted seed beside it in a directory that is still perfectly
+    /// writable, so a seed that did not move can only be this.
+    #[test]
+    fn a_listing_that_cannot_be_dropped_stops_the_recovery_before_the_seed_moves() {
+        let dir = seeded_dir([7u8; 32]);
+        std::fs::create_dir_all(
+            ll_search::sync::config::readable_vaults_path(dir.path()),
+        )
+        .unwrap();
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        let err = recover(dir.path(), &phrase, true).unwrap_err();
+
+        assert!(err.to_string().contains("read"),
+            "the error says what it could not drop and why that stopped it: {err}");
+        assert_eq!(loaded_seed(dir.path()), [7u8; 32],
+            "the identity moved while its predecessor's read authority stayed behind");
+    }
+
+    /// And a refused recovery changes nothing at all — the identity was
+    /// already pinned above, the listing is pinned here.
+    #[test]
+    fn a_refused_recovery_leaves_the_listing_where_it_was() {
+        let dir = seeded_dir([7u8; 32]);
+        list_one_readable_vault(dir.path());
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        assert!(recover(dir.path(), &phrase, false).is_err());
+
+        assert!(a_listing_is_here(dir.path()),
+            "a recovery that did not happen must not take the read authority with it");
     }
 
     #[test]
