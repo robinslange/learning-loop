@@ -161,8 +161,9 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
-    /// Restore this machine's identity from the 24-word recovery phrase
-    /// `ll-search join` printed once.
+    /// Put the identity a 24-word recovery phrase names onto this machine.
+    /// The phrase decides which key that is — this machine's own only if this
+    /// is the machine `ll-search join` printed it on.
     Recover {
         /// The 24 words, quoted as a single argument.
         phrase: String,
@@ -408,7 +409,13 @@ struct RecoverOutcome {
     replaced: Option<String>,
 }
 
-/// Restore this machine's signing identity from a 24-word recovery phrase.
+/// Put the signing identity a 24-word recovery phrase names onto this machine.
+///
+/// **Not "this machine's identity".** The phrase names one key and this makes
+/// that key the one this machine signs with, whatever key it held before. Run
+/// on a second machine it hands over the FIRST machine's identity, which is a
+/// real use — the machine that held it is gone — and is why the reports here
+/// name keys rather than saying "the identity".
 ///
 /// The guard is `--force`, and what it guards is the *loss*, not the write: a
 /// recovery that would put a different key here orphans every grant naming the
@@ -1213,41 +1220,68 @@ mod tests {
 
     /// Spec:334 is not met for a link and the report has to say so in every
     /// branch, because the person reading it is deciding whether their notes
-    /// are still on the other machine. It says what did not happen, it does
-    /// not use the word that would imply it did, and it never points at a
-    /// bigger hammer — there is no `--force` on this command, and an error or
-    /// a report that named one would be teaching the reflex.
+    /// are still on the other machine.
+    ///
+    /// **Every branch is pinned as exact text, not as a wordlist.** A list of
+    /// banned words checks that the report avoids five spellings of "deleted"
+    /// and says nothing at all about what it does say — a first sentence
+    /// rewritten to claim the opposite passes it, and the next author reaches
+    /// for a synonym the list has never heard of. `revoke_report` is a
+    /// function rather than a run of `eprintln!`s inside `main`'s arm exactly
+    /// so the lines that must not lie can be compared whole.
+    ///
+    /// The wordlist stays below as a second net over the same four strings.
     #[test]
-    fn the_revoke_report_says_what_it_did_not_do_whatever_else_it_says() {
+    fn the_revoke_report_says_the_same_four_things_and_no_others() {
         use ed25519_dalek::SigningKey;
         use ll_search::sync::key_id::KeyId;
         use ll_search::sync::link::Revoked;
         let other =
             KeyId::from_pubkey(&SigningKey::from_bytes(&[11u8; 32]).verifying_key());
-        for inbound_remains in [false, true] {
-            for grant_ids in [vec![], vec!["abc".to_string()]] {
-                let text = revoke_report(&Revoked { grant_ids, inbound_remains }, &other);
-                assert!(text.contains("Nothing was deleted"), "{text}");
-                assert!(text.contains("federation/data/peers"),
-                    "it names the directory it did not touch: {text}");
-                assert!(text.contains("not recalled"),
-                    "and does not let a reader think the copy came back: {text}");
-                for lie in ["Removed", "wiped", "erased", "purged", "force"] {
-                    assert!(!text.contains(lie), "the report must not say {lie:?}: {text}");
-                }
+        let id = other.as_str();
+        let withdrew = |n: usize| {
+            format!(
+                "Withdrew {n} link grant(s) issued to {id}. The hub acknowledged it and \
+                 stops authorising that key.\n"
+            )
+        };
+        let inbound = format!(
+            "The link {id} issued to THIS machine still stands. It is that machine's own \
+             statement and only it can withdraw it.\n"
+        );
+        let untouched = "Nothing was deleted. A link covers every vault its issuer owns, so it \
+             names no cached directory to take, and federation/data/peers/ is exactly as it \
+             was. Data that machine already fetched is not recalled either — it stops being \
+             served, and it drops what the withdrawal names on its next sync.\n";
+
+        let report = |grant_ids: Vec<String>, inbound_remains: bool| {
+            revoke_report(&Revoked { grant_ids, inbound_remains }, &other)
+        };
+        assert_eq!(report(vec![], false), format!("{}{untouched}", withdrew(0)));
+        assert_eq!(report(vec![], true), format!("{}{inbound}{untouched}", withdrew(0)));
+        assert_eq!(
+            report(vec!["abc".into()], false),
+            format!("{}{untouched}", withdrew(1))
+        );
+        assert_eq!(
+            report(vec!["abc".into(), "def".into()], true),
+            format!("{}{inbound}{untouched}", withdrew(2))
+        );
+
+        // The same four strings, against the words that would make any of
+        // them a claim about somebody's notes coming back — and against a
+        // bigger hammer, because there is no `--force` on this command and a
+        // report that named one would be teaching the reflex.
+        for text in [
+            report(vec![], false),
+            report(vec![], true),
+            report(vec!["abc".into()], false),
+            report(vec!["abc".into()], true),
+        ] {
+            for lie in ["Removed", "wiped", "erased", "purged", "force"] {
+                assert!(!text.contains(lie), "the report must not say {lie:?}: {text}");
             }
         }
-        let half = revoke_report(
-            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: true },
-            &other,
-        );
-        assert!(half.contains("still stands"), "half a door is not a shut one: {half}");
-        let whole = revoke_report(
-            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: false },
-            &other,
-        );
-        assert!(!whole.contains("still stands"),
-            "and there is no other half to warn about here: {whole}");
     }
 
     /// clap builds the parser at runtime, so a malformed argument definition
