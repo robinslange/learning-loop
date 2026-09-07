@@ -442,7 +442,13 @@ fn recover(
     let seed = zeroize::Zeroizing::new(words::seed_from_phrase(phrase)?);
     let key_id = KeyId::from_pubkey(&SigningKey::from_bytes(&seed).verifying_key());
 
-    let replaced = seed_store::load_only(config_dir)?
+    let existing = seed_store::load_only(config_dir)?;
+    // Not `replaced.is_none()`. A machine with no readable seed replaces
+    // nothing, and it is also a machine that cannot show it wrote the listing
+    // sitting next to it — which is `ReadAuthority::load`'s rule, that no
+    // identity is no authority rather than an unchanged one.
+    let same_identity = existing.as_ref().is_some_and(|r| r.signing_key.to_bytes() == *seed);
+    let replaced = existing
         .filter(|r| r.signing_key.to_bytes() != *seed)
         .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()).as_str().to_string());
 
@@ -455,9 +461,10 @@ fn recover(
     }
 
     // Before the seed moves, not after. `readable-vaults.json` is the hub's
-    // answer about what the OUTGOING key was allowed to read, and it survives
+    // answer about what some earlier key was allowed to read, and it survives
     // a recovery that makes it meaningless — so a reader that trusts it now
-    // serves the old key's caches under the new one.
+    // serves that key's caches under the new one. It stays only when the
+    // identity now installed is the one that earned it.
     //
     // Deleting it rather than teaching each reader to check whose answer it
     // was: absent already means no authority everywhere it is read, in every
@@ -468,7 +475,7 @@ fn recover(
     // with no listing, which one sync fixes. The other order leaves the NEW
     // identity holding the old key's answer, which nothing fixes because
     // nothing afterwards knows it is wrong.
-    if replaced.is_some() {
+    if !same_identity {
         use anyhow::Context as _;
         let listed = ll_search::sync::config::readable_vaults_path(config_dir);
         match std::fs::remove_file(&listed) {
@@ -1426,6 +1433,41 @@ mod tests {
 
         assert!(a_listing_is_here(dir.path()),
             "nothing was replaced, so the hub's answer still describes this key");
+    }
+
+    /// **The quietest path through `recover`, and the one a "was anything
+    /// replaced?" test cannot see.** A config dir holding a listing and no
+    /// readable seed replaces nothing — `load_only` reports every miss as
+    /// `Ok(None)` — so it needs no `--force`, warns about nothing, and would
+    /// keep a listing it cannot show it wrote.
+    ///
+    /// Reachable: a keyring backend whose Keychain item is gone, a config dir
+    /// copied while its seed stayed behind in the source Keychain, an
+    /// encrypted seed deleted while `federation/` survived. The listing is not
+    /// evidence against any of them — it proves an identity existed when the
+    /// cycle wrote it, not that the identity is still here.
+    ///
+    /// So the rule is the identity that earned the listing, not the fact of a
+    /// replacement: `ReadAuthority::load` already refuses to treat a machine
+    /// with no identity as a machine with nothing to read.
+    #[test]
+    fn a_listing_with_no_readable_seed_behind_it_is_dropped_too() {
+        pin_file_backend();
+        let dir = tempfile::tempdir().unwrap();
+        list_one_readable_vault(dir.path());
+        assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
+        assert!(
+            ll_search::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
+            "and no seed, which is what makes this the quiet path"
+        );
+
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        // No `--force`: there was no identity to replace, which is the point.
+        recover(dir.path(), &phrase, false).unwrap();
+
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32]);
+        assert!(!a_listing_is_here(dir.path()),
+            "a machine that cannot show it wrote this listing must not keep it");
     }
 
     /// **The order, and it is the half that cannot be recovered from.** The
