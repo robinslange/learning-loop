@@ -93,7 +93,7 @@ Everything looks good. Nothing to set up.
 - If sync failed with connection error: report "hub unreachable: check the network and the hub endpoint."
 - If sync refused the config: report it verbatim. An unpinned `hub.key_id`, or an endpoint that is not `wss://`, is an error in v5 rather than a warning.
 - If no federation config: report "not configured."
-- If sync succeeded but `ll-search status` still reports a failing last cycle against a different hub, that is the watch daemon holding the config as it was when it started. Say so, and offer `ll-watch stop && ll-watch`.
+- If sync succeeded but `ll-search status` still reports a failing last cycle against a different hub, that is a cycle from before the config changed; the watcher acts on the change at its next federation tick. Re-read rather than reporting it as broken.
 - Never tell the user that a remote peer "needs to register" you unless the hub explicitly rejected auth with that reason.
 
 If everything is configured, stop the entire init flow here. If issues exist, proceed to the relevant phases only.

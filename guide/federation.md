@@ -18,7 +18,7 @@ Every grant expires, and each successful sync renews the ones it exercised. Defa
 
 - **Federated search** -- your results include notes from vaults you may read, merged into the same reciprocal-rank fusion as your own, with provenance tracking. A result from elsewhere carries a `peer:<vault_id>/` prefix on its path.
 - **Visibility control** -- three tiers: `public` (full content), `listed` (title, tags and summary), `private` (not shared). See [Visibility rules](#visibility-rules), and note that a glob can restrict but never publish.
-- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks, against the config it read when it started.
+- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks.
 - **One identity, several machines** -- `ll-search link` joins a second machine to the same key through four doors, one of which needs no network at all.
 
 ## Getting on a hub
@@ -47,19 +47,13 @@ The three arguments are positional and in that order, and the endpoint must be `
 4. Connects, authenticates, and checks the hub's `SyncReady` names the new `vault_id`. Declaring the vault in the hello *is* registering it; there is no second round trip.
 5. Writes `config.json` last.
 
-`join` enrols; it does not sync. Two steps follow it.
-
-**Restart the watcher.** It reads `config.json` once, at startup, and holds that copy for its whole life -- so a daemon that was already running when you joined keeps dialling the endpoint it read then, and writes that failure over `federation/sync-state.json` every five minutes. SessionStart will not replace it either: it only respawns when the binary changes, not when the config does.
-
-```bash
-ll-watch stop && ll-watch
-```
-
-**Then upload.** The first positional is the search index, not anything under the config dir:
+`join` enrols; it does not sync. The first upload is a separate step, and the first positional is the search index rather than anything under the config dir:
 
 ```bash
 ll-search sync <vault-path>/.vault-search/vault-index.db <vault-path>
 ```
+
+Do it here rather than waiting for the watcher. The watcher will get there on its own -- it re-reads `config.json` on every federation tick, so a join needs no restart -- but that is one sync interval away, five minutes by default, and until then `ll-search status` describes the cycle before you joined.
 
 If `join` fails, nothing is written and you can re-run it cleanly. The invite is spent only on success.
 
@@ -78,7 +72,7 @@ Local files only: no socket, no clock, no network, so nothing it prints can impl
 - **`BLOCKED`** -- `ll-search sync` will refuse this config. The two causes are an unpinned `hub.key_id` and an endpoint that is not `wss://`. Both were warnings in v4 and are errors now.
 - **`RECOVERED`** -- the seed and `config.json` name different keys.
 
-One thing it reports is not a verdict about your config: the `last sync` line is whatever last wrote `federation/sync-state.json`, and that is usually the watch daemon, running on the config it read when it started. An error there naming a hub the `hub:` line does not name is a stale daemon. See [Sync commands](#sync-commands).
+One thing it reports is not a verdict about your config: the `last sync` line is whatever last wrote `federation/sync-state.json`, which is the last cycle that finished rather than the state of the file above it. A config changed since then has not been acted on yet, for up to one sync interval. See [Sync commands](#sync-commands).
 
 ## Additional machines
 
@@ -266,7 +260,9 @@ Note that `node scripts/vault-search.mjs status` is the **index** status, not th
 
 Sync runs automatically inside the always-on `ll-search watch` daemon (spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`): the watcher's `tokio::select!` loop runs sync alongside the reindex debounce, the poll tick, and the resync tick (see [Sync wire format](#sync-wire-format)). Nothing syncs at session end -- the Stop hook only emits nudges. The manual commands above cover the cases where the daemon isn't running.
 
-**The daemon loads `config.json` once and never re-reads it.** SessionStart respawns it only when the binary's mtime changes, so a config edited or written underneath a live daemon -- by `join`, by `link request`, or by hand -- is invisible to it for the rest of the session and every session after. It goes on syncing against the endpoint it read at startup and stamping the result over `federation/sync-state.json`, which is the file `ll-search status` reads. That is why a `last sync` error can name a hub the `hub:` line above it does not, and why it can appear minutes after a successful manual sync. `ll-watch stop && ll-watch` after anything that writes the config.
+**The daemon re-reads `config.json` on every federation tick**, so a config written or edited underneath a live one -- by `join`, by `link request`, or by hand -- takes effect within one sync interval and needs no restart. It used to read the file once at startup and hold that copy for the process's life, which meant a `join` run inside a session that had already spawned the daemon was invisible to it: it went on dialling the old endpoint and writing *that* failure into `sync-state.json`, the file `ll-search status` renders.
+
+Two consequences of re-reading that are worth knowing rather than discovering. A config change is acted on at the next tick, not immediately, so `status` can describe the previous cycle for up to five minutes. And a `config.json` that has been hand-edited into invalid JSON does not stop the daemon -- it keeps syncing against the last version that parsed and says so on stderr, because a daemon that quietly stops syncing is the failure being avoided, not an acceptable price for avoiding it. A config that has been *deleted* does stop it.
 
 ## The public knowledge map
 

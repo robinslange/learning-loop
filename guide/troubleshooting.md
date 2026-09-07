@@ -21,14 +21,13 @@ First check that the vault backend is alive. Open a recent shadow record and loo
 
 ## `ll-search status` reports a hub you no longer use
 
-The `hub:` line comes from `config.json`; the `last sync` line comes from `federation/sync-state.json`, which is written by whatever last ran a cycle. That is normally the watch daemon, and the daemon reads `config.json` once at startup and holds that copy for its whole life — SessionStart respawns it only when the binary changes, not when the config does.
-
-So a daemon that was already running when you ran `ll-search join` (or `ll-search link request`) keeps dialling the endpoint it read at startup and stamps that failure over `sync-state.json` every five minutes, including over a manual sync that had just succeeded. The tell is the two lines naming different hubs, with `last ok: never`.
+The `hub:` line comes from `config.json`; the `last sync` line comes from `federation/sync-state.json`, which records the last cycle that finished. A config written since then — by `ll-search join`, by `ll-search link request`, or by hand — has not been acted on yet. The watcher picks it up on its next federation tick, five minutes by default; syncing now settles it immediately.
 
 ```bash
-ll-watch stop && ll-watch
 ll-search sync <vault-path>/.vault-search/vault-index.db <vault-path>
 ```
+
+If the two lines still disagree after a successful sync, that is not this: read the error itself.
 
 ## Notes not showing up in vault
 

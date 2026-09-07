@@ -65,23 +65,12 @@ when the last cycle ran and whether it succeeded,
 what the hub held as of that cycle, and a `BLOCKED` line if `ll-search sync`
 would refuse the config.
 
-**The `last sync` line can describe a config that is no longer on disk.** The
-watch daemon reads `config.json` once, when it starts, and holds that copy for
-its whole life; SessionStart only replaces it when the binary changes, not when
-the config does. A daemon that started before this vault joined therefore keeps
-dialling the endpoint it read then, and stamps that failure over
-`federation/sync-state.json` every five minutes — including over a successful
-manual sync.
-
-The tell is inside the output: a `last sync` error naming a hub that is not the
-`hub:` line above it is a stale daemon, not a broken config. When that happens,
-restart the watcher before reporting anything about the last cycle:
-
-```bash
-ll-watch stop && ll-watch
-```
-
-then run the sync in section C and re-read `status`.
+**The `last sync` line describes the last cycle that finished, not the config
+above it.** The watch daemon re-reads `config.json` on each of its federation
+ticks, so a config written since the last one has not been acted on yet — for
+up to one sync interval, five minutes by default. A `last sync` error naming a
+hub that is not the `hub:` line is that window and nothing else. Run the sync
+in section C and re-read `status` rather than reporting the stale line.
 
 ## B: Invite code
 
@@ -160,24 +149,18 @@ The command, in order:
 **Never echo the recovery phrase back, never write it to a file, and never put
 it in your response.** It is the user's to record.
 
-`join` does **not** sync. It enrolls. Two steps follow it, and neither is
-optional.
-
-**First, restart the watch daemon.** It is running — SessionStart spawns it —
-and it is holding the config as it was before `join` rewrote it. Left alone it
-never picks up the new hub, and its five-minute tick overwrites
-`federation/sync-state.json` with a failure against the old endpoint, which is
-what `ll-search status` then reports.
-
-```bash
-ll-watch stop && ll-watch
-```
-
-**Then upload:**
+`join` does **not** sync. It enrolls. The first upload is a separate step, and
+it is not optional — a vault that enrolled and never synced is one the hub
+holds no index for:
 
 ```bash
 ll-search sync <VAULT>/.vault-search/vault-index.db <VAULT> --config-dir <config_dir>
 ```
+
+Run it here rather than leaving it to the watch daemon. The daemon does pick
+the new config up on its own — it re-reads `config.json` every federation tick,
+and needs no restart — but that is up to five minutes away, and until then
+`ll-search status` still describes the cycle before the join.
 
 Report what it returns (notes uploaded, vaults fetched). If it names vaults it
 could not fetch, say which — the client was entitled to read them and could
@@ -396,6 +379,3 @@ it to `<config_dir>/federation/.seed` (mode 0600) so the legacy reader and
 - The hub's key must be pinned. An unpinned hub is an error, not a warning:
   `ll-search sync` refuses the config and `ll-search status` says `BLOCKED`.
 - One vault, one config dir. Never point two vaults at the same one.
-- Anything that writes `config.json` — `join`, `link request` — is followed by
-  `ll-watch stop && ll-watch`. A running daemon holds the old copy and will
-  keep reporting against it.
