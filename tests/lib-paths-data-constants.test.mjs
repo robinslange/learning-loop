@@ -35,6 +35,8 @@ test('FEDERATION_PATHS resolves federation subtree', () => {
     FEDERATION_PATHS.peerDb(pd, 'abc123'),
     join(pd, 'federation', 'data', 'peers', 'abc123', 'index.db'),
   );
+  assert.equal(FEDERATION_PATHS.syncState(pd), join(pd, 'federation', 'sync-state.json'));
+  assert.equal(FEDERATION_PATHS.vaultRegistry(pd), join(pd, 'vaults.json'));
 });
 
 test('DATA_FILES resolves standalone data files', () => {

@@ -117,7 +117,15 @@ export const FEDERATION_PATHS = {
   seedNoticeShown: (pd) => join(pd, 'federation', '.seed-notice-shown'),
   outbox: (pd) => join(pd, 'federation', 'outbox'),
   peersDir: (pd) => join(pd, 'federation', 'data', 'peers'),
-  peerDb: (pd, peerId) => join(pd, 'federation', 'data', 'peers', peerId, 'index.db'),
+  // The directory name is the corpus's `vault_id`, not a peer's name: the Rust
+  // side builds it as `peer_dir(config_dir, vault_id)`.
+  peerDb: (pd, vaultId) => join(pd, 'federation', 'data', 'peers', vaultId, 'index.db'),
+  // What the last sync cycle did. A MISSING file is a failure, not an unknown:
+  // it means federation is configured and no cycle has ever finished one.
+  syncState: (pd) => join(pd, 'federation', 'sync-state.json'),
+  // The multi-vault registry. Absent on a single-vault install, by design —
+  // it appears only when a second vault is registered.
+  vaultRegistry: (pd) => join(pd, 'vaults.json'),
 };
 
 export const DATA_FILES = {

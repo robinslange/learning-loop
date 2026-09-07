@@ -27,6 +27,72 @@ function memoryIsFresh(path) {
 
 const MEM_CAP = HookConfig.MEMORY_INDEX_MAX_BYTES;
 
+const STALE_AFTER = 7 * 86400;
+
+/**
+ * One line about a vault's federation, or null when there is genuinely nothing
+ * to say.
+ *
+ * A line printed every session regardless is a line nobody reads, which is how
+ * a two-month outage stayed invisible: the client was content and said so at
+ * length. So a healthy federation is silent and every other state is loud.
+ *
+ * `state` is the parsed `federation/sync-state.json`, or null when the file is
+ * missing or unreadable. **Null is a failure, not an unknown** — federation is
+ * configured (the caller checked) and no cycle has ever finished writing one.
+ *
+ * `now` is a parameter rather than a call to `Date.now()` so the staleness
+ * boundary can be tested from both sides. Same reason the Rust `render_status`
+ * takes one.
+ */
+export function federationLine(state, now) {
+  if (!state) {
+    return 'configured, but no sync cycle has ever completed. Run `ll-search status`.';
+  }
+  if (state.outcome === 'error') {
+    return `last sync failed — ${state.detail ?? 'no detail recorded'}`;
+  }
+  // The shape the Rust writes: { kind: "nothing" } | { kind: "index", sha256, note_count }.
+  if (state.hub_holds?.kind === 'nothing') {
+    return 'the hub holds no index for this vault. The next sync will re-upload it.';
+  }
+  const at = state.last_success_at;
+  if (!at) return 'no sync has ever succeeded on this vault.';
+  const age = now - at;
+  if (age > STALE_AFTER) {
+    return `last successful sync was ${Math.floor(age / 86400)} days ago.`;
+  }
+  return null;
+}
+
+/**
+ * Every configured vault profile that has something to say, at most three.
+ *
+ * The registry is read only when it exists. A single-vault install has no
+ * `vaults.json` at all and its config dir is the plugin data root — that is the
+ * zero-migration case working, not a fallback rescuing an error.
+ */
+function federationLines(pluginData, now) {
+  const registryPath = FEDERATION_PATHS.vaultRegistry(pluginData);
+  let profiles = [{ id: null, config_dir: pluginData }];
+  if (existsSync(registryPath)) {
+    const { value: doc } = safeLoad(registryPath, { fallback: null });
+    if (!Array.isArray(doc?.vaults)) return [];
+    profiles = doc.vaults;
+  }
+
+  const lines = [];
+  for (const profile of profiles) {
+    const dir = profile.config_dir;
+    if (typeof dir !== 'string' || !existsSync(FEDERATION_PATHS.config(dir))) continue;
+    const { value: state } = safeLoad(FEDERATION_PATHS.syncState(dir), { fallback: null });
+    const line = federationLine(state, now);
+    if (line) lines.push(profile.id ? `${profile.id}: ${line}` : line);
+    if (lines.length === 3) break;
+  }
+  return lines;
+}
+
 // Cap a variable-size context section at MEM_CAP bytes. Oversized content is
 // cut at the last full line and tagged with a pointer line, so the assembled
 // SessionStart context stays within the hook stdout budget instead of relying
@@ -244,20 +310,11 @@ export async function run(ctx) {
       }
     }
 
-    // 7. Federation status.
+    // 7. Federation status — a line only when there is something wrong.
     try {
-      const fedConfigPath = FEDERATION_PATHS.config(pluginData);
-      if (existsSync(fedConfigPath)) {
-        const peersDir = FEDERATION_PATHS.peersDir(pluginData);
-        if (existsSync(peersDir)) {
-          const peerNames = readdirSync(peersDir, { withFileTypes: true })
-            .filter((e) => e.isDirectory())
-            .map((e) => e.name);
-          if (peerNames.length > 0) {
-            retrieved += '\n## Federation\n';
-            retrieved += `Connected peers: ${peerNames.join(', ')}. Search results include peer knowledge.\n`;
-          }
-        }
+      const lines = federationLines(pluginData, Math.floor(Date.now() / 1000));
+      if (lines.length > 0) {
+        retrieved += `\n## Federation\n${lines.join('\n')}\n`;
       }
     } catch (err) {
       logError('session-start.context-assembly.federation', err);
