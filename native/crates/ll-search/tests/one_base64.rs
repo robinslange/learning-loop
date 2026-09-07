@@ -84,6 +84,25 @@ fn the_sweep_reaches_the_crate_and_finds_the_one_file_that_is_allowed() {
     );
 }
 
+/// Whether `line` reaches the `base64` crate under any spelling.
+///
+/// Three doors, and the third is the one a `base64::` substring misses
+/// entirely: a path through the crate (`base64::`, `::base64::`), a `use`
+/// that imports from it, and a `use` that RENAMES it — after
+/// `use base64 as b64x;` every call site spells `b64x::` and names the crate
+/// nowhere. A rule that lists only the spelling it has already seen is the
+/// wordlist mistake, and this sweep was written to avoid exactly that.
+fn names_the_base64_crate(line: &str) -> bool {
+    let code = line.split("//").next().unwrap_or(line);
+    if code.contains("base64::") {
+        return true;
+    }
+    // `use base64 ...` / `use base64;` / `pub use base64 as ...`
+    code.split_whitespace()
+        .zip(code.split_whitespace().skip(1))
+        .any(|(a, b)| a == "use" && (b == "base64" || b == "base64;" || b.starts_with("base64,")))
+}
+
 #[test]
 fn no_file_but_the_b64_module_names_the_base64_crate() {
     let mut offenders = Vec::new();
@@ -92,14 +111,20 @@ fn no_file_but_the_b64_module_names_the_base64_crate() {
         if rel == THE_ONE {
             continue;
         }
+        // This file quotes the crate name to say what it forbids, the same
+        // exemption the dead-flow sweeps give their own fixtures. Skipped
+        // whole rather than per line: a `continue` inside the line loop reads
+        // as a line-level exemption and is a place a second engine could sit.
+        if rel == "tests/one_base64.rs" {
+            continue;
+        }
         let text = std::fs::read_to_string(&path).unwrap();
         for (i, line) in text.lines().enumerate() {
-            // This file quotes the crate name to say what it forbids, the
-            // same exemption the dead-flow sweeps give their own fixtures.
-            if rel == "tests/one_base64.rs" {
-                continue;
-            }
-            if line.contains("base64::") {
+            // The crate, not one spelling of it. `base64::` alone is a
+            // one-item wordlist: `use base64 as b64x;` builds a path that
+            // contains no `base64::` anywhere, and that is the shape this
+            // sweep exists to refuse.
+            if names_the_base64_crate(line) {
                 offenders.push(format!("{rel}:{}: {}", i + 1, line.trim()));
             }
         }

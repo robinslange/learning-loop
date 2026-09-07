@@ -21,7 +21,7 @@ use crate::b64;
 
 use super::config::{config_path, load_config, FederationConfig};
 use super::key_id::KeyId;
-use super::state::{read_readable_vaults, read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
+use super::state::{read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
 use super::words::fingerprint;
 
 /// A successful sync older than this is called out. Seven days: long enough
@@ -168,18 +168,25 @@ fn sync_block(state: &SyncState, now: i64) -> String {
 /// the same reason: a laptop shut for a long weekend stays quiet, and a
 /// months-old answer cannot hide.
 fn read_authority_block(config_dir: &Path, me: Option<&KeyId>, now: i64) -> anyhow::Result<String> {
-    // Filtered on `me` for the same reason `ReadAuthority::load` is, and the
-    // count printed here has to agree with what that serves or this line is
-    // the only thing on the page that lies. A listing another key earned
-    // parses perfectly and answers for none of these vaults, so it is absent
-    // here exactly as it is there. A machine with no key of its own cannot
-    // say whose answer it holds, which is the same verdict.
-    let listed = read_readable_vaults(config_dir)?.filter(|l| Some(&l.me) == me);
+    // `listed_for` rather than a second copy of the same filter: the count on
+    // this page has to agree with what `ReadAuthority` serves, and two
+    // expressions of one rule are how they stop agreeing. A machine with no
+    // key of its own cannot say whose answer it holds, which is the same
+    // verdict from the other direction.
+    let listed = match me {
+        Some(me) => super::grants::listed_for(config_dir, me)?,
+        None => None,
+    };
     let Some(listed) = listed else {
+        // No cause is named. `read_readable_vaults` collapses absent, corrupt,
+        // pre-`me` and written-by-a-newer-build into one `None`, and an
+        // unreadable seed arrives here the same way — so every diagnosis this
+        // line could offer would be wrong for at least three of them, and the
+        // module's rule is that no line may imply a check that did not run.
         return Ok(row("read auth:",
-            "none — no cached peer index is searched. Either the hub has never told this key \
-             what it may read, or the listing on disk was earned by a key that is no longer \
-             here; both serve nothing, which is the safe direction. `ll sync` records one."));
+            "none — no cached peer index is searched, which is the safe direction. Run \
+             `ll sync` to record what this key may read; any warning about an existing \
+             record is on stderr above."));
     };
     let mut out = row("read auth:", &format!(
         "{} vault(s), as the hub listed them at {}",
@@ -975,10 +982,12 @@ mod tests {
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(!out.contains("vault(s)"),
             "a listing this key did not earn is not a count it can give; got:\n{out}");
-        // The renderer wraps at `WIDTH`, so the reason arrives split across
-        // lines and a literal `contains` would be asserting the column count.
+        // The renderer wraps at `WIDTH`, so a literal `contains` over the row
+        // would be asserting the column count.
         let flowed = out.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(flowed.contains("earned by a key that is no longer here"), "got:\n{out}");
+        assert!(flowed.contains("no cached peer index is searched"), "got:\n{out}");
+        assert!(!flowed.contains("as the hub listed them"),
+            "the count row must not render for a listing this key did not earn; got:\n{out}");
     }
 
     /// The same verdict from the other direction: a machine holding no key
