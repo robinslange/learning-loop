@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::config::TOP_K_FEDERATION;
+use crate::sync::grants::ReadAuthority;
 use crate::sync::registry;
 use super::scoring::{add_ranked_rrf, dot_product, fts_bm25_query};
 
@@ -32,26 +33,79 @@ pub fn query_scope(plugin_data: &Path, vault: &Path, all: bool) -> anyhow::Resul
 /// `discover_peer_dbs` over every config dir the scope names. With the
 /// default (non-`--all`) scope that's exactly one config dir, so a peer
 /// cached under a different profile never enters the result.
-pub fn discover_peer_dbs_for(scope: &QueryScope, local_model_id: &str) -> Vec<(String, Connection)> {
+///
+/// Each config dir is asked about its own grants: authority is a property of
+/// the key that holds it, and a scope spanning two profiles spans two keys.
+pub fn discover_peer_dbs_for(
+    scope: &QueryScope,
+    local_model_id: &str,
+    now: i64,
+) -> Vec<(String, Connection)> {
     scope
         .config_dirs
         .iter()
-        .flat_map(|dir| discover_peer_dbs(dir, local_model_id))
+        .flat_map(|dir| discover_peer_dbs(dir, local_model_id, now))
         .collect()
 }
 
-pub fn discover_peer_dbs(config_dir: &Path, local_model_id: &str) -> Vec<(String, Connection)> {
-    let entries = match std::fs::read_dir(crate::sync::config::peers_dir(config_dir)) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
+/// Every cached peer index under `config_dir` that a live grant still
+/// justifies holding, as of `now`.
+///
+/// **The question is "is this covered?", not "was this deleted?".** A cache
+/// directory on disk used to be enough: this function read `peers/`, opened
+/// whatever it found, and handed it to federated search having consulted no
+/// grant and no key. That made deletion the read-authorization boundary — a
+/// `remove_dir_all` that is not atomic, that an unscoped withdrawal declines
+/// to run (and a `link` is unscoped, which is the main case), and that a
+/// recovered identity can never reach, because a revocation removes only what
+/// a *matching local grant* names and after a recovery no grant matches.
+///
+/// Asking the grant store instead makes an orphaned cache invisible without
+/// being deleted, and demotes deletion to disk hygiene. It also fails closed:
+/// no identity, no readable store, or no live grant all end in nothing served.
+/// [`ReadAuthority`] documents the case it does not close.
+///
+/// Nothing here reads the seed unless there is a cache to decide about. A
+/// keyring read can prompt on macOS, and a query on a machine with no cached
+/// peer must not be the thing that prompts.
+pub fn discover_peer_dbs(
+    config_dir: &Path,
+    local_model_id: &str,
+    now: i64,
+) -> Vec<(String, Connection)> {
+    // A missing `peers/` and an empty one are the same answer and take the
+    // same path out: `read_dir`'s error flattens away with the entries'.
+    let cached: Vec<String> = std::fs::read_dir(crate::sync::config::peers_dir(config_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|entry| entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false))
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .collect();
+    if cached.is_empty() {
+        return Vec::new();
+    }
+
+    let authority = match ReadAuthority::load(config_dir, now) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!(
+                "Serving no peer index from {}: this machine cannot say what it may read ({e:#})",
+                config_dir.display()
+            );
+            return Vec::new();
+        }
     };
 
     let mut peers = Vec::new();
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+    for peer_id in cached {
+        if !authority.covers(&peer_id) {
+            eprintln!(
+                "Peer {peer_id}: no live grant covers this cache, so it is not searched. \
+                 `ll sync` refreshes what this machine holds; `ll status` shows its key."
+            );
             continue;
         }
-        let peer_id = entry.file_name().to_string_lossy().to_string();
         let db_path = crate::sync::config::peer_index_path(config_dir, &peer_id);
         if !db_path.exists() {
             continue;
@@ -241,16 +295,116 @@ pub fn batch_load_bodies_federated(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicI64, Ordering};
+
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+    use rusqlite::Connection;
+
     use super::*;
     use super::super::test_helpers::helpers::*;
-    use rusqlite::Connection;
+    use crate::sync::grant::{self, GrantKind, GrantStatement};
+    use crate::sync::key_id::KeyId;
+    use crate::sync::protocol_v5::GrantWire;
+    use crate::sync::{grants, seed_store, test_hub};
+
+    const B64: base64::engine::general_purpose::GeneralPurpose =
+        base64::engine::general_purpose::STANDARD;
+
+    /// The clock every test in this module reads. `LATER` is after it, so a
+    /// grant expiring at `LATER` is live at `NOW` and lapsed at `MUCH_LATER`.
+    const NOW: i64 = 5_000;
+    const LATER: i64 = 9_000;
+    const MUCH_LATER: i64 = 20_000;
+
+    /// Two grants of the same shape hash to one `grant_id` and the store
+    /// dedupes them, so every statement gets a nonce of its own.
+    static NONCE: AtomicI64 = AtomicI64::new(0);
+
+    /// Give `config_dir` an identity of its own, and hand back its key.
+    ///
+    /// Planted rather than generated so a test can name the same key twice —
+    /// once to address a grant to it and once as the seed the reader loads.
+    /// `write_encrypted` is the backend `force_encrypted_seed_backend` pins
+    /// the whole binary to, so nothing here reaches the OS keyring.
+    fn plant_seed(config_dir: &Path, seed: u8) -> KeyId {
+        test_hub::force_encrypted_seed_backend();
+        std::fs::create_dir_all(config_dir.join("federation")).unwrap();
+        seed_store::write_encrypted(config_dir, &[seed; 32]).unwrap();
+        KeyId::from_pubkey(&SigningKey::from_bytes(&[seed; 32]).verifying_key())
+    }
+
+    /// Lodge a grant in `config_dir`'s store the way a sync cycle does —
+    /// through `apply_grants`, so it is a grant that verified rather than a
+    /// row a test wrote by hand.
+    fn plant_grant(
+        config_dir: &Path,
+        from_seed: u8,
+        to: &KeyId,
+        kind: GrantKind,
+        scope: Option<&str>,
+        expires_at: i64,
+    ) {
+        let signer = SigningKey::from_bytes(&[from_seed; 32]);
+        let statement = grant::canonical_bytes(&GrantStatement {
+            v: 5,
+            kind,
+            from: KeyId::from_pubkey(&signer.verifying_key()),
+            to: to.clone(),
+            scope: scope.map(str::to_string),
+            issued_at: 1,
+            expires_at,
+            nonce: format!("nonce-{}", NONCE.fetch_add(1, Ordering::Relaxed)),
+        });
+        let signature = signer.sign(&statement).to_bytes().to_vec();
+        grants::apply_grants(config_dir, &[GrantWire {
+            statement_b64: B64.encode(&statement),
+            signature_b64: B64.encode(&signature),
+            state: "active".to_string(),
+        }])
+        .unwrap();
+    }
+
+    /// A peer index (model_id "test-model") on disk under `config_dir`, with
+    /// no grant behind it. What an orphaned cache looks like.
+    fn plant_cache(config_dir: &Path, peer_id: &str) {
+        let dir = crate::sync::config::peer_dir(config_dir, peer_id);
+        std::fs::create_dir_all(&dir).unwrap();
+        let conn = Connection::open(dir.join("index.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+        )
+        .unwrap();
+    }
+
+    /// A config dir holding an identity, one cached peer, and the live
+    /// `follow` that justifies it. The servable baseline every test that
+    /// asserts a cache is HIDDEN has to be able to reach first — a cache that
+    /// was never servable proves nothing about the filter.
+    fn served_setup(peer_id: &str) -> (tempfile::TempDir, KeyId) {
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), peer_id);
+        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some(peer_id), LATER);
+        (dir, me)
+    }
+
+    fn ids(peers: &[(String, Connection)]) -> Vec<String> {
+        peers.iter().map(|(id, _)| id.clone()).collect()
+    }
 
     /// Registers two independent vault profiles, each with its own config
     /// dir and empty peer-cache directory, under a shared plugin_data root.
     fn two_profiles(plugin_data: &Path, personal_vault: &str, work_vault: &str) {
-        for (id, vault) in [("personal", personal_vault), ("work", work_vault)] {
+        for (seed, id, vault) in [(1u8, "personal", personal_vault), (2, "work", work_vault)] {
             let config_dir = plugin_data.join(id);
             std::fs::create_dir_all(config_dir.join("federation").join("data").join("peers")).unwrap();
+            // A key each. Authority belongs to the key, so two profiles that
+            // shared one would make "the work profile's cache is out of
+            // scope" and "the work profile's grant is not ours" the same
+            // assertion, and neither would be pinned.
+            plant_seed(&config_dir, seed);
             registry::add(plugin_data, registry::VaultProfile {
                 id: id.to_string(),
                 config_dir,
@@ -274,7 +428,12 @@ mod tests {
         ).unwrap();
     }
 
-    /// Seeds a peer index (model_id "model-x") into one profile's peer cache.
+    /// Seeds a peer index (model_id "model-x") into one profile's peer cache,
+    /// **and the live grant that justifies it**.
+    ///
+    /// Both halves, because the scoping tests below assert a cache is absent
+    /// and a cache no grant covers is absent for a second reason. Planting
+    /// the grant is what makes those tests say something about scope.
     fn seed_peer_cache(plugin_data: &Path, profile_id: &str, peer_id: &str) {
         let profiles = registry::load(plugin_data).unwrap();
         let profile = profiles.iter().find(|p| p.id == profile_id).unwrap();
@@ -285,6 +444,12 @@ mod tests {
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
              INSERT INTO meta (key, value) VALUES ('model_id', 'model-x');",
         ).unwrap();
+        drop(conn);
+        let me = seed_store::load_only(&profile.config_dir)
+            .unwrap()
+            .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()))
+            .expect("two_profiles plants a seed in every profile");
+        plant_grant(&profile.config_dir, 9, &me, GrantKind::Follow, Some(peer_id), LATER);
     }
 
     #[test]
@@ -321,7 +486,7 @@ mod tests {
         two_profiles(d.path(), "/v/personal", "/v/work");
         seed_peer_cache(d.path(), "work", "v-someone");
         let scope = query_scope(d.path(), Path::new("/v/personal"), false).unwrap();
-        let peers = discover_peer_dbs_for(&scope, "model-x");
+        let peers = discover_peer_dbs_for(&scope, "model-x", NOW);
         assert!(peers.is_empty(), "the work profile's peer cache is out of scope");
     }
 
@@ -331,7 +496,7 @@ mod tests {
         two_profiles(d.path(), "/v/personal", "/v/work");
         seed_peer_cache(d.path(), "work", "v-someone");
         let scope = query_scope(d.path(), Path::new("/v/personal"), true).unwrap();
-        let peers = discover_peer_dbs_for(&scope, "model-x");
+        let peers = discover_peer_dbs_for(&scope, "model-x", NOW);
         assert_eq!(peers.len(), 1, "--all must still surface the work profile's peer cache");
         assert_eq!(peers[0].0, "v-someone");
     }
@@ -339,13 +504,14 @@ mod tests {
     #[test]
     fn test_discover_peer_dbs_empty_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        let peers = discover_peer_dbs(tmp.path(), "test-model", NOW);
         assert!(peers.is_empty());
     }
 
     #[test]
     fn test_discover_peer_dbs_model_mismatch() {
         let tmp = tempfile::tempdir().unwrap();
+        let me = plant_seed(tmp.path(), 1);
         let peers_dir = tmp.path().join("federation").join("data").join("peers").join("alice");
         std::fs::create_dir_all(&peers_dir).unwrap();
         let db_path = peers_dir.join("index.db");
@@ -355,28 +521,179 @@ mod tests {
              INSERT INTO meta (key, value) VALUES ('model_id', 'wrong-model');",
         ).unwrap();
         drop(conn);
+        plant_grant(tmp.path(), 2, &me, GrantKind::Follow, Some("alice"), LATER);
 
-        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        let peers = discover_peer_dbs(tmp.path(), "test-model", NOW);
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].0, "alice");
     }
 
     #[test]
     fn test_discover_peer_dbs_valid() {
-        let tmp = tempfile::tempdir().unwrap();
-        let peers_dir = tmp.path().join("federation").join("data").join("peers").join("alice");
-        std::fs::create_dir_all(&peers_dir).unwrap();
-        let db_path = peers_dir.join("index.db");
-        let conn = Connection::open(&db_path).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
-             INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
-        ).unwrap();
-        drop(conn);
-
-        let peers = discover_peer_dbs(tmp.path(), "test-model");
+        let (dir, _me) = served_setup("alice");
+        let peers = discover_peer_dbs(dir.path(), "test-model", NOW);
         assert_eq!(peers.len(), 1);
         assert_eq!(peers[0].0, "alice");
+    }
+
+    // -- the reader filters by live grant -----------------------------------
+    //
+    // Every test below that asserts a cache is HIDDEN starts from
+    // `served_setup`, which is the same cache being served in
+    // `test_discover_peer_dbs_valid` above. A cache that was never reachable
+    // is indistinguishable from a filter working.
+
+    /// The property. spec:334 says a client must not go on serving content it
+    /// no longer has a grant for, and this is where that stops depending on a
+    /// deletion having run: the directory is untouched, and invisible.
+    #[test]
+    fn a_cache_no_live_grant_covers_is_not_searched_and_is_still_on_disk() {
+        let (dir, _me) = served_setup("alice");
+        std::fs::remove_file(dir.path().join("federation").join("grants.json")).unwrap();
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "a cache the grant store does not cover must not reach federated search");
+        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "and it is hidden without being deleted — deletion is disk hygiene now, \
+             not the boundary");
+    }
+
+    /// The four-month-old cache nobody could delete: a directory under
+    /// `peers/` that no grant ever named, on a machine with a healthy store.
+    #[test]
+    fn a_cache_nothing_ever_granted_is_not_searched_beside_one_that_was() {
+        let (dir, _me) = served_setup("alice");
+        plant_cache(dir.path(), "thomas-kirk");
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+            "the granted cache is served and the orphan beside it is not");
+    }
+
+    /// `covers` reads `scope`. A filter that only asked "does this machine
+    /// hold any live read grant?" would serve both.
+    #[test]
+    fn a_grant_scoped_to_another_vault_does_not_cover_this_cache() {
+        let (dir, me) = served_setup("alice");
+        plant_cache(dir.path(), "bob");
+        plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("carol"), LATER);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+    }
+
+    /// Expiry is not a sync-time sweep the reader can assume ran. spec:332
+    /// says a lapsed grant stops meaning anything; here it stops meaning
+    /// anything on the read, whether or not `prune_expired` has been reached.
+    #[test]
+    fn a_grant_that_has_lapsed_stops_covering_its_cache() {
+        let (dir, _me) = served_setup("alice");
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+            "live at NOW");
+        assert!(discover_peer_dbs(dir.path(), "test-model", MUCH_LATER).is_empty(),
+            "the same grant, the same store, read after it expired");
+    }
+
+    /// `to == me`. A grant addressed to someone else is on this disk all the
+    /// time — `SyncReady` serves the grants this key ISSUED as well as the
+    /// ones it holds — and none of them is a reason to read anything.
+    #[test]
+    fn a_grant_addressed_to_another_key_covers_nothing_here() {
+        let dir = tempfile::tempdir().unwrap();
+        plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "alice");
+        let someone_else = KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key());
+        plant_grant(dir.path(), 2, &someone_else, GrantKind::Follow, Some("alice"), LATER);
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
+    }
+
+    /// `assoc` carries no read authority at all, and the pair is the point:
+    /// swap the kind and the same cache is served, so this pins `permits_read`
+    /// rather than some other reason the store came up empty.
+    #[test]
+    fn an_assoc_grant_covers_no_cache_where_a_follow_would() {
+        for (kind, expected) in [(GrantKind::Assoc, 0), (GrantKind::Follow, 1)] {
+            let dir = tempfile::tempdir().unwrap();
+            let me = plant_seed(dir.path(), 1);
+            plant_cache(dir.path(), "alice");
+            plant_grant(dir.path(), 2, &me, kind, Some("alice"), LATER);
+            assert_eq!(discover_peer_dbs(dir.path(), "test-model", NOW).len(), expected,
+                "{kind:?} should have produced {expected} peer(s)");
+        }
+    }
+
+    /// Finding #3, closed. After `ll recover` the seed holds a different key
+    /// and `config.json` is deliberately left alone, so every stored grant
+    /// names an identity this machine no longer has. Nothing deletes those
+    /// caches — a revocation can only remove what a *matching* local grant
+    /// names — and before this filter they stayed searchable forever.
+    #[test]
+    fn a_recovered_identity_reads_none_of_the_old_identitys_caches() {
+        let (dir, _old) = served_setup("alice");
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+            "servable under the identity the grant names");
+
+        plant_seed(dir.path(), 42);
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "every grant in the store is addressed to the key the recovery replaced");
+        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "and the deletion path could never have reached them");
+    }
+
+    /// The case that made this urgent. A `link` is unscoped, so its
+    /// withdrawal names no cache and `withdraw` correctly deletes nothing —
+    /// but `apply_revocations` still drops the row, and with the row gone
+    /// nothing covers the cache. Revoked link, caches on disk, none served.
+    #[test]
+    fn a_revoked_link_stops_covering_the_caches_it_was_the_only_reason_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "alice");
+        let issuer = SigningKey::from_bytes(&[2u8; 32]);
+        plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+            "an unscoped link covers every cache — which is exactly why its \
+             withdrawal has to be visible here");
+
+        let stored = crate::sync::link::load_grants(dir.path()).unwrap();
+        assert_eq!(stored.len(), 1);
+        let statement = B64.decode(&stored[0].statement_b64).unwrap();
+        let revocation = grant::canonical_bytes(&crate::sync::grant::RevocationStatement {
+            v: 5,
+            kind: "revoke",
+            grant_id: grant::grant_id(&statement),
+            by: KeyId::from_pubkey(&issuer.verifying_key()),
+            scope: None,
+            at: 2,
+        });
+        let swept = grants::apply_revocations(
+            dir.path(),
+            &[crate::sync::protocol_v5::RevocationWire {
+                statement_b64: B64.encode(&revocation),
+                signature_b64: B64.encode(issuer.sign(&revocation).to_bytes()),
+            }],
+            &me,
+            NOW,
+        )
+        .unwrap();
+
+        assert!(swept.is_empty(), "an unscoped withdrawal names no cache to delete");
+        assert!(crate::sync::config::peer_index_path(dir.path(), "alice").exists(),
+            "so the cache is still there");
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "and it is no longer served — the reader is what makes the revocation \
+             mean something");
+    }
+
+    /// A machine with caches and no identity cannot tell whether any grant is
+    /// addressed to it, so it serves nothing. Fail closed, not open.
+    #[test]
+    fn a_machine_with_no_identity_serves_no_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        plant_cache(dir.path(), "alice");
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
     }
 
     #[test]

@@ -35,15 +35,72 @@ use super::protocol_v5::{GrantWire, RevocationWire};
 const B64: base64::engine::general_purpose::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
 /// Whether `st` could be this key's reason to hold a cached copy of
-/// `vault_id`. Used to decide what **survives** a withdrawal.
+/// `vault_id`. Used to decide what **survives** a withdrawal, and by
+/// [`ReadAuthority`] to decide what may still be read.
 ///
 /// An unscoped grant — "every vault I own" — could be the reason for any of
-/// them, so it answers true for all. That only ever protects a cache, which
-/// is the safe direction to be uncertain in.
+/// them, so it answers true for all. On the deletion side that only ever
+/// protects a cache, which is the safe direction to be uncertain in. On the
+/// read side the same uncertainty is the permissive one, and [`ReadAuthority`]
+/// says what that costs.
 fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
     &st.to == me
         && permits_read(st.kind)
         && st.scope.as_deref().is_none_or(|scope| scope == vault_id)
+}
+
+/// What this machine may still read, as a question rather than a list.
+///
+/// It cannot be a list. An unscoped grant means "every vault this issuer
+/// owns", and which vaults an issuer owns is hub state this client has never
+/// held — so the covered ids are not enumerable from anything on this disk.
+/// They can only be put to a candidate, which is exactly what the reader has:
+/// a directory name it found under `peers/`.
+///
+/// Loaded once per config dir and then asked repeatedly. Re-reading the store
+/// per candidate would let it change mid-sweep, and half a sweep against each
+/// of two stores is an answer neither of them gave.
+///
+/// **What it does not close.** `covers` answers true for every vault when the
+/// grant is unscoped, and `link.rs::reconcile` mints a reciprocal `link` for
+/// every inbound one — so a machine that has ever been linked holds a live
+/// unscoped grant addressed to itself, and that single row covers every
+/// directory under `peers/`. On such a machine this filter passes everything.
+/// It still closes the three cases where there is no such row: a machine with
+/// no grant store, a machine whose grants all name the identity a recovery
+/// replaced, and a withdrawn `link` that was the only grant — the last being
+/// the one an unscoped revocation deliberately deletes nothing for. The
+/// version that fails closed everywhere needs the hub's `vault_state`, which
+/// names precisely the vaults this key may read and is not persisted.
+pub struct ReadAuthority {
+    me: KeyId,
+    live: Vec<GrantStatement>,
+}
+
+impl ReadAuthority {
+    /// Everything `config_dir` holds that verifies and has not expired by
+    /// `now`.
+    ///
+    /// Fails when this machine has no identity. That is not a machine with
+    /// nothing to read — it is a machine that cannot tell whether a grant is
+    /// addressed to it, so it must be treated as no authority at all rather
+    /// than as an empty one.
+    pub fn load(config_dir: &Path, now: i64) -> anyhow::Result<Self> {
+        Ok(Self {
+            me: link::local_key_id(config_dir)?,
+            live: verified(&link::load_grants(config_dir)?)
+                .into_iter()
+                .filter(|(_, _, st)| st.expires_at > now)
+                .map(|(_, _, st)| st)
+                .collect(),
+        })
+    }
+
+    /// Whether a live grant is this machine's reason to hold a cached copy of
+    /// `vault_id`.
+    pub fn covers(&self, vault_id: &str) -> bool {
+        self.live.iter().any(|st| covers(st, &self.me, vault_id))
+    }
 }
 
 /// The one cache `st` **names**, which is the only one its withdrawal may

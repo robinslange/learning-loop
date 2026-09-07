@@ -378,7 +378,7 @@ fn local_signing_key(config_dir: &Path) -> anyhow::Result<SigningKey> {
         .signing_key)
 }
 
-fn local_key_id(config_dir: &Path) -> anyhow::Result<KeyId> {
+pub(super) fn local_key_id(config_dir: &Path) -> anyhow::Result<KeyId> {
     Ok(KeyId::from_pubkey(&local_signing_key(config_dir)?.verifying_key()))
 }
 

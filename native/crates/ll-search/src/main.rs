@@ -412,6 +412,17 @@ fn recover(
     Ok(RecoverOutcome { key_id: key_id.as_str().to_string(), backend, replaced })
 }
 
+/// Wall-clock seconds, for the one caller in this file that needs to hand a
+/// point in time to the library. A clock before 1970 reads as 1970 rather
+/// than panicking: this is on the query path, and every grant expiry then
+/// compares as lapsed, which is the fail-closed direction.
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app::AppState {
     ll_search::app::AppState::from_db(db_path, config_dir).expect("failed to build AppState")
 }
@@ -473,7 +484,11 @@ fn resolve_peers(
             .unwrap_or_else(|e| panic!("failed to resolve vault scope: {e}"))
     };
 
-    ll_search::search::discover_peer_dbs_for(&scope, &model_id)
+    // The reader's grant check is a point in time, and `unix_now` is where
+    // this process gets one. Threaded rather than read inside the search path
+    // for the same reason `render_status` takes it: an expiry boundary that
+    // cannot be moved cannot be tested from both sides.
+    ll_search::search::discover_peer_dbs_for(&scope, &model_id, unix_now())
 }
 
 fn vault_add(plugin_data: &std::path::Path, vault_path: &std::path::Path, id: &str) -> anyhow::Result<()> {
@@ -965,7 +980,21 @@ mod tests {
         }
     }
 
+    /// A peer index on disk, **and the identity and live grant that make it
+    /// readable**.
+    ///
+    /// All three, because `discover_peer_dbs` serves a cache only when a live
+    /// grant covers it. A fixture that planted the directory alone would make
+    /// every assertion below pass or fail for the wrong reason: the two
+    /// scoping tests would assert an absence that grant filtering already
+    /// guarantees, and the two that expect a hit would be asserting against a
+    /// cache no key was ever entitled to read.
     fn seed_peer(config_dir: &Path, peer: &str, model_id: &str) {
+        use base64::Engine as _;
+        use ed25519_dalek::{Signer, SigningKey};
+        use ll_search::sync::grant::{self, GrantKind, GrantStatement};
+        use ll_search::sync::key_id::KeyId;
+
         let peer_dir = config_dir.join("federation").join("data").join("peers").join(peer);
         std::fs::create_dir_all(&peer_dir).unwrap();
         let conn = rusqlite::Connection::open(peer_dir.join("index.db")).unwrap();
@@ -973,6 +1002,38 @@ mod tests {
             "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
              INSERT INTO meta (key, value) VALUES ('model_id', '{model_id}');"
         )).unwrap();
+        drop(conn);
+
+        pin_file_backend();
+        // Keyed on the directory, so two profiles under one plugin_data get
+        // two identities and a grant to one never covers the other's cache.
+        let seed: [u8; 32] =
+            <sha2::Sha256 as sha2::Digest>::digest(config_dir.to_string_lossy().as_bytes()).into();
+        let me = match ll_search::sync::seed_store::load_only(config_dir).unwrap() {
+            Some(r) => KeyId::from_pubkey(&r.signing_key.verifying_key()),
+            None => {
+                ll_search::sync::seed_store::write_encrypted(config_dir, &seed).unwrap();
+                KeyId::from_pubkey(&SigningKey::from_bytes(&seed).verifying_key())
+            }
+        };
+
+        let issuer = SigningKey::from_bytes(&[3u8; 32]);
+        let statement = grant::canonical_bytes(&GrantStatement {
+            v: 5,
+            kind: GrantKind::Follow,
+            from: KeyId::from_pubkey(&issuer.verifying_key()),
+            to: me,
+            scope: Some(peer.to_string()),
+            issued_at: 1,
+            expires_at: i64::MAX,
+            nonce: format!("{}-{peer}", config_dir.display()),
+        });
+        let b64 = base64::engine::general_purpose::STANDARD;
+        ll_search::sync::grants::apply_grants(config_dir, &[ll_search::sync::protocol_v5::GrantWire {
+            statement_b64: b64.encode(&statement),
+            signature_b64: b64.encode(issuer.sign(&statement).to_bytes()),
+            state: "active".to_string(),
+        }]).unwrap();
     }
 
     #[test]
