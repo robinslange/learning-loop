@@ -100,6 +100,13 @@ enum Fetch {
     Refuse,
 }
 
+fn unix_seconds() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64
+}
+
 /// `false` when the client has hung up, which is not the mock's complaint to
 /// make — it just stops.
 async fn send_hub(ws: &mut WsServer, msg: &HubMsg) -> bool {
@@ -891,13 +898,23 @@ async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_
     .await;
     let config = config_for(dir.path(), addr);
 
+    let before = unix_seconds();
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await
         .expect("the cycle completes");
+    let after = unix_seconds();
 
     let listed = read_readable_vaults(dir.path()).unwrap()
         .expect("the cycle records what the hub listed");
     assert!(listed.contains("v-other-machine"));
+    // `at` is the whole of the staleness answer `ll status` renders and the
+    // only thing bounding how old an answer this machine will serve on. It
+    // has to be when the hub said it, not a constant: `at: 0` renders as a
+    // permanent "read authority 20335 days old" on a machine that just
+    // synced, and a false alarm on that warning is most of how the original
+    // outage stayed invisible for two months.
+    assert!((before..=after).contains(&listed.at),
+        "the cycle stamped {} and it ran between {before} and {after}", listed.at);
     assert!(!listed.contains("v-thomas-kirk"),
         "the hub did not list it, so nothing may put it on the record");
     assert!(!listed.contains("v1"),
