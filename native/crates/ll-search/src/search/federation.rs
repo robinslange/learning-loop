@@ -763,6 +763,24 @@ mod tests {
             "the link covers both caches; only one of them is a vault the hub listed");
     }
 
+    /// And the same distinction on disk. The directory names under `peers/`
+    /// are whatever is there — an orphan from an older build, a rename, a
+    /// hand-made directory — not ids the hub vouched for, so being a prefix
+    /// of something the hub listed cannot be enough. The unscoped link covers
+    /// both caches here, which leaves the list as the only discriminator.
+    #[test]
+    fn a_cache_whose_id_merely_starts_with_a_listed_one_is_not_searched() {
+        let dir = tempfile::tempdir().unwrap();
+        let me = plant_seed(dir.path(), 1);
+        plant_cache(dir.path(), "v-a");
+        plant_cache(dir.path(), "v-alice");
+        plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
+        plant_listed(dir.path(), &["v-a"]);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["v-a"],
+            "`v-alice` starts with a listed id and was never listed");
+    }
+
     /// A machine that has never completed a handshake has never been told it
     /// may read anything. Whatever is under `peers/` predates the rule, which
     /// is exactly the orphan this filter exists to hide. Absence is not

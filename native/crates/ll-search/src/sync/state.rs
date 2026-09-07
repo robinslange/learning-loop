@@ -211,6 +211,21 @@ mod tests {
         assert_eq!(listed.at, 1_000);
     }
 
+    /// **`contains` is equality, not a prefix or substring match.** The ids
+    /// it is asked about are directory names read off disk, not values the
+    /// hub vouched for, so a name that merely starts with a listed id was
+    /// never listed. Found by mutation: `starts_with` passed every other test
+    /// in this file, because no fixture used two ids where one is a prefix of
+    /// the other.
+    #[test]
+    fn contains_matches_a_whole_id_and_never_a_prefix_of_one() {
+        let listed = ReadableVaults { at: 1, vault_ids: vec!["v-a".into()] };
+        assert!(listed.contains("v-a"));
+        assert!(!listed.contains("v-alice"), "a longer id that starts with a listed one");
+        assert!(!listed.contains("v-"), "a shorter id the listed one starts with");
+        assert!(!listed.contains("V-A"), "and it is not case-insensitive either");
+    }
+
     /// The opposite rule from [`read_state`], and the reason it is opposite:
     /// a corrupt report must not block the cycle that rewrites it, but a
     /// corrupt read-authority record must not be treated as an answer. Both
