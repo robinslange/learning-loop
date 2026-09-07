@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.0
+
 ### Federation v5
 
 Federation is now three nouns. A **key** is a principal and IS its own
