@@ -378,14 +378,17 @@ mod tests {
         .unwrap();
     }
 
-    /// Record the hub's answer: these are the vaults it last said this key
-    /// may read, as of `NOW`.
+    /// Record the hub's answer: these are the vaults it last said `me` may
+    /// read, as of `NOW`.
     ///
     /// Every test that expects a cache to be HIDDEN for some *other* reason
     /// lists it here anyway. A cache missing from the list is hidden by the
-    /// list, and a test where two reasons apply at once pins neither.
-    fn plant_listed(config_dir: &Path, vault_ids: &[&str]) {
+    /// list, and a test where two reasons apply at once pins neither. The key
+    /// is on the record for the same reason it is in the type: a list is
+    /// somebody's, and every caller here has to say whose.
+    fn plant_listed(config_dir: &Path, me: &KeyId, vault_ids: &[&str]) {
         state::write_readable_vaults(config_dir, &ReadableVaults {
+            me: me.clone(),
             at: NOW,
             vault_ids: vault_ids.iter().map(|s| s.to_string()).collect(),
         })
@@ -417,7 +420,7 @@ mod tests {
         let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), peer_id);
         plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some(peer_id), LATER);
-        plant_listed(dir.path(), &[peer_id]);
+        plant_listed(dir.path(), &me, &[peer_id]);
         (dir, me)
     }
 
@@ -481,7 +484,7 @@ mod tests {
             .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()))
             .expect("two_profiles plants a seed in every profile");
         plant_grant(&profile.config_dir, 9, &me, GrantKind::Follow, Some(peer_id), LATER);
-        plant_listed(&profile.config_dir, &[peer_id]);
+        plant_listed(&profile.config_dir, &me, &[peer_id]);
     }
 
     #[test]
@@ -554,7 +557,7 @@ mod tests {
         ).unwrap();
         drop(conn);
         plant_grant(tmp.path(), 2, &me, GrantKind::Follow, Some("alice"), LATER);
-        plant_listed(tmp.path(), &["alice"]);
+        plant_listed(tmp.path(), &me, &["alice"]);
 
         let peers = discover_peer_dbs(tmp.path(), "test-model", NOW);
         assert_eq!(peers.len(), 1);
@@ -595,10 +598,10 @@ mod tests {
     /// `peers/` that no grant ever named, on a machine with a healthy store.
     #[test]
     fn a_cache_nothing_ever_granted_is_not_searched_beside_one_that_was() {
-        let (dir, _me) = served_setup("alice");
+        let (dir, me) = served_setup("alice");
         plant_cache(dir.path(), "thomas-kirk");
         // Listed, so the ONLY thing keeping it out is that no grant covers it.
-        plant_listed(dir.path(), &["alice", "thomas-kirk"]);
+        plant_listed(dir.path(), &me, &["alice", "thomas-kirk"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
             "the granted cache is served and the orphan beside it is not");
@@ -612,7 +615,7 @@ mod tests {
         plant_cache(dir.path(), "bob");
         plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("carol"), LATER);
         // Both listed. `bob` is out on scope alone, not on the hub's list.
-        plant_listed(dir.path(), &["alice", "bob"]);
+        plant_listed(dir.path(), &me, &["alice", "bob"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
     }
@@ -636,11 +639,11 @@ mod tests {
     #[test]
     fn a_grant_addressed_to_another_key_covers_nothing_here() {
         let dir = tempfile::tempdir().unwrap();
-        plant_seed(dir.path(), 1);
+        let me = plant_seed(dir.path(), 1);
         plant_cache(dir.path(), "alice");
         let someone_else = KeyId::from_pubkey(&SigningKey::from_bytes(&[7u8; 32]).verifying_key());
         plant_grant(dir.path(), 2, &someone_else, GrantKind::Follow, Some("alice"), LATER);
-        plant_listed(dir.path(), &["alice"]);
+        plant_listed(dir.path(), &me, &["alice"]);
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
     }
@@ -655,7 +658,7 @@ mod tests {
             let me = plant_seed(dir.path(), 1);
             plant_cache(dir.path(), "alice");
             plant_grant(dir.path(), 2, &me, kind, Some("alice"), LATER);
-            plant_listed(dir.path(), &["alice"]);
+            plant_listed(dir.path(), &me, &["alice"]);
             assert_eq!(discover_peer_dbs(dir.path(), "test-model", NOW).len(), expected,
                 "{kind:?} should have produced {expected} peer(s)");
         }
@@ -680,6 +683,94 @@ mod tests {
             "and the deletion path could never have reached them");
     }
 
+    /// **And it stays closed once the recovered key acquires a grant of its
+    /// own, which is the first thing a recovered machine does.** The test
+    /// above passes for as long as no grant names K2. One unscoped `link` to
+    /// K2 makes `covers` say yes to every id, and the only thing left between
+    /// K1's list and K2's reader is that the record says whose list it is.
+    ///
+    /// K1's list is not deleted by `ll recover` — `main.rs::recover` touches
+    /// the seed and nothing else — and `run_cycle` does not rewrite it until a
+    /// whole sync completes, which needs the hub.
+    #[test]
+    fn a_new_grant_to_the_recovered_key_does_not_reopen_the_old_keys_list() {
+        let (dir, k1) = served_setup("alice");
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
+
+        let k2 = plant_seed(dir.path(), 42);
+        assert_ne!(k1, k2, "precondition: recovery installed a different key");
+        plant_grant(dir.path(), 3, &k2, GrantKind::Link, None, LATER);
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "a live grant covers the cache and the list still names it — the list is \
+             K1's, and K2 was never handed it");
+    }
+
+    /// The same, through the door that needs no hub at all. `ll link accept
+    /// <blob>` reaches `link::accept_offline`, which stores a `link`
+    /// addressed to this key over no network, so nothing on the path could
+    /// rewrite `readable-vaults.json` even in principle. `ll recover --force`
+    /// then `ll link accept` then `ll query` is the whole sequence.
+    #[test]
+    fn a_link_accepted_offline_does_not_reopen_the_old_keys_list() {
+        let (dir, _k1) = served_setup("alice");
+        let k2 = plant_seed(dir.path(), 42);
+
+        // `accept_offline` reads the wall clock, so the blob has to be live
+        // against it rather than against NOW.
+        let stranger = SigningKey::from_bytes(&[3u8; 32]);
+        let statement = grant::canonical_bytes(&GrantStatement {
+            v: 5,
+            kind: GrantKind::Link,
+            from: KeyId::from_pubkey(&stranger.verifying_key()),
+            to: k2,
+            scope: None,
+            issued_at: 1,
+            expires_at: i64::MAX,
+            nonce: format!("nonce-{}", NONCE.fetch_add(1, Ordering::Relaxed)),
+        });
+        let blob = crate::sync::link::grant_blob(&crate::sync::link::SignedGrant {
+            signature: stranger.sign(&statement).to_bytes().to_vec(),
+            statement,
+        });
+        crate::sync::link::accept_offline(dir.path(), &blob)
+            .expect("the offline pairing door is supposed to work");
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
+            "the offline door lodges a grant and writes no list; K1's list is still K1's");
+    }
+
+    /// And the recovery ends where it should: one complete cycle under K2
+    /// writes a list of K2's own, and the caches the hub still lists come
+    /// back. Without this the fix would be indistinguishable from a machine
+    /// that had gone dark for good.
+    #[test]
+    fn the_first_list_written_under_the_new_key_opens_it_again() {
+        let (dir, _k1) = served_setup("alice");
+        let k2 = plant_seed(dir.path(), 42);
+        plant_grant(dir.path(), 3, &k2, GrantKind::Link, None, LATER);
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
+
+        plant_listed(dir.path(), &k2, &["alice"]);
+
+        assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
+            "one `ll sync` is the whole cost of the fix");
+    }
+
+    /// The migration, by execution rather than by argument. A
+    /// `readable-vaults.json` written by a build with no `me` on it cannot say
+    /// whose list it is, so it is refused: the file is left alone, the reader
+    /// serves nothing, and the next cycle rewrites it.
+    #[test]
+    fn a_list_file_from_before_the_key_was_recorded_serves_nothing() {
+        let (dir, _me) = served_setup("alice");
+        let path = crate::sync::config::readable_vaults_path(dir.path());
+        std::fs::write(&path, format!(r#"{{"at":{NOW},"vault_ids":["alice"]}}"#)).unwrap();
+
+        assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty());
+        assert!(path.exists(), "refused, not deleted — `ll sync` is what rewrites it");
+    }
+
     /// The case that made this urgent. A `link` is unscoped, so its
     /// withdrawal names no cache and `withdraw` correctly deletes nothing —
     /// but `apply_revocations` still drops the row, and with the row gone
@@ -691,7 +782,7 @@ mod tests {
         plant_cache(dir.path(), "alice");
         let issuer = SigningKey::from_bytes(&[2u8; 32]);
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
-        plant_listed(dir.path(), &["alice"]);
+        plant_listed(dir.path(), &me, &["alice"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"],
             "an unscoped link covers every cache — which is exactly why its \
@@ -735,10 +826,10 @@ mod tests {
     /// rather than present as something to check.
     #[test]
     fn a_cache_the_hub_no_longer_lists_is_not_searched() {
-        let (dir, _me) = served_setup("alice");
+        let (dir, me) = served_setup("alice");
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["alice"]);
 
-        plant_listed(dir.path(), &["someone-else"]);
+        plant_listed(dir.path(), &me, &["someone-else"]);
 
         assert!(discover_peer_dbs(dir.path(), "test-model", NOW).is_empty(),
             "the grant still covers it; the hub no longer lists it, and that is enough");
@@ -757,7 +848,7 @@ mod tests {
         plant_cache(dir.path(), "mine");
         plant_cache(dir.path(), "thomas-kirk");
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
-        plant_listed(dir.path(), &["mine"]);
+        plant_listed(dir.path(), &me, &["mine"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["mine"],
             "the link covers both caches; only one of them is a vault the hub listed");
@@ -775,7 +866,7 @@ mod tests {
         plant_cache(dir.path(), "v-a");
         plant_cache(dir.path(), "v-alice");
         plant_grant(dir.path(), 2, &me, GrantKind::Link, None, LATER);
-        plant_listed(dir.path(), &["v-a"]);
+        plant_listed(dir.path(), &me, &["v-a"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW)), ["v-a"],
             "`v-alice` starts with a listed id and was never listed");
@@ -822,7 +913,7 @@ mod tests {
         plant_cache(dir.path(), "followed");
         plant_grant(dir.path(), 2, &me, GrantKind::Follow, Some("followed"),
             NOW + GrantKind::Follow.default_ttl_secs());
-        plant_listed(dir.path(), &["followed"]);
+        plant_listed(dir.path(), &me, &["followed"]);
 
         assert_eq!(ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 30 * DAY)), ["followed"],
             "a laptop shut for a month must not lose federated search");
@@ -851,7 +942,7 @@ mod tests {
             NOW + GrantKind::Follow.default_ttl_secs());
         plant_grant(dir.path(), 3, &me, GrantKind::Link, None,
             NOW + GrantKind::Link.default_ttl_secs());
-        plant_listed(dir.path(), &["followed", "linked"]);
+        plant_listed(dir.path(), &me, &["followed", "linked"]);
 
         let mut past_the_follow =
             ids(&discover_peer_dbs(dir.path(), "test-model", NOW + 120 * DAY));

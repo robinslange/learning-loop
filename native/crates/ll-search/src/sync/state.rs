@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::atomic_file;
 use super::config::{readable_vaults_path, sync_state_path};
+use super::key_id::KeyId;
 
 /// `SyncState::outcome` for a cycle that finished. Readers match on these
 /// rather than retyping the literal, so a rename is a compile error in the
@@ -96,8 +97,28 @@ pub struct SyncState {
 /// `at` is when the hub said it, not when the cycle finished. Those differ:
 /// a cycle can take the handshake and then die uploading, and the list it was
 /// handed is still the newest answer this machine has.
+///
+/// **`me` is which key the hub answered, and it has to be in the record.**
+/// Without it the sentence above is a comment rather than a fact: the identity
+/// half of the read conjunction would live entirely in the grant store, and
+/// `ll recover` replaces the key while leaving this file exactly where it is.
+/// One grant addressed to the new key — an unscoped `link` is enough, and
+/// `ll link accept <blob>` lodges one with no network — and the old key's list
+/// is read as the new key's authority. Recording the key is what makes
+/// `ReadAuthority` able to refuse it.
+///
+/// `deny_unknown_fields` for the same reason, and the trade is deliberate: a
+/// record whose only job is to decide what a reader is handed must not let a
+/// future *narrowing* field be silently dropped by an older binary. The cost
+/// is that a file written by a newer build is refused rather than half-read,
+/// which is [`read_readable_vaults`]'s fail-closed direction and costs one
+/// `ll sync`. A file predating `me` fails to parse for the same reason and
+/// gets the same treatment — serve nothing, warn, recover on the next cycle —
+/// which is the whole point: an old file cannot say whose list it is.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ReadableVaults {
+    pub me: KeyId,
     pub at: i64,
     pub vault_ids: Vec<String>,
 }
@@ -193,18 +214,26 @@ pub fn write_state(config_dir: &Path, state: &SyncState) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use ed25519_dalek::SigningKey;
+
     use super::*;
+
+    fn key(seed: u8) -> KeyId {
+        KeyId::from_pubkey(&SigningKey::from_bytes(&[seed; 32]).verifying_key())
+    }
 
     #[test]
     fn the_hubs_list_round_trips() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
         write_readable_vaults(dir.path(), &ReadableVaults {
+            me: key(1),
             at: 1_000,
             vault_ids: vec!["v-a".into(), "v-b".into()],
         }).unwrap();
 
         let listed = read_readable_vaults(dir.path()).unwrap().unwrap();
+        assert_eq!(listed.me, key(1), "whose list this is survives the round trip");
         assert!(listed.contains("v-a"));
         assert!(listed.contains("v-b"));
         assert!(!listed.contains("v-c"));
@@ -219,7 +248,7 @@ mod tests {
     /// the other.
     #[test]
     fn contains_matches_a_whole_id_and_never_a_prefix_of_one() {
-        let listed = ReadableVaults { at: 1, vault_ids: vec!["v-a".into()] };
+        let listed = ReadableVaults { me: key(1), at: 1, vault_ids: vec!["v-a".into()] };
         assert!(listed.contains("v-a"));
         assert!(!listed.contains("v-alice"), "a longer id that starts with a listed one");
         assert!(!listed.contains("v-"), "a shorter id the listed one starts with");
@@ -251,17 +280,23 @@ mod tests {
     /// the clamp a negative age would render as freshness.
     #[test]
     fn age_never_reads_as_negative() {
-        let listed = ReadableVaults { at: 9_000, vault_ids: Vec::new() };
+        let listed = ReadableVaults { me: key(1), at: 9_000, vault_ids: Vec::new() };
         assert_eq!(listed.age(9_500), 500);
         assert_eq!(listed.age(1_000), 0);
     }
 
-    /// The record must survive a round trip through a file written by a build
-    /// that had one fewer field, the same way `SyncState` does — this file is
-    /// read on the query path and a parse failure there is federated search
-    /// going dark, not a warning.
+    /// **The opposite rule from `SyncState`, and it is the point of the
+    /// field.** A file written before `me` existed cannot say whose list it
+    /// is, so reading it would be exactly the case `me` closes — a list one
+    /// key was handed, served to whichever key happens to hold the machine
+    /// now. It fails to parse, `read_readable_vaults` warns and answers
+    /// absent, the reader serves nothing, and the next `ll sync` rewrites it.
+    ///
+    /// `an_old_state_file_still_reads` is the sibling and goes the other way
+    /// on purpose: losing a vault's sync history is silent data loss, losing
+    /// its read authority for one cycle is one `ll sync`.
     #[test]
-    fn a_list_file_with_only_the_two_fields_still_reads() {
+    fn a_list_file_written_before_the_key_was_recorded_reads_as_absent() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("federation")).unwrap();
         std::fs::write(
@@ -269,8 +304,43 @@ mod tests {
             r#"{"at":1,"vault_ids":["v-a"]}"#,
         ).unwrap();
 
-        let listed = read_readable_vaults(dir.path()).unwrap().unwrap();
-        assert!(listed.contains("v-a"));
+        assert!(read_readable_vaults(dir.path()).unwrap().is_none(),
+            "a list with no key on it is not this key's list");
+    }
+
+    /// `deny_unknown_fields`, in the direction it is there for: an older
+    /// binary meeting a record a newer one narrowed. Half-reading it would
+    /// drop the narrowing and serve more than the writer meant.
+    #[test]
+    fn a_list_file_carrying_a_field_this_build_does_not_know_reads_as_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("federation")).unwrap();
+        write_readable_vaults(dir.path(), &ReadableVaults {
+            me: key(1), at: 1, vault_ids: vec!["v-a".into()],
+        }).unwrap();
+        let path = readable_vaults_path(dir.path());
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        v["revoked"] = serde_json::json!(true);
+        std::fs::write(&path, v.to_string()).unwrap();
+
+        assert!(read_readable_vaults(dir.path()).unwrap().is_none());
+    }
+
+    /// The file is a contract with every out-of-process reader of
+    /// `federation/`, the same way `sync-state.json` is. Pin the keys.
+    #[test]
+    fn the_list_on_disk_carries_the_key_it_was_answered_for() {
+        let dir = tempfile::tempdir().unwrap();
+        write_readable_vaults(dir.path(), &ReadableVaults {
+            me: key(1), at: 1_000, vault_ids: vec!["v-a".into()],
+        }).unwrap();
+
+        let raw = std::fs::read_to_string(readable_vaults_path(dir.path())).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["me"], key(1).as_str());
+        assert_eq!(v["at"], 1_000);
+        assert_eq!(v["vault_ids"][0], "v-a");
     }
 
     #[test]

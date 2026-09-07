@@ -259,6 +259,7 @@ async fn run_cycle(
     // the only honest thing a long-offline machine can say about it.
     let listed_at = unix_now();
     state::write_readable_vaults(config_dir, &state::ReadableVaults {
+        me: me.clone(),
         at: listed_at,
         vault_ids: super::fetch::readable_vaults(
             &ready.vault_state, &ready.grants, &me, vault_id, listed_at,

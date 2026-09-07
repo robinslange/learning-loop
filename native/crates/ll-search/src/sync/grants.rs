@@ -101,7 +101,10 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 ///    [`ReadableVaults`] list. This is not a second opinion about authority:
 ///    a cache exists on disk only because the hub listed that vault and served
 ///    its index, so filtering on the hub's latest list is the same authority
-///    that produced the cache, applied later.
+///    that produced the cache, applied later. **"This key" is a field on the
+///    record, not a property of the file's location.** `ll recover` replaces
+///    the seed and leaves the file, so a list matching no key on this machine
+///    is a list this machine was never handed, and [`Self::load`] drops it.
 /// 2. **Does a live grant cover it?** — [`covers`], over the local store.
 ///
 /// **Neither alone is a boundary, and the pair is not belt-and-braces — each
@@ -158,14 +161,15 @@ impl ReadAuthority {
     /// addressed to it, so it must be treated as no authority at all rather
     /// than as an empty one.
     pub fn load(config_dir: &Path, now: i64) -> anyhow::Result<Self> {
+        let me = link::local_key_id(config_dir)?;
         Ok(Self {
-            me: link::local_key_id(config_dir)?,
             live: verified(&link::load_grants(config_dir)?)
                 .into_iter()
                 .filter(|(_, _, st)| st.expires_at > now)
                 .map(|(_, _, st)| st)
                 .collect(),
-            listed: state::read_readable_vaults(config_dir)?,
+            listed: state::read_readable_vaults(config_dir)?.filter(|listed| listed.me == me),
+            me,
         })
     }
 

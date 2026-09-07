@@ -899,6 +899,7 @@ mod tests {
         seeded_profile(dir.path());
         crate::sync::state::write_readable_vaults(dir.path(),
             &crate::sync::state::ReadableVaults {
+                me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
                 at: 1_000,
                 vault_ids: vec!["v-a".into(), "v-b".into()],
             }).unwrap();
@@ -919,8 +920,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
         crate::sync::state::write_readable_vaults(dir.path(),
-            &crate::sync::state::ReadableVaults { at: 1_000, vault_ids: vec!["v-a".into()] })
-            .unwrap();
+            &crate::sync::state::ReadableVaults {
+                me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
+                at: 1_000,
+                vault_ids: vec!["v-a".into()],
+            }).unwrap();
 
         let fresh = render_status(dir.path(), 1_000 + STALE_AFTER_SECS - 60).unwrap();
         assert!(!fresh.contains("read authority"),
