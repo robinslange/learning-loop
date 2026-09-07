@@ -210,6 +210,10 @@ federation adds no row. The four that matter here:
 - **`STALE`** — the last successful sync is more than seven days old.
 - **`BLOCKED`** — `ll-search sync` will refuse this config.
 
+A `last sync` error naming a hub the `hub:` line above it does not name is
+none of these: it is the watch daemon still running on the config it read at
+startup. Report it as that.
+
 Do not offer a fix here. `/learning-loop:doctor` carries the full federation
 section, including `ll-search link list` and what each verdict means; point at
 it and stop.

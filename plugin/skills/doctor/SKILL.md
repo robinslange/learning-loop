@@ -164,6 +164,15 @@ ll-search link list --config-dir <config_dir>
 - **`lodged: false`** — this machine signed its half and the hub has not taken
   it. It takes effect on the next sync that reaches the hub.
 
+**Check the daemon before blaming the config.** The `last sync` line is
+whatever last wrote `federation/sync-state.json`, and that is normally the
+watch daemon — which reads `config.json` once at startup and holds that copy.
+A daemon that outlived a `join` or a config edit keeps dialling the old
+endpoint and re-stamps its failure every five minutes, over a successful manual
+sync included. An error naming a hub the `hub:` line above it does not name is
+that, and the fix is `ll-watch stop && ll-watch` followed by a sync, not
+anything in `config.json`.
+
 **None of these is auto-runnable.** `ll-search sync` is the fix for most of
 them and it uploads a person's notes, so offer it and never run it without
 consent.

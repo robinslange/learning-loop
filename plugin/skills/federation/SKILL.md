@@ -29,6 +29,11 @@ $PLUGIN_DATA` is what every command below passes. For a multi-vault install
 each vault has its own config dir under `PLUGIN_DATA`, listed by `ll-search
 vault list`.
 
+`ll-search sync` also takes the **search index** as its first positional. That
+is `VAULT/.vault-search/vault-index.db` — the file the watch daemon writes, not
+anything under the config dir. Pass it in full; a path that does not exist ends
+the command in a panic rather than a message.
+
 ## Process
 
 Detect first, then walk the steps in order. Nothing writes `config.json` until
@@ -60,18 +65,39 @@ when the last cycle ran and whether it succeeded,
 what the hub held as of that cycle, and a `BLOCKED` line if `ll-search sync`
 would refuse the config.
 
+**The `last sync` line can describe a config that is no longer on disk.** The
+watch daemon reads `config.json` once, when it starts, and holds that copy for
+its whole life; SessionStart only replaces it when the binary changes, not when
+the config does. A daemon that started before this vault joined therefore keeps
+dialling the endpoint it read then, and stamps that failure over
+`federation/sync-state.json` every five minutes — including over a successful
+manual sync.
+
+The tell is inside the output: a `last sync` error naming a hub that is not the
+`hub:` line above it is a stale daemon, not a broken config. When that happens,
+restart the watcher before reporting anything about the last cycle:
+
+```bash
+ll-watch stop && ll-watch
+```
+
+then run the sync in section C and re-read `status`.
+
 ## B: Invite code
 
 Enrollment needs an invite code — twelve Crockford base32 characters grouped
 `XXXX-XXXX-XXXX`. A code is single-use, expires seven days after it is minted,
 and is spent only when a key successfully authenticates with it.
 
-**Where a code comes from.** Any member may mint one, capped at five
-outstanding unused invites each; there is no admin role and no `role` column.
-That is the authorization rule. The *surface* today is operator-side: the hub
-operator runs `sync-hub mint-invite <key_id>` on the box, minting as a named
-member, and hands the code over. A remote surface — a member asking the hub
-for a code over the wire, and signing the request — does not exist yet.
+**Where a code comes from: ask someone already on the hub.** Any member may
+mint one, capped at five outstanding unused invites each; there is no admin
+role and no `role` column, so the person who invites a user does not have to be
+whoever runs the box. What is still operator-side is the *surface*: minting is
+`sync-hub mint-invite <key_id>`, run on the hub itself, so a member without a
+shell there asks the operator to mint as them. A remote surface — a member
+asking the hub for a code over the wire, and signing the request — does not
+exist yet. Tell the user to ask a member they know; tell them the operator is
+the fallback, not the rule.
 
 **What `created_by` does and does not mean.** It records the member an invite
 was minted *as*. It is not evidence that member asked for it: the command
@@ -83,9 +109,20 @@ authorised by the member it names.
 So there are three doors onto a hub:
 
 1. named in the hub's own `BOOTSTRAP_MEMBERS` at boot;
-2. an invite code from the hub operator (this section);
+2. an invite code from a member (this section);
 3. a `link` grant from a machine already enrolled (section F) — which needs no
    invite at all, because membership follows the link.
+
+**Door 1 is not something a user can look up, and it does not excuse the
+argument.** `BOOTSTRAP_MEMBERS` is an environment variable on the hub; nothing
+the client runs can read it. The hub admits a key it already knows before it
+looks at the code, so a member's `join` succeeds whatever is in the invite
+slot — but `join` takes the code as a required positional and there is no flag
+to omit it. If the user believes they were admitted at boot and has no code,
+have them pass any well-formed `XXXX-XXXX-XXXX` and read the outcome:
+`Authenticated` means door 1 was real, `hub rejected: invite redemption failed`
+means it was not and they need door 2. Say that is what the argument is doing,
+so nobody records a code that was never spent.
 
 If the user has none of the three, stop here rather than starting a `join`
 that cannot complete.
@@ -123,10 +160,23 @@ The command, in order:
 **Never echo the recovery phrase back, never write it to a file, and never put
 it in your response.** It is the user's to record.
 
-`join` does **not** sync. It enrolls. The first upload is a separate step:
+`join` does **not** sync. It enrolls. Two steps follow it, and neither is
+optional.
+
+**First, restart the watch daemon.** It is running — SessionStart spawns it —
+and it is holding the config as it was before `join` rewrote it. Left alone it
+never picks up the new hub, and its five-minute tick overwrites
+`federation/sync-state.json` with a failure against the old endpoint, which is
+what `ll-search status` then reports.
 
 ```bash
-ll-search sync <db-path> <vault-path> --config-dir <config_dir>
+ll-watch stop && ll-watch
+```
+
+**Then upload:**
+
+```bash
+ll-search sync <VAULT>/.vault-search/vault-index.db <VAULT> --config-dir <config_dir>
 ```
 
 Report what it returns (notes uploaded, vaults fetched). If it names vaults it
@@ -346,3 +396,6 @@ it to `<config_dir>/federation/.seed` (mode 0600) so the legacy reader and
 - The hub's key must be pinned. An unpinned hub is an error, not a warning:
   `ll-search sync` refuses the config and `ll-search status` says `BLOCKED`.
 - One vault, one config dir. Never point two vaults at the same one.
+- Anything that writes `config.json` — `join`, `link request` — is followed by
+  `ll-watch stop && ll-watch`. A running daemon holds the old copy and will
+  keep reporting against it.

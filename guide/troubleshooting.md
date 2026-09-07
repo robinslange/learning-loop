@@ -19,6 +19,17 @@ First check that the vault backend is alive. Open a recent shadow record and loo
 - If you see `spawn ... ENOENT`, run `/learning-loop:init` to install the binary.
 - If the backend is healthy but the gate never passes, the threshold is above what the fusion scale can reach. Run `node PLUGIN/scripts/review-shadow.mjs` — it reports `unreachable` (the gate exceeds the highest score ever recorded), `starved` (within 5% of the observed ceiling), or `ok`. The weighted-RRF ceiling is `0.4333`; the default gate is `0.34`. Lower `injection_threshold` in `config.json` (or set `LEARNING_LOOP_INJECTION_THRESHOLD`) to a value inside that range.
 
+## `ll-search status` reports a hub you no longer use
+
+The `hub:` line comes from `config.json`; the `last sync` line comes from `federation/sync-state.json`, which is written by whatever last ran a cycle. That is normally the watch daemon, and the daemon reads `config.json` once at startup and holds that copy for its whole life — SessionStart respawns it only when the binary changes, not when the config does.
+
+So a daemon that was already running when you ran `ll-search join` (or `ll-search link request`) keeps dialling the endpoint it read at startup and stamps that failure over `sync-state.json` every five minutes, including over a manual sync that had just succeeded. The tell is the two lines naming different hubs, with `last ok: never`.
+
+```bash
+ll-watch stop && ll-watch
+ll-search sync <vault-path>/.vault-search/vault-index.db <vault-path>
+```
+
 ## Notes not showing up in vault
 
 Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.

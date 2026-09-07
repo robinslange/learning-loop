@@ -4,13 +4,13 @@ Federation lets you share vault notes with other learning-loop users through a h
 
 ## Detect
 
-If `PLUGIN_DATA/vaults.json` or `PLUGIN_DATA/federation/config.json` exists from a previous setup, skip with: "Federation: already configured. Run `ll-search status` for detail."
+If `PLUGIN_DATA/vaults.json` or `PLUGIN_DATA/federation/config.json` exists from a previous setup, skip with: "Federation: already configured. Run `ll-search status --config-dir <PLUGIN_DATA>` for detail."
 
 ## Ask
 
 Otherwise, ask:
 
-> Set up federation now? It connects this vault to other learning-loop users through a hub. You will need either an invite code, or a machine already enrolled that can link this one. (default: no)
+> Set up federation now? It connects this vault to other learning-loop users through a hub. You will need either an invite code — any existing member of that hub can get you one — or a machine already enrolled that can link this one. (default: no)
 
 If the user says **no** or just confirms the default, skip silently. Federation is opt-in and most users do not need it on first install.
 

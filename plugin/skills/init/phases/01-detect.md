@@ -43,7 +43,7 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Seed location:** The federation seed normally lives in the binary's secure seed store (OS keyring or encrypted file), not as a plaintext file — no `.seed` on disk is the healthy state. Flag only if a plaintext `.seed` exists: in `${CLAUDE_PLUGIN_ROOT}/federation/` (very old installs — needs relocation, handled by the federation skill) or in `PLUGIN_DATA/federation/` (pre-v1.18 legacy — the federation skill offers `ll-search migrate-seed`).
 
-**Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <db_path> <vault_path>`. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
+**Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <VAULT>/.vault-search/vault-index.db <VAULT> --config-dir <PLUGIN_DATA>`. Both positionals and the config dir are required — the first is the search index the watch daemon writes, and a path that does not exist ends the command in a panic. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 
 **Cache health statusline:** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 
@@ -93,6 +93,7 @@ Everything looks good. Nothing to set up.
 - If sync failed with connection error: report "hub unreachable: check the network and the hub endpoint."
 - If sync refused the config: report it verbatim. An unpinned `hub.key_id`, or an endpoint that is not `wss://`, is an error in v5 rather than a warning.
 - If no federation config: report "not configured."
+- If sync succeeded but `ll-search status` still reports a failing last cycle against a different hub, that is the watch daemon holding the config as it was when it started. Say so, and offer `ll-watch stop && ll-watch`.
 - Never tell the user that a remote peer "needs to register" you unless the hub explicitly rejected auth with that reason.
 
 If everything is configured, stop the entire init flow here. If issues exist, proceed to the relevant phases only.

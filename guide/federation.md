@@ -18,7 +18,7 @@ Every grant expires, and each successful sync renews the ones it exercised. Defa
 
 - **Federated search** -- your results include notes from vaults you may read, merged into the same reciprocal-rank fusion as your own, with provenance tracking. A result from elsewhere carries a `peer:<vault_id>/` prefix on its path.
 - **Visibility control** -- three tiers: `public` (full content), `listed` (title, tags and summary), `private` (not shared). See [Visibility rules](#visibility-rules), and note that a glob can restrict but never publish.
-- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks.
+- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks, against the config it read when it started.
 - **One identity, several machines** -- `ll-search link` joins a second machine to the same key through four doors, one of which needs no network at all.
 
 ## Getting on a hub
@@ -26,8 +26,10 @@ Every grant expires, and each successful sync renews the ones it exercised. Defa
 Three doors, and you need one of them:
 
 1. Your key is named in the hub's own `BOOTSTRAP_MEMBERS` at boot.
-2. An invite code. Any member may mint one, capped at five outstanding, and there is no admin role -- but the *surface* today is operator-side: the hub operator runs `sync-hub mint-invite <key_id>` on the box and hands you the code. It is twelve Crockford base32 characters as `XXXX-XXXX-XXXX`, single-use, and expires seven days after minting. A remote surface, where a member asks the hub for a code over the wire and signs the request, does not exist yet. The `created_by` on an invite records who it was minted *as*, which is not evidence that member asked for it.
+2. An invite code, which you get by asking anyone already on that hub. Any member may mint one, capped at five outstanding, and there is no admin role -- the person who invites you does not have to be whoever runs the box. What is still operator-side is the *surface*: minting is `sync-hub mint-invite <key_id>`, run on the hub itself, so a member without a shell there asks the operator to mint as them. A remote surface, where a member asks the hub for a code over the wire and signs the request, does not exist yet. A code is twelve Crockford base32 characters as `XXXX-XXXX-XXXX`, single-use, and expires seven days after minting. The `created_by` on an invite records who it was minted *as*, which is not evidence that member asked for it.
 3. A `link` grant from a machine already enrolled -- see [Additional machines](#additional-machines). This needs no invite, because membership follows the link.
+
+Door 1 is not something you can look up: `BOOTSTRAP_MEMBERS` is an environment variable on the hub, and nothing the client runs can read it. It also does not excuse the argument. The hub admits a key it already knows before it looks at the code, so a member's `join` succeeds whatever is in the invite slot -- but `join` takes the code as a required positional and there is no flag to omit it. If you think you were admitted at boot and have no code, pass any well-formed `XXXX-XXXX-XXXX`: `Authenticated` means you were, and `hub rejected: invite redemption failed` means you need door 2.
 
 ## Setup
 
@@ -45,10 +47,18 @@ The three arguments are positional and in that order, and the endpoint must be `
 4. Connects, authenticates, and checks the hub's `SyncReady` names the new `vault_id`. Declaring the vault in the hello *is* registering it; there is no second round trip.
 5. Writes `config.json` last.
 
-`join` enrols; it does not sync. The first upload is a separate step:
+`join` enrols; it does not sync. Two steps follow it.
+
+**Restart the watcher.** It reads `config.json` once, at startup, and holds that copy for its whole life -- so a daemon that was already running when you joined keeps dialling the endpoint it read then, and writes that failure over `federation/sync-state.json` every five minutes. SessionStart will not replace it either: it only respawns when the binary changes, not when the config does.
 
 ```bash
-ll-search sync <db-path> <vault-path>
+ll-watch stop && ll-watch
+```
+
+**Then upload.** The first positional is the search index, not anything under the config dir:
+
+```bash
+ll-search sync <vault-path>/.vault-search/vault-index.db <vault-path>
 ```
 
 If `join` fails, nothing is written and you can re-run it cleanly. The invite is spent only on success.
@@ -67,6 +77,8 @@ Local files only: no socket, no clock, no network, so nothing it prints can impl
 - **`hub holds: nothing`** -- as of that cycle the hub had no index for this vault. The next sync re-uploads it. If it survives a successful sync, the hub is degraded. This is the signature of an outage that ran for two months in 2026 while the client reported itself content.
 - **`BLOCKED`** -- `ll-search sync` will refuse this config. The two causes are an unpinned `hub.key_id` and an endpoint that is not `wss://`. Both were warnings in v4 and are errors now.
 - **`RECOVERED`** -- the seed and `config.json` name different keys.
+
+One thing it reports is not a verdict about your config: the `last sync` line is whatever last wrote `federation/sync-state.json`, and that is usually the watch daemon, running on the config it read when it started. An error there naming a hub the `hub:` line does not name is a stale daemon. See [Sync commands](#sync-commands).
 
 ## Additional machines
 
@@ -253,6 +265,8 @@ ll-search status
 Note that `node scripts/vault-search.mjs status` is the **index** status, not this one — it shells out to `ll-search index-status`. v5 gave the bare name `status` to federation, and the pre-existing command became `index-status`.
 
 Sync runs automatically inside the always-on `ll-search watch` daemon (spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`): the watcher's `tokio::select!` loop runs sync alongside the reindex debounce, the poll tick, and the resync tick (see [Sync wire format](#sync-wire-format)). Nothing syncs at session end -- the Stop hook only emits nudges. The manual commands above cover the cases where the daemon isn't running.
+
+**The daemon loads `config.json` once and never re-reads it.** SessionStart respawns it only when the binary's mtime changes, so a config edited or written underneath a live daemon -- by `join`, by `link request`, or by hand -- is invisible to it for the rest of the session and every session after. It goes on syncing against the endpoint it read at startup and stamping the result over `federation/sync-state.json`, which is the file `ll-search status` reads. That is why a `last sync` error can name a hub the `hub:` line above it does not, and why it can appear minutes after a successful manual sync. `ll-watch stop && ll-watch` after anything that writes the config.
 
 ## The public knowledge map
 
