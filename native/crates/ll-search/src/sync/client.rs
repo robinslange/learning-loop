@@ -6,6 +6,7 @@ use futures_util::{SinkExt, StreamExt};
 use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Sha256, Digest};
+use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
@@ -43,9 +44,12 @@ fn env_millis(var: &str, fallback: Duration) -> Duration {
         .unwrap_or(fallback)
 }
 
-/// Test-only override for `RECV_TIMEOUT` via `LL_SYNC_RECV_TIMEOUT_MS` env var.
-/// Production callers ignore this; it exists so integration tests can shorten
-/// the silent-hub timeout from 30s to ~1s without changing source code.
+/// `RECV_TIMEOUT`, overridable by `LL_SYNC_RECV_TIMEOUT_MS`. It exists so
+/// integration tests can shorten the silent-hub timeout from 30s to ~1s
+/// without changing source code, and it carries no `cfg(test)`: a release
+/// build reads the variable too, and the variable's name is in its strings.
+/// Nothing production sets it, which is a different claim from nothing
+/// production reads it.
 fn recv_timeout() -> Duration {
     static RESOLVED: std::sync::OnceLock<Duration> = std::sync::OnceLock::new();
     *RESOLVED.get_or_init(|| env_millis("LL_SYNC_RECV_TIMEOUT_MS", RECV_TIMEOUT))
@@ -60,54 +64,133 @@ pub(super) type WsStream = tokio_tungstenite::WebSocketStream<
     tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
 >;
 
-/// Tailscale's CGNAT range (100.64.0.0/10): first octet 100, second octet
-/// in 64..=127. Tailnet traffic is already WireGuard-encrypted end-to-end,
-/// so requiring TLS on top buys nothing.
-fn is_tailscale_cgnat_ip(host: &str) -> bool {
-    host.parse::<std::net::Ipv4Addr>()
-        .map(|ip| {
-            let [a, b, ..] = ip.octets();
-            a == 100 && (64..=127).contains(&b)
-        })
-        .unwrap_or(false)
+/// The hub endpoint, parsed once, for everything that needs a piece of it.
+///
+/// It used to be parsed three times — by prefix in `check_hub_scheme`, by hand
+/// in `well_known`, and by `http::Uri` inside `IntoClientRequest` — and the
+/// three disagreed about which part was the host. `IntoClientRequest` drops
+/// everything before an `@`; the hand-rolled split read inside the brackets.
+/// So `wss://[legit.hub.example]@evil.example.com/ws` fetched the genuine
+/// hub's six-word fingerprint for the operator to confirm and opened the
+/// WebSocket to `evil.example.com`, which is exactly the substitution the
+/// fingerprint step exists to catch.
+///
+/// `http::Uri` is the parse the WebSocket dialer already performs — tungstenite
+/// re-exports the crate — so a dialer handed [`HubUrl::ws_uri`] cannot
+/// reach a second opinion about the host. Userinfo is refused outright rather
+/// than interpreted: no hub needs it, and it is the only thing that made the
+/// two readings differ.
+#[derive(Debug)]
+pub(super) struct HubUrl {
+    /// `wss://` (and `https://` for the well-known fetch) rather than `ws://`.
+    pub(super) tls: bool,
+    /// The host with no brackets and no userinfo: what `TcpStream::connect`
+    /// and `ServerName::try_from` are handed.
+    pub(super) host: String,
+    pub(super) port: u16,
+    /// `host[:port]`, brackets kept, for the `Host:` header and for the URI
+    /// the dialer is given.
+    pub(super) authority: String,
+    path_and_query: String,
 }
 
-/// Enforce wss:// for hub connections. Cleartext `ws://` (and any other
-/// scheme) is rejected so the vault index never streams unencrypted, EXCEPT
-/// for loopback hosts (127.0.0.1 / ::1 / localhost) and Tailscale tailnet
-/// hosts (100.64.0.0/10 CGNAT range, or `.ts.net` MagicDNS names), where
-/// ws:// is allowed since those transports are already encrypted.
-pub(super) fn check_hub_scheme(endpoint: &str) -> anyhow::Result<()> {
-    let rest = endpoint.trim();
-    if let Some(after) = rest.strip_prefix("wss://") {
-        let _ = after;
-        return Ok(());
-    }
-    if let Some(after) = rest.strip_prefix("ws://") {
-        let authority = after
-            .split(|c| c == '/' || c == '?' || c == '#')
-            .next()
-            .unwrap_or("");
-        let host = if let Some(rest) = authority.strip_prefix('[') {
-            rest.split(']').next().unwrap_or("")
-        } else {
-            authority.split(':').next().unwrap_or("")
+/// `Uri::host` keeps the brackets on an IPv6 literal. `TcpStream::connect` and
+/// `ServerName::try_from` both want it without them, so this is where the two
+/// spellings of one host are reconciled — once, so that comparing a host from
+/// here against a host from anywhere else compares hosts and not notations.
+fn unbracket(host: &str) -> &str {
+    host.strip_prefix('[').and_then(|h| h.strip_suffix(']')).unwrap_or(host)
+}
+
+impl HubUrl {
+    pub(super) fn parse(endpoint: &str) -> anyhow::Result<Self> {
+        let uri: Uri = endpoint
+            .trim()
+            .parse()
+            .with_context(|| format!("hub endpoint {endpoint:?} is not a URL"))?;
+        let tls = match uri.scheme_str() {
+            Some("wss") => true,
+            Some("ws") => false,
+            Some(other) => anyhow::bail!(
+                "unsupported hub scheme {other:?} in {endpoint:?}; federation requires wss://"
+            ),
+            None => anyhow::bail!(
+                "hub endpoint {endpoint:?} has no scheme; federation requires wss://"
+            ),
         };
-        if host == "127.0.0.1" || host == "::1" || host == "localhost" {
-            return Ok(());
+        let authority = uri
+            .authority()
+            .ok_or_else(|| anyhow::anyhow!("hub endpoint {endpoint:?} names no host"))?;
+        if authority.as_str().contains('@') {
+            anyhow::bail!(
+                "hub endpoint {endpoint:?} puts userinfo before the host. The host a \
+                 WebSocket dial resolves is what follows the '@' and the host everything \
+                 else reads is what precedes it, so this address means two different hubs."
+            );
         }
-        if is_tailscale_cgnat_ip(host) || host.ends_with(".ts.net") {
-            return Ok(());
+        let host = unbracket(uri.host().unwrap_or(""));
+        if host.is_empty() {
+            anyhow::bail!("hub endpoint {endpoint:?} names no host");
         }
+        Ok(HubUrl {
+            tls,
+            host: host.to_string(),
+            port: uri.port_u16().unwrap_or(if tls { 443 } else { 80 }),
+            authority: authority.as_str().to_string(),
+            path_and_query: uri.path_and_query().map(|p| p.as_str()).unwrap_or("/").to_string(),
+        })
+    }
+
+    /// The URI the WebSocket dialer is given: this endpoint's own authority,
+    /// with `/ws` appended unless the operator already wrote it.
+    fn ws_uri(&self) -> anyhow::Result<Uri> {
+        let path = if self.path_and_query.ends_with("/ws") {
+            self.path_and_query.clone()
+        } else {
+            format!("{}/ws", self.path_and_query.trim_end_matches('/'))
+        };
+        Uri::builder()
+            .scheme(if self.tls { "wss" } else { "ws" })
+            .authority(self.authority.as_str())
+            .path_and_query(path)
+            .build()
+            .context("building the hub WebSocket URL")
+    }
+}
+
+/// `LL_ALLOW_INSECURE_WS`, read here and nowhere else.
+///
+/// It is the local test harness's escape hatch and the only thing that lets a
+/// hub connection proceed without TLS. [`check_hub_scheme`] is the rule;
+/// [`channel_binding`] and `FederationConfig::validate` defer to it.
+pub(super) fn insecure_ws_allowed() -> bool {
+    std::env::var("LL_ALLOW_INSECURE_WS").is_ok()
+}
+
+/// **The rule: a hub connection must be TLS.** The channel binding that ties a
+/// completed handshake to one session is the TLS exporter, and a plaintext
+/// socket has nothing to export — so cleartext `ws://` is refused here, and
+/// [`channel_binding`] refuses it again at the socket.
+///
+/// `LL_ALLOW_INSECURE_WS` lifts both refusals together, which is what the
+/// crate's own mock hubs run under. It buys a constant channel binding that no
+/// real hub accepts, because the hub's exporter is not 32 zero bytes and the
+/// signature over it will not verify.
+///
+/// There is no host allowlist. One documented itself here for loopback and
+/// Tailscale addresses, was tested, and could not be used by any caller: those
+/// transports carry no TLS exporter either, so every connection they allowed
+/// died at the exporter instead.
+pub(super) fn check_hub_scheme(endpoint: &str) -> anyhow::Result<HubUrl> {
+    let parsed = HubUrl::parse(endpoint)?;
+    if !parsed.tls && !insecure_ws_allowed() {
         anyhow::bail!(
-            "refusing cleartext ws:// connection to non-loopback hub {endpoint:?}; \
-             federation requires wss:// (or a Tailscale tailnet host)"
+            "refusing cleartext ws:// connection to hub {endpoint:?}; federation \
+             requires wss:// — the channel binding is the TLS exporter, and a \
+             plaintext socket has none"
         );
     }
-    let scheme = rest.split("://").next().unwrap_or(rest);
-    anyhow::bail!(
-        "unsupported hub scheme {scheme:?} in {endpoint:?}; federation requires wss://"
-    )
+    Ok(parsed)
 }
 
 #[derive(Debug, Serialize)]
@@ -188,6 +271,17 @@ pub async fn sync_all_async(
     outcome
 }
 
+/// Whether an export of `export_len` bytes fits in one frame the hub will
+/// accept (R12). The hub closes the connection on an inbound frame over
+/// `HUB_INBOUND_CAP`, so the export that would not fit is refused here, with
+/// its own error, rather than sent and hung up on.
+///
+/// The frame carries `ENVELOPE_HEADER_LEN` bytes in front of the export, and
+/// an export of exactly the remaining room fits.
+fn upload_fits(export_len: usize) -> bool {
+    export_len + ENVELOPE_HEADER_LEN <= HUB_INBOUND_CAP
+}
+
 pub(super) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -204,8 +298,7 @@ async fn run_cycle(
 ) -> anyhow::Result<SyncResult> {
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
-    // Pre-flight upload size check (R12). Frame overhead is 36 bytes.
-    if prepared.bytes.len() + ENVELOPE_HEADER_LEN > HUB_INBOUND_CAP {
+    if !upload_fits(prepared.bytes.len()) {
         return Err(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP }.into());
     }
 
@@ -414,6 +507,32 @@ fn hub_tls_connector() -> tokio_tungstenite::Connector {
     ))
 }
 
+/// The 32 bytes that tie a completed handshake to this exact connection, so
+/// replaying it onto another one fails signature verification.
+///
+/// `insecure_ok` is [`insecure_ws_allowed`], passed in rather than read again:
+/// a test binary is one process running its tests in parallel threads, and
+/// `env_millis` above records what reading the environment mid-connection
+/// costs. Handed the flag, a test drives both non-TLS arms without writing to
+/// the environment at all.
+///
+/// The constant on the insecure arm is safe only because it is a constant the
+/// other end does not share: a real hub derives its own exporter from a real
+/// session, and `sig_h` over 32 zero bytes will not verify against it.
+fn channel_binding(ws: &WsStream, insecure_ok: bool) -> anyhow::Result<[u8; 32]> {
+    match ws.get_ref() {
+        tokio_tungstenite::MaybeTlsStream::Rustls(tls) => {
+            let (_io, conn) = tls.get_ref();
+            // rustls hands the buffer back rather than filling one in place,
+            // so there is no zeroed `out` left in scope for a dropped error
+            // to be mistaken for.
+            Ok(conn.export_keying_material([0u8; 32], super::handshake::EXPORTER_LABEL, None)?)
+        }
+        _ if insecure_ok => Ok([0u8; 32]),
+        _ => anyhow::bail!("hub connection is not TLS; refusing to authenticate"),
+    }
+}
+
 pub(super) async fn connect_and_authenticate(
     config: &FederationConfig,
     seed: &SigningKey,
@@ -421,13 +540,8 @@ pub(super) async fn connect_and_authenticate(
     model_id: &str,
     invite: Option<&str>,
 ) -> anyhow::Result<(WsStream, SyncReadyPayload)> {
-    let hub_url = &config.hub.endpoint;
-    check_hub_scheme(hub_url)?;
-    let connect_url = if hub_url.ends_with("/ws") {
-        hub_url.clone()
-    } else {
-        format!("{}/ws", hub_url.trim_end_matches('/'))
-    };
+    let endpoint = check_hub_scheme(&config.hub.endpoint)?;
+    let connect_url = endpoint.ws_uri()?;
     eprintln!("Connecting to hub at {connect_url} as {peer_id} (model {model_id})...");
     let (mut ws, _response) = tokio_tungstenite::connect_async_tls_with_config(
         &connect_url,
@@ -438,21 +552,7 @@ pub(super) async fn connect_and_authenticate(
     .await
     .context("failed to connect to hub")?;
 
-    // Channel binding: the exporter ties a completed handshake to this exact
-    // TLS session, so relaying it onto a different connection fails
-    // signature verification. `LL_ALLOW_INSECURE_WS` is the local test
-    // harness escape hatch only (`check_hub_scheme` already restricts
-    // cleartext `ws://` to loopback/tailnet hosts).
-    let exporter = match ws.get_ref() {
-        tokio_tungstenite::MaybeTlsStream::Rustls(tls) => {
-            let (_io, conn) = tls.get_ref();
-            let mut out = [0u8; 32];
-            conn.export_keying_material(&mut out, super::handshake::EXPORTER_LABEL, None)?;
-            out
-        }
-        _ if std::env::var("LL_ALLOW_INSECURE_WS").is_ok() => [0u8; 32],
-        _ => anyhow::bail!("hub connection is not TLS; refusing to authenticate"),
-    };
+    let exporter = channel_binding(&ws, insecure_ws_allowed())?;
 
     let vault_ids: Vec<String> = config.vault_id.clone().into_iter().collect();
     let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, invite).await?;
@@ -704,6 +804,16 @@ mod tests {
     use super::*;
     use super::super::protocol_v5::HeldIndex;
 
+    /// Every `ws://` case in this module needs the escape hatch in a known
+    /// state, and a test binary is one process: taking the same lock
+    /// `test_hub` writes the variable under is what keeps a parallel test from
+    /// deciding the answer.
+    fn without_the_escape_hatch() -> std::sync::MutexGuard<'static, ()> {
+        let guard = super::super::test_hub::env_lock();
+        std::env::remove_var("LL_ALLOW_INSECURE_WS");
+        guard
+    }
+
     #[test]
     fn check_hub_scheme_accepts_wss() {
         assert!(check_hub_scheme("wss://hub.example.com/ws").is_ok());
@@ -711,43 +821,257 @@ mod tests {
     }
 
     #[test]
-    fn check_hub_scheme_rejects_cleartext_ws_to_remote() {
+    fn check_hub_scheme_rejects_cleartext_ws() {
+        let _env = without_the_escape_hatch();
         let err = check_hub_scheme("ws://hub.example.com/ws").unwrap_err().to_string();
         assert!(err.contains("ws://"), "error should name the scheme: {err}");
         assert!(check_hub_scheme("http://hub.example.com").is_err());
         assert!(check_hub_scheme("hub.example.com").is_err());
     }
 
+    /// The allowlist that used to sit here let `ws://` through to loopback,
+    /// the Tailscale CGNAT range and `.ts.net` names — and every connection it
+    /// allowed then died at `channel_binding`, because none of those
+    /// transports carries a TLS exporter either. Four tests asserted the
+    /// allowance and none asserted it could be used.
+    ///
+    /// One switch lifts the refusal now, and it lifts both.
     #[test]
-    fn check_hub_scheme_allows_loopback_ws() {
-        assert!(check_hub_scheme("ws://127.0.0.1:8080/ws").is_ok());
-        assert!(check_hub_scheme("ws://localhost:9000").is_ok());
-        assert!(check_hub_scheme("ws://[::1]:8080/ws").is_ok());
+    fn the_only_thing_that_permits_cleartext_ws_is_the_escape_hatch() {
+        let _env = without_the_escape_hatch();
+        for endpoint in [
+            "ws://127.0.0.1:8080/ws",
+            "ws://localhost:9000",
+            "ws://[::1]:8080/ws",
+            "ws://100.101.102.103:8787",
+            "ws://my-hub.tailnet-name.ts.net:8787",
+        ] {
+            assert!(check_hub_scheme(endpoint).is_err(),
+                "no host is exempt from the TLS requirement: {endpoint}");
+        }
+
+        std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
+        for endpoint in ["ws://127.0.0.1:8080/ws", "ws://my-hub.tailnet-name.ts.net:8787"] {
+            assert!(check_hub_scheme(endpoint).is_ok(),
+                "the harness switch lifts it for every host, not a list of them: {endpoint}");
+        }
+        std::env::remove_var("LL_ALLOW_INSECURE_WS");
+    }
+
+    /// **The only scheme check `ll link` and `ll watch` get.**
+    /// `FederationConfig::validate` is called in exactly one production place,
+    /// `main.rs`'s `sync` arm; `link request/approve/accept/revoke` and `watch`
+    /// go from `load_config` straight to here. Deleting the call left the
+    /// whole suite green.
+    ///
+    /// `127.0.0.1:1` is refused by the OS immediately, so a build that dropped
+    /// the check still fails — with a different error. That is what the second
+    /// assertion is for.
+    #[tokio::test]
+    async fn the_scheme_is_checked_before_the_socket_is_opened() {
+        let _env = without_the_escape_hatch();
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.hub.endpoint = "ws://127.0.0.1:1/ws".into();
+
+        let seed = SigningKey::from_bytes(&[9u8; 32]);
+        let err = connect_and_authenticate(&config, &seed, "peer", "model", None)
+            .await
+            .expect_err("cleartext ws:// must not reach the socket")
+            .to_string();
+
+        assert!(err.contains("wss://"), "the scheme rule is what refused: {err}");
+        assert!(!err.contains("failed to connect to hub"),
+            "and it refused before anything was dialled: {err}");
+    }
+
+    // -----------------------------------------------------------------
+    // One parse, one host
+    // -----------------------------------------------------------------
+
+    /// The host the WebSocket dialer will use, read the way the dialer reads
+    /// it: `IntoClientRequest` drops everything up to and including an `@`
+    /// (`tungstenite/src/client.rs:226-229`). Not a reimplementation of the
+    /// rule — a use of the same crate, so it tracks the dialer rather than
+    /// agreeing with a copy of it.
+    fn dialer_host(endpoint: &str) -> Option<String> {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        let request = endpoint.into_client_request().ok()?;
+        Some(unbracket(request.uri().host()?).to_string())
+    }
+
+    /// **The attack.** `legit.hub.example` in brackets is a hostname, not an
+    /// IPv6 literal: `TcpStream::connect` resolves it and `ServerName::try_from`
+    /// accepts it, so the well-known fetch reached the genuine hub over
+    /// ordinary TLS and showed the operator the genuine six-word fingerprint —
+    /// while the dial went to `evil.example.com`. The fingerprint step exists
+    /// to catch exactly that substitution.
+    ///
+    /// The check is the disagreement itself, not a list of bad strings: for
+    /// anything this parse accepts, the host it reports and the host the
+    /// dialer resolves must be the same string.
+    #[test]
+    fn no_endpoint_is_read_as_one_host_here_and_another_by_the_dialer() {
+        for endpoint in [
+            "wss://[legit.hub.example]@evil.example.com/ws",
+            "wss://[2606:4700::1111]@evil.example.com/ws",
+            "ws://[::1]@evil.example.com/ws",
+            "wss://legit.hub.example@evil.example.com/ws",
+            "wss://hub.example/ws",
+            "wss://[::1]:8443/ws",
+            "wss://127.0.0.1:9000",
+        ] {
+            let Ok(parsed) = HubUrl::parse(endpoint) else { continue };
+            assert_eq!(
+                Some(parsed.host.clone()),
+                dialer_host(endpoint),
+                "{endpoint:?} is accepted, so the host it names and the host the \
+                 WebSocket dialer resolves must be one host",
+            );
+        }
     }
 
     #[test]
-    fn check_hub_scheme_allows_tailscale_cgnat_ws() {
-        assert!(check_hub_scheme("ws://100.101.102.103:8787").is_ok());
-        assert!(check_hub_scheme("ws://100.64.0.0:8787").is_ok());
-        assert!(check_hub_scheme("ws://100.127.255.255:8787/ws").is_ok());
+    fn userinfo_before_the_host_is_refused_rather_than_interpreted() {
+        for endpoint in [
+            "wss://[legit.hub.example]@evil.example.com/ws",
+            "wss://[2606:4700::1111]@evil.example.com/ws",
+            "ws://[::1]@evil.example.com/ws",
+            "wss://legit.hub.example@evil.example.com/ws",
+        ] {
+            let err = HubUrl::parse(endpoint).unwrap_err().to_string();
+            assert!(err.contains("userinfo"),
+                "{endpoint:?} must be refused for naming two hosts, not for some \
+                 incidental reason: {err}");
+        }
+    }
+
+    /// The other half of D-1: a CRLF in the endpoint reached the `Host:`
+    /// header of the well-known GET and injected a header line into it. The
+    /// WebSocket dialer already refused these URIs; the hand-rolled split did
+    /// not, which is the whole reason there is one parse now.
+    #[test]
+    fn a_control_character_in_the_endpoint_is_refused() {
+        for endpoint in [
+            "ws://[::1]\r\nEvil: injected\r\n/ws",
+            "wss://hub.example\r\nEvil: injected/ws",
+            "wss://hub.example\n/ws",
+        ] {
+            assert!(HubUrl::parse(endpoint).is_err(), "{endpoint:?} must not parse");
+        }
+    }
+
+    /// The scheme rule, isolated from the transport rule. `HubUrl::parse`
+    /// carries no policy, so a scheme it refuses is refused for being that
+    /// scheme — an `http://` endpoint that reached the parse and came back as
+    /// "not TLS" would be refused by `check_hub_scheme` for the right reason
+    /// and by accident.
+    #[test]
+    fn only_ws_and_wss_are_hub_schemes() {
+        for endpoint in ["http://hub.example", "https://hub.example", "ftp://hub.example"] {
+            let err = HubUrl::parse(endpoint).unwrap_err().to_string();
+            assert!(err.contains("scheme"), "{endpoint:?}: {err}");
+        }
+        assert!(HubUrl::parse("wss://hub.example").is_ok());
+        assert!(HubUrl::parse("ws://hub.example").is_ok(),
+            "positive control: the parse itself has no opinion about ws://");
+    }
+
+    /// `http::Uri` accepts an authority that is nothing but a port, and
+    /// reports its host as the empty string. `TcpStream::connect(("", 8443))`
+    /// is not an error worth showing anyone.
+    #[test]
+    fn an_authority_with_no_host_is_refused() {
+        let err = HubUrl::parse("wss://:8443/ws").unwrap_err().to_string();
+        assert!(err.contains("no host"), "{err}");
+    }
+
+    /// **The dialer reads the parse, not the operator's string.** That is what
+    /// D-1's fix is: two spellings of an endpoint are two chances to disagree
+    /// about the host, and the fingerprint the operator confirmed belongs to
+    /// only one of them.
+    ///
+    /// A fragment is the cheapest endpoint the two spellings render
+    /// differently — `http::Uri` drops it, appending `/ws` to the raw text
+    /// does not — so it is what tells a dial built from `ws_uri` apart from a
+    /// dial built by concatenation. The other rows are the ordinary ones, and
+    /// they are here so a `GET /ws` is not being read off a single lucky case.
+    #[tokio::test]
+    async fn the_socket_is_opened_at_the_url_the_parse_produced() {
+        let _env = super::super::test_hub::insecure_ws_env();
+        for suffix in ["", "/", "/ws", "/#tag"] {
+            let (request, authority) = dialed_request(suffix).await;
+            assert!(
+                request.starts_with("GET /ws HTTP/1.1"),
+                "endpoint suffix {suffix:?} must reach /ws, got: {request}",
+            );
+            assert!(
+                request.contains(&format!("Host: {authority}")),
+                "and name the parsed authority: {request}",
+            );
+        }
+    }
+
+    /// Dial a socket that records the upgrade request and hangs up. The
+    /// connection failing afterwards is expected and is not what this
+    /// measures.
+    ///
+    /// Bounded, because the interesting failure is a dial that goes somewhere
+    /// else entirely and never reaches this listener — which as a hang would
+    /// be indistinguishable from the suite being slow.
+    async fn dialed_request(endpoint_suffix: &str) -> (String, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut seen = String::new();
+            if let Ok((mut stream, _)) = listener.accept().await {
+                use tokio::io::AsyncReadExt;
+                let mut buf = vec![0u8; 2048];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    seen = String::from_utf8_lossy(&buf[..n]).to_string();
+                }
+            }
+            let _ = tx.send(seen);
+        });
+
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.hub.endpoint = format!("ws://{addr}{endpoint_suffix}");
+        let seed = SigningKey::from_bytes(&[9u8; 32]);
+        let _ = connect_and_authenticate(&config, &seed, "peer", "model", None).await;
+
+        let request = tokio::time::timeout(Duration::from_secs(5), rx)
+            .await
+            .expect("the dial reached this listener within 5s")
+            .unwrap();
+        (request, addr.to_string())
     }
 
     #[test]
-    fn check_hub_scheme_allows_ts_net_hostname_ws() {
-        assert!(check_hub_scheme("ws://my-hub.tailnet-name.ts.net:8787").is_ok());
+    fn the_dial_url_carries_the_parsed_authority_and_gains_ws_once() {
+        let ws_uri = |e: &str| HubUrl::parse(e).unwrap().ws_uri().unwrap().to_string();
+        assert_eq!(ws_uri("wss://hub.example"), "wss://hub.example/ws");
+        assert_eq!(ws_uri("wss://hub.example/"), "wss://hub.example/ws");
+        assert_eq!(ws_uri("wss://hub.example/ws"), "wss://hub.example/ws");
+        assert_eq!(ws_uri("wss://[::1]:8443/ws"), "wss://[::1]:8443/ws",
+            "a bracketed IPv6 authority survives the round trip with its brackets");
     }
 
     #[test]
-    fn check_hub_scheme_rejects_non_tailscale_ws() {
-        assert!(check_hub_scheme("ws://8.8.8.8:1").is_err());
-        assert!(check_hub_scheme("ws://100.63.255.255:8787").is_err());
-        assert!(check_hub_scheme("ws://100.128.0.0:8787").is_err());
-        assert!(check_hub_scheme("ws://hub.example.com:8787").is_err());
+    fn the_parse_reports_the_default_port_for_each_scheme() {
+        let plain = HubUrl::parse("ws://hub.example/ws").unwrap();
+        assert!(!plain.tls);
+        assert_eq!((plain.host.as_str(), plain.port), ("hub.example", 80));
+
+        let secure = HubUrl::parse("wss://hub.example/ws").unwrap();
+        assert!(secure.tls);
+        assert_eq!((secure.host.as_str(), secure.port), ("hub.example", 443));
+
+        let bracketed = HubUrl::parse("wss://[::1]:8443/ws").unwrap();
+        assert_eq!((bracketed.host.as_str(), bracketed.port), ("::1", 8443));
+        assert_eq!(bracketed.authority, "[::1]:8443",
+            "the Host header keeps the brackets and the port",
+        );
     }
-
-
-
-
 
     #[test]
     fn no_source_file_accepts_an_unauthenticated_hub() {
@@ -1090,6 +1414,118 @@ mod tests {
             "ambiguous scope fails loud and names the fix, never defaults or skips: {err}");
     }
 
+    /// **D-6.** Six of the seven call sites pass `&[]`, where a fallback to
+    /// the first entry is `None` anyway, and the seventh supplies a list the
+    /// wanted vault is in. So a `this_vault_state` that answered from
+    /// whichever entry came first left the whole suite green — and the upload
+    /// decision, `hub_holds` and `sync-state.json` would all then be about
+    /// somebody else's vault.
+    #[test]
+    fn a_hub_that_lists_other_vaults_but_not_this_one_reports_nothing_for_it() {
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v-mine".into());
+        let states = vec![
+            VaultState { vault_id: "v-someone-else".into(), holds: Some(held("theirs")) },
+            VaultState { vault_id: "v-another".into(), holds: Some(held("also-theirs")) },
+        ];
+
+        let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
+        assert_eq!(vault_id, "v-mine");
+        assert!(this_vault.is_none(),
+            "the hub listed vaults, none of them this one — an entry that is not \
+             this vault's says nothing about this vault");
+        assert_eq!(upload_decision("whatever", this_vault), UploadDecision::Upload);
+        assert_eq!(hub_holds(this_vault), HubHolds::Nothing);
+    }
+
+    /// **D-8, both directions.** `if false` and `>` for `>=` each left the
+    /// whole suite green. The rule sits at one byte, so one test either side
+    /// of it is what says the rule is at that byte and not near it.
+    #[test]
+    fn an_export_fits_exactly_when_it_and_the_frame_header_reach_the_cap() {
+        let room = HUB_INBOUND_CAP - ENVELOPE_HEADER_LEN;
+        assert!(upload_fits(room), "an export filling the frame exactly is sendable");
+        assert!(!upload_fits(room + 1), "one byte more is not");
+        assert!(upload_fits(0));
+    }
+
+    /// **D-9.** An `IndexHeader` that holds something promises exactly one
+    /// binary frame. Returning a text frame's bytes as the payload instead
+    /// left the whole suite green: what arrives would then be parsed as a
+    /// SQLite index and fail somewhere else, or not fail at all.
+    #[tokio::test]
+    async fn a_text_frame_where_a_binary_one_was_promised_is_an_error() {
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let _ = ws.send(Message::text("{\"type\":\"reject\"}")).await;
+            let _ = ws.next().await;
+        })
+        .await;
+        let mut ws = client_to(addr).await;
+
+        let err = recv_binary(&mut ws).await.unwrap_err();
+        assert!(matches!(err.downcast_ref::<SyncError>(), Some(SyncError::FrameKind)),
+            "the hub broke the one-binary-frame promise: {err}");
+    }
+
+    /// **D-10.** Dropping the dotfile skip left the whole suite green. The
+    /// watermark decides whether to re-export at all, so a `.obsidian` or a
+    /// `.trash` that the export itself never reads would make every sync
+    /// re-export for a change no exported note contains.
+    #[test]
+    fn the_export_watermark_ignores_dotfiles_and_dotted_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join(".obsidian/workspace.md"), "x").unwrap();
+        std::fs::write(root.join(".hidden.md"), "x").unwrap();
+
+        assert_eq!(max_md_mtime(root), 0,
+            "nothing here is a note the export would read");
+
+        std::fs::write(root.join("notes/real.md"), "x").unwrap();
+        assert!(max_md_mtime(root) > 0,
+            "positive control: an ordinary note in an ordinary directory does count, \
+             so the zero above is the skip and not an empty scan");
+    }
+
+    /// **D-10.** `prepare_export` re-exports when the vault has changed OR
+    /// when there is no export to send. Dropping the second clause left the
+    /// whole suite green here and reddened one timeout test in another binary
+    /// for an unrelated reason — the property has a name and this is it: a
+    /// deleted `federation/export.db` with the watermark still current would
+    /// otherwise fail every sync until someone touched a note.
+    #[tokio::test]
+    async fn a_missing_export_is_rebuilt_even_when_the_vault_has_not_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let vault = dir.path().join("vault");
+        super::super::export::build_source_db(
+            &source,
+            Some("01926d7e-0000-7000-8000-00000000000a"),
+        );
+        super::super::export::public_vault_with_note(&vault);
+        let config = FederationConfig::test_fixture("private", vec![]);
+
+        let first = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(first.result.is_some(), "precondition: a cold config dir exports");
+        // The watermark is the upload's to write, and there is no hub here.
+        std::fs::write(
+            last_export_mtime_path(dir.path()),
+            first.current_max_mtime.to_string(),
+        )
+        .unwrap();
+        let again = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(again.result.is_none(),
+            "precondition: the watermark is current, so nothing else would re-export");
+
+        std::fs::remove_file(export_db_path(dir.path())).unwrap();
+        let rebuilt = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(rebuilt.result.is_some(),
+            "the watermark says the vault has not changed and there is still nothing \
+             to send; the export has to be rebuilt anyway");
+    }
+
     #[test]
     fn the_hub_holding_nothing_is_recorded_as_nothing() {
         assert_eq!(hub_holds(None), HubHolds::Nothing,
@@ -1146,29 +1582,65 @@ mod tests {
         }
     }
 
+    /// Line comments removed, so a check that looks for an attribute cannot
+    /// be satisfied by one that has been commented out. String literals get
+    /// truncated at their first `//` as a side effect; nothing here reads
+    /// them.
+    fn without_line_comments(src: &str) -> String {
+        src.lines()
+            .map(|l| l.split("//").next().unwrap_or(""))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// The claim the doc comment on `hub_tls_connector` makes — that no
     /// shipped binary contains an instruction that could widen the trust
-    /// store — rests entirely on one `#[cfg(test)]`. Dropping that attribute
-    /// compiles, passes every other test, and hands every build a root store
-    /// that anything on the anchor list can enter. So the attribute is
-    /// checked, not trusted.
+    /// store — rests on one `#[cfg(test)]`.
+    ///
+    /// What touching that attribute actually does, measured over a build of
+    /// the whole package. `mod tests` is itself `#[cfg(test)]`, so an ungated
+    /// call to `tests::extend_with_test_anchors` is `error[E0433]: unresolved
+    /// module or unlinked crate 'tests'`. Deleting the attribute is caught
+    /// that way, and so is commenting it out — the compiler gets there before
+    /// this test does, in both cases.
+    ///
+    /// So this check earns its place on exactly one escape: a module-scope
+    /// helper of the same name, called without the `tests::` qualifier, which
+    /// compiles clean in a release build and ships a way to widen the trust
+    /// store. That is the one the old version missed, and the one enumerating
+    /// every mention of the name catches.
     #[test]
     fn the_extra_root_exists_only_under_cfg_test() {
-        let src = include_str!("client.rs");
-        let call = concat!("tests::", "extend_with_test_anchors(&mut roots)");
+        let src = without_line_comments(include_str!("client.rs"));
+        let name = concat!("extend_with_test_", "anchors");
+        let definition = concat!("fn extend_with_test_", "anchors");
+        let lines: Vec<&str> = src.lines().collect();
+
+        let sites: Vec<usize> = lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.contains(name))
+            .map(|(i, _)| i)
+            .collect();
         assert_eq!(
-            src.matches(call).count(),
+            sites.iter().filter(|&&i| lines[i].contains(definition)).count(),
             1,
-            "positive control: exactly one literal call site, or the check below \
-             inspects the first of several",
+            "positive control: the definition is in this file, so a slice that \
+             found nothing would not pass this",
         );
-        let before = &src[..src.find(call).expect("the call site is in this file")];
-        assert!(
-            before.trim_end().ends_with("#[cfg(test)]"),
-            "the extra trust anchor must be gated on cfg(test); without that \
-             attribute every release build carries a way to trust a root \
-             webpki does not",
-        );
+
+        for i in sites {
+            if lines[i].contains(definition) {
+                continue;
+            }
+            assert!(
+                i > 0 && lines[i - 1].trim() == "#[cfg(test)]",
+                "every call to the anchor helper must be gated on cfg(test), \
+                 including any added later: line {} is not — {:?}",
+                i + 1,
+                lines[i].trim(),
+            );
+        }
     }
 
     /// The three `export_keying_material` parameters, as the cross-repo
@@ -1410,13 +1882,70 @@ mod tests {
         let hub = spawn_tls_hub().await;
 
         let seed = SigningKey::from_bytes(&[9u8; 32]);
-        let err = connect_and_authenticate(&config_for(&hub), &seed, "peer", "model", None)
-            .await
-            .expect_err("an unknown issuer must not complete a handshake")
-            .to_string();
-        assert!(
-            err.contains("failed to connect to hub"),
-            "the refusal happens at the TLS handshake, before any hub message: {err}",
+        let err = format!(
+            "{:#}",
+            connect_and_authenticate(&config_for(&hub), &seed, "peer", "model", None)
+                .await
+                .expect_err("an unknown issuer must not complete a handshake"),
         );
+        // `failed to connect to hub` alone does not say what happened: this
+        // test passed unchanged when it was pointed at a dead port, where the
+        // error is `Connection refused`. A handshake has to have happened and
+        // been rejected on the certificate, and only the chain's own words say
+        // so. The sibling above is the reachability control — the same mock,
+        // the same endpoint, one `hub.trust()` more, and it completes.
+        // Which certificate error it is depends on what else is on the
+        // append-only anchor list when this runs — `UnknownIssuer` when the
+        // list is empty, `BadSignature` when a parallel test has already added
+        // its own hub. Both are `invalid peer certificate`, and a connection
+        // that never handshook produces neither.
+        assert!(
+            err.contains("invalid peer certificate"),
+            "the certificate is what was refused, not the connection: {err}",
+        );
+    }
+
+    /// A plaintext WebSocket, live and connected — the stream `connect_async`
+    /// returns for a `ws://` endpoint, and the only kind that reaches either
+    /// non-TLS arm of [`channel_binding`].
+    async fn a_plaintext_stream() -> WsStream {
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let _ = ws.next().await;
+        })
+        .await;
+        let ws = client_to(addr).await;
+        assert!(
+            matches!(ws.get_ref(), tokio_tungstenite::MaybeTlsStream::Plain(_)),
+            "the dangerous thing has to be present for a refusal of it to mean anything",
+        );
+        ws
+    }
+
+    /// Turning this refusal into `[0u8; 32]` left the whole suite green. A
+    /// channel binding that degrades to a constant is worse than none, because
+    /// both ends agree on the constant and the signature over it verifies.
+    ///
+    /// The control is the same connection with the flag flipped: the refusal
+    /// is the flag's doing and not something wrong with the stream.
+    #[tokio::test]
+    async fn a_connection_that_is_not_tls_is_refused_a_channel_binding() {
+        let ws = a_plaintext_stream().await;
+
+        let err = channel_binding(&ws, false).unwrap_err().to_string();
+        assert!(err.contains("not TLS"), "{err}");
+        assert!(channel_binding(&ws, true).is_ok(),
+            "control: the same stream, one flag away from an answer");
+    }
+
+    /// The other route. `LL_ALLOW_INSECURE_WS` buys a constant, and the
+    /// constant is safe only because the other end does not share it: every
+    /// mock in this crate signs its challenge over these same 32 zero bytes,
+    /// and a real hub signs over an exporter that is not zeros
+    /// (asserted in `the_client_derives_the_channel_binding_from_a_real_tls_session`),
+    /// so its `sig_h` fails to verify here.
+    #[tokio::test]
+    async fn the_escape_hatch_substitutes_a_constant_a_real_hub_cannot_agree_with() {
+        let ws = a_plaintext_stream().await;
+        assert_eq!(channel_binding(&ws, true).unwrap(), [0u8; 32]);
     }
 }

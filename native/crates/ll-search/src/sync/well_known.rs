@@ -22,6 +22,8 @@ use anyhow::Context as _;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+use super::client::HubUrl;
+
 const WELL_KNOWN_PATH: &str = "/.well-known/ll-hub";
 
 /// The real answer is a few dozen bytes. Anything past this is the wrong
@@ -43,8 +45,16 @@ pub struct HubIdentity {
 /// scheme maps across (`wss://` → `https://`, `ws://` → `http://`) and any
 /// path is dropped, so `wss://hub.example/ws` is asked at
 /// `https://hub.example/.well-known/ll-hub`.
+///
+/// The endpoint is read by [`HubUrl`](super::client::HubUrl), the same parse the WebSocket
+/// dialer performs, so the host whose fingerprint an operator confirms here is
+/// the host the dial reaches. It used to be split by hand, and the two
+/// readings could name different machines.
+///
+/// Whether `ws://` is permitted at all is [`check_hub_scheme`](super::client::check_hub_scheme)'s decision, not
+/// this function's; `ll join` and `ll link` both ask it before they get here.
 pub async fn fetch(endpoint: &str) -> anyhow::Result<HubIdentity> {
-    let origin = Origin::parse(endpoint)?;
+    let origin = HubUrl::parse(endpoint)?;
     tokio::time::timeout(FETCH_TIMEOUT, get(&origin))
         .await
         .map_err(|_| {
@@ -52,57 +62,7 @@ pub async fn fetch(endpoint: &str) -> anyhow::Result<HubIdentity> {
         })?
 }
 
-struct Origin {
-    tls: bool,
-    host: String,
-    port: u16,
-    /// The authority exactly as written, for the `Host` header.
-    authority: String,
-}
-
-impl Origin {
-    fn parse(endpoint: &str) -> anyhow::Result<Self> {
-        let trimmed = endpoint.trim();
-        let (tls, rest) = if let Some(r) = trimmed.strip_prefix("wss://") {
-            (true, r)
-        } else if let Some(r) = trimmed.strip_prefix("ws://") {
-            (false, r)
-        } else if let Some(r) = trimmed.strip_prefix("https://") {
-            (true, r)
-        } else if let Some(r) = trimmed.strip_prefix("http://") {
-            (false, r)
-        } else {
-            anyhow::bail!("hub endpoint {endpoint:?} has no wss:// or ws:// scheme");
-        };
-
-        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-        let (host, explicit_port) = if let Some(after_bracket) = authority.strip_prefix('[') {
-            let (host, tail) = after_bracket
-                .split_once(']')
-                .ok_or_else(|| anyhow::anyhow!("hub endpoint {endpoint:?} has an unclosed [ipv6]"))?;
-            (host, tail.strip_prefix(':'))
-        } else {
-            match authority.split_once(':') {
-                Some((host, port)) => (host, Some(port)),
-                None => (authority, None),
-            }
-        };
-        if host.is_empty() {
-            anyhow::bail!("hub endpoint {endpoint:?} names no host");
-        }
-        let port = match explicit_port {
-            Some(p) => p
-                .parse()
-                .with_context(|| format!("hub endpoint {endpoint:?} has a non-numeric port"))?,
-            None if tls => 443,
-            None => 80,
-        };
-
-        Ok(Origin { tls, host: host.to_string(), port, authority: authority.to_string() })
-    }
-}
-
-async fn get(origin: &Origin) -> anyhow::Result<HubIdentity> {
+async fn get(origin: &HubUrl) -> anyhow::Result<HubIdentity> {
     let tcp = TcpStream::connect((origin.host.as_str(), origin.port))
         .await
         .with_context(|| format!("failed to connect to {}", origin.authority))?;
@@ -129,7 +89,7 @@ async fn get(origin: &Origin) -> anyhow::Result<HubIdentity> {
 
 async fn exchange<S: AsyncRead + AsyncWrite + Unpin>(
     mut stream: S,
-    origin: &Origin,
+    origin: &HubUrl,
 ) -> anyhow::Result<Vec<u8>> {
     let request = format!(
         "GET {WELL_KNOWN_PATH} HTTP/1.1\r\n\
@@ -207,40 +167,34 @@ mod tests {
             .with_no_client_auth();
     }
 
-    #[test]
-    fn wss_maps_to_https_on_443_and_ws_to_http_on_80() {
-        let secure = Origin::parse("wss://hub.example/ws").unwrap();
-        assert!(secure.tls);
-        assert_eq!((secure.host.as_str(), secure.port), ("hub.example", 443));
+    /// The scheme mapping and the authority split now live in `HubUrl`, with
+    /// `client.rs`'s tests on them. What is this module's own is that the
+    /// `Host:` header carries the authority the connection was made to, byte
+    /// for byte.
+    #[tokio::test]
+    async fn the_host_header_is_the_authority_the_request_went_to() {
+        let hub = test_hub::spawn_raw_http("HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\n\r\n").await;
+        let origin = HubUrl::parse(&hub.ws_url()).unwrap();
+        let expected = format!("Host: {}\r\n", origin.authority);
+        assert!(origin.authority.contains(':'),
+            "precondition: this mock is on an ephemeral port, so the port has to \
+             survive into the header or the request reaches the wrong vhost",
+        );
 
-        let plain = Origin::parse("ws://hub.example/ws").unwrap();
-        assert!(!plain.tls, "a ws:// endpoint must not be fetched over TLS");
-        assert_eq!((plain.host.as_str(), plain.port), ("hub.example", 80));
-    }
+        let (client, mut server) = tokio::io::duplex(4096);
+        let seen = tokio::spawn(async move {
+            let mut buf = vec![0u8; 4096];
+            let n = server.read(&mut buf).await.unwrap();
+            String::from_utf8_lossy(&buf[..n]).to_string()
+        });
+        let _ = exchange(client, &origin).await;
+        let request = seen.await.unwrap();
 
-    #[test]
-    fn an_explicit_port_survives_and_reaches_the_host_header() {
-        let o = Origin::parse("ws://127.0.0.1:9123/ws").unwrap();
-        assert_eq!((o.host.as_str(), o.port), ("127.0.0.1", 9123));
-        assert_eq!(o.authority, "127.0.0.1:9123",
-            "the Host header must carry the port, or a hub on a non-default port \
-             routes the request to the wrong vhost");
-    }
-
-    #[test]
-    fn a_bracketed_ipv6_authority_splits_at_the_bracket_not_the_last_colon() {
-        let o = Origin::parse("wss://[::1]:8443/ws").unwrap();
-        assert_eq!((o.host.as_str(), o.port), ("::1", 8443));
-        let default_port = Origin::parse("wss://[::1]/ws").unwrap();
-        assert_eq!((default_port.host.as_str(), default_port.port), ("::1", 443));
-    }
-
-    #[test]
-    fn an_endpoint_with_no_scheme_is_rejected() {
-        assert!(Origin::parse("hub.example/ws").is_err());
-        assert!(Origin::parse("wss://hub.example").is_ok(),
-            "a scheme with no path is a valid endpoint and must not be caught by \
-             the same check");
+        assert!(request.contains(&expected), "{request}");
+        assert_eq!(request.lines().filter(|l| l.starts_with("Host:")).count(), 1,
+            "one Host line: an endpoint that could smuggle a second one is refused \
+             by the parse, not tidied up here",
+        );
     }
 
     #[tokio::test]

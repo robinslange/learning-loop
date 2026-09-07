@@ -581,22 +581,36 @@ mod tests {
             "{}", out.vault_id);
     }
 
+    /// One switch decides this, and the control is the same endpoint with the
+    /// switch thrown. Without it a refusal could be a join that fails for any
+    /// endpoint at all; with it, `ws://127.0.0.1:1` reaches the socket and
+    /// dies there, so what the first half measured was the scheme rule.
+    ///
+    /// There is no host allowlist to test either side of any more: loopback
+    /// and tailnet addresses used to be exempt here and died at the channel
+    /// binding instead, which had no exemption for them.
     #[tokio::test]
-    async fn refuses_a_plain_ws_endpoint() {
+    async fn refuses_a_plain_ws_endpoint_unless_the_escape_hatch_is_set() {
+        let _guard = test_hub::env_lock();
+        test_hub::force_encrypted_seed_backend();
+        std::env::remove_var("LL_ALLOW_INSECURE_WS");
+
         let dir = tempfile::tempdir().unwrap();
         let err = join(dir.path(), "ws://insecure.example", "C", Path::new("/v"), &mut Yes::default())
             .await
             .unwrap_err();
         assert!(err.to_string().contains("wss://"), "{err}");
+        let loopback = join(dir.path(), "ws://127.0.0.1:1", "C", Path::new("/v"), &mut Yes::default())
+            .await
+            .unwrap_err();
+        assert!(loopback.to_string().contains("wss://"),
+            "loopback is not exempt: {loopback}");
 
-        // The other side of the same boundary: a loopback ws:// endpoint gets
-        // past the scheme check and fails later, on the connection itself. An
-        // implementation that rejected every ws:// would pass the assertion
-        // above and be useless for the local hub the scheme check exists to
-        // permit.
+        std::env::set_var("LL_ALLOW_INSECURE_WS", "1");
         let nowhere = join(dir.path(), "ws://127.0.0.1:1", "C", Path::new("/v"), &mut Yes::default())
             .await
             .unwrap_err();
+        std::env::remove_var("LL_ALLOW_INSECURE_WS");
         assert!(!nowhere.to_string().contains("wss://"), "{nowhere}");
     }
 

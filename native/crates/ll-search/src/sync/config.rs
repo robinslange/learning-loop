@@ -55,10 +55,10 @@ impl FederationConfig {
                  than warned about."
             );
         }
-        let insecure_ok = std::env::var("LL_ALLOW_INSECURE_WS").is_ok();
-        if !self.hub.endpoint.starts_with("wss://") && !insecure_ok {
-            anyhow::bail!("hub.endpoint must use wss:// (got {})", self.hub.endpoint);
-        }
+        // The transport rule lives in `check_hub_scheme` and is stated there
+        // once. Restating it here as a `starts_with` was how this file came to
+        // disagree with `client.rs` about which endpoints are allowed.
+        super::client::check_hub_scheme(&self.hub.endpoint)?;
         Ok(())
     }
 
