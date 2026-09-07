@@ -52,7 +52,7 @@ pub fn render_status(config_dir: &Path, now: i64) -> anyhow::Result<String> {
     };
 
     let mut out = String::new();
-    out.push_str(&identity_block(&config));
+    out.push_str(&identity_block(config_dir, &config));
     match read_state(config_dir)? {
         // `read_state` collapses a missing file and a corrupt one into the
         // same `None`, deliberately, so that a bad file cannot block the sync
@@ -85,13 +85,27 @@ fn unreadable_config(config_dir: &Path, e: &anyhow::Error) -> String {
     )
 }
 
-fn identity_block(config: &FederationConfig) -> String {
+fn identity_block(config_dir: &Path, config: &FederationConfig) -> String {
+    // Read once. Every line below that needs this machine's key needs the
+    // same one, and on the keyring backend each read is a trip to the OS.
+    let seed = seed_key(config_dir);
     let mut out = String::new();
     out.push_str(&row("vault:", config.vault_path.as_deref().unwrap_or("unknown")));
     out.push_str(&row("vault id:", config.vault_id.as_deref().unwrap_or("unknown")));
-    out.push_str(&row("key:", &client_key(&config.identity.pubkey)));
+    out.push_str(&row("key:", &client_key(seed.as_ref(), &config.identity.pubkey)));
     out.push_str(&row("hub:", &config.hub.endpoint));
     out.push_str(&row("hub key:", &hub_key(config.hub.key_id.as_deref())));
+    // `ll recover` writes the seed and deliberately leaves `config.json`
+    // alone: the hub pin and `vault_id` describe an enrollment the new key
+    // was never part of. So after one, the key above is this machine's and
+    // the two lines above it belong to a key it no longer has — and nothing
+    // else on this page would say so.
+    if let Some(stale) = recovered_over(seed.as_ref(), &config.identity.pubkey) {
+        out.push_str(&row("RECOVERED", &format!(
+            "config.json still names {stale}. The key above is this machine's; the vault \
+             id and hub pin are the ones that key had. Re-enroll to bring them into line."
+        )));
+    }
     // A setting nobody can see is the same shape of problem as a setting
     // nobody can set, and this one decides whether a person's notes are drawn
     // on a shared graph. Both states say so in full: "opted out" alone reads
@@ -206,16 +220,52 @@ fn outcome(state: &SyncState) -> String {
     }
 }
 
-/// This client's own identity, as `config.json` declares it.
+/// This machine's identity, out of the seed.
 ///
-/// Derived from the stored public key rather than from the seed: the two
-/// encode the same key, and reading the config keeps `ll status` off the OS
-/// keyring, which on macOS can prompt.
-fn client_key(pubkey_b64: &str) -> String {
+/// **The seed IS the identity; `config.json`'s `identity.pubkey` is a copy of
+/// it, and a copy that can disagree with its source is the bug.** `ll recover`
+/// replaces the seed and touches nothing else, so after one the copy is a key
+/// this machine cannot sign with — while `ll link code` derives its six words
+/// from the seed (`link.rs::pending_offline`). Two commands on one machine
+/// printing two different fingerprints is precisely the false mismatch
+/// `words.rs` exists to prevent, and a person comparing words down a phone
+/// line has no way to tell that kind of mismatch from the kind that means an
+/// impostor.
+///
+/// This costs `ll status` a seed read, which on the keyring backend can prompt
+/// on macOS. That is the price of the line being true.
+///
+/// With no readable seed the config copy is all there is, and it is printed
+/// saying so rather than as a key this machine still holds.
+fn client_key(seed: Option<&KeyId>, pubkey_b64: &str) -> String {
+    if let Some(id) = seed {
+        return key_and_fingerprint(id);
+    }
     match key_id_from_b64(pubkey_b64) {
-        Some(id) => key_and_fingerprint(&id),
+        Some(id) => format!("{}  (from config.json — no seed on this machine)",
+            key_and_fingerprint(&id)),
         None => format!("{pubkey_b64}  (not a public key this build can read)"),
     }
+}
+
+/// This machine's key, or `None` when there is no seed here to read one from.
+///
+/// An unreadable seed is `None` too, and on purpose: `ll status` reports, it
+/// does not fail. A locked keyring must not turn the one page a person reads
+/// to find out what is wrong into an error.
+fn seed_key(config_dir: &Path) -> Option<KeyId> {
+    super::seed_store::load_only(config_dir)
+        .ok()
+        .flatten()
+        .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()))
+}
+
+/// The key `config.json` names, when a seed is here and names a different one.
+/// `None` whenever they agree, or whenever there is nothing to compare.
+fn recovered_over(seed: Option<&KeyId>, pubkey_b64: &str) -> Option<String> {
+    let seed = seed?;
+    let config = key_id_from_b64(pubkey_b64)?;
+    (&config != seed).then(|| elide(config.as_str()))
 }
 
 /// The pinned hub identity. States the pin, and nothing about whether the hub
@@ -352,9 +402,28 @@ mod tests {
             .to_string()
     }
 
+    /// Plant a seed in `config_dir` and hand back the key it encodes.
+    ///
+    /// `write_encrypted` is the backend `force_encrypted_seed_backend` pins
+    /// this binary to, so no test here reaches the OS keyring and stomps the
+    /// developer's real identity.
+    fn plant_seed(config_dir: &Path, seed: [u8; 32]) -> KeyId {
+        crate::sync::test_hub::force_encrypted_seed_backend();
+        std::fs::create_dir_all(config_dir.join("federation")).unwrap();
+        crate::sync::seed_store::write_encrypted(config_dir, &seed).unwrap();
+        KeyId::from_pubkey(&SigningKey::from_bytes(&seed).verifying_key())
+    }
+
     /// A config dir that has joined a hub. Everything `render_status` reads
     /// out of `config.json`, and nothing it does not.
+    ///
+    /// Pins the seed backend even though it plants no seed: `render_status`
+    /// now reads one, and on an unpinned backend the read order starts at the
+    /// OS keyring. A test that reaches it can stall on a prompt or stomp the
+    /// developer's real federation seed, and which test gets there first is a
+    /// property of thread scheduling.
     fn seeded_profile(config_dir: &Path) {
+        crate::sync::test_hub::force_encrypted_seed_backend();
         write_config(config_dir, &FederationConfig {
             identity: Identity {
                 display_name: "brain".into(),
@@ -739,4 +808,81 @@ mod tests {
              sync enforces; got:\n{out}");
     }
 
+    /// The seed IS the identity, and this is the test that says so against
+    /// the other command: `ll link code` derives its six words from the seed,
+    /// `ll status` prints these, and a person comparing them down a phone
+    /// line is comparing two renderings of one key or they are comparing
+    /// nothing.
+    #[test]
+    fn the_key_line_is_the_seeds_and_matches_what_ll_link_code_shows() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        plant_seed(dir.path(), CLIENT_SEED);
+
+        let pending = crate::sync::link::pending_offline(dir.path()).unwrap();
+        let out = render_status(dir.path(), 1_000).unwrap();
+        assert!(out.contains(&pending.fingerprint),
+            "status and `ll link code` must show one machine one fingerprint; got:\n{out}");
+    }
+
+    /// `ll recover` writes the seed and leaves `config.json` alone. Reading
+    /// the config copy prints a key this machine cannot sign with, next to
+    /// six words that no longer match the ones `ll link code` shows — the
+    /// exact false mismatch `words.rs` exists to prevent.
+    #[test]
+    fn after_a_recovery_the_key_line_follows_the_seed_and_not_config_json() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        let recovered = plant_seed(dir.path(), [42u8; 32]);
+        let stale = KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key());
+
+        let out = render_status(dir.path(), 1_000).unwrap();
+        assert!(out.contains(&crate::sync::words::fingerprint(&recovered)),
+            "the seed's fingerprint is the machine's; got:\n{out}");
+        assert!(!out.contains(&crate::sync::words::fingerprint(&stale)),
+            "config.json's copy must not be printed as this machine's key; got:\n{out}");
+    }
+
+    /// And it says the enrollment beside it is the old key's. `recover`
+    /// deliberately does not rewrite `vault id` or the hub pin — they
+    /// describe an enrollment the new key never had — so the page has to,
+    /// or a recovered machine reads as a healthy one.
+    #[test]
+    fn a_recovered_machine_says_its_enrollment_belongs_to_the_replaced_key() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        plant_seed(dir.path(), [42u8; 32]);
+
+        let out = render_status(dir.path(), 1_000).unwrap();
+        assert!(out.contains("RECOVERED"), "got:\n{out}");
+        assert!(out.contains("config.json still names"), "got:\n{out}");
+    }
+
+    /// The other side of it, and the reason it needs saying: a line printed
+    /// unconditionally would satisfy the test above and cry recovery on every
+    /// healthy machine, which is one more warning nobody reads.
+    #[test]
+    fn a_machine_whose_seed_and_config_agree_says_nothing_about_recovery() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        plant_seed(dir.path(), CLIENT_SEED);
+
+        let out = render_status(dir.path(), 1_000).unwrap();
+        assert!(!out.contains("RECOVERED"), "got:\n{out}");
+    }
+
+    /// No seed at all is its own answer. The config copy is the only key
+    /// left to print and it must not be presented as one this machine holds
+    /// — a status page that showed it plain would report a machine that
+    /// cannot sign anything as fully enrolled.
+    #[test]
+    fn with_no_seed_the_config_copy_is_printed_as_a_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+
+        let out = render_status(dir.path(), 1_000).unwrap();
+        assert!(out.contains("no seed on this machine"), "got:\n{out}");
+        assert!(!out.contains("RECOVERED"),
+            "nothing to compare is not a disagreement; got:\n{out}");
+    }
 }
