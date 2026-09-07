@@ -134,7 +134,7 @@ pub async fn authenticate(
 mod tests {
     use super::*;
     use crate::sync::test_hub::{
-        fake_hub_happy_path, hub_key_id_str, hub_signing_key, recv_client_msg,
+        fake_hub_happy_path, hub_key_id_str, hub_signing_key, recv_client_msg, HubVaults,
         send_hub_msg, send_signed_challenge, spawn_mock_hub, MockHub,
     };
 
@@ -246,7 +246,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_successful_handshake_returns_the_vault_state() {
-        let hub = fake_hub_happy_path(vec![("v1", None)]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let ready = run_handshake(&hub, &pinned_config()).await.unwrap();
         assert_eq!(ready.vault_state.len(), 1);
         assert!(ready.vault_state[0].holds.is_none());

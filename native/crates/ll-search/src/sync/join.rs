@@ -293,7 +293,8 @@ mod tests {
     use crate::sync::config::load_config;
     use crate::sync::test_hub::{
         self, fake_hub_happy_path, fake_hub_happy_path_signed_by,
-        fake_hub_that_forgets_the_vault, fake_hub_that_rejects_the_invite, hub_key_id_str, MockHub,
+        fake_hub_that_forgets_the_vault, fake_hub_that_rejects_the_invite, hub_key_id_str, HubVaults,
+        MockHub,
     };
     use crate::sync::protocol_v5::ClientMsg;
     use std::path::Path;
@@ -427,7 +428,7 @@ mod tests {
         // The complement of the test above. Without it, a `join` that never
         // writes a config at all satisfies the failure case perfectly.
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -440,7 +441,7 @@ mod tests {
     #[tokio::test]
     async fn pins_the_hub_key_it_fetched() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -461,7 +462,7 @@ mod tests {
     async fn refuses_a_hub_that_signs_with_a_key_it_did_not_publish() {
         let _env = insecure_ws_env();
         let other = SigningKey::from_bytes(&[9u8; 32]);
-        let hub = fake_hub_happy_path_signed_by(other, &hub_key_id_str(), vec![]).await;
+        let hub = fake_hub_happy_path_signed_by(other, &hub_key_id_str(), HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         let err = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -475,7 +476,7 @@ mod tests {
     #[tokio::test]
     async fn shows_the_fingerprint_of_the_key_it_pins() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = Yes::default();
 
@@ -493,7 +494,7 @@ mod tests {
     #[tokio::test]
     async fn generates_a_recovery_key_linked_to_the_identity() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -537,7 +538,7 @@ mod tests {
     #[tokio::test]
     async fn declares_the_vault_id_in_the_hello_because_that_is_the_registration() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -556,7 +557,7 @@ mod tests {
     #[tokio::test]
     async fn the_vault_id_is_a_uuidv7_the_hub_will_accept() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         let out = join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -595,7 +596,7 @@ mod tests {
     #[tokio::test]
     async fn declining_the_hub_fingerprint_stops_before_anything_is_created() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = DeclineAt::new(Step::Fingerprint);
 
@@ -614,7 +615,7 @@ mod tests {
     #[tokio::test]
     async fn declining_the_recovery_phrase_aborts_the_join() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
         let mut confirm = DeclineAt::new(Step::Phrase);
 
@@ -633,7 +634,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_to_join_a_second_time_over_a_working_config() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let dir = tempfile::tempdir().unwrap();
 
         join(dir.path(), &hub.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
@@ -681,7 +682,7 @@ mod tests {
             .is_err());
         let (_, _, first_key) = hello_of(&rejecting).expect("hub saw a client-hello");
 
-        let good = fake_hub_happy_path(vec![]).await;
+        let good = fake_hub_happy_path(HubVaults::new()).await;
         let out = join(dir.path(), &good.ws_url(), "GOOD-CODE", Path::new("/v"), &mut Yes::default())
             .await
             .unwrap();
@@ -710,7 +711,7 @@ mod tests {
     #[tokio::test]
     async fn the_root_vault_joins_with_no_registry_entry_because_its_config_is_the_entry() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         // A plugin data root is a directory whose parent holds neither a
         // registry nor a config — nothing has registered anything yet.
         let home = tempfile::tempdir().unwrap();
@@ -732,7 +733,7 @@ mod tests {
     #[tokio::test]
     async fn joins_a_config_dir_a_vault_profile_already_names() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let pd = tempfile::tempdir().unwrap();
         plugin_data_with_a_root_vault(pd.path());
         let work = pd.path().join("work");
@@ -754,7 +755,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_a_config_dir_the_registry_does_not_name() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let pd = tempfile::tempdir().unwrap();
         plugin_data_with_a_root_vault(pd.path());
         registry::add(pd.path(), registry::VaultProfile {
@@ -781,7 +782,7 @@ mod tests {
     #[tokio::test]
     async fn refuses_a_second_vault_dir_when_no_registry_exists_at_all() {
         let _env = insecure_ws_env();
-        let hub = fake_hub_happy_path(vec![]).await;
+        let hub = fake_hub_happy_path(HubVaults::new()).await;
         let pd = tempfile::tempdir().unwrap();
         plugin_data_with_a_root_vault(pd.path());
         let work = pd.path().join("work");

@@ -19,10 +19,11 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
+use super::grant::{GrantKind, GrantStatement};
 use super::handshake::{b64, random_nonce, unb64};
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    hub_challenge_message, ClientMsg, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
+    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
 };
 
 /// The identity every mock hub signs with unless a test says otherwise.
@@ -77,6 +78,176 @@ impl Drop for InsecureWsEnv {
     fn drop(&mut self) {
         std::env::remove_var("LL_ALLOW_INSECURE_WS");
     }
+}
+
+// ---------------------------------------------------------------------------
+// What the hub answers `SyncReady.vault_state` from
+// ---------------------------------------------------------------------------
+
+/// The hub's `vaults` table as a mock holds it: who owns which vault, and the
+/// latest index the hub has for each.
+///
+/// Empty is the ordinary case — a client that owns everything it declared and
+/// is reached by nothing else. Seed it when the scenario needs a vault this
+/// client does NOT own: one another key already claimed, or one a grant
+/// reaches.
+#[derive(Clone, Default)]
+pub struct HubVaults {
+    /// `vault_id` -> owner, for vaults that exist before this client connects.
+    owners: Vec<(String, KeyId)>,
+    /// The index bytes the hub holds, per vault. A vault with no entry holds
+    /// nothing and reports `None`.
+    indices: Vec<(String, Vec<u8>)>,
+}
+
+impl HubVaults {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A vault `owner` already owns. A `ClientHello` from any other key
+    /// declaring this id is dropped, because `put_vault` is
+    /// first-authenticated-claim-wins and the row is already taken.
+    pub fn owned_by(mut self, vault_id: &str, owner: &KeyId) -> Self {
+        self.owners.push((vault_id.to_string(), owner.clone()));
+        self
+    }
+
+    /// The index the hub holds for `vault_id`. Bytes rather than a
+    /// `HeldIndex`, because `store_index` hashes what it was given before
+    /// storing it — the sha256 a hub declares is always the sha256 of the
+    /// frame it sends. A hub whose header disagrees with its frame is a
+    /// distinct fixture ([`FetchAnswer::IndexUnderADifferentSha`]), not
+    /// something to be able to say here by accident.
+    pub fn holding(mut self, vault_id: &str, index: &[u8]) -> Self {
+        self.indices.push((vault_id.to_string(), index.to_vec()));
+        self
+    }
+
+    fn index_for(&self, vault_id: &str) -> Option<&[u8]> {
+        self.indices.iter().find(|(v, _)| v == vault_id).map(|(_, b)| b.as_slice())
+    }
+
+    /// `v5::indices::held`.
+    fn holds_for(&self, vault_id: &str) -> Option<HeldIndex> {
+        use sha2::{Digest, Sha256};
+        Some(HeldIndex {
+            sha256: hex::encode(Sha256::digest(self.index_for(vault_id)?)),
+            note_count: FETCH_NOTE_COUNT,
+            uploaded_at: 1,
+        })
+    }
+}
+
+/// Whether an edge of this kind authorises a read. The hub's `authz::matching`
+/// with `want_authority = false`.
+fn permits_read(kind: GrantKind) -> bool {
+    kind.transfers_authority() || matches!(kind, GrantKind::Follow | GrantKind::Peer)
+}
+
+/// The grants a hub's `active_grants_to(reader, now)` would return out of the
+/// ones this mock is serving: addressed to `reader`, `active`, unexpired.
+///
+/// Parsed but not signature-checked. A hub only ever stores a grant whose
+/// signature verified, so a row it reads back needs no re-check — and a mock
+/// deliberately serving an unsigned grant is modelling a hostile hub, whose
+/// `vault_state` claim is its own to make. What cannot be honoured is a
+/// statement that does not parse: no hub could have a row for it.
+fn active_grants_to(grants: &[GrantWire], reader: &KeyId, now: i64) -> Vec<GrantStatement> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    grants
+        .iter()
+        .filter(|w| w.state == "active")
+        .filter_map(|w| {
+            use base64::Engine as _;
+            serde_json::from_slice::<GrantStatement>(&b64.decode(&w.statement_b64).ok()?).ok()
+        })
+        .filter(|st| &st.to == reader && st.expires_at > now)
+        .collect()
+}
+
+/// `v5::authz::read_authority`'s bool, over a mock's ownership table.
+fn may_read(
+    owners: &[(String, KeyId)],
+    held: &[GrantStatement],
+    reader: &KeyId,
+    vault_id: &str,
+) -> bool {
+    let Some(owner) = owners.iter().find(|(v, _)| v == vault_id).map(|(_, o)| o) else {
+        return false;
+    };
+    if owner == reader {
+        return true;
+    }
+    held.iter().any(|st| {
+        &st.from == owner
+            && st.scope.as_deref().is_none_or(|s| s == vault_id)
+            && permits_read(st.kind)
+    })
+}
+
+/// `SyncReady.vault_state`, computed the way the hub computes it:
+/// `v5::authz::readable_vaults` over the registered vaults and the grants this
+/// connection carries, then `v5::indices::vault_state_for`.
+/// (`<HUB>/src/handler.rs:944-999`, `<HUB>/src/v5/authz.rs`.)
+///
+/// **This is not the ids the client declared, and the difference runs both
+/// ways.** The declaration is registered first (`put_vault`, first
+/// authenticated claim wins) and then plays no further part: an id another key
+/// already owns DROPS OUT, because `put_vault` refused it and the reader has
+/// no authority over it; and a vault the reader never named is ADDED when a
+/// grant reaches it — which is the whole reason `SyncReady` carries a list at
+/// all, since an unscoped `link` means "any vault this issuer owns" and only
+/// the hub holds the ownership table.
+///
+/// A mock that echoed the declaration could express neither, so the case
+/// `link` exists for — a peer vault reached through an unscoped grant — could
+/// not be written against these mocks at all.
+fn vault_state_for(
+    world: &HubVaults,
+    reader: &KeyId,
+    declared: &[String],
+    grants: &[GrantWire],
+    now: i64,
+) -> Vec<VaultState> {
+    let mut owners = world.owners.clone();
+    for vault_id in declared {
+        if !owners.iter().any(|(v, _)| v == vault_id) {
+            owners.push((vault_id.clone(), reader.clone()));
+        }
+    }
+    let held = active_grants_to(grants, reader, now);
+
+    let owned_by = |key: &KeyId| -> Vec<String> {
+        owners.iter().filter(|(_, o)| o == key).map(|(v, _)| v.clone()).collect()
+    };
+    let mut candidates = owned_by(reader);
+    for st in &held {
+        match &st.scope {
+            Some(vault_id) => candidates.push(vault_id.clone()),
+            None => candidates.extend(owned_by(&st.from)),
+        }
+    }
+
+    let mut out: Vec<VaultState> = Vec::new();
+    for vault_id in candidates {
+        if out.iter().any(|v| v.vault_id == vault_id) {
+            continue;
+        }
+        if may_read(&owners, &held, reader, &vault_id) {
+            out.push(VaultState { holds: world.holds_for(&vault_id), vault_id });
+        }
+    }
+    out
+}
+
+/// The clock a mock decides grant expiry against, matching the hub's
+/// `now_unix()`.
+fn now_unix() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 pub struct MockHub {
@@ -257,11 +428,18 @@ pub async fn send_signed_challenge(
     .await
 }
 
-/// The full happy path: challenge, verify nothing, reply `SyncReady` with
-/// `vaults`. Records the `ClientHello` so a test can assert what the client
-/// declared — under v5 the hello IS the vault registration.
-pub async fn fake_hub_happy_path(vaults: Vec<(&'static str, Option<HeldIndex>)>) -> MockHub {
-    fake_hub_happy_path_signed_by(hub_signing_key(), &hub_key_id_str(), vaults).await
+/// The full happy path: challenge, verify nothing, reply `SyncReady` computed
+/// from `world` by [`vault_state_for`]. Records the `ClientHello` so a test can
+/// assert what the client declared — under v5 the hello IS the vault
+/// registration.
+///
+/// `HubVaults::new()` is the ordinary case: the client owns everything it
+/// declared, and the hub reports each one holding nothing until an upload
+/// arrives. A mock that answered with an empty `vault_state` there would model
+/// a hub that admits the key and silently drops the registration — precisely
+/// the failure the client refuses to write a config for.
+pub async fn fake_hub_happy_path(world: HubVaults) -> MockHub {
+    fake_hub_happy_path_signed_by(hub_signing_key(), &hub_key_id_str(), world).await
 }
 
 /// A happy path whose WebSocket identity is `signer` while `/.well-known`
@@ -270,15 +448,16 @@ pub async fn fake_hub_happy_path(vaults: Vec<(&'static str, Option<HeldIndex>)>)
 pub async fn fake_hub_happy_path_signed_by(
     signer: SigningKey,
     published_key_id: &str,
-    vaults: Vec<(&'static str, Option<HeldIndex>)>,
+    world: HubVaults,
 ) -> MockHub {
     let hellos = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&hellos);
     let mut hub = spawn_mock_hub_publishing(published_key_id, PROTOCOL_VERSION, move |mut ws| async move {
         let Some(hello) = recv_client_msg(&mut ws).await else { return };
-        let ClientMsg::ClientHello { ref nonce_c, ref vault_ids, .. } = hello else {
+        let ClientMsg::ClientHello { ref key_id, ref nonce_c, ref vault_ids, .. } = hello else {
             return
         };
+        let Ok(reader) = KeyId::parse(key_id) else { return };
         let nonce_c = nonce_c.clone();
         let declared = vault_ids.clone();
         recorder.lock().unwrap().push(hello);
@@ -286,27 +465,9 @@ pub async fn fake_hub_happy_path_signed_by(
 
         let _auth = recv_client_msg(&mut ws).await;
 
-        // The real hub registers every vault the hello declared and reports
-        // each one back, holding nothing until an upload arrives. A mock that
-        // answered with an empty `vault_state` would model a hub that admits
-        // the key and silently drops the registration — which is precisely
-        // the failure the client now refuses to write a config for, so the
-        // mock has to do what the hub does or the two disagree about what
-        // success looks like.
-        let mut state: Vec<VaultState> = declared
-            .into_iter()
-            .map(|vault_id| VaultState { vault_id, holds: None })
-            .collect();
-        for (id, holds) in vaults {
-            match state.iter_mut().find(|v| v.vault_id == id) {
-                Some(existing) => existing.holds = holds,
-                None => state.push(VaultState { vault_id: id.to_string(), holds }),
-            }
-        }
-
         send_hub_msg(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
-            vault_state: state,
+            vault_state: vault_state_for(&world, &reader, &declared, &[], now_unix()),
             grants: vec![],
             revocations: vec![],
         })
@@ -489,29 +650,40 @@ pub enum GrantAnswer {
 /// Complaints go into the record as `unexpected:` / `unparseable:` and the
 /// hub stops.
 pub async fn spawn_grant_hub(
-    serve: Vec<super::protocol_v5::GrantWire>,
+    serve: Vec<GrantWire>,
     answers: Vec<GrantAnswer>,
-) -> (MockHub, Arc<Mutex<Vec<super::protocol_v5::GrantWire>>>) {
+) -> (MockHub, Arc<Mutex<Vec<GrantWire>>>) {
+    spawn_grant_hub_over(HubVaults::new(), serve, answers).await
+}
+
+/// The same, over a hub that already knows about some vaults — the form
+/// needed to serve a grant AND list the vault that grant reaches, which is
+/// what `link` is for and what an empty `HubVaults` cannot express.
+pub async fn spawn_grant_hub_over(
+    world: HubVaults,
+    serve: Vec<GrantWire>,
+    answers: Vec<GrantAnswer>,
+) -> (MockHub, Arc<Mutex<Vec<GrantWire>>>) {
     use base64::Engine;
     use sha2::{Digest, Sha256};
 
-    let lodged: Arc<Mutex<Vec<super::protocol_v5::GrantWire>>> = Arc::new(Mutex::new(Vec::new()));
+    let lodged: Arc<Mutex<Vec<GrantWire>>> = Arc::new(Mutex::new(Vec::new()));
     let recorder = Arc::clone(&lodged);
     let signer = hub_signing_key();
     let hub = spawn_mock_hub(move |mut ws| async move {
         let mut answers = answers.into_iter();
-        let note = |wire: super::protocol_v5::GrantWire| recorder.lock().unwrap().push(wire);
+        let note = |wire: GrantWire| recorder.lock().unwrap().push(wire);
 
         let Some(hello) = recv_client_msg(&mut ws).await else { return };
-        let ClientMsg::ClientHello { nonce_c, vault_ids, .. } = hello else {
+        let ClientMsg::ClientHello { key_id, nonce_c, vault_ids, .. } = hello else {
             return note(complaint("unexpected:not-a-hello"));
+        };
+        let Ok(reader) = KeyId::parse(&key_id) else {
+            return note(complaint("unexpected:client-hello-key_id-is-not-a-key-id"));
         };
         send_signed_challenge(&mut ws, &signer, &nonce_c).await;
         let _auth = recv_client_msg(&mut ws).await;
-        let state: Vec<VaultState> = vault_ids
-            .into_iter()
-            .map(|vault_id| VaultState { vault_id, holds: None })
-            .collect();
+        let state = vault_state_for(&world, &reader, &vault_ids, &serve, now_unix());
         if !send_hub_msg(&mut ws, &HubMsg::SyncReady {
             protocol_version: PROTOCOL_VERSION,
             vault_state: state,
@@ -525,6 +697,26 @@ pub async fn spawn_grant_hub(
 
         loop {
             let Some(msg) = recv_client_msg(&mut ws).await else { return };
+            // A hub answers `FetchIndex` out of the same table it listed
+            // from — `handle_v5_fetch_index` and `readable_vaults` share a
+            // matcher, so a vault named in `SyncReady` can always be fetched.
+            // A mock that listed a vault and then complained about being asked
+            // for it would be modelling a hub that cannot exist.
+            if let ClientMsg::FetchIndex { vault_id } = &msg {
+                let header = HubMsg::IndexHeader {
+                    vault_id: vault_id.clone(),
+                    holds: world.holds_for(vault_id),
+                };
+                if !send_hub_msg(&mut ws, &header).await {
+                    return;
+                }
+                if let Some(bytes) = world.index_for(vault_id) {
+                    if ws.send(Message::binary(bytes.to_vec())).await.is_err() {
+                        return;
+                    }
+                }
+                continue;
+            }
             let ClientMsg::PutGrant { statement_b64, signature_b64 } = msg else {
                 return note(complaint(&format!("unexpected:{msg:?}")));
             };

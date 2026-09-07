@@ -1317,6 +1317,106 @@ mod tests {
         assert!(is_mutual(joiner.path(), &key_of(approver.path())).unwrap());
     }
 
+    /// The combination `link` exists for, at the wire, in one cycle: a hub
+    /// serving an unscoped `link` AND listing the peer vault that grant
+    /// reaches, with the client answering the link and reading the vault.
+    ///
+    /// **This could not be written before.** Both mocks built `vault_state`
+    /// from the ids the client DECLARED, and a `link` is unscoped — it names
+    /// no vault at all — so the vault it reaches is one this client has never
+    /// heard of and could never have declared. The two halves were each tested
+    /// against a listing typed out by hand; nothing checked that a hub which
+    /// DERIVES the listing from the grant names the vault the client then asks
+    /// for. That agreement is the whole of what `SyncReady.vault_state` is
+    /// for, since only the hub holds the ownership table an unscoped grant
+    /// resolves through.
+    ///
+    /// Driven through `connect_and_authenticate` / `reconcile` / `fetch_all`
+    /// in the order `client::run_cycle` runs them, over one connection,
+    /// because settling the key graph before reading is part of the claim: a
+    /// machine linked a minute ago has nothing else worth uploading.
+    #[tokio::test]
+    async fn a_link_and_the_peer_vault_it_reaches_arrive_over_one_connection() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        let joiner = fresh_dir();
+        seed_store::load_or_create(joiner.path()).unwrap();
+        let a = key_of(approver.path());
+        let b = key_of(joiner.path());
+
+        // A admits B offline. The grant names no vault, which is the point.
+        let blob = approve_offline(
+            approver.path(),
+            &request_offline(joiner.path()).unwrap(),
+            &mut Yes::default(),
+        )
+        .unwrap();
+        let a_to_b = parse_grant_blob(&blob).unwrap();
+        assert_eq!(
+            verify_grant(&a_to_b).unwrap().scope,
+            None,
+            "precondition: a link is unscoped, so B cannot resolve what it reaches"
+        );
+        let served = vec![GrantWire {
+            statement_b64: B64.encode(&a_to_b.statement),
+            signature_b64: B64.encode(&a_to_b.signature),
+            state: "active".into(),
+        }];
+
+        // What only the hub knows: A owns a vault, and the hub holds an index
+        // for it.
+        let index = b"pretend-this-is-the-other-machines-index";
+        let world = test_hub::HubVaults::new()
+            .owned_by("v-a-machine", &a)
+            .holding("v-a-machine", index);
+        let (hub, lodged) = test_hub::spawn_grant_hub_over(world, served, vec![]).await;
+        write_hub_config(joiner.path(), &hub.ws_url(), None);
+
+        let config = config::load_config(joiner.path()).unwrap();
+        let signing_key = local_signing_key(joiner.path()).unwrap();
+        let (mut ws, ready) =
+            connect_and_authenticate(&config, &signing_key, "test", "unknown", None)
+                .await
+                .unwrap();
+
+        let listed: Vec<&str> = ready.vault_state.iter().map(|v| v.vault_id.as_str()).collect();
+        assert_eq!(
+            listed,
+            vec!["v1", "v-a-machine"],
+            "the hub names this machine's own vault and the one the link reaches"
+        );
+
+        let links = reconcile(&mut ws, joiner.path(), &config, &ready.grants, unix_now())
+            .await
+            .unwrap();
+        assert_eq!(links.lodged, 1, "B owed its own half of the link");
+
+        let read = crate::sync::fetch::fetch_all(
+            &mut ws,
+            joiner.path(),
+            &ready.vault_state,
+            &ready.grants,
+            &b,
+            "v1",
+            unix_now(),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(read.skipped, Vec::<String>::new());
+        assert_eq!(
+            read.fetched.iter().map(|f| f.vault_id.as_str()).collect::<Vec<_>>(),
+            vec!["v-a-machine"],
+            "the vault the grant reached was read; this machine's own was left \
+             to the upload half"
+        );
+        assert_eq!(
+            std::fs::read(config::peer_index_path(joiner.path(), "v-a-machine")).unwrap(),
+            index,
+        );
+        assert_eq!(lodged.lock().unwrap().len(), 1, "one grant lodged: B's own half");
+    }
+
     #[tokio::test]
     async fn a_second_connection_lodges_nothing_it_has_already_lodged() {
         let _env = test_hub::insecure_ws_env();
