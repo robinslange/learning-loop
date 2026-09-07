@@ -123,6 +123,11 @@ export const FEDERATION_PATHS = {
   // What the last sync cycle did. A MISSING file is a failure, not an unknown:
   // it means federation is configured and no cycle has ever finished one.
   syncState: (pd) => join(pd, 'federation', 'sync-state.json'),
+  // The vaults the hub last named as readable by this key, written by the sync
+  // cycle. Absent or unreadable reads as NO authority, not as an unknown —
+  // `sync::state::read_readable_vaults` on the Rust side, and every reader of
+  // `data/peers/` owes it the same answer.
+  readableVaults: (pd) => join(pd, 'federation', 'readable-vaults.json'),
   // The multi-vault registry. Absent on a single-vault install, by design —
   // it appears only when a second vault is registered.
   vaultRegistry: (pd) => join(pd, 'vaults.json'),
