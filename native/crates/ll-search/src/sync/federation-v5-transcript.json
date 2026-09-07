@@ -1,0 +1,130 @@
+{
+  "readme": [
+    "GENERATED. Do not hand-edit; regenerate and copy both halves.",
+    "Produced by sync-hub src/v5/transcript.rs from fixed seeds, ids, timestamps",
+    "and nonces. Every value below is output of the hub's own handshake.rs,",
+    "grant.rs, key.rs and tls.rs — not a spelling agreed between two repos.",
+    "This file is checked into sync-hub at src/v5/federation-v5-transcript.json",
+    "and into learning-loop at",
+    "native/crates/ll-search/src/sync/federation-v5-transcript.json, byte-identical.",
+    "Each repo asserts that ITS OWN code produces these values, so a wire change",
+    "on either side reddens that side.",
+    "Regenerate with:",
+    "  LL_V5_TRANSCRIPT_CLIENT=<client repo root> \\",
+    "    cargo test -p sync-hub --lib -- --ignored bless_the_transcript",
+    "which writes both copies or neither."
+  ],
+  "inputs": {
+    "seed_issuer_hex": "0909090909090909090909090909090909090909090909090909090909090909",
+    "seed_subject_hex": "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+    "seed_hub_hex": "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d",
+    "seed_pinned_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+    "issued_at": 1757000000,
+    "grant_nonce": "ZmFrZS1ub25jZQ",
+    "nonce_h_hex": "0101010101010101010101010101010101010101010101010101010101010101",
+    "nonce_c_hex": "0202020202020202020202020202020202020202020202020202020202020202",
+    "exporter_hex": "0303030303030303030303030303030303030303030303030303030303030303",
+    "vault_one": "vault-one",
+    "vault_two": "vault-two",
+    "model_id": "bge-small-en-v1.5",
+    "index_sha256": "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+    "schema_version": "1",
+    "note_count": 42,
+    "uploaded_at": 1757000300,
+    "graph_opt_in": true,
+    "reject_reason": "unknown key_id",
+    "accept_at": 1757000060,
+    "deny_at": 1757000120,
+    "revoke_unscoped_at": 1757000180,
+    "revoke_scoped_at": 1757000240
+  },
+  "key_ids": {
+    "issuer": "z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3",
+    "subject": "z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX",
+    "hub": "z6MkpFkurpyZgyna5SAfLpvdzp7W6cvdc1fn9YECrwv3AMbF",
+    "pinned_seed_7": "z6MkvDqGT54cXesYGvABpF1UapVNwjCqRcafi4Px6Thv5T3Z"
+  },
+  "tls_exporter": {
+    "label": "EXPORTER-ll-federation-v5",
+    "length": 32,
+    "context": null
+  },
+  "handshake_signed_bytes": {
+    "hub_challenge_message_hex": "6c6c2d6875622d7635000000200101010101010101010101010101010101010101010101010101010101010101000000200202020202020202020202020202020202020202020202020202020202020202000000200303030303030303030303030303030303030303030303030303030303030303",
+    "client_auth_message_hex": "6c6c2d636c69656e742d7635000000200101010101010101010101010101010101010101010101010101010101010101000000200202020202020202020202020202020202020202020202020202020202020202000000307a364d6b70466b757270795a67796e61355341664c7076647a703757366376646331666e3959454372777633414d6246000000200303030303030303030303030303030303030303030303030303030303030303",
+    "hub_challenge_signature_b64": "nRDMi36jtQ+XYFb1nFKqq07aTB5UELYyWnc1qmeyCk4+J68OfSC9LkzqlbX8AHqxSGAV5DmpNwJFmpdU+XV/Cg==",
+    "client_auth_signature_b64": "eDLE4OefNtFsJVu+O9t7CFQveeX8faw0LrAX5cd//MBXIRo8B5wke8QUg4fBiQSaNP3aDSatUj4+LP15rt+/BA=="
+  },
+  "statements": {
+    "grant_follow": {
+      "statement_json": "{\"v\":5,\"kind\":\"follow\",\"from\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"to\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"scope\":null,\"issued_at\":1757000000,\"expires_at\":1764776000,\"nonce\":\"ZmFrZS1ub25jZQ\"}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoiZm9sbG93IiwiZnJvbSI6Ino2TWt3VkRmQ2c5TGJiWTZ4akgzRVprOFlTRlFadWpWNVk0eTFaV2VFUjl0RGlOMyIsInRvIjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwic2NvcGUiOm51bGwsImlzc3VlZF9hdCI6MTc1NzAwMDAwMCwiZXhwaXJlc19hdCI6MTc2NDc3NjAwMCwibm9uY2UiOiJabUZyWlMxdWIyNWpaUSJ9",
+      "signature_b64": "8jkQzbKFN753a17HTnXHuOreoh9EaHTZuwQfQLv2WhsR7tvoamK/mOlQbtQTWv4Ji2mQUUXhB5eEd4PPaHjABw==",
+      "statement_sha256": "2b0cc1cf22e163f046bfe7ca6c8e2d4dcc3ea907d46c778c7d5a6ddcf5aaffdc"
+    },
+    "grant_link": {
+      "statement_json": "{\"v\":5,\"kind\":\"link\",\"from\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"to\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"scope\":null,\"issued_at\":1757000000,\"expires_at\":1788536000,\"nonce\":\"ZmFrZS1ub25jZQ\"}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoibGluayIsImZyb20iOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJ0byI6Ino2TWttTkw2eGtzZEVKRU5HazlaMXFxR3NZNW5qS1FkalUxVWhuVUVVdld5UVVWWCIsInNjb3BlIjpudWxsLCJpc3N1ZWRfYXQiOjE3NTcwMDAwMDAsImV4cGlyZXNfYXQiOjE3ODg1MzYwMDAsIm5vbmNlIjoiWm1GclpTMXViMjVqWlEifQ==",
+      "signature_b64": "D5r0jbF3n8NXGQ6dHRDlj4ZEn75KgVTCk/y3TrxeY6ubXWYEAoe2ceTqEc/19juuzZue/rsAUQli3AOPNyX9Bg==",
+      "statement_sha256": "bcb2ff67a167db463b07bccd8bd373a1ad8b97664f8f15810c00940c8e7f5ccb"
+    },
+    "grant_assoc": {
+      "statement_json": "{\"v\":5,\"kind\":\"assoc\",\"from\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"to\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"scope\":null,\"issued_at\":1757000000,\"expires_at\":1788536000,\"nonce\":\"ZmFrZS1ub25jZQ\"}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoiYXNzb2MiLCJmcm9tIjoiejZNa3dWRGZDZzlMYmJZNnhqSDNFWms4WVNGUVp1alY1WTR5MVpXZUVSOXREaU4zIiwidG8iOiJ6Nk1rbU5MNnhrc2RFSkVOR2s5WjFxcUdzWTVuaktRZGpVMVVoblVFVXZXeVFVVlgiLCJzY29wZSI6bnVsbCwiaXNzdWVkX2F0IjoxNzU3MDAwMDAwLCJleHBpcmVzX2F0IjoxNzg4NTM2MDAwLCJub25jZSI6IlptRnJaUzF1YjI1alpRIn0=",
+      "signature_b64": "Y5M+pDfD1TazzKq/APw3Tx6jXt3iGQt+09fJaoQK7VZjzw41wnj44XCsi4bNCWe3Oe4+9q2HXMG12hXvkWYEBg==",
+      "statement_sha256": "0e23f47060b9a06500f70bb5d4be7b7fae0c3c0fdad436f5bc909c31fc489525"
+    },
+    "grant_peer": {
+      "statement_json": "{\"v\":5,\"kind\":\"peer\",\"from\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"to\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"scope\":null,\"issued_at\":1757000000,\"expires_at\":1764776000,\"nonce\":\"ZmFrZS1ub25jZQ\"}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoicGVlciIsImZyb20iOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJ0byI6Ino2TWttTkw2eGtzZEVKRU5HazlaMXFxR3NZNW5qS1FkalUxVWhuVUVVdld5UVVWWCIsInNjb3BlIjpudWxsLCJpc3N1ZWRfYXQiOjE3NTcwMDAwMDAsImV4cGlyZXNfYXQiOjE3NjQ3NzYwMDAsIm5vbmNlIjoiWm1GclpTMXViMjVqWlEifQ==",
+      "signature_b64": "lHwrLflN5OfuG0UnVk1/cisa41keC131Vnd2ah3yICG9NGK67dwW7EDUbnb15ysP/7Pf8eubSpJADjtumOdiDQ==",
+      "statement_sha256": "9fa17cf349aeb8b76a692d733b84f4da60b70fb1a4824e6eb99d209501cd9e9f"
+    },
+    "grant_follow_scoped": {
+      "statement_json": "{\"v\":5,\"kind\":\"follow\",\"from\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"to\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"scope\":\"vault-one\",\"issued_at\":1757000000,\"expires_at\":1764776000,\"nonce\":\"ZmFrZS1ub25jZQ\"}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoiZm9sbG93IiwiZnJvbSI6Ino2TWt3VkRmQ2c5TGJiWTZ4akgzRVprOFlTRlFadWpWNVk0eTFaV2VFUjl0RGlOMyIsInRvIjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwic2NvcGUiOiJ2YXVsdC1vbmUiLCJpc3N1ZWRfYXQiOjE3NTcwMDAwMDAsImV4cGlyZXNfYXQiOjE3NjQ3NzYwMDAsIm5vbmNlIjoiWm1GclpTMXViMjVqWlEifQ==",
+      "signature_b64": "qV13mWnBa/dvkyE4YEsdKcwfINLUB1P/ONMxB9pq9a8FMWVDT1l4HRUbciyrbTbY/EdUbh2Egh+fdRlV9d77Dg==",
+      "statement_sha256": "e3892bf298063ec40f30b5fb5ac6c8f99a499f9b974cfcad7bff1f1ee794a051"
+    },
+    "decision_accept": {
+      "statement_json": "{\"v\":5,\"kind\":\"accept\",\"grant_id\":\"2b0cc1cf22e163f046bfe7ca6c8e2d4dcc3ea907d46c778c7d5a6ddcf5aaffdc\",\"by\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"at\":1757000060}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoiYWNjZXB0IiwiZ3JhbnRfaWQiOiIyYjBjYzFjZjIyZTE2M2YwNDZiZmU3Y2E2YzhlMmQ0ZGNjM2VhOTA3ZDQ2Yzc3OGM3ZDVhNmRkY2Y1YWFmZmRjIiwiYnkiOiJ6Nk1rbU5MNnhrc2RFSkVOR2s5WjFxcUdzWTVuaktRZGpVMVVoblVFVXZXeVFVVlgiLCJhdCI6MTc1NzAwMDA2MH0=",
+      "signature_b64": "2FhAVkZEa5L1eT3NwLUNSkvbqcM9I+AEEBEAV5f8obKWPo0yOe5ghzJAp4/QCF6RyTeje3eOUd5iz5zfppjKAA==",
+      "statement_sha256": "31a9647c1dd49f95b196ae9606df30bc5efc0f3492a28c2e2f74453e2b83e6d1"
+    },
+    "decision_deny": {
+      "statement_json": "{\"v\":5,\"kind\":\"deny\",\"grant_id\":\"bcb2ff67a167db463b07bccd8bd373a1ad8b97664f8f15810c00940c8e7f5ccb\",\"by\":\"z6MkmNL6xksdEJENGk9Z1qqGsY5njKQdjU1UhnUEUvWyQUVX\",\"at\":1757000120}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoiZGVueSIsImdyYW50X2lkIjoiYmNiMmZmNjdhMTY3ZGI0NjNiMDdiY2NkOGJkMzczYTFhZDhiOTc2NjRmOGYxNTgxMGMwMDk0MGM4ZTdmNWNjYiIsImJ5IjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwiYXQiOjE3NTcwMDAxMjB9",
+      "signature_b64": "D4R0vzvtTsHwzw4mP6A1fUBvSL8equmYxcDBFXwmqi6gJ1GWe7lxyIU9eX5kElncd4CivRl5qtPvT6Ll/s+vCQ==",
+      "statement_sha256": "336b770c1218bf4b357c248b6d6c2d321ba3d1b910db2bd497821c0171ecb916"
+    },
+    "revocation_unscoped": {
+      "statement_json": "{\"v\":5,\"kind\":\"revoke\",\"grant_id\":\"bcb2ff67a167db463b07bccd8bd373a1ad8b97664f8f15810c00940c8e7f5ccb\",\"by\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"scope\":null,\"at\":1757000180}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoicmV2b2tlIiwiZ3JhbnRfaWQiOiJiY2IyZmY2N2ExNjdkYjQ2M2IwN2JjY2Q4YmQzNzNhMWFkOGI5NzY2NGY4ZjE1ODEwYzAwOTQwYzhlN2Y1Y2NiIiwiYnkiOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJzY29wZSI6bnVsbCwiYXQiOjE3NTcwMDAxODB9",
+      "signature_b64": "kSceeAtK5yJ6z9X6OVUYY8tDxcrLZYXZZxs9qOPTWQea1oKpMCrbHCwWWSZuLZPCzkdNDa1p6ZaQE06c55L5DQ==",
+      "statement_sha256": "20ff9b85e6cf25ce3d4edac858c779b970a043f78427cbadc1b370d16924e205"
+    },
+    "revocation_scoped": {
+      "statement_json": "{\"v\":5,\"kind\":\"revoke\",\"grant_id\":\"e3892bf298063ec40f30b5fb5ac6c8f99a499f9b974cfcad7bff1f1ee794a051\",\"by\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"scope\":\"vault-one\",\"at\":1757000240}",
+      "statement_b64": "eyJ2Ijo1LCJraW5kIjoicmV2b2tlIiwiZ3JhbnRfaWQiOiJlMzg5MmJmMjk4MDYzZWM0MGYzMGI1ZmI1YWM2YzhmOTlhNDk5ZjliOTc0Y2ZjYWQ3YmZmMWYxZWU3OTRhMDUxIiwiYnkiOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJzY29wZSI6InZhdWx0LW9uZSIsImF0IjoxNzU3MDAwMjQwfQ==",
+      "signature_b64": "Uf5LUiS878ulTUWHgJYmvg2ZJBqbojRuv0NW6axM7+tc3c+BFkjyD5jnjiBcOyRtI86cB+Kjno0DRmbQyIrlCg==",
+      "statement_sha256": "43fb325c5e268c852388a2c53f5edfdc3c3ab08a722d497a3087765e9699bdab"
+    }
+  },
+  "messages": {
+    "client_hello": "{\"type\":\"client-hello\",\"key_id\":\"z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3\",\"nonce_c\":\"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=\",\"vault_ids\":[\"vault-one\",\"vault-two\"],\"protocol_version\":5,\"model_id\":\"bge-small-en-v1.5\",\"invite_code\":null,\"graph_opt_in\":true}",
+    "client_auth": "{\"type\":\"client-auth\",\"sig_c\":\"eDLE4OefNtFsJVu+O9t7CFQveeX8faw0LrAX5cd//MBXIRo8B5wke8QUg4fBiQSaNP3aDSatUj4+LP15rt+/BA==\"}",
+    "upload_index": "{\"type\":\"upload-index\",\"vault_id\":\"vault-one\",\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"note_count\":42,\"schema_version\":\"1\",\"model_id\":\"bge-small-en-v1.5\"}",
+    "put_grant": "{\"type\":\"put-grant\",\"statement_b64\":\"eyJ2Ijo1LCJraW5kIjoiZm9sbG93IiwiZnJvbSI6Ino2TWt3VkRmQ2c5TGJiWTZ4akgzRVprOFlTRlFadWpWNVk0eTFaV2VFUjl0RGlOMyIsInRvIjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwic2NvcGUiOm51bGwsImlzc3VlZF9hdCI6MTc1NzAwMDAwMCwiZXhwaXJlc19hdCI6MTc2NDc3NjAwMCwibm9uY2UiOiJabUZyWlMxdWIyNWpaUSJ9\",\"signature_b64\":\"8jkQzbKFN753a17HTnXHuOreoh9EaHTZuwQfQLv2WhsR7tvoamK/mOlQbtQTWv4Ji2mQUUXhB5eEd4PPaHjABw==\"}",
+    "revoke_grant": "{\"type\":\"revoke-grant\",\"statement_b64\":\"eyJ2Ijo1LCJraW5kIjoicmV2b2tlIiwiZ3JhbnRfaWQiOiJlMzg5MmJmMjk4MDYzZWM0MGYzMGI1ZmI1YWM2YzhmOTlhNDk5ZjliOTc0Y2ZjYWQ3YmZmMWYxZWU3OTRhMDUxIiwiYnkiOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJzY29wZSI6InZhdWx0LW9uZSIsImF0IjoxNzU3MDAwMjQwfQ==\",\"signature_b64\":\"Uf5LUiS878ulTUWHgJYmvg2ZJBqbojRuv0NW6axM7+tc3c+BFkjyD5jnjiBcOyRtI86cB+Kjno0DRmbQyIrlCg==\"}",
+    "put_decision": "{\"type\":\"put-decision\",\"statement_b64\":\"eyJ2Ijo1LCJraW5kIjoiYWNjZXB0IiwiZ3JhbnRfaWQiOiIyYjBjYzFjZjIyZTE2M2YwNDZiZmU3Y2E2YzhlMmQ0ZGNjM2VhOTA3ZDQ2Yzc3OGM3ZDVhNmRkY2Y1YWFmZmRjIiwiYnkiOiJ6Nk1rbU5MNnhrc2RFSkVOR2s5WjFxcUdzWTVuaktRZGpVMVVoblVFVXZXeVFVVlgiLCJhdCI6MTc1NzAwMDA2MH0=\",\"signature_b64\":\"2FhAVkZEa5L1eT3NwLUNSkvbqcM9I+AEEBEAV5f8obKWPo0yOe5ghzJAp4/QCF6RyTeje3eOUd5iz5zfppjKAA==\"}",
+    "fetch_index": "{\"type\":\"fetch-index\",\"vault_id\":\"vault-one\"}",
+    "hub_challenge": "{\"type\":\"hub-challenge\",\"nonce_h\":\"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=\",\"hub_key_id\":\"z6MkpFkurpyZgyna5SAfLpvdzp7W6cvdc1fn9YECrwv3AMbF\",\"sig_h\":\"nRDMi36jtQ+XYFb1nFKqq07aTB5UELYyWnc1qmeyCk4+J68OfSC9LkzqlbX8AHqxSGAV5DmpNwJFmpdU+XV/Cg==\"}",
+    "sync_ready": "{\"type\":\"sync-ready\",\"protocol_version\":5,\"vault_state\":[{\"vault_id\":\"vault-one\",\"holds\":null},{\"vault_id\":\"vault-two\",\"holds\":{\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"note_count\":42,\"uploaded_at\":1757000300}}],\"grants\":[{\"statement_b64\":\"eyJ2Ijo1LCJraW5kIjoiZm9sbG93IiwiZnJvbSI6Ino2TWt3VkRmQ2c5TGJiWTZ4akgzRVprOFlTRlFadWpWNVk0eTFaV2VFUjl0RGlOMyIsInRvIjoiejZNa21OTDZ4a3NkRUpFTkdrOVoxcXFHc1k1bmpLUWRqVTFVaG5VRVV2V3lRVVZYIiwic2NvcGUiOm51bGwsImlzc3VlZF9hdCI6MTc1NzAwMDAwMCwiZXhwaXJlc19hdCI6MTc2NDc3NjAwMCwibm9uY2UiOiJabUZyWlMxdWIyNWpaUSJ9\",\"signature_b64\":\"8jkQzbKFN753a17HTnXHuOreoh9EaHTZuwQfQLv2WhsR7tvoamK/mOlQbtQTWv4Ji2mQUUXhB5eEd4PPaHjABw==\",\"state\":\"active\"}],\"revocations\":[{\"statement_b64\":\"eyJ2Ijo1LCJraW5kIjoicmV2b2tlIiwiZ3JhbnRfaWQiOiJiY2IyZmY2N2ExNjdkYjQ2M2IwN2JjY2Q4YmQzNzNhMWFkOGI5NzY2NGY4ZjE1ODEwYzAwOTQwYzhlN2Y1Y2NiIiwiYnkiOiJ6Nk1rd1ZEZkNnOUxiYlk2eGpIM0VaazhZU0ZRWnVqVjVZNHkxWldlRVI5dERpTjMiLCJzY29wZSI6bnVsbCwiYXQiOjE3NTcwMDAxODB9\",\"signature_b64\":\"kSceeAtK5yJ6z9X6OVUYY8tDxcrLZYXZZxs9qOPTWQea1oKpMCrbHCwWWSZuLZPCzkdNDa1p6ZaQE06c55L5DQ==\"}]}",
+    "reject": "{\"type\":\"reject\",\"reason\":\"unknown key_id\"}",
+    "upload_ack": "{\"type\":\"upload-ack\",\"vault_id\":\"vault-one\",\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"}",
+    "grant_ack": "{\"type\":\"grant-ack\",\"grant_id\":\"2b0cc1cf22e163f046bfe7ca6c8e2d4dcc3ea907d46c778c7d5a6ddcf5aaffdc\"}",
+    "index_header_holds": "{\"type\":\"index-header\",\"vault_id\":\"vault-two\",\"holds\":{\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"note_count\":42,\"uploaded_at\":1757000300}}",
+    "index_header_empty": "{\"type\":\"index-header\",\"vault_id\":\"vault-one\",\"holds\":null}"
+  }
+}

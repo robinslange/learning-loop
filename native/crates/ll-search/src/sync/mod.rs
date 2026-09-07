@@ -27,3 +27,7 @@ pub mod join;
 pub mod link;
 #[cfg(test)]
 pub mod test_hub;
+/// This client's half of the cross-repo transcript: values sync-hub's code
+/// produced, re-derived here from ours. Test-only.
+#[cfg(test)]
+mod transcript_v5;
