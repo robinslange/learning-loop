@@ -186,6 +186,55 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
     Ok(LoadResult { signing_key: key, backend: SeedBackend::Encrypted, created: true })
 }
 
+/// Store `seed` as this config dir's signing seed, replacing whatever is
+/// already there, and report which backend now holds it.
+///
+/// The backend is the one [`load_only`] already reads, when a seed is there to
+/// read. That is not a preference — it is the whole postcondition. `load_only`
+/// tries keyring, then encrypted, then plaintext, so writing into a *later*
+/// backend than the one currently answering leaves the old seed loading and
+/// the caller believing it replaced an identity it did not.
+///
+/// Two cases have no such backend to match, and both take the same selection
+/// [`load_or_create`] uses for a brand new seed:
+///
+/// - Nothing is stored, so there is nothing to shadow.
+/// - A plaintext-legacy seed is answering. Plaintext is a migration source and
+///   never a write target; both other backends outrank it in the read order,
+///   so either choice wins. **The legacy file is left where it is** — shredding
+///   it belongs to `seed_migrate`, which verifies before it destroys — so a
+///   caller replacing an identity here leaves the previous seed readable on
+///   disk until that migration runs.
+pub fn store_seed(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<SeedBackend> {
+    let backend = match load_only(config_dir)?.map(|r| r.backend) {
+        Some(b @ (SeedBackend::Keyring | SeedBackend::Encrypted)) => b,
+        Some(SeedBackend::PlaintextLegacy) | None => {
+            match std::env::var("LL_SEED_BACKEND").ok().as_deref() {
+                Some("keyring") => SeedBackend::Keyring,
+                Some("mock" | "encrypted") => SeedBackend::Encrypted,
+                None | Some("") => {
+                    if probe_keyring().is_ok() {
+                        SeedBackend::Keyring
+                    } else {
+                        SeedBackend::Encrypted
+                    }
+                }
+                Some(other) => anyhow::bail!(
+                    "unknown LL_SEED_BACKEND value: '{}'; use keyring, encrypted, or mock",
+                    other
+                ),
+            }
+        }
+    };
+
+    match backend {
+        SeedBackend::Keyring => write_keyring(config_dir, seed)?,
+        _ => write_encrypted(config_dir, seed)?,
+    }
+    write_seed_meta(config_dir, backend, false)?;
+    Ok(backend)
+}
+
 /// Write a `.seed-meta.json` sidecar recording which backend is active.
 ///
 /// Extends the existing plugin schema additively: the plugin only reads
@@ -359,6 +408,29 @@ mod tests {
             result.signing_key.sign(msg).to_bytes(),
             migrated.sign(msg).to_bytes(),
             "auto-migrate must preserve the signing identity",
+        );
+    }
+
+    #[test]
+    fn store_seed_is_what_load_only_then_reads() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        assert_eq!(store_seed(tmp.path(), &[23u8; 32]).unwrap(), SeedBackend::Encrypted);
+        let loaded = load_only(tmp.path()).unwrap().unwrap();
+        assert_eq!(loaded.signing_key.to_bytes(), [23u8; 32]);
+        assert_eq!(loaded.backend, SeedBackend::Encrypted);
+    }
+
+    #[test]
+    fn store_seed_replaces_the_seed_already_there() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        write_encrypted(tmp.path(), &[1u8; 32]).unwrap();
+        store_seed(tmp.path(), &[2u8; 32]).unwrap();
+        assert_eq!(
+            load_only(tmp.path()).unwrap().unwrap().signing_key.to_bytes(),
+            [2u8; 32],
+            "a stored seed that does not become the loaded seed is a silent no-op",
         );
     }
 

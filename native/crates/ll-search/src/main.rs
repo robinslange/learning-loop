@@ -175,6 +175,19 @@ enum Commands {
         #[arg(long)]
         config_dir: Option<String>,
     },
+    /// Restore this machine's identity from the 24-word recovery phrase
+    /// `ll-search join` printed once.
+    Recover {
+        /// The 24 words, quoted as a single argument.
+        phrase: String,
+        /// Replace an identity already on this machine with a different one.
+        /// Without it that is refused: the old key's grants would survive it,
+        /// signed and unreachable.
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
     MigrateSeed {
         #[arg(long)]
         config_dir: Option<String>,
@@ -340,6 +353,63 @@ fn show_pending(pending: &ll_search::sync::link::PendingLink) {
     eprintln!("that the six words it shows are the six words above.");
     eprintln!();
     println!("{}", pending.code);
+}
+
+/// What a completed [`recover`] did. `replaced` is `Some` only when a
+/// *different* identity was on this machine and `--force` authorised losing
+/// it; it names the key that is now gone, because "an identity was replaced"
+/// with no way to say which one is not a report anybody can act on.
+///
+/// Every field is public-half only, so unlike `JoinOutcome` this can derive
+/// `Debug` without putting a secret in a log line.
+#[derive(Debug)]
+struct RecoverOutcome {
+    key_id: String,
+    backend: ll_search::sync::seed_store::SeedBackend,
+    replaced: Option<String>,
+}
+
+/// Restore this machine's signing identity from a 24-word recovery phrase.
+///
+/// The guard is `--force`, and what it guards is the *loss*, not the write: a
+/// recovery that would put a different key here orphans every grant naming the
+/// old one — they stay signed, valid and unreachable, while the machine still
+/// looks enrolled.
+///
+/// Which is why recovering the identity already here needs no `--force`.
+/// Nothing is replaced, so there is nothing to authorise. That is not a
+/// special case in the code either — `replaced` is the identity this would
+/// *lose*, and an identical seed simply does not produce one. Refusing it
+/// would make checking that the phrase in the drawer is the right one the
+/// case that trains a user to reach for `--force`, which is the one habit
+/// this guard cannot survive.
+fn recover(
+    config_dir: &std::path::Path,
+    phrase: &str,
+    force: bool,
+) -> anyhow::Result<RecoverOutcome> {
+    use ed25519_dalek::SigningKey;
+    use ll_search::sync::{key_id::KeyId, seed_store, words};
+
+    // Before anything on disk is touched: a phrase that does not decode must
+    // cost the caller nothing, `--force` or not.
+    let seed = zeroize::Zeroizing::new(words::seed_from_phrase(phrase)?);
+    let key_id = KeyId::from_pubkey(&SigningKey::from_bytes(&seed).verifying_key());
+
+    let replaced = seed_store::load_only(config_dir)?
+        .filter(|r| r.signing_key.to_bytes() != *seed)
+        .map(|r| KeyId::from_pubkey(&r.signing_key.verifying_key()).as_str().to_string());
+
+    if let (Some(old), false) = (&replaced, force) {
+        anyhow::bail!(
+            "{} already holds a different identity ({old}); recovering over it would orphan \
+             every grant that names it. Re-run with --force if that is what you mean.",
+            config_dir.display(),
+        );
+    }
+
+    let backend = seed_store::store_seed(config_dir, &seed)?;
+    Ok(RecoverOutcome { key_id: key_id.as_str().to_string(), backend, replaced })
 }
 
 fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app::AppState {
@@ -645,6 +715,29 @@ async fn main() {
                 "backend": result.backend.to_string(),
                 "created": result.created,
             }));
+        }
+        Commands::Recover { phrase, force, config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            match recover(&dir, &phrase, force) {
+                Ok(o) => {
+                    match &o.replaced {
+                        Some(old) => eprintln!(
+                            "Replaced {old}. Every grant naming it is now inert — the peers \
+                             that hold them have to be re-linked.",
+                        ),
+                        None => eprintln!("Recovered {}.", o.key_id),
+                    }
+                    out(&serde_json::json!({
+                        "key_id": o.key_id,
+                        "backend": o.backend.to_string(),
+                        "replaced": o.replaced,
+                    }));
+                }
+                Err(e) => {
+                    eprintln!("recover failed: {e:#}");
+                    std::process::exit(1);
+                }
+            }
         }
         Commands::MigrateSeed { config_dir, rollback } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
@@ -1017,6 +1110,112 @@ mod tests {
     fn the_cli_definition_is_one_clap_will_build() {
         use clap::CommandFactory;
         Cli::command().debug_assert();
+    }
+
+    /// Same hazard `seed_store`'s own tests pin, for the same reason: the
+    /// keyring is a system store, and a test that reaches it can stomp the
+    /// developer's real federation seed. Pinned once for the whole binary
+    /// rather than per test — `set_var`/`remove_var` pairs race across
+    /// parallel test threads.
+    static SEED_BACKEND: std::sync::Once = std::sync::Once::new();
+    fn pin_file_backend() {
+        SEED_BACKEND.call_once(|| std::env::set_var("LL_SEED_BACKEND", "encrypted"));
+    }
+
+    /// A config dir already holding `seed`, written through the backend
+    /// directly rather than through `recover` — a fixture built by the code
+    /// under test can only agree with it.
+    fn seeded_dir(seed: [u8; 32]) -> tempfile::TempDir {
+        pin_file_backend();
+        let dir = tempfile::tempdir().unwrap();
+        ll_search::sync::seed_store::write_encrypted(dir.path(), &seed).unwrap();
+        dir
+    }
+
+    fn loaded_seed(dir: &Path) -> [u8; 32] {
+        ll_search::sync::seed_store::load_only(dir).unwrap().unwrap().signing_key.to_bytes()
+    }
+
+    #[test]
+    fn recovering_restores_the_same_identity() {
+        pin_file_backend();
+        let original = [42u8; 32];
+        let phrase = ll_search::sync::words::recovery_phrase(&original).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        recover(dir.path(), &phrase, false).unwrap();
+        assert_eq!(loaded_seed(dir.path()), original);
+    }
+
+    #[test]
+    fn recovering_over_an_existing_identity_requires_force() {
+        let dir = seeded_dir([7u8; 32]);
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        let err = recover(dir.path(), &phrase, false).unwrap_err();
+        assert!(err.to_string().contains("--force"),
+            "silently replacing a working identity would orphan every grant it holds");
+        assert_eq!(loaded_seed(dir.path()), [7u8; 32],
+            "a refused recovery must leave the identity it refused to replace exactly as it was");
+    }
+
+    #[test]
+    fn force_replaces_the_identity_and_names_what_it_replaced() {
+        let dir = seeded_dir([7u8; 32]);
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        let outcome = recover(dir.path(), &phrase, true).unwrap();
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32]);
+        let replaced = outcome.replaced.expect("a replaced identity must be named, not merely gone");
+        assert_eq!(replaced, key_id_of(&[7u8; 32]));
+        assert_ne!(replaced, outcome.key_id);
+    }
+
+    /// The decision the plan left open. `--force` exists to authorise losing
+    /// an identity; recovering the identity already here loses nothing, so
+    /// there is nothing for it to authorise. Requiring it anyway would make
+    /// the safe idempotent case — checking that the phrase in the drawer is
+    /// the right one — the case that teaches the user to type `--force`.
+    #[test]
+    fn recovering_the_identity_already_here_needs_no_force() {
+        let dir = seeded_dir([42u8; 32]);
+        let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
+        let outcome = recover(dir.path(), &phrase, false).unwrap();
+        assert!(outcome.replaced.is_none(), "nothing was replaced, so nothing may be reported as replaced");
+        assert_eq!(loaded_seed(dir.path()), [42u8; 32]);
+        assert_eq!(outcome.key_id, key_id_of(&[42u8; 32]));
+    }
+
+    #[test]
+    fn a_phrase_that_is_not_a_phrase_writes_nothing() {
+        let dir = seeded_dir([7u8; 32]);
+        let err = recover(dir.path(), "zzzz not a recovery phrase", true).unwrap_err();
+        assert!(!err.to_string().contains("--force"));
+        assert_eq!(loaded_seed(dir.path()), [7u8; 32],
+            "an unreadable phrase must be refused before the existing seed is touched, \
+             even under --force");
+    }
+
+    fn key_id_of(seed: &[u8; 32]) -> String {
+        use ed25519_dalek::SigningKey;
+        ll_search::sync::key_id::KeyId::from_pubkey(&SigningKey::from_bytes(seed).verifying_key())
+            .as_str()
+            .to_string()
+    }
+
+    /// `--force` is a flag and the phrase is a positional: the shape clap
+    /// builds its parser from, which it does at runtime.
+    #[test]
+    fn recover_takes_the_phrase_positionally_and_force_as_a_flag() {
+        use clap::Parser;
+        match Cli::parse_from(["ll-search", "recover", "abandon abandon", "--force"]).command {
+            Commands::Recover { phrase, force, .. } => {
+                assert_eq!(phrase, "abandon abandon");
+                assert!(force);
+            }
+            other => panic!("wrong subcommand: {:?}", std::mem::discriminant(&other)),
+        }
+        assert!(!matches!(
+            Cli::parse_from(["ll-search", "recover", "abandon abandon"]).command,
+            Commands::Recover { force: true, .. }
+        ));
     }
 
     /// The value is a word the caller types, not the presence of a flag: an
