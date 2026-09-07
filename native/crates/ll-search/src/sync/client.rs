@@ -13,6 +13,7 @@ use super::config::{export_db_path, last_export_mtime_path, seed_path, Federatio
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
 use super::fetch::{fetch_all, Fetched};
+use super::grants;
 use super::handshake::SyncReadyPayload;
 use super::key_id::KeyId;
 use super::protocol::{ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP};
@@ -214,6 +215,26 @@ async fn run_cycle(
     let (mut ws, ready) =
         connect_and_authenticate(config, &seed, &peer_id, &prepared.model_id, None).await?;
 
+    let me = KeyId::from_pubkey(&seed.verifying_key());
+
+    // Everything the hub served, folded into the store before anything acts
+    // on it. `reconcile` decides what it owes against this file, and a
+    // revocation can only ever be resolved against a grant that was kept —
+    // a revoked grant is absent from `SyncReady.grants` and arrives as a
+    // signed statement about an id, nothing more.
+    grants::apply_grants(config_dir, &ready.grants)?;
+
+    // And the deletions before any of the network half. Spec:334 is not
+    // best-effort: a cycle that dies uploading must still have stopped
+    // serving what it no longer holds a grant for.
+    let swept: Vec<String> = grants::apply_revocations(config_dir, &ready.revocations, &me, unix_now())?
+        .into_iter()
+        .chain(grants::prune_expired(config_dir, &me, unix_now())?)
+        .collect();
+    for vault_id in &swept {
+        eprintln!("Removed the cached index for {vault_id}: the grant behind it is gone");
+    }
+
     // Before anything vault-shaped. A machine that was linked a minute ago
     // owes the other half of that link and may hold nothing else worth
     // uploading; settling the key graph first means an upload problem cannot
@@ -233,7 +254,6 @@ async fn run_cycle(
     // handshake, less this one. Nothing here asks it to list anything, and
     // nothing here derives the list from a grant: a `link` is unscoped, so a
     // client that tried would read nothing on a machine that was just linked.
-    let me = KeyId::from_pubkey(&seed.verifying_key());
     let read =
         fetch_all(&mut ws, config_dir, &ready.vault_state, &ready.grants, &me, vault_id, unix_now())
             .await?;

@@ -95,11 +95,17 @@ fn cached_vaults(config_dir: &Path) -> anyhow::Result<Vec<String>> {
 /// Deletion is not best-effort. Spec:334 makes removing
 /// `federation/data/peers/<vault_id>/` a hard requirement, and a client that
 /// keeps serving material it no longer has a grant for is the failure the
-/// requirement exists to prevent — so a failure here propagates, and every
-/// caller runs it inside the store's lock *before* the row is dropped. Losing
-/// the row and keeping the cache is the one unrecoverable order: the hub
-/// serves the same revocation next cycle, but with no local grant behind it
-/// there is nothing left to say which directory it meant.
+/// requirement exists to prevent — so a failure here propagates.
+///
+/// The failure it must not produce is a dropped row beside a surviving cache:
+/// the hub serves the same revocation next cycle, but with no local grant
+/// behind it there is nothing left to say which directory it meant, and the
+/// cache is orphaned for good. Every caller runs this **inside** the store's
+/// lock, and `update_grants` writes nothing when the closure returns `Err` —
+/// so the deletion and the row removal are one transaction and the order
+/// between them inside the closure carries no weight. Mutating that order
+/// kills no test, correctly: it is the lock and the write-on-success that
+/// hold this, not a sequence anyone has to remember.
 fn withdraw(
     config_dir: &Path,
     gone: &GrantStatement,
@@ -255,9 +261,6 @@ pub fn apply_revocations(
             }
             let remaining: Vec<GrantStatement> =
                 held.iter().filter(|(i, _, _)| *i != idx).map(|(_, _, st)| st.clone()).collect();
-            // Delete first, drop the row second — and inside the lock, so a
-            // failed deletion leaves the store untouched and the next cycle
-            // still knows what this revocation meant.
             deleted.extend(withdraw(config_dir, gone, &remaining, me, now)?);
             rows.remove(idx);
         }
@@ -778,10 +781,11 @@ mod tests {
         assert!(loose.exists(), "a file is not a peer cache");
     }
 
-    /// Delete first, drop the row second. The reverse order is the one
-    /// unrecoverable failure: the hub serves the same revocation next cycle,
-    /// but with the grant gone there is nothing left to say which directory
-    /// it meant, and the cache is orphaned for good.
+    /// A deletion and its row removal are one transaction. The failure this
+    /// forbids is a dropped row beside a surviving cache: the hub serves the
+    /// same revocation next cycle, but with the grant gone there is nothing
+    /// left to say which directory it meant, and the cache is orphaned for
+    /// good.
     ///
     /// Proved by making the deletion fail rather than by reading the code's
     /// order: the cache directory is made read-only, so nothing inside it can
