@@ -1596,15 +1596,18 @@ mod tests {
     /// shipped binary contains an instruction that could widen the trust
     /// store — rests on one `#[cfg(test)]`.
     ///
-    /// What deleting that attribute actually does, measured: it does not
-    /// compile. `mod tests` is itself `#[cfg(test)]`, so an ungated call to
-    /// `tests::extend_with_test_anchors` is `error[E0433]: unresolved module
-    /// or unlinked crate 'tests'` and `cargo build` catches it before this
-    /// test runs. This is the third layer, and the two escapes it exists for
-    /// are the deliberate ones: an attribute commented out rather than
-    /// removed, and a second call site spelled so the first check misses it.
-    /// It caught neither until it stopped reading comments and started
-    /// enumerating every mention of the name.
+    /// What touching that attribute actually does, measured over a build of
+    /// the whole package. `mod tests` is itself `#[cfg(test)]`, so an ungated
+    /// call to `tests::extend_with_test_anchors` is `error[E0433]: unresolved
+    /// module or unlinked crate 'tests'`. Deleting the attribute is caught
+    /// that way, and so is commenting it out — the compiler gets there before
+    /// this test does, in both cases.
+    ///
+    /// So this check earns its place on exactly one escape: a module-scope
+    /// helper of the same name, called without the `tests::` qualifier, which
+    /// compiles clean in a release build and ships a way to widen the trust
+    /// store. That is the one the old version missed, and the one enumerating
+    /// every mention of the name catches.
     #[test]
     fn the_extra_root_exists_only_under_cfg_test() {
         let src = without_line_comments(include_str!("client.rs"));
