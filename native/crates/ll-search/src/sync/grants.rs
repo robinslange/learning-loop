@@ -456,7 +456,7 @@ mod tests {
         let g = issue(&key(1), &me, GrantKind::Follow, Some("v-other"), LATER);
         let forged = GrantWire {
             statement_b64: B64.encode(&g.statement),
-            signature_b64: B64.encode(&key(2).sign(&g.statement).to_bytes()),
+            signature_b64: B64.encode(key(2).sign(&g.statement).to_bytes()),
             state: "active".to_string(),
         };
         let dir = tempfile::tempdir().unwrap();
@@ -671,7 +671,7 @@ mod tests {
         let rev = revoking(&a, &held);
 
         assert_eq!(
-            apply_revocations(dir.path(), &[rev.clone()], &me, NOW).unwrap(),
+            apply_revocations(dir.path(), std::slice::from_ref(&rev), &me, NOW).unwrap(),
             vec!["v-other".to_string()]
         );
         assert!(apply_revocations(dir.path(), &[rev], &me, NOW).unwrap().is_empty());
