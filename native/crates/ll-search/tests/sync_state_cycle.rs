@@ -1288,16 +1288,25 @@ async fn a_cycle_that_dies_uploading_has_already_dropped_what_a_revocation_withd
     let issuer = SigningKey::from_bytes(&[31u8; 32]);
     let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
 
+    // The cache arrives the way a real one does — the hub lists `v-other` and
+    // serves it. Planting it by hand would describe a hub that lists nothing
+    // and answers for it anyway, which `spawn_hub_full` says cannot occur.
     let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
-
-    let (addr, _) = spawn_hub_revoking(stale(), vec![granted], vec![]).await;
+    let (addr, _) = spawn_hub_full(
+        stale(),
+        OnUpload::Ack,
+        OnGrant::Ack,
+        vec![granted],
+        vec![],
+        vec![("v-other".to_string(), Fetch::Serve(peer_index_bytes()))],
+    )
+    .await;
     let config = config_for(dir.path(), addr);
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await
         .expect("the first cycle completes");
-    assert!(cache.join("index.db").exists(), "precondition: an active grant keeps its cache");
+    assert!(cache.join("index.db").exists(),
+        "precondition: the hub listed it, served it, and the grant justifies keeping it");
 
     let (addr, _) = spawn_hub_full(
         stale(),
