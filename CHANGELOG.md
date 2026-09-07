@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v1.41.2
+
 ### Fixed
 
 - **`verify-note` graded a bare author-year mention by whether the resolver answered, not by whether it was right.** With no identifier to dispatch on, the branch searched `<author> <year> <topic>`, took the first hit whose author list contained the claimed surname anywhere, and discarded the claimed year entirely — it was spent building the query and never compared. A search like that cannot fail: given `Haskell 2005 caffeine` PubMed returns a paper by some Haskell about something. On real vault notes `Rogers 2014` resolved to a 2016 paper on older adults' perceptions of computers, `James & Rogers 2005` to paediatric cochlear implantation, and `Haskell et al. 2005` to Tai Chi hemodynamics — every one `verified: true` with an empty `issues` array, so the promotion gate counted zero problems and promoted notes whose citations pointed at strangers' papers. Resolutions are now graded against what the citation form actually asserts, and against nothing more: `X et al.` asserts X is the FIRST author, `X & Y` asserts both are authors in no particular position, a bare `X` asserts authorship only, and the year asserts the publication year (a one-year gap is online-first lag and stays low severity; more is `wrong_year` at high). A senior author cited alone still sits last by convention without being flagged.
