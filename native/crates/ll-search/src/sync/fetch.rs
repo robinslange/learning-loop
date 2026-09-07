@@ -1062,6 +1062,57 @@ mod tests {
         assert!(!is_safe_vault_id("café"));
     }
 
+    /// A grant's `scope` names ONE vault, and `only_assoc_names` compares it
+    /// whole on both sides of its own rule — the `assoc` that vetoes and the
+    /// read grant that outranks it.
+    ///
+    /// Weaken either comparison to a prefix or a case-insensitive one and the
+    /// brace stops refusing what it exists to refuse: an `assoc` naming
+    /// `v-alice` is outranked by a read grant for the unrelated vault `v-a`,
+    /// or vetoes a vault nobody named. Ids are UUIDv7 today and no two of them
+    /// are prefixes of each other, which is exactly what was true of
+    /// `ReadableVaults::contains` before the same rule was found missing
+    /// there.
+    ///
+    /// Both wrong directions, one assertion each: a scope that is a prefix of
+    /// the vault id and a vault id that is a prefix of the scope.
+    #[test]
+    fn an_assoc_and_the_read_that_outranks_it_both_name_a_whole_vault_id() {
+        let (_, a) = them();
+        let (_, b) = stranger();
+        let held = |from: &KeyId, kind: GrantKind, scope: &str| GrantStatement {
+            v: 5,
+            kind,
+            from: from.clone(),
+            to: me().1,
+            scope: Some(scope.to_string()),
+            issued_at: NOW - 1,
+            expires_at: NOW + 1_000,
+            nonce: "ZmFrZS1ub25jZQ".into(),
+        };
+        let assoc = held(&a, GrantKind::Assoc, "v-alice");
+
+        // The veto side: it silences the vault it names, and no other.
+        assert!(only_assoc_names(std::slice::from_ref(&assoc), "v-alice"));
+        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "v-a"),
+            "a vault whose id the scope starts with is a different vault");
+        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "v-alice-2"),
+            "and so is one that starts with the scope");
+        assert!(!only_assoc_names(std::slice::from_ref(&assoc), "V-ALICE"),
+            "and the comparison is not case-insensitive either");
+
+        // The outranking side: only a read grant naming this vault, or naming
+        // none at all, may lift the veto.
+        assert!(!only_assoc_names(&[assoc.clone(), held(&b, GrantKind::Follow, "v-alice")], "v-alice"),
+            "a read grant for this vault outranks a stranger's assoc");
+        for near_miss in ["v-a", "v-alice-2", "V-ALICE"] {
+            assert!(
+                only_assoc_names(&[assoc.clone(), held(&b, GrantKind::Follow, near_miss)], "v-alice"),
+                "a read grant for {near_miss:?} says nothing about v-alice"
+            );
+        }
+    }
+
     #[test]
     fn only_assoc_authorises_no_read() {
         assert!(permits_read(GrantKind::Follow));
