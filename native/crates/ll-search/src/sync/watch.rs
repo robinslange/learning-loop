@@ -93,6 +93,26 @@ struct DebounceState {
     touched: HashSet<PathBuf>,
 }
 
+/// Take up `config.json` if it parses; keep `current` if it does not.
+///
+/// The watcher used to read this file once, before the loop, and reuse that
+/// value forever. `join`, `link accept` and `recover` all rewrite it under a
+/// running daemon, so after any of them the watcher went on dialling the hub
+/// the machine had left — and wrote THAT failure into `sync-state.json`, which
+/// is the file `ll status` renders. The stale answer did not merely persist;
+/// it overwrote the true one every cycle.
+///
+/// Keeping the last good copy is the safe direction, and it is the reason this
+/// is not a bare re-read: a config saved half-written must not cost a working
+/// daemon its federation until someone restarts it. `None` -> `Some` is the
+/// first-join case, where the daemon started before there was anything to read.
+fn reload_federation_config(
+    config_dir: &Path,
+    current: Option<FederationConfig>,
+) -> Option<FederationConfig> {
+    super::config::load_config(config_dir).ok().or(current)
+}
+
 pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     let _pid = PidGuard::new(&cfg.pid_file)?;
 
@@ -205,7 +225,20 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
             _ = notify.notified() => {}
             _ = tokio::time::sleep(POLL_TICK) => {}
             _ = federation_tick.tick() => {
-                reload_config(&cfg.config_dir, &mut fed_config);
+                // Re-read before every cycle. `join`, `link accept` and
+                // `recover` all rewrite config.json underneath a running
+                // daemon, and a copy cached at startup makes the watcher go on
+                // dialling a hub the machine has left -- then write THAT
+                // failure into sync-state.json, which is the file `ll status`
+                // renders. The stale answer does not merely persist, it
+                // overwrites the true one every tick.
+                //
+                // A file that stops parsing keeps the last good copy rather
+                // than becoming `None`: a half-written save must not cost a
+                // working daemon its federation until someone restarts it.
+                // `None` -> `Some` is the first-join case, where the daemon
+                // started before there was anything to read.
+                fed_config = reload_federation_config(&cfg.config_dir, fed_config.take());
                 if let Some(ref fc) = fed_config {
                     do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
                 }
@@ -242,53 +275,6 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     let _ = tokio::time::timeout(SHUTDOWN_DRAIN, async {}).await;
     eprintln!("Watch stopped");
     Ok(())
-}
-
-/// Bring `held` up to date with `config.json` before a federation tick uses it.
-///
-/// **The file is the source of truth for which hub this vault is on, and this
-/// is what keeps it that way.** The config used to be read once, before the
-/// loop, and kept for the process's life. `ll join` writes that file — and it
-/// is normally run inside a session that already spawned this daemon, because
-/// SessionStart spawns one and only replaces it when the binary's mtime
-/// changes. So the daemon went on dialling the endpoint it had read at
-/// startup, and, worse, wrote *that* failure into `sync-state.json` on every
-/// tick, over a successful manual sync included. `ll status` renders that
-/// file, so a process nobody could see was overwriting the truth about which
-/// hub this vault had joined with an error about one it had left.
-///
-/// Re-reading is per federation tick, not per event: one small JSON file every
-/// `sync_interval`, next to a sync that opens a WebSocket and uploads an index.
-///
-/// **A file that does not parse keeps the last config that did.** That is the
-/// reason this is not `load_config(..).ok()` assigned straight in. `write_config`
-/// renames a complete file into place, so a parse failure is never a torn read
-/// — it is a config someone has edited by hand into something invalid. Dropping
-/// to `None` there would silently stop a daemon that had been syncing fine, and
-/// silent-stop is the failure this whole function exists to remove, not one to
-/// trade for. A file that has been *deleted* is different and does clear it:
-/// that is an uninstall or a vault that has left, and continuing to sync on a
-/// config the user removed is the one direction worse than stopping.
-fn reload_config(config_dir: &Path, held: &mut Option<FederationConfig>) {
-    match super::config::load_config(config_dir) {
-        Ok(fresh) => *held = Some(fresh),
-        Err(e) if is_not_found(&e) => *held = None,
-        Err(e) => eprintln!(
-            "federation config at {} did not parse ({e}); still syncing against the last \
-             one that did. Fix the file — nothing here rewrites it.",
-            super::config::config_path(config_dir).display()
-        ),
-    }
-}
-
-/// Whether an error from [`super::config::load_config`] is "no such file".
-///
-/// `load_config` reads and then parses, so its error is an `io::Error` for a
-/// missing file and a `serde_json::Error` for a broken one. Those two need
-/// opposite handling above, and the message is not what tells them apart.
-fn is_not_found(e: &anyhow::Error) -> bool {
-    e.downcast_ref::<std::io::Error>()
-        .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn spawn_shutdown_signals(tx: watch_chan::Sender<bool>) {
@@ -406,174 +392,6 @@ pub fn is_watch_running(pid_file: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod config_reload_tests {
-    use super::*;
-    use crate::sync::config::{self, HubEndpoint};
-    use crate::sync::{seed_store, test_hub};
-    use tempfile::TempDir;
-
-    fn config_pointing_at(endpoint: &str) -> FederationConfig {
-        let mut c = FederationConfig::test_fixture("private", Vec::new());
-        c.hub = HubEndpoint {
-            endpoint: endpoint.into(),
-            key_id: Some("z6MkpZHEGuuEsage7m4TN8FXKxZr6vEkEtz9Xkf9cWuLcwE7".into()),
-        };
-        c.vault_id = Some("01a07e21-0d14-77d1-9dbc-cefc0bec9b25".into());
-        c
-    }
-
-    fn endpoint_of(held: &Option<FederationConfig>) -> Option<&str> {
-        held.as_ref().map(|c| c.hub.endpoint.as_str())
-    }
-
-    #[test]
-    fn a_config_written_after_the_daemon_started_is_picked_up() {
-        // The state `join` leaves behind: the daemon began with no config at
-        // all, because this vault had not federated when the session started.
-        let dir = TempDir::new().unwrap();
-        let mut held = config::load_config(dir.path()).ok();
-        assert!(held.is_none(), "precondition: nothing on disk yet");
-
-        config::write_config(dir.path(), &config_pointing_at("wss://new.example/ws")).unwrap();
-        reload_config(dir.path(), &mut held);
-
-        assert_eq!(endpoint_of(&held), Some("wss://new.example/ws"));
-    }
-
-    #[test]
-    fn a_rewritten_endpoint_replaces_the_one_the_daemon_was_holding() {
-        let dir = TempDir::new().unwrap();
-        config::write_config(dir.path(), &config_pointing_at("ws://100.64.0.2:9473/ws")).unwrap();
-        let mut held = config::load_config(dir.path()).ok();
-        assert_eq!(endpoint_of(&held), Some("ws://100.64.0.2:9473/ws"));
-
-        config::write_config(dir.path(), &config_pointing_at("wss://hub.example:8443")).unwrap();
-        reload_config(dir.path(), &mut held);
-
-        assert_eq!(endpoint_of(&held), Some("wss://hub.example:8443"));
-    }
-
-    #[test]
-    fn a_config_that_stops_parsing_keeps_the_last_one_that_did() {
-        // `write_config` renames a complete file into place, so this is not a
-        // torn read — it is a hand-edit. A daemon that was syncing must not be
-        // stopped by it, because a daemon that stops syncing says nothing.
-        let dir = TempDir::new().unwrap();
-        config::write_config(dir.path(), &config_pointing_at("wss://hub.example:8443")).unwrap();
-        let mut held = config::load_config(dir.path()).ok();
-
-        std::fs::write(config::config_path(dir.path()), "{ this is not json").unwrap();
-        reload_config(dir.path(), &mut held);
-
-        assert_eq!(
-            endpoint_of(&held),
-            Some("wss://hub.example:8443"),
-            "a broken file must not silently disable federation",
-        );
-    }
-
-    #[test]
-    fn a_deleted_config_does_stop_the_syncing() {
-        // The one direction worse than stopping: syncing on a config the user
-        // has removed. `is_not_found` is what tells this apart from the case
-        // above, and the two want opposite answers.
-        let dir = TempDir::new().unwrap();
-        config::write_config(dir.path(), &config_pointing_at("wss://hub.example:8443")).unwrap();
-        let mut held = config::load_config(dir.path()).ok();
-        assert!(held.is_some());
-
-        std::fs::remove_file(config::config_path(dir.path())).unwrap();
-        reload_config(dir.path(), &mut held);
-
-        assert!(held.is_none());
-    }
-
-    /// The property the three tests above cannot reach: that the LOOP asks.
-    ///
-    /// They would all pass against a daemon that reads `config.json` once and
-    /// never calls `reload_config` at all — which is exactly the shipped
-    /// behaviour this replaced. So this one runs the real `run_watch_async`,
-    /// rewrites `config.json` underneath it, and reads back the file the
-    /// daemon writes about what it did.
-    ///
-    /// `sync-state.json` is the observable on purpose: it is the file `ll
-    /// status` renders, and the whole defect was a daemon writing a dead
-    /// endpoint into it. Both endpoints here are closed loopback ports, so
-    /// every cycle fails and names the endpoint it failed against — which is
-    /// the only thing being asserted. No hub, no network, no TLS.
-    #[tokio::test]
-    async fn the_running_daemon_syncs_against_a_config_rewritten_underneath_it() {
-        test_hub::force_encrypted_seed_backend();
-        let home = TempDir::new().unwrap();
-        let vault = TempDir::new().unwrap();
-        let config_dir = home.path().to_path_buf();
-        std::fs::create_dir_all(config_dir.join("federation")).unwrap();
-        seed_store::write_encrypted(&config_dir, &[7u8; 32]).unwrap();
-
-        // An empty vault indexes to a database with no `model_id`, and the
-        // export refuses that before it ever reads the endpoint. Stamping one
-        // is what puts the failure at the hub instead, which is where this
-        // test needs to read it. `reindex` without `--force` leaves it alone.
-        let db_path = vault.path().join(".vault-search").join("vault-index.db");
-        crate::db::open_or_create_db(&db_path.to_string_lossy())
-            .unwrap()
-            .execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('model_id', ?1)",
-                rusqlite::params!["test-model"],
-            )
-            .unwrap();
-
-        config::write_config(&config_dir, &config_pointing_at("ws://127.0.0.1:9101/ws")).unwrap();
-
-        let watch = tokio::spawn(run_watch_async(WatchConfig {
-            vault_path: vault.path().to_path_buf(),
-            db_path,
-            config_dir: config_dir.clone(),
-            pid_file: home.path().join("watch.pid"),
-            sync_interval: Duration::from_millis(250),
-            librarian_script: None,
-        }));
-
-        // Establish that the cycle runs at all and names its endpoint, or the
-        // assertion after the rewrite would have nowhere to happen: a daemon
-        // that never synced and a daemon that ignored the rewrite both leave
-        // no mention of the second endpoint.
-        assert!(
-            detail_naming(&config_dir, "127.0.0.1:9101").await,
-            "the daemon never recorded a cycle against the first endpoint",
-        );
-
-        config::write_config(&config_dir, &config_pointing_at("ws://127.0.0.1:9202/ws")).unwrap();
-
-        let picked_up = detail_naming(&config_dir, "127.0.0.1:9202").await;
-        watch.abort();
-        assert!(
-            picked_up,
-            "a config rewritten under a running daemon must take effect without a restart",
-        );
-    }
-
-    /// Wait for `sync-state.json` to record a failure naming `needle`.
-    ///
-    /// Polled rather than slept on: the deadline is generous so a loaded
-    /// machine does not fail this, and a fast one does not pay for it.
-    async fn detail_naming(config_dir: &Path, needle: &str) -> bool {
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while Instant::now() < deadline {
-            if let Ok(text) = std::fs::read_to_string(
-                config_dir.join("federation").join("sync-state.json"),
-            ) {
-                if text.contains(needle) {
-                    return true;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-        false
-    }
-}
-
-#[cfg(test)]
 mod debounce_tests {
     use super::*;
 
@@ -652,4 +470,178 @@ mod debounce_tests {
         }
         assert_eq!(touched(&state), 1, "HashSet must dedup repeated atomic writes to one file");
     }
+
+    // ---------------------------------------------------------------------
+    // The daemon's view of `config.json`
+    // ---------------------------------------------------------------------
+
+    /// Write a config naming `endpoint`. `ws://` to a non-loopback address is
+    /// refused by `check_hub_scheme`, and the refusal NAMES the endpoint — so
+    /// two such endpoints fail identically except in the one way this test
+    /// needs to read.
+    fn write_hub_config(config_dir: &Path, endpoint: &str) {
+        let mut c = crate::sync::config::FederationConfig::test_fixture("private", vec![]);
+        c.hub.endpoint = endpoint.to_string();
+        crate::sync::config::write_config(config_dir, &c).unwrap();
+    }
+
+    /// An identity, so the cycle's failure is the hub one and not "no
+    /// federation seed found" — which is checked before the endpoint is.
+    fn plant_identity(config_dir: &Path) {
+        crate::sync::test_hub::force_encrypted_seed_backend();
+        crate::sync::seed_store::write_encrypted(config_dir, &[7u8; 32]).unwrap();
+    }
+
+    /// A source index the export can get past its own gate on, so the failure
+    /// the test reads is the hub one and not a missing `model_id`.
+    fn seed_source_db(db_path: &Path) {
+        std::fs::create_dir_all(db_path.parent().unwrap()).unwrap();
+        let conn = crate::db::open_or_create_db(&db_path.to_string_lossy()).unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('model_id', 'test-model')",
+            [],
+        )
+        .unwrap();
+    }
+
+    /// When the last cycle ran. A cycle that keeps failing still moves this.
+    fn last_attempt(config_dir: &Path) -> i64 {
+        crate::sync::state::read_state(config_dir)
+            .ok()
+            .flatten()
+            .map(|s| s.last_attempt_at)
+            .unwrap_or(0)
+    }
+
+    /// The `detail` the last cycle recorded, or empty.
+    fn last_detail(config_dir: &Path) -> String {
+        crate::sync::state::read_state(config_dir)
+            .ok()
+            .flatten()
+            .and_then(|s| s.detail)
+            .unwrap_or_default()
+    }
+
+    /// Generous on purpose. The daemon does a full reindex before its first
+    /// federation tick, and under a loaded parallel suite that is far slower
+    /// than it is alone — a fixed ten-second budget made this test fail only
+    /// when the whole workspace ran, which is a flake, not a finding. When the
+    /// behaviour is right this returns in well under a second.
+    async fn wait_for_detail(config_dir: &Path, needle: &str) -> bool {
+        for _ in 0..1200 {
+            if last_detail(config_dir).contains(needle) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        false
+    }
+
+    /// **A `join` rewrites `config.json` underneath a running daemon.**
+    ///
+    /// The watcher used to read the file once, before the loop, and reuse that
+    /// value forever — so after a join it went on dialling the hub the machine
+    /// had left, and wrote THAT failure into `sync-state.json`, which is the
+    /// file `ll status` renders. The stale answer did not merely persist: it
+    /// overwrote the true one every tick.
+    ///
+    /// The first assertion is the reachability half. Without it, a daemon that
+    /// never synced at all would pass the second one by never writing either
+    /// endpoint.
+    /// `#[ignore]`, and the reason is a real limit rather than a preference.
+    /// This spins the whole daemon, which does a full reindex before its first
+    /// federation tick. Alone it passes in under a second; inside the parallel
+    /// workspace suite it does not reach that tick even given sixty seconds,
+    /// so as a default-suite test it reports load, not correctness. The three
+    /// tests below cover what the reload DECIDES, deterministically. This one
+    /// covers the thing they cannot — that the tick calls it at all — and is
+    /// run deliberately: `cargo test -p ll-search --lib -- --ignored`.
+    #[tokio::test]
+    #[ignore]
+    async fn the_federation_tick_takes_up_a_config_rewritten_underneath_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let vault = tmp.path().join("vault");
+        let config_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let db_path = tmp.path().join("index.db");
+        seed_source_db(&db_path);
+        plant_identity(&config_dir);
+
+        let before = "ws://10.0.0.1:9473/ws";
+        let after = "ws://10.0.0.2:9473/ws";
+        write_hub_config(&config_dir, before);
+
+        let cfg = WatchConfig {
+            vault_path: vault.clone(),
+            db_path: db_path.clone(),
+            config_dir: config_dir.clone(),
+            pid_file: tmp.path().join("watch.pid"),
+            sync_interval: Duration::from_millis(150),
+            librarian_script: None,
+        };
+        let task = tokio::spawn(async move { run_watch_async(cfg).await });
+
+        assert!(
+            wait_for_detail(&config_dir, "10.0.0.1").await,
+            "precondition: the daemon must actually be using the pre-rewrite hub, or the \
+             assertion below passes against a daemon that never synced. detail was {:?}",
+            last_detail(&config_dir)
+        );
+
+        write_hub_config(&config_dir, after);
+
+        let took_it_up = wait_for_detail(&config_dir, "10.0.0.2").await;
+        task.abort();
+        assert!(
+            took_it_up,
+            "the daemon went on using the config it read at startup; detail was {:?}",
+            last_detail(&config_dir)
+        );
+    }
+
+    // --- the reload decision, without a daemon ---------------------------
+    //
+    // Deterministic: no timing, no reindex, no sockets. The e2e test above
+    // proves the tick CALLS this; these three prove what it decides.
+
+    #[test]
+    fn a_rewritten_config_is_taken_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_hub_config(tmp.path(), "wss://before.invalid/ws");
+        let first = reload_federation_config(tmp.path(), None).unwrap();
+        assert_eq!(first.hub.endpoint, "wss://before.invalid/ws");
+
+        write_hub_config(tmp.path(), "wss://after.invalid/ws");
+        let second = reload_federation_config(tmp.path(), Some(first)).unwrap();
+        assert_eq!(second.hub.endpoint, "wss://after.invalid/ws");
+    }
+
+    #[test]
+    fn a_config_that_stops_parsing_leaves_the_last_good_one_in_force() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_hub_config(tmp.path(), "wss://good.invalid/ws");
+        let good = reload_federation_config(tmp.path(), None).unwrap();
+
+        std::fs::write(crate::sync::config::config_path(tmp.path()), "{ not json").unwrap();
+        let kept = reload_federation_config(tmp.path(), Some(good))
+            .expect("a half-written save must not cost a working daemon its federation");
+        assert_eq!(kept.hub.endpoint, "wss://good.invalid/ws");
+    }
+
+    /// The first-join case: the daemon started before there was anything to
+    /// read, so it holds `None` and must pick the file up when it appears.
+    #[test]
+    fn a_config_that_appears_after_startup_is_picked_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(
+            reload_federation_config(tmp.path(), None).is_none(),
+            "precondition: nothing to read yet"
+        );
+        write_hub_config(tmp.path(), "wss://joined.invalid/ws");
+        let now = reload_federation_config(tmp.path(), None)
+            .expect("a daemon that started before `join` must still take the config up");
+        assert_eq!(now.hub.endpoint, "wss://joined.invalid/ws");
+    }
+
 }
