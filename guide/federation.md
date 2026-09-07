@@ -1,49 +1,117 @@
 # Federation (experimental)
 
-A curated knowledge network for sharing verified insights across vaults. Federation is invite-only -- onboarding runs through [interchange.live](https://interchange.live), which issues one-time redeem tokens that self-register your peer without any manual hub-admin step. Notes that reach your peers have already passed source verification and quality gating.
+A curated knowledge network for sharing verified insights across vaults. Federation is invite-only, and notes that reach other people have already passed source verification and quality gating.
 
-## interchange.live
+## Three nouns
 
-`interchange.live` is the coordination service the federation runs on. It's the reason onboarding is self-service, and it's the reason your vault's contents never leave your machine: it handles *identity and routing*, not content.
+Federation v5 is a **key**, a **vault**, and a **grant**.
 
-Three responsibilities:
+- A **key** is a principal -- a person, a machine, later an organisation. The key *is* the identifier: an Ed25519 public key, rendered as a `key_id`. There is no registry, no display name to allocate, and nothing a server assigns you.
+- A **vault** is a corpus with an owning key and a visibility policy. One key may own several.
+- A **grant** is a signed statement by one key about another. Four kinds: `follow` (read a vault), `link` (these machines are the same person, full authority), `assoc` (these identities are the same human, no authority), `peer` (two hubs bridge).
 
-1. **Invitation issuance.** An existing peer (or the admin) generates a redeem token bound to a display name and an expiry. You paste the token into `/learning-loop:federation`. Tokens are one-shot -- once redeemed, they're burned.
-2. **Pubkey registration and network provisioning.** The redeem endpoint (`interchange.live/api/redeem`) accepts your raw Ed25519 public key (extracted locally via `ll-search identity`) and returns a [headscale](https://headscale.net) pre-auth key. Headscale is a self-hosted coordination server for [tailscale](https://tailscale.com) -- your peer connects over a WireGuard mesh, not over the public internet. Each peer's identity is cryptographic, not credential-based.
-3. **Index exchange rendezvous.** Peers sync their filtered index databases (titles, embeddings, tags, graph edges -- never body text unless a note is `public`) over the tailnet. The interchange service only facilitates the handshake; the actual index transfer is peer-to-peer.
+A **hub** decides one thing: who may connect. It never decides trust between keys. Every grant is signed by the key that made it, the hub stores those exact bytes, and any party can verify a grant offline against nothing but the bytes and the issuer's public half.
 
-The optional [interchange.live/graph](https://interchange.live/graph) surface is a separate, read-only visualization. Peers opt in by setting `"graph": true` in their config. Only note *titles* and the edges between them leave the machine -- no content, no summaries. Toggling off removes your contribution on the next sync.
-
-What the interchange service deliberately does *not* do:
-
-- Store your vault content. Public-tier notes live in your own index DB; peers pull them on demand.
-- Decrypt anything. WireGuard terminates on the peers, not on the coordinator.
-- Operate without your key. You can revoke participation by rotating the seed (see [Seed storage](#seed-storage) below) and re-running `/learning-loop:federation`.
-
-The architecture mirrors Signal's sealed-sender or Matrix's federated-room model: a neutral rendezvous, not a content host. The trust boundary is the tailnet; the content boundary is your disk.
+Every grant expires, and each successful sync renews the ones it exercised. Defaults: `link` and `assoc` 365 days, `follow` and `peer` 90 days. A machine you use never asks again; a machine you stopped using -- stolen, sold, wiped -- lapses on its own with no action required, and dormant follows decay instead of accumulating.
 
 ## What you get
 
-- **Federated search** -- your vault search results include relevant notes from peers, ranked by reciprocal rank fusion with provenance tracking
-- **Visibility control** -- you decide what to share. Three tiers: `public` (full content), `listed` (title + summary only), `private` (not shared). Glob rules + per-note frontmatter overrides
-- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs with the hub on its periodic ticks. No manual commands needed
-- **Ed25519 identity** -- each peer has a persistent cryptographic identity. All index exchanges are signed and verified
+- **Federated search** -- your results include notes from vaults you may read, merged into the same reciprocal-rank fusion as your own, with provenance tracking. A result from elsewhere carries a `peer:<vault_id>/` prefix on its path.
+- **Visibility control** -- three tiers: `public` (full content), `listed` (title, tags and summary), `private` (not shared). See [Visibility rules](#visibility-rules), and note that a glob can restrict but never publish.
+- **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks.
+- **One identity, several machines** -- `ll-search link` joins a second machine to the same key through four doors, one of which needs no network at all.
 
-## How it works
+## Getting on a hub
 
-Each peer exports a filtered index of their vault (respecting visibility rules) and uploads it to a coordination hub over encrypted WireGuard tunnels. Peers download each other's indexes and search locally. No note content leaves your machine unless you mark it public. The hub only stores indexes, not vault contents.
+Three doors, and you need one of them:
+
+1. Your key is named in the hub's own `BOOTSTRAP_MEMBERS` at boot.
+2. An invite code. Any member may mint one, capped at five outstanding, and there is no admin role -- but the *surface* today is operator-side: the hub operator runs `sync-hub mint-invite <key_id>` on the box and hands you the code. It is twelve Crockford base32 characters as `XXXX-XXXX-XXXX`, single-use, and expires seven days after minting. A remote surface, where a member asks the hub for a code over the wire and signs the request, does not exist yet. The `created_by` on an invite records who it was minted *as*, which is not evidence that member asked for it.
+3. A `link` grant from a machine already enrolled -- see [Additional machines](#additional-machines). This needs no invite, because membership follows the link.
 
 ## Setup
 
-Federation is configured during `/learning-loop:federation`. Onboarding is self-service via `interchange.live` invitation tokens:
+Run `/learning-loop:federation`, or drive the binary directly:
 
-1. Paste an invitation redeem token from `interchange.live`
-2. Init extracts your Ed25519 pubkey via `ll-search identity` (creating the seed on first run) and posts it to `interchange.live/api/redeem`, which returns a headscale pre-auth key
-3. `tailscale up` connects you to the network
-4. Init configures default visibility rules
-5. Sync test confirms peer reachability
+```bash
+ll-search join <hub-endpoint> <invite-code> <vault-path>
+```
 
-Re-running `/learning-loop:federation` on an existing peer skips the token prompt. The previous manual hub-admin registration step is gone.
+The three arguments are positional and in that order, and the endpoint must be `wss://`. The command, in order:
+
+1. Fetches the hub's advertised identity and prints its `key_id` and a **six-word fingerprint**, then asks whether those are the six words the hub operator gave you. Anyone who can answer for that address can present a key; the words are how you tell the real hub from that. **The invite code has not left your machine at this point** -- the hub redeems it while handling the hello, so a code offered to an impostor is a code already burned.
+2. Loads this machine's Ed25519 identity, or creates one.
+3. Prints a **24-word recovery phrase, once**, and asks whether you have written it down. Those words are the only copy that will ever exist. Nothing on disk holds them.
+4. Connects, authenticates, and checks the hub's `SyncReady` names the new `vault_id`. Declaring the vault in the hello *is* registering it; there is no second round trip.
+5. Writes `config.json` last.
+
+`join` enrols; it does not sync. The first upload is a separate step:
+
+```bash
+ll-search sync <db-path> <vault-path>
+```
+
+If `join` fails, nothing is written and you can re-run it cleanly. The invite is spent only on success.
+
+A second vault on the same machine needs `ll-search vault add <vault-path> <id>` first: `join` creates the identity, `vault add` creates the registry entry, and a config dir the registry cannot see is refused rather than joined.
+
+## Reading the status
+
+```bash
+ll-search status
+```
+
+Local files only: no socket, no clock, no network, so nothing it prints can imply a check that did not run. It reports the vault and its `vault_id`, this machine's key and fingerprint, the hub and its pinned key, the graph setting, when the last cycle ran and whether it worked, and what the hub held as of that cycle. Four verdicts are worth knowing by name:
+
+- **`STALE`** -- the last successful sync is more than seven days old, or none has ever succeeded.
+- **`hub holds: nothing`** -- as of that cycle the hub had no index for this vault. The next sync re-uploads it. If it survives a successful sync, the hub is degraded. This is the signature of an outage that ran for two months in 2026 while the client reported itself content.
+- **`BLOCKED`** -- `ll-search sync` will refuse this config. The two causes are an unpinned `hub.key_id` and an endpoint that is not `wss://`. Both were warnings in v4 and are errors now.
+- **`RECOVERED`** -- the seed and `config.json` name different keys.
+
+## Additional machines
+
+A person is a set of machines joined by `link` grants. Four doors, and **the six-word fingerprint is the security boundary in every one of them** -- the transport is not. Both ends print six words over the joining machine's key; the approver confirms they match before approving. If they do not match, stop: something is relaying the pairing.
+
+**Both machines networked, hub reachable.** On the new machine:
+
+```bash
+ll-search link request <hub-endpoint> <vault-path>
+```
+
+then on a machine already enrolled:
+
+```bash
+ll-search link approve <code>
+```
+
+**No hub, or no network path between them.** On the new machine, `ll-search link code` needs no network at all; on the established one, `ll-search link approve <code> --offline` signs the grant and prints it instead of lodging it; carry that blob across and run `ll-search link accept <grant>`. The grant verifies against nothing but its own bytes and the issuer's public key, so the new machine can act as itself immediately and reaches the hub once the approver next connects.
+
+A link is two grants, not one signed twice: the approver signs A->B, and the new machine signs B->A itself on finding it. `ll-search link list` shows which halves exist.
+
+### Cutting a machine off
+
+```bash
+ll-search link revoke <key_id>
+```
+
+It signs a revocation, lodges it with the hub, and *then* drops the local row -- that order, because this store is the only record of what this key issued, and dropping it first would leave nothing to sign a revocation for while the other machine kept authority for a full year.
+
+Two limits worth knowing before you rely on it:
+
+- **It withdraws only the half this machine signed.** The grant the other machine issued to this one is that machine's statement about its own key, and only that machine can withdraw it. `link revoke` says when one is still standing.
+- **It deletes nothing from disk.** A `link` is unscoped -- "every vault this issuer owns" -- so it names no directory under `federation/data/peers/` to remove. What stops the data being served is the hub dropping those vaults from this key's listing on the next sync, not the revocation itself.
+
+There is no equivalent for a `follow` someone holds on your vault. Nothing sends one; those lapse at their own expiry.
+
+## Recovering an identity
+
+```bash
+ll-search recover "<24 words>"
+```
+
+Recovering the identity already on this machine needs nothing extra -- nothing is replaced, so there is nothing to authorise. Recovering a **different** identity over an existing one requires `--force`, and what that guards is the loss, not the write: every grant naming the old key stays signed, valid, and unreachable, while the machine still looks enrolled.
+
+`recover` writes the seed and deliberately leaves `config.json` alone, because the hub pin and `vault_id` in it describe an enrolment the new key was never part of. `ll-search status` prints a `RECOVERED` line when the two disagree.
 
 ## Seed storage
 
@@ -79,63 +147,70 @@ When `/learning-loop:federation` succeeds, init writes `PLUGIN_DATA/federation/.
 }
 ```
 
-On every session start, `hooks/session-start.js` compares the recorded `plugin_major` against the current plugin version. If they differ, it prints a one-line notice to stderr:
+On every session start, `hooks/session-start/vault-snapshot.mjs` compares the recorded `plugin_major` against the current plugin version. If they differ, it prints a one-line notice to stderr:
 
 ```
-learning-loop federation: seed created on plugin v1.18.0 (current: v2.0.0). Run /learning-loop:federation to rotate.
+learning-loop federation: identity created on plugin v1.18.0 (current: v2.0.0). Nothing rotates an identity — but a config written before v5 will not sync. Run `ll-search status`: it reports BLOCKED when the hub key is unpinned.
 ```
 
-The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same major mismatch does not nag on every session. Rotating via `/learning-loop:federation` removes the marker, so the next major bump fires a fresh notice.
+The notice fires once per major bump. After it prints, the hook writes `.seed-notice-shown` so the same mismatch does not nag every session.
 
 Federations created before this marker existed get a backfill: the hook stamps `.seed-meta.json` with the current version on first run after upgrade, so the notice stays silent until the next major bump.
 
-### Rotating
+### There is no rotation
 
-Re-run `/learning-loop:federation`. The skill regenerates the seed (after a confirm prompt), repeats the redeem step if needed, and overwrites `.seed-meta.json` with the new version. The previous seed entry is removed from the active backend in the same transaction.
+**Nothing rotates an identity, and nothing ever did.** The seed *is* the key: no command replaces one, and `ll-search recover` restores the same key rather than issuing a new one. An earlier version of this page described re-running the setup skill to regenerate the seed; that skill has never had such a step.
+
+If you want a different key on this machine, that is not a rotation -- it is a new identity, and every grant naming the old one survives it, signed and unreachable. `ll-search recover --force` is the only path that does it, and `--force` exists to make the loss deliberate.
 
 ## Sync wire format
 
-Federation sync runs over WebSocket on the tailnet. The transport stack migrated from synchronous `tungstenite` to async `tokio_tungstenite` in v1.19.0; sync now runs as a `tokio::select!` loop alongside the watcher debounce, the poll tick, and the resync tick.
+Federation sync runs over WebSocket, and the endpoint must be `wss://`: confidentiality is the TLS transport, and `check_hub_scheme` refuses a plaintext `ws://` unless `LL_ALLOW_INSECURE_WS` is set. The payload is zstd-compressed, not encrypted -- compressed whole before chunking, so the dictionary context spans the payload. Sync runs as a `tokio::select!` loop inside the watcher, alongside the reindex debounce, the poll tick and the resync tick.
 
-The wire format negotiates a `protocol_version` on `SyncHello` / `SyncReady`:
+**There is no protocol negotiation and no downgrade.** `PROTOCOL_VERSION` is `5`, both ends declare it, and a mismatch is an error that names both versions and tells you to upgrade one side. The v1/v2 negotiation an earlier version of this page described is gone: a version two peers have to agree on at runtime is a version one of them can be talked down to.
 
-- **v1** (legacy) -- raw JSON / binary frames; the hub omits `protocol_version` from `SyncReady` and clients read it as `1`.
-- **v2** -- length-prefixed envelopes for client uploads and hub-to-client peer downloads: `u32 size (big-endian, 4 bytes) + sha256 (32 bytes) + body`. The receiver validates total length and SHA256 before allocating the body, so a malicious size declaration cannot trigger a 4 GB `Vec::with_capacity`.
-
-Three caps apply on the v2 path:
+Bodies travel as length-prefixed envelopes -- `u32 size (big-endian) + sha256 (32 bytes) + body` -- and the receiver validates the declared length and the hash before allocating, so a hostile size cannot trigger a huge `Vec::with_capacity`.
 
 | Cap | Default | Where |
 |---|---|---|
 | `MAX_ENVELOPE_SIZE` | 200 MB | Policy ceiling for envelope decode |
-| `HUB_INBOUND_CAP` | 50 MB | Axum-enforced ceiling on uploads (smaller wins) |
+| `HUB_INBOUND_CAP` | 50 MB | Ceiling on uploads (the smaller of the two wins) |
 | Recv / send timeouts | 30 s / 60 s | `LL_SYNC_RECV_TIMEOUT_MS` / `LL_SYNC_SEND_TIMEOUT_MS` override per process |
 
-Uploads larger than 50 MB return `SyncError::EnvelopeOversize { cap }` pre-flight without opening the WebSocket. Timestamp comparison on peer freshness parses unix seconds (rejects garbage with `SyncError::BadTimestamp`) instead of by-string equality, so trailing `Z`, fractional seconds, and `±HH:MM` offsets all compare correctly.
+An upload over the inbound cap returns `SyncError::EnvelopeOversize { cap }` pre-flight, without opening the WebSocket.
 
 ## Visibility rules
 
-Default configuration in `PLUGIN_DATA/federation/config.json`:
+Three tiers: `public` (full content shared), `listed` (title, tags and summary), `private` (not shared at all). A fresh config is `private` by default with no rules.
 
-```json
-{
-  "visibility": {
-    "default": "private",
-    "rules": [
-      { "pattern": "3-permanent/**", "tier": "public" },
-      { "pattern": "1-fleeting/**", "tier": "listed" }
-    ]
-  }
-}
+**Frontmatter is the only route to `public`.** A note is published in full only when it says so itself:
+
+```yaml
+---
+visibility: public
+---
 ```
 
-**Resolution order:** rules are evaluated top-to-bottom, **last match wins**, and frontmatter `visibility:` on a note overrides all globs. In practice this means you can layer broad allows with narrow denies — e.g. share `3-permanent/**` publicly but carve out project-prefix notes:
+**A glob rule may restrict, never publish.** A rule naming `public` is clamped to `listed` on the export path. That is deliberate: publishing a whole note's body should be an explicit act by its author, not a consequence of which folder it landed in. A misspelled frontmatter value (`visibility: pubic`) falls through to the glob rules *and their clamp* rather than to an uncapped tier, so a typo cannot publish a note either.
+
+**If you federated before this rule existed**, your published set was derived from folder globs and is now capped. To keep exactly the notes that were public before, run once:
+
+```bash
+ll-search visibility-backfill <vault-path> --dry-run   # report what would change
+ll-search visibility-backfill <vault-path>             # stamp `visibility: public` into those notes
+```
+
+On a vault that has never federated there is nothing to preserve; skip it.
+
+### Rules in config
+
+Rules live in `PLUGIN_DATA/federation/config.json` under `visibility.rules`. There is no CLI to edit them; write the file.
 
 ```json
 {
   "visibility": {
     "default": "private",
     "rules": [
-      { "pattern": "3-permanent/**", "tier": "public" },
       { "pattern": "1-fleeting/**", "tier": "listed" },
       { "pattern": "**/projectname-*", "tier": "private" },
       { "pattern": "**/client-name-*", "tier": "private" }
@@ -144,29 +219,31 @@ Default configuration in `PLUGIN_DATA/federation/config.json`:
 }
 ```
 
-Globs match against the note's vault-relative path. For fuzzier privacy decisions (one-off notes where a glob would false-positive), add `visibility: private` to the note's frontmatter -- it's more precise and survives file renames.
+**Resolution order:** rules are evaluated top-to-bottom, **last match wins**, and frontmatter `visibility:` on a note overrides all globs. So you can layer a broad allow with narrow denies, as above -- but the broad allow tops out at `listed`, whatever tier it names.
+
+Globs match the note's vault-relative path. For fuzzier privacy decisions -- a one-off note where a glob would false-positive -- put `visibility: private` in the note's frontmatter: it is more precise and survives a rename.
 
 ## Knowledge graph
 
-A shared visualization of cross-vault connections at [interchange.live/graph](https://interchange.live/graph). The graph shows note titles only -- no content, summaries, or body text leaves your machine. Connections are drawn from shared tags and embedding similarity between notes across vaults.
+A shared visualisation of cross-vault connections. The graph shows note titles only -- no content, summaries, or body text leaves your machine. Connections are drawn from shared tags and embedding similarity between notes across vaults.
 
 ### Opting in
 
-Add `"graph": true` to your federation config:
+Off unless you say otherwise, and declared on every connection, so it is a choice rather than a default anyone drifted into:
 
-```json
-{
-  "visibility": { ... },
-  "graph": true
-}
+```bash
+ll-search graph-opt-in true    # publish this vault on the graph
+ll-search graph-opt-in false   # withdraw it
 ```
 
-Graph visibility is two-gated: a note appears in the graph only if **both** conditions are met:
+The value is spelled out rather than being a bare `--publish` flag: the absence of a flag is how a value nobody chose gets mistaken for a choice, and this is the setting that mistake already cost two months. It is stored as `graph_opt_in` in `config.json`, and `ll-search status` shows the current value in full -- "opted out" alone would read as a fact about the hub rather than a choice this vault made.
 
-1. The note's visibility tier is `public` or `listed` (private notes are never included)
-2. The peer has `"graph": true` in their config
+Graph visibility is two-gated. A note appears only if **both** hold:
 
-Disabling graph participation is instant -- set `"graph": false` or remove the key. Your titles are removed from the graph on next sync.
+1. Its tier is `public` or `listed` -- a private note is never included.
+2. This vault has `graph_opt_in` set to `true`.
+
+Withdrawing takes effect on the next sync.
 
 ## Sync commands
 
@@ -182,7 +259,12 @@ node scripts/vault-search.mjs sync
 
 # Watch mode with periodic sync
 ll-watch
+
+# Federation status: local files only, no network
+ll-search status
 ```
+
+Note that `node scripts/vault-search.mjs status` is the **index** status, not this one — it shells out to `ll-search index-status`. v5 gave the bare name `status` to federation, and the pre-existing command became `index-status`.
 
 Sync runs automatically inside the always-on `ll-search watch` daemon (spawned at SessionStart by `hooks/session-start/watch-daemon.mjs`): the watcher's `tokio::select!` loop runs sync alongside the reindex debounce, the poll tick, and the resync tick (see [Sync wire format](#sync-wire-format)). Nothing syncs at session end -- the Stop hook only emits nudges. The manual commands above cover the cases where the daemon isn't running.
 

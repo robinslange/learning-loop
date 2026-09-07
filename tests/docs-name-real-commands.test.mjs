@@ -18,10 +18,10 @@
 // neither of them has.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ROOT, publishedFiles } from './helpers/published-docs.mjs';
 
-const ROOT = join(import.meta.dirname, '..');
 const MAIN_RS = join(ROOT, 'native', 'crates', 'll-search', 'src', 'main.rs');
 
 // ---------------------------------------------------------------------------
@@ -222,19 +222,16 @@ const CLAP_BUILTINS = new Set(['--help', '--version']);
 // The docs.
 // ---------------------------------------------------------------------------
 
-const DOCS = [
-  join(ROOT, 'ARCHITECTURE.md'),
-  join(ROOT, 'README.md'),
-  ...walkMarkdown(join(ROOT, 'plugin', 'skills')),
-];
-
-function walkMarkdown(dir) {
-  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) return e.name === 'vendor' ? [] : walkMarkdown(p);
-    return e.name.endsWith('.md') ? [p] : [];
-  });
-}
+/**
+ * Every markdown document this repository publishes.
+ *
+ * Exclusion-based, sharing one list with the dead-flow sweep — see
+ * `helpers/published-docs.mjs`. The include list this replaced named
+ * `plugin/skills/**`, `ARCHITECTURE.md` and `README.md`, and was green while
+ * `guide/federation.md` documented a command surface three protocol versions
+ * old. A test's file list is itself a claim, and nothing was checking it.
+ */
+const DOCS = () => publishedFiles('*.md');
 
 /**
  * The code-ish spans of a markdown file: fenced blocks and inline-code spans.
@@ -335,12 +332,34 @@ test('the extraction catches a command that is absent, and one hiding under a gr
   assert.equal(parseSpan('  Binary:        ll-search vX.Y.Z (installed)'), null);
 });
 
+test('the doc sweep reaches the documents, and actually finds invocations in them', () => {
+  // Two ways this suite could be green for the wrong reason, and the include
+  // list it replaced was the first: sweeping no documents, or sweeping them and
+  // extracting nothing. Both are checked here rather than assumed.
+  const docs = DOCS();
+  assert.ok(docs.length > 50, `swept only ${docs.length} documents`);
+  for (const expected of ['ARCHITECTURE.md', 'README.md', 'guide/federation.md']) {
+    assert.ok(docs.includes(expected), `the sweep must reach ${expected}`);
+  }
+  const found = docs.flatMap((rel) =>
+    codeSpans(readFileSync(join(ROOT, rel), 'utf8'))
+      .map(parseSpan)
+      .filter(Boolean)
+      .map((hit) => hit.name),
+  );
+  assert.ok(
+    found.length > 30,
+    `extracted only ${found.length} invocations from ${docs.length} docs`,
+  );
+  assert.ok(found.includes('identity'), 'guide/federation.md documents `ll-search identity`');
+});
+
 test('every command the docs name exists in the CLI', () => {
   const unknown = [];
-  for (const file of DOCS) {
-    for (const span of codeSpans(readFileSync(file, 'utf8'))) {
+  for (const rel of DOCS()) {
+    for (const span of codeSpans(readFileSync(join(ROOT, rel), 'utf8'))) {
       const hit = parseSpan(span);
-      if (hit && !(hit.name in CLI)) unknown.push(`${relative(ROOT, file)}: ll-search ${hit.name}`);
+      if (hit && !(hit.name in CLI)) unknown.push(`${rel}: ll-search ${hit.name}`);
     }
   }
   assert.deepEqual(
@@ -352,15 +371,15 @@ test('every command the docs name exists in the CLI', () => {
 
 test('every flag the docs name exists on the command they name it on', () => {
   const unknown = [];
-  for (const file of DOCS) {
-    for (const span of codeSpans(readFileSync(file, 'utf8'))) {
+  for (const rel of DOCS()) {
+    for (const span of codeSpans(readFileSync(join(ROOT, rel), 'utf8'))) {
       const hit = parseSpan(span);
       if (!hit) continue;
       const valid = CLI[hit.name];
       if (!valid) continue; // the previous test owns that failure
       for (const flag of hit.flags) {
         if (!valid.has(flag) && !CLAP_BUILTINS.has(flag)) {
-          unknown.push(`${relative(ROOT, file)}: ll-search ${hit.name} ${flag}`);
+          unknown.push(`${rel}: ll-search ${hit.name} ${flag}`);
         }
       }
     }
