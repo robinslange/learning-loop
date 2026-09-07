@@ -243,13 +243,46 @@ mod tests {
         }
     }
 
+    /// A parse test over hub-SHAPED values. **Not a cross-repo capture**, and
+    /// it must not be described as one: the field names and the tag are the
+    /// contract this pins, and the three values are constructed here.
+    ///
+    /// This comment used to claim the literal was "captured from sync-hub's
+    /// integration test output", which was false — its `hub_key_id` was
+    /// `"zAbc"`, a string that has never existed in the hub, is absent from its
+    /// history, and is not even a well-formed key_id (base58 `Abc` is 2 bytes
+    /// against a 34-byte `KEY_ID_LEN`, so this client's own `KeyId::parse`
+    /// rejects it; it survived only because the wire field is a `String`). A
+    /// false provenance claim is worse than none: it is counted by anyone
+    /// auditing which pins actually compare the two repos.
+    ///
+    /// So the values are now at least the right shape, and the shape is
+    /// asserted rather than eyeballed — a 48-character `z6Mk…` key_id that
+    /// parses, a 32-byte nonce and a 64-byte signature, exactly what
+    /// `send_signed_challenge` and the hub's `handle_v5_client_hello` emit.
+    /// A regression to a placeholder that only looks like a key_id fails here.
     #[test]
     fn hub_challenge_deserialises_from_the_hub_wire_format() {
-        // Captured from sync-hub's integration test output. If this ever fails,
-        // the two repos have drifted and the freeze was broken.
-        let wire = r#"{"type":"hub-challenge","nonce_h":"AAAA","hub_key_id":"zAbc","sig_h":"BBBB"}"#;
-        match serde_json::from_str::<HubMsg>(wire).unwrap() {
-            HubMsg::HubChallenge { hub_key_id, .. } => assert_eq!(hub_key_id, "zAbc"),
+        use base64::Engine;
+
+        const HUB_KEY_ID: &str = "z6MkwVDfCg9LbbY6xjH3EZk8YSFQZujV5Y4y1ZWeER9tDiN3";
+        let wire = format!(
+            r#"{{"type":"hub-challenge","nonce_h":"AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+                 "hub_key_id":"{HUB_KEY_ID}",
+                 "sig_h":"AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAg=="}}"#
+        );
+        let b64 = base64::engine::general_purpose::STANDARD;
+        match serde_json::from_str::<HubMsg>(&wire).unwrap() {
+            HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => {
+                assert_eq!(hub_key_id, HUB_KEY_ID);
+                assert!(
+                    crate::sync::key_id::KeyId::parse(&hub_key_id).is_ok(),
+                    "the hub sends a real key_id; a fixture whose value this client \
+                     would reject is not the hub's wire format"
+                );
+                assert_eq!(b64.decode(&nonce_h).unwrap().len(), 32);
+                assert_eq!(b64.decode(&sig_h).unwrap().len(), 64);
+            }
             other => panic!("wrong variant: {other:?}"),
         }
     }
