@@ -1,4 +1,7 @@
-// tests/eslint-no-handwritten-trust-envelope.test.mjs
+// eslint-plugin-learning-loop/rules/no-handwritten-trust-envelope.test.mjs
+// Lives beside the rule, not under tests/: it needs the `eslint` devDependency,
+// and the tests/ suite runs on bare node with no npm install. The lint job,
+// which installs dependencies, runs this one.
 // The delimiter is only unforgeable while every envelope comes from
 // sealedDelimiters(). A hand-written `<tag trust="untrusted-data">` is a
 // guessable terminator, and that is exactly the shape the framing spike
@@ -6,7 +9,7 @@
 // error instead of a review finding.
 import { test } from 'node:test';
 import { RuleTester } from 'eslint';
-import rule from '../eslint-plugin-learning-loop/rules/no-handwritten-trust-envelope.mjs';
+import rule from './no-handwritten-trust-envelope.mjs';
 
 const ruleTester = new RuleTester({
   languageOptions: { ecmaVersion: 'latest', sourceType: 'module' },

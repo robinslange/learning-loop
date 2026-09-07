@@ -34,6 +34,24 @@ function nearestAuthorYear(content, index) {
   return match;
 }
 
+// Citation link text puts the year either straight after the author
+// (`Smith 2020`) or on the far side of a title (`Rogers, "Caffeine and
+// Alertness" (2014)`). Anchoring the year to the author matched only the first
+// form, so every titled citation parsed as author:null — which in turn made the
+// short-form dedup below unable to recognise a later bare mention of that same
+// work, and the resolver went looking for it by search.
+const AUTHOR_GROUP = /^([A-Z][a-zÀ-ɏ]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-zÀ-ɏ]+|[A-Z][a-zÀ-ɏ]+))*)/;
+
+function parseAuthorYear(text) {
+  const author = text.match(AUTHOR_GROUP);
+  if (!author) return null;
+  const rest = text.slice(author[1].length);
+  // A parenthesised year is the citation's own; a bare one may belong to the
+  // title (`"Trends since 1990"`), so it is only the fallback.
+  const year = rest.match(/\((\d{4})\)/) || rest.match(/\b((?:19|20)\d{2})\b/);
+  return year ? [text, author[1], year[1]] : null;
+}
+
 export function extractSourcesFromNote(content) {
   const sources = [];
 
@@ -47,13 +65,14 @@ export function extractSourcesFromNote(content) {
     const pmcMatch = url.match(
       /(?:pmc\.ncbi\.nlm\.nih\.gov|ncbi\.nlm\.nih\.gov\/pmc)\/articles\/(PMC\d+)/,
     );
-    const doiMatch = url.match(/doi\.org\/(.+)/);
+    // Publishers serve the same DOI under their own host (`/doi/full/10.x/y`),
+    // so anchor on the DOI's own shape rather than on doi.org. Stop at `?` and
+    // `#` — tracking parameters are not part of the identifier.
+    const doiMatch = url.match(/(10\.\d{4,9}\/[^\s?#]+)/);
     const arxivUrlMatch = url.match(/arxiv\.org\/abs\/(\d{4}\.\d{4,5}(?:v\d+)?)/);
     const rfcUrlMatch = url.match(/rfc-editor\.org\/rfc\/rfc(\d{3,5})/);
 
-    const authorYearMatch = text.match(
-      /^([A-Z][a-zÀ-ɏ]+(?:\s+(?:et\s+al\.?|&\s+[A-Z][a-zÀ-ɏ]+|[A-Z][a-zÀ-ɏ]+))*)\s*[\(,]?\s*(\d{4})/,
-    );
+    const authorYearMatch = parseAuthorYear(text);
 
     sources.push({
       text,
