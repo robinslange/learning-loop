@@ -11,6 +11,12 @@
  *
  * So a new documentation tree is covered by default, and dropping one out is a
  * deliberate act with a reason attached that a test then checks still applies.
+ *
+ * **Sweeping nothing and sweeping everything are indistinguishable from a green
+ * run.** Every caller owes a coverage assertion — that the sweep reached the
+ * documents it should, and that it extracted something from them — because a
+ * suite green because it looked and found nothing reads exactly like a suite
+ * green because it never looked. That is the failure the include list was.
  */
 import { execFileSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
