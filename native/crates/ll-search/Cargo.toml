@@ -57,6 +57,10 @@ hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3"
+# Test-only: mints the certificate the TLS mock hub serves, so the client's
+# `MaybeTlsStream::Rustls` exporter arm runs against a real handshake. Its
+# `ring` default matches the provider rustls already uses here.
+rcgen = "0.14"
 criterion = { version = "=0.5", features = ["html_reports"] }
 walkdir = "2"
 

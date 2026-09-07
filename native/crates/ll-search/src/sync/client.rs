@@ -368,6 +368,33 @@ async fn prepare_export(
     })
 }
 
+/// The TLS trust this client offers a hub.
+///
+/// Byte-for-byte the store `connect_async` builds for itself under the
+/// `rustls-tls-webpki-roots` feature: an empty `RootCertStore` extended with
+/// `webpki_roots::TLS_SERVER_ROOTS`, and `with_no_client_auth()`. Naming it
+/// here rather than letting the default happen changes nothing a hub can
+/// observe; it buys one thing, a `ClientConfig` this crate owns.
+///
+/// That is the only place an extra root can attach, and the attachment is a
+/// `#[cfg(test)]` statement. `cargo build`, `cargo build --release`, and the
+/// lib that this crate's own `tests/` binaries link are all compiled without
+/// `cfg(test)`, so a shipped binary holds no instruction that could widen
+/// this store — there is no environment variable, config field or file for an
+/// attacker to reach, because there is no code to reach. The source-level
+/// check `the_extra_root_exists_only_under_cfg_test` keeps it that way.
+fn hub_tls_connector() -> tokio_tungstenite::Connector {
+    let mut roots = rustls::RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    #[cfg(test)]
+    tests::extend_with_test_anchors(&mut roots);
+    tokio_tungstenite::Connector::Rustls(std::sync::Arc::new(
+        rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth(),
+    ))
+}
+
 pub(super) async fn connect_and_authenticate(
     config: &FederationConfig,
     seed: &SigningKey,
@@ -383,9 +410,14 @@ pub(super) async fn connect_and_authenticate(
         format!("{}/ws", hub_url.trim_end_matches('/'))
     };
     eprintln!("Connecting to hub at {connect_url} as {peer_id} (model {model_id})...");
-    let (mut ws, _response) = tokio_tungstenite::connect_async(&connect_url)
-        .await
-        .context("failed to connect to hub")?;
+    let (mut ws, _response) = tokio_tungstenite::connect_async_tls_with_config(
+        &connect_url,
+        None,
+        false,
+        Some(hub_tls_connector()),
+    )
+    .await
+    .context("failed to connect to hub")?;
 
     // Channel binding: the exporter ties a completed handshake to this exact
     // TLS session, so relaying it onto a different connection fails
@@ -1072,5 +1104,300 @@ mod tests {
         let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
         assert_eq!(vault_id, "v2");
         assert_eq!(this_vault.unwrap().holds.as_ref().unwrap().sha256, "right");
+    }
+
+    // -----------------------------------------------------------------
+    // The TLS channel binding, over a real handshake
+    // -----------------------------------------------------------------
+
+    /// Roots a test has stood up, and the only way this crate trusts a
+    /// certificate `webpki_roots` does not. Appended to, never cleared: two
+    /// tests running in parallel each add their own, and an extra root that
+    /// signs nothing any other test talks to changes nothing for them.
+    type TrustAnchors = std::sync::Mutex<Vec<rustls::pki_types::CertificateDer<'static>>>;
+
+    fn test_trust_anchors() -> &'static TrustAnchors {
+        static ANCHORS: std::sync::OnceLock<TrustAnchors> = std::sync::OnceLock::new();
+        ANCHORS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
+    }
+
+    pub(super) fn extend_with_test_anchors(roots: &mut rustls::RootCertStore) {
+        for der in test_trust_anchors().lock().unwrap().iter() {
+            let _ = roots.add(der.clone());
+        }
+    }
+
+    /// The claim the doc comment on `hub_tls_connector` makes — that no
+    /// shipped binary contains an instruction that could widen the trust
+    /// store — rests entirely on one `#[cfg(test)]`. Dropping that attribute
+    /// compiles, passes every other test, and hands every build a root store
+    /// that anything on the anchor list can enter. So the attribute is
+    /// checked, not trusted.
+    #[test]
+    fn the_extra_root_exists_only_under_cfg_test() {
+        let src = include_str!("client.rs");
+        let call = concat!("tests::", "extend_with_test_anchors(&mut roots)");
+        assert_eq!(
+            src.matches(call).count(),
+            1,
+            "positive control: exactly one literal call site, or the check below \
+             inspects the first of several",
+        );
+        let before = &src[..src.find(call).expect("the call site is in this file")];
+        assert!(
+            before.trim_end().ends_with("#[cfg(test)]"),
+            "the extra trust anchor must be gated on cfg(test); without that \
+             attribute every release build carries a way to trust a root \
+             webpki does not",
+        );
+    }
+
+    /// The three `export_keying_material` parameters, as the cross-repo
+    /// transcript states them. Only the label is a named constant on this
+    /// side; the length and the context are call arguments in
+    /// `connect_and_authenticate`, so nothing but a live handshake can pin
+    /// them. This is the client's twin of the hub's
+    /// `tls::tests::the_exporter_matches_the_transcripts_label_length_and_context`.
+    fn transcript_exporter_params() -> (Vec<u8>, usize, Option<Vec<u8>>) {
+        let t: serde_json::Value =
+            serde_json::from_str(include_str!("federation-v5-transcript.json"))
+                .expect("the transcript is valid JSON");
+        let ex = &t["tls_exporter"];
+        let label = ex["label"].as_str().expect("tls_exporter.label").as_bytes().to_vec();
+        let length = ex["length"].as_u64().expect("tls_exporter.length") as usize;
+        let context = match &ex["context"] {
+            serde_json::Value::Null => None,
+            serde_json::Value::String(s) => Some(s.as_bytes().to_vec()),
+            other => panic!("tls_exporter.context is a string or null, got {other:?}"),
+        };
+        (label, length, context)
+    }
+
+    /// A hub that speaks TLS, whose certificate this process trusts because
+    /// the test just put it on the anchor list.
+    struct TlsHub {
+        addr: std::net::SocketAddr,
+        signer: SigningKey,
+        /// The self-signed certificate this hub serves. Nothing trusts it
+        /// until a test calls [`TlsHub::trust`] — which is what lets the
+        /// untrusted case be the same hub with one line left out, rather
+        /// than a second mock that could differ in some other way.
+        cert: rustls::pki_types::CertificateDer<'static>,
+        /// The exporter the hub derived from its own end of the session,
+        /// using the transcript's label, length and context. `None` until a
+        /// client has completed a TLS handshake against it.
+        derived: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
+        /// What the hub answered the client with, or why it stopped. A mock
+        /// that panicked inside `tokio::spawn` would fail nothing.
+        outcome: std::sync::Arc<std::sync::Mutex<Option<Result<(), String>>>>,
+    }
+
+    /// Serve one TLS WebSocket connection and run the happy path over it.
+    ///
+    /// The hub signs its challenge with the exporter IT derived. The client
+    /// derives its own, in production code, and verifies that signature
+    /// against it — so a completed handshake is the assertion that both ends
+    /// produced the same 32 bytes, and a client that fell back to
+    /// `[0u8; 32]` fails it.
+    async fn spawn_tls_hub() -> TlsHub {
+        use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
+
+        let issued = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+            .expect("rcgen mints a certificate for the loopback address");
+        let cert_der: CertificateDer<'static> = issued.cert.der().clone();
+        let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
+            issued.signing_key.serialize_der(),
+        ));
+
+        let server_config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert_der.clone()], key_der)
+            .expect("the certificate and its own key agree");
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(server_config));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let signer = SigningKey::from_bytes(&[3u8; 32]);
+        let hub_signer = signer.clone();
+        let derived = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let derived_out = std::sync::Arc::clone(&derived);
+        let outcome = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let outcome_out = std::sync::Arc::clone(&outcome);
+
+        tokio::spawn(async move {
+            let result = serve_one_tls_client(listener, acceptor, hub_signer, derived_out).await;
+            *outcome_out.lock().unwrap() = Some(result);
+        });
+
+        TlsHub { addr, signer, cert: cert_der, derived, outcome }
+    }
+
+    impl TlsHub {
+        /// Put this hub's certificate on the anchor list. Appended, never
+        /// removed: an anchor is only ever an issuer, and no certificate but
+        /// this hub's own chains to it, so a leftover from an earlier test
+        /// cannot rescue a later one.
+        fn trust(&self) {
+            test_trust_anchors().lock().unwrap().push(self.cert.clone());
+        }
+    }
+
+    async fn serve_one_tls_client(
+        listener: tokio::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+        signer: SigningKey,
+        derived: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
+    ) -> Result<(), String> {
+        use ed25519_dalek::Signer;
+
+        use super::super::handshake::{b64, random_nonce, unb64};
+        use super::super::protocol_v5::{
+            client_auth_message, hub_challenge_message, PROTOCOL_VERSION,
+        };
+
+        let (tcp, _) = listener.accept().await.map_err(|e| format!("accept: {e}"))?;
+        let tls = acceptor.accept(tcp).await.map_err(|e| format!("tls handshake: {e}"))?;
+
+        // Derive from the transcript's own numbers, not from this crate's
+        // constants. The client derives from its constants; agreement is the
+        // pin, and it covers all three parameters at once.
+        let (label, length, context) = transcript_exporter_params();
+        let mut out = vec![0u8; length];
+        {
+            let (_io, conn) = tls.get_ref();
+            conn.export_keying_material(&mut out[..], &label, context.as_deref())
+                .map_err(|e| format!("export_keying_material: {e}"))?;
+        }
+        let exporter: [u8; 32] = out
+            .try_into()
+            .map_err(|_| "the transcript's exporter length is not what the handshake signs over"
+                .to_string())?;
+        *derived.lock().unwrap() = Some(exporter);
+
+        let mut ws = tokio_tungstenite::accept_async(tls)
+            .await
+            .map_err(|e| format!("websocket upgrade: {e}"))?;
+
+        let hello = match ws.next().await {
+            Some(Ok(Message::Text(t))) => serde_json::from_str::<ClientMsg>(t.as_str())
+                .map_err(|e| format!("client-hello: {e}"))?,
+            other => return Err(format!("expected a client-hello, got {other:?}")),
+        };
+        let ClientMsg::ClientHello { key_id, nonce_c, .. } = hello else {
+            return Err(format!("expected a client-hello, got {hello:?}"));
+        };
+        let nonce_c = unb64(&nonce_c).map_err(|e| format!("nonce_c: {e}"))?;
+        let nonce_h = random_nonce();
+        let hub_key_id =
+            KeyId::from_pubkey(&signer.verifying_key()).as_str().to_string();
+        let sig_h = signer.sign(&hub_challenge_message(&nonce_h, &nonce_c, &exporter));
+        let challenge = HubMsg::HubChallenge {
+            nonce_h: b64(&nonce_h),
+            hub_key_id: hub_key_id.clone(),
+            sig_h: b64(&sig_h.to_bytes()),
+        };
+        ws.send(Message::text(serde_json::to_string(&challenge).unwrap()))
+            .await
+            .map_err(|e| format!("send hub-challenge: {e}"))?;
+
+        let auth = match ws.next().await {
+            Some(Ok(Message::Text(t))) => serde_json::from_str::<ClientMsg>(t.as_str())
+                .map_err(|e| format!("client-auth: {e}"))?,
+            other => return Err(format!("expected a client-auth, got {other:?}")),
+        };
+        let ClientMsg::ClientAuth { sig_c } = auth else {
+            return Err(format!("expected a client-auth, got {auth:?}"));
+        };
+        // The client's half of the binding: its signature covers the same
+        // exporter, so verifying it here proves the agreement in the other
+        // direction too.
+        let client_key = KeyId::parse(&key_id).map_err(|e| format!("client key_id: {e}"))?;
+        client_key
+            .verify(
+                &client_auth_message(&nonce_h, &nonce_c, &hub_key_id, &exporter),
+                &unb64(&sig_c).map_err(|e| format!("sig_c: {e}"))?,
+            )
+            .map_err(|e| format!("client signature did not verify: {e}"))?;
+
+        let ready = HubMsg::SyncReady {
+            protocol_version: PROTOCOL_VERSION,
+            vault_state: vec![],
+            grants: vec![],
+            revocations: vec![],
+        };
+        ws.send(Message::text(serde_json::to_string(&ready).unwrap()))
+            .await
+            .map_err(|e| format!("send sync-ready: {e}"))?;
+        Ok(())
+    }
+
+    fn config_for(hub: &TlsHub) -> FederationConfig {
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.hub.endpoint = format!("wss://{}", hub.addr);
+        config.hub.key_id =
+            Some(KeyId::from_pubkey(&hub.signer.verifying_key()).as_str().to_string());
+        config.vault_id = Some("v1".into());
+        config
+    }
+
+    /// **The arm that had never run.** Every other test in this crate reaches
+    /// `connect_and_authenticate` over cleartext loopback and takes the
+    /// `LL_ALLOW_INSECURE_WS` `[0u8; 32]` branch; nothing had ever driven the
+    /// `MaybeTlsStream::Rustls` branch, because `connect_async` offered no way
+    /// to trust a certificate minted here.
+    ///
+    /// Success proves the branch ran, and nothing in the process environment
+    /// can make it prove that falsely. `LL_ALLOW_INSECURE_WS` is not consulted
+    /// here at all — the `Rustls` arm is matched before the guard that reads
+    /// it, and this connection is `wss://`. What rules out the insecure branch
+    /// is the signature: the hub signs its challenge with the exporter it
+    /// derived from a live TLS session, asserted below to be something other
+    /// than 32 zero bytes, and a client holding zeros fails to verify it.
+    #[tokio::test]
+    async fn the_client_derives_the_channel_binding_from_a_real_tls_session() {
+        let hub = spawn_tls_hub().await;
+        hub.trust();
+        let seed = SigningKey::from_bytes(&[9u8; 32]);
+        let config = config_for(&hub);
+
+        let (_ws, ready) =
+            connect_and_authenticate(&config, &seed, "peer", "model", None)
+                .await
+                .expect("the handshake completes over TLS");
+
+        assert_eq!(ready.protocol_version, super::super::protocol_v5::PROTOCOL_VERSION);
+        assert_eq!(
+            hub.outcome.lock().unwrap().clone(),
+            Some(Ok(())),
+            "the hub ran the whole exchange, including verifying the client's own \
+             signature over the exporter",
+        );
+        let derived = hub.derived.lock().unwrap().expect("the hub derived an exporter");
+        assert_ne!(
+            derived, [0u8; 32],
+            "a TLS exporter of 32 zero bytes would make this test pass for a client \
+             that never derived one",
+        );
+    }
+
+    /// The same handshake with the trust anchor withheld. Without it the
+    /// client offers only the webpki roots, which never signed this
+    /// certificate — so the test above is passing because of the injection
+    /// point and not because a `wss://` connection to loopback would have
+    /// worked anyway.
+    #[tokio::test]
+    async fn an_untrusted_hub_certificate_is_refused() {
+        // The same hub as above, minus the one line that trusts it.
+        let hub = spawn_tls_hub().await;
+
+        let seed = SigningKey::from_bytes(&[9u8; 32]);
+        let err = connect_and_authenticate(&config_for(&hub), &seed, "peer", "model", None)
+            .await
+            .expect_err("an unknown issuer must not complete a handshake")
+            .to_string();
+        assert!(
+            err.contains("failed to connect to hub"),
+            "the refusal happens at the TLS handshake, before any hub message: {err}",
+        );
     }
 }
