@@ -658,6 +658,57 @@ mod tests {
         assert!(!cached(dir.path(), "v-two"), "an assoc is not a reason to keep a cache");
     }
 
+    /// The `assoc` rule on the withdrawal side, which is the side the
+    /// survivor test cannot reach. An `assoc` scoped to a vault names it
+    /// perfectly well — and still removes nothing, because it never produced
+    /// that cache and so was never the reason for it. Whatever wrote it, an
+    /// `assoc` being withdrawn is not the event that should take it away.
+    #[test]
+    fn revoking_an_assoc_removes_no_cache() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Assoc, Some("v-work"), LATER);
+        let (dir, me) = store(&[&held]);
+        cache(dir.path(), "v-work");
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(cached(dir.path(), "v-work"), "assoc carries no read authority in either direction");
+    }
+
+    /// The scope reaches `withdraw` out of a signed statement and lands in a
+    /// path component, and `config.rs`'s helpers assume a validated id. An
+    /// issuer can sign whatever it likes into that field — `grant::verify`
+    /// has no opinion on it — so a scope that escapes `peers/` must be
+    /// refused before it reaches `remove_dir_all`.
+    ///
+    /// **`peers/` has to exist for this to test anything.** `remove_dir_all`
+    /// really does resolve `peers/../secret` and delete through it — measured,
+    /// not assumed — but only when `peers/` is there for the kernel to walk.
+    /// Without it the call fails `NotFound`, `withdraw` reports nothing
+    /// removed, and the test passes with the guard deleted. It did exactly
+    /// that for one round: a test that fails to delete for an incidental
+    /// reason is indistinguishable from a guard doing its job.
+    #[test]
+    fn a_scope_that_is_not_a_usable_vault_id_removes_nothing() {
+        let a = key(1);
+        let me = id(&key(9));
+        let held = issue(&a, &me, GrantKind::Follow, Some("../secret"), LATER);
+        let (dir, me) = store(&[&held]);
+        let innocent = cache(dir.path(), "v-other");
+        let outside = super::super::config::data_dir(dir.path()).join("secret");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("keep.db"), b"not a peer cache").unwrap();
+
+        let deleted = apply_revocations(dir.path(), &[revoking(&a, &held)], &me, NOW).unwrap();
+
+        assert!(deleted.is_empty());
+        assert!(outside.join("keep.db").exists(),
+            "a signed statement does not get to name a path outside the peer cache");
+        assert!(innocent.exists(), "and the traversal was reachable: peers/ was there to walk");
+    }
+
     /// A grant this machine ISSUED gives this machine no read, so it is not
     /// the reason for any cache and revoking it deletes none.
     #[test]

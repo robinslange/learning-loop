@@ -22,8 +22,10 @@ use ll_search::sync::config::{
 };
 use ll_search::sync::grant::{canonical_bytes, GrantKind, GrantStatement};
 use ll_search::sync::key_id::KeyId;
+use ll_search::sync::grant::RevocationStatement;
 use ll_search::sync::protocol_v5::{
-    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
+    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, RevocationWire, VaultState,
+    PROTOCOL_VERSION,
 };
 use ll_search::sync::state::{read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
 use tokio::net::TcpListener;
@@ -134,6 +136,20 @@ async fn spawn_hub(holds: Option<HeldIndex>, on_upload: OnUpload) -> SocketAddr 
     spawn_hub_with(holds, on_upload, OnGrant::Ack, vec![], vec![]).await.0
 }
 
+/// The same, plus the revocations the handshake serves.
+///
+/// A separate entry point rather than a sixth positional argument on
+/// `spawn_hub_with`: every existing caller passes no revocations, and a
+/// parameter eighteen call sites have to spell `vec![]` is a parameter that
+/// gets copied rather than read.
+async fn spawn_hub_revoking(
+    holds: Option<HeldIndex>,
+    grants: Vec<GrantWire>,
+    revocations: Vec<RevocationWire>,
+) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
+    spawn_hub_full(holds, OnUpload::Ack, OnGrant::Ack, grants, revocations, vec![]).await
+}
+
 /// The same, with `grants` in the `SyncReady`, a scripted answer for each
 /// `FetchIndex` the client is expected to send as a result, and the record of
 /// everything the hub saw and everything it wants to complain about.
@@ -157,6 +173,25 @@ async fn spawn_hub_with(
     on_upload: OnUpload,
     on_grant: OnGrant,
     grants: Vec<GrantWire>,
+    fetches: Vec<(String, Fetch)>,
+) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
+    spawn_hub_full(holds, on_upload, on_grant, grants, vec![], fetches).await
+}
+
+/// The same with `revocations` in the `SyncReady` as well.
+///
+/// This field carried `vec![]` unconditionally until now, so no test could
+/// serve a revocation through a cycle at all — the client's whole revocation
+/// path was unreachable from here. That is a mock bounding what could be
+/// expressed rather than what was asserted, which is a worse failure than a
+/// test that runs and passes wrongly: nothing about it looks like a gap.
+#[allow(clippy::too_many_arguments)]
+async fn spawn_hub_full(
+    holds: Option<HeldIndex>,
+    on_upload: OnUpload,
+    on_grant: OnGrant,
+    grants: Vec<GrantWire>,
+    revocations: Vec<RevocationWire>,
     fetches: Vec<(String, Fetch)>,
 ) -> (SocketAddr, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -207,7 +242,7 @@ async fn spawn_hub_with(
             protocol_version: PROTOCOL_VERSION,
             vault_state,
             grants,
-            revocations: vec![],
+            revocations,
         })
         .await
         {
@@ -381,6 +416,50 @@ fn link_grant(to: &KeyId) -> (SigningKey, GrantWire) {
             state: "active".into(),
         },
     )
+}
+
+/// A `follow` from `issuer` to `to`, scoped to one vault — the shape whose
+/// withdrawal names a cache to delete. Returned with the wire form and the
+/// grant id, because a revocation names the id and the test has to hold it.
+fn scoped_follow(issuer: &SigningKey, to: &KeyId, vault_id: &str) -> (GrantWire, String) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let statement = GrantStatement {
+        v: 5,
+        kind: GrantKind::Follow,
+        from: KeyId::from_pubkey(&issuer.verifying_key()),
+        to: to.clone(),
+        scope: Some(vault_id.into()),
+        issued_at: now - 1,
+        expires_at: now + 86_400,
+        nonce: "ZmFrZS1mb2xsb3c".into(),
+    };
+    let bytes = canonical_bytes(&statement);
+    let sig = issuer.sign(&bytes);
+    (
+        GrantWire {
+            statement_b64: b64(&bytes),
+            signature_b64: b64(&sig.to_bytes()),
+            state: "active".into(),
+        },
+        ll_search::sync::grant::grant_id(&bytes),
+    )
+}
+
+/// That grant's withdrawal, signed by its issuer and carrying its scope.
+fn revocation_of(issuer: &SigningKey, grant_id: &str, scope: Option<&str>) -> RevocationWire {
+    let statement = canonical_bytes(&RevocationStatement {
+        v: 5,
+        kind: "revoke",
+        grant_id: grant_id.to_string(),
+        by: KeyId::from_pubkey(&issuer.verifying_key()),
+        scope: scope.map(str::to_string),
+        at: 2,
+    });
+    let sig = issuer.sign(&statement);
+    RevocationWire { statement_b64: b64(&statement), signature_b64: b64(&sig.to_bytes()) }
 }
 
 /// This client's own key id, from the seed `config_for` generated.
@@ -935,4 +1014,109 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
 
     assert!(result.refused_grants.is_empty());
     assert_eq!(read_state(dir.path()).unwrap().unwrap().refused_grants, Some(0));
+}
+
+/// The read half's mirror: a cycle must act on the revocations the handshake
+/// served, and deleting the local copy is what revocation MEANS here.
+///
+/// Every unit test of that behaviour drives `grants::apply_revocations`
+/// directly, so removing the line in `run_cycle` that calls it leaves all of
+/// them green — exactly as `a_cycle_answers_an_inbound_link_with_its_own_half`
+/// exists for the link half. This is the test that notices.
+///
+/// It could not be written at all until `SyncReady.revocations` stopped being
+/// hardcoded `vec![]` in this mock.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let issuer = SigningKey::from_bytes(&[31u8; 32]);
+    let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
+
+    // The cache the grant justified, and one nothing in this cycle names.
+    let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
+    let untouched = ll_search::sync::config::peer_dir(dir.path(), "v-unrelated");
+    std::fs::create_dir_all(&untouched).unwrap();
+    std::fs::write(untouched.join("index.db"), b"peer data").unwrap();
+
+    let held = HeldIndex {
+        sha256: export_sha(dir.path()),
+        note_count: HUB_NOTE_COUNT,
+        uploaded_at: 1,
+    };
+
+    // First cycle: the hub serves the grant, and the client stores it. This
+    // is the step the whole rule depends on — a revoked grant never comes
+    // back in `grants`, so a client that had not already kept it has nothing
+    // to resolve the revocation against.
+    let (addr, _) = spawn_hub_revoking(Some(held.clone()), vec![granted], vec![]).await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the first cycle completes");
+    assert!(cache.join("index.db").exists(), "precondition: an active grant keeps its cache");
+
+    // Second cycle: the grant is gone from `grants` and present only as a
+    // signed revocation, which is how a real hub serves one.
+    let (addr, _) =
+        spawn_hub_revoking(Some(held), vec![], vec![revocation_of(&issuer, &grant_id, Some("v-other"))])
+            .await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the second cycle completes");
+
+    assert!(!cache.exists(),
+        "data already read cannot be recalled, but continuing to serve it is not revocation");
+    assert!(untouched.join("index.db").exists(),
+        "no grant named it, so no revocation may remove it");
+}
+
+/// The same cycle, with the revocation signed by someone who never issued the
+/// grant. The hub is not trusted to have checked: it carries revocations, it
+/// does not vouch for them.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_cycle_ignores_a_revocation_the_grants_issuer_did_not_sign() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_export(dir.path());
+    let me = client_key_id(dir.path());
+    let issuer = SigningKey::from_bytes(&[31u8; 32]);
+    let stranger = SigningKey::from_bytes(&[32u8; 32]);
+    let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
+
+    let cache = ll_search::sync::config::peer_dir(dir.path(), "v-other");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(cache.join("index.db"), b"peer data").unwrap();
+
+    let held = HeldIndex {
+        sha256: export_sha(dir.path()),
+        note_count: HUB_NOTE_COUNT,
+        uploaded_at: 1,
+    };
+    let (addr, _) = spawn_hub_revoking(Some(held.clone()), vec![granted], vec![]).await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the first cycle completes");
+
+    let (addr, _) = spawn_hub_revoking(
+        Some(held),
+        vec![],
+        vec![revocation_of(&stranger, &grant_id, Some("v-other"))],
+    )
+    .await;
+    let config = config_for(dir.path(), addr);
+    sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
+        .await
+        .expect("the cycle completes: a revocation it will not act on is not an error");
+
+    assert!(cache.join("index.db").exists(),
+        "a signature proves someone signed those bytes, not that the right someone did");
 }
