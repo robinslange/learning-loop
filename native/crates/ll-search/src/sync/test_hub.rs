@@ -627,7 +627,20 @@ pub async fn spawn_fetch_hub(
     (hub, asked)
 }
 
-/// How a [`spawn_grant_hub`] answers one `PutGrant`.
+/// The id of the grant a revocation statement withdraws, read the way a hub
+/// reads it: out of the statement's own `grant_id`, which is what the
+/// signature covers and what the ack must name.
+fn revoked_grant_id(statement: &[u8]) -> Option<String> {
+    Some(
+        serde_json::from_slice::<serde_json::Value>(statement)
+            .ok()?
+            .get("grant_id")?
+            .as_str()?
+            .to_string(),
+    )
+}
+
+/// How a [`spawn_grant_hub`] answers one `PutGrant` or `RevokeGrant`.
 pub enum GrantAnswer {
     /// `GrantAck` carrying the sha256 of the statement — what the real hub
     /// replies, and the id the client recomputes for itself.
@@ -717,22 +730,42 @@ pub async fn spawn_grant_hub_over(
                 }
                 continue;
             }
-            let ClientMsg::PutGrant { statement_b64, signature_b64 } = msg else {
-                return note(complaint(&format!("unexpected:{msg:?}")));
-            };
-            let Ok(statement) = base64::engine::general_purpose::STANDARD.decode(&statement_b64)
-            else {
-                return note(complaint("unparseable:statement-not-base64"));
+            // `PutGrant` and `RevokeGrant` are answered from one table and
+            // with one `GrantAck`, the way the real hub answers them. The
+            // only difference is which id the ack carries: a grant is
+            // acknowledged by the hash of its own bytes, a revocation by the
+            // id of the grant it withdraws — which is a field inside the
+            // statement and is emphatically not the hash of it. A mock that
+            // hashed both would ack every revocation with an id no client
+            // ever asked about, and the client's own check would be the only
+            // thing left saying so.
+            let decode = |b64: &str| base64::engine::general_purpose::STANDARD.decode(b64).ok();
+            let (statement_b64, signature_b64, acked, state) = match msg {
+                ClientMsg::PutGrant { statement_b64, signature_b64 } => {
+                    let Some(bytes) = decode(&statement_b64) else {
+                        return note(complaint("unparseable:statement-not-base64"));
+                    };
+                    let id = hex::encode(Sha256::digest(&bytes));
+                    (statement_b64, signature_b64, id, "active")
+                }
+                ClientMsg::RevokeGrant { statement_b64, signature_b64 } => {
+                    let Some(bytes) = decode(&statement_b64) else {
+                        return note(complaint("unparseable:statement-not-base64"));
+                    };
+                    let Some(id) = revoked_grant_id(&bytes) else {
+                        return note(complaint("unparseable:revocation-names-no-grant-id"));
+                    };
+                    (statement_b64, signature_b64, id, "revoked")
+                }
+                other => return note(complaint(&format!("unexpected:{other:?}"))),
             };
             note(super::protocol_v5::GrantWire {
-                statement_b64: statement_b64.clone(),
+                statement_b64,
                 signature_b64,
-                state: "active".into(),
+                state: state.into(),
             });
             let reply = match answers.next().unwrap_or(GrantAnswer::Ack) {
-                GrantAnswer::Ack => HubMsg::GrantAck {
-                    grant_id: hex::encode(Sha256::digest(&statement)),
-                },
+                GrantAnswer::Ack => HubMsg::GrantAck { grant_id: acked },
                 GrantAnswer::AckWrongId => HubMsg::GrantAck { grant_id: "00".repeat(32) },
                 GrantAnswer::Reject(reason) => HubMsg::Reject { reason: reason.into() },
             };

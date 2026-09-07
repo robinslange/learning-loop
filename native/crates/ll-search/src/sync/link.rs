@@ -38,7 +38,7 @@ use sha2::{Digest, Sha256};
 use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
 use super::config::{self, grants_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
-use super::grant::{self, canonical_bytes, GrantKind, GrantStatement};
+use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::{b64, random_nonce};
 use super::key_id::KeyId;
 use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
@@ -654,20 +654,16 @@ enum Lodged {
     Refused(String),
 }
 
-async fn lodge_one(
-    ws: &mut WsStream,
-    statement_b64: &str,
-    signature_b64: &str,
-    grant_id: &str,
-) -> anyhow::Result<Lodged> {
-    send_json(
-        ws,
-        &ClientMsg::PutGrant {
-            statement_b64: statement_b64.to_string(),
-            signature_b64: signature_b64.to_string(),
-        },
-    )
-    .await?;
+/// Send one grant-shaped request and read the hub's answer to it.
+///
+/// `PutGrant` and `RevokeGrant` are one round trip, not two: each names a
+/// single grant, each is answered by a `GrantAck` naming it back, and both
+/// have the same three ways of going wrong. So the message is a parameter
+/// rather than the one line of difference between two copies of this
+/// function — and the copy that would have drifted is the one whose caller
+/// deletes local state on the strength of the answer.
+async fn ack_one(ws: &mut WsStream, msg: &ClientMsg, grant_id: &str) -> anyhow::Result<Lodged> {
+    send_json(ws, msg).await?;
     match recv_json::<HubMsg>(ws).await? {
         HubMsg::GrantAck { grant_id: acked } if acked == grant_id => Ok(Lodged::Acknowledged),
         // The hub answered this request, one for one, so the stream is still
@@ -699,7 +695,11 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
             continue;
         };
         let grant_id = grant::grant_id(&signed.statement);
-        match lodge_one(ws, &stored.statement_b64, &stored.signature_b64, &grant_id).await {
+        let put = ClientMsg::PutGrant {
+            statement_b64: stored.statement_b64.clone(),
+            signature_b64: stored.signature_b64.clone(),
+        };
+        match ack_one(ws, &put, &grant_id).await {
             Ok(Lodged::Acknowledged) => {
                 acked.push(grant_id);
                 out.lodged += 1;
@@ -809,6 +809,160 @@ pub async fn connect_and_reconcile(config_dir: &Path) -> anyhow::Result<LinkOutc
     let outcome = reconcile(&mut ws, config_dir, &config, &ready.grants, unix_now()).await;
     let _ = futures_util::SinkExt::close(&mut ws).await;
     outcome
+}
+
+/// What [`revoke`] withdrew, and what it deliberately left standing.
+#[derive(Debug, Serialize)]
+pub struct Revoked {
+    /// The grants the hub acknowledged as withdrawn. Nothing else was
+    /// dropped locally: a row this machine still holds is a row the hub was
+    /// never told about.
+    pub grant_ids: Vec<String>,
+    /// Whether a `link` the other machine issued to **this** one is still
+    /// standing. It is that machine's own statement and no key but its own
+    /// can withdraw it, so this call cannot — and a caller that reports
+    /// "revoked" without saying so is telling somebody the door is shut when
+    /// half of it is open.
+    pub inbound_remains: bool,
+}
+
+/// The issuer's withdrawal of one grant it issued: the message to send, and
+/// the id the ack must name.
+///
+/// **Both are read out of `grant` itself.** The id is the hash of its bytes
+/// and the scope is its own `scope` column, so a caller has nothing to supply
+/// and therefore nothing to get wrong. The hub refuses a revocation naming a
+/// scope its grant never carried and `grants::apply_revocations` refuses the
+/// same thing coming back down — a field whose two readings differ by "every
+/// vault on this disk" is not one to take from a second source. Handing the
+/// id back beside the message is the same argument: the caller checks the ack
+/// against it, and a caller that computed it separately could check the wrong
+/// one.
+fn sign_revocation(
+    key: &SigningKey,
+    grant: &SignedGrant,
+    now: i64,
+) -> anyhow::Result<(String, ClientMsg)> {
+    let scope = serde_json::from_slice::<GrantStatement>(&grant.statement)
+        .context("a stored grant that does not parse cannot be withdrawn by name")?
+        .scope;
+    let statement = canonical_bytes(&RevocationStatement {
+        v: 5,
+        kind: "revoke",
+        grant_id: grant::grant_id(&grant.statement),
+        by: KeyId::from_pubkey(&key.verifying_key()),
+        scope,
+        at: now,
+    });
+    let signature = key.sign(&statement).to_bytes().to_vec();
+    Ok((
+        grant::grant_id(&grant.statement),
+        ClientMsg::RevokeGrant {
+            statement_b64: B64.encode(&statement),
+            signature_b64: B64.encode(&signature),
+        },
+    ))
+}
+
+/// Withdraw every `link` this machine issued to `other`: the hub first, the
+/// local store second.
+///
+/// **Only the issuer may revoke, so this withdraws one half of a link.** The
+/// grant `other` issued to this machine is `other`'s statement about its own
+/// key; nothing here touches it, and [`Revoked::inbound_remains`] says when
+/// one is still there so the caller can too. Revoking a grant issued *to* us
+/// is not a thing that exists: we stop using it, and
+/// `grants::apply_revocations` deletes what it justified when its issuer
+/// withdraws it.
+///
+/// **The hub is told first and the local row dropped second, and the two
+/// orders are not each other's mirror.** This store is this key's only record
+/// of what it issued: drop the row while the hub still serves the grant and
+/// there is nothing left to sign a revocation *for*, the id is gone, and the
+/// other machine keeps full authority until the grant expires a year later.
+/// The other order costs a row that outlives its grant for one cycle, and the
+/// hub reports it as no longer active on the next handshake. One of those two
+/// failures is recoverable.
+///
+/// **It deletes no cached data, and that is the honest state rather than an
+/// oversight.** A `link` is unscoped — "every vault this issuer owns" — and
+/// an unscoped grant names no single cache, so spec:334's deletion has
+/// nothing to name. See `grants::names`, which is where that argument is
+/// made, and `grants::ReadAuthority`, which is what stops the data being
+/// served once the hub drops the vault from this key's listing.
+pub async fn revoke(config_dir: &Path, other: &KeyId) -> anyhow::Result<Revoked> {
+    let me = local_key_id(config_dir)?;
+    let now = unix_now();
+    let held = active_grants(config_dir, now)?;
+    let links = |from: &KeyId, to: &KeyId| -> Vec<(StoredGrant, GrantStatement)> {
+        held.iter()
+            .filter(|(_, st)| st.kind == GrantKind::Link && &st.from == from && &st.to == to)
+            .cloned()
+            .collect()
+    };
+    let mine = links(&me, other);
+    let inbound_remains = !links(other, &me).is_empty();
+    if mine.is_empty() {
+        anyhow::bail!(
+            "this machine holds no link it issued to {}{}. `ll-search link list` shows \
+             every machine this one is linked to and which halves exist.",
+            other.as_str(),
+            if inbound_remains {
+                format!(
+                    " — only {} can withdraw the link it issued to this machine",
+                    other.as_str()
+                )
+            } else {
+                String::new()
+            }
+        );
+    }
+
+    let key = local_signing_key(config_dir)?;
+    let config = config::load_config(config_dir)?;
+    let (mut ws, _ready) = connect_and_authenticate(
+        &config,
+        &key,
+        &config.identity.display_name,
+        "unknown",
+        None,
+    )
+    .await?;
+
+    let mut withdrawn: Vec<String> = Vec::new();
+    let mut failure = Ok(());
+    for (row, _) in &mine {
+        let (grant_id, msg) = sign_revocation(&key, &row.signed()?, now)?;
+        match ack_one(&mut ws, &msg, &grant_id).await {
+            Ok(Lodged::Acknowledged) => withdrawn.push(grant_id),
+            // Unlike a sync cycle, there is nothing after this to protect: a
+            // refusal is the whole answer to the command, and the grant it
+            // refused to withdraw is still live at the hub.
+            Ok(Lodged::Refused(reason)) => {
+                failure = Err(anyhow::anyhow!(
+                    "the hub refused to withdraw {grant_id}: {reason}. The grant still \
+                     stands and this machine still holds it."
+                ));
+                break;
+            }
+            Err(e) => {
+                failure = Err(e);
+                break;
+            }
+        }
+    }
+    let _ = futures_util::SinkExt::close(&mut ws).await;
+
+    // Only what the hub acknowledged, and it is dropped even on the way out
+    // of a failure over the grants behind it: an acknowledged withdrawal is
+    // withdrawn whatever happened next, and a row kept past that would be
+    // re-offered forever for a grant the hub has already retired.
+    update_grants(config_dir, |rows| {
+        rows.retain(|row| !withdrawn.iter().any(|id| has_id(row, id)));
+        Ok(())
+    })?;
+    failure?;
+    Ok(Revoked { grant_ids: withdrawn, inbound_remains })
 }
 
 /// One line per link this machine knows about, for `ll link list`.
@@ -1958,6 +2112,222 @@ mod tests {
             "and the grant is kept, so the next connection offers it again");
     }
 
+    // -- withdrawing a link ------------------------------------------------
+
+    /// A machine that has admitted `joiner` through the offline door: one row
+    /// in the store, nothing said to any hub about it yet. What every
+    /// failure test below needs, because what they assert is that the row is
+    /// still exactly here afterwards.
+    fn approver_who_admitted(joiner: &KeyId) -> TempDir {
+        let approver = seeded_dir();
+        approve_offline(approver.path(), &pairing_code(joiner), &mut Yes::default()).unwrap();
+        approver
+    }
+
+    fn grant_ids(dir: &Path) -> Vec<String> {
+        load_grants(dir)
+            .unwrap()
+            .iter()
+            .map(|row| grant::grant_id(&row.signed().unwrap().statement))
+            .collect()
+    }
+
+    /// The whole round trip: the statement is minted here, signed with this
+    /// machine's own key, and names the grant it withdraws — and only once
+    /// the hub has acknowledged it does the local row go.
+    #[tokio::test]
+    async fn revoking_a_link_tells_the_hub_and_then_drops_the_local_row() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = seeded_dir();
+
+        // Admitted through the hub door, so the grant this withdraws is one
+        // the hub actually holds — which is the only state a revocation has
+        // anything to say about.
+        let (hub_a, _lodged) = test_hub::spawn_grant_hub(vec![], vec![]).await;
+        write_hub_config(approver.path(), &hub_a.ws_url(), None);
+        approve(approver.path(), &pairing_code(&joiner), &mut Yes::default()).await.unwrap();
+        let id = grant::grant_id(&stored_grant_to(approver.path(), &joiner).statement);
+
+        let (hub_b, seen) = test_hub::spawn_grant_hub(vec![], vec![]).await;
+        write_hub_config(approver.path(), &hub_b.ws_url(), None);
+        let done = revoke(approver.path(), &joiner).await.unwrap();
+
+        assert_eq!(done.grant_ids, vec![id.clone()]);
+        assert!(!done.inbound_remains, "the joiner never answered, so there is no other half");
+
+        let seen = seen.lock().unwrap().clone();
+        assert_eq!(seen.len(), 1, "one link, one revocation, and nothing else: {seen:?}");
+        assert_eq!(seen[0].state, "revoked", "the hub was sent a revocation, not another grant");
+        let rev = grant::verify_revocation(
+            &B64.decode(&seen[0].statement_b64).unwrap(),
+            &B64.decode(&seen[0].signature_b64).unwrap(),
+            &key_of(approver.path()),
+        )
+        .expect("the issuer signs its own withdrawal, and the hub checks that it did");
+        assert_eq!(rev.grant_id, id, "a revocation naming another grant withdraws nothing");
+        assert_eq!(rev.scope, None, "a link is unscoped and its withdrawal has to say so");
+        assert!(load_grants(approver.path()).unwrap().is_empty(),
+            "the hub acknowledged it, so the row has nothing left to describe");
+    }
+
+    /// **The order, and it is the one thing here that cannot be recovered
+    /// from.** A row dropped while the hub still serves the grant leaves this
+    /// machine with no record of what it issued — no id to name in a
+    /// revocation, and the other machine holding full authority until the
+    /// grant lapses a year later. The hub refusing is exactly that situation
+    /// arriving from outside.
+    #[tokio::test]
+    async fn a_refused_withdrawal_leaves_the_grant_exactly_where_it_was() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let before = grant_ids(approver.path());
+
+        let (hub, _seen) =
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::Reject("no such grant")]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        let err = revoke(approver.path(), &joiner).await.unwrap_err().to_string();
+        assert!(err.contains("refused to withdraw"), "{err}");
+        assert!(err.contains("no such grant"), "the hub's reason reaches the user: {err}");
+        assert_eq!(grant_ids(approver.path()), before,
+            "the hub still serves this grant, so this machine must still know it issued it");
+    }
+
+    /// The same property against the failure that is not a decision: the
+    /// socket goes away and no answer ever arrives.
+    #[tokio::test]
+    async fn a_withdrawal_the_hub_never_answers_leaves_the_grant_exactly_where_it_was() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let before = grant_ids(approver.path());
+
+        let hub = hub_that_mishandles_the_first_grant(Mishandle::Drop).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        assert!(revoke(approver.path(), &joiner).await.is_err());
+        assert_eq!(grant_ids(approver.path()), before,
+            "nothing was acknowledged, so nothing may be forgotten");
+    }
+
+    /// An ack naming a different grant is a hub that withdrew something else.
+    /// It looks identical to a healthy one unless the id is checked, and
+    /// acting on it would drop the row for a grant still being served.
+    #[tokio::test]
+    async fn an_ack_naming_a_different_grant_withdraws_nothing() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let before = grant_ids(approver.path());
+
+        let (hub, _seen) =
+            test_hub::spawn_grant_hub(vec![], vec![GrantAnswer::AckWrongId]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+
+        assert!(revoke(approver.path(), &joiner).await.is_err());
+        assert_eq!(grant_ids(approver.path()), before,
+            "the hub acknowledged some other grant; this one is still live");
+    }
+
+    /// Only the issuer may revoke, so this withdraws one half. The grant the
+    /// other machine issued to this one is its statement about its own key,
+    /// and a client that quietly dropped it would forget an authority that is
+    /// still standing at the hub.
+    #[tokio::test]
+    async fn the_half_the_other_machine_issued_is_not_this_machines_to_withdraw() {
+        let _env = test_hub::insecure_ws_env();
+        let joiner_key = SigningKey::from_bytes(&[11u8; 32]);
+        let joiner = key(11);
+        let approver = approver_who_admitted(&joiner);
+        let inbound =
+            issue_link_grant(&joiner_key, &key_of(approver.path()), unix_now()).unwrap();
+        let inbound_id = grant::grant_id(&inbound.statement);
+        remember(approver.path(), &inbound, true).unwrap();
+
+        let (hub, seen) = test_hub::spawn_grant_hub(vec![], vec![]).await;
+        write_hub_config(approver.path(), &hub.ws_url(), None);
+        let done = revoke(approver.path(), &joiner).await.unwrap();
+
+        assert_eq!(seen.lock().unwrap().len(), 1,
+            "one message: this machine may only withdraw what it signed");
+        assert!(done.inbound_remains,
+            "and the caller is told, because half a door is not a shut one");
+        assert_eq!(grant_ids(approver.path()), vec![inbound_id],
+            "the other machine's grant stays exactly where it is");
+    }
+
+    /// Nothing to withdraw is not a connection to make. The error names the
+    /// key and points at the list that would have shown it, and does not
+    /// invite a retry with anything more forceful — there is no such flag,
+    /// and an error that taught the reflex would be the start of one.
+    #[tokio::test]
+    async fn revoking_a_machine_this_one_never_admitted_says_so_without_a_hub() {
+        let _env = test_hub::insecure_ws_env();
+        let approver = seeded_dir();
+        let stranger_key = SigningKey::from_bytes(&[11u8; 32]);
+        let stranger = key(11);
+        let inbound =
+            issue_link_grant(&stranger_key, &key_of(approver.path()), unix_now()).unwrap();
+        remember(approver.path(), &inbound, true).unwrap();
+
+        // No hub config was ever written here. A revocation that reached the
+        // network step would fail on that instead, and the error says which.
+        let err = revoke(approver.path(), &stranger).await.unwrap_err().to_string();
+        assert!(err.contains("holds no link it issued"), "{err}");
+        assert!(err.contains(stranger.as_str()), "the error names the key it looked for: {err}");
+        assert!(err.contains("only"), "and says who can withdraw the half that does exist: {err}");
+        assert!(err.contains("link list"), "and where to look: {err}");
+        assert!(!err.contains("force"), "an error must not point at a bigger hammer: {err}");
+        assert_eq!(grant_ids(approver.path()).len(), 1, "and nothing was dropped");
+    }
+
+    /// A withdrawal carries the id and the scope of the grant it withdraws,
+    /// both read out of that grant.
+    ///
+    /// `ll link revoke` only ever withdraws a `link`, and a link is unscoped
+    /// — so the one grant whose scope could be dropped without anyone
+    /// noticing is the only one that command produces. The hub compares the
+    /// revocation's scope against the grant's and refuses a mismatch, and
+    /// `grants::apply_revocations` refuses the same thing coming back down,
+    /// so it is pinned here, against a scoped grant, where the field can be
+    /// wrong.
+    #[test]
+    fn a_withdrawal_carries_the_id_and_scope_of_the_grant_it_withdraws() {
+        let signer = SigningKey::from_bytes(&[5u8; 32]);
+        let statement = canonical_bytes(&GrantStatement {
+            v: 5,
+            kind: GrantKind::Follow,
+            from: KeyId::from_pubkey(&signer.verifying_key()),
+            to: key(11),
+            scope: Some("v-personal".into()),
+            issued_at: 1,
+            expires_at: i64::MAX,
+            nonce: "n".into(),
+        });
+        let scoped = SignedGrant {
+            signature: signer.sign(&statement).to_bytes().to_vec(),
+            statement,
+        };
+
+        let (grant_id, msg) = sign_revocation(&signer, &scoped, 99).unwrap();
+        assert_eq!(grant_id, grant::grant_id(&scoped.statement));
+        let ClientMsg::RevokeGrant { statement_b64, signature_b64 } = msg else {
+            panic!("a withdrawal is a revoke-grant and nothing else");
+        };
+        let rev = grant::verify_revocation(
+            &B64.decode(&statement_b64).unwrap(),
+            &B64.decode(&signature_b64).unwrap(),
+            &KeyId::from_pubkey(&signer.verifying_key()),
+        )
+        .expect("the issuer signs its own withdrawal");
+        assert_eq!(rev.grant_id, grant_id, "a revocation naming another grant withdraws nothing");
+        assert_eq!(rev.scope.as_deref(), Some("v-personal"),
+            "the hub refuses a revocation whose scope its grant never carried");
+        assert_eq!(rev.at, 99);
+    }
+
     // -- the store ---------------------------------------------------------
 
     #[test]
@@ -2031,6 +2401,62 @@ mod tests {
         let approver_rows = list(approver.path()).unwrap();
         assert_eq!(approver_rows.len(), 1);
         assert_eq!(approver_rows[0].direction, "outbound", "it has not heard back yet");
+    }
+
+    /// An approval nobody ever picked up, beside one that was — and the field
+    /// that tells them apart is not the one it looks like.
+    ///
+    /// This is the only withdrawal path for an abandoned link: somebody
+    /// admits a machine, the grant is lodged, and that machine never
+    /// connects. The row sits there for a year, and `ll link revoke` is how
+    /// it goes — but only if the person can pick it out of the list.
+    ///
+    /// **`lodged` cannot be what picks it out.** `lodged` says the hub took
+    /// the grant, which is equally true of a link that is working perfectly.
+    /// `direction` is what carries it: `mutual` is a link the other machine
+    /// answered with a grant of its own, `outbound` is one it never did. Both
+    /// halves of that are asserted here, because the tidy-looking change is
+    /// to reach for `lodged`, and it would find nothing.
+    #[test]
+    fn a_lodged_link_nobody_answered_does_not_look_like_a_working_one() {
+        let approver = seeded_dir();
+        let answered = fresh_dir();
+        let abandoned = key(11);
+
+        let blob = approve_offline(
+            approver.path(),
+            &request_offline(answered.path()).unwrap(),
+            &mut Yes::default(),
+        )
+        .unwrap();
+        accept_offline(answered.path(), &blob).unwrap();
+        // The reciprocal reaching the approver, the way `reconcile` delivers
+        // it out of `SyncReady.grants` on the next connection.
+        let their_half = stored_grant_to(answered.path(), &key_of(approver.path()));
+        remember(approver.path(), &their_half, true).unwrap();
+
+        // And a machine that was admitted and never showed up.
+        approve_offline(approver.path(), &pairing_code(&abandoned), &mut Yes::default()).unwrap();
+        update_grants(approver.path(), |rows| {
+            for row in rows.iter_mut() {
+                row.lodged = true;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        let rows = list(approver.path()).unwrap();
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        let row = |k: &KeyId| {
+            rows.iter().find(|r| r.other == k.as_str()).unwrap_or_else(|| panic!("no row for {k:?}"))
+        };
+        assert!(
+            row(&abandoned).lodged && row(&key_of(answered.path())).lodged,
+            "both grants are at the hub, so `lodged` cannot be what tells them apart"
+        );
+        assert_eq!(row(&abandoned).direction, "outbound",
+            "nobody answered this one, and the list has to say so or it cannot be found");
+        assert_eq!(row(&key_of(answered.path())).direction, "mutual");
     }
 
     #[test]
