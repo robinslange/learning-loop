@@ -298,8 +298,26 @@ enum LinkCommand {
         #[arg(long)]
         config_dir: Option<String>,
     },
-    /// The machines this one is linked to, and which halves exist.
+    /// The machines this one is linked to, and which halves exist. A row
+    /// reading `outbound` is one this machine admitted and has never seen
+    /// answer — an approval nobody picked up looks exactly like that, and
+    /// `link revoke` is how it is taken back.
     List {
+        #[arg(long)]
+        config_dir: Option<String>,
+    },
+    /// Withdraw the link this machine issued to another machine.
+    ///
+    /// Only the half this machine signed. The grant the other machine issued
+    /// to this one is its own statement about its own key, and only that
+    /// machine can withdraw it.
+    ///
+    /// This deletes no cached data. A link covers every vault its issuer
+    /// owns, which names no single directory under `federation/data/peers/`
+    /// to remove, so nothing there is touched.
+    Revoke {
+        /// The key id of the machine to cut off, as `link list` prints it.
+        key_id: String,
         #[arg(long)]
         config_dir: Option<String>,
     },
@@ -353,6 +371,41 @@ fn show_pending(pending: &ll_search::sync::link::PendingLink) {
     eprintln!("that the six words it shows are the six words above.");
     eprintln!();
     println!("{}", pending.code);
+}
+
+/// What `ll link revoke` tells the person — and the half that matters is
+/// what it refuses to say.
+///
+/// Spec:334 makes a revocation remove `federation/data/peers/<vault_id>/`,
+/// and this command removes nothing: a link covers every vault its issuer
+/// owns, so it names no directory to take (`sync::grants::names` is where
+/// that argument lives). A line reading "removed" here would be a claim about
+/// somebody's notes coming back, so the report states what did not happen as
+/// plainly as what did, and every branch of it does.
+fn revoke_report(
+    done: &ll_search::sync::link::Revoked,
+    other: &ll_search::sync::key_id::KeyId,
+) -> String {
+    let mut out = format!(
+        "Withdrew {} link grant(s) issued to {}. The hub acknowledged it and stops \
+         authorising that key.\n",
+        done.grant_ids.len(),
+        other.as_str(),
+    );
+    if done.inbound_remains {
+        out.push_str(&format!(
+            "The link {} issued to THIS machine still stands. It is that machine's own \
+             statement and only it can withdraw it.\n",
+            other.as_str(),
+        ));
+    }
+    out.push_str(
+        "Nothing was deleted. A link covers every vault its issuer owns, so it names no \
+         cached directory to take, and federation/data/peers/ is exactly as it was. Data \
+         that machine already fetched is not recalled either — it stops being served, and \
+         it drops what the withdrawal names on its next sync.\n",
+    );
+    out
 }
 
 /// What a completed [`recover`] did. `replaced` is `Some` only when a
@@ -934,6 +987,16 @@ async fn main() {
                     let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
                     out(&link::list(&dir).unwrap_or_else(|e| fail(e)));
                 }
+                LinkCommand::Revoke { key_id, config_dir } => {
+                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+                    let other = ll_search::sync::key_id::KeyId::parse(&key_id)
+                        .unwrap_or_else(|e| fail(e.context(
+                            "that is not a key id. `ll-search link list` prints the key id of \
+                             every machine this one is linked to",
+                        )));
+                    let done = link::revoke(&dir, &other).await.unwrap_or_else(|e| fail(e));
+                    eprint!("{}", revoke_report(&done, &other));
+                }
             }
         }
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
@@ -1169,6 +1232,45 @@ mod tests {
         let _ = vault_add(d.path(), Path::new("/home/r/brain"), "dupe");
         assert!(!d.path().join("dupe").exists(),
             "a rejected vault_add must not leave a half-registered config dir on disk");
+    }
+
+    /// Spec:334 is not met for a link and the report has to say so in every
+    /// branch, because the person reading it is deciding whether their notes
+    /// are still on the other machine. It says what did not happen, it does
+    /// not use the word that would imply it did, and it never points at a
+    /// bigger hammer — there is no `--force` on this command, and an error or
+    /// a report that named one would be teaching the reflex.
+    #[test]
+    fn the_revoke_report_says_what_it_did_not_do_whatever_else_it_says() {
+        use ed25519_dalek::SigningKey;
+        use ll_search::sync::key_id::KeyId;
+        use ll_search::sync::link::Revoked;
+        let other =
+            KeyId::from_pubkey(&SigningKey::from_bytes(&[11u8; 32]).verifying_key());
+        for inbound_remains in [false, true] {
+            for grant_ids in [vec![], vec!["abc".to_string()]] {
+                let text = revoke_report(&Revoked { grant_ids, inbound_remains }, &other);
+                assert!(text.contains("Nothing was deleted"), "{text}");
+                assert!(text.contains("federation/data/peers"),
+                    "it names the directory it did not touch: {text}");
+                assert!(text.contains("not recalled"),
+                    "and does not let a reader think the copy came back: {text}");
+                for lie in ["Removed", "wiped", "erased", "purged", "force"] {
+                    assert!(!text.contains(lie), "the report must not say {lie:?}: {text}");
+                }
+            }
+        }
+        let half = revoke_report(
+            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: true },
+            &other,
+        );
+        assert!(half.contains("still stands"), "half a door is not a shut one: {half}");
+        let whole = revoke_report(
+            &Revoked { grant_ids: vec!["abc".into()], inbound_remains: false },
+            &other,
+        );
+        assert!(!whole.contains("still stands"),
+            "and there is no other half to warn about here: {whole}");
     }
 
     /// clap builds the parser at runtime, so a malformed argument definition
