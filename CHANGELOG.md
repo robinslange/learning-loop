@@ -4,6 +4,11 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The librarian's link_check turn reported a TypeError naming its own destructure instead of the ollama error that caused it.** `investigateNote` POSTed to `/api/chat` with a hand-rolled `fetch` and read `data.message` without checking the response, so any error body — a context overflow on a large note is the common one — left `msg` undefined and the turn died as `Cannot read properties of undefined (reading 'tool_calls')` at the destructure, with the HTTP status nowhere in the log. The note was silently dropped from investigation and the daemon moved on. `ollama-client.chat()` already performed the `res.ok` check and already accepted every argument the inline fetch was passing; it had no callers, `DEFAULTS.investigateTimeoutMs` was written for this call site and referenced nowhere, and `daemon.mjs`'s own header described the timeout as `AbortSignal.timeout` — `chat()`'s mechanism, not the `AbortController` twenty lines below it. The call site now goes through `chat()`, which removes the controller, the `setTimeout` and both `clearTimeout` calls along with the fault, and the log names the status.
+- **`chat()` promised callers a body they could destructure and did not check that it had one.** Ollama reports some failures as a 200 whose body carries an `error` and no `message`, which reached callers as the same undefined destructure the HTTP path produced. It now throws `OLLAMA_NO_MESSAGE` carrying the reported error, so the documented contract holds for every response that returns.
+
 ## v2.0.0
 
 ### Federation v5

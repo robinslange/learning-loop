@@ -62,8 +62,9 @@ export async function waitForOllama({ url, maxAttempts, intervalMs, logFn } = {}
 
 /**
  * Send a chat completion request to ollama.
- * Returns the raw parsed response body.
- * Throws on network/HTTP error; caller handles parse errors.
+ * Returns the raw parsed response body, guaranteed to carry a `message`.
+ * Throws on network/HTTP error, and on a 200 whose body carries no completion
+ * (ollama reports some failures that way) so callers can destructure `message`.
  *
  * @param {{
  *   url?: string,
@@ -116,5 +117,13 @@ export async function chat({
     throw err;
   }
 
-  return res.json();
+  const completion = await res.json();
+  if (!completion?.message) {
+    const err = new Error(
+      `ollama returned no message: ${completion?.error ?? 'unrecognised body'}`,
+    );
+    err.code = 'OLLAMA_NO_MESSAGE';
+    throw err;
+  }
+  return completion;
 }

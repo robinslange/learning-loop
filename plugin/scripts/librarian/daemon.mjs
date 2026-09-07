@@ -17,7 +17,7 @@ import { loadLibrarianConfig } from './config.mjs';
 import { DB_PATH, VAULT_PATH } from '../lib/constants.mjs';
 import { openReadonly } from '../lib/sqljs.mjs';
 import { loadState, saveState, markVisited, pendingCount, expireStaleItems } from './queue.mjs';
-import { waitForOllama } from './ollama-client.mjs';
+import { waitForOllama, chat, DEFAULTS as OLLAMA_DEFAULTS } from './ollama-client.mjs';
 import { TOOL_DEFS, executeTool, extractModelProb } from './tools/index.mjs';
 import { logError, info } from '../lib/log.mjs';
 import {
@@ -138,26 +138,18 @@ export async function investigateNote(notePath, task, cfg, db, log) {
   const toolCtx = { neighbourScores: new Map(), modelProb: null };
 
   for (let turn = 0; turn < 8; turn++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 120000);
     try {
-      const res = await fetch(`${ollamaUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages,
-          tools: TOOL_DEFS,
-          options: { temperature: 0, num_predict: 1000 },
-          logprobs: true,
-          top_logprobs: 20,
-          keep_alive: cfg.keepAlive,
-          stream: false,
-        }),
-        signal: controller.signal,
+      const data = await chat({
+        url: ollamaUrl,
+        model,
+        messages,
+        tools: TOOL_DEFS,
+        options: { temperature: 0, num_predict: 1000 },
+        logprobs: true,
+        top_logprobs: 20,
+        keepAlive: cfg.keepAlive,
+        signalTimeoutMs: OLLAMA_DEFAULTS.investigateTimeoutMs,
       });
-      clearTimeout(timer);
-      const data = await res.json();
       const msg = data.message;
       messages.push(msg);
 
@@ -184,7 +176,6 @@ export async function investigateNote(notePath, task, cfg, db, log) {
         messages.push({ role: 'tool', content: result });
       }
     } catch (err) {
-      clearTimeout(timer);
       logError('daemon:turn' + turn, err, { notePath });
       break;
     }
