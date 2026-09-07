@@ -959,6 +959,92 @@ mod tests {
         }
     }
 
+    /// The scheme rule, isolated from the transport rule. `HubUrl::parse`
+    /// carries no policy, so a scheme it refuses is refused for being that
+    /// scheme — an `http://` endpoint that reached the parse and came back as
+    /// "not TLS" would be refused by `check_hub_scheme` for the right reason
+    /// and by accident.
+    #[test]
+    fn only_ws_and_wss_are_hub_schemes() {
+        for endpoint in ["http://hub.example", "https://hub.example", "ftp://hub.example"] {
+            let err = HubUrl::parse(endpoint).unwrap_err().to_string();
+            assert!(err.contains("scheme"), "{endpoint:?}: {err}");
+        }
+        assert!(HubUrl::parse("wss://hub.example").is_ok());
+        assert!(HubUrl::parse("ws://hub.example").is_ok(),
+            "positive control: the parse itself has no opinion about ws://");
+    }
+
+    /// `http::Uri` accepts an authority that is nothing but a port, and
+    /// reports its host as the empty string. `TcpStream::connect(("", 8443))`
+    /// is not an error worth showing anyone.
+    #[test]
+    fn an_authority_with_no_host_is_refused() {
+        let err = HubUrl::parse("wss://:8443/ws").unwrap_err().to_string();
+        assert!(err.contains("no host"), "{err}");
+    }
+
+    /// **The dialer reads the parse, not the operator's string.** That is what
+    /// D-1's fix is: two spellings of an endpoint are two chances to disagree
+    /// about the host, and the fingerprint the operator confirmed belongs to
+    /// only one of them.
+    ///
+    /// A fragment is the cheapest endpoint the two spellings render
+    /// differently — `http::Uri` drops it, appending `/ws` to the raw text
+    /// does not — so it is what tells a dial built from `ws_uri` apart from a
+    /// dial built by concatenation. The other rows are the ordinary ones, and
+    /// they are here so a `GET /ws` is not being read off a single lucky case.
+    #[tokio::test]
+    async fn the_socket_is_opened_at_the_url_the_parse_produced() {
+        let _env = super::super::test_hub::insecure_ws_env();
+        for suffix in ["", "/", "/ws", "/#tag"] {
+            let (request, authority) = dialed_request(suffix).await;
+            assert!(
+                request.starts_with("GET /ws HTTP/1.1"),
+                "endpoint suffix {suffix:?} must reach /ws, got: {request}",
+            );
+            assert!(
+                request.contains(&format!("Host: {authority}")),
+                "and name the parsed authority: {request}",
+            );
+        }
+    }
+
+    /// Dial a socket that records the upgrade request and hangs up. The
+    /// connection failing afterwards is expected and is not what this
+    /// measures.
+    ///
+    /// Bounded, because the interesting failure is a dial that goes somewhere
+    /// else entirely and never reaches this listener — which as a hang would
+    /// be indistinguishable from the suite being slow.
+    async fn dialed_request(endpoint_suffix: &str) -> (String, String) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let mut seen = String::new();
+            if let Ok((mut stream, _)) = listener.accept().await {
+                use tokio::io::AsyncReadExt;
+                let mut buf = vec![0u8; 2048];
+                if let Ok(n) = stream.read(&mut buf).await {
+                    seen = String::from_utf8_lossy(&buf[..n]).to_string();
+                }
+            }
+            let _ = tx.send(seen);
+        });
+
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.hub.endpoint = format!("ws://{addr}{endpoint_suffix}");
+        let seed = SigningKey::from_bytes(&[9u8; 32]);
+        let _ = connect_and_authenticate(&config, &seed, "peer", "model", None).await;
+
+        let request = tokio::time::timeout(Duration::from_secs(5), rx)
+            .await
+            .expect("the dial reached this listener within 5s")
+            .unwrap();
+        (request, addr.to_string())
+    }
+
     #[test]
     fn the_dial_url_carries_the_parsed_authority_and_gains_ws_once() {
         let ws_uri = |e: &str| HubUrl::parse(e).unwrap().ws_uri().unwrap().to_string();
