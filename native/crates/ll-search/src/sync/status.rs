@@ -21,7 +21,7 @@ use ed25519_dalek::VerifyingKey;
 
 use super::config::{config_path, load_config, FederationConfig};
 use super::key_id::KeyId;
-use super::state::{read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
+use super::state::{read_readable_vaults, read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
 use super::words::fingerprint;
 
 /// A successful sync older than this is called out. Seven days: long enough
@@ -60,6 +60,7 @@ pub fn render_status(config_dir: &Path, now: i64) -> anyhow::Result<String> {
         None => out.push_str(&row("last sync:", "no information — federation/sync-state.json is missing or unreadable. The next sync writes one.")),
         Some(state) => out.push_str(&sync_block(&state, now)),
     }
+    out.push_str(&read_authority_block(config_dir, now)?);
     out.push_str(FOOTER);
     Ok(out)
 }
@@ -161,6 +162,43 @@ fn sync_block(state: &SyncState, now: i64) -> String {
         )));
     }
     out
+}
+
+/// How old this machine's read authority is, and what that means for search.
+///
+/// **The one thing about federated reads a person cannot otherwise see.** The
+/// reader serves a cached peer index only while the hub's last list still
+/// names it and a live grant still covers it, and both of those are files.
+/// Neither shows up in a search result: a peer that drops out simply returns
+/// fewer rows.
+///
+/// A stale list is not an error and is not treated as one. There is no way to
+/// be both offline-capable and instantly revocation-correct, so the client
+/// keeps serving and says how old the answer is — the same choice the STALE
+/// verdict above makes about the sync itself, at the same threshold and for
+/// the same reason: a laptop shut for a long weekend stays quiet, and a
+/// months-old answer cannot hide.
+fn read_authority_block(config_dir: &Path, now: i64) -> anyhow::Result<String> {
+    let Some(listed) = read_readable_vaults(config_dir)? else {
+        return Ok(row("read auth:", 
+            "none — no cached peer index is searched. A machine that has never been told \
+             what it may read serves nothing, which is the safe direction. `ll sync` records it."));
+    };
+    let mut out = row("read auth:", &format!(
+        "{} vault(s), as the hub listed them at {}",
+        listed.vault_ids.len(),
+        utc_minute(listed.at),
+    ));
+    let age = listed.age(now);
+    if age >= STALE_AFTER_SECS {
+        out.push_str(&row("WARNING", &format!(
+            "federated search is being served on read authority {} days old. A vault the hub \
+             has stopped listing since then is still searchable here until the grant behind \
+             it expires. Run `ll sync`.",
+            age / 86_400,
+        )));
+    }
+    Ok(out)
 }
 
 /// What the hub was last known to hold.
@@ -884,5 +922,60 @@ mod tests {
         assert!(out.contains("no seed on this machine"), "got:\n{out}");
         assert!(!out.contains("RECOVERED"),
             "nothing to compare is not a disagreement; got:\n{out}");
+    }
+    /// The invisible property, made visible. A person whose peer results have
+    /// gone quiet has no other way to find out whether this machine still
+    /// believes it may read them.
+    #[test]
+    fn status_says_how_many_vaults_this_machine_may_read_and_when_it_was_told() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        crate::sync::state::write_readable_vaults(dir.path(),
+            &crate::sync::state::ReadableVaults {
+                at: 1_000,
+                vault_ids: vec!["v-a".into(), "v-b".into()],
+            }).unwrap();
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("read auth:"), "got:\n{out}");
+        assert!(out.contains("2 vault(s)"), "got:\n{out}");
+        assert!(!out.contains("WARNING"),
+            "a list a hundred seconds old is not a warning; got:\n{out}");
+    }
+
+    /// A stale list keeps serving — there is no way to be both
+    /// offline-capable and instantly revocation-correct — so the page says how
+    /// old the answer is instead of pretending the question does not exist.
+    /// Same threshold as the sync verdict, and for the same reason.
+    #[test]
+    fn a_read_authority_older_than_the_stale_threshold_is_called_out() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        crate::sync::state::write_readable_vaults(dir.path(),
+            &crate::sync::state::ReadableVaults { at: 1_000, vault_ids: vec!["v-a".into()] })
+            .unwrap();
+
+        let fresh = render_status(dir.path(), 1_000 + STALE_AFTER_SECS - 60).unwrap();
+        assert!(!fresh.contains("read authority"),
+            "one second inside the threshold is fine; got:\n{fresh}");
+
+        let out = render_status(dir.path(), 1_000 + 41 * 86_400).unwrap();
+        assert!(out.contains("read authority 41 days old"), "got:\n{out}");
+        assert!(out.contains("until the grant behind it expires"),
+            "the reader keeps serving; say what still bounds it; got:\n{out}");
+    }
+
+    /// No record is not a fresh record. A machine that has never been told
+    /// what it may read serves nothing, and the page must say that rather
+    /// than leaving the line blank or reading as healthy.
+    #[test]
+    fn a_machine_with_no_recorded_read_authority_says_it_searches_no_peer() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(out.contains("read auth:"), "got:\n{out}");
+        assert!(out.contains("no cached peer index is searched"), "got:\n{out}");
+        assert!(!out.contains("vault(s)"), "there is no count to give; got:\n{out}");
     }
 }
