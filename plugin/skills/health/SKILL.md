@@ -191,6 +191,29 @@ If `coverage_days` is null (no surfacing telemetry yet), skip this step silently
 **Light:** counts + top 5 of each list.
 **Deep:** full `surfaced_never_used` list with surfaced counts and explicit-ignore counts; `surfaced_unevaluated` count + top 5; `never_surfaced` count + first 20 paths.
 
+### Step 7.7: Check: Federation
+
+Skip silently unless `PLUGIN_DATA/federation/config.json` or
+`PLUGIN_DATA/vaults.json` exists. For each configured vault profile:
+
+```bash
+ll-search status --config-dir <config_dir>
+```
+
+Report one line per profile, and only when it has something to say — a healthy
+federation adds no row. The four that matter here:
+
+- **no `sync-state.json`** — configured, never completed a cycle. A failure,
+  not an unknown.
+- **`hub holds: nothing`** — the hub has no index for this vault; the next sync
+  re-uploads.
+- **`STALE`** — the last successful sync is more than seven days old.
+- **`BLOCKED`** — `ll-search sync` will refuse this config.
+
+Do not offer a fix here. `/learning-loop:doctor` carries the full federation
+section, including `ll-search link list` and what each verdict means; point at
+it and stop.
+
 ### Step 8: Present Dashboard
 
 Output the summary dashboard:
@@ -207,11 +230,12 @@ Vault Health: YYYY-MM-DD
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
   Retrieval usage: N surfaced-then-ignored, U unevaluated, M never retrieved by search in Kd of logs
+  Federation:      <one line per profile with a verdict, omitted entirely when healthy or unconfigured>
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
+Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 

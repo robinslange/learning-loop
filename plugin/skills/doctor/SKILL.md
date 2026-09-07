@@ -110,6 +110,64 @@ Manual-only fixes (user must run; doctor reports the command):
 - `plugin-cache-version-present` → `claude plugin install …`
 - `node-version`, `claude-version` → run install.sh or upgrade manually
 
+## Step 4.5: Federation checks
+
+`health-check.mjs` does not cover federation — it never opens the federation
+directory, so none of what follows appears in its JSON. Run these yourself, and
+only when a config exists. Skip the whole step silently on an install that has
+never federated.
+
+For each vault profile in `PLUGIN_DATA/vaults.json` — or the single legacy
+profile at `PLUGIN_DATA` itself when there is no registry — run:
+
+```bash
+ll-search status --config-dir <config_dir>
+```
+
+It reads local files only: no socket, no clock, no keyring beyond this
+machine's own seed. Nothing it prints can imply a check that did not run.
+
+Report each of these as a **failure**, never as "unknown":
+
+- **"no information — federation/sync-state.json is missing or unreadable"** —
+  federation is configured and no cycle has ever finished writing one. That is
+  a failure. The file is also the report a corrupt copy collapses into, so the
+  line cannot say which of the two it was; say both.
+- **`hub holds: nothing`** — as of that cycle the hub held no index for this
+  vault. The next sync re-uploads it. If it survives a successful sync, the hub
+  is degraded — check its `/health`. *This is the signature of the 2026-07
+  outage: the client was content, the hub was empty, and for two months nothing
+  said so.*
+- **`STALE`** — the last successful sync is older than seven days, or none has
+  ever succeeded. Show the age the line gives.
+- **`BLOCKED`** — `ll-search sync` will refuse this config. The two causes are
+  an unpinned `hub.key_id` and an endpoint that is not `wss://`.
+- **`RECOVERED`** — the seed and `config.json` name different keys, so the
+  `vault_id` and hub pin belong to a key this machine no longer has.
+- **`WARNING` on read auth** — federated search is being served on read
+  authority more than seven days old. A vault the hub has stopped listing is
+  still searchable here until the grant behind it expires.
+- **`WARNING` on refused grants** — the hub refused N grants that cycle. They
+  are still signed and still offered every sync, but retrying alone will not
+  change its answer.
+
+Then, for machines linked to this identity:
+
+```bash
+ll-search link list --config-dir <config_dir>
+```
+
+- **A grant expiring within 14 days** — grants renew on use, so an imminent
+  expiry means that machine has gone quiet. Name it by its six-word
+  fingerprint. This covers `link` grants only; `link list` filters to them, so
+  a `follow` about to lapse is not visible from here.
+- **`lodged: false`** — this machine signed its half and the hub has not taken
+  it. It takes effect on the next sync that reaches the hub.
+
+**None of these is auto-runnable.** `ll-search sync` is the fix for most of
+them and it uploads a person's notes, so offer it and never run it without
+consent.
+
 ## Step 5: Summary
 
 After all checks have been processed, print:
