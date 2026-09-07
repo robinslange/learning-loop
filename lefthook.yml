@@ -36,3 +36,13 @@ pre-commit:
     cargo-test:
       glob: "native/**"
       run: cargo test --workspace --quiet --manifest-path native/Cargo.toml
+
+    # `cargo test` builds no bench target, so nothing here compiled
+    # benches/index_reindex.rs and it sat broken from the commit that gave
+    # EmbedItem a `note_uuid` until somebody ran `cargo bench` by hand.
+    # `check` rather than `test --all-targets`: the latter would RUN a bench
+    # over ten thousand notes on every commit, and what rotted was the
+    # compile.
+    cargo-check-benches:
+      glob: "native/**"
+      run: cargo check --benches --workspace --quiet --manifest-path native/Cargo.toml
