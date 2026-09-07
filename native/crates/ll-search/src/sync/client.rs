@@ -271,6 +271,17 @@ pub async fn sync_all_async(
     outcome
 }
 
+/// Whether an export of `export_len` bytes fits in one frame the hub will
+/// accept (R12). The hub closes the connection on an inbound frame over
+/// `HUB_INBOUND_CAP`, so the export that would not fit is refused here, with
+/// its own error, rather than sent and hung up on.
+///
+/// The frame carries `ENVELOPE_HEADER_LEN` bytes in front of the export, and
+/// an export of exactly the remaining room fits.
+fn upload_fits(export_len: usize) -> bool {
+    export_len + ENVELOPE_HEADER_LEN <= HUB_INBOUND_CAP
+}
+
 pub(super) fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -287,8 +298,7 @@ async fn run_cycle(
 ) -> anyhow::Result<SyncResult> {
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
-    // Pre-flight upload size check (R12). Frame overhead is 36 bytes.
-    if prepared.bytes.len() + ENVELOPE_HEADER_LEN > HUB_INBOUND_CAP {
+    if !upload_fits(prepared.bytes.len()) {
         return Err(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP }.into());
     }
 
@@ -1315,6 +1325,118 @@ mod tests {
         let err = this_vault_state(&config, &[]).unwrap_err().to_string();
         assert!(err.contains("ll join"),
             "ambiguous scope fails loud and names the fix, never defaults or skips: {err}");
+    }
+
+    /// **D-6.** Six of the seven call sites pass `&[]`, where a fallback to
+    /// the first entry is `None` anyway, and the seventh supplies a list the
+    /// wanted vault is in. So a `this_vault_state` that answered from
+    /// whichever entry came first left the whole suite green — and the upload
+    /// decision, `hub_holds` and `sync-state.json` would all then be about
+    /// somebody else's vault.
+    #[test]
+    fn a_hub_that_lists_other_vaults_but_not_this_one_reports_nothing_for_it() {
+        let mut config = FederationConfig::test_fixture("private", vec![]);
+        config.vault_id = Some("v-mine".into());
+        let states = vec![
+            VaultState { vault_id: "v-someone-else".into(), holds: Some(held("theirs")) },
+            VaultState { vault_id: "v-another".into(), holds: Some(held("also-theirs")) },
+        ];
+
+        let (vault_id, this_vault) = this_vault_state(&config, &states).unwrap();
+        assert_eq!(vault_id, "v-mine");
+        assert!(this_vault.is_none(),
+            "the hub listed vaults, none of them this one — an entry that is not \
+             this vault's says nothing about this vault");
+        assert_eq!(upload_decision("whatever", this_vault), UploadDecision::Upload);
+        assert_eq!(hub_holds(this_vault), HubHolds::Nothing);
+    }
+
+    /// **D-8, both directions.** `if false` and `>` for `>=` each left the
+    /// whole suite green. The rule sits at one byte, so one test either side
+    /// of it is what says the rule is at that byte and not near it.
+    #[test]
+    fn an_export_fits_exactly_when_it_and_the_frame_header_reach_the_cap() {
+        let room = HUB_INBOUND_CAP - ENVELOPE_HEADER_LEN;
+        assert!(upload_fits(room), "an export filling the frame exactly is sendable");
+        assert!(!upload_fits(room + 1), "one byte more is not");
+        assert!(upload_fits(0));
+    }
+
+    /// **D-9.** An `IndexHeader` that holds something promises exactly one
+    /// binary frame. Returning a text frame's bytes as the payload instead
+    /// left the whole suite green: what arrives would then be parsed as a
+    /// SQLite index and fail somewhere else, or not fail at all.
+    #[tokio::test]
+    async fn a_text_frame_where_a_binary_one_was_promised_is_an_error() {
+        let addr = spawn_mock_hub(|mut ws| async move {
+            let _ = ws.send(Message::text("{\"type\":\"reject\"}")).await;
+            let _ = ws.next().await;
+        })
+        .await;
+        let mut ws = client_to(addr).await;
+
+        let err = recv_binary(&mut ws).await.unwrap_err();
+        assert!(matches!(err.downcast_ref::<SyncError>(), Some(SyncError::FrameKind)),
+            "the hub broke the one-binary-frame promise: {err}");
+    }
+
+    /// **D-10.** Dropping the dotfile skip left the whole suite green. The
+    /// watermark decides whether to re-export at all, so a `.obsidian` or a
+    /// `.trash` that the export itself never reads would make every sync
+    /// re-export for a change no exported note contains.
+    #[test]
+    fn the_export_watermark_ignores_dotfiles_and_dotted_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".obsidian")).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join(".obsidian/workspace.md"), "x").unwrap();
+        std::fs::write(root.join(".hidden.md"), "x").unwrap();
+
+        assert_eq!(max_md_mtime(root), 0,
+            "nothing here is a note the export would read");
+
+        std::fs::write(root.join("notes/real.md"), "x").unwrap();
+        assert!(max_md_mtime(root) > 0,
+            "positive control: an ordinary note in an ordinary directory does count, \
+             so the zero above is the skip and not an empty scan");
+    }
+
+    /// **D-10.** `prepare_export` re-exports when the vault has changed OR
+    /// when there is no export to send. Dropping the second clause left the
+    /// whole suite green here and reddened one timeout test in another binary
+    /// for an unrelated reason — the property has a name and this is it: a
+    /// deleted `federation/export.db` with the watermark still current would
+    /// otherwise fail every sync until someone touched a note.
+    #[tokio::test]
+    async fn a_missing_export_is_rebuilt_even_when_the_vault_has_not_changed() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("source.db");
+        let vault = dir.path().join("vault");
+        super::super::export::build_source_db(
+            &source,
+            Some("01926d7e-0000-7000-8000-00000000000a"),
+        );
+        super::super::export::public_vault_with_note(&vault);
+        let config = FederationConfig::test_fixture("private", vec![]);
+
+        let first = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(first.result.is_some(), "precondition: a cold config dir exports");
+        // The watermark is the upload's to write, and there is no hub here.
+        std::fs::write(
+            last_export_mtime_path(dir.path()),
+            first.current_max_mtime.to_string(),
+        )
+        .unwrap();
+        let again = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(again.result.is_none(),
+            "precondition: the watermark is current, so nothing else would re-export");
+
+        std::fs::remove_file(export_db_path(dir.path())).unwrap();
+        let rebuilt = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
+        assert!(rebuilt.result.is_some(),
+            "the watermark says the vault has not changed and there is still nothing \
+             to send; the export has to be rebuilt anyway");
     }
 
     #[test]

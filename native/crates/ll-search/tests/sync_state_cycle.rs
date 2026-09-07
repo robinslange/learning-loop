@@ -17,6 +17,7 @@ use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use ll_search::sync::client::sync_all_async;
+use ll_search::sync::error::SyncError;
 use ll_search::sync::config::{
     export_db_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig,
 };
@@ -1090,6 +1091,58 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
 
     assert!(result.refused_grants.is_empty());
     assert_eq!(read_state(dir.path()).unwrap().unwrap().refused_grants, Some(0));
+}
+
+/// **D-8's call site.** The two boundary tests in `sync::client` pin
+/// `upload_fits`; this pins the line that calls it. Disabling the pre-flight
+/// left the whole suite green, and what it costs is the difference between a
+/// named error and a hub that closes the connection mid-frame.
+///
+/// It needs no hub: the pre-flight runs before the seed is loaded and long
+/// before anything is dialled, which is the whole point of a pre-flight.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_export_too_big_for_one_frame_is_refused_before_the_hub_is_dialled() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_oversize_export(dir.path());
+
+    // Nothing listens here, so a cycle that got past the pre-flight would fail
+    // on the connection instead and say so.
+    let config = config_for(dir.path(), "127.0.0.1:1".parse().unwrap());
+    let err = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect_err("an export this size cannot be sent");
+
+    assert!(
+        matches!(err.downcast_ref::<SyncError>(), Some(SyncError::EnvelopeOversize { .. })),
+        "the size rule is what refused it, not a failed connection: {err}",
+    );
+}
+
+/// An export one byte past what a single frame can carry. `zeroblob` grows
+/// the file without this test materialising the bytes.
+fn place_oversize_export(config_dir: &Path) {
+    const CAP: usize = 50 * 1024 * 1024;
+    let path = export_db_path(config_dir);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(&format!(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+         INSERT INTO meta VALUES ('note_count', '{LOCAL_NOTE_COUNT}'),
+                                 ('schema_version', '2'), ('model_id', 'test-model');
+         CREATE TABLE pad (b BLOB);
+         INSERT INTO pad VALUES (zeroblob({CAP}));"
+    ))
+    .unwrap();
+    drop(conn);
+    assert!(std::fs::metadata(&path).unwrap().len() as usize > CAP,
+        "precondition: the export has to actually exceed the cap");
 }
 
 /// **Before the upload, not after.** `run_cycle` writes the hub's listing
