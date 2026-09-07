@@ -434,6 +434,21 @@ mod tests {
         assert_eq!(rows(dir.path()), 1);
     }
 
+    /// A `follow` is lodged `pending` and becomes active only once its `to`
+    /// key has decided. `fetch.rs` and `link.rs::reconcile` both refuse a row
+    /// the hub does not call active, and a store that kept one would hand a
+    /// later revocation something to resolve against that was never in force.
+    #[test]
+    fn a_grant_the_hub_does_not_call_active_is_not_stored() {
+        let me = id(&key(9));
+        let g = issue(&key(1), &me, GrantKind::Follow, Some("v-other"), LATER);
+        let pending = GrantWire { state: "pending".to_string(), ..wire(&g) };
+        let dir = tempfile::tempdir().unwrap();
+
+        assert_eq!(apply_grants(dir.path(), &[pending]).unwrap(), 0);
+        assert_eq!(rows(dir.path()), 0);
+    }
+
     /// The hub carries grants; it does not vouch for them.
     #[test]
     fn a_grant_whose_signature_does_not_check_out_is_not_stored() {
