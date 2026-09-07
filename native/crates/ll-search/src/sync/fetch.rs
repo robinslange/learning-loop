@@ -48,7 +48,7 @@ pub struct Fetched {
 /// Mirrors the hub's `authz::matching` with `want_authority = false`: `link`
 /// transfers full authority and so covers reading, `follow` and `peer`
 /// authorise reads and nothing more, and `assoc` authorises nothing at all.
-fn permits_read(kind: GrantKind) -> bool {
+pub(super) fn permits_read(kind: GrantKind) -> bool {
     kind.transfers_authority() || matches!(kind, GrantKind::Follow | GrantKind::Peer)
 }
 

@@ -258,7 +258,7 @@ pub struct StoredGrant {
 }
 
 impl StoredGrant {
-    fn signed(&self) -> anyhow::Result<SignedGrant> {
+    pub(super) fn signed(&self) -> anyhow::Result<SignedGrant> {
         Ok(SignedGrant {
             statement: B64.decode(&self.statement_b64).context("stored statement is not base64")?,
             signature: B64.decode(&self.signature_b64).context("stored signature is not base64")?,
@@ -292,7 +292,7 @@ pub fn load_grants(config_dir: &Path) -> anyhow::Result<Vec<StoredGrant>> {
 /// closure rather than before the call: the answer stops being true the
 /// moment another writer appends, and a check outside the lock is a check
 /// against a store that has already moved.
-fn update_grants<T>(
+pub(super) fn update_grants<T>(
     config_dir: &Path,
     f: impl FnOnce(&mut Vec<StoredGrant>) -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
@@ -304,7 +304,7 @@ fn update_grants<T>(
     Ok(out)
 }
 
-fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
+pub(super) fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
     StoredGrant {
         statement_b64: B64.encode(&g.statement),
         signature_b64: B64.encode(&g.signature),
@@ -312,7 +312,7 @@ fn stored(g: &SignedGrant, lodged: bool) -> StoredGrant {
     }
 }
 
-fn has_id(s: &StoredGrant, id: &str) -> bool {
+pub(super) fn has_id(s: &StoredGrant, id: &str) -> bool {
     s.signed().map(|sg| grant::grant_id(&sg.statement) == id).unwrap_or(false)
 }
 
