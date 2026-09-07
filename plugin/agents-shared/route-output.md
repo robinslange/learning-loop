@@ -36,7 +36,8 @@ Subagents cannot spawn subagents. Vault notes are written by the `note-writer` a
 For each `durable-insight`, first check if it is a **project artefact** rather than an atomic insight:
 
 ```bash
-node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/route-project-artefact.mjs').then(async m => { const vault = await m.readVaultProjectIndex(process.argv[2]); const r = m.routeArtefact(process.argv[1], vault); console.log(JSON.stringify(r)); })" "<proposed-filename>.md" "{{VAULT}}"
+eval "$(ll-paths --sh)"
+node -e "import('$PLUGIN/scripts/route-project-artefact.mjs').then(async m => { const vault = await m.readVaultProjectIndex(process.argv[2]); const r = m.routeArtefact(process.argv[1], vault); console.log(JSON.stringify(r)); })" "<proposed-filename>.md" "{{VAULT}}"
 ```
 
 If the result has a non-null `slug`, this insight is a project artefact (interview prep, client brief, evidence bundle, etc.) — its filename matches an existing project's slug in `4-projects/`. Route it to that subfolder instead of `0-inbox/`. Project artefacts are not atomic insights; they are working documents for a specific project.
@@ -50,7 +51,8 @@ For each `durable-insight`:
 
 1. Search for existing vault notes on the same topic using:
    ```bash
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<key terms>" --rerank
+   eval "$(ll-paths --sh)"
+   node "$PLUGIN/scripts/vault-search.mjs" search "<key terms>" --rerank
    ```
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
 3. If novel, add a worklist row with:

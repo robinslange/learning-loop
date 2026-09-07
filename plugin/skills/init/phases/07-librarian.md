@@ -115,7 +115,8 @@ Merge a `provider` block into the existing `librarian` config (don't overwrite s
 Confirm the provider resolves and answers (this hits the cloud API, so it costs a token or two):
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/librarian/verify.mjs <<'JSON'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/librarian/verify.mjs" <<'JSON'
 {"question":"is water wet?","claim":{"claim":"water is wet","quote":"water is wet","sourceUrl":"https://example.com","sourceQuality":"reliable"}}
 JSON
 ```

@@ -39,7 +39,7 @@ Check that `librarian.enabled` is `true` in your config, ollama is running (`oll
 
 ## `ll-search: command not found`
 
-Both `ll-watch` and `ll-search` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
+`ll-watch`, `ll-search` and `ll-paths` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
 
 ## Episodic memory not available
 

@@ -69,7 +69,8 @@ Add `status: intentioned | resolved | limbo` to each note's frontmatter via `Edi
 Run semantic clustering:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs cluster --threshold 0.72
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/vault-search.mjs" cluster --threshold 0.72
 ```
 
 Filter to clusters containing at least one inbox note. Supplement with tag overlap: notes sharing 2+ tags that weren't caught by embeddings belong in the same cluster.
@@ -113,11 +114,12 @@ For each note, assign one action:
 Before any `mv` to `3-permanent/`, run the programmatic gate that wraps both the 6-criterion check and the source-resolver verify-note pass:
 
 ```bash
-node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/promotion-gate.mjs').then(async m => { \
+eval "$(ll-paths --sh)"
+node -e "import('$PLUGIN/scripts/promotion-gate.mjs').then(async m => { \
   const note = { /* path, body, frontmatter, gateCriteria from this batch */ }; \
   const verifier = async (n) => { \
     const { execFileSync } = await import('node:child_process'); \
-    const out = execFileSync('node', ['${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs', 'verify-note', n.path], { encoding: 'utf-8' }); \
+    const out = execFileSync('node', ['$PLUGIN/scripts/source-resolver.mjs', 'verify-note', n.path], { encoding: 'utf-8' }); \
     const parsed = JSON.parse(out); \
     const high = (parsed.sources || []).flatMap(s => s.issues || []).filter(i => i.severity === 'high'); \
     return { highSeverityIssues: high.length, warnings: high.map(i => i.reason || i.type + ': claimed ' + i.claimed + (i.actual_first || i.actual ? ', actual ' + (i.actual_first || i.actual) : '')) }; \
@@ -132,7 +134,8 @@ The wrapper short-circuits when promote-gate already routes to fleeting/inbox, a
 Then emit a `verify` provenance event so the same flow appears in /health --provenance:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
 ```
 
 Counter-arguments get promoted like any other note (quality determines folder) but also get bidirectional links added per the counter-argument-linking skill.
@@ -294,7 +297,8 @@ Fleeting: [A] archival candidates returned, [D] need /deepen, [F] active notes r
 After completing inbox processing, emit a triage summary:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"resolved_skipped":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"inbox_archival_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"fleeting_needs_deepen":N}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"resolved_skipped":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"inbox_archival_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"fleeting_needs_deepen":N}'
 ```
 
 Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows), `merge_candidates` = [Wm]. Executed-counts (rewrites done, merges done) belong to the skill's session-end event, not this payload.

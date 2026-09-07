@@ -227,11 +227,14 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // fence that builds the reflect scratch prefix must resolve its own paths
       // — a hardcoded or inherited session id / scratch dir re-splits the
       // hook/shell handshake for exactly the steps that fence drives. The
-      // canonical resolver is one `eval "$(resolve-paths.mjs --sh)"` per fence,
-      // which exports SESSION_ID + REFLECT_SCRATCH (among others) from a single
-      // spawn; the prefix is then built from those.
+      // canonical resolver is one `eval "$(ll-paths --sh)"` per fence, which
+      // exports SESSION_ID + REFLECT_SCRATCH (among others) from a single
+      // spawn; the prefix is then built from those. It goes through the PATH
+      // shim rather than naming resolve-paths.mjs by path, because a step file
+      // is Read rather than loaded and `${CLAUDE_PLUGIN_ROOT}` would arrive
+      // unsubstituted — which is how this fence silently resolved to `/`.
       const PREFIX = '${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect';
-      const SH_RESOLVER = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh';
+      const SH_RESOLVER = 'eval "$(ll-paths --sh)"';
       let found = 0;
       for (const { file, path } of [
         { file: 'SKILL.md', path: SKILL_PATH },
@@ -263,7 +266,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // the marker again and Step 4.6 refinement goes quiet.
       assert.match(
         skill,
-        /LL_REFLECT_SID="\$SESSION_ID"\s+node\s+"\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/sweep-hook-replay\.mjs"/,
+        /LL_REFLECT_SID="\$SESSION_ID"\s+node\s+"\$PLUGIN\/scripts\/sweep-hook-replay\.mjs"/,
         'Step 4.4 must invoke sweep-hook-replay.mjs with LL_REFLECT_SID="$SESSION_ID" so ' +
           'replayed sub-agent writes append to the calling session marker.',
       );
@@ -280,7 +283,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       const fence = extractFence(readFileSync(SKILL_PATH, 'utf8'), '--scan-vault "$VAULT"');
       assert.ok(fence, 'could not find the Step 4.4 --scan-vault bash fence');
       assert.ok(
-        fence.body.includes('node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh'),
+        fence.body.includes('eval "$(ll-paths --sh)"'),
         'the Step 4.4 --scan-vault fence must resolve $VAULT/$SESSION_ID via ' +
           'resolve-paths.mjs --sh in its own shell — a dropped resolver silently ' +
           'unresolves the sweep and breaks the marker handshake + LL_REFLECT_SID routing.',
@@ -335,7 +338,7 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // REFLECT_SCRATCH mirrors reflectScratchDir()); the hook calls those
       // directly. Pin the exact snippet so a future edit can't drop back to
       // `cat`-ing the id file under an env-dependent path.
-      const snippet = 'node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh';
+      const snippet = 'eval "$(ll-paths --sh)"';
       assert.ok(
         skill.includes(snippet),
         'expected the canonical resolve-paths.mjs --sh resolver snippet somewhere in the reflect skill',

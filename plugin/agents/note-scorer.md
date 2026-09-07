@@ -144,7 +144,8 @@ Why this is deep: Falsifiable claim (specificity 2): "negative definition is a c
 After scoring all notes, emit a summary event:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"note-scorer","action":"batch-score","notes_scored":N,"tiers":{"shallow":N,"medium":N,"deep":N},"actions":{"deepen":N,"promote":N,"split":N,"merge":N,"source-attach":N}}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"note-scorer","action":"batch-score","notes_scored":N,"tiers":{"shallow":N,"medium":N,"deep":N},"actions":{"deepen":N,"promote":N,"split":N,"merge":N,"source-attach":N}}'
 ```
 
 ## Rules

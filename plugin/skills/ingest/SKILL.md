@@ -107,7 +107,8 @@ Text:
 Generate a structured profile of the repo via cheap Bash. The output drives the depth gate in Step 2.3.
 
 ```bash
-PROFILE_JSON=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-profile.mjs" "{repo_path}")
+eval "$(ll-paths --sh)"
+PROFILE_JSON=$(node "$PLUGIN/scripts/ingest-profile.mjs" "{repo_path}")
 PROFILE_PATH="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-profile.json"
 echo "$PROFILE_JSON" > "$PROFILE_PATH"
 ```
@@ -137,13 +138,15 @@ If `--deep` flag was passed: skip the gate, set `TIER=parallel`, `REASON="--deep
 Else: spawn a `general-purpose` Task subagent with the gate prompt:
 
 ```bash
-GATE_PROMPT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-depth-gate.mjs" build-prompt "$PROFILE_JSON")
+eval "$(ll-paths --sh)"
+GATE_PROMPT=$(node "$PLUGIN/scripts/ingest-depth-gate.mjs" build-prompt "$PROFILE_JSON")
 ```
 
 Pass the prompt verbatim, instruct the agent to use Haiku-class reasoning and return only the JSON. Then parse:
 
 ```bash
-GATE_RESULT=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-depth-gate.mjs" parse-response "<agent text>")
+eval "$(ll-paths --sh)"
+GATE_RESULT=$(node "$PLUGIN/scripts/ingest-depth-gate.mjs" parse-response "<agent text>")
 TIER=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin)['tier'])")
 REASON=$(echo "$GATE_RESULT" | python3 -c "import json,sys;print(json.load(sys.stdin)['reason'])")
 ```
@@ -164,19 +167,22 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 1. Compute slug:
    ```bash
+   eval "$(ll-paths --sh)"
    ORIGIN_URL=$(git -C "{repo_path}" remote get-url origin 2>/dev/null || echo "")
-   SLUG=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/ingest-slug.mjs" "{repo_path}" "$ORIGIN_URL")
+   SLUG=$(node "$PLUGIN/scripts/ingest-slug.mjs" "{repo_path}" "$ORIGIN_URL")
    ```
 
 2. Resolve vault root and create staging directory:
    ```bash
-   VAULT_ROOT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
+   eval "$(ll-paths --sh)"
+   VAULT_ROOT=$(node -e "import('$PLUGIN/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
    mkdir -p "${VAULT_ROOT}/_ingested-repos/${SLUG}"
    ```
 
 3. Write defense-in-depth policy file (no-op if hooks don't fire on subagents - see plan probe outcome 2026-05-15):
    ```bash
-   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.writePolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID, { vault_root: '${VAULT_ROOT}', ingested_repo_slug: '${SLUG}', allowed_bash_prefixes: ['ygrep ', 'ygrep index ', 'git log', 'git rev-parse', 'git status', 'ls ', 'find ', 'grep ', 'wc ', 'cat '], allowed_write_dir_prefix: '_ingested-repos/${SLUG}/', expires_at_seconds: 1800 }))"
+   eval "$(ll-paths --sh)"
+   node -e "import('$PLUGIN/scripts/ingest-policy.mjs').then(m => m.writePolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID, { vault_root: '${VAULT_ROOT}', ingested_repo_slug: '${SLUG}', allowed_bash_prefixes: ['ygrep ', 'ygrep index ', 'git log', 'git rev-parse', 'git status', 'ls ', 'find ', 'grep ', 'wc ', 'cat '], allowed_write_dir_prefix: '_ingested-repos/${SLUG}/', expires_at_seconds: 1800 }))"
    ```
 
 4. Snapshot vault git status (post-fanout audit baseline):
@@ -203,8 +209,9 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 7. Run post-fanout audit:
    ```bash
+   eval "$(ll-paths --sh)"
    SUCCESSFUL_FOCUSES_JSON='["stack","arch","conventions","domain"]'  # filter to status=ok
-   AUDIT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-postfanout-audit.mjs').then(m => console.log(JSON.stringify(m.auditPostFanout('${VAULT_ROOT}', '${SLUG}', $SUCCESSFUL_FOCUSES_JSON))))")
+   AUDIT=$(node -e "import('$PLUGIN/scripts/ingest-postfanout-audit.mjs').then(m => console.log(JSON.stringify(m.auditPostFanout('${VAULT_ROOT}', '${SLUG}', $SUCCESSFUL_FOCUSES_JSON))))")
    ```
    Parse `AUDIT.ok`. If false: surface to user, log to provenance.
 
@@ -245,7 +252,8 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 
 13. Clear policy file:
     ```bash
-    node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID))"
+    eval "$(ll-paths --sh)"
+    node -e "import('$PLUGIN/scripts/ingest-policy.mjs').then(m => m.clearPolicy(process.env.CLAUDE_PLUGIN_DATA, process.env.CLAUDE_CODE_SESSION_ID))"
     ```
 
 14. Pass the synthesizer's `confirmed_insights` array to Step 3 (existing preview flow). It uses the same item schema as `extract-insights`, so preview and route-output need no deep-mode special-casing.
@@ -255,7 +263,8 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 Append a run entry at the start of Step 5.5 — every ingest path reaches that step, including memory-only runs whose vault worklist is `none` (those skip Step 5a entirely) — or on any abort path:
 
 ```bash
-node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
+eval "$(ll-paths --sh)"
+node -e "import('$PLUGIN/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
 ```
 
 ### Step 3: Preview
@@ -314,8 +323,9 @@ When the fan-out completes, reconcile before replaying: match each insight row t
 Then replay the PostToolUse hook chain on every path note-writer reported — subagent Writes bypass it (see `skills-shared/hook-replay.md`, targeted variant). If a row's worklist destination and note-writer's reported path disagree, use the reported path:
 
 ```bash
+eval "$(ll-paths --sh)"
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
-  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
 Surface any `failures` from the JSON summary in Step 6.
@@ -343,8 +353,9 @@ Step 5a's note-writer agents report their written paths, but the routing subagen
 All temp files in 5.6 use a session-keyed prefix so parallel `/ingest` invocations don't race. Each bash block re-derives the same paths from `$CLAUDE_CODE_SESSION_ID` (stable across the session); when passing paths into agent prompts or other tools, substitute the resolved literal value.
 
 ```bash
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
-VAULT_ROOT=$(node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
+VAULT_ROOT=$(node -e "import('$PLUGIN/scripts/lib/config.mjs').then(m => console.log(m.getVaultPath()))")
 REPO_ROOT=$(git -C "$VAULT_ROOT" rev-parse --show-toplevel)
 VAULT_REL=$(node -e "const p=require('path'); console.log(p.relative(process.argv[1], process.argv[2]))" "$REPO_ROOT" "$VAULT_ROOT")
 cd "$REPO_ROOT"
@@ -361,15 +372,17 @@ If the file is empty, skip the rest of 5.6 and report `Refinement: 0 new notes f
 #### 5.6.b: Build candidate pairs (capped)
 
 ```bash
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
+node "$PLUGIN/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
 If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation, which has no batch cap: reflect's Step 4.6 gate fires whenever this queue is non-empty, even in a session that wrote no vault notes (see `skills/reflect/steps/refinement.md` 4.6.a).
 
 ```bash
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
-DATA_DIR="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
+DATA_DIR="$PLUGIN_DATA"
 mkdir -p "$DATA_DIR"
 CLAUDE_PLUGIN_DATA="$DATA_DIR" LL_PAIRS_PATH="${LL_TMP_PREFIX}-refinement-pairs.json" python3 - <<'PY'
 import json, os

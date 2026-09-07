@@ -16,7 +16,8 @@ Only list items that are actually needed. After confirmation, run sequentially.
 ## 3a: Binary Download
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/download-binary.mjs
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/download-binary.mjs"
 ```
 
 Detects the platform and downloads the correct binary from GitHub releases. Extracts to `PLUGIN_DATA/bin/`, sets executable permission, writes `.version`. Skips if the installed version already matches.
@@ -44,15 +45,17 @@ Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` to build the sea
 ## 3d: Install CLI shims
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/install-shims.mjs --install
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/install-shims.mjs" --install
 ```
 
-Writes two stable shims to `~/.local/bin/`:
+Writes three stable shims to `~/.local/bin/`:
 
 - `ll-watch`: resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
 - `ll-search`: resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
+- `ll-paths`: same cache resolution as `ll-watch`, exec'ing `scripts/resolve-paths.mjs`. It is how a Bash block gets `PLUGIN`, `PLUGIN_DATA` and `VAULT` without an environment set up first — `eval "$(ll-paths --sh)"` — which is what every block outside a `SKILL.md` uses, since nothing substitutes `${CLAUDE_PLUGIN_ROOT}` into those.
 
-Both shims survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node ${CLAUDE_PLUGIN_ROOT}/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
+All three survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node ${CLAUDE_PLUGIN_ROOT}/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
 
 ## 3e.5: Optional - ygrep (local indexed code search)
 

@@ -9,10 +9,10 @@ When a new vault note touches a claim already in the vault, the existing claim s
 Each refinement.md bash block runs in its own shell (variables do not persist across Bash tool calls), so resolve the paths once at the top of the block with `--sh` — one spawn for all of SESSION_ID/REFLECT_SCRATCH/PLUGIN_DATA, not three:
 
 ```bash
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 if [ -s "${LL_TMP_PREFIX}-new-notes.txt" ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
+  node "$PLUGIN/scripts/refinement-candidates.mjs" --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 else
   printf '[]' > "${LL_TMP_PREFIX}-refinement-pairs.json"
 fi
@@ -23,7 +23,7 @@ The marker can be missing or empty on a drain-only run (Step 4.6 fired because t
 Then drain the deferred queue left by a capped `/ingest --refine` run (ingest Step 5.6.b writes overflow pairs there as JSONL). Merge queued pairs into the pairs file, dedupe on `(new_note, candidate)`, reassign ids (the validator matches decisions to pairs by `id`; deferred entries carry stale ids from their original run), and truncate the queue:
 
 ```bash
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 DEFERRED="$PLUGIN_DATA/refinement-deferred.jsonl"
 if [ -s "$DEFERRED" ]; then
@@ -67,9 +67,9 @@ Capture the agent's stdout response. Write it to `${LL_TMP_PREFIX}-refinement-ag
 ## 4.6.c: Validate
 
 ```bash
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
+node "$PLUGIN/scripts/refinement-validate.mjs" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-pairs.json" > "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
 The validator strips em-dashes, computes sentence delta, rejects any edit that drops or rewrites an original sentence (`sentences_removed` flag), and tags each decision with status `ok`, `oversized_warning`, or `auto_rejected`. The cleaned proposed bodies replace the agent's originals. Each edit decision also carries `validation.upstream_hash`, the sha256 of the upstream file as the validator read it, which 4.6.e uses as a stale-read guard.
@@ -132,7 +132,8 @@ For each decision in the approved set:
 For each applied refinement:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"refinement-proposer","skill":"reflect","action":"refinement-applied","target":"<upstream-path>","new_note":"<new-note-path>","subtype":"<edit_subtype>","cosine":<cosine>}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"refinement-proposer","skill":"reflect","action":"refinement-applied","target":"<upstream-path>","new_note":"<new-note-path>","subtype":"<edit_subtype>","cosine":<cosine>}'
 ```
 
 For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"` or `reason: "sentences_removed"` per the validation flag. For edits skipped by the 4.6.e stale-read guard emit `action: "refinement-skipped"` with `reason: "stale"`.
@@ -140,7 +141,7 @@ For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `
 ## 4.6.g: Cleanup
 
 ```bash
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 
 # Strip the transient reflect_sid stamp from every note this session tracked
@@ -150,7 +151,7 @@ LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 # starting with reflect_sid: is left intact), idempotent, and write-only-if-
 # changed; it skips missing paths. One node pass for the whole list.
 if [ -f "${LL_TMP_PREFIX}-new-notes.txt" ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/strip-reflect-sid.mjs" --stdin < "${LL_TMP_PREFIX}-new-notes.txt"
+  node "$PLUGIN/scripts/strip-reflect-sid.mjs" --stdin < "${LL_TMP_PREFIX}-new-notes.txt"
 fi
 
 rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"

@@ -3,7 +3,8 @@
 Run the health-check library, which is the single source of truth used by `/learning-loop:doctor` and the session-start detector:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/health-check.mjs" --full --json
 ```
 
 Parse the JSON. Each result has `id`, `name`, `status`, `severity`, `detail`, `fix`.
@@ -11,7 +12,8 @@ Parse the JSON. Each result has `id`, `name`, `status`, `severity`, `detail`, `f
 Also write the result as the shared cache for future session-start detector runs:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/health-check.mjs" --full --json > <PLUGIN_DATA>/last-health.json
 ```
 
 Now render the dashboard, mapping each check id to its dashboard row. Use these mappings:
@@ -72,7 +74,7 @@ Learning Loop Setup
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   AGENTS.md:     ~/.codex/AGENTS.md (learning-loop section present)
   Librarian:     [status]
-  Shims:         ll-watch installed, ll-search installed (watcher not running)
+  Shims:         ll-watch, ll-search, ll-paths installed (watcher not running)
 
 Everything looks good. Nothing to set up.
 ```

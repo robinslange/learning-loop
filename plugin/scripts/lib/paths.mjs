@@ -6,6 +6,18 @@ export function home() {
   return env.HOME || env.USERPROFILE || homedir();
 }
 
+/**
+ * The CLI shims `install-shims.mjs` writes into `~/.local/bin`, in one place.
+ *
+ * Three consumers need this list and they need the SAME list: the installer
+ * that writes them, the health check that reports them missing, and the
+ * SessionStart hook that decides whether to re-run the installer. That hook is
+ * why the list cannot be copied — it re-runs the installer only when a shim it
+ * knows about is absent, so a shim added to the installer alone is one every
+ * existing install already has enough of the others to never receive.
+ */
+export const SHIM_NAMES = ['ll-watch', 'll-search', 'll-paths'];
+
 // Encode a project directory into its ~/.claude/projects/<slug> segment.
 // Claude Code replaces every path separator AND every '.' and ':' with '-',
 // so /Users/x/.claude/p -> -Users-x--claude-p and C:\Users\x -> C--Users-x.

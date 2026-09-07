@@ -54,8 +54,9 @@ This is a capture, not a promotion: leave `destination_locked` unset so a genuin
 The note-writer is a subagent. Its Write call bypassed PostToolUse, so backlinks and edge inference didn't run. Replay them on the **exact path the agent reported** (the gate may have routed the note to a folder other than `0-inbox/`; a reconstructed `0-inbox/<filename>` path would point at a nonexistent file and the replay would silently fail):
 
 ```bash
+eval "$(ll-paths --sh)"
 printf '%s\n' "$NOTE_PATH" \
-  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
 Where `$NOTE_PATH` is the absolute path built from the `Written:` line in the agent's response — never reconstructed from the requested destination. See `skills-shared/hook-replay.md` for context.

@@ -92,13 +92,20 @@ test('no PLUGIN/ placeholder remains in agents/ or skills/ (M15)', () => {
     readFileSync(join(ROOT, rel), 'utf8')
       .split('\n')
       .forEach((line, i) => {
-        if (line.includes('PLUGIN/')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
+        // `$PLUGIN/` and `${PLUGIN}/` are the shell variable `ll-paths --sh`
+        // sets, and are the required form inside a Bash block. What stays
+        // banned is a BARE `PLUGIN/` prefix: nothing substitutes that, in any
+        // context. Matching both would ban the fix for the bug this lint's
+        // own advice caused.
+        const bare = line.replace(/\$\{?PLUGIN\}?\//g, '');
+        if (bare.includes('PLUGIN/')) offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
       });
   }
   assert.deepEqual(
     offenders,
     [],
-    'use ${CLAUDE_PLUGIN_ROOT}/ (see agents-shared/vault-io.md Placeholders)',
+    'in prose use ${CLAUDE_PLUGIN_ROOT}/; in a Bash block use "$PLUGIN/" after ' +
+      'eval "$(ll-paths --sh)" (see agents-shared/vault-io.md Placeholders)',
   );
 });
 

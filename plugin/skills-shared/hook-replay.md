@@ -16,11 +16,11 @@ The pattern has two parts:
 2. **Unlinked-body backfill.** Walk the vault for markdown files whose bodies contain no `[[wikilinks]]` and append those. This catches stragglers from earlier sessions and notes written outside any reporting contract. Works regardless of git state.
 
 ```bash
-# Resolve vault path from config. The ll-search shim (~/.local/bin/ll-search,
-# installed by /init or the SessionStart hook) handles binary location and ORT
-# env vars itself.
-PLUGIN_DATA="${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}"
-LL_VAULT="$(node -e "const c=JSON.parse(require('fs').readFileSync(process.argv[1]+'/config.json','utf-8'));console.log(c.vault_path.replace(/^~/,require('os').homedir()))" "$PLUGIN_DATA")"
+# PLUGIN, PLUGIN_DATA and VAULT come from the shim. The ll-search shim
+# (~/.local/bin/ll-search, installed alongside it) handles binary location and
+# ORT env vars itself.
+eval "$(ll-paths --sh)"
+LL_VAULT="$VAULT"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
 ll-search index "$LL_VAULT" "$LL_VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
@@ -57,7 +57,7 @@ sort -u "$SWEEP_CANDIDATES" | grep -v '<' > "${SWEEP_CANDIDATES}.dedup" || true
 mv "${SWEEP_CANDIDATES}.dedup" "$SWEEP_CANDIDATES"
 
 if [ -s "$SWEEP_CANDIDATES" ]; then
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
+  node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
 fi
 rm -f "$SWEEP_CANDIDATES"
 ```
@@ -90,8 +90,9 @@ Same root-resolution pattern as `/ingest` Step 5.6.a. If the vault is not a git 
 When a skill already knows which notes the subagent wrote (e.g., `note-writer` returned a filename), pipe those paths directly. Skips the walk and runs unconditionally.
 
 ```bash
+eval "$(ll-paths --sh)"
 printf '%s\n' "$NOTE_PATH_1" "$NOTE_PATH_2" \
-  | node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" --stdin
+  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
 ```
 
 Use this when the skill's only writes are the paths in hand and no backfill is wanted.
