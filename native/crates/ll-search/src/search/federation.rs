@@ -61,9 +61,19 @@ pub fn discover_peer_dbs_for(
 /// a *matching local grant* names and after a recovery no grant matches.
 ///
 /// Asking the grant store instead makes an orphaned cache invisible without
-/// being deleted, and demotes deletion to disk hygiene. It also fails closed:
-/// no identity, no readable store, or no live grant all end in nothing served.
-/// [`ReadAuthority`] documents the case it does not close.
+/// being deleted, and demotes deletion to disk hygiene. It fails closed on
+/// absence: no identity, no readable store, or no live grant all end in
+/// nothing served.
+///
+/// **It does not fail closed in general, and the steady state is the case it
+/// misses.** An unscoped grant covers every vault, a `link` is unscoped, and
+/// `link.rs::reconcile` stores a `link` addressed to this key for every
+/// machine that has ever linked to it — so on a linked machine one row covers
+/// every directory here and nothing is filtered out. This is a narrowing, not
+/// an authorization boundary, and the next person to read it needs to know
+/// that before they treat spec:334 as satisfied. The predicate that closes it
+/// is the hub's `vault_state`; [`ReadAuthority`] carries the argument for why
+/// persisting that is safe, and what a stale copy of it has to do.
 ///
 /// Nothing here reads the seed unless there is a cache to decide about. A
 /// keyring read can prompt on macOS, and a query on a machine with no cached
@@ -99,6 +109,8 @@ pub fn discover_peer_dbs(
 
     let mut peers = Vec::new();
     for peer_id in cached {
+        // Not "is this read authorized" — see `ReadAuthority`. On a linked
+        // machine an unscoped `link` says yes to every id that reaches here.
         if !authority.covers(&peer_id) {
             eprintln!(
                 "Peer {peer_id}: no live grant covers this cache, so it is not searched. \

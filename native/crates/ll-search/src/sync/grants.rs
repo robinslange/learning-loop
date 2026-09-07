@@ -61,17 +61,39 @@ fn covers(st: &GrantStatement, me: &KeyId, vault_id: &str) -> bool {
 /// per candidate would let it change mid-sweep, and half a sweep against each
 /// of two stores is an answer neither of them gave.
 ///
-/// **What it does not close.** `covers` answers true for every vault when the
-/// grant is unscoped, and `link.rs::reconcile` mints a reciprocal `link` for
-/// every inbound one — so a machine that has ever been linked holds a live
-/// unscoped grant addressed to itself, and that single row covers every
-/// directory under `peers/`. On such a machine this filter passes everything.
-/// It still closes the three cases where there is no such row: a machine with
-/// no grant store, a machine whose grants all name the identity a recovery
-/// replaced, and a withdrawn `link` that was the only grant — the last being
-/// the one an unscoped revocation deliberately deletes nothing for. The
-/// version that fails closed everywhere needs the hub's `vault_state`, which
-/// names precisely the vaults this key may read and is not persisted.
+/// # This does not authorize reads. It narrows them, and here is the gap.
+///
+/// **On a machine that has ever been linked, this filter passes everything.**
+/// `covers` answers true for every `vault_id` when the grant is unscoped;
+/// a `link` is unscoped; and `link.rs::reconcile` mints a reciprocal `link`
+/// for every inbound one, storing the inbound half too — which is a row with
+/// `to == me` and `scope: None`. One such row covers every directory under
+/// `peers/`. Multi-machine is the normal case for this feature, so the normal
+/// case is a no-op. Do not read this type as "reads are now authorized".
+///
+/// **The same gap sits one layer down in [`withdraw`]**, which keeps a cache
+/// whenever `remaining` holds anything `covers` says yes to. So revoking a
+/// scoped `follow` while any live link stands deletes nothing *and* filters
+/// nothing. Both layers are approximating one fact neither of them has —
+/// which vaults an issuer actually owns — and they will stop approximating
+/// together or not at all.
+///
+/// **What it does close**, all three by there being no covering row at all:
+/// a machine with no grant store; a machine whose grants every one name the
+/// identity a recovery replaced (`to == me` matches nothing, and the deletion
+/// path could never have reached those caches); and a withdrawn `link` that
+/// was the only grant, which is the case an unscoped revocation deliberately
+/// deletes nothing for.
+///
+/// **The honest predicate is the hub's `vault_state`**, which names precisely
+/// the vaults this key may read and which `fetch.rs` already derives its read
+/// list from. It is not persisted, so the reader cannot ask it yet. Filtering
+/// on it would not be a new trust assumption: a cache exists on this disk only
+/// because the hub listed that vault and served its index, so the hub's latest
+/// list is the same authority that produced the cache, not a weaker one. It
+/// belongs in conjunction with this predicate rather than instead of it — the
+/// list bounds an unscoped grant to vaults the hub actually named, and grant
+/// expiry bounds a list this machine has been too long offline to refresh.
 pub struct ReadAuthority {
     me: KeyId,
     live: Vec<GrantStatement>,
