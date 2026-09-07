@@ -1380,11 +1380,23 @@ mod tests {
             "a refused recovery must leave the identity it refused to replace exactly as it was");
     }
 
-    /// Plant the hub's last answer about what this key may read.
-    fn list_one_readable_vault(dir: &Path) {
+    /// Plant the hub's last answer about what `owner` may read.
+    ///
+    /// `owner` rather than the seed in `dir`, because one caller plants a
+    /// listing on a machine holding no readable seed at all — which is the
+    /// case that proves an identity existed when the cycle wrote it, not that
+    /// the identity is still here.
+    fn list_one_readable_vault(dir: &Path, owner: &[u8; 32]) {
+        use ed25519_dalek::SigningKey;
         ll_search::sync::state::write_readable_vaults(
             dir,
-            &ll_search::sync::state::ReadableVaults { at: 1, vault_ids: vec!["v-peer".into()] },
+            &ll_search::sync::state::ReadableVaults {
+                me: ll_search::sync::key_id::KeyId::from_pubkey(
+                    &SigningKey::from_bytes(owner).verifying_key(),
+                ),
+                at: 1,
+                vault_ids: vec!["v-peer".into()],
+            },
         )
         .unwrap();
     }
@@ -1408,7 +1420,7 @@ mod tests {
     #[test]
     fn a_recovery_leaves_no_read_authority_for_any_reader() {
         let dir = seeded_dir([7u8; 32]);
-        list_one_readable_vault(dir.path());
+        list_one_readable_vault(dir.path(), &[7u8; 32]);
         // The dangerous state has to be reachable, or the assertion below
         // passes against a file that was never written.
         assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
@@ -1429,7 +1441,7 @@ mod tests {
     #[test]
     fn recovering_the_identity_already_here_keeps_the_listing() {
         let dir = seeded_dir([7u8; 32]);
-        list_one_readable_vault(dir.path());
+        list_one_readable_vault(dir.path(), &[7u8; 32]);
 
         let phrase = ll_search::sync::words::recovery_phrase(&[7u8; 32]).unwrap();
         recover(dir.path(), &phrase, false).unwrap();
@@ -1457,7 +1469,7 @@ mod tests {
     fn a_listing_with_no_readable_seed_behind_it_is_dropped_too() {
         pin_file_backend();
         let dir = tempfile::tempdir().unwrap();
-        list_one_readable_vault(dir.path());
+        list_one_readable_vault(dir.path(), &[7u8; 32]);
         assert!(a_listing_is_here(dir.path()), "the fixture must plant a readable listing");
         assert!(
             ll_search::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
@@ -1507,7 +1519,7 @@ mod tests {
     #[test]
     fn a_refused_recovery_leaves_the_listing_where_it_was() {
         let dir = seeded_dir([7u8; 32]);
-        list_one_readable_vault(dir.path());
+        list_one_readable_vault(dir.path(), &[7u8; 32]);
 
         let phrase = ll_search::sync::words::recovery_phrase(&[42u8; 32]).unwrap();
         assert!(recover(dir.path(), &phrase, false).is_err());
