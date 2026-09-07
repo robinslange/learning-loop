@@ -151,6 +151,89 @@ pub fn verify_decision(
     Ok(DecisionStatement { v: raw.v, kind, grant_id: raw.grant_id, by: raw.by, at: raw.at })
 }
 
+/// A grant's withdrawal, signed by the key the grant names as `from`.
+///
+/// Carries the revoked grant's `scope` — the whole reason this is a statement
+/// and not a bare id. Spec:334 makes deleting `federation/data/peers/<vault_id>/`
+/// a hard requirement on the client, and a client that has lost its local copy
+/// of the grant cannot map an opaque `grant_id` to a `vault_id`. `scope` is
+/// exactly the grant's own `scope` column: `Some(vault_id)` names the one
+/// vault whose cached data must go; `None` means every vault owned by `by`,
+/// the same "any vault this issuer owns" an unscoped grant meant.
+///
+/// The hub checks `scope` against the stored grant before writing (see
+/// `V5Store::revoke_grant`). Without that check an issuer could sign a
+/// revocation naming a vault its grant never covered, and a client honouring
+/// spec:334 would delete peer data it holds under a DIFFERENT issuer's grant.
+/// **The client cannot make that check from these bytes alone** — serde reads
+/// a missing `scope` as `None`, so a parsed `None` is indistinguishable from a
+/// truncated message. A client acting on `scope` must compare it against its
+/// own stored copy of the grant, exactly as the hub does.
+///
+/// `kind` is the `&'static str` `"revoke"`, the same discipline
+/// `DecisionStatement` uses: `verify_revocation` is the only way to produce
+/// one and it rejects any other wire value first, so the `"accept"`/`"deny"`
+/// domain and this one can never be confused for each other even though the
+/// two statements share every other field name.
+#[derive(Clone, Debug, Serialize)]
+pub struct RevocationStatement {
+    pub v: u8,
+    pub kind: &'static str,
+    pub grant_id: String,
+    pub by: KeyId,
+    pub scope: Option<String>,
+    pub at: i64,
+}
+
+/// Wire shape for a `RevocationStatement`, for the same reason
+/// `RawDecisionStatement` exists: serde's derive cannot deserialize into
+/// `&'static str`.
+#[derive(Deserialize)]
+struct RawRevocationStatement {
+    v: u8,
+    kind: String,
+    grant_id: String,
+    by: KeyId,
+    scope: Option<String>,
+    at: i64,
+}
+
+/// Verify a revocation statement was signed by `expected_by`. Same shape as
+/// `verify` and `verify_decision`: `by` is attacker-controlled content, so it
+/// is checked against `expected_by` BEFORE the cryptographic check.
+///
+/// This function knows only the bytes it was handed. It does NOT know whether
+/// `expected_by` is the revoked grant's `from`, nor whether `scope` matches
+/// that grant — both belong to whatever holds the grant, which on this side is
+/// the local grant store. Splitting it that way is deliberate: signature
+/// validity and authorization are separate questions and neither should be
+/// able to stand in for the other.
+pub fn verify_revocation(
+    statement_bytes: &[u8],
+    signature: &[u8],
+    expected_by: &KeyId,
+) -> anyhow::Result<RevocationStatement> {
+    let raw: RawRevocationStatement = serde_json::from_slice(statement_bytes)?;
+    if raw.v != 5 {
+        anyhow::bail!("unsupported revocation version {}", raw.v);
+    }
+    if raw.kind != "revoke" {
+        anyhow::bail!("unsupported revocation kind `{}`", raw.kind);
+    }
+    if &raw.by != expected_by {
+        anyhow::bail!("revocation `by` does not match the expected signer");
+    }
+    expected_by.verify(statement_bytes, signature)?;
+    Ok(RevocationStatement {
+        v: raw.v,
+        kind: "revoke",
+        grant_id: raw.grant_id,
+        by: raw.by,
+        scope: raw.scope,
+        at: raw.at,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,6 +516,111 @@ mod tests {
         let bytes = canonical_bytes(&decision("g", &b, "accept", 1_050));
         let sig = sk_m.sign(&bytes);
         assert!(verify_decision(&bytes, &sig.to_bytes(), &b).is_err());
+    }
+
+    fn revocation(grant_id: &str, by: &KeyId, scope: Option<&str>, at: i64) -> RevocationStatement {
+        RevocationStatement {
+            v: 5,
+            kind: "revoke",
+            grant_id: grant_id.to_string(),
+            by: by.clone(),
+            scope: scope.map(str::to_string),
+            at,
+        }
+    }
+
+    #[test]
+    fn verifies_a_well_formed_revocation() {
+        let (sk_a, a) = pair();
+        let bytes = canonical_bytes(&revocation("g1", &a, Some("v1"), 1_100));
+        let sig = sk_a.sign(&bytes);
+        let out = verify_revocation(&bytes, &sig.to_bytes(), &a).unwrap();
+        assert_eq!(out.grant_id, "g1");
+        assert_eq!(out.scope.as_deref(), Some("v1"));
+        assert_eq!(out.kind, "revoke");
+    }
+
+    /// An unscoped grant's revocation must survive the round trip as `None`
+    /// and not collapse into `Some("")` or a dropped field — `None` is the
+    /// instruction "every vault this issuer owns", not the absence of one.
+    #[test]
+    fn an_unscoped_revocation_verifies_and_keeps_its_null_scope() {
+        let (sk_a, a) = pair();
+        let bytes = canonical_bytes(&revocation("g1", &a, None, 1_100));
+        let sig = sk_a.sign(&bytes);
+        let out = verify_revocation(&bytes, &sig.to_bytes(), &a).unwrap();
+        assert!(out.scope.is_none());
+    }
+
+    #[test]
+    fn rejects_an_unsupported_revocation_version() {
+        let (sk_a, a) = pair();
+        let mut r = revocation("g1", &a, None, 1_100);
+        r.v = 4;
+        let bytes = canonical_bytes(&r);
+        let sig = sk_a.sign(&bytes);
+        let err = verify_revocation(&bytes, &sig.to_bytes(), &a).unwrap_err();
+        assert!(err.to_string().contains("version"));
+    }
+
+    #[test]
+    fn rejects_a_revocation_whose_signer_forges_a_different_by_field() {
+        let (sk_x, x) = pair();
+        let (_, a) = pair();
+        let bytes = canonical_bytes(&revocation("g1", &a, None, 1_100));
+        let sig = sk_x.sign(&bytes);
+        assert!(verify_revocation(&bytes, &sig.to_bytes(), &x).is_err());
+    }
+
+    #[test]
+    fn rejects_a_revocation_signed_by_someone_other_than_by() {
+        let (_, a) = pair();
+        let (sk_m, _m) = pair();
+        let bytes = canonical_bytes(&revocation("g1", &a, None, 1_100));
+        let sig = sk_m.sign(&bytes);
+        assert!(verify_revocation(&bytes, &sig.to_bytes(), &a).is_err());
+    }
+
+    /// `DecisionStatement` and `RevocationStatement` share `v`, `grant_id`,
+    /// `by` and `at`, and are signed by keys that are frequently both parties
+    /// to the same grant. `kind` is the only thing separating the two
+    /// domains, so a genuine, correctly-signed statement of one kind must be
+    /// refused by the other's verifier — otherwise a followee's `deny` could
+    /// be replayed as the issuer's revocation, or vice versa. Both directions,
+    /// because a one-way check passes even if only one verifier looks.
+    #[test]
+    fn a_decision_and_a_revocation_are_not_interchangeable() {
+        let (sk_a, a) = pair();
+
+        let rev = canonical_bytes(&revocation("g1", &a, None, 1_100));
+        let rev_sig = sk_a.sign(&rev);
+        assert!(verify_revocation(&rev, &rev_sig.to_bytes(), &a).is_ok(), "fixture sanity");
+        let err = verify_decision(&rev, &rev_sig.to_bytes(), &a).unwrap_err();
+        assert!(err.to_string().contains("kind"), "got {err}");
+
+        let dec = canonical_bytes(&decision("g1", &a, "deny", 1_100));
+        let dec_sig = sk_a.sign(&dec);
+        assert!(verify_decision(&dec, &dec_sig.to_bytes(), &a).is_ok(), "fixture sanity");
+        let err = verify_revocation(&dec, &dec_sig.to_bytes(), &a).unwrap_err();
+        assert!(err.to_string().contains("kind"), "got {err}");
+    }
+
+    /// The scope is inside the signed bytes, so changing it changes the
+    /// signature's subject. Without this the field could be carried and never
+    /// covered — a relay could rewrite which vault a client is told to
+    /// delete, which is precisely the deletion spec:334 makes mandatory.
+    #[test]
+    fn rewriting_the_scope_invalidates_the_signature() {
+        let (sk_a, a) = pair();
+        let bytes = canonical_bytes(&revocation("g1", &a, Some("v1"), 1_100));
+        let sig = sk_a.sign(&bytes);
+        let tampered = canonical_bytes(&revocation("g1", &a, Some("v2"), 1_100));
+        assert!(
+            serde_json::from_slice::<RawRevocationStatement>(&tampered).is_ok(),
+            "the tamper must stay well-formed, or the parser catches it instead of the signature"
+        );
+        assert!(verify_revocation(&tampered, &sig.to_bytes(), &a).is_err());
+        assert!(verify_revocation(&bytes, &sig.to_bytes(), &a).is_ok());
     }
 
     /// Pinned literal comparison, not a round-trip — a round-trip through our

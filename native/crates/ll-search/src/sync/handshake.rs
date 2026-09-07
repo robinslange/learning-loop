@@ -13,8 +13,8 @@ use super::client::{recv_json, send_json, WsStream};
 use super::config::FederationConfig;
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    client_auth_message, hub_challenge_message, ClientMsg, GrantWire, HubMsg, VaultState,
-    PROTOCOL_VERSION,
+    client_auth_message, hub_challenge_message, ClientMsg, GrantWire, HubMsg, RevocationWire,
+    VaultState, PROTOCOL_VERSION,
 };
 
 /// TLS exporter label per RFC 9266-style channel binding.
@@ -38,7 +38,7 @@ pub struct SyncReadyPayload {
     pub protocol_version: u32,
     pub vault_state: Vec<VaultState>,
     pub grants: Vec<GrantWire>,
-    pub revocations: Vec<String>,
+    pub revocations: Vec<RevocationWire>,
 }
 
 pub(super) fn random_nonce() -> [u8; 32] {

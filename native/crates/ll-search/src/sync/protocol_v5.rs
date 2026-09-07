@@ -71,11 +71,23 @@ pub enum ClientMsg {
         statement_b64: String,
         signature_b64: String,
     },
-    /// Revoke a grant. Only the issuer may: revocation is the `from` key
-    /// withdrawing its own statement, and a `to` key that wants out simply
-    /// stops using it.
+    /// Revoke a grant, as the issuer's own signed statement. Only the issuer
+    /// may: revocation is the `from` key withdrawing its own statement, and a
+    /// `to` key that wants out simply stops using it.
+    ///
+    /// The same `statement_b64`/`signature_b64` pair as `PutGrant` and
+    /// `PutDecision`, and for the same reason — a bare `grant_id` was
+    /// unauthenticated data at rest, and worse, unresolvable: it told a
+    /// client which id had been withdrawn and nothing about what to do
+    /// about it. `RevocationStatement` carries the revoked grant's `scope`,
+    /// which is what a client with no local copy of the grant needs to
+    /// delete `federation/data/peers/<vault_id>/`.
+    ///
+    /// No `grant_id` field beside the bytes: it lives inside the statement
+    /// the signature covers, so there is no second copy to disagree with it.
     RevokeGrant {
-        grant_id: String,
+        statement_b64: String,
+        signature_b64: String,
     },
     /// Accept or deny a `follow`. Signed by the key the grant names as `to`,
     /// so a follower can prove its access was granted without the hub
@@ -105,7 +117,7 @@ pub enum HubMsg {
         protocol_version: u32,
         vault_state: Vec<VaultState>,
         grants: Vec<GrantWire>,
-        revocations: Vec<String>,
+        revocations: Vec<RevocationWire>,
     },
     Reject {
         reason: String,
@@ -153,6 +165,16 @@ pub struct GrantWire {
     pub statement_b64: String,
     pub signature_b64: String,
     pub state: String,
+}
+
+/// A revocation as `SyncReady` serves it. `GrantWire` minus `state`: a
+/// revocation has no lifecycle to report — it exists or it does not — and a
+/// field that always reads `"revoked"` is a field a client has to be told to
+/// ignore.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RevocationWire {
+    pub statement_b64: String,
+    pub signature_b64: String,
 }
 
 /// Length-prefix every field before concatenating. Plain concatenation lets
@@ -205,7 +227,7 @@ mod tests {
             statement_b64: "s".into(), signature_b64: "g".into(),
         }).unwrap()), "put-grant");
         assert_eq!(tag(serde_json::to_value(ClientMsg::RevokeGrant {
-            grant_id: "g1".into(),
+            statement_b64: "s".into(), signature_b64: "g".into(),
         }).unwrap()), "revoke-grant");
         assert_eq!(tag(serde_json::to_value(ClientMsg::PutDecision {
             statement_b64: "s".into(), signature_b64: "g".into(),
@@ -307,13 +329,18 @@ mod tests {
         // Pins the full nested shape (a populated `holds`, a non-empty
         // `grants` array, and `revocations`) against the exact field names
         // and types sync-hub's SyncReady emits — a divergence in any nested
-        // field (VaultState, HeldIndex, or GrantWire) fails here, not just
-        // the top-level enum tag.
+        // field (VaultState, HeldIndex, GrantWire or RevocationWire) fails
+        // here, not just the top-level enum tag.
+        //
+        // `revocations` carried `["zRevokedKey"]` until the hub froze the
+        // signed-statement shape. That literal was the STALE wire pinned as
+        // though it were the contract: a bare id is unauthenticated, and it
+        // names an id without saying which vault's cached data to delete.
         let wire = r#"{"type":"sync-ready","protocol_version":5,
                        "vault_state":[{"vault_id":"v1","holds":
                            {"sha256":"deadbeef","note_count":42,"uploaded_at":1700000000}}],
                        "grants":[{"statement_b64":"c3RtdA==","signature_b64":"c2ln","state":"active"}],
-                       "revocations":["zRevokedKey"]}"#;
+                       "revocations":[{"statement_b64":"cmV2","signature_b64":"cnNpZw"}]}"#;
         match serde_json::from_str::<HubMsg>(wire).unwrap() {
             HubMsg::SyncReady { protocol_version, vault_state, grants, revocations } => {
                 assert_eq!(protocol_version, 5);
@@ -324,10 +351,26 @@ mod tests {
                 assert_eq!(grants[0].statement_b64, "c3RtdA==");
                 assert_eq!(grants[0].signature_b64, "c2ln");
                 assert_eq!(grants[0].state, "active");
-                assert_eq!(revocations, vec!["zRevokedKey".to_string()]);
+                assert_eq!(revocations[0].statement_b64, "cmV2");
+                assert_eq!(revocations[0].signature_b64, "cnNpZw");
             }
             other => panic!("wrong variant: {other:?}"),
         }
+    }
+
+    /// `revocations[]` used to be a `Vec<String>` of bare ids. A client
+    /// reading the new shape as the old one, or the reverse, must fail loudly
+    /// rather than quietly seeing an empty list — an empty `revocations[]` is
+    /// "nothing was withdrawn", which is precisely the sentence a client must
+    /// never be told by accident.
+    #[test]
+    fn the_old_bare_id_revocation_shape_no_longer_parses() {
+        let old = r#"{"type":"sync-ready","protocol_version":5,"vault_state":[],
+                      "grants":[],"revocations":["deadbeef"]}"#;
+        assert!(
+            serde_json::from_str::<HubMsg>(old).is_err(),
+            "a bare-id revocation list must not deserialise as signed statements"
+        );
     }
 
     #[test]
