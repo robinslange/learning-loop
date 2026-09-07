@@ -161,7 +161,7 @@ You learn that a claim you've been building on is wrong. `/rewrite "old pattern"
 | `/harvest [--all]`      | Carry opt-in, IP-scrubbed insights from a work instance back home             |
 | `/diagram "concept"`    | Generate Excalidraw diagram                                                   |
 | `/init`                 | First-time setup: vault path, persona, binary, optional integrations          |
-| `/federation`           | Set up federation: identity, token redeem, peers, visibility, sync            |
+| `/federation`           | Set up federation: enroll a vault on a hub, link machines, visibility, sync   |
 | `/help`                 | Show all commands with usage details                                          |
 | `/uninstall`            | Guided removal of the plugin and its captured indexes                         |
 
@@ -186,7 +186,7 @@ your-vault/
 - [Workflows](guide/workflows.md) -- common patterns, session lifecycle, and chaining skills together
 - [Search](guide/search.md) -- five-signal hybrid search, reranking, retrieval instrumentation
 - [Agents](guide/agents.md) -- 20 specialized agents and 20 shared skills
-- [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental)
+- [Federation](guide/federation.md) -- cross-vault knowledge sharing (experimental). A key is a principal, a vault is a corpus, and a grant is one key's signed statement about another
 - [Configuration](guide/configuration.md) -- hooks, injection pipeline, provenance, source verification, cache health
 - [Resource usage](guide/resource-usage.md) -- token costs, local compute, and what we do to keep it lean
 - [Cross-platform support](guide/cross-platform.md) -- macOS / Linux / Windows status and known caveats

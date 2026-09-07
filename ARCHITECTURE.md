@@ -136,20 +136,26 @@ Reindexing is continuous, not post-session. `hooks/session-start/watch-daemon.mj
 
 ### sync path
 
-Federation sends encrypted vault snapshots to peers over WebSocket. Peers merge the received embeddings into their local index.
+Federation is three nouns. A **key** is a principal -- a person, a machine, later an organisation; the key IS the identifier, so there is no registry and no name allocation. A **vault** is a corpus with an owning key and a visibility policy; one key may own several. A **grant** is a signed statement by one key about another -- `follow` (read a vault), `link` (these machines are the same person, full authority), `assoc` (these identities are the same human, no authority), `peer` (two hubs bridge).
+
+The hub stores each grant's exact signed bytes (`grants.statement`, `grants.signature`), so any party can verify a grant offline against nothing but those bytes and the issuer's public half. The hub is authoritative over its own membership -- who may connect -- and never over trust between keys. Every grant expires; each successful sync renews the grants it exercised, so a machine in use never asks again while one that stopped being used lapses on its own. Default TTLs: `link` and `assoc` 365 days, `follow` and `peer` 90 days.
 
 ```mermaid
 flowchart LR
   A[ll-search export] --> B[visibility filter]
-  B --> C[signed envelope with SHA256 hash]
-  C --> D[WebSocket to hub]
-  D --> E[peer ll-search]
-  E --> F[envelope validation]
-  F --> G[peer SQLite + embeddings]
-  G --> H[merged into peer ranking]
+  B --> C[zstd, chunked, SHA256 per body]
+  C --> D[wss:// to hub]
+  D --> E[hub verifies signature, records sha]
+  E --> F[grant-holder fetches index]
+  F --> G[federation/data/peers/vault_id/index.db]
+  G --> H[merged into that reader's RRF ranking]
 ```
 
-Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from a synchronous thread in v1.19.0). Authentication uses ed25519 signatures; the seed lives in the OS keyring (macOS Keychain, Linux Secret Service) or an encrypted-at-rest file on headless installs, with a plaintext-legacy fallback for un-migrated installs. The wire format negotiates `protocol_version` on `SyncHello`/`SyncReady`: v2 hubs receive length-prefixed envelopes (`u32 size + 32-byte SHA256 + body`) validated before allocation, with a 50 MB hub-side cap on uploads.
+The payload is compressed, not encrypted: confidentiality is the TLS transport, and `wss://` is required. `sync/client.rs` refuses a plaintext `ws://` endpoint unless `LL_ALLOW_INSECURE_WS` is set, and `FederationConfig::validate` refuses a hub whose `key_id` is not pinned -- an unpinned hub was a warning in v4 and is an error now. There is no protocol negotiation and no downgrade: a hub speaking a different `protocol_version` is refused, and one side is upgraded.
+
+Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from a synchronous thread in v1.19.0). Authentication uses ed25519 signatures; the seed lives in the OS keyring (macOS Keychain, Linux Secret Service) or an encrypted-at-rest file on headless installs, with a plaintext-legacy fallback for un-migrated installs.
+
+**What a cached peer index is served on, and what it is not.** `search/federation.rs` serves a directory under `federation/data/peers/` only while the hub's last `vault_state` list still names that `vault_id` and a live local grant covers it. **That pair narrows what is read; it is not an authorization boundary, and the code says so.** An unscoped grant means "every vault this issuer owns", a `link` is unscoped, and one is stored for every machine that has ever linked to this one -- so on a linked machine, which is the normal case, one row covers every directory there and nothing is filtered out. The predicate that would close it is the hub's list; `grants.rs::ReadAuthority` carries the argument.
 
 ### research-offload path
 
@@ -505,7 +511,7 @@ Optional stages:
 - **Temporal decay** -- exponential decay applied to scores based on note recency. Controlled by `half_life_days` in the search query.
 - **Reranking** -- cross-encoder reranking via the `rerank` function in ll-core (`rerank.rs`). Applied to the top-k after RRF to improve precision on the final set.
 - **Pseudo-relevance feedback (PRF)** -- Rocchio algorithm re-embeds the query using the top results to expand coverage. Controlled by `PrfParams` in ll-core.
-- **Federation** -- peer vault results merged into the local RRF pipeline. Only active when sync peers are configured.
+- **Federation** -- results from vaults this key may read, merged into the local RRF pipeline. Active only when a federation config exists and a cached peer index passes the read check above.
 
 ---
 

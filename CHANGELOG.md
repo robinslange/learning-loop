@@ -4,6 +4,102 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Federation v5
+
+Federation is now three nouns. A **key** is a principal and IS its own
+identifier — an Ed25519 public key, so there is no registry and no name to
+allocate. A **vault** is a corpus with an owning key and a visibility policy.
+A **grant** is one key's signed statement about another: `follow` (read a
+vault), `link` (these machines are the same person), `assoc` (these identities
+are the same human, no authority), `peer` (two hubs bridge). A hub decides who
+may connect and never decides trust between keys.
+
+- **BREAKING. `peer_id` is gone.** A principal is its `key_id`. Nothing
+  allocates or assigns one, and nothing can be bound to a token server-side,
+  because there is no longer a name to bind.
+- **BREAKING. `ll-search status` now means federation status.** The old
+  index-health command is `ll-search index-status <db> <vault>`. Anything
+  scripting `ll-search status` for index health has to be repointed.
+- **BREAKING. The hub must be pinned and reached over `wss://`.** An unpinned
+  `hub.key_id` was a warning in v4 and is an error now: `ll-search sync`
+  refuses the config and `ll-search status` reports `BLOCKED`.
+- **BREAKING. Tailscale and headscale are no longer involved.** The
+  application form, the redeem POST, the headscale auth key and `tailscale up`
+  are all deleted. `ll-search join <hub> <invite-code> <vault-path>` replaces
+  the whole flow. It prints the hub's six-word fingerprint and stops until you
+  confirm it out of band — the invite code has not left the machine at that
+  point — then shows a 24-word recovery phrase once, and writes
+  `config.json` only after the hub has authenticated the key and proved it
+  registered the vault.
+- **MIGRATION. Glob visibility rules now grant at most `listed`.** `public`
+  requires `visibility: public` in the note's own frontmatter, so a note is
+  published in full only by an explicit act of its author and never as a
+  consequence of which folder it landed in. A misspelled value falls through
+  to the glob rules and their cap rather than to an uncapped tier. **A vault
+  that federated before this** should run `ll-search visibility-backfill
+  <vault-path>` once (`--dry-run` first) to stamp the previously-published set
+  explicitly; without it, notes that were public become `listed`.
+- One machine can hold several vaults. A single-vault install needs no
+  migration: `vaults.json` appears only when `ll-search vault add` registers a
+  second one.
+- Every note gains a stable `id:` in its frontmatter, assigned at index time.
+  A row without one predates stable identity and is not exported.
+- `ll-search link` adds a machine to an identity through four doors — a typed
+  pairing code, a QR, an offline paste blob, and the recovery key. The
+  six-word fingerprint is the security boundary in all four; the transport is
+  not. The offline door needs no hub at all.
+- `ll-search recover "<24 words>"` restores an identity from the phrase
+  `join` printed. Recovering the identity already present needs no `--force`;
+  recovering a *different* one over it does, and what `--force` authorises is
+  the loss — every grant naming the old key survives it, signed and
+  unreachable.
+- `ll-search graph-opt-in <true|false>` is the setter for whether this vault
+  may be drawn on the federation-wide graph. It is off unless you say
+  otherwise and is declared on every connection. In v4 nothing could set it.
+- Grants renew on use and expire on disuse: `link` and `assoc` 365 days,
+  `follow` and `peer` 90 days. A machine in use never asks again; one that
+  stopped being used lapses on its own.
+- **Fixed: the client decided "no changes" from a local hash file** and would
+  never re-upload to a hub that had lost its index. The hub is now
+  authoritative about what it holds, and `federation/sync-state.json` records
+  what each cycle actually did — including `hub_holds: nothing`, which is the
+  signature of the outage that ran from 2026-06-16 to 2026-09-04 without
+  anything saying so. `ll-search status` renders it, and `/doctor` and
+  `/health` read it.
+
+#### What revocation does not yet do
+
+The spec makes deleting a revoked follow's cached copy a hard requirement
+rather than best-effort. **It is met for a scoped `follow` and not for the
+main case, and this release does not close that.** Three separate gaps, stated
+because a changelog is what people believe without checking:
+
+- **Nothing in this client can revoke anything.** `ClientMsg::RevokeGrant`
+  exists in the protocol and has no production sender; there is no
+  `ll-search link revoke`. Revocations are applied when the hub serves them,
+  but this end cannot originate one. Uninstalling withdraws nothing either —
+  grants lapse on their own at the TTLs above.
+- **An unscoped revocation deletes nothing, and a `link` is unscoped.** A
+  withdrawal removes exactly the cache its own `scope` names. "Every vault
+  this issuer owns" names no single directory, and which vaults an issuer owns
+  is hub state this client has never held. So the second-machine story — the
+  normal multi-machine case — leaves its caches in place. That is an
+  under-delete, recorded and reported rather than papered over: the
+  alternative on offer was to sweep every cache no surviving grant justifies,
+  which is a garbage collector wearing a revocation's clothes and would
+  dispose of directories written by an earlier protocol version.
+- **The reader-side check narrows what is served; it is not a boundary.** A
+  cached peer index is searched only while the hub's last list still names it
+  and a live grant covers it. But an unscoped grant covers every vault, and
+  one is stored for every machine that has ever linked to this one — so on a
+  linked machine that check passes everything. `search/federation.rs` says so
+  in its own doc comment.
+
+What does work: a withdrawn or lapsed `follow` carries the `vault_id` it was
+granted for, and removes exactly `federation/data/peers/<vault_id>/` unless a
+still-live grant justifies keeping it. `/uninstall` sweeps that directory
+itself, because on the main path nothing else will.
+
 ## v1.41.1
 
 ### Fixed

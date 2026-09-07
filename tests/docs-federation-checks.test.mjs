@@ -33,6 +33,48 @@ test('doctor says the federation checks are not in the health-check JSON', () =>
   );
 });
 
+test('architecture describes keys, vaults and grants', () => {
+  const doc = readFileSync(join(ROOT, 'ARCHITECTURE.md'), 'utf8');
+  for (const noun of [/\bkey\b/i, /\bvaults?\b/i, /\bgrants?\b/i, /\bvault_id\b/]) {
+    assert.match(doc, noun, `architecture must describe federation as ${noun}`);
+  }
+  assert.doesNotMatch(doc, /tailnet|tailscale/i, 'the overlay network is gone');
+});
+
+test('architecture does not present the reader-side filter as a boundary', () => {
+  // `search/federation.rs` says in its own doc comment that this is a
+  // narrowing and not an authorization boundary, because an unscoped `link`
+  // covers every cache on a linked machine. A document that read as
+  // "revocation is complete" would contradict the code it describes.
+  const doc = readFileSync(join(ROOT, 'ARCHITECTURE.md'), 'utf8');
+  assert.match(
+    doc,
+    /not an authorization boundary/i,
+    'architecture must say the peer-cache read check narrows and does not bound',
+  );
+});
+
+test('the changelog states the revocation gap rather than claiming it closed', () => {
+  const doc = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
+  const unreleased = doc.slice(doc.indexOf('## Unreleased'), doc.indexOf('## v1.41.1'));
+  assert.ok(unreleased.includes('Federation v5'), 'the v5 entry belongs under Unreleased');
+
+  // The three facts. A changelog is what a person believes without checking,
+  // so this is the one place an overstatement costs the most.
+  for (const gap of [
+    'Nothing in this client can revoke anything',
+    'An unscoped revocation deletes nothing, and a `link` is unscoped',
+    'it is not a boundary',
+  ]) {
+    assert.ok(unreleased.includes(gap), `the changelog must state the gap: ${gap}`);
+  }
+  assert.doesNotMatch(
+    unreleased,
+    /revocation (removes|deletes) local data(?! )/i,
+    'a bare claim that revocation removes local data would be false for the main case',
+  );
+});
+
 test('uninstall clears the peer caches and says the grants outlive it', () => {
   const doc = readFileSync(join(SKILLS, 'uninstall', 'SKILL.md'), 'utf8');
   assert.ok(
