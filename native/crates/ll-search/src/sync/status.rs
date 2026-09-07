@@ -51,8 +51,11 @@ pub fn render_status(config_dir: &Path, now: i64) -> anyhow::Result<String> {
         Err(e) => return Ok(unreadable_config(config_dir, &e)),
     };
 
+    // Read once. Every block below that needs this machine's key needs the
+    // same one, and on the keyring backend each read is a trip to the OS.
+    let seed = seed_key(config_dir);
     let mut out = String::new();
-    out.push_str(&identity_block(config_dir, &config));
+    out.push_str(&identity_block(&config, seed.as_ref()));
     match read_state(config_dir)? {
         // `read_state` collapses a missing file and a corrupt one into the
         // same `None`, deliberately, so that a bad file cannot block the sync
@@ -60,7 +63,7 @@ pub fn render_status(config_dir: &Path, now: i64) -> anyhow::Result<String> {
         None => out.push_str(&row("last sync:", "no information — federation/sync-state.json is missing or unreadable. The next sync writes one.")),
         Some(state) => out.push_str(&sync_block(&state, now)),
     }
-    out.push_str(&read_authority_block(config_dir, now)?);
+    out.push_str(&read_authority_block(config_dir, seed.as_ref(), now)?);
     out.push_str(FOOTER);
     Ok(out)
 }
@@ -86,14 +89,11 @@ fn unreadable_config(config_dir: &Path, e: &anyhow::Error) -> String {
     )
 }
 
-fn identity_block(config_dir: &Path, config: &FederationConfig) -> String {
-    // Read once. Every line below that needs this machine's key needs the
-    // same one, and on the keyring backend each read is a trip to the OS.
-    let seed = seed_key(config_dir);
+fn identity_block(config: &FederationConfig, seed: Option<&KeyId>) -> String {
     let mut out = String::new();
     out.push_str(&row("vault:", config.vault_path.as_deref().unwrap_or("unknown")));
     out.push_str(&row("vault id:", config.vault_id.as_deref().unwrap_or("unknown")));
-    out.push_str(&row("key:", &client_key(seed.as_ref(), &config.identity.pubkey)));
+    out.push_str(&row("key:", &client_key(seed, &config.identity.pubkey)));
     out.push_str(&row("hub:", &config.hub.endpoint));
     out.push_str(&row("hub key:", &hub_key(config.hub.key_id.as_deref())));
     // `ll recover` writes the seed and deliberately leaves `config.json`
@@ -101,7 +101,7 @@ fn identity_block(config_dir: &Path, config: &FederationConfig) -> String {
     // was never part of. So after one, the key above is this machine's and
     // the two lines above it belong to a key it no longer has — and nothing
     // else on this page would say so.
-    if let Some(stale) = recovered_over(seed.as_ref(), &config.identity.pubkey) {
+    if let Some(stale) = recovered_over(seed, &config.identity.pubkey) {
         out.push_str(&row("RECOVERED", &format!(
             "config.json still names {stale}. The key above is this machine's; the vault \
              id and hub pin are the ones that key had. Re-enroll to bring them into line."
@@ -167,11 +167,19 @@ fn sync_block(state: &SyncState, now: i64) -> String {
 /// verdict above makes about the sync itself, at the same threshold and for
 /// the same reason: a laptop shut for a long weekend stays quiet, and a
 /// months-old answer cannot hide.
-fn read_authority_block(config_dir: &Path, now: i64) -> anyhow::Result<String> {
-    let Some(listed) = read_readable_vaults(config_dir)? else {
-        return Ok(row("read auth:", 
-            "none — no cached peer index is searched. A machine that has never been told \
-             what it may read serves nothing, which is the safe direction. `ll sync` records it."));
+fn read_authority_block(config_dir: &Path, me: Option<&KeyId>, now: i64) -> anyhow::Result<String> {
+    // Filtered on `me` for the same reason `ReadAuthority::load` is, and the
+    // count printed here has to agree with what that serves or this line is
+    // the only thing on the page that lies. A listing another key earned
+    // parses perfectly and answers for none of these vaults, so it is absent
+    // here exactly as it is there. A machine with no key of its own cannot
+    // say whose answer it holds, which is the same verdict.
+    let listed = read_readable_vaults(config_dir)?.filter(|l| Some(&l.me) == me);
+    let Some(listed) = listed else {
+        return Ok(row("read auth:",
+            "none — no cached peer index is searched. Either the hub has never told this key \
+             what it may read, or the listing on disk was earned by a key that is no longer \
+             here; both serve nothing, which is the safe direction. `ll sync` records one."));
     };
     let mut out = row("read auth:", &format!(
         "{} vault(s), as the hub listed them at {}",
@@ -897,9 +905,10 @@ mod tests {
     fn status_says_how_many_vaults_this_machine_may_read_and_when_it_was_told() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
+        let me = plant_seed(dir.path(), CLIENT_SEED);
         crate::sync::state::write_readable_vaults(dir.path(),
             &crate::sync::state::ReadableVaults {
-                me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
+                me,
                 at: 1_000,
                 vault_ids: vec!["v-a".into(), "v-b".into()],
             }).unwrap();
@@ -919,9 +928,10 @@ mod tests {
     fn a_read_authority_older_than_the_stale_threshold_is_called_out() {
         let dir = tempfile::tempdir().unwrap();
         seeded_profile(dir.path());
+        let me = plant_seed(dir.path(), CLIENT_SEED);
         crate::sync::state::write_readable_vaults(dir.path(),
             &crate::sync::state::ReadableVaults {
-                me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
+                me,
                 at: 1_000,
                 vault_ids: vec!["v-a".into()],
             }).unwrap();
@@ -934,6 +944,61 @@ mod tests {
         assert!(out.contains("read authority 41 days old"), "got:\n{out}");
         assert!(out.contains("until the grant behind it expires"),
             "the reader keeps serving; say what still bounds it; got:\n{out}");
+    }
+
+    /// **The count on this page has to agree with what the reader serves, and
+    /// a listing another key earned parses perfectly.** `ReadAuthority::covers`
+    /// refuses every vault in it, so a page that printed the count would be
+    /// the only thing here saying federated search works.
+    ///
+    /// Reachable without anyone copying anything: a `recover` by a build that
+    /// records `me` but predates the unlink leaves exactly this state, as does
+    /// a `federation/` restored from backup onto a rotated identity.
+    #[test]
+    fn a_listing_another_key_earned_is_not_counted_as_this_machines() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        let me = plant_seed(dir.path(), CLIENT_SEED);
+        let other = KeyId::from_pubkey(&SigningKey::from_bytes(&[42u8; 32]).verifying_key());
+        assert_ne!(me, other, "the fixture must plant a listing this key did not earn");
+        crate::sync::state::write_readable_vaults(dir.path(),
+            &crate::sync::state::ReadableVaults {
+                me: other,
+                at: 1_000,
+                vault_ids: vec!["v-a".into(), "v-b".into()],
+            }).unwrap();
+        // The dangerous state has to be reachable, or the assertion below
+        // passes against a file nothing could read.
+        assert!(crate::sync::state::read_readable_vaults(dir.path()).unwrap().is_some(),
+            "the listing must parse, or this tests the parse and not the key");
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(!out.contains("vault(s)"),
+            "a listing this key did not earn is not a count it can give; got:\n{out}");
+        // The renderer wraps at `WIDTH`, so the reason arrives split across
+        // lines and a literal `contains` would be asserting the column count.
+        let flowed = out.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(flowed.contains("earned by a key that is no longer here"), "got:\n{out}");
+    }
+
+    /// The same verdict from the other direction: a machine holding no key
+    /// cannot say whose answer the listing is, and the reader already refuses
+    /// to serve one. Printing a count here would contradict it.
+    #[test]
+    fn a_machine_with_no_key_gives_no_count_for_a_listing_it_cannot_claim() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        crate::sync::state::write_readable_vaults(dir.path(),
+            &crate::sync::state::ReadableVaults {
+                me: KeyId::from_pubkey(&SigningKey::from_bytes(&CLIENT_SEED).verifying_key()),
+                at: 1_000,
+                vault_ids: vec!["v-a".into()],
+            }).unwrap();
+        assert!(crate::sync::seed_store::load_only(dir.path()).unwrap().is_none(),
+            "no seed is what makes this the other direction");
+
+        let out = render_status(dir.path(), 1_100).unwrap();
+        assert!(!out.contains("vault(s)"), "got:\n{out}");
     }
 
     /// No record is not a fresh record. A machine that has never been told
