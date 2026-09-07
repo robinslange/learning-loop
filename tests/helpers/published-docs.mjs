@@ -20,7 +20,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 
 export const ROOT = join(import.meta.dirname, '..', '..');
 
@@ -42,9 +42,17 @@ export const EXCLUDED = [
   { path: 'SPIKE-injection-framing.md', why: 'a historical spike write-up' },
 ];
 
-/** The exclusion covering `rel`, or undefined. */
+/**
+ * The exclusion covering `rel`, or undefined.
+ *
+ * Both sides are compared with forward slashes and no separator translation.
+ * `git ls-files` emits `/` on every platform including Windows, so rewriting
+ * the exclusion to `path.sep` made it match nothing there: `tests/` and
+ * `plugin/vendor/` were swept on Windows only, and the dead-flow sweep read
+ * the very files whose job is to name the dead flow.
+ */
 export function excludedBy(rel) {
-  return EXCLUDED.find((e) => rel === e.path || rel.startsWith(e.path.replaceAll('/', sep)));
+  return EXCLUDED.find((e) => rel === e.path || rel.startsWith(e.path));
 }
 
 /**
