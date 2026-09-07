@@ -382,31 +382,48 @@ fn local_key_id(config_dir: &Path) -> anyhow::Result<KeyId> {
     Ok(KeyId::from_pubkey(&local_signing_key(config_dir)?.verifying_key()))
 }
 
+/// The `link` this machine holds to another key, and whether this call is
+/// what signed it.
+struct StandingLink {
+    grant: SignedGrant,
+    minted: bool,
+}
+
 /// Make sure this machine has issued an active `link` to `other`, signing one
-/// if it has not.
+/// if it has not, and hand back the one that stands either way.
 ///
-/// Both halves of a completed link come through here — the reciprocal a
-/// joiner owes whoever admitted it, and the grant the recovery key holds —
-/// because they are the same sentence with a different subject, and a second
-/// copy of it would be a second thing to keep correct.
-fn ensure_link_to(config_dir: &Path, other: &KeyId, now: i64) -> anyhow::Result<bool> {
+/// **Every door goes through here** — the reciprocal a joiner owes whoever
+/// admitted it, the grant the recovery key holds, and the offline door's
+/// approving half — because they are the same sentence with a different
+/// subject, and because a door that mints its own answers the question "is
+/// there already a link?" with "no" every time. A second full-authority grant
+/// for a relationship that already has one is a second thing to revoke, and
+/// `remember` cannot catch it: identity is the statement hash and every mint
+/// carries a fresh nonce.
+///
+/// `None` only when `other` is this machine, which is not a link to make.
+fn ensure_link_to(
+    config_dir: &Path,
+    other: &KeyId,
+    now: i64,
+) -> anyhow::Result<Option<StandingLink>> {
     let me = local_key_id(config_dir)?;
     if &me == other {
-        return Ok(false);
+        return Ok(None);
     }
     let key = local_signing_key(config_dir)?;
     // The look and the mint are one locked section. Split across two, two
-    // processes both find nothing and both sign — a second full-authority
-    // link for a relationship that already had one.
+    // processes both find nothing and both sign.
     update_grants(config_dir, |grants| {
-        let already = active_among(grants, now)
-            .iter()
-            .any(|(_, st)| st.kind == GrantKind::Link && st.from == me && &st.to == other);
-        if already {
-            return Ok(false);
+        let standing = active_among(grants, now)
+            .into_iter()
+            .find(|(_, st)| st.kind == GrantKind::Link && st.from == me && &st.to == other);
+        if let Some((row, _)) = standing {
+            return Ok(Some(StandingLink { grant: row.signed()?, minted: false }));
         }
-        grants.push(stored(&issue_link_grant(&key, other, now)?, false));
-        Ok(true)
+        let grant = issue_link_grant(&key, other, now)?;
+        grants.push(stored(&grant, false));
+        Ok(Some(StandingLink { grant, minted: true }))
     })
 }
 
@@ -537,13 +554,19 @@ pub fn approve_offline(
     confirm: &mut dyn Approve,
 ) -> anyhow::Result<String> {
     let joiner = parse_pairing_code(blob)?;
-    let approver = local_signing_key(config_dir)?;
+    // Resolved before the prompt: there is no point asking someone to check a
+    // fingerprint on a machine with no identity to sign with.
+    let me = local_key_id(config_dir)?;
     if !confirm.confirm("new machine", &words::fingerprint(&joiner))? {
         anyhow::bail!("fingerprint not confirmed; nothing was signed");
     }
-    let signed = issue_link_grant(&approver, &joiner, unix_now())?;
-    remember(config_dir, &signed, false)?;
-    Ok(grant_blob(&signed))
+    // Through `ensure_link_to` like every other door. Running this twice is
+    // ordinary — the error the hub half raises invites exactly that retry —
+    // and minting a second grant each time would leave a revoked machine
+    // holding full authority through the copy nobody counted.
+    let link = ensure_link_to(config_dir, &joiner, unix_now())?
+        .ok_or_else(|| anyhow::anyhow!("{} cannot link to itself", me.as_str()))?;
+    Ok(grant_blob(&link.grant))
 }
 
 /// Door 3, the joining half: take a grant handed over offline, check it with
@@ -590,7 +613,7 @@ fn ensure_recovery_link(
         return Ok(false);
     };
     let recovery = KeyId::parse(recorded).context("recovery_key_id in config.json is unusable")?;
-    ensure_link_to(config_dir, &recovery, now)
+    Ok(ensure_link_to(config_dir, &recovery, now)?.is_some_and(|l| l.minted))
 }
 
 // ---------------------------------------------------------------------------
@@ -758,7 +781,7 @@ pub(super) async fn reconcile(
         // is this key's only memory of what it issued, and `SyncReady` carries
         // both directions.
         remember(config_dir, &signed, true)?;
-        if st.to == me && ensure_link_to(config_dir, &st.from, now)? {
+        if st.to == me && ensure_link_to(config_dir, &st.from, now)?.is_some_and(|l| l.minted) {
             eprintln!("Answered a link from {} with its reciprocal", st.from.as_str());
         }
     }
@@ -1236,7 +1259,9 @@ mod tests {
              complete is the failure here"
         );
 
-        assert!(ensure_link_to(joiner.path(), &key_of(approver.path()), unix_now()).unwrap());
+        assert!(ensure_link_to(joiner.path(), &key_of(approver.path()), unix_now())
+            .unwrap()
+            .is_some_and(|l| l.minted));
         assert!(is_mutual(joiner.path(), &key_of(approver.path())).unwrap());
     }
 
@@ -1852,6 +1877,42 @@ mod tests {
         assert!(!has_active_link(dir.path()).unwrap());
     }
 
+    /// Approving the same machine twice is ordinary — the hub half's own
+    /// error message invites the retry, and someone who loses the blob just
+    /// runs the command again. Each run used to mint a second full-authority
+    /// `link`, because `approve_offline` signed directly instead of going
+    /// through `ensure_link_to`, and `remember`'s dedup cannot catch it:
+    /// identity is the statement hash and every mint carries a fresh nonce.
+    ///
+    /// The assertion is on the STORE as well as on `list`. `list` collapses
+    /// the rows for one relationship into one line, so a duplicate is
+    /// invisible there — which is how this survived — and the thing that
+    /// matters is how many grants revoking this machine would have to find.
+    #[test]
+    fn approving_the_same_machine_twice_leaves_one_link_to_revoke() {
+        let approver = seeded_dir();
+        let joiner = fresh_dir();
+        let code = request_offline(joiner.path()).unwrap();
+
+        let first = approve_offline(approver.path(), &code, &mut Yes::default()).unwrap();
+        let second = approve_offline(approver.path(), &code, &mut Yes::default()).unwrap();
+
+        assert_eq!(
+            load_grants(approver.path()).unwrap().len(),
+            1,
+            "a second grant is a second full authority, and revoking the first leaves it"
+        );
+        assert_eq!(list(approver.path()).unwrap().len(), 1);
+        assert_eq!(
+            first, second,
+            "the second run hands back the link that already stands, not a new one"
+        );
+
+        // And the joiner still gets in on what came back from the second run.
+        accept_offline(joiner.path(), &second).unwrap();
+        assert!(has_active_link(joiner.path()).unwrap());
+    }
+
     #[test]
     fn list_reports_both_directions_as_one_mutual_row() {
         let approver = seeded_dir();
@@ -1969,7 +2030,7 @@ mod tests {
         let dir = seeded_dir();
         let me = key_of(dir.path());
         assert!(issue_link_grant(&local_signing_key(dir.path()).unwrap(), &me, unix_now()).is_err());
-        assert!(!ensure_link_to(dir.path(), &me, unix_now()).unwrap());
+        assert!(ensure_link_to(dir.path(), &me, unix_now()).unwrap().is_none());
     }
 
     // -- Door 1's joining half --------------------------------------------
