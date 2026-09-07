@@ -130,14 +130,21 @@ fn live_grants(grants: &[GrantWire], me: &KeyId, now: i64) -> Vec<GrantStatement
 /// standing over a vault we reach through somebody else's grant.
 ///
 /// So an `assoc` naming this vault is outranked by any read grant that could
-/// cover it: one scoped to it, or an unscoped one — "every vault I own" —
-/// from an issuer that is not itself vetoing it. What is left suppressed is
-/// the case the brace is for: nobody has offered us a way in but the `assoc`.
+/// cover it — one scoped to it, or an unscoped one, "every vault I own" —
+/// **issued by a key that is not itself vetoing it**. What is left suppressed
+/// is the case the brace is for: nobody has offered us a way in but the
+/// `assoc`.
 ///
 /// One issuer saying both about the same vault is saying contradictory things
 /// — `assoc` exists precisely to withhold what `link` transfers — and that
 /// contradiction resolves in favour of refusing. Deliberate: this brace only
 /// ever refuses, so erring costs a read and never leaks one.
+///
+/// The issuer test is a fact about the grant's signer, not about its shape, so
+/// it sits in the filter and applies to both. It used to be written into the
+/// unscoped arm of a `match` on `scope` and left off the scoped one — the
+/// third finding this function has produced, and the second where a rule
+/// stated in the prose above it was applied to one branch and not its sibling.
 fn only_assoc_names(held: &[GrantStatement], vault_id: &str) -> bool {
     let names_it = |st: &GrantStatement| st.scope.as_deref() == Some(vault_id);
     let vetoing: Vec<&KeyId> = held
@@ -148,10 +155,10 @@ fn only_assoc_names(held: &[GrantStatement], vault_id: &str) -> bool {
     if vetoing.is_empty() {
         return false;
     }
-    !held.iter().filter(|st| permits_read(st.kind)).any(|st| match st.scope {
-        Some(_) => names_it(st),
-        None => !vetoing.contains(&&st.from),
-    })
+    !held
+        .iter()
+        .filter(|st| permits_read(st.kind) && !vetoing.contains(&&st.from))
+        .any(|st| st.scope.is_none() || names_it(st))
 }
 
 /// The vaults this client may read, in the order the hub listed them.
@@ -715,6 +722,59 @@ mod tests {
 
         assert!(asked.is_empty(), "the issuer withheld this vault by name: {asked:?}");
         assert!(out.fetched.is_empty());
+    }
+
+    /// The scoped half of the issuer test, and the direction the code was
+    /// missing: the rule stated above this function applied to the unscoped
+    /// arm of a `match` and not to its sibling.
+    ///
+    /// One issuer saying `read(v-work)` and `assoc(v-work)` is contradicting
+    /// itself about the same vault by name — a sharper contradiction than the
+    /// unscoped case, where a general permission and a specific withholding
+    /// can at least be read as a carve-out. It resolves the same way. The
+    /// brace only ever refuses, so erring costs a read and never leaks one.
+    #[tokio::test]
+    async fn a_scoped_read_from_the_issuer_that_assocs_it_does_not_outrank_the_assoc() {
+        let dir = tempfile::tempdir().unwrap();
+        let (out, asked) = run(
+            dir.path(),
+            &["v-work"],
+            vec![
+                to_me(follow("v-work")),
+                to_me(of_kind(GrantKind::Assoc, "v-work")),
+            ],
+            vec![("v-work", FetchAnswer::Index(index_bytes("v-work")))],
+        )
+        .await;
+
+        assert!(asked.is_empty(), "the issuer withheld this vault by name: {asked:?}");
+        assert!(out.fetched.is_empty());
+    }
+
+    /// The opposite direction on the same decision, and the reason it cannot
+    /// simply be "a scoped read never outranks an `assoc`". The vetoer here is
+    /// a stranger, which costs it nothing to be — the hub lodges an `assoc` as
+    /// `active` with no acceptance step and does not check the issuer owns the
+    /// scope. A key that has said nothing else to us must not silence a vault
+    /// somebody we actually read from granted us by name.
+    #[tokio::test]
+    async fn a_stranger_assoc_cannot_veto_a_vault_we_hold_a_scoped_read_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("v-work");
+        let (out, asked) = run(
+            dir.path(),
+            &["v-work"],
+            vec![
+                to_me(follow("v-work")),
+                wire(&stranger(), &me().1, &of_kind(GrantKind::Assoc, "v-work")),
+            ],
+            vec![("v-work", FetchAnswer::Index(body.clone()))],
+        )
+        .await;
+
+        assert_eq!(asked, vec!["v-work".to_string()],
+            "the key that named this vault to us is not the key vetoing it");
+        assert_eq!(out.fetched.len(), 1);
     }
 
     /// The hub lists this client's own vault, because it owns it. The upload
