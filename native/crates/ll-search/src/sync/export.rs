@@ -183,6 +183,9 @@ pub fn export_index(
     // The same notes, keyed the way a wikilink names them. Populated in the
     // same step as `exported_ids` so the two cannot disagree about who shipped.
     let mut exported_link_names: HashSet<String> = HashSet::new();
+    // Only `public` ships a vector. A `listed` note's embedding is computed
+    // over its whole body, and `listed` sends a 300-character summary.
+    let mut embedded_ids: HashSet<i64> = HashSet::new();
 
     for (row, tier) in all_rows.iter().zip(tiers.iter()) {
         if *tier == "private" {
@@ -209,6 +212,9 @@ pub fn export_index(
 
         exported_ids.insert(row.id);
         exported_link_names.insert(crate::preprocess::wikilink_name(&row.path));
+        if *tier == "public" {
+            embedded_ids.insert(row.id);
+        }
         exported += 1;
     }
 
@@ -223,7 +229,13 @@ pub fn export_index(
             Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?
         .filter_map(|r| r.ok())
-        .filter(|(id, _)| exported_ids.contains(id))
+        // `public` only. The vector is computed over the full body, and a
+        // `listed` note sends a 300-character summary -- so shipping its
+        // embedding publishes a derivation of exactly the text the summary
+        // withheld. That is the links leak one column over. Peer search over
+        // listed notes falls back to BM25, which `search::federation` already
+        // does whenever a peer's model does not match.
+        .filter(|(id, _)| embedded_ids.contains(id))
         .collect();
 
     for chunk in emb_rows.chunks(INSERT_CHUNK) {
@@ -555,6 +567,51 @@ mod tests {
             .query_row("SELECT note_uuid FROM notes LIMIT 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(got, "01926d7e-0000-7000-8000-00000000000a");
+    }
+
+    /// A `listed` note sends a 300-character summary, and its embedding is
+    /// computed over the whole body. Shipping the vector publishes a
+    /// derivation of the text the summary withheld.
+    #[test]
+    fn a_listed_note_ships_no_embedding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_linked_source_db(&source, &vault);
+        {
+            let c = Connection::open(&source).unwrap();
+            for id in 1..=3 {
+                c.execute(
+                    "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
+                    rusqlite::params![id, vec![0u8; 16]],
+                )
+                .unwrap();
+            }
+        }
+        // `shared` publishes itself; `other` stays listed; `secret` is withheld.
+        std::fs::write(
+            vault.join("shared.md"),
+            "---\nvisibility: public\n---\n\nLinks [[secret]] and [[other]].",
+        )
+        .unwrap();
+
+        let config = FederationConfig::test_fixture(
+            "listed",
+            vec![("**/secret*".to_string(), "private".to_string())],
+        );
+        export_index(&source, &vault, &out, &config).unwrap();
+
+        let c = Connection::open(&out).unwrap();
+        let ids: Vec<i64> = c
+            .prepare("SELECT id FROM embeddings").unwrap()
+            .query_map([], |r| r.get::<_, i64>(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        assert!(!ids.contains(&3), "a listed note shipped a full-body vector: {ids:?}");
+        assert!(!ids.contains(&2), "a withheld note shipped a vector: {ids:?}");
+        // Not vacuous: the public note keeps its embedding, or peer search over
+        // public notes would silently lose its vector path.
+        assert_eq!(ids, vec![1], "the public note must keep its embedding");
     }
 
     /// The control that decides what leaves the machine. Deleting the `private`
