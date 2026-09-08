@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use anyhow::Context;
 use regex::Regex;
@@ -179,24 +179,22 @@ pub fn export_index(
 
     let mut exported = 0usize;
     let mut skipped = 0usize;
-    let mut exported_ids: HashSet<i64> = HashSet::new();
-    // The same notes, keyed the way a wikilink names them. Populated in the
-    // same step as `exported_ids` so the two cannot disagree about who shipped.
+    // The disclosed notes, keyed the way a wikilink names them, so the target
+    // end of a link can be checked against the same decision as the source.
     let mut exported_link_names: HashSet<String> = HashSet::new();
-    // Only `public` ships a vector. A `listed` note's embedding is computed
-    // over its whole body, and `listed` sends a 300-character summary.
-    let mut embedded_ids: HashSet<i64> = HashSet::new();
+    // The one decision, per note. Every later phase reads it rather than
+    // asking `tier` a second question of its own.
+    let mut disclosed: HashMap<i64, Disclosure> = HashMap::new();
 
     for (row, tier) in all_rows.iter().zip(tiers.iter()) {
-        if *tier == "private" {
+        let Some(disclosure) = Disclosure::for_tier(tier) else {
             skipped += 1;
             continue;
-        }
+        };
 
-        let export_body = if *tier == "public" {
-            row.body.clone()
-        } else {
-            summarize(&row.body, 300)
+        let export_body = match disclosure.body {
+            Body::Full => row.body.clone(),
+            Body::Summary => summarize(&row.body, 300),
         };
 
         export.prepare_cached(
@@ -210,10 +208,9 @@ pub fn export_index(
         )?
         .execute(params![row.id, row.title, row.tags, export_body])?;
 
-        exported_ids.insert(row.id);
-        exported_link_names.insert(crate::preprocess::wikilink_name(&row.path));
-        if *tier == "public" {
-            embedded_ids.insert(row.id);
+        disclosed.insert(row.id, disclosure);
+        if disclosure.links {
+            exported_link_names.insert(crate::preprocess::wikilink_name(&row.path));
         }
         exported += 1;
     }
@@ -229,13 +226,7 @@ pub fn export_index(
             Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?))
         })?
         .filter_map(|r| r.ok())
-        // `public` only. The vector is computed over the full body, and a
-        // `listed` note sends a 300-character summary -- so shipping its
-        // embedding publishes a derivation of exactly the text the summary
-        // withheld. That is the links leak one column over. Peer search over
-        // listed notes falls back to BM25, which `search::federation` already
-        // does whenever a peer's model does not match.
-        .filter(|(id, _)| embedded_ids.contains(id))
+        .filter(|(id, _)| disclosed.get(id).is_some_and(|d| d.embedding))
         .collect();
 
     for chunk in emb_rows.chunks(INSERT_CHUNK) {
@@ -277,7 +268,7 @@ pub fn export_index(
             // its notes did; a target naming no exported note drops, so an
             // unresolvable link cannot default to sent.
             .filter(|(source_id, target_path)| {
-                exported_ids.contains(source_id)
+                disclosed.get(source_id).is_some_and(|d| d.links)
                     && exported_link_names
                         .contains(&crate::preprocess::wikilink_name(target_path))
             })
@@ -401,6 +392,45 @@ pub fn compute_patchset(base_db: &Path, current_db: &Path) -> anyhow::Result<Vec
 /// Lives outside `mod tests` because `sync::client`'s tests need a real
 /// export to read metadata back out of, and a second copy of this schema
 /// there would be free to drift from the one `export_index` actually reads.
+/// What one note discloses, derived once from its tier.
+///
+/// Every phase of the export asks this instead of re-testing `tier` itself.
+/// That is not tidiness: `links` and `embeddings` each re-derived the rule on
+/// their own and each got it wrong -- the links table published the titles of
+/// withheld notes, and a listed note shipped a vector computed over the body
+/// its summary had just truncated. A phase that must name a field cannot
+/// silently default to shipping, and a new table added to the export has to
+/// answer the question to compile.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct Disclosure {
+    /// The note's own body, as this tier sends it.
+    pub body: Body,
+    /// The vector, which is computed over the WHOLE body regardless of tier.
+    pub embedding: bool,
+    /// Whether this note may appear as a link source. A link also needs its
+    /// target disclosed; that is the other end of the same rule.
+    pub links: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Body {
+    Full,
+    Summary,
+}
+
+impl Disclosure {
+    /// `None` means nothing about this note leaves the machine.
+    pub(crate) fn for_tier(tier: &str) -> Option<Self> {
+        match tier {
+            "public" => Some(Disclosure { body: Body::Full, embedding: true, links: true }),
+            // A listed note sends a summary, so its full-body vector would
+            // disclose exactly what the summary withheld.
+            "listed" => Some(Disclosure { body: Body::Summary, embedding: false, links: true }),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
     let c = Connection::open(path).unwrap();
