@@ -46,26 +46,24 @@ pub(super) fn random_nonce() -> [u8; 32] {
     rand::random()
 }
 
-/// The model id this client's embedding pipeline is running, best-effort.
-/// The provider is normally initialised earlier in the sync pipeline (export
-/// runs before the handshake), but `authenticate` is unit-tested standalone
-/// and must not panic when nothing has initialised it yet.
-fn local_model_id() -> String {
-    crate::embed::try_provider()
-        .map(|p| p.model_id().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 /// Authenticate to the hub named in `config.hub`, over a connection whose
 /// TLS channel-binding value is `exporter`. Returns the hub's post-auth
 /// state on success. Any other message shape, or a failed pin/signature
 /// check, is an error — there is no partial-trust fallback.
+/// `model_id` is the embedding model this vault's vectors were produced by,
+/// and it is the caller's to supply: on sync it comes from the index the
+/// export was built from, and nothing else is authoritative about vectors
+/// already on disk. It used to be read from the process-global embedding
+/// provider, which meant any path that had not loaded a model announced
+/// "unknown" -- and "unknown" is the value that makes every peer's
+/// `discover_peer_dbs` drop to BM25 for this vault.
 pub async fn authenticate(
     ws: &mut WsStream,
     seed: &SigningKey,
     config: &FederationConfig,
     vault_ids: &[String],
     exporter: &[u8; 32],
+    model_id: &str,
     invite: Option<&str>,
 ) -> anyhow::Result<SyncReadyPayload> {
     let key_id = KeyId::from_pubkey(&seed.verifying_key());
@@ -76,7 +74,7 @@ pub async fn authenticate(
         nonce_c: b64::encode(&nonce_c),
         vault_ids: vault_ids.to_vec(),
         protocol_version: PROTOCOL_VERSION,
-        model_id: local_model_id(),
+        model_id: model_id.to_string(),
         invite_code: invite.map(str::to_string),
     }).await?;
 
@@ -164,7 +162,45 @@ mod tests {
             .await
             .expect("mock hub connection failed");
         let seed = SigningKey::generate(&mut rand::thread_rng());
-        authenticate(&mut ws, &seed, config, &[String::from("v1")], exporter, None).await
+        authenticate(&mut ws, &seed, config, &[String::from("v1")], exporter, "test-model", None).await
+    }
+
+    /// The hub records the embedding model from `ClientHello`, and a peer whose
+    /// recorded model does not match the searcher's drops to BM25. The value
+    /// used to come from the process-global provider, so `join` -- which never
+    /// loads a model -- announced "unknown" and nothing noticed, because no
+    /// test had ever read this field off the wire.
+    #[tokio::test]
+    async fn client_hello_carries_the_model_id_it_was_given() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let hub = spawn_mock_hub(move |mut ws| {
+            let tx = tx.clone();
+            async move {
+                let hello = recv_client_msg(&mut ws).await;
+                if let Some(ClientMsg::ClientHello { model_id, .. }) = hello {
+                    let _ = tx.send(model_id);
+                }
+                send_hub_msg(&mut ws, &HubMsg::Reject { reason: "done".into() }).await;
+            }
+        })
+        .await;
+
+        let config = test_config();
+        let _ = run_handshake(&hub, &config).await;
+
+        let seen = rx.recv().expect("hub never received a ClientHello");
+        assert_eq!(seen, "test-model", "the model the caller supplied must reach the wire");
+        assert_ne!(seen, "unknown", "an uninitialised provider must not decide this");
+    }
+
+    /// `join` runs before the vault has an index, so it cannot read a model id
+    /// out of one -- but the model this client embeds with is known statically
+    /// and must be what it announces.
+    #[test]
+    fn the_join_model_id_is_the_model_this_client_embeds_with() {
+        let declared = &crate::model::KnownModel::BgeSmallEnV15.config().model_id;
+        assert_eq!(declared, "Xenova/bge-small-en-v1.5");
+        assert_ne!(declared, "unknown");
     }
 
     async fn fake_hub_presenting_key(key_id: &str) -> MockHub {

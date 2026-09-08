@@ -202,7 +202,10 @@ pub async fn join(
         &config,
         &identity.signing_key,
         &config.identity.display_name,
-        "unknown",
+        // Not "unknown". Join happens before this vault has an index, but the
+        // model this client embeds with is known statically, and the hub
+        // records what it is told here.
+        &crate::model::KnownModel::BgeSmallEnV15.config().model_id,
         Some(invite_code),
     )
     .await?;

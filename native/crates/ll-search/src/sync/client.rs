@@ -574,7 +574,9 @@ pub(super) async fn connect_and_authenticate(
     let exporter = channel_binding(&ws, insecure_ws_allowed())?;
 
     let vault_ids: Vec<String> = config.vault_id.clone().into_iter().collect();
-    let ready = super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, invite).await?;
+    let ready =
+        super::handshake::authenticate(&mut ws, seed, config, &vault_ids, &exporter, model_id, invite)
+            .await?;
     eprintln!("Authenticated (protocol v{})", ready.protocol_version);
 
     Ok((ws, ready))
