@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.4
+
 ### Added
 
 - **An index larger than one WebSocket frame can now be uploaded.** v5 sent the whole export as a single binary frame, and tungstenite and axum both default `max_frame_size` to 16 MiB, so a vault past that could not federate at all — roughly 2,586 notes for the vault this was measured on, which holds 5,059. The pieces to fix it were already written and wired to nothing: `ChunkedFrame`, `manifest_root` and `CHUNK_MAX_BODY_SIZE` had no callers, and sync-hub's assembler sat on the v4 path where a v5 connection can never reach it. v5 replaced the upload path and orphaned both halves.
