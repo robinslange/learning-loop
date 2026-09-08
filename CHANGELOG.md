@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **An index larger than one WebSocket frame can now be uploaded.** v5 sent the whole export as a single binary frame, and tungstenite and axum both default `max_frame_size` to 16 MiB, so a vault past that could not federate at all — roughly 2,586 notes for the vault this was measured on, which holds 5,059. The pieces to fix it were already written and wired to nothing: `ChunkedFrame`, `manifest_root` and `CHUNK_MAX_BODY_SIZE` had no callers, and sync-hub's assembler sat on the v4 path where a v5 connection can never reach it. v5 replaced the upload path and orphaned both halves.
+
+  `SyncReady` now carries `chunked_upload` when the hub can reassemble, and `UploadIndex` carries `chunked` when the client is splitting. Presence is the mode on both sides — no flag beside the numbers that could disagree with them — and absence is the single-frame upload, so a client and a hub that do not both know about this behave exactly as before. A client only chunks when the hub advertised it: sending frames to a hub expecting one body would have it store the first chunk as the index.
+
+  The chunk size is the smaller of the two ceilings, and an export past what the hub will assemble at all is refused before the first frame with its size named, as a terminal error rather than something retried on a timer.
+
+  **This needs a sync-hub that advertises the capability.** Against an older hub the client behaves as it does today: one frame while it fits, and a clear terminal error above that.
+
+### Fixed
+
+- **A Windows path is not an ESM specifier.** `install-shims.test.mjs` spawned a child importing the installer by absolute path, which on Windows is `D:\...` — refused by the ESM loader with "Received protocol 'd:'". posix accepts a bare absolute path, so this could only fail on the runner nobody develops on. It had been red on main since the `fix/fedv5-docs` merge, and v2.0.3 shipped with it red.
+
+
 ## v2.0.3
 
 ### Fixed
