@@ -17,6 +17,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use futures_util::{SinkExt, StreamExt};
 use ll_search::sync::client::sync_all_async;
 use ll_search::sync::error::SyncError;
+use ll_search::sync::protocol::{manifest_root, ChunkedFrame};
 use ll_search::sync::config::{
     export_db_path, export_shape_fingerprint, last_export_shape_path, FederationConfig,
     HubEndpoint, Identity, VisibilityConfig,
@@ -27,6 +28,7 @@ use ll_search::sync::grant::RevocationStatement;
 use ll_search::sync::protocol_v5::{
     hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, RevocationWire, VaultState,
     PROTOCOL_VERSION,
+    ChunkedUploadLimits,
 };
 use ll_search::sync::state::{read_readable_vaults, read_state, HubHolds, OUTCOME_ERROR, OUTCOME_OK};
 use tokio::net::TcpListener;
@@ -1130,17 +1132,26 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
 /// named error and a hub that closes the connection mid-frame.
 ///
 /// It needs no hub: the pre-flight runs before the seed is loaded and long
-/// before anything is dialled, which is the whole point of a pre-flight.
+/// A hub that never offered chunking reads one frame per upload, so an export
+/// past that cannot be sent to it. The refusal is terminal -- the export does
+/// not shrink because time passed.
+///
+/// It is refused AFTER the handshake, not before: whether an export can be
+/// sent depends on what the hub offers, and nothing local knows that. A guard
+/// that answered this question before dialling is what made the chunked path
+/// unreachable, and every unit test of `upload_plan` still passed, because
+/// both halves were individually right.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn an_export_too_big_for_one_frame_is_refused_before_the_hub_is_dialled() {
+async fn an_oversize_export_to_a_hub_without_chunking_is_refused() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
     place_oversize_export(dir.path());
 
-    // Nothing listens here, so a cycle that got past the pre-flight would fail
-    // on the connection instead and say so.
-    let config = config_for(dir.path(), "127.0.0.1:1".parse().unwrap());
+    // A real hub that completes the handshake and advertises nothing.
+    let addr = spawn_hub(None, OnUpload::Ack).await;
+    let config = config_for(dir.path(), addr);
+
     let err = sync_all_async(
         &dir.path().join("no-such-source.db"),
         vault.path(),
@@ -1148,12 +1159,138 @@ async fn an_export_too_big_for_one_frame_is_refused_before_the_hub_is_dialled() 
         &config,
     )
     .await
-    .expect_err("an export this size cannot be sent");
+    .expect_err("an export this size cannot be sent to this hub");
 
     assert!(
         matches!(err.downcast_ref::<SyncError>(), Some(SyncError::EnvelopeOversize { .. })),
-        "the size rule is what refused it, not a failed connection: {err}",
+        "the size rule is what refused it, not a failed connection: {err:#}",
     );
+    assert!(
+        SyncError::is_terminal(&err),
+        "an export that does not fit will not fit on the next tick either",
+    );
+}
+
+/// The case chunking exists for, end to end: an export past one frame, a hub
+/// that says it can reassemble, and a body that arrives whole.
+///
+/// This is the test the live run needed and the unit tests could not be. It
+/// asserts what the hub receives -- the declaration, the frames, and that
+/// reassembling them in seq order reproduces the export byte for byte.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_oversize_export_is_chunked_when_the_hub_offers_it() {
+    test_env();
+    let dir = tempfile::tempdir().unwrap();
+    let vault = tempfile::tempdir().unwrap();
+    place_oversize_export(dir.path());
+    let expected = std::fs::read(export_db_path(dir.path())).unwrap();
+
+    let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let addr = spawn_chunking_hub(Arc::clone(&seen), expected.len()).await;
+    let config = config_for(dir.path(), addr);
+
+    let result = sync_all_async(
+        &dir.path().join("no-such-source.db"),
+        vault.path(),
+        dir.path(),
+        &config,
+    )
+    .await
+    .expect("an oversize export must upload when the hub can reassemble");
+
+    assert_eq!(result.uploaded_notes, LOCAL_NOTE_COUNT);
+    let log = seen.lock().unwrap().clone();
+    assert!(
+        log.iter().any(|l| l == "reassembled-ok"),
+        "the hub must have rebuilt the export from the frames: {log:?}",
+    );
+    assert!(
+        log.iter().any(|l| l.starts_with("chunks=")),
+        "the upload must have been declared as chunked: {log:?}",
+    );
+}
+
+/// A hub that advertises chunked upload, checks the declaration against the
+/// frames that follow, and records what it saw.
+async fn spawn_chunking_hub(seen: Arc<Mutex<Vec<String>>>, expected_len: usize) -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let note = |what: String| seen.lock().unwrap().push(what);
+        let Ok((stream, _)) = listener.accept().await else { return };
+        let Ok(mut ws) = tokio_tungstenite::accept_async(stream).await else { return };
+
+        let Some(hello) = recv_json(&mut ws).await else { return note("no hello".into()) };
+        let Ok(ClientMsg::ClientHello { nonce_c, .. }) = serde_json::from_value(hello) else {
+            return note("not a hello".into());
+        };
+        let nonce_h: [u8; 32] = rand::random();
+        let Some(nonce_c_raw) = unb64(&nonce_c) else { return note("bad nonce".into()) };
+        let sig_h = hub_key().sign(&hub_challenge_message(&nonce_h, &nonce_c_raw, &[0u8; 32]));
+        if !send_hub(&mut ws, &HubMsg::HubChallenge {
+            nonce_h: b64(&nonce_h),
+            hub_key_id: hub_key_id(),
+            sig_h: b64(&sig_h.to_bytes()),
+        }).await { return }
+        if recv_json(&mut ws).await.is_none() { return note("no client-auth".into()) }
+
+        // The capability. Deliberately smaller than the client's own ceiling,
+        // so the smaller of the two is what the frames must respect.
+        let chunk_bytes: u32 = 4 * 1024 * 1024;
+        if !send_hub(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: Some(ChunkedUploadLimits {
+                max_chunk_bytes: chunk_bytes,
+                max_total_bytes: 200 * 1024 * 1024,
+            }),
+            protocol_version: PROTOCOL_VERSION,
+            vault_state: vec![],
+            grants: vec![],
+            revocations: vec![],
+        }).await { return }
+
+        let Some(msg) = recv_json(&mut ws).await else { return note("no upload".into()) };
+        let Ok(ClientMsg::UploadIndex { vault_id, sha256, chunked, .. }) =
+            serde_json::from_value(msg)
+        else {
+            return note("not an upload-index".into());
+        };
+        let Some(d) = chunked else { return note("upload was not declared chunked".into()) };
+        note(format!("chunks={}", d.chunks));
+        if d.chunk_size_max > chunk_bytes {
+            return note(format!("chunk_size_max {} exceeds what was offered", d.chunk_size_max));
+        }
+
+        // Read exactly what was declared and rebuild it.
+        let mut parts: Vec<(u32, [u8; 32], Vec<u8>)> = Vec::new();
+        for _ in 0..d.chunks {
+            let Some(Ok(tokio_tungstenite::tungstenite::Message::Binary(raw))) = ws.next().await
+            else {
+                return note("a declared chunk never arrived".into());
+            };
+            match ChunkedFrame::decode(&raw) {
+                Ok(f) => {
+                    if f.body.len() as u32 > d.chunk_size_max {
+                        return note("a chunk was larger than declared".into());
+                    }
+                    parts.push((f.seq, f.hash, f.body))
+                }
+                Err(e) => return note(format!("undecodable chunk: {e}")),
+            }
+        }
+        parts.sort_by_key(|p| p.0);
+        let hashes: Vec<[u8; 32]> = parts.iter().map(|p| p.1).collect();
+        if hex::encode(manifest_root(&hashes)) != d.manifest_root {
+            return note("manifest root did not match the frames".into());
+        }
+        let body: Vec<u8> = parts.into_iter().flat_map(|p| p.2).collect();
+        if body.len() != expected_len {
+            return note(format!("reassembled {} bytes, expected {expected_len}", body.len()));
+        }
+        note("reassembled-ok".into());
+
+        let _ = send_hub(&mut ws, &HubMsg::UploadAck { vault_id, sha256 }).await;
+    });
+    addr
 }
 
 /// An export one byte past what a single frame can carry. `zeroblob` grows

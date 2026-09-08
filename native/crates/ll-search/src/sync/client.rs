@@ -387,18 +387,11 @@ async fn run_cycle(
 ) -> anyhow::Result<SyncResult> {
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
-    if !upload_fits(prepared.bytes.len()) {
-        // Name the size and say it will not self-heal. The export only grows,
-        // so retrying this on a timer is the one case where the next attempt
-        // is knowably the same failure.
-        return Err(anyhow::Error::new(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP })
-            .context(format!(
-                "the export is {} bytes and a single frame to the hub cannot exceed {}. \
-                 Retrying will not change this: the vault has outgrown one-frame upload",
-                prepared.bytes.len(),
-                HUB_INBOUND_CAP
-            )));
-    }
+    // No size check here. Whether an export can be sent depends on what the
+    // hub offers, and that is not known until after the handshake -- a guard
+    // at this point can only ask "does it fit in one frame", which was the
+    // whole question before chunking existed and is the wrong one now.
+    // `upload_plan` decides, once, with the hub's limits in hand.
 
     let seed = auth::load_seed(&seed_path(config_dir))?;
     let peer_id = config.identity.display_name.clone();
