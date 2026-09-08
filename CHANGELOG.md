@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.2
+
 ### Fixed
 
 - **A running `ll-search watch` daemon never re-read `config.json`, so it overwrote a successful `join` with the pre-join hub's failure.** The watcher loaded the federation config once, before its loop, and reused that value on every tick forever — but `join`, `link accept` and `recover` all rewrite that file underneath a live daemon. After any of them the watcher went on dialling the hub the machine had left, and wrote *that* failure into `federation/sync-state.json`, which is the file `ll-search status` renders. The stale answer did not merely persist: it overwrote the true one every cycle, so even a successful manual `sync` was undone within one interval, and the page read as though federation had never moved. Observed end to end — a join rewrote the endpoint at 11:02:39 and three minutes later the daemon stamped `refusing cleartext ws:// connection to hub "ws://100.64.0.2:9473/ws"`, an endpoint no longer on disk. The tick re-reads now. A config that stops parsing keeps the last good one rather than dropping to none, so a half-written save cannot cost a working daemon its federation until someone restarts it, and a daemon that started before `join` picks the file up when it appears.
