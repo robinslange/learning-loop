@@ -19,6 +19,16 @@ First check that the vault backend is alive. Open a recent shadow record and loo
 - If you see `spawn ... ENOENT`, run `/learning-loop:init` to install the binary.
 - If the backend is healthy but the gate never passes, the threshold is above what the fusion scale can reach. Run `node PLUGIN/scripts/review-shadow.mjs` — it reports `unreachable` (the gate exceeds the highest score ever recorded), `starved` (within 5% of the observed ceiling), or `ok`. The weighted-RRF ceiling is `0.4333`; the default gate is `0.34`. Lower `injection_threshold` in `config.json` (or set `LEARNING_LOOP_INJECTION_THRESHOLD`) to a value inside that range.
 
+## `ll-search status` reports a hub you no longer use
+
+The `hub:` line comes from `config.json`; the `last sync` line comes from `federation/sync-state.json`, which records the last cycle that finished. A config written since then — by `ll-search join`, by `ll-search link request`, or by hand — has not been acted on yet. The watcher picks it up on its next federation tick, five minutes by default; syncing now settles it immediately.
+
+```bash
+ll-search sync <vault-path>/.vault-search/vault-index.db <vault-path>
+```
+
+If the two lines still disagree after a successful sync, that is not this: read the error itself.
+
 ## Notes not showing up in vault
 
 Check that `config.json` in `PLUGIN_DATA` (set by `CLAUDE_PLUGIN_DATA` env var) has the correct `vault_path`. If set, the `VAULT_PATH` environment variable overrides it.
@@ -29,7 +39,7 @@ Check that `librarian.enabled` is `true` in your config, ollama is running (`oll
 
 ## `ll-search: command not found`
 
-Both `ll-watch` and `ll-search` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
+`ll-watch`, `ll-search` and `ll-paths` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
 
 ## Episodic memory not available
 

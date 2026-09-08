@@ -13,8 +13,7 @@ Agent and skill files use two path placeholders for the plugin and vault roots:
 
 - **Value mapping.** The Learning Loop Paths session context carries a `PLUGIN=` and a `VAULT=` line, where `PLUGIN=` → `${CLAUDE_PLUGIN_ROOT}` and `VAULT=` → `{{VAULT}}`.
 - **Resolve early.** Resolve both placeholders to literal absolute paths BEFORE passing any prompt to a subagent.
-- **Recovery when the context block is absent.** Recover the plugin root in any Bash block: `echo "$CLAUDE_PLUGIN_ROOT"` (a real env var there) or `node "$CLAUDE_PLUGIN_ROOT/scripts/resolve-paths.mjs"`.
-- **Inside Bash, it runs as written.** `${CLAUDE_PLUGIN_ROOT}` inside a Bash command resolves at execution — leave it as written.
+- **Inside Bash, resolve it instead — `eval "$(ll-paths --sh)"`, then `"$PLUGIN/..."`.** `${CLAUDE_PLUGIN_ROOT}` is NOT an environment variable; nothing in a Bash tool shell sets it. The Skill tool substitutes it when it loads a `SKILL.md`, and nothing substitutes it anywhere else — this file, agent definitions and step files all arrive through `Read`. Left in a Bash block it expands to the empty string and the command runs against `/`, silently, because `eval` of a failed command consumes nothing. `tests/bash-blocks-resolve-paths.test.mjs` fails the build over it.
 - **Never guess.** If a placeholder reaches you unresolved in prompt or input TEXT you must use as a path, report it as a dispatch error instead of inventing a value.
 
 Writing a bare `PLUGIN` prefix before a path is banned (a lint test enforces this); always write `${CLAUDE_PLUGIN_ROOT}/`.

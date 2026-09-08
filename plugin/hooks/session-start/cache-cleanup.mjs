@@ -1,7 +1,7 @@
 // hooks/session-start/cache-cleanup.mjs : stale cache version prune + shim installer
 // + binary auto-update.
 // Removes plugin-data directories strictly older than the running version, ensures
-// ll-watch and ll-search shims are installed, and triggers a detached binary
+// the CLI shims are installed, and triggers a detached binary
 // download when the installed ll-search version diverges from the plugin's
 // manifest (.claude-plugin/plugin.json) version (plugin auto-update bumps the
 // marketplace files but the native binary lags otherwise).
@@ -21,7 +21,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
 import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
-import { DATA_FILES, DATA_PATHS } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, DATA_PATHS, SHIM_NAMES } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
 
@@ -43,11 +43,15 @@ export async function run(ctx) {
     logError('session-start.cache-cleanup', err);
   }
 
-  // Shim installer: ensure ll-watch and ll-search stable shell wrappers exist.
+  // Shim installer: ensure the stable shell wrappers exist.
+  //
+  // Driven by SHIM_NAMES rather than a list written out here, because this is
+  // the only thing that installs a NEW shim onto an install that already has
+  // the old ones — name them locally and every existing user keeps passing the
+  // check while missing the shim that was added.
   try {
-    const watchShim = join(home(), '.local', 'bin', 'll-watch');
-    const searchShim = join(home(), '.local', 'bin', 'll-search');
-    if (!existsSync(watchShim) || !existsSync(searchShim)) {
+    const missing = SHIM_NAMES.some((s) => !existsSync(join(home(), '.local', 'bin', s)));
+    if (missing) {
       const installer = join(ctx.pluginDir, 'scripts', 'install-shims.mjs');
       if (existsSync(installer)) {
         mkdirSync(join(home(), '.local', 'bin'), { recursive: true });

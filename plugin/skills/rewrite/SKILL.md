@@ -120,7 +120,8 @@ Run the approved actions. Use the right tool per store.
   3. **Write the stub** at the original path with a single line: `Superseded: see [[<replacement>]]`. The stub Write fires the post-write hook chain, which calls `removeOutgoingEdges`. With the v1.14.1 fix, that query now skips `source_graph='archived'` rows: but we have not added any yet, so this pass correctly wipes the live edges as intended.
   4. **Re-insert the dumped edges** with `source_graph='archived'`. For each edge in the dumped `outgoing` array, run:
      ```bash
-     node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs add <from_path> <to_path> <edge_type> \
+     eval "$(ll-paths --sh)"
+     node "$PLUGIN/scripts/edges-cli.mjs" add <from_path> <to_path> <edge_type> \
        --confidence <high|medium> \
        --source-graph archived \
        --direction-flipped <0|1>
@@ -143,7 +144,8 @@ Write a new note to `0-inbox/` capturing the correction itself:
 Always write the supersession, regardless of which other actions ran:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs super-add "<old pattern>" \
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/edges-cli.mjs" super-add "<old pattern>" \
   --replacement "<vault path of transition note or primary rewritten note>" \
   --reason "<reason>"
 ```
@@ -154,13 +156,15 @@ This is what makes future episodic searches surface the correction inline.
 After the supersession record, check whether this instance is federated:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/federation-active.mjs
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/federation-active.mjs"
 ```
 
 If it prints `FEDERATED`, emit a retraction event for each vault note that was REWRITTEN or ARCHIVED this run, so peers holding the old version learn of the correction:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/retraction-notify.mjs "<note_path>" \
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/retraction-notify.mjs" "<note_path>" \
   --reason "<reason>" \
   --replacement "<vault path of transition note or rewritten note>"
 ```

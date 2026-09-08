@@ -38,12 +38,14 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start (after scope identified):**
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"gaps","skill":"gaps","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH"}}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"gaps","skill":"gaps","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH"}}'
 ```
 
 **At session end:**
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

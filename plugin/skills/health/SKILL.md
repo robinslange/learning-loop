@@ -169,7 +169,8 @@ If the queue has pending items, add recommendation:
 Run:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/retrieval-report.mjs --usage --json
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/retrieval-report.mjs" --usage --json
 ```
 
 Parse the JSON. Two candidate lists plus one coverage list:
@@ -209,6 +210,10 @@ federation adds no row. The four that matter here:
   re-uploads.
 - **`STALE`** — the last successful sync is more than seven days old.
 - **`BLOCKED`** — `ll-search sync` will refuse this config.
+
+A `last sync` error naming a hub the `hub:` line above it does not name is
+none of these: it is a cycle that ran before the config changed, and the
+watcher acts on the change at its next federation tick. Report it as that.
 
 Do not offer a fix here. `/learning-loop:doctor` carries the full federation
 section, including `ll-search link list` and what each verdict means; point at

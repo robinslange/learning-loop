@@ -120,10 +120,13 @@ function closeBracket(code, open) {
  *
  * Variants are the capitalised names at depth 1; a variant's long flags are
  * its fields carrying an `#[arg(... long ...)]`; a field carrying
- * `#[command(subcommand)]` names the enum the variant delegates to.
+ * `#[command(subcommand)]` names the enum the variant delegates to. Every
+ * other field is a POSITIONAL, and its place in the list is its place on the
+ * command line — `Option<T>` may be left off the end, `Vec<T>` takes the rest.
  */
 function parseEnumBody(code, brace) {
   const variants = {};
+  const positionalsOf = {};
   const nestedOf = {};
   let depth = 1;
   let attrs = '';
@@ -152,6 +155,7 @@ function parseEnumBody(code, brace) {
       if (m) {
         variant = m[1];
         variants[variant] = new Set();
+        positionalsOf[variant] = [];
         attrs = '';
         i += m[1].length;
         continue;
@@ -168,6 +172,8 @@ function parseEnumBody(code, brace) {
           // silently asserting against a flag that does not exist.
           assert.ok(!/\blong\s*=/.test(attrs), `${variant}.${m[1]} renames its long flag`);
           variants[variant].add(`--${kebab(m[1])}`);
+        } else {
+          positionalsOf[variant].push({ name: m[1], type: m[2] });
         }
         attrs = '';
         i += m[0].length;
@@ -176,24 +182,26 @@ function parseEnumBody(code, brace) {
     }
     i += 1;
   }
-  return { variants, nestedOf };
+  return { variants, positionalsOf, nestedOf };
 }
 
 /** Every `#[derive(Subcommand)] enum X` in main.rs. */
 function parseSubcommandEnums(src) {
   const code = blankLiterals(src);
   const enums = {};
+  const positions = {};
   const nested = {};
   for (const m of code.matchAll(/#\[derive\([^)]*\bSubcommand\b[^)]*\)\]\s*enum\s+(\w+)\s*\{/g)) {
     const brace = m.index + m[0].length - 1;
-    const { variants, nestedOf } = parseEnumBody(code, brace);
+    const { variants, positionalsOf, nestedOf } = parseEnumBody(code, brace);
     enums[m[1]] = variants;
+    positions[m[1]] = positionalsOf;
     for (const [variant, child] of Object.entries(nestedOf)) nested[`${m[1]}.${variant}`] = child;
   }
-  return { enums, nested };
+  return { enums, positions, nested };
 }
 
-const { enums, nested } = parseSubcommandEnums(readFileSync(MAIN_RS, 'utf8'));
+const { enums, positions, nested } = parseSubcommandEnums(readFileSync(MAIN_RS, 'utf8'));
 
 /** `{ 'reflect-scan': Set<flag>, 'link approve': Set<flag>, ... }` */
 function flattenCli(enumName, prefix = '') {
@@ -214,6 +222,26 @@ function flattenCli(enumName, prefix = '') {
 }
 
 const CLI = flattenCli('Commands');
+
+/** `{ 'join': { min: 3, max: 3 }, 'intentions': { min: 1, max: 2 }, ... }` */
+function flattenArity(enumName, prefix = '') {
+  const out = {};
+  for (const [variant, fields] of Object.entries(positions[enumName] ?? {})) {
+    const name = prefix ? `${prefix} ${kebab(variant)}` : kebab(variant);
+    const child = nested[`${enumName}.${variant}`];
+    if (child) {
+      out[name] = { min: 0, max: 0 };
+      Object.assign(out, flattenArity(child, name));
+    } else {
+      const variadic = fields.some((f) => f.type === 'Vec');
+      const required = fields.filter((f) => f.type !== 'Vec' && f.type !== 'Option').length;
+      out[name] = { min: required, max: variadic ? Infinity : fields.length };
+    }
+  }
+  return out;
+}
+
+const ARITY = flattenArity('Commands');
 
 /** Flags clap supplies itself, on every subcommand. */
 const CLAP_BUILTINS = new Set(['--help', '--version']);
@@ -277,7 +305,30 @@ function parseSpan(span) {
   const name = GROUPS.has(words[0]) && words[1] ? `${words[0]} ${words[1]}` : words[0];
   const rest = span.slice(m[0].length);
   const flags = [...rest.matchAll(/(?<![\w-])(--[a-z][a-z0-9-]*)/g)].map((f) => f[1]);
-  return { name, flags };
+  return { name, flags, positionals: leadingPositionals(rest) };
+}
+
+/**
+ * The positional arguments a span writes: the leading run of words before the
+ * first flag, optional bracket, or shell operator.
+ *
+ * Leading, because that is how every invocation in these documents is written
+ * and how clap prints its own usage — `[OPTIONS] <A> <B>` reads the same way
+ * round. Taking every non-flag word instead would count a flag's VALUE
+ * (`--config-dir <config_dir>`) as another positional, which is the reading
+ * that makes the check disagree with the CLI on correct documents.
+ *
+ * The run also stops at a pipe or a redirection: `ll-search index "$VAULT"
+ * "$VAULT/…/vault-index.db" 2>&1 | tail -1` supplies two arguments, and the
+ * three shell tokens after them are not a third, fourth and fifth.
+ */
+function leadingPositionals(rest) {
+  const out = [];
+  for (const tok of rest.match(/"[^"]*"|'[^']*'|\S+/g) ?? []) {
+    if (/^(-|\[|#|\||&|;|\d*>|<<)/.test(tok)) break;
+    out.push(tok);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +489,72 @@ test('every exclusion from the ARCHITECTURE sweep still describes something real
     assert.ok(LEAF_COMMANDS.includes(name), `${name} is excluded and is not a command`);
     assert.ok(!named.has(name), `${name} is excluded and ${ARCHITECTURE} names it anyway`);
   }
+});
+
+/**
+ * Existence is not the whole claim a document makes about a command.
+ *
+ * `ll-search join <hub-endpoint> <invite-code> <vault-path>` says three things:
+ * that `join` exists, that it takes three arguments, and that they go in that
+ * order. Everything above checks the first. The second is checkable against the
+ * same derived CLI, and it is the half that strands a reader — a documented
+ * invocation missing an argument is a command that exits non-zero, or panics,
+ * on the line the reader was told to run.
+ *
+ * A span that writes NO arguments is skipped, not failed: `ll-search sync`
+ * inside a sentence is the command's name, not an invocation of it, and the
+ * documents use it that way in a dozen places.
+ */
+test('every documented invocation supplies the arguments its command takes', () => {
+  const wrong = [];
+  for (const rel of DOCS()) {
+    for (const span of codeSpans(readFileSync(join(ROOT, rel), 'utf8'))) {
+      const hit = parseSpan(span);
+      if (!hit || hit.positionals.length === 0) continue;
+      const arity = ARITY[hit.name];
+      if (!arity) continue; // the existence test owns that failure
+      const n = hit.positionals.length;
+      if (n < arity.min || n > arity.max) {
+        wrong.push(
+          `${rel}: ll-search ${hit.name} takes ${arity.min}..${arity.max} ` +
+            `positionals, written with ${n} (${hit.positionals.join(' ')})`,
+        );
+      }
+    }
+  }
+  assert.deepEqual([...new Set(wrong)].sort(), [], `wrong arity:\n${wrong.join('\n')}`);
+});
+
+test('the arity derivation and its extraction both work', () => {
+  // Same reason as the other two derivation guards: an arity map that came
+  // back empty, or an extractor that finds no arguments, would make the test
+  // above pass by looking at nothing.
+  assert.deepEqual(ARITY['join'], { min: 3, max: 3 });
+  assert.deepEqual(ARITY['sync'], { min: 2, max: 2 });
+  assert.deepEqual(ARITY['status'], { min: 0, max: 0 });
+  // `Option` may be omitted, `Vec` takes the rest — both come out of the type,
+  // and a check that only counted fields would get these two wrong.
+  assert.deepEqual(ARITY['intentions'], { min: 1, max: 2 });
+  assert.deepEqual(ARITY['tune-prf'], { min: 1, max: Infinity });
+
+  // A flag's value is not a positional, or every documented `--config-dir DIR`
+  // would read as one more argument than the command takes.
+  assert.deepEqual(parseSpan('ll-search status --config-dir <config_dir>').positionals, []);
+  assert.deepEqual(parseSpan('ll-search join <h> <i> <v> --config-dir <d>').positionals, [
+    '<h>',
+    '<i>',
+    '<v>',
+  ]);
+  // Shell tokens after the arguments are not arguments.
+  assert.deepEqual(parseSpan('ll-search index "$VAULT" "$DB" 2>&1 | tail -1').positionals, [
+    '"$VAULT"',
+    '"$DB"',
+  ]);
+  // And the check can actually fail: this is what a doc that dropped the index
+  // path from a `sync` line looks like.
+  const short = parseSpan('ll-search sync <vault-path>');
+  assert.equal(short.positionals.length, 1);
+  assert.ok(short.positionals.length < ARITY['sync'].min);
 });
 
 test('every flag the docs name exists on the command they name it on', () => {

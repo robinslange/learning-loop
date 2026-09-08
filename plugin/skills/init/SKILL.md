@@ -46,7 +46,7 @@ Learning loop configured.
   Librarian:    [enabled | skipped: ollama/hardware not available]
   Seed restore: [restored from bundle | no bundle present]
   Harvest list: [seeded | empty (personal instance)]
-  Shims:        ll-watch + ll-search installed in ~/.local/bin
+  Shims:        ll-watch + ll-search + ll-paths installed in ~/.local/bin
 
 Start the watcher with: ll-watch
 Run /learning-loop:help to see available commands.
