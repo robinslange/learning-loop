@@ -557,6 +557,78 @@ mod tests {
         assert_eq!(got, "01926d7e-0000-7000-8000-00000000000a");
     }
 
+    /// The control that decides what leaves the machine. Deleting the `private`
+    /// branch published every withheld note, body and all, and the suite stayed
+    /// green: the assertion that looked like cover was `exported + skipped == 1`,
+    /// a sum over a partition that both branches satisfy. This one names the
+    /// artefact instead of the counters.
+    #[test]
+    fn a_private_note_is_absent_from_the_export_artefact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_linked_source_db(&source, &vault);
+
+        let config = FederationConfig::test_fixture(
+            "listed",
+            vec![("**/secret*".to_string(), "private".to_string())],
+        );
+        export_index(&source, &vault, &out, &config).unwrap();
+
+        let c = Connection::open(&out).unwrap();
+        let paths: Vec<String> = c
+            .prepare("SELECT path FROM notes").unwrap()
+            .query_map([], |r| r.get::<_, String>(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        assert!(!paths.iter().any(|p| p == "secret.md"), "withheld note in notes: {paths:?}");
+
+        // Its body must not be reachable by id either: the row and its content
+        // are separate tables, and only one of them is what a peer reads.
+        let bodies: Vec<String> = c
+            .prepare("SELECT body FROM notes_content").unwrap()
+            .query_map([], |r| r.get::<_, String>(0)).unwrap()
+            .filter_map(|r| r.ok()).collect();
+        assert!(
+            !bodies.iter().any(|b| b.contains("Private body")),
+            "withheld body in notes_content: {bodies:?}"
+        );
+        // Not vacuous: the notes that were meant to ship are still there.
+        assert_eq!(paths.len(), 2, "shared and other must still export: {paths:?}");
+    }
+
+    /// `listed` is documented as title, tags and a summary. Removing the cap
+    /// shipped the whole body under that tier and no test noticed, so the tier
+    /// distinction existed only in the docs.
+    #[test]
+    fn a_listed_note_ships_a_summary_not_its_body() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        let long = "x".repeat(2000);
+        build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000b"));
+        {
+            let c = Connection::open(&source).unwrap();
+            c.execute("UPDATE notes_content SET body = ?1 WHERE id = 1", [&long]).unwrap();
+        }
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::write(vault.join("n.md"), format!("---\ntitle: N\n---\n\n{long}")).unwrap();
+
+        let config = FederationConfig::test_fixture("listed", vec![]);
+        export_index(&source, &vault, &out, &config).unwrap();
+
+        let c = Connection::open(&out).unwrap();
+        let body: String = c
+            .query_row("SELECT body FROM notes_content WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            body.len() < long.len(),
+            "a listed note shipped its whole body: {} chars", body.len()
+        );
+        assert!(body.len() <= 320, "summary should be capped near 300: {} chars", body.len());
+    }
+
     /// A wikilink names its target by filename, and in this vault filenames are
     /// whole sentences, so a link row IS the target's title. Copying one whose
     /// target was withheld publishes a private note's title through a table the
