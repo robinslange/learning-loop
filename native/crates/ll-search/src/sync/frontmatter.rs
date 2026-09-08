@@ -28,11 +28,18 @@ fn strip_bom(raw: &str) -> (&str, &str) {
     }
 }
 
+/// Read a TOP-LEVEL frontmatter key.
+///
+/// The match is on the raw line, so a key must start at column zero. An earlier
+/// version trimmed the line first, which erased nesting depth: `visibility:
+/// public` indented under any parent key -- or inside a block scalar quoting
+/// someone else's frontmatter -- read as though the note had declared it, and
+/// `visibility` decides what leaves the machine. Only the value is trimmed.
 pub fn read_key(raw: &str, key: &str) -> Option<String> {
     let (_, _, fm, _) = split(raw)?;
     let prefix = format!("{key}:");
     for line in fm.lines() {
-        if let Some(val) = line.trim().strip_prefix(&prefix) {
+        if let Some(val) = line.strip_prefix(&prefix) {
             return Some(val.trim().to_string());
         }
     }
@@ -217,6 +224,22 @@ pub fn verify_replacement(
 
 #[cfg(test)]
 mod tests {
+
+    /// `visibility` decides what leaves the machine, so a nested key that reads
+    /// as top-level is a publish primitive. Indented under any parent, or
+    /// quoted inside a block scalar, it must not be seen.
+    #[test]
+    fn an_indented_key_is_not_a_top_level_key() {
+        let nested = "---\nmeta:\n  visibility: public\n---\n\nBody.";
+        assert_eq!(read_key(nested, "visibility"), None, "indented key was read as top-level");
+
+        let quoted = "---\nnote: |\n  visibility: public\n---\n\nBody.";
+        assert_eq!(read_key(quoted, "visibility"), None, "block scalar content was read as a key");
+
+        // Not vacuous: a real top-level key still reads, value trimmed.
+        let top = "---\nvisibility: public\n---\n\nBody.";
+        assert_eq!(read_key(top, "visibility"), Some("public".to_string()));
+    }
     use super::*;
 
     #[test]
