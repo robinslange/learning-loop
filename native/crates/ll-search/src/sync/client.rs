@@ -17,7 +17,7 @@ use super::fetch::{fetch_all, Fetched};
 use super::grants;
 use super::handshake::SyncReadyPayload;
 use super::key_id::KeyId;
-use super::protocol::{ENVELOPE_HEADER_LEN, HUB_INBOUND_CAP};
+use super::protocol::HUB_INBOUND_CAP;
 use super::protocol_v5::{ClientMsg, HubMsg, VaultState};
 use super::state::{self, HubHolds, SyncState};
 
@@ -276,10 +276,11 @@ pub async fn sync_all_async(
 /// `HUB_INBOUND_CAP`, so the export that would not fit is refused here, with
 /// its own error, rather than sent and hung up on.
 ///
-/// The frame carries `ENVELOPE_HEADER_LEN` bytes in front of the export, and
-/// an export of exactly the remaining room fits.
+/// v5 sends the export bytes raw -- there is no envelope header on the wire --
+/// and `max_frame_size` bounds the payload alone, so the export is the whole
+/// of what is measured.
 fn upload_fits(export_len: usize) -> bool {
-    export_len + ENVELOPE_HEADER_LEN <= HUB_INBOUND_CAP
+    export_len <= HUB_INBOUND_CAP
 }
 
 pub(super) fn unix_now() -> i64 {
@@ -299,7 +300,16 @@ async fn run_cycle(
     let prepared = prepare_export(source_db, vault_path, config_dir, config).await?;
 
     if !upload_fits(prepared.bytes.len()) {
-        return Err(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP }.into());
+        // Name the size and say it will not self-heal. The export only grows,
+        // so retrying this on a timer is the one case where the next attempt
+        // is knowably the same failure.
+        return Err(anyhow::Error::new(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP })
+            .context(format!(
+                "the export is {} bytes and a single frame to the hub cannot exceed {}. \
+                 Retrying will not change this: the vault has outgrown one-frame upload",
+                prepared.bytes.len(),
+                HUB_INBOUND_CAP
+            )));
     }
 
     let seed = auth::load_seed(&seed_path(config_dir))?;
@@ -745,13 +755,42 @@ pub(super) async fn send_json<T: serde::Serialize>(
     Ok(())
 }
 
+/// Send one binary frame, and on failure read the socket once more before
+/// giving up.
+///
+/// A peer that refuses a frame for its size closes with a reason, and that
+/// close frame is still readable after the write has already failed. Returning
+/// the write error immediately threw it away, so a hub saying "index exceeds
+/// max_frame_size" and a hub that simply vanished both surfaced as
+/// `Broken pipe (os error 32)` -- the operator could not tell a permanent
+/// refusal from a transient reset without waiting out another cycle.
+/// How long to wait for a close frame after a failed write. The peer has
+/// already decided; this only collects the reason it gave.
+const CLOSE_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
+
 async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> {
     let to = send_timeout();
-    tokio::time::timeout(to, ws.send(Message::binary(payload)))
-        .await
-        .map_err(|_| SyncError::SendTimeout { timeout: to })?
-        .map_err(SyncError::from)?;
-    Ok(())
+    let n = payload.len();
+    match tokio::time::timeout(to, ws.send(Message::binary(payload))).await {
+        Err(_) => Err(SyncError::SendTimeout { timeout: to }.into()),
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => {
+            let closed = tokio::time::timeout(CLOSE_DRAIN_TIMEOUT, ws.next()).await;
+            if let Ok(Some(Ok(Message::Close(Some(cf))))) = closed {
+                anyhow::bail!(
+                    "the hub closed the connection while receiving {n} bytes: {:?} {}",
+                    cf.code,
+                    cf.reason
+                );
+            }
+            // No reason given: the peer dropped the socket, which is
+            // byte-identical to a transient reset. Say what we do know.
+            Err(anyhow::Error::new(SyncError::from(e)).context(format!(
+                "the upload of {n} bytes did not finish. A WebSocket peer at the \
+                 default limits refuses a single frame over {HUB_INBOUND_CAP} bytes"
+            )))
+        }
+    }
 }
 
 pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
@@ -1452,9 +1491,13 @@ mod tests {
     /// of it is what says the rule is at that byte and not near it.
     #[test]
     fn an_export_fits_exactly_when_it_and_the_frame_header_reach_the_cap() {
-        let room = HUB_INBOUND_CAP - ENVELOPE_HEADER_LEN;
-        assert!(upload_fits(room), "an export filling the frame exactly is sendable");
-        assert!(!upload_fits(room + 1), "one byte more is not");
+        // Literals, not `HUB_INBOUND_CAP` arithmetic. Deriving the bound from
+        // the constant under test makes the test agree with whatever the
+        // constant says -- which is how a 50 MB cap sat here while the wire
+        // refused anything over 16 MiB. These two numbers were measured
+        // against a live server and are the rule itself.
+        assert!(upload_fits(16_777_216), "an export filling the frame exactly is sendable");
+        assert!(!upload_fits(16_777_217), "one byte more is not");
         assert!(upload_fits(0));
     }
 

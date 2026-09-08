@@ -1144,7 +1144,9 @@ async fn an_export_too_big_for_one_frame_is_refused_before_the_hub_is_dialled() 
 /// An export one byte past what a single frame can carry. `zeroblob` grows
 /// the file without this test materialising the bytes.
 fn place_oversize_export(config_dir: &Path) {
-    const CAP: usize = 50 * 1024 * 1024;
+    // Must track protocol::HUB_INBOUND_CAP, or this synthesises an export in
+    // a band that is no longer the boundary and the test stops testing it.
+    const CAP: usize = 16 * 1024 * 1024;
     let path = export_db_path(config_dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();

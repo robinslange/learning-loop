@@ -9,17 +9,23 @@ pub use messages::{ClientMessage, HubMessage};
 
 /// Maximum envelope size accepted on either send or receive.
 ///
-/// This is the **client-side policy ceiling**; the hub's axum
-/// `WebSocketUpgrade::max_message_size` is the lower effective ceiling
-/// for outbound uploads (see [`HUB_INBOUND_CAP`]).
+/// This is the **client-side policy ceiling**, and it is far above what the
+/// transport can carry: [`HUB_INBOUND_CAP`] is the effective ceiling for
+/// outbound uploads, and nothing this large can reach either direction.
 pub const MAX_ENVELOPE_SIZE: usize = 200 * 1024 * 1024;
 
 /// Bytes preceding the body in a framed binary message: 4 (size BE u32) + 32 (sha256).
 pub const ENVELOPE_HEADER_LEN: usize = 4 + 32;
 
-/// Hub's axum `WebSocketUpgrade::max_message_size`. Uploads above this are dropped
-/// at the transport layer; pre-flight returns [`crate::sync::error::SyncError::EnvelopeOversize`].
-pub const HUB_INBOUND_CAP: usize = 50 * 1024 * 1024;
+/// The largest single WebSocket frame payload the hub will read.
+///
+/// This is `max_frame_size`, not `max_message_size`. An unfragmented frame is
+/// bounded by the former, and tungstenite and axum both default it to 16 MiB;
+/// raising `max_message_size` alone -- the obvious hub-side change -- does not
+/// move it. Measured against a live server: 16777216 is accepted, 16777217
+/// closes the connection. Uploads above this are dropped at the transport
+/// layer; pre-flight returns [`crate::sync::error::SyncError::EnvelopeOversize`].
+pub const HUB_INBOUND_CAP: usize = 16 * 1024 * 1024;
 
 /// Protocol version this client advertises in `SyncHello`.
 pub const PROTOCOL_VERSION_FRAMED: u32 = 2;
