@@ -90,6 +90,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
     quick.checkNliSocketFresh({ pluginData: c.pluginData }),
     quick.checkDuplicateGateHealth({ pluginData: c.pluginData }),
+    quick.checkFederationSyncHealth({ pluginData: c.pluginData }),
     quick.checkHookErrors({ pluginData: c.pluginData }),
     quick.checkInjectionShadowGate({
       pluginData: c.pluginData,

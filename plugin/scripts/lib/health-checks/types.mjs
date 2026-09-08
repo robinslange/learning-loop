@@ -34,6 +34,7 @@ export const CHECK_IDS = Object.freeze({
   'watch-daemon-status': 'watch-daemon-status',
   'offline-mode': 'offline-mode',
   'edges-backfill': 'edges-backfill',
+  'federation-sync-health': 'federation-sync-health',
 });
 
 /**

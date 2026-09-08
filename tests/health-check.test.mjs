@@ -21,6 +21,7 @@ import {
   checkSearchIndexExists,
   checkNliSocketFresh,
   checkDuplicateGateHealth,
+  checkFederationSyncHealth,
   checkHookErrors,
   checkInjectionShadowGate,
   checkAbiDrift,
@@ -412,6 +413,108 @@ test('checkNliSocketFresh: warn when path exists but is not a socket', () => {
   const result = checkNliSocketFresh({ pluginData: dir });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// --- federation sync health -------------------------------------------------
+// The daemon already records every failure; the point of these is that
+// something the user actually sees now reads that record.
+
+function fedDir(name, state) {
+  const dir = mkdtempSync(join(tmpdir(), name));
+  mkdirSync(join(dir, 'federation'), { recursive: true });
+  writeFileSync(join(dir, 'federation', 'config.json'), JSON.stringify({ hub: {} }));
+  if (state !== undefined) {
+    writeFileSync(join(dir, 'federation', 'sync-state.json'), JSON.stringify(state));
+  }
+  return dir;
+}
+
+const NOW = Date.UTC(2026, 8, 8, 12, 0, 0);
+const secs = (ms) => Math.floor(ms / 1000);
+
+test('checkFederationSyncHealth: ok when federation is not configured', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-fed-none-'));
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: configured with no state has never completed a cycle', () => {
+  const dir = fedDir('health-fed-nostate-');
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /has ever completed/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a terminal error is reported as unrecoverable', () => {
+  const dir = fedDir('health-fed-terminal-', {
+    outcome: 'error',
+    detail: 'envelope exceeds hard cap 16777216 bytes',
+    terminal: true,
+    consecutive_failures: 1,
+    last_success_at: secs(NOW) - 60,
+  });
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /cannot recover by retrying/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a run of failures is reported with its length', () => {
+  const dir = fedDir('health-fed-streak-', {
+    outcome: 'error',
+    detail: 'ws: IO error: Broken pipe (os error 32)',
+    consecutive_failures: 7,
+    last_success_at: secs(NOW) - 60,
+  });
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /failed 7 times in a row/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: one failure is not yet an alarm', () => {
+  const dir = fedDir('health-fed-blip-', {
+    outcome: 'error',
+    detail: 'transient',
+    consecutive_failures: 1,
+    last_success_at: secs(NOW) - 60,
+  });
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'ok', 'a blip must not cry wolf');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a daemon that stopped ticking is caught by staleness', () => {
+  // outcome ok, no streak — nothing is writing failures because nothing runs.
+  const dir = fedDir('health-fed-silent-', {
+    outcome: 'ok',
+    consecutive_failures: 0,
+    last_success_at: secs(NOW) - 3600,
+  });
+  const r = checkFederationSyncHealth({ pluginData: dir, syncIntervalSecs: 300, now: NOW });
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /no successful sync in \d+ minutes/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a healthy recent sync is ok', () => {
+  const dir = fedDir('health-fed-ok-', {
+    outcome: 'ok',
+    consecutive_failures: 0,
+    last_success_at: secs(NOW) - 120,
+  });
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.status, 'ok');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: severity is fail so the session-start detector shows it', () => {
+  const dir = fedDir('health-fed-sev-', { outcome: 'ok', last_success_at: secs(NOW) - 60 });
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+  assert.equal(r.severity, 'fail', 'health-detector.mjs filters on severity === fail');
   rmSync(dir, { recursive: true, force: true });
 });
 

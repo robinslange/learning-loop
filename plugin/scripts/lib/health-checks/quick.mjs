@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
-import { DATA_FILES } from '../paths.mjs';
+import { DATA_FILES, FEDERATION_PATHS } from '../paths.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
@@ -687,6 +687,93 @@ function countDuplicateGateIssues(path) {
 // pays the round-trip + cold subprocess on every vault Write indefinitely.
 // Scans the current + previous UTC month files (`hook-errors-YYYY-MM.jsonl`),
 // the same naming pre-write-check.js writes.
+function readJsonOrNull(path) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether federation is still syncing.
+ *
+ * The daemon already knows when it stops: it writes the error to
+ * sync-state.json every cycle and `ll-search status` renders it. But status
+ * only speaks to whoever runs it, and the session-start federation line is
+ * sealed inside the untrusted-data envelope with the retrieved notes -- one
+ * unmarked sentence in a block the model is told not to act on. So a vault
+ * could stop federating indefinitely with the evidence sitting in a file
+ * nobody reads.
+ *
+ * `fail` rather than `warn` on purpose: health-detector.mjs surfaces only
+ * `fail`, and this is the channel that reaches the user unframed.
+ */
+export function checkFederationSyncHealth({
+  pluginData,
+  syncIntervalSecs = 300,
+  now = Date.now(),
+} = {}) {
+  const ok = (detail) =>
+    makeCheck({
+      id: CHECK_IDS['federation-sync-health'],
+      name: 'Federation sync',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.fail,
+      detail,
+      fix: null,
+    });
+  const bad = (detail) =>
+    makeCheck({
+      id: CHECK_IDS['federation-sync-health'],
+      name: 'Federation sync',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.fail,
+      detail,
+      fix: 'Run `ll-search status` for the full report; the detail above is the error the daemon last recorded.',
+    });
+
+  if (!pluginData) return ok('plugin-data not available — skipped');
+
+  // Same profile walk as the session-start federation line: the registry when
+  // there is one, otherwise the single implicit profile.
+  let profiles = [{ id: null, config_dir: pluginData }];
+  const registryPath = FEDERATION_PATHS.vaultRegistry(pluginData);
+  if (existsSync(registryPath)) {
+    const doc = readJsonOrNull(registryPath);
+    if (!Array.isArray(doc?.vaults)) return ok('not configured');
+    profiles = doc.vaults;
+  }
+
+  let configured = 0;
+  for (const profile of profiles) {
+    const dir = profile?.config_dir;
+    if (typeof dir !== 'string' || !existsSync(FEDERATION_PATHS.config(dir))) continue;
+    configured += 1;
+    const who = profile.id ? `${profile.id}: ` : '';
+    const state = readJsonOrNull(FEDERATION_PATHS.syncState(dir));
+
+    if (!state) return bad(`${who}no sync cycle has ever completed`);
+
+    const detail = state.detail || 'no detail recorded';
+    if (state.outcome === 'error' && state.terminal === true) {
+      return bad(`${who}federation cannot recover by retrying: ${detail}`);
+    }
+    const streak = state.consecutive_failures ?? (state.outcome === 'error' ? 1 : 0);
+    if (state.outcome === 'error' && streak >= 3) {
+      return bad(`${who}federation has failed ${streak} times in a row: ${detail}`);
+    }
+    // Catches the daemon that stopped ticking entirely, which no counter sees
+    // because nothing is writing one.
+    const nowSecs = Math.floor(now / 1000);
+    if (state.last_success_at && nowSecs - state.last_success_at > 6 * syncIntervalSecs) {
+      const mins = Math.round((nowSecs - state.last_success_at) / 60);
+      return bad(`${who}no successful sync in ${mins} minutes`);
+    }
+  }
+  return ok(configured === 0 ? 'not configured' : 'syncing');
+}
+
 export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) {
   if (!pluginData) {
     return makeCheck({
