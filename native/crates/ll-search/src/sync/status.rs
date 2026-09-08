@@ -61,7 +61,9 @@ pub fn render_status(config_dir: &Path, now: i64) -> anyhow::Result<String> {
         // same `None`, deliberately, so that a bad file cannot block the sync
         // that would rewrite it. This line must not claim which one it was.
         None => out.push_str(&row("last sync:", "no information — federation/sync-state.json is missing or unreadable. The next sync writes one.")),
-        Some(state) => out.push_str(&sync_block(&state, now)),
+        Some(state) => {
+            out.push_str(&sync_block(&state, now, local_export_note_count(config_dir)))
+        }
     }
     out.push_str(&read_authority_block(config_dir, seed.as_ref(), now)?);
     out.push_str(FOOTER);
@@ -116,7 +118,29 @@ fn identity_block(config: &FederationConfig, seed: Option<&KeyId>) -> String {
     out
 }
 
-fn sync_block(state: &SyncState, now: i64) -> String {
+/// How many notes the last export actually contained, from the export's own
+/// `meta`. Local file, no network -- the same rule as the rest of this page.
+/// `None` when there is no export yet or it cannot be read, which is reported
+/// as nothing rather than as zero.
+fn local_export_note_count(config_dir: &Path) -> Option<i64> {
+    let path = super::config::export_db_path(config_dir);
+    if !path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .ok()?;
+    conn.query_row("SELECT value FROM meta WHERE key = 'note_count'", [], |r| {
+        r.get::<_, String>(0)
+    })
+    .ok()?
+    .parse()
+    .ok()
+}
+
+fn sync_block(state: &SyncState, now: i64, local_note_count: Option<i64>) -> String {
     let mut out = String::new();
     out.push_str(&row("last sync:", &format!("{}  ({})", utc_minute(state.last_attempt_at), outcome(state))));
     out.push_str(&row("last ok:", &match state.last_success_at {
@@ -124,6 +148,32 @@ fn sync_block(state: &SyncState, now: i64) -> String {
         None => "never".to_string(),
     }));
     out.push_str(&row("hub holds:", &holds(state.hub_holds.as_ref())));
+    // A count with nothing beside it reads as healthy at any value. "866
+    // notes" was true and useless while 4,193 more sat unsent, because the
+    // page never said what the vault held.
+    if let (Some(HubHolds::Index { note_count, .. }), Some(local)) =
+        (state.hub_holds.as_ref(), local_note_count)
+    {
+        if local > *note_count {
+            out.push_str(&row(
+                "BEHIND",
+                &format!(
+                    "the vault holds {local} exportable note(s); the hub has {note_count}.                      {} have never reached it.",
+                    local - note_count
+                ),
+            ));
+        }
+    }
+    if let Some(consecutive) = state.consecutive_failures.filter(|n| *n > 1) {
+        let terminal = state.terminal.unwrap_or(false);
+        out.push_str(&row(
+            if terminal { "STUCK" } else { "FAILING" },
+            &format!(
+                "{consecutive} cycles in a row have failed{}.",
+                if terminal { " and retrying cannot fix it" } else { "" }
+            ),
+        ));
+    }
     if let Some(v) = stale_verdict(state.last_success_at, now) {
         out.push_str(&row("STALE", &v));
     }
