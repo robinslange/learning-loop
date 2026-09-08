@@ -14,6 +14,8 @@ All notable changes to this project are documented here. The format is based on 
 
   **This needs a sync-hub that advertises the capability.** Against an older hub the client behaves as it does today: one frame while it fits, and a clear terminal error above that.
 
+  Verified against a live hub: a 26 MB export of 5,059 notes, which had been refused all day, uploaded as chunks and reassembled intact.
+
 ### Fixed
 
 - **A Windows path is not an ESM specifier.** `install-shims.test.mjs` spawned a child importing the installer by absolute path, which on Windows is `D:\...` — refused by the ESM loader with "Received protocol 'd:'". posix accepts a bare absolute path, so this could only fail on the runner nobody develops on. It had been red on main since the `fix/fedv5-docs` merge, and v2.0.3 shipped with it red.
