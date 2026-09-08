@@ -144,7 +144,10 @@ can find.
 
 ## D: Visibility rules
 
-Three tiers: `public` (full content shared), `listed` (title, tags and summary
+Three tiers: `public` (full content and its embedding), `listed` (title, tags,
+vault-relative path and a 300-character summary, and no embedding: the vector is
+computed over the whole body, so sending it would disclose what the summary
+withheld)
 only), `private` (not shared at all). A fresh config is `private` by default
 with no rules.
 
@@ -155,10 +158,20 @@ only when it says so itself:
 visibility: public
 ```
 
-Glob rules may restrict, never publish: a rule naming `public` is clamped to
-`listed`. A misspelled frontmatter value (`visibility: pubic`) falls through to
-the glob rules *and their clamp* rather than to an uncapped tier, so a typo
+A glob rule naming `public` is clamped to `listed`: only frontmatter
+publishes. A misspelled frontmatter value (`visibility: pubic`) falls through
+to the glob rules *and their clamp* rather than to an uncapped tier, so a typo
 cannot publish a note.
+
+**Frontmatter outranks a glob in both directions.** A note carrying
+`visibility: public` defeats a `private` rule written at that exact path, so a
+glob cannot be used to claw back a note that has declared itself. This is the
+opposite of what "rules may restrict" would suggest, and it is the one thing to
+know before relying on a pattern to withhold something: check the frontmatter
+of what it is meant to cover. `ll-search visibility-backfill` stamps
+`visibility: public` into every note the globs published at the moment it runs,
+so running it freezes one config's answer into thousands of notes that no later
+rule can override.
 
 Rules live in `config.json` under `visibility.rules` as `{ "pattern": "...",
 "tier": "..." }`, last match wins. There is no CLI to edit them; write the file

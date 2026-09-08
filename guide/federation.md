@@ -1,6 +1,6 @@
 # Federation (experimental)
 
-A curated knowledge network for sharing verified insights across vaults. Federation is invite-only, and notes that reach other people have already passed source verification and quality gating.
+A curated knowledge network for sharing notes across vaults. Federation is invite-only. What reaches other people is decided by the visibility tier alone: verification status and quality gating are not consulted on the export path, and the source index carries no column for either.
 
 ## Three nouns
 
@@ -17,7 +17,7 @@ Every grant expires, and each successful sync renews the ones it exercised. Defa
 ## What you get
 
 - **Federated search** -- your results include notes from vaults you may read, merged into the same reciprocal-rank fusion as your own, with provenance tracking. A result from elsewhere carries a `peer:<vault_id>/` prefix on its path.
-- **Visibility control** -- three tiers: `public` (full content), `listed` (title, tags and summary), `private` (not shared). See [Visibility rules](#visibility-rules), and note that a glob can restrict but never publish.
+- **Visibility control** -- three tiers: `public` (full content and its embedding), `listed` (title, tags, vault-relative path and a summary, with no embedding), `private` (not shared). See [Visibility rules](#visibility-rules), and note that a glob names a ceiling rather than the last word: frontmatter outranks it in both directions.
 - **Automatic sync** -- the always-on `ll-search watch` daemon reindexes incrementally and syncs on its periodic ticks.
 - **One identity, several machines** -- `ll-search link` joins a second machine to the same key through four doors, one of which needs no network at all.
 
@@ -181,7 +181,9 @@ An upload over the inbound cap returns `SyncError::EnvelopeOversize { cap }` pre
 
 ## Visibility rules
 
-Three tiers: `public` (full content shared), `listed` (title, tags and summary), `private` (not shared at all). A fresh config is `private` by default with no rules.
+Three tiers: `public` (full content and its embedding), `listed` (title, tags, vault-relative path and a 300-character summary, and no embedding), `private` (not shared at all). A fresh config is `private` by default with no rules.
+
+A `listed` note ships no vector because the vector is computed over its whole body: sending it would disclose a derivation of exactly the text the summary truncated. Peer search over listed notes uses BM25.
 
 **Frontmatter is the only route to `public`.** A note is published in full only when it says so itself:
 
@@ -191,7 +193,9 @@ visibility: public
 ---
 ```
 
-**A glob rule may restrict, never publish.** A rule naming `public` is clamped to `listed` on the export path. A misspelled frontmatter value (`visibility: pubic`) falls through to the glob rules *and their clamp* rather than to an uncapped tier, so a typo cannot publish a note either.
+**A glob rule names a ceiling, not the last word.** A rule naming `public` is clamped to `listed` on the export path, so a glob alone never publishes a body. A misspelled frontmatter value (`visibility: pubic`) falls through to the glob rules *and their clamp* rather than to an uncapped tier, so a typo cannot publish a note either.
+
+But a glob does not restrict a note that has declared itself: `visibility: public` in frontmatter beats a `private` rule aimed at that exact path (see **Resolution order** below). Before trusting a pattern to withhold something, check the frontmatter of what it covers.
 
 **Why the default inverted.** The old policy was a blocklist: `3-permanent/** → public`, then roughly thirty hand-written filename patterns clawing individual notes back to private. That only works if someone anticipates every filename — and promotion into `3-permanent/` is done by an automated pipeline, with filenames generated from note content rather than chosen defensively. Every new sensitive topic needed a new pattern added by hand *before* the note landed. Thirty patches to one missing guard is one design mistake with thirty instances, not thirty problems. Publishing a whole note's body is now an explicit act by its author rather than a consequence of which folder it landed in.
 
