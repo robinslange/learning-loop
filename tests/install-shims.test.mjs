@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 
 const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'install-shims.mjs');
@@ -71,8 +72,10 @@ mkdirSync(join(fakeHome, '.claude', 'plugins', 'cache',
 process.env.CLAUDE_PLUGIN_ROOT = join(fakeHome, '.claude', 'plugins', 'cache',
   'learning-loop-marketplace', 'learning-loop', '1.0.0');
 
-// Run the installer.
-await import(${JSON.stringify(SCRIPT + '?bust=' + Date.now())});
+// Run the installer. A file:// URL, not a bare path: an absolute Windows
+// path is not a valid ESM specifier ("Received protocol 'd:'"), and posix
+// accepts both, so this only ever fails on the runner nobody develops on.
+await import(${JSON.stringify(pathToFileURL(SCRIPT).href + '?bust=' + Date.now())});
 
 // Read back what was written.
 const watchCmd = readFileSync(join(fakeHome, '.local', 'bin', 'll-watch.cmd'), 'utf-8');
