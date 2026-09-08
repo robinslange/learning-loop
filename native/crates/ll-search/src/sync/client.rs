@@ -10,7 +10,10 @@ use tokio_tungstenite::tungstenite::http::Uri;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::auth;
-use super::config::{export_db_path, last_export_mtime_path, seed_path, FederationConfig};
+use super::config::{
+    export_db_path, export_shape_fingerprint, last_export_mtime_path, last_export_shape_path,
+    seed_path, FederationConfig,
+};
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
 use super::fetch::{fetch_all, Fetched};
@@ -419,12 +422,24 @@ async fn prepare_export(
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
     let vault_owned = vault_path.to_path_buf();
-    let current_max_mtime = tokio::task::spawn_blocking(move || max_md_mtime(&vault_owned))
-        .await
-        .map_err(|e| anyhow::anyhow!("mtime scan task panicked: {e}"))?;
+    let (current_max_mtime, note_count) =
+        tokio::task::spawn_blocking(move || max_md_mtime_and_count(&vault_owned))
+            .await
+            .map_err(|e| anyhow::anyhow!("mtime scan task panicked: {e}"))?;
     let vault_changed = current_max_mtime > last_mtime;
 
-    let need_export = vault_changed || !export_path.exists();
+    // An mtime answers "did a note change", which is not the same question as
+    // "would the export come out different". Editing a visibility rule changes
+    // every tier decision and touches no `.md`, and deleting a note lowers no
+    // mtime -- both used to reuse the cached export and keep publishing the old
+    // answer until something unrelated happened to be saved.
+    let shape_path = last_export_shape_path(config_dir);
+    let shape = export_shape_fingerprint(config, note_count);
+    let shape_changed = std::fs::read_to_string(&shape_path)
+        .map(|s| s.trim() != shape)
+        .unwrap_or(true);
+
+    let need_export = vault_changed || shape_changed || !export_path.exists();
     let (bytes, result) = if need_export {
         eprintln!("Exporting local index...");
         let source_owned = source_db.to_path_buf();
@@ -450,6 +465,9 @@ async fn prepare_export(
         let bytes = tokio::task::spawn_blocking(move || std::fs::read(&export_owned))
             .await
             .map_err(|e| anyhow::anyhow!("export read task panicked: {e}"))??;
+        // Written here, not after the upload acks: this records what the export
+        // on disk was built from, which is true whether or not it ships.
+        let _ = std::fs::write(&shape_path, &shape);
         (bytes, Some(result))
     } else {
         eprintln!("No vault changes since last export");
@@ -720,8 +738,14 @@ async fn upload_index(
     })
 }
 
-fn max_md_mtime(dir: &Path) -> u64 {
+/// Newest `.md` mtime under `dir`, and how many there are.
+///
+/// The count is what notices a deletion: removing a note lowers no mtime, so a
+/// max alone reports "no vault changes" and the export keeps publishing a note
+/// that is gone.
+fn max_md_mtime_and_count(dir: &Path) -> (u64, u64) {
     let mut max = 0u64;
+    let mut count = 0u64;
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -729,8 +753,11 @@ fn max_md_mtime(dir: &Path) -> u64 {
                 continue;
             }
             if path.is_dir() {
-                max = max.max(max_md_mtime(&path));
+                let (m, c) = max_md_mtime_and_count(&path);
+                max = max.max(m);
+                count += c;
             } else if path.extension().is_some_and(|e| e == "md") {
+                count += 1;
                 if let Ok(meta) = path.metadata() {
                     if let Ok(modified) = meta.modified() {
                         if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {
@@ -741,7 +768,12 @@ fn max_md_mtime(dir: &Path) -> u64 {
             }
         }
     }
-    max
+    (max, count)
+}
+
+#[cfg(test)]
+fn max_md_mtime(dir: &Path) -> u64 {
+    max_md_mtime_and_count(dir).0
 }
 
 pub(super) async fn send_json<T: serde::Serialize>(
@@ -1422,6 +1454,66 @@ mod tests {
         assert_eq!(prepared.schema_version, "2");
     }
 
+    /// Editing a visibility rule changes every tier decision and touches no
+    /// `.md`, so an mtime cannot see it. The cached export was reused and kept
+    /// publishing the previous rules' answer until some unrelated note
+    /// happened to be saved.
+    #[tokio::test]
+    async fn a_visibility_rule_change_invalidates_the_cached_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let vault = tempfile::tempdir().unwrap();
+        let export_path = export_db_path(dir.path());
+        std::fs::create_dir_all(export_path.parent().unwrap()).unwrap();
+        std::fs::write(&export_path, b"stale").unwrap();
+
+        let before = FederationConfig::test_fixture("private", vec![]);
+        std::fs::write(
+            last_export_shape_path(dir.path()),
+            export_shape_fingerprint(&before, 0),
+        )
+        .unwrap();
+
+        // Same vault, same mtimes, different rules.
+        let after = FederationConfig::test_fixture(
+            "listed",
+            vec![("**/secret*".to_string(), "private".to_string())],
+        );
+        let err = prepare_export(
+            &dir.path().join("no-such-source.db"),
+            vault.path(),
+            dir.path(),
+            &after,
+        )
+        .await;
+        let err = match err {
+            Err(e) => e,
+            Ok(_) => panic!("a rule change must force a re-export, but the stale export was served"),
+        };
+
+        // It tried to rebuild rather than serving the stale bytes: the only
+        // way to reach the source index is to have decided to re-export.
+        assert!(
+            format!("{err:#}").contains("source index"),
+            "a rule change must force a re-export, got: {err:#}"
+        );
+    }
+
+    /// A deleted note lowers no mtime, so the max alone reports "no changes"
+    /// and the export keeps publishing a note that is gone.
+    #[test]
+    fn the_export_shape_notices_a_note_disappearing() {
+        let config = FederationConfig::test_fixture("private", vec![]);
+        assert_ne!(
+            export_shape_fingerprint(&config, 100),
+            export_shape_fingerprint(&config, 99),
+            "the count is what sees a deletion"
+        );
+        assert_eq!(
+            export_shape_fingerprint(&config, 100),
+            export_shape_fingerprint(&config, 100),
+        );
+    }
+
     /// The declared metadata must describe the bytes on the wire, so it is
     /// read from the export DB — never from the source index, and never from
     /// a version constant. The export's own `SCHEMA_VERSION` is 2, so a
@@ -1443,6 +1535,13 @@ mod tests {
 
         let vault = tempfile::tempdir().unwrap();
         let config = FederationConfig::test_fixture("private", vec![]);
+        // Reuse requires the cache to record what it was built from. The vault
+        // is empty, so the shape is the rules plus a count of zero.
+        std::fs::write(
+            last_export_shape_path(dir.path()),
+            export_shape_fingerprint(&config, 0),
+        )
+        .unwrap();
         let prepared =
             prepare_export(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
                 .await

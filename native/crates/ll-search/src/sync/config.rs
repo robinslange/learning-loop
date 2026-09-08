@@ -177,6 +177,25 @@ pub fn last_export_mtime_path(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("last-export-mtime")
 }
 
+/// Fingerprint of everything other than note bodies that decides what an
+/// export contains: the visibility rules, and how many notes exist.
+pub fn last_export_shape_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("last-export-shape")
+}
+
+/// The value that file holds. Any change here changes tier decisions or
+/// membership, so a cached export built under a different one is stale even
+/// though no note was touched.
+pub fn export_shape_fingerprint(config: &FederationConfig, note_count: u64) -> String {
+    use sha2::Digest;
+    let rules = serde_json::to_string(&config.visibility).unwrap_or_default();
+    let mut hasher = sha2::Sha256::new();
+    hasher.update(rules.as_bytes());
+    hasher.update(b"\n");
+    hasher.update(note_count.to_string().as_bytes());
+    hex::encode(hasher.finalize())
+}
+
 pub fn peers_dir(config_dir: &Path) -> PathBuf {
     data_dir(config_dir).join("peers")
 }

@@ -18,7 +18,8 @@ use futures_util::{SinkExt, StreamExt};
 use ll_search::sync::client::sync_all_async;
 use ll_search::sync::error::SyncError;
 use ll_search::sync::config::{
-    export_db_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig,
+    export_db_path, export_shape_fingerprint, last_export_shape_path, FederationConfig,
+    HubEndpoint, Identity, VisibilityConfig,
 };
 use ll_search::sync::grant::{canonical_bytes, GrantKind, GrantStatement};
 use ll_search::sync::key_id::KeyId;
@@ -497,6 +498,18 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
 fn place_export(config_dir: &Path) {
     let path = export_db_path(config_dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // A cache is only reusable if it records the rules it was built under.
+    // These fixtures pair it with a source index that does not exist, so a
+    // rebuild is not merely wasteful here -- it is the failure under test.
+    // The fingerprint covers `visibility` and the note count, and every test
+    // here uses `config_for`'s rules over an empty vault, so the address the
+    // config happens to name does not enter it.
+    let rules_only = config_for(config_dir, "127.0.0.1:1".parse().unwrap());
+    std::fs::write(
+        last_export_shape_path(config_dir),
+        export_shape_fingerprint(&rules_only, 0),
+    )
+    .unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(&format!(
         "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -1149,6 +1162,14 @@ fn place_oversize_export(config_dir: &Path) {
     const CAP: usize = 16 * 1024 * 1024;
     let path = export_db_path(config_dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // Same reason as `place_export`: without this the cache is rebuilt from a
+    // source index that does not exist, and the size rule never gets asked.
+    let rules_only = config_for(config_dir, "127.0.0.1:1".parse().unwrap());
+    std::fs::write(
+        last_export_shape_path(config_dir),
+        export_shape_fingerprint(&rules_only, 0),
+    )
+    .unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
     conn.execute_batch(&format!(
         "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
