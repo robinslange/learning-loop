@@ -135,6 +135,7 @@ fn this_client_produces_every_message_in_the_transcript() {
     emit(
         "upload_index",
         serde_json::to_string(&ClientMsg::UploadIndex {
+            chunked: None,
             vault_id: vault_one.into(),
             sha256: text(inp, "index_sha256").into(),
             note_count: num(inp, "note_count"),
@@ -183,6 +184,7 @@ fn this_client_produces_every_message_in_the_transcript() {
     emit(
         "sync_ready",
         serde_json::to_string(&HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![
                 VaultState { vault_id: vault_one.into(), holds: None },
@@ -286,7 +288,8 @@ fn this_client_accepts_every_message_in_the_transcript() {
         other => panic!("wrong variant: {other:?}"),
     }
     match serde_json::from_str::<HubMsg>(text(m, "sync_ready")).unwrap() {
-        HubMsg::SyncReady { protocol_version, vault_state, grants, revocations } => {
+        HubMsg::SyncReady {
+            chunked_upload: None, protocol_version, vault_state, grants, revocations } => {
             assert_eq!(protocol_version, PROTOCOL_VERSION);
             assert!(
                 vault_state[0].holds.is_none(),

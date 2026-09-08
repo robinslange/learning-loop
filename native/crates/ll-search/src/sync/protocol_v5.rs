@@ -56,6 +56,13 @@ pub enum ClientMsg {
         note_count: i64,
         schema_version: String,
         model_id: String,
+        /// Present when the body follows as N chunk frames rather than one
+        /// raw frame. Its presence IS the mode; there is no flag beside these
+        /// numbers that could disagree with them. Only ever set when the hub
+        /// advertised `chunked_upload` in `SyncReady`, so a hub that predates
+        /// chunking is never sent frames it would treat as one body.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chunked: Option<ChunkedUpload>,
     },
     /// Submit a signed grant. The bytes are self-authenticating — the hub
     /// verifies the signature against the `from` key named inside the
@@ -118,6 +125,10 @@ pub enum HubMsg {
         vault_state: Vec<VaultState>,
         grants: Vec<GrantWire>,
         revocations: Vec<RevocationWire>,
+        /// Present when the hub can reassemble a chunked upload. Absent means
+        /// single-frame only, which is every hub before this existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chunked_upload: Option<ChunkedUploadLimits>,
     },
     Reject {
         reason: String,
@@ -165,6 +176,26 @@ pub struct GrantWire {
     pub statement_b64: String,
     pub signature_b64: String,
     pub state: String,
+}
+
+/// What this client declares when it splits an upload across frames.
+///
+/// `manifest_root` is `sha256(chunk0_hash || chunk1_hash || ...)` in seq
+/// order, computed by [`crate::sync::protocol::frame::manifest_root`]. Flat,
+/// not a merkle tree: every chunk hash travels with the upload, so there is
+/// nothing for an inclusion proof to prove.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChunkedUpload {
+    pub chunks: u32,
+    pub chunk_size_max: u32,
+    pub manifest_root: String,
+}
+
+/// What the hub says it can reassemble. Presence is the capability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChunkedUploadLimits {
+    pub max_chunk_bytes: u32,
+    pub max_total_bytes: u64,
 }
 
 /// A revocation as `SyncReady` serves it. `GrantWire` minus `state`: a
@@ -314,7 +345,8 @@ mod tests {
                        "vault_state":[{"vault_id":"v1","holds":null}],
                        "grants":[],"revocations":[]}"#;
         match serde_json::from_str::<HubMsg>(wire).unwrap() {
-            HubMsg::SyncReady { vault_state, .. } => {
+            HubMsg::SyncReady {
+            chunked_upload: None, vault_state, .. } => {
                 assert!(vault_state[0].holds.is_none(),
                     "`null` must mean 'the hub holds nothing' — this is the value \
                      that triggers a re-upload");
@@ -341,7 +373,8 @@ mod tests {
                        "grants":[{"statement_b64":"c3RtdA==","signature_b64":"c2ln","state":"active"}],
                        "revocations":[{"statement_b64":"cmV2","signature_b64":"cnNpZw"}]}"#;
         match serde_json::from_str::<HubMsg>(wire).unwrap() {
-            HubMsg::SyncReady { protocol_version, vault_state, grants, revocations } => {
+            HubMsg::SyncReady {
+            chunked_upload: None, protocol_version, vault_state, grants, revocations } => {
                 assert_eq!(protocol_version, 5);
                 let held = vault_state[0].holds.as_ref().expect("holds must be Some");
                 assert_eq!(held.sha256, "deadbeef");
@@ -455,6 +488,7 @@ mod tests {
     #[test]
     fn sync_ready_wire_bytes_are_pinned_exactly() {
         let msg = HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![
                 VaultState { vault_id: "v1".into(), holds: None },
@@ -497,6 +531,7 @@ mod tests {
     #[test]
     fn upload_index_serialises_to_the_exact_hub_expected_wire_format() {
         let msg = ClientMsg::UploadIndex {
+            chunked: None,
             vault_id: "v1".into(),
             sha256: "abc".into(),
             note_count: 10,
@@ -514,7 +549,8 @@ mod tests {
         assert!(json.get("uploaded_at").is_none(), "uploaded_at is hub-derived, not wire-carried");
 
         let round_tripped: ClientMsg = serde_json::from_value(json).unwrap();
-        assert!(matches!(round_tripped, ClientMsg::UploadIndex { .. }));
+        assert!(matches!(round_tripped, ClientMsg::UploadIndex {
+            chunked: None, .. }));
     }
 
     /// Independently hand-assembles the expected byte string field-by-field

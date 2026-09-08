@@ -465,6 +465,7 @@ pub async fn fake_hub_happy_path_signed_by(
         let _auth = recv_client_msg(&mut ws).await;
 
         send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vault_state_for(&world, &reader, &declared, &[], now_unix()),
             grants: vec![],
@@ -490,6 +491,7 @@ pub async fn fake_hub_that_forgets_the_vault() -> MockHub {
         send_signed_challenge(&mut ws, &signer, &nonce_c).await;
         let _auth = recv_client_msg(&mut ws).await;
         send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![],
             grants: vec![],
@@ -696,6 +698,7 @@ pub async fn spawn_grant_hub_over(
         let _auth = recv_client_msg(&mut ws).await;
         let state = vault_state_for(&world, &reader, &vault_ids, &serve, now_unix());
         if !send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: state,
             grants: serve,

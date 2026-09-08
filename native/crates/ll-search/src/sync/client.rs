@@ -20,8 +20,8 @@ use super::fetch::{fetch_all, Fetched};
 use super::grants;
 use super::handshake::SyncReadyPayload;
 use super::key_id::KeyId;
-use super::protocol::HUB_INBOUND_CAP;
-use super::protocol_v5::{ClientMsg, HubMsg, VaultState};
+use super::protocol::{manifest_root, ChunkedFrame, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP};
+use super::protocol_v5::{ClientMsg, HubMsg, VaultState, ChunkedUpload, ChunkedUploadLimits};
 use super::state::{self, HubHolds, SyncState};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
@@ -300,6 +300,73 @@ pub async fn sync_all_async(
 /// v5 sends the export bytes raw -- there is no envelope header on the wire --
 /// and `max_frame_size` bounds the payload alone, so the export is the whole
 /// of what is measured.
+/// How the body will be sent.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum UploadPlan {
+    /// One raw binary frame: the body is the frame. What every upload was
+    /// before chunking, and still the answer whenever it fits.
+    SingleFrame,
+    /// N `ChunkedFrame`s of at most `chunk_bytes` each.
+    Chunked { chunk_bytes: usize },
+}
+
+impl UploadPlan {
+    /// The declaration that must accompany this plan on `UploadIndex`.
+    /// Derived from the plan rather than assembled beside it, so the message
+    /// and the frames that follow cannot describe different uploads.
+    fn declaration(&self, body: &[u8]) -> Option<ChunkedUpload> {
+        let UploadPlan::Chunked { chunk_bytes } = *self else {
+            return None;
+        };
+        let hashes: Vec<[u8; 32]> = body
+            .chunks(chunk_bytes)
+            .map(|c| <[u8; 32]>::from(Sha256::digest(c)))
+            .collect();
+        Some(ChunkedUpload {
+            chunks: hashes.len() as u32,
+            chunk_size_max: chunk_bytes as u32,
+            manifest_root: hex::encode(manifest_root(&hashes)),
+        })
+    }
+}
+
+/// Decide how to send `export_len` bytes to a hub that offered `limits`.
+///
+/// One frame while it fits, because that is one round trip and needs nothing
+/// of the hub. Above that, chunking is only possible if the hub said it can
+/// reassemble: sending frames to a hub that expects one body would have it
+/// store the first chunk as though it were the index.
+fn upload_plan(
+    export_len: usize,
+    limits: Option<&ChunkedUploadLimits>,
+) -> anyhow::Result<UploadPlan> {
+    if upload_fits(export_len) {
+        return Ok(UploadPlan::SingleFrame);
+    }
+    let Some(l) = limits else {
+        return Err(anyhow::Error::new(SyncError::EnvelopeOversize { cap: HUB_INBOUND_CAP })
+            .context(format!(
+                "the export is {export_len} bytes, one frame holds {HUB_INBOUND_CAP}, and this \
+                 hub did not offer chunked upload. Retrying will not change this"
+            )));
+    };
+    let chunk_bytes = (l.max_chunk_bytes as usize).min(CHUNK_MAX_BODY_SIZE);
+    if chunk_bytes == 0 {
+        anyhow::bail!("hub advertised a zero-byte chunk limit");
+    }
+    if export_len as u64 > l.max_total_bytes {
+        return Err(anyhow::Error::new(SyncError::EnvelopeOversize {
+            cap: l.max_total_bytes as usize,
+        })
+        .context(format!(
+            "the export is {export_len} bytes and this hub accepts at most {}. Retrying will \
+             not change this",
+            l.max_total_bytes
+        )));
+    }
+    Ok(UploadPlan::Chunked { chunk_bytes })
+}
+
 fn upload_fits(export_len: usize) -> bool {
     export_len <= HUB_INBOUND_CAP
 }
@@ -390,7 +457,11 @@ async fn run_cycle(
         ),
     })?;
 
-    let uploaded = upload_index(&mut ws, config_dir, vault_id, this_vault, &prepared).await?;
+    let uploaded = upload_index(
+        &mut ws, config_dir, vault_id, this_vault, &prepared,
+        ready.chunked_upload.as_ref(),
+    )
+    .await?;
     *known_holds = Some(uploaded.hub_holds);
 
     // The read half asks for exactly the vaults the hub named at the
@@ -690,6 +761,7 @@ async fn upload_index(
     vault_id: &str,
     this_vault: Option<&VaultState>,
     prepared: &PreparedExport,
+    chunked_upload: Option<&ChunkedUploadLimits>,
 ) -> anyhow::Result<Uploaded> {
     if upload_decision(&prepared.hash, this_vault) == UploadDecision::Skip {
         eprintln!("Hub already holds this index, skipping upload");
@@ -700,15 +772,27 @@ async fn upload_index(
         });
     }
 
+    let plan = upload_plan(prepared.bytes.len(), chunked_upload)?;
+
     send_json(ws, &ClientMsg::UploadIndex {
         vault_id: vault_id.to_string(),
         sha256: prepared.hash.clone(),
         note_count: prepared.note_count,
         schema_version: prepared.schema_version.clone(),
         model_id: prepared.model_id.clone(),
+        chunked: plan.declaration(&prepared.bytes),
     })
     .await?;
-    send_binary(ws, prepared.bytes.clone()).await?;
+    match plan {
+        UploadPlan::SingleFrame => send_binary(ws, prepared.bytes.clone()).await?,
+        UploadPlan::Chunked { chunk_bytes } => {
+            let total = prepared.bytes.len().div_ceil(chunk_bytes) as u32;
+            for (seq, body) in prepared.bytes.chunks(chunk_bytes).enumerate() {
+                let frame = ChunkedFrame::from_body(seq as u32, total, body.to_vec())?;
+                send_binary(ws, frame.encode()).await?;
+            }
+        }
+    }
     eprintln!(
         "Sent local index ({} KB, {} notes declared)",
         prepared.bytes.len() / 1024,
@@ -1292,7 +1376,8 @@ mod tests {
                 Message::Binary(b) => b.to_vec(),
                 other => panic!("expected one raw binary frame, got {other:?}"),
             };
-            let ClientMsg::UploadIndex { ref vault_id, ref sha256, .. } = declared else {
+            let ClientMsg::UploadIndex {
+            chunked: None, ref vault_id, ref sha256, .. } = declared else {
                 panic!("expected upload-index, got {declared:?}")
             };
             let ack = HubMsg::UploadAck { vault_id: vault_id.clone(), sha256: sha256.clone() };
@@ -1309,7 +1394,7 @@ mod tests {
         let mut ws = client_to(addr).await;
 
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
-        let outcome = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared)
+        let outcome = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared, None)
             .await
             .unwrap();
         assert_eq!((outcome.note_count, outcome.skipped), (42, false));
@@ -1324,7 +1409,8 @@ mod tests {
         assert_eq!(frame, body,
             "the hub runs Sha256 over exactly this frame: no envelope header, no zstd, no chunking");
         match declared {
-            ClientMsg::UploadIndex { vault_id, sha256, note_count, schema_version, model_id } => {
+            ClientMsg::UploadIndex {
+            chunked: None, vault_id, sha256, note_count, schema_version, model_id } => {
                 assert_eq!(vault_id, "v1");
                 assert_eq!(sha256, expected_hash);
                 assert_eq!(note_count, 42);
@@ -1355,7 +1441,7 @@ mod tests {
 
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
         let err =
-            upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared_fixture(b"x".to_vec()))
+            upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared_fixture(b"x".to_vec()), None)
                 .await
                 .unwrap_err()
                 .to_string();
@@ -1388,7 +1474,7 @@ mod tests {
         let mut ws = client_to(addr).await;
 
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
-        let err = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared)
+        let err = upload_index(&mut ws, dir.path(), vault_id, this_vault, &prepared, None)
             .await
             .unwrap_err()
             .to_string();
@@ -1420,7 +1506,8 @@ mod tests {
 
         let addr = spawn_mock_hub(|mut ws| async move {
             let Message::Text(t) = ws.next().await.unwrap().unwrap() else { panic!("no decl") };
-            let ClientMsg::UploadIndex { vault_id, sha256, .. } =
+            let ClientMsg::UploadIndex {
+            chunked: None, vault_id, sha256, .. } =
                 serde_json::from_str(t.as_str()).unwrap()
             else {
                 panic!("expected upload-index")
@@ -1432,7 +1519,7 @@ mod tests {
         .await;
         let mut ws = client_to(addr).await;
         let (vault_id, this_vault) = this_vault_state(&config, &[]).unwrap();
-        upload_index(&mut ws, dir.path(), vault_id, this_vault, &first).await.unwrap();
+        upload_index(&mut ws, dir.path(), vault_id, this_vault, &first, None).await.unwrap();
 
         let second = prepare_export(&source, &vault, dir.path(), &config).await.unwrap();
         assert!(second.result.is_none(),
@@ -1603,6 +1690,124 @@ mod tests {
              this vault's says nothing about this vault");
         assert_eq!(upload_decision("whatever", this_vault), UploadDecision::Upload);
         assert_eq!(hub_holds(this_vault), HubHolds::Nothing);
+    }
+
+    // --- chunked upload -------------------------------------------------
+
+    fn limits(max_chunk_bytes: u32, max_total_bytes: u64) -> ChunkedUploadLimits {
+        ChunkedUploadLimits { max_chunk_bytes, max_total_bytes }
+    }
+
+    /// TWIN TEST -- sync-hub asserts this same literal in
+    /// `handler::tests::manifest_root_is_a_flat_sha256_of_chunk_hashes`.
+    /// Neither repo can see the other, so the value IS the contract: a change
+    /// to either implementation fails its own side rather than silently
+    /// breaking the wire while both halves still compile.
+    #[test]
+    fn manifest_root_is_a_flat_sha256_of_chunk_hashes() {
+        let h0: [u8; 32] = Sha256::digest(b"chunk-zero").into();
+        let h1: [u8; 32] = Sha256::digest(b"chunk-one").into();
+        assert_eq!(
+            hex::encode(manifest_root(&[h0, h1])),
+            "92abcb6cd5a2844dc509d4a75757a76b3bed321b5690ce4043d43b319ed37087",
+        );
+    }
+
+    /// One frame while it fits, whatever the hub offers: chunking a small
+    /// export would cost round trips and need something of the hub for nothing.
+    #[test]
+    fn an_export_that_fits_is_sent_as_one_frame() {
+        assert_eq!(upload_plan(1024, None).unwrap(), UploadPlan::SingleFrame);
+        let l = limits(8 * 1024 * 1024, 200 * 1024 * 1024);
+        assert_eq!(upload_plan(1024, Some(&l)).unwrap(), UploadPlan::SingleFrame);
+        assert_eq!(upload_plan(HUB_INBOUND_CAP, Some(&l)).unwrap(), UploadPlan::SingleFrame);
+    }
+
+    /// The case this exists for: a vault too big for one frame, and a hub that
+    /// said it can reassemble.
+    #[test]
+    fn an_export_over_one_frame_is_chunked_when_the_hub_offers_it() {
+        let l = limits(8 * 1024 * 1024, 200 * 1024 * 1024);
+        assert_eq!(
+            upload_plan(HUB_INBOUND_CAP + 1, Some(&l)).unwrap(),
+            UploadPlan::Chunked { chunk_bytes: 8 * 1024 * 1024 },
+        );
+    }
+
+    /// A hub that never offered chunking expects exactly one frame, so sending
+    /// it several would have it store the first as though it were the index.
+    #[test]
+    fn an_oversize_export_to_a_hub_that_cannot_chunk_is_refused_locally() {
+        let err = upload_plan(HUB_INBOUND_CAP + 1, None).unwrap_err();
+        assert!(
+            SyncError::is_terminal(&err),
+            "nothing about this changes by retrying it on a timer"
+        );
+        assert!(format!("{err:#}").contains("did not offer chunked upload"));
+    }
+
+    /// The client never sends a chunk larger than the hub said it would read,
+    /// even if its own ceiling is higher.
+    #[test]
+    fn the_chunk_size_is_the_smaller_of_the_two_ceilings() {
+        let tiny = limits(64 * 1024, 200 * 1024 * 1024);
+        assert_eq!(
+            upload_plan(HUB_INBOUND_CAP + 1, Some(&tiny)).unwrap(),
+            UploadPlan::Chunked { chunk_bytes: 64 * 1024 },
+        );
+        // And never above this client's own frame limit, whatever is offered.
+        let huge = limits(u32::MAX, u64::MAX);
+        assert_eq!(
+            upload_plan(HUB_INBOUND_CAP + 1, Some(&huge)).unwrap(),
+            UploadPlan::Chunked { chunk_bytes: CHUNK_MAX_BODY_SIZE },
+        );
+    }
+
+    /// An export past what the hub will assemble at all fails before the
+    /// first frame, not after the last one.
+    #[test]
+    fn an_export_over_the_hubs_total_is_refused_before_sending() {
+        let l = limits(8 * 1024 * 1024, 32 * 1024 * 1024);
+        let err = upload_plan(33 * 1024 * 1024, Some(&l)).unwrap_err();
+        assert!(SyncError::is_terminal(&err));
+        assert!(format!("{err:#}").contains("accepts at most"));
+    }
+
+    /// The declaration is derived from the plan, so the message and the frames
+    /// that follow cannot describe different uploads. The root must be the one
+    /// the hub will recompute from the frames it receives.
+    #[test]
+    fn the_declaration_describes_the_frames_that_will_follow() {
+        let body: Vec<u8> = (0..2500u32).map(|i| (i % 251) as u8).collect();
+        let plan = UploadPlan::Chunked { chunk_bytes: 1000 };
+        let d = plan.declaration(&body).expect("a chunked plan declares itself");
+        assert_eq!(d.chunks, 3, "2500 bytes in 1000-byte chunks is three frames");
+        assert_eq!(d.chunk_size_max, 1000);
+
+        let hashes: Vec<[u8; 32]> = body
+            .chunks(1000)
+            .map(|c| <[u8; 32]>::from(Sha256::digest(c)))
+            .collect();
+        assert_eq!(d.manifest_root, hex::encode(manifest_root(&hashes)));
+
+        // Every frame the loop will send is within what was declared, and the
+        // seq range covers the whole body exactly once.
+        let frames: Vec<_> = body
+            .chunks(1000)
+            .enumerate()
+            .map(|(i, c)| ChunkedFrame::from_body(i as u32, d.chunks, c.to_vec()).unwrap())
+            .collect();
+        assert_eq!(frames.len(), d.chunks as usize);
+        assert!(frames.iter().all(|f| f.size <= d.chunk_size_max));
+        let rejoined: Vec<u8> = frames.iter().flat_map(|f| f.body.clone()).collect();
+        assert_eq!(rejoined, body, "the chunks are the body, in order");
+    }
+
+    /// A single-frame plan declares nothing, which is what keeps a hub that
+    /// predates chunking reading the frame as the body.
+    #[test]
+    fn a_single_frame_plan_declares_nothing() {
+        assert!(UploadPlan::SingleFrame.declaration(b"anything").is_none());
     }
 
     /// **D-8, both directions.** `if false` and `>` for `>=` each left the
@@ -1983,6 +2188,7 @@ mod tests {
             .map_err(|e| format!("client signature did not verify: {e}"))?;
 
         let ready = HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![],
             grants: vec![],

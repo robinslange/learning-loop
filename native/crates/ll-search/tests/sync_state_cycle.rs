@@ -247,6 +247,7 @@ async fn spawn_hub_full(
             )
             .collect();
         if !send_hub(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
             protocol_version: PROTOCOL_VERSION,
             vault_state,
             grants,
@@ -300,7 +301,8 @@ async fn spawn_hub_full(
                         return;
                     }
                 }
-                ClientMsg::UploadIndex { vault_id, sha256, .. } => {
+                ClientMsg::UploadIndex {
+            chunked: None, vault_id, sha256, .. } => {
                     if ws.next().await.is_none() {
                         return note("upload-index with no frame behind it".into());
                     }

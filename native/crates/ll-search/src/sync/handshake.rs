@@ -14,8 +14,8 @@ use super::client::{recv_json, send_json, WsStream};
 use super::config::FederationConfig;
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    client_auth_message, hub_challenge_message, ClientMsg, GrantWire, HubMsg, RevocationWire,
-    VaultState, PROTOCOL_VERSION,
+    client_auth_message, hub_challenge_message, ChunkedUploadLimits, ClientMsg, GrantWire, HubMsg,
+    RevocationWire, VaultState, PROTOCOL_VERSION,
 };
 
 /// TLS exporter label per RFC 9266-style channel binding.
@@ -40,6 +40,10 @@ pub struct SyncReadyPayload {
     pub vault_state: Vec<VaultState>,
     pub grants: Vec<GrantWire>,
     pub revocations: Vec<RevocationWire>,
+    /// What the hub said it can reassemble, if anything. `None` means it only
+    /// reads one frame per upload, so an export larger than a frame cannot be
+    /// sent to it at all.
+    pub chunked_upload: Option<ChunkedUploadLimits>,
 }
 
 pub(super) fn random_nonce() -> [u8; 32] {
@@ -111,8 +115,10 @@ pub async fn authenticate(
     send_json(ws, &ClientMsg::ClientAuth { sig_c: b64::encode(&sig_c.to_bytes()) }).await?;
 
     match recv_json::<HubMsg>(ws).await? {
-        HubMsg::SyncReady { protocol_version, vault_state, grants, revocations } =>
-            Ok(SyncReadyPayload { protocol_version, vault_state, grants, revocations }),
+        HubMsg::SyncReady { protocol_version, vault_state, grants, revocations, chunked_upload } =>
+            Ok(SyncReadyPayload {
+                protocol_version, vault_state, grants, revocations, chunked_upload,
+            }),
         HubMsg::Reject { reason } => anyhow::bail!("auth failed: {reason}"),
         other => anyhow::bail!("expected sync-ready, got {other:?}"),
     }
@@ -219,6 +225,7 @@ mod tests {
         spawn_mock_hub(|mut ws| async move {
             let _hello = recv_client_msg(&mut ws).await;
             send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
                 protocol_version: PROTOCOL_VERSION,
                 vault_state: vec![],
                 grants: vec![],

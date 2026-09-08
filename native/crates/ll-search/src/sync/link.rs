@@ -2029,6 +2029,7 @@ mod tests {
             test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
             let _auth = test_hub::recv_client_msg(&mut ws).await;
             if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
                 protocol_version: PROTOCOL_VERSION,
                 vault_state: vec![],
                 grants: vec![],
@@ -2324,6 +2325,7 @@ mod tests {
             test_hub::send_signed_challenge(&mut ws, &test_hub::hub_signing_key(), &nonce_c).await;
             let _auth = test_hub::recv_client_msg(&mut ws).await;
             if !test_hub::send_hub_msg(&mut ws, &HubMsg::SyncReady {
+            chunked_upload: None,
                 protocol_version: PROTOCOL_VERSION,
                 vault_state: vec![],
                 grants: vec![],
