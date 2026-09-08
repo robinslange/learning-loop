@@ -221,6 +221,18 @@ fn strip_frontmatter(raw: &str) -> String {
     }
 }
 
+/// Reduce either side of a link comparison to one key.
+///
+/// `extract_wikilinks` stores whatever the author typed, minus the `|` alias and
+/// `#` anchor, lower-cased -- so a target is usually a bare basename but may be
+/// `3-permanent/foo.md`. Reducing a note's path and a stored target through the
+/// same function is what makes them comparable; anything that compares a
+/// `links.target_path` to a note must go through here, on both sides.
+pub fn wikilink_name(path: &str) -> String {
+    let base = path.rsplit('/').next().unwrap_or(path);
+    base.strip_suffix(".md").unwrap_or(base).to_lowercase()
+}
+
 pub fn extract_wikilinks(text: &str) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut links = Vec::new();

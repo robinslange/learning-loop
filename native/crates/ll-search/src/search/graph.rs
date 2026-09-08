@@ -11,13 +11,7 @@ pub(crate) fn load_link_graph(conn: &Connection) -> HashMap<String, Vec<String>>
     if let Ok(mut stmt) = conn.prepare("SELECT path FROM notes") {
         if let Ok(rows) = stmt.query_map([], |row| row.get::<_, String>(0)) {
             for path in rows.flatten() {
-                let basename = path
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&path)
-                    .strip_suffix(".md")
-                    .unwrap_or(&path)
-                    .to_lowercase();
+                let basename = crate::preprocess::wikilink_name(&path);
                 basename_to_path.entry(basename).or_insert(path);
             }
         }

@@ -180,6 +180,9 @@ pub fn export_index(
     let mut exported = 0usize;
     let mut skipped = 0usize;
     let mut exported_ids: HashSet<i64> = HashSet::new();
+    // The same notes, keyed the way a wikilink names them. Populated in the
+    // same step as `exported_ids` so the two cannot disagree about who shipped.
+    let mut exported_link_names: HashSet<String> = HashSet::new();
 
     for (row, tier) in all_rows.iter().zip(tiers.iter()) {
         if *tier == "private" {
@@ -205,6 +208,7 @@ pub fn export_index(
         .execute(params![row.id, row.title, row.tags, export_body])?;
 
         exported_ids.insert(row.id);
+        exported_link_names.insert(crate::preprocess::wikilink_name(&row.path));
         exported += 1;
     }
 
@@ -250,7 +254,21 @@ pub fn export_index(
                 Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
             })?
             .filter_map(|r| r.ok())
-            .filter(|(source_id, _)| exported_ids.contains(source_id))
+            // Both ends, not just the source. `target_path` is whatever the
+            // author typed inside `[[...]]`, which is normally the target's
+            // basename -- and in a vault whose filenames are sentences, that
+            // basename IS the note's title. A row kept because its source
+            // shipped would publish the title of a note the tier decision
+            // withheld, through a table that decision never reached. Reducing
+            // both sides through `wikilink_name` also catches the author who
+            // wrote a folder into the link. A link leaves only when both of
+            // its notes did; a target naming no exported note drops, so an
+            // unresolvable link cannot default to sent.
+            .filter(|(source_id, target_path)| {
+                exported_ids.contains(source_id)
+                    && exported_link_names
+                        .contains(&crate::preprocess::wikilink_name(target_path))
+            })
             .collect();
 
         for chunk in link_rows.chunks(INSERT_CHUNK) {
@@ -411,6 +429,50 @@ pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
 }
 
 #[cfg(test)]
+/// Two addressable notes and one link between them. `shared.md` is published
+/// by the caller's rules; `secret.md` is withheld. `shared` links to both, so
+/// the export must carry the link to `other` and drop the link to `secret`.
+pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
+    let c = Connection::open(path).unwrap();
+    c.execute_batch(
+        "CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+         CREATE TABLE notes (
+             id INTEGER PRIMARY KEY,
+             path TEXT UNIQUE NOT NULL,
+             content_hash TEXT NOT NULL,
+             mtime REAL NOT NULL,
+             title TEXT,
+             tags TEXT,
+             visibility TEXT DEFAULT 'private',
+             note_uuid TEXT
+         );
+         CREATE TABLE notes_content (
+             id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT
+         );
+         CREATE TABLE embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+         CREATE TABLE links (
+             source_id INTEGER NOT NULL, target_path TEXT NOT NULL,
+             UNIQUE(source_id, target_path)
+         );
+         INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');
+         INSERT INTO notes (id, path, content_hash, mtime, title, tags, note_uuid) VALUES
+             (1, 'shared.md', 'h', 0.0, 'Shared', '', '01926d7e-0000-7000-8000-000000000001'),
+             (2, 'secret.md', 'h', 0.0, 'Secret', '', '01926d7e-0000-7000-8000-000000000002'),
+             (3, 'other.md',  'h', 0.0, 'Other',  '', '01926d7e-0000-7000-8000-000000000003');
+         INSERT INTO notes_content (id, title, tags, body) VALUES
+             (1, 'Shared', '', 'Links [[secret]] and [[other]].'),
+             (2, 'Secret', '', 'Private body.'),
+             (3, 'Other',  '', 'Other body.');
+         INSERT INTO links (source_id, target_path) VALUES (1, 'secret'), (1, 'other');",
+    )
+    .unwrap();
+    std::fs::create_dir_all(vault).unwrap();
+    std::fs::write(vault.join("shared.md"), "---\ntitle: Shared\n---\n\nLinks [[secret]] and [[other]].").unwrap();
+    std::fs::write(vault.join("secret.md"), "---\ntitle: Secret\n---\n\nPrivate body.").unwrap();
+    std::fs::write(vault.join("other.md"),  "---\ntitle: Other\n---\n\nOther body.").unwrap();
+}
+
+#[cfg(test)]
 pub(crate) fn public_vault_with_note(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
@@ -493,6 +555,48 @@ mod tests {
             .query_row("SELECT note_uuid FROM notes LIMIT 1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(got, "01926d7e-0000-7000-8000-00000000000a");
+    }
+
+    /// A wikilink names its target by filename, and in this vault filenames are
+    /// whole sentences, so a link row IS the target's title. Copying one whose
+    /// target was withheld publishes a private note's title through a table the
+    /// visibility decision never looked at.
+    #[test]
+    fn a_link_whose_target_is_withheld_is_not_exported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_linked_source_db(&source, &vault);
+
+        // Everything listed except `secret.md`, which the last rule withholds.
+        let config = FederationConfig::test_fixture(
+            "listed",
+            vec![("**/secret*".to_string(), "private".to_string())],
+        );
+        let result = export_index(&source, &vault, &out, &config).unwrap();
+        assert_eq!(result.exported, 2, "shared and other ship");
+        assert_eq!(result.skipped, 1, "secret is withheld");
+
+        let c = Connection::open(&out).unwrap();
+        let targets: Vec<String> = c
+            .prepare("SELECT target_path FROM links")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert!(
+            !targets.iter().any(|t| t == "secret"),
+            "the withheld note's title left the machine in the links table: {targets:?}"
+        );
+        // Not vacuous: the link between two published notes must survive, or a
+        // filter that dropped every row would pass this test.
+        assert!(
+            targets.iter().any(|t| t == "other"),
+            "a link between two exported notes must still be carried: {targets:?}"
+        );
     }
 
     #[test]
