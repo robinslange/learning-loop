@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.3
+
 ### Fixed
 
 Everything below was found by running federation against a real 6,025-note vault, after two full adversarial review rounds over the same code had returned 41 findings and missed all of it. Each one needed state to exist before it could be seen.
