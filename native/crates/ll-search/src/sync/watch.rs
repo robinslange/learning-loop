@@ -214,6 +214,10 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     federation_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     federation_tick.tick().await; // consume the immediate first tick
 
+    // Consecutive failures, and the ticks still to sit out because of them.
+    let mut sync_failures: u32 = 0;
+    let mut skip_ticks: u32 = 0;
+
     let mut resync_tick = tokio::time::interval(RESYNC_INTERVAL);
     resync_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     resync_tick.tick().await;
@@ -239,8 +243,25 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
                 // `None` -> `Some` is the first-join case, where the daemon
                 // started before there was anything to read.
                 fed_config = reload_federation_config(&cfg.config_dir, fed_config.take());
-                if let Some(ref fc) = fed_config {
-                    do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await;
+                if skip_ticks > 0 {
+                    skip_ticks -= 1;
+                } else if let Some(ref fc) = fed_config {
+                    match do_sync(&cfg.db_path, &cfg.vault_path, &cfg.config_dir, fc).await {
+                        CycleOutcome::Ok => sync_failures = 0,
+                        outcome => {
+                            sync_failures += 1;
+                            let terminal = outcome == CycleOutcome::Terminal;
+                            skip_ticks = backoff_ticks(sync_failures, terminal);
+                            if skip_ticks > 0 {
+                                eprintln!(
+                                    "Sync has failed {sync_failures} time(s){}; next attempt in {}s",
+                                    if terminal { " and cannot succeed by retrying" } else { "" },
+                                    skip_ticks as u64 * cfg.sync_interval.as_secs()
+                                        + cfg.sync_interval.as_secs()
+                                );
+                            }
+                        }
+                    }
                 }
             }
             _ = resync_tick.tick() => {
@@ -335,7 +356,7 @@ async fn do_sync(
     vault_path: &Path,
     config_dir: &Path,
     config: &FederationConfig,
-) {
+) -> CycleOutcome {
     match super::client::sync_all_async(db_path, vault_path, config_dir, config).await {
         Ok(result) => {
             eprintln!(
@@ -357,7 +378,42 @@ async fn do_sync(
                 .await;
             }
         }
-        Err(e) => eprintln!("Sync failed: {e}"),
+        Err(e) => {
+            eprintln!("Sync failed: {e:#}");
+            return if crate::sync::error::SyncError::is_terminal(&e) {
+                CycleOutcome::Terminal
+            } else {
+                CycleOutcome::Failed
+            };
+        }
+    }
+    CycleOutcome::Ok
+}
+
+/// What the loop needs to know from a cycle: whether to keep the cadence, and
+/// whether the next attempt is knowably the same attempt.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CycleOutcome {
+    Ok,
+    Failed,
+    Terminal,
+}
+
+/// Ticks to sit out after `failures` consecutive failures.
+///
+/// A doomed request used to go out at the same cadence forever, rebuilding the
+/// whole export each time. Doubling holds that to a few attempts an hour while
+/// still recovering on its own when the hub comes back. A terminal error goes
+/// straight to the ceiling: it cannot be fixed by waiting, only by the vault
+/// or the rules changing, so the point of retrying at all is to notice that.
+fn backoff_ticks(failures: u32, terminal: bool) -> u32 {
+    const CEILING: u32 = 12;
+    if terminal {
+        return CEILING;
+    }
+    match failures {
+        0 | 1 => 0,
+        n => (1u32 << (n - 1).min(4)).min(CEILING),
     }
 }
 
@@ -644,4 +700,54 @@ mod debounce_tests {
         assert_eq!(now.hub.endpoint, "wss://joined.invalid/ws");
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A doomed request used to go out at the same cadence forever, rebuilding
+    /// the whole export every time.
+    #[test]
+    fn backoff_grows_with_failures_and_caps() {
+        assert_eq!(backoff_ticks(0, false), 0);
+        assert_eq!(backoff_ticks(1, false), 0, "one failure retries at the normal cadence");
+        assert!(backoff_ticks(2, false) > 0, "a second failure must slow down");
+        assert!(
+            backoff_ticks(3, false) > backoff_ticks(2, false),
+            "the wait grows while it keeps failing"
+        );
+        assert_eq!(backoff_ticks(99, false), 12, "and stops growing");
+    }
+
+    /// An export too large for one frame does not shrink because time passed,
+    /// so the early attempts have nothing to find.
+    #[test]
+    fn a_terminal_failure_waits_the_full_hold_immediately() {
+        assert_eq!(backoff_ticks(1, true), 12);
+        assert_eq!(
+            backoff_ticks(1, true),
+            backoff_ticks(99, false),
+            "terminal starts where retrying has already given up"
+        );
+    }
+
+    /// Only the error that provably cannot change is terminal. Calling a
+    /// dropped connection terminal would stop a vault syncing over a blip.
+    #[test]
+    fn only_an_oversize_export_is_terminal() {
+        use crate::sync::error::SyncError;
+        let oversize = anyhow::Error::new(SyncError::EnvelopeOversize { cap: 16 * 1024 * 1024 });
+        assert!(SyncError::is_terminal(&oversize));
+
+        assert!(
+            !SyncError::is_terminal(&anyhow::Error::new(SyncError::ClosedUnexpected)),
+            "a dropped socket is worth another cycle"
+        );
+
+        // The classification must survive the context the sync paths add.
+        let wrapped = anyhow::Error::new(SyncError::EnvelopeOversize { cap: 1 })
+            .context("the export is 30412800 bytes");
+        assert!(SyncError::is_terminal(&wrapped), "context must not erase the verdict");
+    }
 }

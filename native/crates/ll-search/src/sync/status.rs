@@ -494,6 +494,9 @@ mod tests {
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
@@ -514,6 +517,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: Some(0),
             refused_grants: Some(1),
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
@@ -539,6 +545,9 @@ mod tests {
                 hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
                 skipped_fetches: Some(0),
                 refused_grants,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
             }).unwrap();
             let out = render_status(dir.path(), 1_100).unwrap();
             assert!(!out.contains("refused"),
@@ -558,6 +567,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: Some(2),
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         let out = render_status(dir.path(), 1_100).unwrap();
@@ -581,6 +593,9 @@ mod tests {
                 hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
                 skipped_fetches,
                 refused_grants: None,
+                consecutive_failures: None,
+                first_failure_at: None,
+                terminal: None,
             }).unwrap();
             let out = render_status(dir.path(), 1_100).unwrap();
             assert!(!out.contains("could not be read"),
@@ -600,6 +615,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
         assert!(out.contains("STALE"), "got:\n{out}");
@@ -622,6 +640,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 7 * 86_400 - 60).unwrap();
         assert!(!out.contains("STALE"),
@@ -655,6 +676,9 @@ mod tests {
             }),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("hub holds:  sha 9f2b1c0d4e5a… (3578 notes)"), "got:\n{out}");
@@ -701,6 +725,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("Nothing here contacted the hub"), "got:\n{out}");
@@ -737,6 +764,9 @@ mod tests {
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_000 + 9 * 86_400).unwrap();
         assert!(out.contains("error: hub key mismatch"), "got:\n{out}");
@@ -759,6 +789,9 @@ mod tests {
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let out = render_status(dir.path(), 1_100).unwrap();
         assert!(out.contains("last ok:    never"), "got:\n{out}");

@@ -30,4 +30,23 @@ pub enum SyncError {
     Json(#[from] serde_json::Error),
 }
 
+impl SyncError {
+    /// Whether retrying this on a timer is knowably pointless.
+    ///
+    /// Deliberately narrow. A dropped connection, a timeout, a hub that was
+    /// restarting -- all of those are worth another cycle, and calling them
+    /// terminal would stop a vault syncing over a blip. Only an export that
+    /// cannot fit in one frame qualifies today: it does not shrink because
+    /// time passed, so the next attempt is the same attempt.
+    ///
+    /// Takes `anyhow::Error` because the sync paths wrap these with context
+    /// and the classification must survive that wrapping.
+    pub fn is_terminal(err: &anyhow::Error) -> bool {
+        matches!(
+            err.downcast_ref::<SyncError>(),
+            Some(SyncError::EnvelopeOversize { .. })
+        )
+    }
+}
+
 pub type Result<T> = std::result::Result<T, SyncError>;

@@ -237,27 +237,42 @@ pub async fn sync_all_async(
     // `None` on the error path rather than 0: the read half runs last, so a
     // cycle that failed never reached it and "nothing was skipped" would be a
     // claim it is in no position to make.
-    let (outcome_label, detail, last_success_at, skipped_fetches, refused_grants) = match &outcome {
+    // Read once. A failure must not erase when this vault last synced, and the
+    // streak below is carried from the same file. Best-effort by construction —
+    // `read_state` reports a corrupt file as missing, so one corruption resets
+    // the streak to 1 and loses the last-success answer. That is the fail-open
+    // direction and the right one: a lost streak costs a few more cycles before
+    // anything escalates, never a false alarm.
+    let prev = state::read_state(config_dir).ok().flatten();
+    let (
+        outcome_label,
+        detail,
+        last_success_at,
+        skipped_fetches,
+        refused_grants,
+        consecutive_failures,
+        first_failure_at,
+        terminal,
+    ) = match &outcome {
         Ok(result) => (
             state::OUTCOME_OK,
             None,
             Some(now),
             Some(result.skipped_fetches.len()),
             Some(result.refused_grants.len()),
+            Some(0),
+            None,
+            None,
         ),
         Err(e) => (
             state::OUTCOME_ERROR,
             Some(e.to_string()),
-            // A failure must not erase when this vault last synced: how long
-            // the outage has been running is the whole question. Best-effort
-            // by construction — `read_state` reports a corrupt file as
-            // missing, so one corruption loses the answer permanently.
-            state::read_state(config_dir)
-                .ok()
-                .flatten()
-                .and_then(|prev| prev.last_success_at),
+            prev.as_ref().and_then(|p| p.last_success_at),
             None,
             None,
+            Some(prev.as_ref().and_then(|p| p.consecutive_failures).unwrap_or(0) + 1),
+            prev.as_ref().and_then(|p| p.first_failure_at).or(Some(now)),
+            Some(SyncError::is_terminal(e)),
         ),
     };
     // Failing to record the cycle must never mask the cycle's own error.
@@ -269,6 +284,9 @@ pub async fn sync_all_async(
         hub_holds: known_holds,
         skipped_fetches,
         refused_grants,
+        consecutive_failures,
+        first_failure_at,
+        terminal,
     });
 
     outcome

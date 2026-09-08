@@ -75,6 +75,19 @@ pub struct SyncState {
     /// connection is not. `None` means the cycle never reached the link half,
     /// the same distinction `skipped_fetches` draws.
     pub refused_grants: Option<usize>,
+    /// Cycles that have failed back to back; `Some(0)` after a success.
+    ///
+    /// Without it a permanent failure and a first blip are the same persisted
+    /// state, distinguished only by subtracting `last_success_at` from now --
+    /// so nothing downstream can tell "failed once, five minutes ago" from
+    /// "failed identically four hundred times".
+    pub consecutive_failures: Option<u32>,
+    /// When the current run of failures began. `None` when the last cycle
+    /// succeeded.
+    pub first_failure_at: Option<i64>,
+    /// The last error cannot fix itself by being retried. An export too large
+    /// for one frame is the clear case: it does not shrink on a timer.
+    pub terminal: Option<bool>,
 }
 
 /// The vaults the hub last named as readable by this key, and when.
@@ -355,6 +368,9 @@ mod tests {
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         let s = read_state(dir.path()).unwrap().unwrap();
@@ -374,6 +390,9 @@ mod tests {
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         assert_eq!(read_state(dir.path()).unwrap().unwrap().hub_holds,
                    Some(HubHolds::Nothing));
@@ -407,6 +426,9 @@ mod tests {
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         assert_eq!(read_state(dir.path()).unwrap().unwrap().outcome, OUTCOME_ERROR);
@@ -421,6 +443,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc".into(), note_count: 1 }),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         };
         write_state(dir.path(), &first).unwrap();
         let second = SyncState {
@@ -429,6 +454,9 @@ mod tests {
             hub_holds: None,
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         };
         write_state(dir.path(), &second).unwrap();
 
@@ -481,6 +509,9 @@ mod tests {
             hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 3578 }),
             skipped_fetches: Some(2),
             refused_grants: Some(1),
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
 
         assert!(dir.path().join("federation/sync-state.json").exists(),
@@ -506,6 +537,9 @@ mod tests {
             hub_holds: Some(HubHolds::Nothing),
             skipped_fetches: None,
             refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
         }).unwrap();
         let raw = std::fs::read_to_string(sync_state_path(dir.path())).unwrap();
         let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
