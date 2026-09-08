@@ -18,7 +18,8 @@ Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/s
 ## Step 1: Run all checks
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/health-check.mjs" --full --json
 ```
 
 Parse the JSON. The schema:
@@ -164,6 +165,12 @@ ll-search link list --config-dir <config_dir>
 - **`lodged: false`** — this machine signed its half and the hub has not taken
   it. It takes effect on the next sync that reaches the hub.
 
+**One of these is not a fault.** The `last sync` line records the last cycle
+that finished, and the watcher acts on a config change at its next federation
+tick — so for up to one sync interval after a `join` or a config edit, an error
+there can name a hub the `hub:` line does not. Offer the sync and re-read
+rather than reporting it as a broken config.
+
 **None of these is auto-runnable.** `ll-search sync` is the fix for most of
 them and it uploads a person's notes, so offer it and never run it without
 consent.
@@ -184,7 +191,8 @@ Doctor summary
 Then write the final result via:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/health-check.mjs --full --json > <PLUGIN_DATA>/last-health.json
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/health-check.mjs" --full --json > <PLUGIN_DATA>/last-health.json
 ```
 
 (One last cache refresh so the next session-start detector reflects the post-doctor state.)
@@ -204,15 +212,15 @@ Scans persisted plugin-data text files for likely credentials. Only text files a
 ### Step 1: Locate plugin data
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs
-```
+eval "$(ll-paths --sh)"```
 
 Note the `PLUGIN_DATA` path. Recursively collect files under that path, then filter to those whose extension is in the text allowlist (`.jsonl`, `.json`, `.md`, `.log`, `.txt`). Skip everything else, including any `.db` files.
 
 ### Step 2: Scan for secrets
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/redact-scan.mjs <text-files...>
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/redact-scan.mjs" <text-files...>
 ```
 
 Pass only the text-allowlisted files. The script will also skip any non-text file passed to it (printing a notice to stderr). For each file with hits, the script prints one line per finding:

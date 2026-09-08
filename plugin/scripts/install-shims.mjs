@@ -6,7 +6,7 @@
 //   node install-shims.mjs --install        — same (compat alias)
 //   node install-shims.mjs --check          — print which shims exist, exit 0
 //
-// Two shims are written. Both resolve their target at runtime so they survive
+// Three shims are written. All resolve their target at runtime so they survive
 // plugin updates.
 //
 // 1. ~/.local/bin/ll-watch  (POSIX) / %USERPROFILE%\.local\bin\ll-watch.cmd  (Windows)
@@ -18,12 +18,27 @@
 //    ~/.claude/plugins/data/.ll-data-path marker, then exec's
 //    $PLUGIN_DATA/bin/ll-search with ORT_DYLIB_PATH and ORT_LIB_LOCATION
 //    pointing at the binary's directory (matches scripts/lib/binary.mjs).
+//
+// 3. ~/.local/bin/ll-paths  (POSIX) / %USERPROFILE%\.local\bin\ll-paths.cmd  (Windows)
+//    Same cache resolution as ll-watch, exec'ing scripts/resolve-paths.mjs.
+//
+//    This one is a bootstrap, and it exists because the other route into
+//    resolve-paths.mjs needs to know where the plugin is in order to ask where
+//    the plugin is. `${CLAUDE_PLUGIN_ROOT}` is substituted into SKILL.md by
+//    the Skill tool, so a skill's own bash blocks can name the script by path
+//    — but a file the skill points at arrives through Read, which substitutes
+//    nothing, and CLAUDE_PLUGIN_ROOT is NOT an environment variable in a Bash
+//    tool shell. The placeholder then expands to the empty string and the
+//    block runs `node "/scripts/resolve-paths.mjs"`, which fails while `eval`
+//    consumes nothing, leaving every resolved path unset and silently rooted
+//    at `/`. A name on PATH is the one anchor that needs neither.
 
 import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { getPluginRoot, getPluginData } from './lib/config.mjs';
 import { env } from './lib/env.mjs';
+import { SHIM_NAMES } from './lib/paths.mjs';
 import { migrateRetrievalLogsIfNeeded } from './lib/migrate-retrieval-logs.mjs';
 
 const isWindows = process.platform === 'win32';
@@ -31,14 +46,23 @@ const command = process.argv[2] || '--install';
 
 const binDir = join(homedir(), '.local', 'bin');
 
-const llWatchPath = isWindows ? join(binDir, 'll-watch.cmd') : join(binDir, 'll-watch');
-const llSearchPath = isWindows ? join(binDir, 'll-search.cmd') : join(binDir, 'll-search');
+// One list, in scripts/lib/paths.mjs, shared with the health check and the
+// SessionStart hook that decides whether to re-run this installer.
+const shimPath = (name) => {
+  if (!SHIM_NAMES.includes(name)) throw new Error(`${name} is not in SHIM_NAMES`);
+  return join(binDir, isWindows ? `${name}.cmd` : name);
+};
+const llWatchPath = shimPath('ll-watch');
+const llSearchPath = shimPath('ll-search');
+const llPathsPath = shimPath('ll-paths');
 
 if (command === '--check' || command === 'check') {
   const w = existsSync(llWatchPath) ? 'installed' : 'missing';
   const s = existsSync(llSearchPath) ? 'installed' : 'missing';
+  const p = existsSync(llPathsPath) ? 'installed' : 'missing';
   console.log(`ll-watch:  ${w} (${llWatchPath})`);
   console.log(`ll-search: ${s} (${llSearchPath})`);
+  console.log(`ll-paths:  ${p} (${llPathsPath})`);
   process.exit(0);
 }
 
@@ -90,6 +114,33 @@ if "!LATEST!"=="" (
 )
 
 node "!LATEST!\\scripts\\watch.mjs" %*
+endlocal
+`;
+
+  const llPathsCmdShim = `@echo off
+rem ll-paths shim — resolves latest learning-loop plugin version at runtime.
+rem Written by: node ...\\scripts\\install-shims.mjs
+rem
+rem The bootstrap for bash blocks in files the Skill tool does not load, where
+rem %CLAUDE_PLUGIN_ROOT% is neither substituted nor set. See install-shims.mjs.
+setlocal enabledelayedexpansion
+
+set "CACHE_DIR=${cacheParent}"
+set "LATEST="
+
+rem Same PowerShell version sort as ll-watch, and for the same reason: cmd's
+rem built-in sort is alphabetical, so "1.10.0" would lose to "1.9.0".
+for /f "delims=" %%D in ('powershell -NoProfile -Command "Get-ChildItem '!CACHE_DIR!' -Directory -ErrorAction SilentlyContinue ^| Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } ^| Sort-Object { [version]$_.Name } ^| Select-Object -Last 1 -ExpandProperty Name"') do (
+  set "LATEST=!CACHE_DIR!\\%%D"
+)
+
+if "!LATEST!"=="" (
+  echo error: learning-loop plugin not found in cache 1>&2
+  echo   Run: claude plugin install learning-loop@learning-loop-marketplace 1>&2
+  exit /b 1
+)
+
+node "!LATEST!\\scripts\\resolve-paths.mjs" %*
 endlocal
 `;
 
@@ -151,10 +202,12 @@ endlocal
 
   writeFileSync(llWatchPath, llWatchCmdShim);
   writeFileSync(llSearchPath, llSearchCmdShim);
+  writeFileSync(llPathsPath, llPathsCmdShim);
 
   console.log(`Wrote ${llWatchPath}`);
   console.log(`Wrote ${llSearchPath}`);
-  console.log(`Both shims resolve their targets at runtime — survive plugin updates.`);
+  console.log(`Wrote ${llPathsPath}`);
+  console.log(`All three shims resolve their targets at runtime — survive plugin updates.`);
   console.log(`\nNOTE: cmd.exe does not add %USERPROFILE%\\.local\\bin to PATH automatically.`);
   console.log(
     `Add it via: setx PATH "%USERPROFILE%\\.local\\bin;%PATH%" (run in cmd.exe, then restart terminal)`,
@@ -180,6 +233,29 @@ if [ -z "\${LATEST}" ]; then
 fi
 
 exec node "\${LATEST}scripts/watch.mjs" "$@"
+`;
+
+  const llPathsShim = `#!/bin/bash
+# ll-paths shim — resolves latest learning-loop plugin version at runtime.
+# Written by: node .../scripts/install-shims.mjs
+#
+# The bootstrap for every bash block that needs a plugin path. Blocks in files
+# the Skill tool does not load — step files, agent definitions, shared docs —
+# cannot write \${CLAUDE_PLUGIN_ROOT}: nothing substitutes it and it is not an
+# environment variable, so it expands to the empty string. Run this instead:
+#   eval "\$(ll-paths --sh)"      then use "\$PLUGIN", "\$PLUGIN_DATA", "\$VAULT"
+set -euo pipefail
+
+CACHE_DIR="${cacheParent}"
+LATEST="$(ls -d "\${CACHE_DIR}"/[0-9]*/ 2>/dev/null | sort -V | tail -1)"
+
+if [ -z "\${LATEST}" ]; then
+  echo "error: learning-loop plugin not found in cache" >&2
+  echo "  Run: claude plugin install learning-loop@learning-loop-marketplace" >&2
+  exit 1
+fi
+
+exec node "\${LATEST}scripts/resolve-paths.mjs" "$@"
 `;
 
   // ── ll-search shim ──
@@ -243,9 +319,13 @@ fi
   writeFileSync(llSearchPath, llSearchShim);
   chmodSync(llSearchPath, 0o755);
 
+  writeFileSync(llPathsPath, llPathsShim);
+  chmodSync(llPathsPath, 0o755);
+
   console.log(`Wrote ${llWatchPath}`);
   console.log(`Wrote ${llSearchPath}`);
-  console.log(`Both shims resolve their targets at runtime — survive plugin updates.`);
+  console.log(`Wrote ${llPathsPath}`);
+  console.log(`All three shims resolve their targets at runtime — survive plugin updates.`);
 
   // One-shot cleanup of pre-canonical retrieval logs. Mixing the old
   // passthrough/inline shapes with the new canonical shape would muddy

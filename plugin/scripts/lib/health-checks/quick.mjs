@@ -13,7 +13,7 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
-import { DATA_FILES, FEDERATION_PATHS } from '../paths.mjs';
+import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES } from '../paths.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
@@ -268,7 +268,7 @@ export function checkShimsExist({ home } = {}) {
     });
   }
   const missing = [];
-  for (const s of ['ll-watch', 'll-search']) {
+  for (const s of SHIM_NAMES) {
     const p = join(home, '.local/bin', s);
     if (!existsSync(p)) {
       missing.push(s);
@@ -287,7 +287,7 @@ export function checkShimsExist({ home } = {}) {
       name: 'CLI shims',
       status: SEVERITIES.ok,
       severity: SEVERITIES.fail,
-      detail: 'll-watch + ll-search ready',
+      detail: `${SHIM_NAMES.join(' + ')} ready`,
       fix: null,
     });
   }

@@ -23,7 +23,8 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 **At session start:**
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-start"}'
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-start"}'
 ```
 
 The session-end emit runs in Step 6, coalesced with the completion marker stamp (one final Bash block instead of two).
@@ -69,7 +70,8 @@ Before finalizing, explicitly check the three categories that hide in a fast pas
 If any subagent (note-writer, discovery-researcher, literature-capturer) wrote vault notes _earlier in this session_, the search index may not cover them yet, so the dedup below would miss them. Refresh the index first (incremental; embeds only new or mtime-changed notes):
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs" index
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/vault-search.mjs" index
 ```
 
 Skip this index refresh if no subagent wrote notes this session (a pure-conversation session). It is also re-run in Step 4.4 after this step's own writes; both passes are incremental and cheap.
@@ -77,7 +79,8 @@ Skip this index refresh if no subagent wrote notes this session (a pure-conversa
 Run a single retrieval call for all learnings identified in Step 2. Pass each learning summary as a query:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/vault-search.mjs" reflect-scan "learning 1 summary" "learning 2 summary" ... --top 5
 ```
 
 **MUST use the `vault-search.mjs` wrapper, not bare `ll-search reflect-scan`.** The wrapper prepends `DB_PATH` and `--config-dir` from plugin config; if you call the raw binary, always pass the db path explicitly — a missing DB arg silently corrupts results.
@@ -126,7 +129,7 @@ Using the reflect-scan results from Step 2.5:
 - Tag with source project/domain
 - Link to the project index note in `4-projects/` if one exists
 - **Stamp `reflect_sid: <SESSION_ID>` in the frontmatter of every note you write this session** (where `SESSION_ID` is resolved as in the Step 4 init block below). The Step 4.4 sweep uses it to recover sub-agent notes (PostToolUse hooks don't fire on sub-agent writes); the Step 4.6.g cleanup strips it once tracking is done.
-- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: resolve the session id and marker dir via `node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh` (exports `SESSION_ID` and `REFLECT_SCRATCH`, as in the init block below), the same resolvers the hook uses, so writer and reader stay in lockstep.
+- **Create the session-keyed reflect new-notes marker once, at the start of Step 4.** From then until the Step 4.6.g cleanup, the post-tool hook (`hooks/modules/reflect-track.mjs`) appends every vault Write/Edit's absolute path to that file. Do not echo paths in by hand — the hook is the single writer. The marker lives in **plugin-data**, not tmp: resolve the session id and marker dir via `eval "$(ll-paths --sh)"` (exports `SESSION_ID` and `REFLECT_SCRATCH`, as in the init block below), the same resolvers the hook uses, so writer and reader stay in lockstep.
 
 ```bash
 # Step 4 init: truncate the new-notes file (the hook handshake marker), after
@@ -136,7 +139,7 @@ Using the reflect-scan results from Step 2.5:
 # Write — the post-tool hook does the per-write appends automatically while
 # this file exists. Step 4.6.g removes it to end the tracking window.
 #
-# One resolve-paths.mjs --sh call exports the values this step and 4.4/4.6/4.7
+# One `ll-paths --sh` call exports the values this step and 4.4/4.6/4.7
 # use: SESSION_ID, REFLECT_SCRATCH (and PLUGIN_DATA/VAULT where a fence needs
 # them). Because bash fences run in separate shells, each later fence re-runs
 # this same --sh eval; within a fence the exported names are used directly (no
@@ -145,7 +148,7 @@ Using the reflect-scan results from Step 2.5:
 # reflectScratchDir()+getSessionId(), so writer and reader stay in lockstep
 # across the $TMPDIR-split hook/shell boundary. Never hardcode a tmp path or
 # change the ll-${SESSION_ID}-reflect prefix shape.
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 mkdir -p "$REFLECT_SCRATCH"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 : > "${LL_TMP_PREFIX}-new-notes.txt"
@@ -163,7 +166,7 @@ Replay the hook chain on two candidate sets, unioned: (1) notes missing structur
 # This fence runs in its own shell, so re-resolve via --sh. The ll-search shim
 # (~/.local/bin/ll-search, installed by /init or the SessionStart hook) handles
 # binary location and ORT env vars itself.
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
 # Incremental by default; only embeds notes that are new or mtime-changed.
@@ -177,7 +180,7 @@ ll-search index "$VAULT" "$VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 #         -> marker backfill for sub-agent writes the live hook missed
 # LL_REFLECT_SID=$SESSION_ID routes each replayed Write to THIS session's marker
 # even under concurrent /reflect runs (see hooks/post-tool.js).
-LL_REFLECT_SID="$SESSION_ID" node "${CLAUDE_PLUGIN_ROOT}/scripts/sweep-hook-replay.mjs" \
+LL_REFLECT_SID="$SESSION_ID" node "$PLUGIN/scripts/sweep-hook-replay.mjs" \
   --scan-vault "$VAULT" --sid "$SESSION_ID"
 ```
 
@@ -206,7 +209,7 @@ This ensures new notes with intentions appear in the next session's intention su
 **Trigger**: either of two conditions fires this step: (1) the reflect new-notes marker created in Step 4 (`${LL_TMP_PREFIX}-new-notes.txt`) exists and is non-empty, or (2) the deferred refinement queue at `$PLUGIN_DATA/refinement-deferred.jsonl` is non-empty (overflow pairs parked by a capped `/ingest --refine` run; this step is their only drain). Check both with one command; refinement.md 4.6.a re-resolves the prefix in its own shell:
 
 ```bash
-eval "$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" --sh)"
+eval "$(ll-paths --sh)"
 LL_TMP_PREFIX="${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect"
 { [ -s "${LL_TMP_PREFIX}-new-notes.txt" ] || [ -s "$PLUGIN_DATA/refinement-deferred.jsonl" ]; } && echo RUN || echo SKIP
 ```
@@ -240,8 +243,9 @@ Keep it to 2-4 lines. The user can see the diffs if they want details.
 Emit the session-end provenance event and write the completion timestamp in one final block. Substitute the real counts for the `N`s (vault notes written, auto-memories written this session). Emit first, stamp last:
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
-node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-reflect
+eval "$(ll-paths --sh)"
+node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
+node "$PLUGIN/scripts/marker.mjs" stamp last-reflect
 ```
 
 Run this at the end of **every** /reflect invocation, unconditionally — both lines always run, regardless of whether any notes were written or surfaced. The `last-reflect` marker is what tells the Stop hook reflection already happened; it lives in plugin-data (not tmp) so the Stop hook — which does not inherit this shell's `$TMPDIR` — reads the same file this command wrote. A non-zero exit on either line is non-fatal: surface the stderr message but do not re-run /reflect.

@@ -262,12 +262,12 @@ test('checkBinaryVersionFile: ok when no pluginVersion is supplied (no compariso
 });
 
 test(
-  'checkShimsExist: ok when both shims present and executable',
+  'checkShimsExist: ok when every shim is present and executable',
   { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
   () => {
     const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
     mkdirSync(join(home, '.local/bin'), { recursive: true });
-    for (const s of ['ll-watch', 'll-search']) {
+    for (const s of ['ll-watch', 'll-search', 'll-paths']) {
       writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
       chmodSync(join(home, '.local/bin', s), 0o755);
     }
@@ -288,6 +288,28 @@ test(
     const result = checkShimsExist({ home });
     assert.equal(result.status, 'fail');
     assert.match(result.detail, /ll-watch/);
+    assert.match(result.detail, /ll-paths/);
+    rmSync(home, { recursive: true, force: true });
+  },
+);
+
+test(
+  'checkShimsExist: fail when only ll-paths is missing',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    // Its own case because every Bash block outside a SKILL.md bootstraps
+    // through `ll-paths`, and an install that wrote the other two would leave
+    // those blocks calling a command that does not exist. A check that only
+    // ever sees a wholly empty ~/.local/bin cannot tell that apart from health.
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-nopaths-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const s of ['ll-watch', 'll-search']) {
+      writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
+      chmodSync(join(home, '.local/bin', s), 0o755);
+    }
+    const result = checkShimsExist({ home });
+    assert.equal(result.status, 'fail');
+    assert.match(result.detail, /ll-paths/);
     rmSync(home, { recursive: true, force: true });
   },
 );
