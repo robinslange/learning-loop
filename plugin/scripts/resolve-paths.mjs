@@ -11,6 +11,7 @@ import { DATA_PATHS } from './lib/paths.mjs';
 import { MARKER_PATHS } from './lib/marker-cache.mjs';
 
 const pluginData = getPluginData();
+const sessionId = getSessionId();
 
 const fields = {
   PLUGIN: getPluginRoot(),
@@ -19,13 +20,20 @@ const fields = {
   // The canonical session id (scripts/lib/session.mjs) the reflect new-notes
   // hook keys its marker on. Skills resolve LL_SID through this so both sides
   // of the handshake run the identical resolver.
-  SESSION_ID: getSessionId(),
+  SESSION_ID: sessionId,
   // The dir the reflect Step 4 scratch markers live in — plugin-data, NOT tmp.
   // Mirrors hooks/modules/reflect-track.mjs:reflectScratchDir() exactly so the
   // skill's bash and the hook resolve the same dir even when one inherits
   // $TMPDIR and the other doesn't (os.tmpdir() honors $TMPDIR; plugin-data
   // doesn't, so it agrees across the hook/shell process boundary).
   REFLECT_SCRATCH: pluginData ? DATA_PATHS.reflectScratch(pluginData) : tmpdir(),
+  // The session-keyed stem the Step 4 scratch files hang off. Every reflect
+  // fence used to rebuild `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect` by
+  // hand; asking for it directly costs one spawn and cannot be spelled wrong.
+  REFLECT_PREFIX:
+    pluginData && sessionId
+      ? DATA_PATHS.reflectPrefix(pluginData, sessionId)
+      : join(tmpdir(), `ll-${sessionId}-reflect`),
   // Dream/reflect marker paths (read-side convenience for skills/doctor —
   // WRITES go through scripts/marker.mjs so the resurrection guard applies).
   LAST_DREAM: pluginData ? MARKER_PATHS.lastDream(pluginData) : '',

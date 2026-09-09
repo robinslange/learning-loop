@@ -222,33 +222,37 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
-    it('every fence referencing the reflect scratch prefix resolves its own paths via --sh', () => {
+    it('every fence referencing the reflect scratch prefix asks the resolver for it', () => {
       // Per-fence, not aggregate: bash fences run in separate shells, so each
-      // fence that builds the reflect scratch prefix must resolve its own paths
-      // — a hardcoded or inherited session id / scratch dir re-splits the
-      // hook/shell handshake for exactly the steps that fence drives. The
-      // canonical resolver is one `eval "$(ll-paths --sh)"` per fence, which
-      // exports SESSION_ID + REFLECT_SCRATCH (among others) from a single
-      // spawn; the prefix is then built from those. It goes through the PATH
-      // shim rather than naming resolve-paths.mjs by path, because a step file
-      // is Read rather than loaded and `${CLAUDE_PLUGIN_ROOT}` would arrive
-      // unsubstituted — which is how this fence silently resolved to `/`.
-      const PREFIX = '${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect';
-      const SH_RESOLVER = 'eval "$(ll-paths --sh)"';
+      // fence that uses the reflect scratch prefix must resolve it in its own
+      // shell — a hardcoded or inherited prefix re-splits the hook/shell
+      // handshake for exactly the steps that fence drives.
+      //
+      // It asks for the WHOLE prefix rather than rebuilding it from
+      // REFLECT_SCRATCH + SESSION_ID. Rebuilding put the `ll-<sid>-reflect`
+      // shape in five places, under a comment asking the reader not to change
+      // it; REFLECT_PREFIX comes from the same DATA_PATHS.reflectPrefix() the
+      // hook calls, so the shape has one author.
+      //
+      // It goes through the PATH shim rather than naming resolve-paths.mjs by
+      // path, because a step file is Read rather than loaded and
+      // `${CLAUDE_PLUGIN_ROOT}` would arrive unsubstituted — which is how this
+      // fence once silently resolved to `/`.
+      const RESOLVER = 'LL_TMP_PREFIX="$(ll-paths REFLECT_PREFIX)"';
       let found = 0;
       for (const { file, path } of [
         { file: 'SKILL.md', path: SKILL_PATH },
         { file: 'steps/refinement.md', path: REFINEMENT_STEP_PATH },
       ]) {
         for (const fence of extractAllFences(readFileSync(path, 'utf8'))) {
-          if (!fence.body.includes(PREFIX)) continue;
+          if (!fence.body.includes('LL_TMP_PREFIX')) continue;
           found++;
           assert.ok(
-            fence.body.includes(SH_RESOLVER),
-            `${file}: the bash fence starting at line ${fence.startLine} references the ` +
-              `reflect scratch prefix but does not resolve its paths via the canonical ` +
-              `resolve-paths.mjs --sh snippet — a hardcoded or inherited SESSION_ID/` +
-              `REFLECT_SCRATCH re-splits the handshake for that fence.`,
+            fence.body.includes(RESOLVER),
+            `${file}: the bash fence starting at line ${fence.startLine} uses the ` +
+              `reflect scratch prefix but does not resolve it via ` +
+              `\`ll-paths REFLECT_PREFIX\` — an inherited or hand-built prefix ` +
+              `re-splits the handshake for that fence.`,
           );
         }
       }
@@ -259,6 +263,22 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
+    it('no reflect fence rebuilds the prefix by hand', () => {
+      // The negative half of the rule above. Concatenating REFLECT_SCRATCH and
+      // SESSION_ID reproduces today's value and drifts the moment either side
+      // of the handshake changes shape.
+      for (const { file, path } of [
+        { file: 'SKILL.md', path: SKILL_PATH },
+        { file: 'steps/refinement.md', path: REFINEMENT_STEP_PATH },
+      ]) {
+        assert.doesNotMatch(
+          readFileSync(path, 'utf8'),
+          /\$\{REFLECT_SCRATCH\}\/ll-\$\{SESSION_ID\}-reflect/,
+          `${file}: build the prefix with \`ll-paths REFLECT_PREFIX\`, not by concatenation`,
+        );
+      }
+    });
+
     it('runs the Step 4.4 sweep replay with LL_REFLECT_SID set to SESSION_ID', () => {
       // The subagent-backfill fix: the replay must carry the calling session's
       // id so reflect-track appends to THIS marker (concurrency-safe). If a
@@ -266,28 +286,30 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // the marker again and Step 4.6 refinement goes quiet.
       assert.match(
         skill,
-        /LL_REFLECT_SID="\$SESSION_ID"\s+node\s+"\$PLUGIN\/scripts\/sweep-hook-replay\.mjs"/,
+        /LL_REFLECT_SID="\$SESSION_ID"\s+ll-run\s+sweep-hook-replay\.mjs/,
         'Step 4.4 must invoke sweep-hook-replay.mjs with LL_REFLECT_SID="$SESSION_ID" so ' +
           'replayed sub-agent writes append to the calling session marker.',
       );
     });
 
-    it('the Step 4.4 --scan-vault fence resolves its own paths via --sh', () => {
+    it('the Step 4.4 --scan-vault fence resolves its own paths', () => {
       // The 4.4 fence runs in its own shell and reads $VAULT/$SESSION_ID (and
       // sets LL_REFLECT_SID=$SESSION_ID). It does NOT build the reflect-scratch
       // prefix, so the per-fence-prefix test above never visits it. Pin its
-      // resolver directly: dropping the `eval "$(...--sh)"` would leave $VAULT
-      // and $SESSION_ID empty in this separate shell — the sweep would abort
-      // (empty root) or run blind, sub-agent notes would stop reaching the
-      // marker, and Step 4.6 refinement would go silent, all with green CI.
+      // resolvers directly: dropping either would leave $VAULT or $SESSION_ID
+      // empty in this separate shell — the sweep would abort (empty root) or
+      // run blind, sub-agent notes would stop reaching the marker, and Step
+      // 4.6 refinement would go silent, all with green CI.
       const fence = extractFence(readFileSync(SKILL_PATH, 'utf8'), '--scan-vault "$VAULT"');
       assert.ok(fence, 'could not find the Step 4.4 --scan-vault bash fence');
-      assert.ok(
-        fence.body.includes('eval "$(ll-paths --sh)"'),
-        'the Step 4.4 --scan-vault fence must resolve $VAULT/$SESSION_ID via ' +
-          'resolve-paths.mjs --sh in its own shell — a dropped resolver silently ' +
-          'unresolves the sweep and breaks the marker handshake + LL_REFLECT_SID routing.',
-      );
+      for (const field of ['VAULT', 'SESSION_ID']) {
+        assert.ok(
+          fence.body.includes(`${field}="$(ll-paths ${field})"`),
+          `the Step 4.4 --scan-vault fence must resolve $${field} in its own shell — ` +
+            'a dropped resolver silently unresolves the sweep and breaks the marker ' +
+            'handshake + LL_REFLECT_SID routing.',
+        );
+      }
     });
 
     it('runs 4.6.g cleanup even on the 0-candidate path (no permanent reflect_sid leak)', () => {
@@ -332,16 +354,15 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       );
     });
 
-    it('resolves session paths via the canonical resolve-paths.mjs --sh resolver, not a cat of the id file', () => {
+    it('resolves session paths via the canonical resolver, not a cat of the id file', () => {
       // Both sides must run the SAME resolver. The skill shells to
-      // resolve-paths.mjs --sh (whose SESSION_ID calls getSessionId(),
-      // REFLECT_SCRATCH mirrors reflectScratchDir()); the hook calls those
-      // directly. Pin the exact snippet so a future edit can't drop back to
-      // `cat`-ing the id file under an env-dependent path.
-      const snippet = 'eval "$(ll-paths --sh)"';
+      // resolve-paths.mjs through the ll-paths shim (whose SESSION_ID calls
+      // getSessionId(), REFLECT_PREFIX calls DATA_PATHS.reflectPrefix()); the
+      // hook calls those directly. Pin the snippet so a future edit can't drop
+      // back to `cat`-ing the id file under an env-dependent path.
       assert.ok(
-        skill.includes(snippet),
-        'expected the canonical resolve-paths.mjs --sh resolver snippet somewhere in the reflect skill',
+        skill.includes('LL_TMP_PREFIX="$(ll-paths REFLECT_PREFIX)"'),
+        'expected the canonical REFLECT_PREFIX resolver somewhere in the reflect skill',
       );
       // The old env-dependent cat-of-the-id-file pattern must be gone entirely.
       assert.doesNotMatch(

@@ -55,15 +55,13 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 **At session start (after scope identified):**
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"session-start","intent":"TOPIC","config":{"style":"STYLE","capture":"MODE"}}'
+ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-start","intent":"TOPIC","config":{"style":"STYLE","capture":"MODE"}}'
 ```
 
 **At session end (after all rounds complete):**
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"session-end","notes_created":N,"rounds":R}'
+ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-end","notes_created":N,"rounds":R}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.
@@ -130,8 +128,7 @@ Run this after EVERY `discovery-researcher` return — orientation and every loo
 4. After the loop settles, emit a provenance event (silently):
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|PARTIAL|ISSUES_FOUND","rounds":N}'
+ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"verify","target":"TOPIC -- ANGLE","status":"PASS|PARTIAL|ISSUES_FOUND","rounds":N}'
 ```
 
 Findings never reach the user or the vault unverified — with one escape: findings still unresolved after the 3-round cap are explicitly flagged (the `### Unresolved Verification Issues` section), never passed silently.
@@ -220,9 +217,8 @@ Sources worth capturing (run /literature):
 If any `note-writer` agents ran (trail notes, synthesis, or surf-mode captures), their Write calls bypassed PostToolUse: backlinks and edge inference didn't run. Replay the hook chain on every path note-writer reported (see `skills-shared/hook-replay.md`, targeted variant):
 
 ```bash
-eval "$(ll-paths --sh)"
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
-  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
+  | ll-run sweep-hook-replay.mjs --stdin
 ```
 
 Idempotent: safe on already-hooked notes. Skip if no note-writer ran. Surface any `failures` from the JSON summary in Step 5.

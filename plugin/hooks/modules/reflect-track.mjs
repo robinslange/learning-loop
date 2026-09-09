@@ -68,7 +68,9 @@ export function reflectScratchDir() {
 
 export function reflectNewNotesPath(sessionId) {
   const sid = sessionId || getSessionId();
-  return join(reflectScratchDir(), `ll-${sid}-reflect-new-notes.txt`);
+  const pd = resolvePluginData();
+  const stem = pd ? DATA_PATHS.reflectPrefix(pd, sid) : join(tmpdir(), `ll-${sid}-reflect`);
+  return `${stem}-new-notes.txt`;
 }
 
 export function runReflectTrack(ctx) {

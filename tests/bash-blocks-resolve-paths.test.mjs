@@ -18,8 +18,15 @@
 // an exception is exactly how this bug travels: the natural way to write a
 // step file is to copy a working block out of the SKILL.md that calls it, and
 // the copy is broken the moment it lands. So every Bash block under `plugin/`
-// resolves the same way — `eval "$(ll-paths --sh)"`, then `"$PLUGIN/..."` —
-// and the shim needs no environment, which is the whole point of it.
+// resolves the same way: `ll-run <script>` to run something, `ll-paths <FIELD>`
+// to name a path. Both are commands on PATH and need no environment, which is
+// the whole point of them.
+//
+// The one-spawn shorthand `eval "$(ll-paths --sh)"` is banned here too, and
+// for a second reason. The worktree isolation guard refuses a command it
+// cannot statically verify, and `eval` of a command substitution is the
+// canonical example — so under worktree isolation the bootstrap line was
+// refused and every skill that opened with it died at its first fence.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -66,7 +73,7 @@ test('no shell block under plugin/ writes ${CLAUDE_PLUGIN_ROOT}', () => {
   for (const rel of pluginDocs()) {
     for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
       const n = block.split(PLACEHOLDER).length - 1;
-      if (n) offenders.push(`${rel}: ${n} occurrence(s) — use \`eval "$(ll-paths --sh)"\` and "$PLUGIN/..."`);
+      if (n) offenders.push(`${rel}: ${n} occurrence(s) — use \`ll-run <script>\` or \`ll-paths <FIELD>\``);
     }
   }
   assert.deepEqual(offenders.sort(), [], `unsubstitutable placeholders:\n${offenders.join('\n')}`);
@@ -80,8 +87,8 @@ test('a block that uses $PLUGIN is the block that resolves it', () => {
   for (const rel of pluginDocs()) {
     for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
       const usesPlugin = /\$\{?PLUGIN\}?(?!_DATA)\b/.test(block);
-      if (usesPlugin && !block.includes('ll-paths --sh')) {
-        offenders.push(`${rel}: uses $PLUGIN without \`eval "$(ll-paths --sh)"\``);
+      if (usesPlugin && !/^\s*PLUGIN="\$\(ll-paths PLUGIN\)"/m.test(block)) {
+        offenders.push(`${rel}: uses $PLUGIN without \`PLUGIN="$(ll-paths PLUGIN)"\``);
       }
     }
   }
@@ -99,4 +106,62 @@ test('the shim the rule points at is one install-shims.mjs actually writes', () 
     'the POSIX shim must exec resolve-paths.mjs');
   assert.match(src, /node "!LATEST!\\\\scripts\\\\resolve-paths\.mjs" %\*/,
     'and so must the .cmd, or the guard stops guarding on Windows');
+  assert.match(src, /shimPath\('ll-run'\)/, 'install-shims.mjs must write ll-run');
+  assert.match(src, /exec node "\\\$SCRIPT" "\$@"/, 'the POSIX ll-run must exec the named script');
+  assert.match(src, /node "!SCRIPT!" !ARGS!/, 'and so must the .cmd');
+});
+
+test('a shim the rule names is a shim SHIM_NAMES carries', () => {
+  // SessionStart re-runs the installer only when a shim it knows about is
+  // missing. A shim added to install-shims.mjs alone reaches no existing
+  // install: they all have ll-watch/ll-search/ll-paths already, so the check
+  // passes and ll-run never lands.
+  const src = readFileSync(join(ROOT, 'plugin', 'scripts', 'lib', 'paths.mjs'), 'utf8');
+  const m = src.match(/export const SHIM_NAMES = \[([^\]]*)\]/);
+  assert.ok(m, 'SHIM_NAMES must exist in scripts/lib/paths.mjs');
+  for (const name of ['ll-watch', 'll-search', 'll-paths', 'll-run']) {
+    assert.ok(m[1].includes(`'${name}'`), `SHIM_NAMES must carry ${name}`);
+  }
+});
+
+test('no shell block under plugin/ evals a resolver', () => {
+  // `eval "$(...)"` is refused outright by the worktree isolation guard, which
+  // cannot statically verify it. One such line at the top of a skill takes the
+  // whole skill down in any worktree session. It also swallows the resolver's
+  // own failure: eval of a command that died consumes nothing, leaving every
+  // name unset and the next line building a path out of empty strings.
+  const offenders = [];
+  for (const rel of pluginDocs()) {
+    for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
+      if (/\beval\s+"\$\(/.test(block)) {
+        offenders.push(`${rel}: eval of a command substitution — use \`ll-run\` / \`ll-paths <FIELD>\``);
+      }
+    }
+  }
+  assert.deepEqual(offenders.sort(), [], `evalled resolvers:\n${offenders.join('\n')}`);
+});
+
+test('a block that uses a resolver field is the block that resolves it', () => {
+  // Each Bash tool call is its own shell. Naming exactly the fields a block
+  // uses is what replaced the one-line eval, so the check that used to look
+  // for that line now looks for the assignments themselves.
+  const FIELDS = [
+    'PLUGIN_DATA', 'VAULT', 'SESSION_ID',
+    'REFLECT_SCRATCH', 'REFLECT_PREFIX', 'LAST_DREAM', 'LAST_REFLECT', 'DREAM_LOCK',
+  ];
+  const offenders = [];
+  for (const rel of pluginDocs()) {
+    for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
+      const lines = block.split('\n');
+      for (const field of FIELDS) {
+        const use = lines.findIndex((l) => new RegExp(`\\$\\{?${field}\\b`).test(l));
+        if (use === -1) continue;
+        const assigned = lines
+          .slice(0, use + 1)
+          .some((l) => new RegExp(`^\\s*(export )?${field}=`).test(l));
+        if (!assigned) offenders.push(`${rel}: uses $${field} before assigning it`);
+      }
+    }
+  }
+  assert.deepEqual([...new Set(offenders)].sort(), [], `unresolved fields:\n${offenders.join('\n')}`);
 });

@@ -28,16 +28,14 @@ This skill emits provenance events for pipeline observability.
 
 **At session start (after scope identified):**
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
 ```
 
 **After scoring and verification, emit each finding via provenance-emit.js:**
 
 For each note with issues, run the stdin form (`-` + quoted heredoc) — `finding_detail` carries free text, and prose quotes/backticks/`$` must not break shell quoting (escape only JSON's own `"` and `\`):
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" - <<'JSON'
+ll-run provenance-emit.js - <<'JSON'
 {"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","result":"fail","finding_type":"overclaim","finding_detail":"single RCT stated as consensus","trigger":"verify-manual","confidence":"clear","ambiguous_alt":""}
 JSON
 ```
@@ -50,16 +48,14 @@ Where:
 
 For quality scores, emit one event per note:
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"score","target":"note-filename.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}'
 ```
 
 A note with no finding events is a pass.
 
 **Then emit session-end:**
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
 ```
 
 A note with zero score records is a pass.
@@ -112,9 +108,8 @@ Wait for all scoring agents to complete before proceeding.
 After all scorer agents return, parse their results and emit one provenance event per note via `provenance-emit.js`. Run all emit calls in a single Bash command (chained with `&&`) to avoid excessive tool calls:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}' && \
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","gate":"2/6","claim_specificity":0,"source_grounded":0}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"score","target":"note-1.md","tier":"deep","gate":"6/6","claim_specificity":2,"source_grounded":2}' && \
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"score","target":"note-2.md","tier":"shallow","gate":"2/6","claim_specificity":0,"source_grounded":0}'
 ```
 
 This closes the subagent provenance gap -- scorer agents return text results, the main thread emits them to the provenance system.
@@ -242,8 +237,7 @@ Group scored notes by filename prefix to find coherent knowledge clusters ready 
 
 On approval, `mv` all qualifying files from the main thread (not subagents) so the PostToolUse hook captures the promotions. Log a batch provenance event:
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"batch-promote","cluster":"CLUSTER_NAME","count":N,"from":"1-fleeting","to":"3-permanent"}'
 ```
 
 Clusters below the 80% threshold are reported but not offered for batch promotion. Individual deep notes within those clusters can still be promoted in the normal batch actions step.

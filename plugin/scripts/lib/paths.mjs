@@ -16,7 +16,7 @@ export function home() {
  * knows about is absent, so a shim added to the installer alone is one every
  * existing install already has enough of the others to never receive.
  */
-export const SHIM_NAMES = ['ll-watch', 'll-search', 'll-paths'];
+export const SHIM_NAMES = ['ll-watch', 'll-search', 'll-paths', 'll-run'];
 
 // Encode a project directory into its ~/.claude/projects/<slug> segment.
 // Claude Code replaces every path separator AND every '.' and ':' with '-',
@@ -101,6 +101,14 @@ export const DATA_PATHS = {
   // regardless of whether each inherits $TMPDIR (os.tmpdir() honors $TMPDIR, so
   // a tmp anchor diverges between a hook subprocess and the interactive shell).
   reflectScratch: (pd) => join(pd, 'reflect-scratch'),
+  // The session-keyed stem every Step 4 scratch file hangs off:
+  //   <reflectScratch>/ll-<sid>-reflect{-new-notes.txt,-pairs.json,...}
+  // The skill's bash fences used to rebuild this string by hand from
+  // REFLECT_SCRATCH and SESSION_ID, once per fence, under a comment telling
+  // the reader not to change its shape. resolve-paths.mjs exports it as
+  // REFLECT_PREFIX instead, so the shape has exactly one author and the
+  // hook and the skill cannot drift apart.
+  reflectPrefix: (pd, sid) => join(DATA_PATHS.reflectScratch(pd), `ll-${sid}-reflect`),
   // Env-independent session-id anchor. SessionStart stamps the canonical id
   // (the harness $CLAUDE_CODE_SESSION_ID) into session/id; getSessionId() reads
   // the env var first, then this file. Earlier revisions keyed per-process files

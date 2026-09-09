@@ -18,8 +18,7 @@ Seven operators, each defined in `operators/`. This file orchestrates the four-p
 Emit events silently via Bash for each operator action.
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
+ll-run provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","target":"FILENAME"}'
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 

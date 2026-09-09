@@ -14,8 +14,8 @@ All commands run silently.
 ## 4.7.a: Gather surfaced notes
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/retrieval-report.mjs" --session-surfaced "$SESSION_ID"
+SESSION_ID="$(ll-paths SESSION_ID)"
+ll-run retrieval-report.mjs --session-surfaced "$SESSION_ID"
 ```
 
 Output is a JSON array of `{path, via, level?}`:
@@ -98,8 +98,7 @@ report meaningful:
 For each note from 4.7.a, emit (vault-relative path, exactly as returned):
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect","action":"note-usage","target":"<path>","status":"used","signals":["read","linked"],"surfaced_via":["injected"]}'
+ll-run provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"note-usage","target":"<path>","status":"used","signals":["read","linked"],"surfaced_via":["injected"]}'
 ```
 
 - `status`: `"used"` or `"ignored"`.
@@ -113,8 +112,7 @@ node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"reflect","skill":"reflect",
 — quoting it inline will break on the first apostrophe:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" - <<'JSON'
+ll-run provenance-emit.js - <<'JSON'
 {"agent":"reflect","skill":"reflect","action":"note-usage","target":"<path>","status":"used","signals":["informed"],"evidence":"used its 58% over-fire figure to argue against query expansion in the JIT answer","surfaced_via":["injected"]}
 JSON
 ```

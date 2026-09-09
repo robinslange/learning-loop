@@ -135,8 +135,7 @@ Run the full verification procedure per `${CLAUDE_PLUGIN_ROOT}/agents-shared/sou
 ### Emit provenance
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"note-writer","action":"source-check","target":"NOTE_FILENAME","sources_checked":N,"sources_passed":N,"sources_failed":N,"failure_types":["type1"],"claims_checked":N,"claims_in_abstract":N,"claims_not_in_abstract":N,"iterations":N,"final_status":"pass|fail"}'
+ll-run provenance-emit.js '{"agent":"note-writer","action":"source-check","target":"NOTE_FILENAME","sources_checked":N,"sources_passed":N,"sources_failed":N,"failure_types":["type1"],"claims_checked":N,"claims_in_abstract":N,"claims_not_in_abstract":N,"iterations":N,"final_status":"pass|fail"}'
 ```
 
 ## Evidence Context in Notes

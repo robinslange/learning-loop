@@ -36,7 +36,7 @@ Subagents cannot spawn subagents. Vault notes are written by the `note-writer` a
 For each `durable-insight`, first check if it is a **project artefact** rather than an atomic insight:
 
 ```bash
-eval "$(ll-paths --sh)"
+PLUGIN="$(ll-paths PLUGIN)"
 node -e "import('$PLUGIN/scripts/route-project-artefact.mjs').then(async m => { const vault = await m.readVaultProjectIndex(process.argv[2]); const r = m.routeArtefact(process.argv[1], vault); console.log(JSON.stringify(r)); })" "<proposed-filename>.md" "{{VAULT}}"
 ```
 
@@ -51,8 +51,7 @@ For each `durable-insight`:
 
 1. Search for existing vault notes on the same topic using:
    ```bash
-   eval "$(ll-paths --sh)"
-   node "$PLUGIN/scripts/vault-search.mjs" search "<key terms>" --rerank
+   ll-run vault-search.mjs search "<key terms>" --rerank
    ```
 2. If a closely matching note exists, skip (don't duplicate — mention in summary).
 3. If novel, add a worklist row with:

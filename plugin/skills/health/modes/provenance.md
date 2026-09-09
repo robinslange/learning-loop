@@ -5,8 +5,7 @@ Executed by /health --provenance; see SKILL.md.
 If `--provenance` flag is present, skip all vault health checks and run:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-report.mjs"
+ll-run provenance-report.mjs
 ```
 
 Display the output directly.

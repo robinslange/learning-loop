@@ -43,8 +43,7 @@ Run novelty gate (decision-gates):
 ### 2. Initialize Convergence Session
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/convergence-check.mjs" init "SESSION_ID"
+ll-run convergence-check.mjs init "SESSION_ID"
 ```
 
 Use a unique session ID (e.g., `discovery-TIMESTAMP`).
@@ -60,8 +59,7 @@ Repeat:
 3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
 
    ```bash
-   eval "$(ll-paths --sh)"
-   node "$PLUGIN/scripts/convergence-check.mjs" check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
+   ll-run convergence-check.mjs check "SESSION_ID" "your query" - <<'LL_RESULT_EOF'
    [paste the full search result text here, verbatim — your synthesis]
    LL_RESULT_EOF
    ```
@@ -181,8 +179,7 @@ Reference findings by ID: "Microglia prune synapses via complement [S1]"
 After compiling the research brief, emit a summary event:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
+ll-run provenance-emit.js '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
 ```
 
 ## Fetch Discipline

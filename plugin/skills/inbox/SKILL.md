@@ -21,14 +21,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start:**
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-start"}'
+ll-run provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-start"}'
 ```
 
 **At session end:**
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"limbo":N}'
+ll-run provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"limbo":N}'
 ```
 
 Per-note tracking is automatic for main-thread writes via the PostToolUse hook; subagent writes and edits (note-writer files, the organiser's own Edits and mv-promotions) bypass it and are covered by the Step 2 hook replays (2a for note-writer output, 2c for the agent's touched-files inventory).
@@ -83,9 +81,8 @@ Resolve all path placeholders in each prompt to literal absolute paths (see `age
 When the 2a fan-out completes, replay the PostToolUse hook chain on every written path — subagent Writes bypass it (see `skills-shared/hook-replay.md`, targeted variant):
 
 ```bash
-eval "$(ll-paths --sh)"
 printf '%s\n' "$WRITTEN_PATH_1" "$WRITTEN_PATH_2" \
-  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
+  | ll-run sweep-hook-replay.mjs --stdin
 ```
 
 Surface any `failures` from the JSON summary in Step 3.
@@ -107,9 +104,8 @@ Fleeting notes needing repair (run /deepen to resolve):
 **2c. Replay hooks over the agent's touched files.** The organiser's own `Edit` and `mv` calls (counter-argument link pairs, Zeigarnik status stamps, mv-promotions, 6a hygiene) also bypassed PostToolUse — 2a covers only note-writer output. After the gated actions complete, parse the `### Touched files` inventory from the agent's report (one vault path per line; skip if it says `none`) and replay the hook chain over it, same snippet as 2a:
 
 ```bash
-eval "$(ll-paths --sh)"
 printf '%s\n' "$TOUCHED_PATH_1" "$TOUCHED_PATH_2" \
-  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
+  | ll-run sweep-hook-replay.mjs --stdin
 ```
 
 Counter-argument link pairs matter most here — they are exactly what edge-infer should index. Resolve vault-relative paths to absolute before piping. Surface any `failures` from the JSON summary in Step 3.

@@ -169,8 +169,7 @@ If the queue has pending items, add recommendation:
 Run:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/retrieval-report.mjs" --usage --json
+ll-run retrieval-report.mjs --usage --json
 ```
 
 Parse the JSON. Two candidate lists plus one coverage list:

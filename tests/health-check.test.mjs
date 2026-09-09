@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
 import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
+import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 import {
   checkVaultPath,
   checkVaultFolders,
@@ -267,7 +268,7 @@ test(
   () => {
     const home = mkdtempSync(join(tmpdir(), 'health-shims-'));
     mkdirSync(join(home, '.local/bin'), { recursive: true });
-    for (const s of ['ll-watch', 'll-search', 'll-paths']) {
+    for (const s of SHIM_NAMES) {
       writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
       chmodSync(join(home, '.local/bin', s), 0o755);
     }

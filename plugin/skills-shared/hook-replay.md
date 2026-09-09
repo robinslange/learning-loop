@@ -19,7 +19,7 @@ The pattern has two parts:
 # PLUGIN, PLUGIN_DATA and VAULT come from the shim. The ll-search shim
 # (~/.local/bin/ll-search, installed alongside it) handles binary location and
 # ORT env vars itself.
-eval "$(ll-paths --sh)"
+VAULT="$(ll-paths VAULT)"
 LL_VAULT="$VAULT"
 
 # Ensure new notes are indexed before the sweep + any downstream similarity queries.
@@ -57,7 +57,7 @@ sort -u "$SWEEP_CANDIDATES" | grep -v '<' > "${SWEEP_CANDIDATES}.dedup" || true
 mv "${SWEEP_CANDIDATES}.dedup" "$SWEEP_CANDIDATES"
 
 if [ -s "$SWEEP_CANDIDATES" ]; then
-  node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin < "$SWEEP_CANDIDATES"
+  ll-run sweep-hook-replay.mjs --stdin < "$SWEEP_CANDIDATES"
 fi
 rm -f "$SWEEP_CANDIDATES"
 ```
@@ -90,9 +90,8 @@ Same root-resolution pattern as `/ingest` Step 5.6.a. If the vault is not a git 
 When a skill already knows which notes the subagent wrote (e.g., `note-writer` returned a filename), pipe those paths directly. Skips the walk and runs unconditionally.
 
 ```bash
-eval "$(ll-paths --sh)"
 printf '%s\n' "$NOTE_PATH_1" "$NOTE_PATH_2" \
-  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
+  | ll-run sweep-hook-replay.mjs --stdin
 ```
 
 Use this when the skill's only writes are the paths in hand and no backfill is wanted.

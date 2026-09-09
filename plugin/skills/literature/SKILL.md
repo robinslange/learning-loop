@@ -48,9 +48,8 @@ The agent may identify existing vault notes that reference the source without wi
 The `literature-capturer` is a subagent. The literature note it wrote to `2-literature/` bypassed PostToolUse, so backlinks and edge inference didn't run. Replay on the returned path:
 
 ```bash
-eval "$(ll-paths --sh)"
 printf '%s\n' "$LITERATURE_NOTE_PATH" \
-  | node "$PLUGIN/scripts/sweep-hook-replay.mjs" --stdin
+  | ll-run sweep-hook-replay.mjs --stdin
 ```
 
 Where `$LITERATURE_NOTE_PATH` is constructed from the agent's response (e.g. `{{VAULT}}/2-literature/<filename>`, where `<filename>` is the kebab-case filename literature-capturer returned). The backlink edits from Step 2 happen via main-thread `Edit` and trigger PostToolUse normally: no replay needed for those. See `skills-shared/hook-replay.md` for the full pattern.

@@ -142,8 +142,7 @@ If existing vault notes reference this source without wiki-links, list the propo
 After writing the literature note, emit a summary event:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"literature-capturer","action":"capture","target":"NOTE_FILENAME","source_url":"URL","overlap":"novel|partial|redundant","connections":N,"counterpoints":N,"backlinks_offered":N}'
+ll-run provenance-emit.js '{"agent":"literature-capturer","action":"capture","target":"NOTE_FILENAME","source_url":"URL","overlap":"novel|partial|redundant","connections":N,"counterpoints":N,"backlinks_offered":N}'
 ```
 
 If emission fails (script not found, plugin root missing), continue silently: provenance is observability, not correctness.

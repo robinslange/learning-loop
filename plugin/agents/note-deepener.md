@@ -106,8 +106,7 @@ Body: 3-10 lines (up to 15 for deep notes with sources). Max 3 tags. At least on
 **Run source-resolver on the rewritten note before finishing.** Do not rely on your own recognition of whether citations are correct: LLM-generated PMIDs are wrong ~43% of the time.
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/source-resolver.mjs" verify-note <note-path>
+ll-run source-resolver.mjs verify-note <note-path>
 ```
 
 For each source flagged:
@@ -158,8 +157,7 @@ Flag any sources found during research that aren't already in `2-literature/` as
 After completing the deepen cycle, emit a result event:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
+ll-run provenance-emit.js '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
 ```
 
 ## Rules

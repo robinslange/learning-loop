@@ -43,15 +43,14 @@ Read each note. Identify:
 For each source with a PMID, PMC ID, or DOI, run the appropriate command:
 
 ```bash
-eval "$(ll-paths --sh)"
 # For PubMed URLs
-node "$PLUGIN/scripts/source-resolver.mjs" verify-pmid <pmid> "ClaimedAuthor" <year>
+ll-run source-resolver.mjs verify-pmid <pmid> "ClaimedAuthor" <year>
 
 # For DOI URLs
-node "$PLUGIN/scripts/source-resolver.mjs" verify-doi <doi> "ClaimedAuthor" <year>
+ll-run source-resolver.mjs verify-doi <doi> "ClaimedAuthor" <year>
 
 # Or verify all sources in a note at once
-node "$PLUGIN/scripts/source-resolver.mjs" verify-note <note-path>
+ll-run source-resolver.mjs verify-note <note-path>
 ```
 
 When a note arrives as content without a path on disk, materialize it first (you have no Write tool; use Bash, one temp file per note):
@@ -77,8 +76,7 @@ The resolver returns:
 
 **For sources cited by name without a URL:**
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/source-resolver.mjs" resolve "Author Year Topic"
+ll-run source-resolver.mjs resolve "Author Year Topic"
 ```
 This searches, in order and stopping at the first author-matched hit: PubMed (author/year-qualified), PubMed (unqualified), Europe PMC, arXiv, Semantic Scholar, CrossRef, OpenAlex, DBLP. If found, report the correct URL and verify authors match.
 
@@ -87,8 +85,7 @@ This searches, in order and stopping at the first author-matched hit: PubMed (au
 For quantitative claims, run the mechanical checker first:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/source-resolver.mjs" check-claims <note-path>
+ll-run source-resolver.mjs check-claims <note-path>
 ```
 
 This extracts specific numbers from the note body and checks whether each appears in the source's abstract. Use results to prioritize which claims need deeper review.
@@ -191,8 +188,7 @@ Before returning the verification report to the caller, emit one summary event p
 ### Per-note summary (always emit)
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"note-verifier","skill":"verify","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
+ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
 ```
 
 ### Per-finding score event (emit one per issue)
@@ -200,8 +196,7 @@ node "$PLUGIN/scripts/provenance-emit.js" '{"agent":"note-verifier","skill":"ver
 For each finding identified during verification, also emit. `finding_detail` carries free text — pass the payload on stdin (`-` + quoted heredoc) so quotes, backticks, and `$` in the prose cannot break shell quoting; escape only JSON's own `"` and `\`:
 
 ```bash
-eval "$(ll-paths --sh)"
-node "$PLUGIN/scripts/provenance-emit.js" - <<'JSON'
+ll-run provenance-emit.js - <<'JSON'
 {"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","finding_detail":"<one-line>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}
 JSON
 ```

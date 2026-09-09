@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Every skill died at its first Bash fence in a worktree-isolated session.** v2.0.3 moved path resolution off `${CLAUDE_PLUGIN_ROOT}` and onto the `ll-paths` shim, which fixed the version-pinned absolute path but kept the shape it arrived in: `eval "$(ll-paths --sh)"`, once per fence, 94 of them. The worktree isolation guard refuses a command it cannot statically verify, and `eval` of a command substitution is the canonical example — so under isolation the bootstrap line was refused and took the rest of the fence with it. `/reflect` and `/discovery` both reported it.
+
+  The line is gone, not rewritten. Of the 90 fenced occurrences, 83 resolved `$PLUGIN` for one purpose: to spell out `node "$PLUGIN/scripts/<script>"`. A new shim, `ll-run <script> [args]`, runs a named script from the newest installed version, so those fences say what they do in one command with no variable to resolve first — `ll-run provenance-emit.js '{...}'`. The fences that genuinely need a path (an inline `node -e "import(...)"`, a vault or plugin-data location) name the one field they use: `VAULT="$(ll-paths VAULT)"`. Which paths a block touches is now readable without running it, and a resolver that fails now fails loudly instead of being swallowed by `eval`.
+
+- **The `/reflect` scratch prefix had five authors.** Each fence rebuilt `${REFLECT_SCRATCH}/ll-${SESSION_ID}-reflect` by hand, under a comment asking the reader not to change its shape — the hook computing the same string independently on the other side of the handshake. `DATA_PATHS.reflectPrefix()` now owns it, `hooks/modules/reflect-track.mjs` calls it, and the skill asks for it whole via `ll-paths REFLECT_PREFIX`. Cross-process agreement is asserted, not maintained.
+
+- **`/doctor`'s "Locate plugin data" block had no body.** Its opening fence and its only line of code were on separate lines but its closing fence was glued to that line, so the block rendered as an unterminated fence swallowing the prose after it.
+
+### Changed
+
+- **The authoring rule that produced the trap now forbids it.** `skills-shared/paths-preamble.md` and `agents-shared/vault-io.md` documented `eval "$(ll-paths --sh)"` as the canonical bootstrap, and `tests/bash-blocks-resolve-paths.test.mjs` enforced it. Both now say to name the command instead, and the test fails the build on any `eval "$(...)"` in a shell block under `plugin/`, plus on any resolver field used before it is assigned. `tests/reflect-new-notes-track.test.mjs` likewise asserted the eval per fence; it now asserts the prefix resolver and forbids rebuilding the prefix by concatenation.
+
+- `ll-run` joins `SHIM_NAMES`, so the SessionStart hook installs it on existing installs rather than only on fresh ones. The health check reports it, and its test fixture is driven off `SHIM_NAMES` rather than a hardcoded list — the same mistake `SHIM_NAMES` exists to prevent.
+
+
 ## v2.0.4
 
 ### Added

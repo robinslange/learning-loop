@@ -6,7 +6,7 @@
 //   node install-shims.mjs --install        — same (compat alias)
 //   node install-shims.mjs --check          — print which shims exist, exit 0
 //
-// Three shims are written. All resolve their target at runtime so they survive
+// Four shims are written. All resolve their target at runtime so they survive
 // plugin updates.
 //
 // 1. ~/.local/bin/ll-watch  (POSIX) / %USERPROFILE%\.local\bin\ll-watch.cmd  (Windows)
@@ -32,6 +32,17 @@
 //    block runs `node "/scripts/resolve-paths.mjs"`, which fails while `eval`
 //    consumes nothing, leaving every resolved path unset and silently rooted
 //    at `/`. A name on PATH is the one anchor that needs neither.
+//
+// 4. ~/.local/bin/ll-run  (POSIX) / %USERPROFILE%\.local\bin\ll-run.cmd  (Windows)
+//    Same cache resolution as ll-paths, exec'ing an arbitrary script under
+//    scripts/: `ll-run provenance-emit.js '{...}'`.
+//
+//    ll-paths answers "where is the plugin", and almost every caller asked
+//    only so it could spell out a path to a script and run it. Naming the
+//    script directly removes the question. It also removes the `eval` the
+//    two-step form needed: a Bash block that runs `eval "$(ll-paths --sh)"`
+//    is a command no static analyser can see through, and the worktree
+//    isolation guard refuses it outright, which took every skill with it.
 
 import { writeFileSync, mkdirSync, chmodSync, existsSync } from 'fs';
 import { join, resolve } from 'path';
@@ -55,14 +66,17 @@ const shimPath = (name) => {
 const llWatchPath = shimPath('ll-watch');
 const llSearchPath = shimPath('ll-search');
 const llPathsPath = shimPath('ll-paths');
+const llRunPath = shimPath('ll-run');
 
 if (command === '--check' || command === 'check') {
   const w = existsSync(llWatchPath) ? 'installed' : 'missing';
   const s = existsSync(llSearchPath) ? 'installed' : 'missing';
   const p = existsSync(llPathsPath) ? 'installed' : 'missing';
+  const r = existsSync(llRunPath) ? 'installed' : 'missing';
   console.log(`ll-watch:  ${w} (${llWatchPath})`);
   console.log(`ll-search: ${s} (${llSearchPath})`);
   console.log(`ll-paths:  ${p} (${llPathsPath})`);
+  console.log(`ll-run:    ${r} (${llRunPath})`);
   process.exit(0);
 }
 
@@ -144,6 +158,46 @@ node "!LATEST!\\scripts\\resolve-paths.mjs" %*
 endlocal
 `;
 
+  const llRunCmdShim = `@echo off
+rem ll-run shim — runs a learning-loop script from the newest installed version.
+rem Written by: node ...\\scripts\\install-shims.mjs
+rem
+rem Usage: ll-run <script-under-scripts/> [args...]
+setlocal enabledelayedexpansion
+
+if "%~1"=="" (
+  echo usage: ll-run ^<script-under-scripts/^> [args...] 1>&2
+  exit /b 2
+)
+
+set "CACHE_DIR=${cacheParent}"
+set "LATEST="
+
+rem Same PowerShell version sort as ll-watch, and for the same reason: cmd's
+rem built-in sort is alphabetical, so "1.10.0" would lose to "1.9.0".
+for /f "delims=" %%D in ('powershell -NoProfile -Command "Get-ChildItem '!CACHE_DIR!' -Directory -ErrorAction SilentlyContinue ^| Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } ^| Sort-Object { [version]$_.Name } ^| Select-Object -Last 1 -ExpandProperty Name"') do (
+  set "LATEST=!CACHE_DIR!\\%%D"
+)
+
+if "!LATEST!"=="" (
+  echo error: learning-loop plugin not found in cache 1>&2
+  echo   Run: claude plugin install learning-loop@learning-loop-marketplace 1>&2
+  exit /b 1
+)
+
+set "SCRIPT=!LATEST!\\scripts\\%~1"
+if not exist "!SCRIPT!" (
+  echo error: no such learning-loop script: %~1 1>&2
+  echo   Looked in: !LATEST!\\scripts\\ 1>&2
+  exit /b 2
+)
+
+set "ARGS=%*"
+call set "ARGS=%%ARGS:*%1=%%"
+node "!SCRIPT!" !ARGS!
+endlocal
+`;
+
   const llSearchCmdShim = `@echo off
 rem ll-search shim — resolves PLUGIN_DATA at runtime and runs the binary.
 rem Written by: node ...\\scripts\\install-shims.mjs
@@ -203,10 +257,12 @@ endlocal
   writeFileSync(llWatchPath, llWatchCmdShim);
   writeFileSync(llSearchPath, llSearchCmdShim);
   writeFileSync(llPathsPath, llPathsCmdShim);
+  writeFileSync(llRunPath, llRunCmdShim);
 
   console.log(`Wrote ${llWatchPath}`);
   console.log(`Wrote ${llSearchPath}`);
   console.log(`Wrote ${llPathsPath}`);
+  console.log(`Wrote ${llRunPath}`);
   console.log(`All three shims resolve their targets at runtime — survive plugin updates.`);
   console.log(`\nNOTE: cmd.exe does not add %USERPROFILE%\\.local\\bin to PATH automatically.`);
   console.log(
@@ -256,6 +312,53 @@ if [ -z "\${LATEST}" ]; then
 fi
 
 exec node "\${LATEST}scripts/resolve-paths.mjs" "$@"
+`;
+
+  // ── ll-run shim ──
+  //
+  // `ll-run <script> [args]` runs scripts/<script> from the newest installed
+  // version. Almost every caller of ll-paths wanted $PLUGIN only to build
+  // `node "$PLUGIN/scripts/<script>"`; this says that in one command, with no
+  // variable and no `eval` for the worktree guard to refuse.
+  //
+  // A .sh script runs under bash, everything else under node — the extension
+  // already carries the answer, so the caller never passes an interpreter.
+  const llRunShim = `#!/bin/bash
+# ll-run shim — runs a learning-loop script from the newest installed version.
+# Written by: node .../scripts/install-shims.mjs
+#
+# Usage: ll-run <script-under-scripts/> [args...]
+#   ll-run provenance-emit.js '{"agent":"reflect",...}'
+#   ll-run vault-search.mjs index
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+  echo "usage: ll-run <script-under-scripts/> [args...]" >&2
+  exit 2
+fi
+
+CACHE_DIR="${cacheParent}"
+LATEST="$(ls -d "\${CACHE_DIR}"/[0-9]*/ 2>/dev/null | sort -V | tail -1)"
+
+if [ -z "\${LATEST}" ]; then
+  echo "error: learning-loop plugin not found in cache" >&2
+  echo "  Run: claude plugin install learning-loop@learning-loop-marketplace" >&2
+  exit 1
+fi
+
+SCRIPT="\${LATEST}scripts/$1"
+shift
+
+if [ ! -f "\$SCRIPT" ]; then
+  echo "error: no such learning-loop script: \$(basename "\$SCRIPT")" >&2
+  echo "  Looked in: \${LATEST}scripts/" >&2
+  exit 2
+fi
+
+case "\$SCRIPT" in
+  *.sh) exec bash "\$SCRIPT" "$@" ;;
+  *)    exec node "\$SCRIPT" "$@" ;;
+esac
 `;
 
   // ── ll-search shim ──
@@ -322,9 +425,13 @@ fi
   writeFileSync(llPathsPath, llPathsShim);
   chmodSync(llPathsPath, 0o755);
 
+  writeFileSync(llRunPath, llRunShim);
+  chmodSync(llRunPath, 0o755);
+
   console.log(`Wrote ${llWatchPath}`);
   console.log(`Wrote ${llSearchPath}`);
   console.log(`Wrote ${llPathsPath}`);
+  console.log(`Wrote ${llRunPath}`);
   console.log(`All three shims resolve their targets at runtime — survive plugin updates.`);
 
   // One-shot cleanup of pre-canonical retrieval logs. Mixing the old
