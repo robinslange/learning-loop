@@ -4,6 +4,44 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **A note whose file could not be read at export time was published at its folder's
+  tier.** `export.rs` read each note's frontmatter with `read_to_string(..).ok()`, which
+  turns "I could not read this file" into the same `None` as "this note declared
+  nothing" — and `None` falls through to the glob rules. A note whose frontmatter says
+  `visibility: private`, sitting under a rule that says `listed`, was therefore published
+  the moment its file became unreadable, shipping its path, title, tags and a 300-character
+  body summary. Nothing downstream noticed, because the body comes from the index database
+  rather than from disk. A rename or delete since the last reindex, a permission error, or
+  non-UTF-8 bytes all reach that line. On the vault this was found in, **416 notes were
+  held back by frontmatter alone while sitting under a `listed` rule**, so for those notes
+  that single `.ok()` was the whole of the protection.
+
+  Visibility input is now a three-state `Declared { Absent, Unknown, Tier }` instead of an
+  `Option`, so the type no longer has a way to say "something went wrong" that also reads
+  as "the author chose nothing". Every cause of `Unknown` withholds. Unreadable notes are
+  counted into a new `unreadable` field on `ExportResult`, beside `unindexed`.
+
+- **An unrecognised `visibility:` spelling silently downgraded private to the folder tier.**
+  The matcher accepted only the bare lowercase words, so `visibility: "private"` — which is
+  what Obsidian's property editor writes — was an unrecognised value, and unrecognised meant
+  "use the globs". The existing test asserted this behaviour and reasoned only about the
+  publishing direction: it checked that a typo could not reach an *uncapped* tier, and missed
+  that falling through to the capped tier is still more disclosing than the `private` the
+  author was trying to write. Values are now normalised (matched quotes, case, a trailing
+  `# comment`) before matching, and anything still unrecognised resolves to `private`.
+  A half-quoted value is left alone rather than repaired into a tier it does not name.
+
+- **An export that could read nothing produced a valid-looking index of nothing.** With
+  every note withheld individually — correct on its own — a mistyped `vault_path` (a raw CLI
+  argument) yielded an empty export rather than an error. It now refuses when no note at all
+  could be read, and the export artefact is created only after that check, so a refused
+  export no longer leaves a half-made index on disk under the name the uploader reads.
+
+  Verified against the real vault: 5,071 notes export to byte-identical tiers and bodies
+  before and after, so the hole closes without changing what is published today.
+
 ## v2.0.5
 
 ### Fixed

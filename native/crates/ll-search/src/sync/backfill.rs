@@ -10,7 +10,7 @@ use std::path::Path;
 use crate::db::index::walk_vault;
 use crate::sync::config::FederationConfig;
 use crate::sync::frontmatter;
-use crate::sync::visibility::VisibilityEngine;
+use crate::sync::visibility::{Declared, VisibilityEngine};
 
 pub struct BackfillReport {
     pub scanned: usize,
@@ -55,7 +55,10 @@ pub fn backfill_public(
 
         // Pre-inversion rule application: a glob may still say "public" here,
         // because that is exactly the set we are making explicit.
-        if engine.evaluate_uncapped(&entry.rel_path, None) != "public" {
+        // `Absent` is a fact here, not a default: the `read_key(..).is_some()`
+        // guard above has already sent every note carrying a `visibility` key
+        // to `already_explicit`, and an unreadable file never reaches this line.
+        if engine.evaluate_uncapped(&entry.rel_path, &Declared::Absent) != "public" {
             continue;
         }
 
