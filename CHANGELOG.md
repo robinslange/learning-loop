@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.5
+
 ### Fixed
 
 - **Every skill died at its first Bash fence in a worktree-isolated session.** v2.0.3 moved path resolution off `${CLAUDE_PLUGIN_ROOT}` and onto the `ll-paths` shim, which fixed the version-pinned absolute path but kept the shape it arrived in: `eval "$(ll-paths --sh)"`, once per fence, 94 of them. The worktree isolation guard refuses a command it cannot statically verify, and `eval` of a command substitution is the canonical example — so under isolation the bootstrap line was refused and took the rest of the fence with it. `/reflect` and `/discovery` both reported it.
