@@ -1000,6 +1000,13 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
     let vault = tempfile::tempdir().unwrap();
     place_export(dir.path());
     let me = client_key_id(dir.path());
+    // What "a machine that was admitted a minute ago" means in practice: a
+    // person ran `ll link request` (or `link code`) HERE and showed the code.
+    // `reconcile` answers an inbound link only inside the window that opens,
+    // because a signature proves someone signed a statement and not that
+    // anyone here agreed to it. Calling the real door rather than fabricating
+    // the state keeps this fixture a description of the flow it is named for.
+    ll_search::sync::link::request_offline(dir.path()).unwrap();
     let (approver, inbound) = link_grant(&me);
     let held = HeldIndex {
         sha256: export_sha(dir.path()),
@@ -1070,6 +1077,13 @@ async fn a_refused_grant_does_not_stop_the_upload_or_the_read_half() {
     let vault = tempfile::tempdir().unwrap();
     place_export(dir.path());
     let me = client_key_id(dir.path());
+    // What "a machine that was admitted a minute ago" means in practice: a
+    // person ran `ll link request` (or `link code`) HERE and showed the code.
+    // `reconcile` answers an inbound link only inside the window that opens,
+    // because a signature proves someone signed a statement and not that
+    // anyone here agreed to it. Calling the real door rather than fabricating
+    // the state keeps this fixture a description of the flow it is named for.
+    ll_search::sync::link::request_offline(dir.path()).unwrap();
     let (_approver, inbound) = link_grant(&me);
     let (addr, seen) = spawn_hub_with(
         stale(),

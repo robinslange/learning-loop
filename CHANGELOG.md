@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **A validly signed inbound `link` no longer earns an automatic, unprompted reciprocal,
+  and `ll link revoke` is no longer undone by the next sync.** These were one bug wearing
+  two faces. `reconcile`'s only gates on minting a reciprocal were a valid signature, the
+  right kind, expiry and addressing — and a signature proves that *some* key signed a
+  statement, not that anyone at this machine agreed to it. `GrantKind::Link` transfers
+  authority, so answering one handed `from` the standing of "the same person at another
+  keyboard" over every vault this identity owns, unscoped, for a year. Any member who
+  could land `their_key -> my_key` in this client's `SyncReady` took that for free.
+
+  The same missing gate undid revocation. `ll link revoke` withdraws this machine's
+  outbound half while the hub keeps serving the peer's inbound one — only its issuer can
+  withdraw that — so the next `reconcile` found no standing link and minted a fresh one,
+  returning the revoked machine's access for doing nothing.
+
+  The auto-mint exists for exactly one flow: Door 1's joining machine, which has no local
+  record of the counterparty and learns it was admitted from the grant itself. So that
+  record is now kept explicitly. `ll link request` and `ll link code` — the joiner-side
+  commands where a person asks to be linked — open a 30-minute pairing window, and
+  `reconcile` answers an inbound link only while one is open, consuming it on first use.
+  An unsolicited link is still stored and shown by `ll link list` as inbound; the message
+  says how to complete it deliberately.
+
+  **Behaviour change worth knowing:** if more than 30 minutes pass between showing a
+  pairing code and the other machine approving it, run `ll-search link request` (or
+  `link code`) again and sync. Nothing is lost — the inbound grant is already stored.
+
 ## v2.0.5
 
 ### Fixed

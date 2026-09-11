@@ -37,7 +37,7 @@ use sha2::{Digest, Sha256};
 
 use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
-use super::config::{self, grants_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
+use super::config::{self, grants_path, pairing_window_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
@@ -427,6 +427,73 @@ fn ensure_link_to(
 }
 
 // ---------------------------------------------------------------------------
+// The pairing window
+// ---------------------------------------------------------------------------
+
+/// How long a machine stays willing to answer an inbound link unprompted.
+///
+/// Long enough to walk to the other machine and approve a code; short enough
+/// that it is not a standing invitation.
+const PAIRING_WINDOW_SECS: i64 = 30 * 60;
+
+#[derive(Serialize, Deserialize)]
+struct PairingWindow {
+    opened_at: i64,
+    expires_at: i64,
+}
+
+/// Record that a human has just asked this machine to be linked.
+///
+/// `reconcile` mints a full-authority reciprocal for an inbound `link`, and
+/// its only gates were a valid signature and the right addressing. A signature
+/// proves some key signed a statement, not that anyone here agreed to it — so
+/// ANY member who could land `their_key -> my_key` in this machine's
+/// `SyncReady` walked away holding a real, unscoped, 365-day link that every
+/// machine of mine verifies happily. `GrantKind::Link.transfers_authority()`
+/// is true: that key is "the same person at another keyboard".
+///
+/// The auto-mint exists for exactly one flow — Door 1's joining machine, which
+/// has no local record of the counterparty and learns it was admitted from the
+/// grant itself. So the window is that record: opened by the joiner-side
+/// commands that show a pairing code, consumed by the first link it answers.
+///
+/// It also ends `ll link revoke` being undone by the next sync. Revoking drops
+/// this machine's outbound half while the hub keeps serving the peer's inbound
+/// one, so `reconcile` found no standing link and minted a fresh one — handing
+/// the revoked machine its access back for doing nothing. With no window open,
+/// nothing is minted.
+pub(super) fn arm_pairing_window(config_dir: &Path, now: i64) -> anyhow::Result<()> {
+    let path = pairing_window_path(config_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_file::write_json(
+        &path,
+        &PairingWindow { opened_at: now, expires_at: now + PAIRING_WINDOW_SECS },
+    )
+}
+
+/// Whether this machine is currently expecting to be linked.
+///
+/// An unreadable or malformed file is NOT an open window. The permissive
+/// reading of a failure is what this whole change is about.
+pub(super) fn pairing_window_open(config_dir: &Path, now: i64) -> bool {
+    let Ok(text) = std::fs::read_to_string(pairing_window_path(config_dir)) else {
+        return false;
+    };
+    match serde_json::from_str::<PairingWindow>(&text) {
+        Ok(w) => w.expires_at > now,
+        Err(_) => false,
+    }
+}
+
+/// One window, one link. Closed as soon as it has been used, so a single
+/// `ll link request` cannot answer a second inbound grant that arrives later.
+pub(super) fn close_pairing_window(config_dir: &Path) {
+    let _ = std::fs::remove_file(pairing_window_path(config_dir));
+}
+
+// ---------------------------------------------------------------------------
 // The doors
 // ---------------------------------------------------------------------------
 
@@ -442,6 +509,9 @@ pub fn request_offline(config_dir: &Path) -> anyhow::Result<String> {
 /// The same, with the six words this machine must show beside the code.
 pub fn pending_offline(config_dir: &Path) -> anyhow::Result<PendingLink> {
     let identity = seed_store::load_or_create(config_dir)?;
+    // Showing a pairing code is a person asking to be linked. That ask is the
+    // only evidence `reconcile` has that an inbound grant was wanted.
+    arm_pairing_window(config_dir, unix_now())?;
     Ok(PendingLink::for_key(KeyId::from_pubkey(&identity.signing_key.verifying_key())))
 }
 
@@ -506,6 +576,7 @@ pub async fn request(
         },
     )?;
 
+    arm_pairing_window(config_dir, unix_now())?;
     Ok(PendingLink::for_key(joining_key))
 }
 
@@ -779,8 +850,26 @@ pub(super) async fn reconcile(
         // is this key's only memory of what it issued, and `SyncReady` carries
         // both directions.
         remember(config_dir, &signed, true)?;
-        if st.to == me && ensure_link_to(config_dir, &st.from, now)?.is_some_and(|l| l.minted) {
+        if st.to != me {
+            continue;
+        }
+        // Minting here hands `st.from` full authority over this identity, so
+        // it happens only when a person at THIS machine asked to be linked.
+        // Without that, a valid signature was the whole gate, and any member
+        // who could land a grant in this stream took the authority for free.
+        if !pairing_window_open(config_dir, now) {
+            eprintln!(
+                "An inbound link from {} is stored but unanswered: this machine did not ask \
+                 to be linked. If you want it, run `ll-search link request` (or `link code`) \
+                 here and sync again. `ll-search link list` shows it as inbound.",
+                st.from.as_str()
+            );
+            continue;
+        }
+        if ensure_link_to(config_dir, &st.from, now)?.is_some_and(|l| l.minted) {
             eprintln!("Answered a link from {} with its reciprocal", st.from.as_str());
+            // One window, one link.
+            close_pairing_window(config_dir);
         }
     }
     ensure_recovery_link(config_dir, config, now)?;
@@ -1691,6 +1780,103 @@ mod tests {
             "and it must not be stored either — a forged grant in the local store is one \
              `ll link list` reports as real"
         );
+    }
+
+    /// A validly signed inbound link from a key nobody here asked for must
+    /// not be answered.
+    ///
+    /// This is the gap the signature check could never close: verifying proves
+    /// some key signed a statement, not that a person at this machine agreed
+    /// to it. `GrantKind::Link.transfers_authority()` is true, so answering
+    /// one hands `from` the authority of "the same person at another
+    /// keyboard" — over every vault this identity owns, unscoped, for a year.
+    /// Any member able to land `their_key -> my_key` in this stream took it
+    /// for free, and the forged-bytes test above does not cover it because
+    /// these bytes are not forged. They are genuine, and unwanted.
+    #[tokio::test]
+    async fn an_unsolicited_inbound_link_is_not_answered() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        // A real member, signing a real grant, correctly addressed to me.
+        let stranger_sk = SigningKey::from_bytes(&[47u8; 32]);
+        let stranger = KeyId::from_pubkey(&stranger_sk.verifying_key());
+        let genuine = link_wire(&stranger_sk, &stranger, &me, vec![], "active");
+
+        // Nobody at this machine has run `link request` or `link code`.
+        assert!(!pairing_window_open(machine.path(), unix_now()));
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![genuine], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "this machine handed a stranger full authority without anyone asking: {:?}",
+            lodged.lock().unwrap()
+        );
+        assert!(
+            !is_mutual(machine.path(), &stranger).unwrap(),
+            "the relationship must not be mutual"
+        );
+    }
+
+    /// The same machine, having asked, answers it — so the guard above is a
+    /// gate and not simply a wall.
+    #[tokio::test]
+    async fn an_inbound_link_is_answered_when_this_machine_asked_to_be_linked() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let other_sk = SigningKey::from_bytes(&[47u8; 32]);
+        let other = KeyId::from_pubkey(&other_sk.verifying_key());
+        let genuine = link_wire(&other_sk, &other, &me, vec![], "active");
+
+        // What `ll link request` / `ll link code` does.
+        arm_pairing_window(machine.path(), unix_now()).unwrap();
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![genuine], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert_eq!(lodged.lock().unwrap().len(), 1, "the asked-for link must be answered");
+        assert!(is_mutual(machine.path(), &other).unwrap());
+        assert!(
+            !pairing_window_open(machine.path(), unix_now()),
+            "one window, one link: it must be consumed"
+        );
+    }
+
+    /// `ll link revoke` must not be undone by the next sync.
+    ///
+    /// Revoking drops this machine's outbound half; the hub goes on serving
+    /// the peer's inbound one, because only its issuer can withdraw it. So
+    /// `reconcile` found no standing link and minted a fresh, full-authority,
+    /// 365-day one — handing the revoked machine its access back for doing
+    /// nothing at all. The window is what stops it: nobody asked.
+    #[tokio::test]
+    async fn a_revoked_link_is_not_re_minted_by_the_next_sync() {
+        let _env = test_hub::insecure_ws_env();
+        let machine = seeded_dir();
+        let me = key_of(machine.path());
+        let peer_sk = SigningKey::from_bytes(&[51u8; 32]);
+        let peer = KeyId::from_pubkey(&peer_sk.verifying_key());
+        let inbound = link_wire(&peer_sk, &peer, &me, vec![], "active");
+
+        // The relationship existed and was revoked here: the local outbound
+        // half is gone, and no window is open.
+        assert!(!pairing_window_open(machine.path(), unix_now()));
+
+        let (hub, lodged) = test_hub::spawn_grant_hub(vec![inbound], vec![]).await;
+        write_hub_config(machine.path(), &hub.ws_url(), None);
+        connect_and_reconcile(machine.path()).await.unwrap();
+
+        assert!(
+            lodged.lock().unwrap().is_empty(),
+            "the revoked machine was handed a fresh link by the next sync: {:?}",
+            lodged.lock().unwrap()
+        );
+        assert!(!is_mutual(machine.path(), &peer).unwrap());
     }
 
     /// A grant the hub does not call `active` is not one to act on. Revocation
