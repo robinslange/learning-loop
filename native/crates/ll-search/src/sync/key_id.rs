@@ -16,6 +16,15 @@ const ED25519_MULTICODEC: [u8; 2] = [0xed, 0x01];
 /// Multicodec prefix + the 32-byte ed25519 public key it tags.
 const KEY_ID_LEN: usize = ED25519_MULTICODEC.len() + 32;
 
+/// The longest base58btc body a `KEY_ID_LEN`-byte value can encode to:
+/// `floor(KEY_ID_LEN * log(256)/log(58)) + 1`.
+///
+/// Not a guess and not slack — `the_bound_is_tight_for_the_largest_key_id`
+/// pins it against the encoder itself, so a change to `KEY_ID_LEN` that makes
+/// this wrong fails the suite rather than silently rejecting valid keys.
+/// Must match the hub's `MAX_KEY_ID_BODY_LEN`.
+const MAX_KEY_ID_BODY_LEN: usize = 47;
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct KeyId(String);
 
@@ -26,6 +35,19 @@ fn decode(s: &str) -> anyhow::Result<[u8; 32]> {
     let body = s
         .strip_prefix('z')
         .ok_or_else(|| anyhow::anyhow!("key_id must use the multibase base58btc prefix 'z'"))?;
+    // Bound the input BEFORE decoding it. base58 is a base conversion, not a
+    // block transform: bs58's `into_vec` is O(n²) in the length of the string,
+    // and a key_id arrives from the hub inside every grant statement, where
+    // serde calls `KeyId::parse` during deserialisation. A hostile or
+    // compromised hub could otherwise hang this client on one message —
+    // measured on the hub's identical copy, a 200 KB body takes 56 s.
+    //
+    // Length alone settles it: a longer string cannot encode a KEY_ID_LEN-byte
+    // value, so this rejects exactly what the length check below would have
+    // rejected anyway, without doing the work first.
+    if body.len() > MAX_KEY_ID_BODY_LEN {
+        anyhow::bail!("key_id is not a 32-byte ed25519 public key");
+    }
     let bytes = bs58::decode(body)
         .into_vec()
         .map_err(|_| anyhow::anyhow!("key_id is not valid base58btc"))?;
@@ -163,5 +185,56 @@ mod tests {
         let other_id = KeyId::from_pubkey(&key().verifying_key());
         let sig = signer.sign(b"payload");
         assert!(other_id.verify(b"payload", &sig.to_bytes()).is_err());
+    }
+
+    /// Tight against the encoder, not a comfortable guess: too low silently
+    /// rejects real keys, too high leaves the quadratic decode reachable.
+    /// Must stay identical to the hub's test of the same name.
+    #[test]
+    fn the_bound_is_tight_for_the_largest_key_id() {
+        let mut biggest = [0xffu8; KEY_ID_LEN];
+        biggest[..2].copy_from_slice(&ED25519_MULTICODEC);
+        let mut smallest = [0x00u8; KEY_ID_LEN];
+        smallest[..2].copy_from_slice(&ED25519_MULTICODEC);
+
+        let big = bs58::encode(biggest).into_string();
+        let small = bs58::encode(smallest).into_string();
+        assert!(big.len() <= MAX_KEY_ID_BODY_LEN, "bound too low: {}", big.len());
+        assert!(small.len() <= MAX_KEY_ID_BODY_LEN, "bound too low: {}", small.len());
+        assert_eq!(
+            big.len(),
+            MAX_KEY_ID_BODY_LEN,
+            "bound is looser than the encoder needs; tighten it to KEY_ID_LEN's real maximum"
+        );
+    }
+
+    #[test]
+    fn a_real_key_is_within_the_bound() {
+        use ed25519_dalek::SigningKey;
+        for seed in 0u8..32 {
+            let sk = SigningKey::from_bytes(&[seed; 32]);
+            let id = KeyId::from_pubkey(&sk.verifying_key());
+            let body = id.as_str().strip_prefix('z').unwrap();
+            assert!(body.len() <= MAX_KEY_ID_BODY_LEN, "{} chars", body.len());
+            assert!(KeyId::parse(id.as_str()).is_ok());
+        }
+    }
+
+    /// A hostile hub puts an over-long key_id in a grant statement. It must be
+    /// refused on length, before the quadratic decode runs.
+    ///
+    /// 'z' is base58's HIGHEST digit, not '1', which is its zero: bs58 counts
+    /// leading zeros rather than multiplying through them, so a string of '1's
+    /// decodes in linear time and would pass against an unbounded decoder.
+    #[test]
+    fn an_over_long_body_is_rejected_before_it_is_decoded() {
+        let huge = format!("z{}", "z".repeat(200_000));
+        let started = std::time::Instant::now();
+        assert!(KeyId::parse(&huge).is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(250),
+            "rejection took {:?} — the decode ran instead of being refused on length",
+            started.elapsed()
+        );
     }
 }
