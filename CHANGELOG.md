@@ -68,6 +68,61 @@ All notable changes to this project are documented here. The format is based on 
   pairing code and the other machine approving it, run `ll-search link request` (or
   `link code`) again and sync. Nothing is lost — the inbound grant is already stored.
 
+- **Promoting a note between folders no longer breaks the whole index.** `note_uuid` carries a
+  partial UNIQUE index, and a moved note arrived as an INSERT at its new path while the stale row
+  still held its id, so SQLite aborted the entire reindex with "UNIQUE constraint failed:
+  notes.note_uuid" — not one note, the whole run. The deletion pass that would have cleared the
+  stale row runs *after* the inserts, so it never got the chance. Moving a note from `0-inbox/` to
+  `3-permanent/` is exactly this, which means an ordinary vault promotion could leave the index
+  permanently unable to rebuild. Found on a live vault where one promoted note had already done it.
+
+  A note that moved is the same note, so the row now follows its `note_uuid` rather than its path.
+  That also preserves its embedding: a move is not a content change, and re-embedding it would be
+  work for nothing.
+
+- **A keyring that refuses to answer is no longer read as a machine without a keyring.**
+  `is_platform_unavailable` matched the substring `"platform"` against the error text —
+  and keyring 3.6.3 renders `PlatformFailure` as "Platform secure storage failure: …"
+  *and* `NoStorageAccess` as "Couldn't access platform secure storage: …". Since
+  `NoStorageAccess` is documented as "typically… the credential store is locked", both of
+  the variants that mean *I could not read it* were classified as *there is nothing here*.
+  A locked keychain, a denied prompt and a cancelled prompt all became `Ok(None)`.
+
+  `load_only` then fell through to `.seed.enc` while the real key sat in the keychain, so
+  `store_seed` wrote a second identity and the next run with an unlocked keychain signed
+  with the first. `recover` compounded it: `existing` read as `None`, so its `--force`
+  guard never fired, `readable-vaults.json` was deleted, and the user was told
+  "Recovered z6Mk…" for a key the machine will not sign with — exactly the
+  usable-looking-but-wrong identity that path exists to make impossible.
+
+  The needle is gone, so those failures now reach the caller as errors. The remaining
+  needles name Linux backends that are genuinely absent on a headless box, which is the
+  case the fallback exists for, and a test pins that it still works.
+
+- **An incremental reindex now writes each note's stable id into the index, not only onto
+  disk.** `resolve_note_uuids` assigns an `id:` to every walked note — its comment says
+  "every note gets a stable id, whether or not its content changed" — but the only writer
+  of the `note_uuid` *column* was `insert_embedded`, reachable only for notes that get
+  re-embedded. A note whose id had just been written was then skipped and kept `note_uuid`
+  NULL permanently.
+
+  The steady state was a trap rather than a delay. Run 1 writes `id:` into the file, but
+  `walk_vault` captured the mtime *before* that write, so the note is skipped. Run 2 sees
+  the new mtime, re-reads, and finds the content hash unchanged — the hash is taken over
+  the frontmatter-stripped body, so an added `id:` line moves none of it — and takes the
+  update-mtime branch, which writes mtime and nothing else. Run 3 onward the mtimes agree
+  and it is skipped forever.
+
+  `export_index` selects `WHERE note_uuid IS NOT NULL`, so such a note was silently absent
+  from every sync. Measured on the vault this was found in: 3 of 6,051 notes, all carrying
+  an `id:` on disk, none ever exported. The count is small only because that vault is
+  edited constantly; a mostly-static one lands its whole corpus here. Verified against a
+  copy of that real index — all three backfilled, matching their on-disk ids, with no
+  duplicate `note_uuid` anywhere in the table.
+
+  This also makes the remedy the exporter already prints true: `ll-search index <vault>
+  <db>` now does assign one to each, and they do arrive on the next sync.
+
 ## v2.0.5
 
 ### Fixed
