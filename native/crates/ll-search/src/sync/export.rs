@@ -7,7 +7,7 @@ use serde::Serialize;
 use std::sync::LazyLock;
 
 use super::config::FederationConfig;
-use super::visibility::VisibilityEngine;
+use super::visibility::{Declared, VisibilityEngine};
 
 const SCHEMA_VERSION: u32 = 2;
 
@@ -28,6 +28,13 @@ pub struct ExportResult {
     /// skipped would say the export considered every note and chose to send
     /// these, when it never saw them.
     pub unindexed: usize,
+    /// Notes whose file could not be read at export time, and which were
+    /// therefore withheld. Separate from `skipped` for the same reason
+    /// `unindexed` is: `skipped` is a visibility decision the engine made on
+    /// a declaration it could see, and this is the absence of one. A non-zero
+    /// count here means the vault on disk and the index disagree — usually a
+    /// rename or delete since the last reindex.
+    pub unreadable: usize,
     #[serde(skip)]
     pub model_id: String,
 }
@@ -74,42 +81,6 @@ pub fn export_index(
         .collect();
     let engine = VisibilityEngine::new(&config.visibility.default, &rules);
 
-    if export_path.exists() {
-        std::fs::remove_file(export_path)?;
-    }
-
-    let export = Connection::open(export_path)?;
-    export.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         CREATE TABLE notes (
-             id INTEGER PRIMARY KEY,
-             note_uuid TEXT NOT NULL,
-             path TEXT NOT NULL,
-             title TEXT NOT NULL,
-             tags TEXT,
-             tier TEXT NOT NULL,
-             updated_at INTEGER NOT NULL
-         );
-         CREATE TABLE notes_content (
-             id INTEGER PRIMARY KEY,
-             title TEXT,
-             tags TEXT,
-             body TEXT
-         );
-         CREATE TABLE meta (
-             key TEXT PRIMARY KEY,
-             value TEXT
-         );
-         CREATE TABLE embeddings (
-             id INTEGER PRIMARY KEY,
-             data BLOB NOT NULL
-         );
-         CREATE TABLE links (
-             source_id INTEGER NOT NULL,
-             target_path TEXT NOT NULL,
-             UNIQUE(source_id, target_path)
-         );"
-    )?;
 
     // --- Phase 1: load all rows from source and pre-compute visibility -------
     //
@@ -154,16 +125,91 @@ pub fn export_index(
         }
     }
 
-    // Build visibility inputs once: (path, frontmatter_visibility).
-    let vis_inputs: Vec<(String, Option<String>)> = all_rows
+    // Build visibility inputs once: (path, what the note declared).
+    //
+    // A note we could not read has NOT declared nothing. The two were the same
+    // `None` here, and `None` falls through to the glob rules — so a note whose
+    // frontmatter says `private`, sitting under a folder rule that says
+    // `listed`, was published the moment its file became unreadable. The body
+    // comes from the index DB rather than from disk, so nothing downstream
+    // noticed the file was missing. Renames, deletes since the last reindex,
+    // permission errors and non-UTF-8 bytes all reach this line.
+    let mut unreadable = 0usize;
+    let mut readable = 0usize;
+    let vis_inputs: Vec<(String, Declared)> = all_rows
         .iter()
         .map(|r| {
-            let fm = std::fs::read_to_string(vault_path.join(&r.path))
-                .ok()
-                .and_then(|raw| crate::sync::frontmatter::read_key(&raw, "visibility"));
-            (r.path.clone(), fm)
+            let declared = match std::fs::read_to_string(vault_path.join(&r.path)) {
+                Ok(raw) => {
+                    readable += 1;
+                    Declared::from_frontmatter(crate::sync::frontmatter::read_key(
+                        &raw,
+                        "visibility",
+                    ))
+                }
+                Err(e) => {
+                    unreadable += 1;
+                    eprintln!("export: {} unreadable, withholding it: {e}", r.path);
+                    Declared::Unknown
+                }
+            };
+            (r.path.clone(), declared)
         })
         .collect();
+
+    // Withholding each unreadable note one at a time is right, but it answers
+    // the wrong question when the vault path itself is wrong: every note fails
+    // to read, every note is withheld, and the result is a valid-looking export
+    // of nothing. `vault_path` is a raw CLI argument, so that is one typo away.
+    // Refuse, rather than let a silent empty index stand in for a vault.
+    if !all_rows.is_empty() && readable == 0 {
+        anyhow::bail!(
+            "not one of {} notes could be read under {} — refusing to export. \
+             Check the vault path.",
+            all_rows.len(),
+            vault_path.display()
+        );
+    }
+
+    // The artefact is created only once the export knows it has something to
+    // say. Building it earlier meant a refused export still left a half-made
+    // index on disk under the name the uploader reads.
+    if export_path.exists() {
+        std::fs::remove_file(export_path)?;
+    }
+
+    let export = Connection::open(export_path)?;
+    export.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE notes (
+             id INTEGER PRIMARY KEY,
+             note_uuid TEXT NOT NULL,
+             path TEXT NOT NULL,
+             title TEXT NOT NULL,
+             tags TEXT,
+             tier TEXT NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE notes_content (
+             id INTEGER PRIMARY KEY,
+             title TEXT,
+             tags TEXT,
+             body TEXT
+         );
+         CREATE TABLE meta (
+             key TEXT PRIMARY KEY,
+             value TEXT
+         );
+         CREATE TABLE embeddings (
+             id INTEGER PRIMARY KEY,
+             data BLOB NOT NULL
+         );
+         CREATE TABLE links (
+             source_id INTEGER NOT NULL,
+             target_path TEXT NOT NULL,
+             UNIQUE(source_id, target_path)
+         );"
+    )?;
 
     // Evaluate the whole batch — O(n) glob matching, no per-row disk I/O.
     let tiers = engine.evaluate_batch(&vis_inputs);
@@ -296,7 +342,7 @@ pub fn export_index(
 
     export.execute("COMMIT", [])?;
 
-    Ok(ExportResult { exported, skipped, unindexed, model_id })
+    Ok(ExportResult { exported, skipped, unindexed, unreadable, model_id })
 }
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
@@ -806,6 +852,86 @@ mod tests {
             1,
             "an addressable note is either exported or skipped, and counted exactly once"
         );
+    }
+
+    /// Adds a second addressable note to a `build_source_db` fixture, so a
+    /// test can make ONE note unreadable without emptying the vault (which
+    /// trips the wrong-vault-path guard instead).
+    fn add_second_note(db: &Path, path: &str) {
+        let c = Connection::open(db).unwrap();
+        c.execute(
+            "INSERT INTO notes (id, path, content_hash, mtime, title, tags, note_uuid)
+             VALUES (2, ?1, 'h', 0.0, 'Gone', '', '01926d7e-0000-7000-8000-00000000000b')",
+            rusqlite::params![path],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO notes_content (id, title, tags, body)
+             VALUES (2, 'Gone', '', 'Secret body.')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_note_whose_file_cannot_be_read_is_withheld_not_published_at_its_glob_tier() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
+        add_second_note(&source, "gone.md");
+        // `n.md` exists on disk; `gone.md` does not — renamed or deleted since
+        // the last reindex. Both are in the index, so both have a title and a
+        // body available without touching the disk at all.
+        public_vault_with_note(&vault);
+
+        // A rule that would publish everything it can see. Before the fix,
+        // `gone.md`'s failed read read as "declared nothing" and it shipped at
+        // this tier: path, title, tags and a body summary.
+        let config =
+            FederationConfig::test_fixture("private", vec![("**".to_string(), "listed".to_string())]);
+        let result = export_index(&source, &vault, &out, &config).unwrap();
+
+        assert_eq!(result.unreadable, 1, "the missing note must be counted, not silently absorbed");
+
+        let c = Connection::open(&out).unwrap();
+        let leaked: i64 = c
+            .query_row("SELECT count(*) FROM notes WHERE path = 'gone.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leaked, 0, "nothing about an unreadable note may reach the export");
+        let leaked_body: i64 = c
+            .query_row("SELECT count(*) FROM notes_content WHERE id = 2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(leaked_body, 0, "its summary must not reach the export either");
+
+        // The readable note still went out, so this is withholding one note
+        // rather than the export having failed wholesale.
+        let kept: i64 = c
+            .query_row("SELECT count(*) FROM notes WHERE path = 'n.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "the note that WAS readable must still be exported");
+    }
+
+    #[test]
+    fn an_export_that_can_read_nothing_refuses_rather_than_publishing_an_empty_index() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
+        // An empty directory standing in for a mistyped --vault-path. Every
+        // note is withheld individually, which is correct and useless: the
+        // answer the operator needs is that this is not the vault.
+        let empty = tmp.path().join("not-the-vault");
+        std::fs::create_dir_all(&empty).unwrap();
+
+        let config =
+            FederationConfig::test_fixture("private", vec![("**".to_string(), "listed".to_string())]);
+        let err = export_index(&source, &empty, &out, &config).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("refusing to export"), "unexpected error: {msg}");
+        assert!(msg.contains("vault path"), "the error must name the likely cause: {msg}");
+        assert!(!out.exists(), "no export artefact may be left behind by a refused export");
     }
 
     fn build_minimal_export_db(path: &Path) {
