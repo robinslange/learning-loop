@@ -569,8 +569,6 @@ pub(crate) fn public_vault_with_note(dir: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn summarize_short_text_unchanged() {
