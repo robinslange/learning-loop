@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.6
+
 ### Fixed
 
 - **A note whose file could not be read at export time was published at its folder's
