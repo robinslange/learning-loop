@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **Promoting a note between folders no longer breaks the whole index.** `note_uuid` carries a
+  partial UNIQUE index, and a moved note arrived as an INSERT at its new path while the stale row
+  still held its id, so SQLite aborted the entire reindex with "UNIQUE constraint failed:
+  notes.note_uuid" — not one note, the whole run. The deletion pass that would have cleared the
+  stale row runs *after* the inserts, so it never got the chance. Moving a note from `0-inbox/` to
+  `3-permanent/` is exactly this, which means an ordinary vault promotion could leave the index
+  permanently unable to rebuild. Found on a live vault where one promoted note had already done it.
+
+  A note that moved is the same note, so the row now follows its `note_uuid` rather than its path.
+  That also preserves its embedding: a move is not a content change, and re-embedding it would be
+  work for nothing.
+
 - **A keyring that refuses to answer is no longer read as a machine without a keyring.**
   `is_platform_unavailable` matched the substring `"platform"` against the error text —
   and keyring 3.6.3 renders `PlatformFailure` as "Platform secure storage failure: …"

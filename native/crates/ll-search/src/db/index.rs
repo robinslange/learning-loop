@@ -182,6 +182,48 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     // incremental index would leave most of the vault unaddressable.
     let (note_uuids, duplicate_ids) = resolve_note_uuids(Path::new(vault_path), &vault_files)?;
 
+    // A note that MOVED is the same note. Identity is `note_uuid`, so the row
+    // follows the id rather than the path.
+    //
+    // Without this, a promoted note is an INSERT at its new path while the
+    // stale row still holds its uuid, and `idx_notes_uuid` (UNIQUE on
+    // note_uuid WHERE NOT NULL) aborts the entire reindex: "UNIQUE constraint
+    // failed: notes.note_uuid". Not the file, the whole run. The deletion pass
+    // that would have cleared the stale row runs AFTER the inserts, so it
+    // never gets the chance.
+    //
+    // Moving a note from 0-inbox to 3-permanent is exactly this, and it is
+    // what every promotion does, so an ordinary vault workflow could leave the
+    // index unable to rebuild at all.
+    //
+    // Following the id also keeps the note's embedding: a move is not a
+    // content change, and re-embedding it would be work for nothing.
+    let moved = {
+        let tx = conn.unchecked_transaction()?;
+        let mut n = 0usize;
+        {
+            let mut stmt = tx.prepare(
+                // The NOT EXISTS keeps this from colliding on `path` if some
+                // row already sits at the destination; that row is the
+                // authority for the path and the loop below decides its fate.
+                "UPDATE notes SET path = ?1
+                 WHERE note_uuid = ?2
+                   AND path <> ?1
+                   AND NOT EXISTS (SELECT 1 FROM notes n2 WHERE n2.path = ?1)",
+            )?;
+            for file in &vault_files {
+                if let Some(uuid) = note_uuids.get(&file.rel_path) {
+                    n += stmt.execute(rusqlite::params![file.rel_path, uuid])?;
+                }
+            }
+        }
+        tx.commit()?;
+        n
+    };
+    if moved > 0 {
+        eprintln!("Followed {moved} note(s) to a new path by their stable id.");
+    }
+
     // ...and every note gets it in the DATABASE too, which is where everything
     // downstream reads it. `resolve_note_uuids` writes `id:` into the file; the
     // only writer of the COLUMN was `insert_embedded`, reachable only for notes
@@ -824,6 +866,65 @@ mod tests {
             Some(id),
             "a skipped note must still get the id it already carries on disk; without it \
              the note is unaddressable and every export drops it"
+        );
+    }
+
+    /// Promoting a note from `0-inbox/` to `3-permanent/` must not break the
+    /// index.
+    ///
+    /// The stale row holds the uuid; the file now carries it at a new path.
+    /// Inserting that as a new row hits `idx_notes_uuid` and aborts the whole
+    /// reindex, not just the one note — and the deletion pass that would clear
+    /// the stale row runs after the inserts, so it never gets there. Found on
+    /// a real vault, where a single promoted note had made the index
+    /// unrebuildable.
+    #[test]
+    fn a_note_that_moved_follows_its_id_instead_of_colliding_with_itself() {
+        let dir = TempDir::new().unwrap();
+        let db = TempDir::new().unwrap();
+        let conn = open_or_create_db(db.path().join("i.db").to_str().unwrap()).unwrap();
+
+        std::fs::create_dir_all(dir.path().join("3-permanent")).unwrap();
+        let id = "01926d7e-0000-7000-8000-00000000000b";
+        std::fs::write(
+            dir.path().join("3-permanent/note.md"),
+            format!("---\nid: {id}\ntitle: T\n---\n\nBody."),
+        )
+        .unwrap();
+
+        // The row the vault left behind when the note was promoted, carrying
+        // the file's real mtime: a promotion moves the note, it does not edit
+        // it, so the row must end up skipped rather than re-embedded.
+        let mtime = walk_vault(dir.path().to_str().unwrap())
+            .into_iter()
+            .next()
+            .expect("the walker sees the note")
+            .mtime;
+        conn.execute(
+            "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+             VALUES ('0-inbox/note.md', 'h', ?2, 'T', '', ?1)",
+            rusqlite::params![id, mtime],
+        )
+        .unwrap();
+
+        reindex(&conn, dir.path().to_str().unwrap(), false)
+            .expect("a promoted note must not abort the reindex");
+
+        let rows: i64 = conn
+            .query_row("SELECT count(*) FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1, "one note, one row: the id must not be duplicated");
+        let path: String = conn
+            .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(path, "3-permanent/note.md", "the row must follow the note to its new path");
+        let hash: String = conn
+            .query_row("SELECT content_hash FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            hash, "h",
+            "a move is not a content change; the row keeps its embedding rather than being \
+             re-embedded for having changed folder"
         );
     }
 }
