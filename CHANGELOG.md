@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **A keyring that refuses to answer is no longer read as a machine without a keyring.**
+  `is_platform_unavailable` matched the substring `"platform"` against the error text —
+  and keyring 3.6.3 renders `PlatformFailure` as "Platform secure storage failure: …"
+  *and* `NoStorageAccess` as "Couldn't access platform secure storage: …". Since
+  `NoStorageAccess` is documented as "typically… the credential store is locked", both of
+  the variants that mean *I could not read it* were classified as *there is nothing here*.
+  A locked keychain, a denied prompt and a cancelled prompt all became `Ok(None)`.
+
+  `load_only` then fell through to `.seed.enc` while the real key sat in the keychain, so
+  `store_seed` wrote a second identity and the next run with an unlocked keychain signed
+  with the first. `recover` compounded it: `existing` read as `None`, so its `--force`
+  guard never fired, `readable-vaults.json` was deleted, and the user was told
+  "Recovered z6Mk…" for a key the machine will not sign with — exactly the
+  usable-looking-but-wrong identity that path exists to make impossible.
+
+  The needle is gone, so those failures now reach the caller as errors. The remaining
+  needles name Linux backends that are genuinely absent on a headless box, which is the
+  case the fallback exists for, and a test pins that it still works.
+
 - **An incremental reindex now writes each note's stable id into the index, not only onto
   disk.** `resolve_note_uuids` assigns an `id:` to every walked note — its comment says
   "every note gets a stable id, whether or not its content changed" — but the only writer
