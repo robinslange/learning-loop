@@ -44,8 +44,8 @@ use super::grant::{
 };
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    ClientMsg, GrantWire, HeldIndex, HubMsg, PROTOCOL_VERSION, RevocationWire, VaultState,
-    client_auth_message, hub_challenge_message,
+    ChunkedUpload, ChunkedUploadLimits, ClientMsg, GrantWire, HeldIndex, HubMsg, PROTOCOL_VERSION, RevocationWire,
+    VaultState, client_auth_message, hub_challenge_message,
 };
 
 /// `include_str!` rather than a runtime read: a missing or moved transcript is
@@ -135,7 +135,16 @@ fn this_client_produces_every_message_in_the_transcript() {
     emit(
         "upload_index",
         serde_json::to_string(&ClientMsg::UploadIndex {
-            chunked: None,
+            // Read from the transcript's inputs rather than restated here.
+            // Both sides used to pass `None`, and because the field is
+            // skip_serializing_if, the artefact came out byte-identical to its
+            // pre-chunking self -- two repos each pinning the absence of the
+            // capability they had both just implemented.
+            chunked: Some(ChunkedUpload {
+                chunks: num(inp, "chunk_count") as u32,
+                chunk_size_max: num(inp, "chunk_size_max") as u32,
+                manifest_root: text(inp, "manifest_root").into(),
+            }),
             vault_id: vault_one.into(),
             sha256: text(inp, "index_sha256").into(),
             note_count: num(inp, "note_count"),
@@ -184,7 +193,13 @@ fn this_client_produces_every_message_in_the_transcript() {
     emit(
         "sync_ready",
         serde_json::to_string(&HubMsg::SyncReady {
-            chunked_upload: None,
+            // The hub's advertised ceilings, read from the artefact's inputs.
+            // This crate reproducing them from its own constants would be the
+            // two-repos-agreeing-with-themselves shape the transcript replaces.
+            chunked_upload: Some(ChunkedUploadLimits {
+                max_chunk_bytes: num(inp, "max_chunk_bytes") as u32,
+                max_total_bytes: num(inp, "max_total_bytes") as u64,
+            }),
             protocol_version: PROTOCOL_VERSION,
             vault_state: vec![
                 VaultState { vault_id: vault_one.into(), holds: None },
@@ -289,8 +304,20 @@ fn this_client_accepts_every_message_in_the_transcript() {
     }
     match serde_json::from_str::<HubMsg>(text(m, "sync_ready")).unwrap() {
         HubMsg::SyncReady {
-            chunked_upload: None, protocol_version, vault_state, grants, revocations } => {
+            chunked_upload,
+            protocol_version,
+            vault_state,
+            grants,
+            revocations,
+        } => {
             assert_eq!(protocol_version, PROTOCOL_VERSION);
+            // `chunked_upload: None` as a literal pattern matched only while
+            // the hub did not send the field, so the one test that reads every
+            // hub message agreed the capability did not exist -- and would have
+            // gone on agreeing after the hub started advertising it.
+            let limits = chunked_upload.expect("the hub advertises chunked upload");
+            assert_eq!(limits.max_chunk_bytes, num(inp, "max_chunk_bytes") as u32);
+            assert_eq!(limits.max_total_bytes, num(inp, "max_total_bytes") as u64);
             assert!(
                 vault_state[0].holds.is_none(),
                 "`null` must mean 'the hub holds nothing' — the value that triggers a re-upload"
