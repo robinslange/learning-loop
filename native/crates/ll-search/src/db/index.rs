@@ -182,6 +182,45 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     // incremental index would leave most of the vault unaddressable.
     let (note_uuids, duplicate_ids) = resolve_note_uuids(Path::new(vault_path), &vault_files)?;
 
+    // ...and every note gets it in the DATABASE too, which is where everything
+    // downstream reads it. `resolve_note_uuids` writes `id:` into the file; the
+    // only writer of the COLUMN was `insert_embedded`, reachable only for notes
+    // that get re-embedded. So a note whose id was just written was then skipped
+    // by the mtime check below and kept `note_uuid` NULL — permanently.
+    //
+    // The steady state is a trap rather than a delay. Run 1 writes `id:` into
+    // the file, but `walk_vault` captured `file.mtime` BEFORE that write, so the
+    // note is skipped. Run 2 sees the changed mtime, re-reads, and finds the
+    // content hash unchanged — the hash is taken over the frontmatter-stripped
+    // body, so adding an `id:` line moves none of it — and takes the
+    // update-mtime branch, which writes mtime and nothing else. Run 3 onward the
+    // mtimes agree and it is skipped forever.
+    //
+    // `export_index` selects `WHERE note_uuid IS NOT NULL`, so such a note is
+    // silently absent from every sync. Measured on the vault this was found in:
+    // 3 of 6,051 notes, all carrying an `id:` on disk, none of which had ever
+    // been exported. The count is small only because that vault is edited
+    // constantly; a mostly-static one lands its whole corpus here.
+    let backfilled = {
+        let tx = conn.unchecked_transaction()?;
+        let mut n = 0usize;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE notes SET note_uuid = ?1 WHERE path = ?2 AND note_uuid IS NULL",
+            )?;
+            for file in &vault_files {
+                if let Some(uuid) = note_uuids.get(&file.rel_path) {
+                    n += stmt.execute(rusqlite::params![uuid, file.rel_path])?;
+                }
+            }
+        }
+        tx.commit()?;
+        n
+    };
+    if backfilled > 0 {
+        eprintln!("Assigned a stable id to {backfilled} note(s) that had none in the index.");
+    }
+
     let mut existing: HashMap<String, (i64, String, f64)> = HashMap::new();
     {
         let mut stmt = conn
@@ -736,5 +775,55 @@ mod tests {
             )
             .unwrap();
         assert_eq!(fts_hit, 1, "trigger should fire for inserts after insert_embedded completes");
+    }
+
+    /// The absorbing state: a note with an `id:` on disk, a row whose mtime
+    /// already agrees with the file, and `note_uuid` NULL.
+    ///
+    /// It is reached by ordinary use — run 1 writes the `id:` after
+    /// `walk_vault` captured the mtime, so the note is skipped; run 2 sees the
+    /// new mtime but an unchanged content hash (the hash is taken over the
+    /// frontmatter-stripped body) and only writes mtime; run 3 onward the
+    /// mtimes agree. From there nothing ever set the column, and
+    /// `export_index` filters `WHERE note_uuid IS NOT NULL`, so the note was
+    /// silently absent from every sync forever.
+    #[test]
+    fn an_unchanged_note_gets_its_id_into_the_index_not_only_onto_disk() {
+        let dir = TempDir::new().unwrap();
+        let db = TempDir::new().unwrap();
+        let conn = open_or_create_db(db.path().join("i.db").to_str().unwrap()).unwrap();
+
+        let note = dir.path().join("note.md");
+        let id = "01926d7e-0000-7000-8000-00000000000a";
+        std::fs::write(&note, format!("---\nid: {id}\ntitle: T\n---\n\nBody.")).unwrap();
+
+        // A row that matches the file in every way except the column. The
+        // mtime comes from `walk_vault` itself rather than from `fs::metadata`,
+        // because the column's unit is whatever the walker produces — reading
+        // it independently is how a fixture ends up describing a note that
+        // looks changed, which is a different test from this one.
+        let mtime = walk_vault(dir.path().to_str().unwrap())
+            .into_iter()
+            .next()
+            .expect("the walker sees the note")
+            .mtime;
+        conn.execute(
+            "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+             VALUES ('note.md', 'unchanged', ?1, 'T', '', NULL)",
+            rusqlite::params![mtime],
+        )
+        .unwrap();
+
+        reindex(&conn, dir.path().to_str().unwrap(), false).unwrap();
+
+        let got: Option<String> = conn
+            .query_row("SELECT note_uuid FROM notes WHERE path = 'note.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            got.as_deref(),
+            Some(id),
+            "a skipped note must still get the id it already carries on disk; without it \
+             the note is unaddressable and every export drops it"
+        );
     }
 }

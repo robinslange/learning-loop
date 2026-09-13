@@ -4,6 +4,32 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **An incremental reindex now writes each note's stable id into the index, not only onto
+  disk.** `resolve_note_uuids` assigns an `id:` to every walked note — its comment says
+  "every note gets a stable id, whether or not its content changed" — but the only writer
+  of the `note_uuid` *column* was `insert_embedded`, reachable only for notes that get
+  re-embedded. A note whose id had just been written was then skipped and kept `note_uuid`
+  NULL permanently.
+
+  The steady state was a trap rather than a delay. Run 1 writes `id:` into the file, but
+  `walk_vault` captured the mtime *before* that write, so the note is skipped. Run 2 sees
+  the new mtime, re-reads, and finds the content hash unchanged — the hash is taken over
+  the frontmatter-stripped body, so an added `id:` line moves none of it — and takes the
+  update-mtime branch, which writes mtime and nothing else. Run 3 onward the mtimes agree
+  and it is skipped forever.
+
+  `export_index` selects `WHERE note_uuid IS NOT NULL`, so such a note was silently absent
+  from every sync. Measured on the vault this was found in: 3 of 6,051 notes, all carrying
+  an `id:` on disk, none ever exported. The count is small only because that vault is
+  edited constantly; a mostly-static one lands its whole corpus here. Verified against a
+  copy of that real index — all three backfilled, matching their on-disk ids, with no
+  duplicate `note_uuid` anywhere in the table.
+
+  This also makes the remedy the exporter already prints true: `ll-search index <vault>
+  <db>` now does assign one to each, and they do arrive on the next sync.
+
 ## v2.0.5
 
 ### Fixed
