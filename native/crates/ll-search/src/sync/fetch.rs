@@ -22,6 +22,7 @@
 //! identities and carries no authority at all, and a client that asks anyway
 //! is one hub-side bug away from getting an answer.
 
+use anyhow::Context;
 use crate::b64;
 use std::path::Path;
 
@@ -32,7 +33,8 @@ use super::client::{recv_binary, recv_json, send_json, WsStream};
 use super::config::{peer_dir, peer_index_path};
 use super::grant::{self, GrantKind, GrantStatement};
 use super::key_id::KeyId;
-use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, VaultState};
+use super::protocol::{manifest_root, ChunkedFrame};
+use super::protocol_v5::{ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState};
 
 /// One vault whose index this cycle fetched and wrote.
 #[derive(Debug, Serialize)]
@@ -272,19 +274,21 @@ async fn fetch_one(
 ) -> anyhow::Result<Outcome> {
     send_json(ws, &ClientMsg::FetchIndex { vault_id: vault_id.to_string() }).await?;
 
-    let (answered, holds) = match recv_json::<HubMsg>(ws).await? {
-        HubMsg::IndexHeader { vault_id, holds } => (vault_id, holds),
+    let (answered, holds, chunked) = match recv_json::<HubMsg>(ws).await? {
+        HubMsg::IndexHeader { vault_id, holds, chunked } => (vault_id, holds, chunked),
         HubMsg::Reject { reason } => anyhow::bail!("hub refused the read: {reason}"),
         other => anyhow::bail!("expected index-header, got: {other:?}"),
     };
 
-    // `holds: Some(..)` promises exactly one binary frame. Read it before
-    // judging anything else about the header: a header this client goes on to
-    // refuse must not leave its frame in the stream for the next vault's
-    // fetch to pick up as its own.
-    let body = match holds {
-        Some(_) => Some(recv_binary(ws).await?),
-        None => None,
+    // `holds: Some(..)` promises the bytes follow -- as one binary frame when
+    // the header describes no chunks, or as that many `ChunkedFrame`s when it
+    // does. Read them before judging anything else about the header: frames a
+    // fetch goes on to refuse must not be left in the stream for the next
+    // vault's fetch to pick up as its own.
+    let body = match (&holds, &chunked) {
+        (None, _) => None,
+        (Some(_), None) => Some(recv_binary(ws).await?),
+        (Some(_), Some(desc)) => Some(recv_chunked(ws, desc).await?),
     };
 
     if answered != vault_id {
@@ -324,6 +328,59 @@ async fn fetch_one(
         vault_id: vault_id.to_string(),
         note_count: held.note_count,
     }))
+}
+
+/// Read `desc.chunks` frames and reassemble the body they carry.
+///
+/// The counterpart to what `upload_plan` does on the way out, and the reason it
+/// did not exist is that chunking was built in one direction: the hub could
+/// accept an index too large for one frame and then had no way to hand it back.
+/// A body past this client's frame ceiling used to arrive as a single oversized
+/// frame, which tungstenite refuses with `Capacity` -- and that error poisons
+/// the socket, so the remaining vaults on the connection failed with it.
+///
+/// Two checks here, and deliberately not three. Seq and total must match what
+/// the header described, and the hashes must reassemble to the announced
+/// manifest root -- that one catches a hub whose framing contradicts its own
+/// descriptor, which nothing downstream can see, because correct frames
+/// described wrongly still hash to the right body.
+///
+/// Comparing each frame's body against the hash it carries was written here and
+/// then removed: `fetch_one` hashes the whole reassembled body against
+/// `holds.sha256`, so altered bytes are already refused, and deleting the
+/// per-frame check reddened no test even against a deliberately corrupted
+/// frame. A guard whose removal nothing notices is not defence, and the cost of
+/// keeping it is a reader who thinks the end-to-end check is optional.
+async fn recv_chunked(ws: &mut WsStream, desc: &ChunkedBody) -> anyhow::Result<Vec<u8>> {
+    if desc.chunks == 0 {
+        anyhow::bail!("the hub described a chunked body of zero frames");
+    }
+    let mut hashes = Vec::with_capacity(desc.chunks as usize);
+    let mut body = Vec::new();
+    for expected_seq in 0..desc.chunks {
+        let raw = recv_binary(ws).await?;
+        let frame = ChunkedFrame::decode(&raw)
+            .with_context(|| format!("chunk {expected_seq} of {} did not decode", desc.chunks))?;
+        if frame.seq != expected_seq || frame.total != desc.chunks {
+            anyhow::bail!(
+                "chunk {} of {} arrived as seq {} of {}",
+                expected_seq,
+                desc.chunks,
+                frame.seq,
+                frame.total
+            );
+        }
+        hashes.push(frame.hash);
+        body.extend_from_slice(&frame.body);
+    }
+    let root = hex::encode(manifest_root(&hashes));
+    if root != desc.manifest_root {
+        anyhow::bail!(
+            "the chunks reassemble to manifest root {root}, the header announced {}",
+            desc.manifest_root
+        );
+    }
+    Ok(body)
 }
 
 /// The sha256 of the index already cached for `vault_id`, or `None` when
@@ -622,6 +679,99 @@ mod tests {
         assert!(out.fetched.is_empty());
         assert!(out.skipped.is_empty(), "not asking is not a failure to report");
         assert!(!peer_dir(dir.path(), "v-work").exists());
+    }
+
+    /// A body the hub had to split arrives whole.
+    ///
+    /// Chunking was built in one direction. `upload_plan` splits an export on
+    /// the way out, and a fetch did a bare `recv_binary` -- so a body past this
+    /// client's frame ceiling came as one oversized frame, tungstenite refused
+    /// it with `Capacity`, and that error poisons the socket, failing every
+    /// remaining vault on the connection as one `skipped_fetches` count. The
+    /// vault this was measured on exports to 25 MB, so the first person to
+    /// follow it would have read nothing at all.
+    ///
+    /// A small chunk size rather than a real 8 MiB body: what is under test is
+    /// the framing, and forcing four frames out of a short fixture exercises
+    /// exactly the same path as forcing four out of a large one, in
+    /// milliseconds.
+    #[tokio::test]
+    async fn a_chunked_body_is_reassembled_from_its_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("chunked-across-several-frames");
+        assert!(body.len() > 12, "fixture must be long enough to split");
+        let (out, asked) = run(
+            dir.path(),
+            &["v-other"],
+            vec![to_me(of_kind(GrantKind::Follow, "v-other"))],
+            vec![("v-other", FetchAnswer::Chunked(body.clone(), 8))],
+        )
+        .await;
+
+        assert_eq!(asked, vec!["v-other".to_string()]);
+        assert!(out.skipped.is_empty(), "a chunked body must not be a skipped fetch: {:?}", out.skipped);
+        assert_eq!(out.fetched.len(), 1, "the chunked fetch produced nothing");
+        // Written to disk byte-for-byte: reassembling in the wrong order, or
+        // dropping a frame, still yields "some bytes" and would pass a test
+        // that only counted fetches.
+        assert_eq!(
+            std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(),
+            body,
+            "the reassembled index differs from what the hub sent"
+        );
+    }
+
+    /// A chunk stream that does not reassemble to the announced root is
+    /// refused, and nothing is written.
+    ///
+    /// The root is what makes reordering, substitution and truncation
+    /// detectable; without it a hub could hand over any frames in any order and
+    /// the client would concatenate them into a file it then trusts. A
+    /// happy-path test cannot reach this, because a correct hub always agrees
+    /// with itself -- so the hub here lies on purpose.
+    #[tokio::test]
+    async fn a_chunk_stream_that_contradicts_the_announced_root_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("frames-that-do-not-add-up");
+        let (out, _asked) = run(
+            dir.path(),
+            &["v-other"],
+            vec![to_me(of_kind(GrantKind::Follow, "v-other"))],
+            vec![("v-other", FetchAnswer::ChunkedBadRoot(body, 8))],
+        )
+        .await;
+
+        assert!(out.fetched.is_empty(), "a body that failed its integrity check was accepted");
+        assert_eq!(out.skipped.len(), 1, "the refusal must be reported, not swallowed");
+        assert!(
+            !peer_index_path(dir.path(), "v-other").exists(),
+            "refused bytes must not reach disk: there is no coming back to repair them"
+        );
+    }
+
+    /// Altered bytes are refused, whichever check notices.
+    ///
+    /// The guard is `fetch_one`'s whole-body sha against `holds.sha256`, not
+    /// anything inside the frame loop: `recv_chunked` briefly compared each
+    /// frame to the hash it carries, and removing that comparison left this
+    /// test green, which is what says it was never the thing doing the work.
+    /// Asserted as an outcome -- nothing fetched, nothing on disk -- rather
+    /// than against a particular check, so it keeps its meaning if the checks
+    /// move.
+    #[tokio::test]
+    async fn a_corrupted_frame_never_reaches_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = index_bytes("one-frame-quietly-altered");
+        let (out, _asked) = run(
+            dir.path(),
+            &["v-other"],
+            vec![to_me(of_kind(GrantKind::Follow, "v-other"))],
+            vec![("v-other", FetchAnswer::ChunkedCorruptFrame(body, 8))],
+        )
+        .await;
+
+        assert!(out.fetched.is_empty(), "a corrupted frame was accepted");
+        assert!(!peer_index_path(dir.path(), "v-other").exists());
     }
 
     /// The other side of the same boundary. An implementation that asks for

@@ -27,6 +27,20 @@ pub const ENVELOPE_HEADER_LEN: usize = 4 + 32;
 /// layer; pre-flight returns [`crate::sync::error::SyncError::EnvelopeOversize`].
 pub const HUB_INBOUND_CAP: usize = 16 * 1024 * 1024;
 
+/// The largest single WebSocket frame payload this client will READ.
+///
+/// The mirror of [`HUB_INBOUND_CAP`], and it had no name because nothing set
+/// it: the connection was opened with `connect_async_tls_with_config(.., None,
+/// ..)`, so the receive ceiling was whatever tungstenite defaulted to -- a
+/// limit this client depended on, documented nowhere, and never stated beside
+/// the send limit it has to agree with.
+///
+/// Named and passed explicitly now. Equal to the send cap on purpose: the two
+/// bound the same frame travelling in opposite directions, and a client that
+/// refuses to send what it is willing to receive (or the reverse) is a
+/// disagreement waiting for a vault to grow into it.
+pub const HUB_INBOUND_FRAME_CAP: usize = HUB_INBOUND_CAP;
+
 /// Protocol version this client advertises in `SyncHello`.
 pub const PROTOCOL_VERSION_FRAMED: u32 = 2;
 

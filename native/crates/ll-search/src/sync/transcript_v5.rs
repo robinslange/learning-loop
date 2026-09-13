@@ -44,7 +44,7 @@ use super::grant::{
 };
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    ChunkedUpload, ChunkedUploadLimits, ClientMsg, GrantWire, HeldIndex, HubMsg, PROTOCOL_VERSION, RevocationWire,
+    ChunkedBody, ChunkedUploadLimits, ClientMsg, GrantWire, HeldIndex, HubMsg, PROTOCOL_VERSION, RevocationWire,
     VaultState, client_auth_message, hub_challenge_message,
 };
 
@@ -140,7 +140,7 @@ fn this_client_produces_every_message_in_the_transcript() {
             // skip_serializing_if, the artefact came out byte-identical to its
             // pre-chunking self -- two repos each pinning the absence of the
             // capability they had both just implemented.
-            chunked: Some(ChunkedUpload {
+            chunked: Some(ChunkedBody {
                 chunks: num(inp, "chunk_count") as u32,
                 chunk_size_max: num(inp, "chunk_size_max") as u32,
                 manifest_root: text(inp, "manifest_root").into(),
@@ -242,13 +242,34 @@ fn this_client_produces_every_message_in_the_transcript() {
         serde_json::to_string(&HubMsg::IndexHeader {
             vault_id: vault_two.into(),
             holds: Some(held()),
+            chunked: None,
         })
         .unwrap(),
     );
     emit(
         "index_header_empty",
-        serde_json::to_string(&HubMsg::IndexHeader { vault_id: vault_one.into(), holds: None })
-            .unwrap(),
+        serde_json::to_string(&HubMsg::IndexHeader {
+            vault_id: vault_one.into(),
+            holds: None,
+            chunked: None,
+        })
+        .unwrap(),
+    );
+    emit(
+        "index_header_chunked",
+        serde_json::to_string(&HubMsg::IndexHeader {
+            vault_id: vault_two.into(),
+            holds: Some(held()),
+            // The descriptor's three values, read from the artefact's inputs
+            // like the upload's. This client has to reproduce the hub's bytes,
+            // not restate the numbers.
+            chunked: Some(ChunkedBody {
+                chunks: num(inp, "chunk_count") as u32,
+                chunk_size_max: num(inp, "chunk_size_max") as u32,
+                manifest_root: text(inp, "manifest_root").into(),
+            }),
+        })
+        .unwrap(),
     );
 
     for (name, json) in &produced {
@@ -287,7 +308,7 @@ fn this_client_accepts_every_message_in_the_transcript() {
             .unwrap_or_else(|e| panic!("client message `{name}` must parse: {e}"));
     }
     for name in ["hub_challenge", "sync_ready", "reject", "upload_ack", "grant_ack",
-                 "index_header_holds", "index_header_empty"] {
+                 "index_header_holds", "index_header_empty", "index_header_chunked"] {
         seen.push(name);
         serde_json::from_str::<HubMsg>(text(m, name))
             .unwrap_or_else(|e| panic!("hub message `{name}` must parse: {e}"));
@@ -355,7 +376,24 @@ fn this_client_accepts_every_message_in_the_transcript() {
         other => panic!("wrong variant: {other:?}"),
     }
     match serde_json::from_str::<HubMsg>(text(m, "index_header_empty")).unwrap() {
-        HubMsg::IndexHeader { holds, .. } => assert!(holds.is_none()),
+        HubMsg::IndexHeader { holds, chunked, .. } => {
+            assert!(holds.is_none());
+            assert!(chunked.is_none(), "a hub holding nothing describes no frames");
+        }
+        other => panic!("wrong variant: {other:?}"),
+    }
+    match serde_json::from_str::<HubMsg>(text(m, "index_header_chunked")).unwrap() {
+        HubMsg::IndexHeader { holds, chunked, .. } => {
+            assert!(holds.is_some());
+            // Absent here would mean this client reads a chunked body as a
+            // single frame and dies on it -- the failure the field exists to
+            // remove, which is why its presence is asserted and not just its
+            // shape.
+            let c = chunked.expect("a body past the frame ceiling describes its chunks");
+            assert_eq!(c.chunks, num(inp, "chunk_count") as u32);
+            assert_eq!(c.chunk_size_max, num(inp, "chunk_size_max") as u32);
+            assert_eq!(c.manifest_root, text(inp, "manifest_root"));
+        }
         other => panic!("wrong variant: {other:?}"),
     }
 

@@ -349,6 +349,9 @@ async fn spawn_hub_full(
                                     note_count: 3,
                                     uploaded_at: 1,
                                 }),
+                                // This fixture serves small bodies in one
+                                // frame, which is what absent means.
+                                chunked: None,
                             };
                             (header, Some(bytes.clone()))
                         }

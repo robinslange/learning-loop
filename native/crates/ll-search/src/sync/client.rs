@@ -20,8 +20,10 @@ use super::fetch::{fetch_all, Fetched};
 use super::grants;
 use super::handshake::SyncReadyPayload;
 use super::key_id::KeyId;
-use super::protocol::{manifest_root, ChunkedFrame, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP};
-use super::protocol_v5::{ClientMsg, HubMsg, VaultState, ChunkedUpload, ChunkedUploadLimits};
+use super::protocol::{
+    manifest_root, ChunkedFrame, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP, HUB_INBOUND_FRAME_CAP,
+};
+use super::protocol_v5::{ClientMsg, HubMsg, VaultState, ChunkedBody, ChunkedUploadLimits};
 use super::state::{self, HubHolds, SyncState};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
@@ -314,7 +316,7 @@ impl UploadPlan {
     /// The declaration that must accompany this plan on `UploadIndex`.
     /// Derived from the plan rather than assembled beside it, so the message
     /// and the frames that follow cannot describe different uploads.
-    fn declaration(&self, body: &[u8]) -> Option<ChunkedUpload> {
+    fn declaration(&self, body: &[u8]) -> Option<ChunkedBody> {
         let UploadPlan::Chunked { chunk_bytes } = *self else {
             return None;
         };
@@ -322,7 +324,7 @@ impl UploadPlan {
             .chunks(chunk_bytes)
             .map(|c| <[u8; 32]>::from(Sha256::digest(c)))
             .collect();
-        Some(ChunkedUpload {
+        Some(ChunkedBody {
             chunks: hashes.len() as u32,
             chunk_size_max: chunk_bytes as u32,
             manifest_root: hex::encode(manifest_root(&hashes)),
@@ -662,9 +664,17 @@ pub(super) async fn connect_and_authenticate(
     let endpoint = check_hub_scheme(&config.hub.endpoint)?;
     let connect_url = endpoint.ws_uri()?;
     eprintln!("Connecting to hub at {connect_url} as {peer_id} (model {model_id})...");
+    // An explicit config, not `None`. Passing `None` took tungstenite's
+    // defaults, so this client's receive ceiling was a library default nothing
+    // here named or agreed to -- while `upload_plan` chunked against
+    // `HUB_INBOUND_CAP` on the way out. The two limits bound the same frame in
+    // opposite directions and only one of them was written down.
+    let ws_config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+        .max_frame_size(Some(HUB_INBOUND_FRAME_CAP))
+        .max_message_size(Some(HUB_INBOUND_FRAME_CAP));
     let (mut ws, _response) = tokio_tungstenite::connect_async_tls_with_config(
         &connect_url,
-        None,
+        Some(ws_config),
         false,
         Some(hub_tls_connector()),
     )

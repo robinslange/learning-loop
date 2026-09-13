@@ -129,6 +129,7 @@
     "upload_ack": "{\"type\":\"upload-ack\",\"vault_id\":\"vault-one\",\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\"}",
     "grant_ack": "{\"type\":\"grant-ack\",\"grant_id\":\"2b0cc1cf22e163f046bfe7ca6c8e2d4dcc3ea907d46c778c7d5a6ddcf5aaffdc\"}",
     "index_header_holds": "{\"type\":\"index-header\",\"vault_id\":\"vault-two\",\"holds\":{\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"note_count\":42,\"uploaded_at\":1757000300}}",
-    "index_header_empty": "{\"type\":\"index-header\",\"vault_id\":\"vault-one\",\"holds\":null}"
+    "index_header_empty": "{\"type\":\"index-header\",\"vault_id\":\"vault-one\",\"holds\":null}",
+    "index_header_chunked": "{\"type\":\"index-header\",\"vault_id\":\"vault-two\",\"holds\":{\"sha256\":\"5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\",\"note_count\":42,\"uploaded_at\":1757000300},\"chunked\":{\"chunks\":4,\"chunk_size_max\":8388608,\"manifest_root\":\"fc3f585df363f099ede277d9da0d866a4615f905af5dea38407ec4e023e29afc\"}}"
   }
 }

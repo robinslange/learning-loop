@@ -21,10 +21,12 @@ use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use super::grant::{GrantKind, GrantStatement};
+use super::protocol::{manifest_root, ChunkedFrame};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
 use super::protocol_v5::{
-    hub_challenge_message, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState, PROTOCOL_VERSION,
+    hub_challenge_message, ChunkedBody, ClientMsg, GrantWire, HeldIndex, HubMsg, VaultState,
+    PROTOCOL_VERSION,
 };
 
 /// The identity every mock hub signs with unless a test says otherwise.
@@ -534,6 +536,21 @@ pub enum FetchAnswer {
     /// A header for a vault other than the one asked for, honestly hashed,
     /// with its frame. A hub that answers the wrong question.
     HeaderFor(&'static str, Vec<u8>),
+    /// A body past the frame ceiling, served as `ChunkedFrame`s the way the
+    /// real hub does above `CHUNK_MAX_BODY_SIZE`. The chunk size is a
+    /// parameter so a test can force multiple frames without building an 8 MiB
+    /// fixture to do it.
+    Chunked(Vec<u8>, usize),
+    /// The frames are real and the announced manifest root is not. A correct
+    /// hub cannot produce this, which is the point: the root check is the only
+    /// thing standing between a reordered or substituted chunk stream and a
+    /// plausible-looking index on disk, and a happy-path test cannot reach it.
+    ChunkedBadRoot(Vec<u8>, usize),
+    /// One frame's body is altered after its hash was taken, so the frame no
+    /// longer matches the hash it carries. Covers the per-frame check, which
+    /// the root check does not subsume -- the root is computed over the hashes,
+    /// so a body swapped underneath an unchanged hash leaves it intact.
+    ChunkedCorruptFrame(Vec<u8>, usize),
     /// `IndexHeader { holds: None }` and no frame: the hub has nothing for
     /// this vault yet.
     Nothing,
@@ -544,7 +561,41 @@ fn index_header(vault_id: &str, sha256: String) -> HubMsg {
     HubMsg::IndexHeader {
         vault_id: vault_id.to_string(),
         holds: Some(HeldIndex { sha256, note_count: FETCH_NOTE_COUNT, uploaded_at: 1 }),
+        chunked: None,
     }
+}
+
+/// The same header for a body the real hub would split, plus the frames to
+/// send after it.
+///
+/// Built by chunking the body and deriving the descriptor from the frames,
+/// which is the order `handle_v5_fetch_index` uses -- a count computed one way
+/// and frames emitted another is how a mock comes to describe a body it does
+/// not send, and then the client is tested against a hub that cannot exist.
+fn chunked_index_header(vault_id: &str, body: &[u8], chunk_size: usize) -> (HubMsg, Vec<Vec<u8>>) {
+    use sha2::{Digest, Sha256};
+    let total = body.len().div_ceil(chunk_size).max(1) as u32;
+    let frames: Vec<ChunkedFrame> = body
+        .chunks(chunk_size)
+        .enumerate()
+        .map(|(i, c)| ChunkedFrame::from_body(i as u32, total, c.to_vec()).unwrap())
+        .collect();
+    let header = HubMsg::IndexHeader {
+        vault_id: vault_id.to_string(),
+        holds: Some(HeldIndex {
+            sha256: hex::encode(Sha256::digest(body)),
+            note_count: FETCH_NOTE_COUNT,
+            uploaded_at: 1,
+        }),
+        chunked: Some(ChunkedBody {
+            chunks: total,
+            chunk_size_max: frames.iter().map(|f| f.body.len()).max().unwrap_or(0) as u32,
+            manifest_root: hex::encode(manifest_root(
+                &frames.iter().map(|f| f.hash).collect::<Vec<[u8; 32]>>(),
+            )),
+        }),
+    };
+    (header, frames.iter().map(|f| f.encode()).collect())
 }
 
 /// A hub that answers `FetchIndex` from a scripted table, and the record of
@@ -607,8 +658,63 @@ pub async fn spawn_fetch_hub(
                     let sha = hex::encode(Sha256::digest(&bytes));
                     (index_header(other, sha), Some(bytes))
                 }
+                FetchAnswer::ChunkedBadRoot(bytes, chunk_size) => {
+                    let (header, frames) = chunked_index_header(&vault_id, &bytes, chunk_size);
+                    let header = match header {
+                        HubMsg::IndexHeader { vault_id, holds, chunked } => HubMsg::IndexHeader {
+                            vault_id,
+                            holds,
+                            chunked: chunked.map(|c| ChunkedBody {
+                                manifest_root: "00".repeat(32),
+                                ..c
+                            }),
+                        },
+                        other => other,
+                    };
+                    if !send_hub_msg(&mut ws, &header).await {
+                        return;
+                    }
+                    for frame in frames {
+                        if ws.send(Message::binary(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
+                FetchAnswer::ChunkedCorruptFrame(bytes, chunk_size) => {
+                    let (header, mut frames) = chunked_index_header(&vault_id, &bytes, chunk_size);
+                    // Last byte of the last frame, after the header that
+                    // describes it: the hash travels in the frame, so this
+                    // makes the frame disagree with itself.
+                    if let Some(last) = frames.last_mut() {
+                        if let Some(b) = last.last_mut() {
+                            *b ^= 0xFF;
+                        }
+                    }
+                    if !send_hub_msg(&mut ws, &header).await {
+                        return;
+                    }
+                    for frame in frames {
+                        if ws.send(Message::binary(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
+                FetchAnswer::Chunked(bytes, chunk_size) => {
+                    let (header, frames) = chunked_index_header(&vault_id, &bytes, chunk_size);
+                    if !send_hub_msg(&mut ws, &header).await {
+                        return;
+                    }
+                    for frame in frames {
+                        if ws.send(Message::binary(frame)).await.is_err() {
+                            return;
+                        }
+                    }
+                    continue;
+                }
                 FetchAnswer::Nothing => {
-                    (HubMsg::IndexHeader { vault_id: vault_id.clone(), holds: None }, None)
+                    (HubMsg::IndexHeader { vault_id: vault_id.clone(), holds: None, chunked: None }, None)
                 }
                 FetchAnswer::Reject(reason) => {
                     (HubMsg::Reject { reason: reason.into() }, None)
@@ -720,6 +826,7 @@ pub async fn spawn_grant_hub_over(
                 let header = HubMsg::IndexHeader {
                     vault_id: vault_id.clone(),
                     holds: world.holds_for(vault_id),
+                    chunked: None,
                 };
                 if !send_hub_msg(&mut ws, &header).await {
                     return;

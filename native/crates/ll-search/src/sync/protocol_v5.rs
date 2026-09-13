@@ -62,7 +62,7 @@ pub enum ClientMsg {
         /// advertised `chunked_upload` in `SyncReady`, so a hub that predates
         /// chunking is never sent frames it would treat as one body.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        chunked: Option<ChunkedUpload>,
+        chunked: Option<ChunkedBody>,
     },
     /// Submit a signed grant. The bytes are self-authenticating — the hub
     /// verifies the signature against the `from` key named inside the
@@ -155,6 +155,14 @@ pub enum HubMsg {
     IndexHeader {
         vault_id: String,
         holds: Option<HeldIndex>,
+        /// Absent means the bytes arrive as exactly one binary frame, which is
+        /// what every hub before this sent. Present means `chunks`
+        /// `ChunkedFrame`s follow instead, because the body is past the frame
+        /// ceiling this client reads with -- previously that body simply killed
+        /// the socket, and the `Capacity` error took the remaining vaults on
+        /// the connection with it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chunked: Option<ChunkedBody>,
     },
 }
 
@@ -185,7 +193,7 @@ pub struct GrantWire {
 /// not a merkle tree: every chunk hash travels with the upload, so there is
 /// nothing for an inclusion proof to prove.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChunkedUpload {
+pub struct ChunkedBody {
     pub chunks: u32,
     pub chunk_size_max: u32,
     pub manifest_root: String,
@@ -272,7 +280,7 @@ mod tests {
             grant_id: "g1".into(),
         }).unwrap()), "grant-ack");
         let header = serde_json::to_value(HubMsg::IndexHeader {
-            vault_id: "v1".into(), holds: None,
+            vault_id: "v1".into(), holds: None, chunked: None,
         }).unwrap();
         assert_eq!(tag(header.clone()), "index-header");
         assert!(header["holds"].is_null(),
