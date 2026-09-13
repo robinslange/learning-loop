@@ -123,6 +123,18 @@ All notable changes to this project are documented here. The format is based on 
   This also makes the remedy the exporter already prints true: `ll-search index <vault>
   <db>` now does assign one to each, and they do arrive on the next sync.
 
+- **An over-long `key_id` is refused on length before it is base58-decoded.** base58
+  is a base conversion, not a block transform, so `bs58::decode(..).into_vec()` is
+  O(n²) in the length of the string. A `key_id` reaches this client inside every grant
+  statement the hub sends, where serde calls `KeyId::parse` during deserialisation — so
+  a hostile or compromised hub could hang the client on a single message. Measured with
+  the bound removed: a 200 KB body takes **56 seconds**. The bound is derived from
+  `KEY_ID_LEN` and pinned against the encoder from both directions, so a change that
+  invalidates it fails the suite rather than silently rejecting every valid key.
+
+  The same fix lands in sync-hub, where the equivalent parse sits on the pre-auth path;
+  the two copies of this type are deliberate and change together.
+
 ## v2.0.5
 
 ### Fixed
