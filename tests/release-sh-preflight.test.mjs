@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, chmodSync, accessSync, constants } from 'node:fs';
+import { mkdtempSync, writeFileSync, chmodSync, symlinkSync, accessSync, constants } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -23,21 +23,42 @@ case "$1" in
   *) exit 0 ;;
 esac`;
 
-// PATH entries with no gh in them, so `command -v gh` genuinely fails rather
-// than finding the real one behind the stub dir.
-function pathWithoutGh(stubDir) {
-  const kept = (process.env.PATH || '')
-    .split(':')
-    .filter(Boolean)
-    .filter((d) => {
-      try {
-        accessSync(join(d, 'gh'), constants.X_OK);
-        return false;
-      } catch {
-        return true;
-      }
-    });
-  return [stubDir, ...kept].join(':');
+// The first executable named `name` on the real PATH, or null.
+function resolveOnPath(name) {
+  for (const d of (process.env.PATH || '').split(':').filter(Boolean)) {
+    const candidate = join(d, name);
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      /* keep looking */
+    }
+  }
+  return null;
+}
+
+// A PATH on which `gh` genuinely does not exist.
+//
+// The first version of this deleted every PATH entry that contained a gh. That
+// removes a directory to remove one file, and on ubuntu `gh` and `bash` are both
+// in /usr/bin -- so the filter deleted the shell, release.sh never ran, and
+// `spawnSync` returned status null. It passed on macOS only because homebrew
+// puts gh somewhere the shell is not. The gate this file tests exists because a
+// suite that runs on one OS cannot fail for the others; its own test was an
+// instance of that.
+//
+// So build the sandbox up instead of tearing PATH down: link in exactly what
+// release.sh needs to reach the gh check -- bash to run it, node to read the
+// version, dirname to resolve its own directory -- and let PATH be that one
+// directory. Nothing else is reachable, which is the precondition the test
+// claims.
+function sandboxWithoutGh(dir) {
+  for (const name of ['bash', 'node', 'dirname']) {
+    const real = name === 'node' ? process.execPath : resolveOnPath(name);
+    if (!real) throw new Error(`cannot build a gh-less sandbox: no ${name} on PATH`);
+    symlinkSync(real, join(dir, name));
+  }
+  return dir;
 }
 
 function runWithGitStub(stubBody, args = ['patch'], opts = {}) {
@@ -63,13 +84,20 @@ function runWithGitStub(stubBody, args = ['patch'], opts = {}) {
     writeFileSync(gh, `#!/usr/bin/env bash\n${ghStub}\n`);
     chmodSync(gh, 0o755);
   }
-  return spawnSync('bash', [SCRIPT, ...args], {
+  const res = spawnSync('bash', [SCRIPT, ...args], {
     encoding: 'utf-8',
     env: {
       ...process.env,
-      PATH: omitGh ? pathWithoutGh(dir) : `${dir}:${process.env.PATH}`,
+      PATH: omitGh ? sandboxWithoutGh(dir) : `${dir}:${process.env.PATH}`,
     },
   });
+  // A script that never started has `status: null`, which every caller below
+  // then reports as `null !== 1` -- an assertion about release.sh's exit code,
+  // for a release.sh that did not run. Name it here once instead.
+  if (res.error) {
+    throw new Error(`release.sh did not start (${res.error.code}): ${res.error.message}`);
+  }
+  return res;
 }
 
 test('release.sh aborts when not on main', { skip: SKIP }, () => {
