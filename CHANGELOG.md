@@ -135,6 +135,28 @@ All notable changes to this project are documented here. The format is based on 
   The same fix lands in sync-hub, where the equivalent parse sits on the pre-auth path;
   the two copies of this type are deliberate and change together.
 
+- **`release.sh` now refuses to tag a commit CI has not passed.** The only gate was
+  prettier, `npm test` and `cargo test` on the operator's own machine, and a gate
+  cannot fail for a platform it does not run on: v2.0.0 was tagged on a commit whose
+  `node (windows-latest)` job was red, and nothing in the release path was capable of
+  noticing. The release now asks GitHub for the check runs on the commit it is about
+  to build on, and stops unless every one of them concluded.
+
+  It gates the base commit rather than the release commit, which does not exist yet.
+  That is the honest scope — the release commit adds version bumps, a CHANGELOG rename
+  and lockfiles, all of which the local suite covers. What CI adds is the platforms
+  this machine is not.
+
+  Every way of not knowing is a stop, because a gate that passes when it could not run
+  is the vacuous pre-flight this project already fixed once: no `gh`, an unauthenticated
+  or erroring `gh`, zero checks reported, or checks still in flight each abort with the
+  reason named. `skipped` and `neutral` are not failures. There is no bypass flag, for
+  the same reason `--skip-tests` was removed — a red CI is a thing to fix, not to route
+  around.
+
+  Verified against the history that motivated it: the gate blocks the v2.0.0 base
+  commit on `node (windows-latest) (failure)` and passes v2.0.4's 13 green checks.
+
 ## v2.0.5
 
 ### Fixed
@@ -152,7 +174,6 @@ All notable changes to this project are documented here. The format is based on 
 - **The authoring rule that produced the trap now forbids it.** `skills-shared/paths-preamble.md` and `agents-shared/vault-io.md` documented `eval "$(ll-paths --sh)"` as the canonical bootstrap, and `tests/bash-blocks-resolve-paths.test.mjs` enforced it. Both now say to name the command instead, and the test fails the build on any `eval "$(...)"` in a shell block under `plugin/`, plus on any resolver field used before it is assigned. `tests/reflect-new-notes-track.test.mjs` likewise asserted the eval per fence; it now asserts the prefix resolver and forbids rebuilding the prefix by concatenation.
 
 - `ll-run` joins `SHIM_NAMES`, so the SessionStart hook installs it on existing installs rather than only on fresh ones. The health check reports it, and its test fixture is driven off `SHIM_NAMES` rather than a hardcoded list — the same mistake `SHIM_NAMES` exists to prevent.
-
 
 ## v2.0.4
 

@@ -76,6 +76,65 @@ if ! git pull --ff-only origin main; then
   exit 1
 fi
 
+# CI gate: the suite below runs on this machine's OS only, so it cannot fail for
+# a platform it does not run on. v2.0.0 was tagged on a commit whose Windows job
+# was red for exactly that reason. Ask GitHub instead.
+#
+# This gates the commit the release is *based on*, not the release commit, which
+# does not exist yet. That is the honest scope: the release commit adds version
+# bumps, a CHANGELOG rename and lockfiles, all of which the local suite covers.
+# What CI adds is the platforms this machine is not.
+#
+# There is no bypass flag, for the same reason --skip-tests was removed: a red
+# CI is a thing to fix, not to route around.
+BASE_SHA=$(git rev-parse HEAD)
+echo "Checking CI on $BASE_SHA..."
+
+# Every failure below is a hard stop. A gate that passes when it could not run
+# is the vacuous pre-flight this repo already fixed once in deploy.sh.
+command -v gh >/dev/null 2>&1 || {
+  echo "Error: gh is not installed, so CI status cannot be read."
+  echo "Install the GitHub CLI, or verify the run for $BASE_SHA by hand and re-run."
+  exit 1
+}
+
+# --jq runs per page, so paginated output arrives already flattened: one
+# tab-separated line per check, no JSON reassembly.
+if ! CHECKS=$(gh api "repos/{owner}/{repo}/commits/$BASE_SHA/check-runs" --paginate \
+       --jq '.check_runs[] | [.status, (.conclusion // "none"), .name] | @tsv' 2>&1); then
+  echo "Error: could not read CI status for $BASE_SHA."
+  echo "$CHECKS"
+  exit 1
+fi
+
+# Assert the complement is empty rather than listing the checks that must pass:
+# a named list is a wordlist, and it goes stale the day a job is added.
+# skipped/neutral are not failures — a path-filtered job declining to run is not
+# a red build. Everything else (failure, cancelled, timed_out, action_required,
+# stale) is.
+CI_TOTAL=$(printf '%s' "$CHECKS" | grep -c . || true)
+CI_PENDING=$(printf '%s\n' "$CHECKS" | awk -F'\t' '$1 != "completed" && NF { print $3 }' | paste -sd'|' - | tr '|' ',')
+CI_BAD=$(printf '%s\n' "$CHECKS" | awk -F'\t' '
+  $1 == "completed" && $2 != "success" && $2 != "skipped" && $2 != "neutral" { print $3 " (" $2 ")" }
+' | paste -sd'|' - | tr '|' ',')
+
+if [ "$CI_TOTAL" -eq 0 ]; then
+  echo "Error: no CI has reported on $BASE_SHA."
+  echo "An unpushed or unbuilt commit is not a green one. Push it and let CI run."
+  exit 1
+fi
+if [ -n "$CI_PENDING" ]; then
+  echo "Error: CI is still running on $BASE_SHA: $CI_PENDING"
+  echo "Wait for it to finish, then re-run."
+  exit 1
+fi
+if [ -n "$CI_BAD" ]; then
+  echo "Error: CI is not green on $BASE_SHA: $CI_BAD"
+  echo "Fix the failure and release from a commit CI has passed."
+  exit 1
+fi
+echo "CI green on $BASE_SHA ($CI_TOTAL checks)."
+
 # Test gate: run prettier + JS + Rust suites before tagging.
 echo "Running prettier check..."
 npx prettier --check 'plugin/hooks/**/*.{js,mjs}' 'plugin/scripts/**/*.{js,mjs}'
