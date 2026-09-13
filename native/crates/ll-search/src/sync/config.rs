@@ -228,6 +228,12 @@ pub fn grants_path(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("grants.json")
 }
 
+/// The window during which this machine will answer an inbound link by
+/// minting its own half, unprompted. See `link::arm_pairing_window`.
+pub fn pairing_window_path(config_dir: &Path) -> PathBuf {
+    config_dir.join("federation").join("pairing-window.json")
+}
+
 /// What the last sync cycle did — written on every cycle, succeeded or not.
 /// A missing file means no cycle has ever finished writing one, which is a
 /// different report from "the last cycle was fine" and must not be rendered
