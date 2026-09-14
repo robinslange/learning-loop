@@ -43,6 +43,7 @@ use super::config::{
 };
 use super::key_id::KeyId;
 use super::protocol_v5::PROTOCOL_VERSION;
+use super::well_known::HubIdentity;
 use super::{auth, registry, seed_store, well_known, words};
 
 /// What a completed join produced. `recovery_phrase` is the only copy of the
@@ -152,17 +153,7 @@ pub async fn join(
     }
     require_a_profile_if_this_is_not_the_root(config_dir)?;
 
-    check_hub_scheme(hub_endpoint)?;
-
-    let hub = well_known::fetch(hub_endpoint).await?;
-    if hub.protocol_version != PROTOCOL_VERSION {
-        anyhow::bail!(
-            "hub speaks protocol v{}, this client speaks v{PROTOCOL_VERSION}. \
-             There is no negotiation and no downgrade; upgrade one side.",
-            hub.protocol_version
-        );
-    }
-    let hub_key = KeyId::parse(&hub.hub_key_id)?;
+    let (hub, hub_key) = pin_hub(hub_endpoint).await?;
     let fingerprint = words::fingerprint(&hub_key);
     if !confirm.hub_fingerprint(&fingerprint, hub_key.as_str())? {
         anyhow::bail!("hub fingerprint not confirmed; nothing was sent and nothing written");
@@ -180,21 +171,14 @@ pub async fn join(
         anyhow::bail!("recovery phrase not confirmed; nothing was sent and nothing written");
     }
 
-    let vault_id = uuid::Uuid::now_v7().to_string();
-    let config = FederationConfig {
-        identity: Identity {
-            display_name: display_name_for(vault_path),
-            pubkey: auth::pubkey_b64(&identity.signing_key),
-        },
-        visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
-        hub: HubEndpoint {
-            endpoint: hub_endpoint.to_string(),
-            key_id: Some(hub.hub_key_id.clone()),
-        },
-        vault_id: Some(vault_id.clone()),
-        vault_path: Some(vault_path.display().to_string()),
-        recovery_key_id: Some(recovery_key_id.as_str().to_string()),
-    };
+    let config = fresh_config(
+        vault_path,
+        &identity.signing_key,
+        hub_endpoint,
+        &hub.hub_key_id,
+        Some(recovery_key_id.as_str()),
+    );
+    let vault_id = config.vault_id.clone().expect("fresh_config always mints one");
 
     // The round trip. `authenticate` re-checks the pinned key against the one
     // the hub presents, so a hub that publishes one identity and signs with
@@ -235,6 +219,58 @@ pub async fn join(
         hub_fingerprint: fingerprint,
         vault_id,
     })
+}
+
+/// Everything both doors do to a hub endpoint before a human is asked to
+/// confirm it: check the scheme, fetch the published identity, refuse a
+/// protocol this client cannot speak, and parse the key.
+///
+/// It stops short of the confirmation itself because the two doors ask
+/// through different traits — `join` has a `Confirm` that also has to show a
+/// recovery phrase, `link request` has an `Approve` that does not. Folding the
+/// question in would mean one of them carrying a parameter it has no use for.
+pub(super) async fn pin_hub(hub_endpoint: &str) -> anyhow::Result<(HubIdentity, KeyId)> {
+    check_hub_scheme(hub_endpoint)?;
+    let hub = well_known::fetch(hub_endpoint).await?;
+    if hub.protocol_version != PROTOCOL_VERSION {
+        anyhow::bail!(
+            "hub speaks protocol v{}, this client speaks v{PROTOCOL_VERSION}. \
+             There is no negotiation and no downgrade; upgrade one side.",
+            hub.protocol_version
+        );
+    }
+    let hub_key = KeyId::parse(&hub.hub_key_id)?;
+    Ok((hub, hub_key))
+}
+
+/// The config a machine gets the first time it is given one.
+///
+/// Both doors wrote this literal, and they agreed on all of it but
+/// `recovery_key_id` — which only `join` can set, because only the enrollment
+/// that generated the 24 words knows the key they name. `link request` passes
+/// `None` for the same reason it always did: the recovery key belongs to the
+/// person, and the person already has one.
+pub(super) fn fresh_config(
+    vault_path: &Path,
+    signing_key: &SigningKey,
+    hub_endpoint: &str,
+    hub_key_id: &str,
+    recovery_key_id: Option<&str>,
+) -> FederationConfig {
+    FederationConfig {
+        identity: Identity {
+            display_name: display_name_for(vault_path),
+            pubkey: auth::pubkey_b64(signing_key),
+        },
+        visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
+        hub: HubEndpoint {
+            endpoint: hub_endpoint.to_string(),
+            key_id: Some(hub_key_id.to_string()),
+        },
+        vault_id: Some(uuid::Uuid::now_v7().to_string()),
+        vault_path: Some(vault_path.display().to_string()),
+        recovery_key_id: recovery_key_id.map(str::to_string),
+    }
 }
 
 /// Refuse a config dir that sits under a plugin data root without a vault

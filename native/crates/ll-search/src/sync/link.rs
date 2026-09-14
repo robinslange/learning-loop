@@ -37,12 +37,12 @@ use sha2::{Digest, Sha256};
 
 use super::atomic_file;
 use super::client::{connect_and_authenticate, recv_json, send_json, unix_now, WsStream};
-use super::config::{self, grants_path, pairing_window_path, FederationConfig, HubEndpoint, Identity, VisibilityConfig};
+use super::config::{self, grants_path, pairing_window_path, FederationConfig};
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
-use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
-use super::{seed_store, well_known, words};
+use super::protocol_v5::{ClientMsg, GrantWire, HubMsg};
+use super::{seed_store, words};
 
 
 /// Tags the two strings a door puts on a screen. A string that came from
@@ -538,17 +538,8 @@ pub async fn request(
         );
     }
     super::join::require_a_profile_if_this_is_not_the_root(config_dir)?;
-    super::client::check_hub_scheme(hub_endpoint)?;
 
-    let hub = well_known::fetch(hub_endpoint).await?;
-    if hub.protocol_version != PROTOCOL_VERSION {
-        anyhow::bail!(
-            "hub speaks protocol v{}, this client speaks v{PROTOCOL_VERSION}. \
-             There is no negotiation and no downgrade; upgrade one side.",
-            hub.protocol_version
-        );
-    }
-    let hub_key = KeyId::parse(&hub.hub_key_id)?;
+    let (hub, hub_key) = super::join::pin_hub(hub_endpoint).await?;
     if !confirm.confirm("hub identity", &words::fingerprint(&hub_key))? {
         anyhow::bail!("hub fingerprint not confirmed; nothing was written");
     }
@@ -556,24 +547,17 @@ pub async fn request(
     let identity = seed_store::load_or_create(config_dir)?;
     let joining_key = KeyId::from_pubkey(&identity.signing_key.verifying_key());
 
+    // `None` recovery key: it belongs to the person, and the person already
+    // has one. Only the enrollment that generated the 24 words can record it.
     config::write_config(
         config_dir,
-        &FederationConfig {
-            identity: Identity {
-                display_name: super::join::display_name_for(vault_path),
-                pubkey: super::auth::pubkey_b64(&identity.signing_key),
-            },
-            visibility: VisibilityConfig { default: "private".into(), rules: Vec::new() },
-            hub: HubEndpoint {
-                endpoint: hub_endpoint.to_string(),
-                key_id: Some(hub.hub_key_id.clone()),
-            },
-            vault_id: Some(uuid::Uuid::now_v7().to_string()),
-            vault_path: Some(vault_path.display().to_string()),
-            // Belongs to the person, and the person already has one. Only the
-            // enrollment that generated the 24 words can record it.
-            recovery_key_id: None,
-        },
+        &super::join::fresh_config(
+            vault_path,
+            &identity.signing_key,
+            hub_endpoint,
+            &hub.hub_key_id,
+            None,
+        ),
     )?;
 
     arm_pairing_window(config_dir, unix_now())?;
@@ -1126,6 +1110,10 @@ pub fn list(config_dir: &Path) -> anyhow::Result<Vec<LinkRow>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Production reaches these through `join::fresh_config` now; the fixtures
+    // here still build a config by hand.
+    use super::super::config::{HubEndpoint, Identity, VisibilityConfig};
+    use super::super::protocol_v5::PROTOCOL_VERSION;
     use crate::sync::test_hub::{self, GrantAnswer};
     use std::path::PathBuf;
     use tempfile::TempDir;
