@@ -605,6 +605,28 @@ test('checkFederationSyncHealth: a healthy recent sync is ok', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkFederationSyncHealth: a BOM on sync-state.json is not a dead federation', () => {
+  // `readJsonOrNull` was the 23rd hand-rolled `JSON.parse(readFileSync)` in
+  // this repo, and strictly weaker than the `safeLoad` that exists because an
+  // audit found the other 22: no BOM strip. A BOM'd sync-state.json — what an
+  // editor writes on Windows — made `JSON.parse` throw, which read as "no
+  // state", which reported a healthy vault as never having synced.
+  const dir = fedDir('health-fed-bom-');
+  writeFileSync(
+    join(dir, 'federation', 'sync-state.json'),
+    `\ufeff${JSON.stringify({
+      outcome: 'ok',
+      consecutive_failures: 0,
+      last_success_at: secs(NOW) - 60,
+    })}`,
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'ok', `detail: ${r.detail}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkFederationSyncHealth: a corrupt registry is a failure, not a fresh install', () => {
   // `vaults.json` names every profile on the machine. Unreadable means nothing
   // resolves and nothing syncs -- and the old code returned `ok('not

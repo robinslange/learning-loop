@@ -45,12 +45,31 @@ const STALE_AFTER = 7 * 86400;
  * boundary can be tested from both sides. Same reason the Rust `render_status`
  * takes one.
  */
+// `detail` is the only string in the assembled context that came from off the
+// machine: a `HubMsg::Reject` reason, written to sync-state.json by the client.
+// The client bounds and strips it at the source now, but this file READS a
+// state file that may have been written by an older one, and it is the last
+// step before the text reaches a session. So the rule is applied again where
+// the value is consumed.
+//
+// Not a shared constant with the Rust cap: this is a defensive re-bound of
+// persisted data of unknown age, not a protocol value the two sides have to
+// agree on. It only has to be finite.
+const HUB_TEXT_CAP = 500;
+
+function hubText(raw) {
+  if (typeof raw !== 'string') return null;
+  // eslint-disable-next-line no-control-regex
+  const clean = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
+  return clean.length > HUB_TEXT_CAP ? `${clean.slice(0, HUB_TEXT_CAP)}… (truncated)` : clean;
+}
+
 export function federationLine(state, now) {
   if (!state) {
     return 'configured, but no sync cycle has ever completed. Run `ll-search status`.';
   }
   if (state.outcome === 'error') {
-    return `last sync failed — ${state.detail ?? 'no detail recorded'}`;
+    return `last sync failed — ${hubText(state.detail) ?? 'no detail recorded'}`;
   }
   // The shape the Rust writes: { kind: "nothing" } | { kind: "index", sha256, note_count }.
   if (state.hub_holds?.kind === 'nothing') {

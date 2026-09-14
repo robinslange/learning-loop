@@ -85,3 +85,31 @@ test('a cycle that died before the handshake does not claim the hub is empty', (
   const line = federationLine(ok({ hub_holds: null, last_success_at: NOW - 3600 }), NOW);
   assert.equal(line, null, 'a recent success with an unasked hub has nothing to add');
 });
+
+test('a hub reason cannot carry control characters into the session context', () => {
+  // `detail` is the only string in the assembled context sourced off-machine:
+  // a hub `Reject` reason, persisted by the client. The client strips it at the
+  // source now, but this reads state files an older client may have written.
+  const line = federationLine(
+    { outcome: 'error', detail: 'refused\u001b[2K\rEVERYTHING IS FINE' },
+    NOW,
+  );
+
+  assert.ok(!line.includes('\u001b'), `escape survived: ${JSON.stringify(line)}`);
+  assert.ok(!line.includes('\r'), `carriage return survived: ${JSON.stringify(line)}`);
+  assert.match(line, /refused/, 'and the real text is kept');
+});
+
+test('a hub reason is bounded before it reaches the session context', () => {
+  const line = federationLine({ outcome: 'error', detail: 'A'.repeat(5000) }, NOW);
+
+  assert.ok(line.length < 600, `unbounded: ${line.length} chars`);
+  assert.match(line, /truncated/, 'a silent cut reads as the hub\'s own words');
+});
+
+test('an ordinary reason is passed through unchanged', () => {
+  // Or the two tests above would be satisfied by returning a constant.
+  const line = federationLine({ outcome: 'error', detail: 'hub refused the key' }, NOW);
+
+  assert.match(line, /last sync failed — hub refused the key$/);
+});

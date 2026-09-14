@@ -168,7 +168,18 @@ pub async fn join(
         KeyId::from_pubkey(&SigningKey::from_bytes(&recovery_seed).verifying_key());
     let recovery_phrase = words::recovery_phrase(&recovery_seed)?;
     if !confirm.recovery_phrase(&recovery_phrase)? {
-        anyhow::bail!("recovery phrase not confirmed; nothing was sent and nothing written");
+        // Not "nothing written". `seed_store::load_or_create` ran three lines
+        // up, so this machine's signing seed and its `.seed-meta.json` sidecar
+        // are on disk and stay there — deliberately, and pinned by
+        // `declining_the_recovery_phrase_aborts_the_join`. Someone backing out
+        // here is exactly the person who needs to know that, because the next
+        // `ll join` will reuse that identity rather than mint a fresh one.
+        anyhow::bail!(
+            "recovery phrase not confirmed; nothing was sent to the hub and no config was \
+             written. This machine's identity ({}) was created before the prompt and is \
+             kept — a later `ll-search join` reuses it rather than making a new one.",
+            key_id.as_str()
+        );
     }
 
     let config = fresh_config(
@@ -690,6 +701,19 @@ mod tests {
         assert!(err.to_string().contains("recovery phrase not confirmed"), "{err}");
         assert!(hub.last_hello().is_none(), "nothing should have been sent to the hub");
         assert!(!config::config_path(dir.path()).exists());
+
+        // The seed was created before the prompt and stays. That is deliberate,
+        // and the message has to say so: the person backing out here is exactly
+        // the one who needs to know the next `join` reuses this identity rather
+        // than minting a fresh one.
+        let kept = seed_store::load_only(dir.path()).unwrap();
+        assert!(kept.is_some(), "the identity created before the prompt is kept");
+        let key_id =
+            KeyId::from_pubkey(&kept.unwrap().signing_key.verifying_key()).as_str().to_string();
+        assert!(
+            err.to_string().contains(&key_id),
+            "and the abort names it, or the user cannot tell which identity was kept: {err}"
+        );
     }
 
     #[tokio::test]

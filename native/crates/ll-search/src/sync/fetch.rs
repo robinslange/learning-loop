@@ -34,7 +34,9 @@ use super::config::{peer_dir, peer_index_path};
 use super::grant::{self, GrantKind, GrantStatement};
 use super::key_id::KeyId;
 use super::protocol::{manifest_root, ChunkedFrame};
-use super::protocol_v5::{ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState};
+use super::protocol_v5::{
+    sanitise_hub_text, ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState,
+};
 
 /// One vault whose index this cycle fetched and wrote.
 #[derive(Debug, Serialize)]
@@ -276,7 +278,9 @@ async fn fetch_one(
 
     let (answered, holds, chunked) = match recv_json::<HubMsg>(ws).await? {
         HubMsg::IndexHeader { vault_id, holds, chunked } => (vault_id, holds, chunked),
-        HubMsg::Reject { reason } => anyhow::bail!("hub refused the read: {reason}"),
+        HubMsg::Reject { reason } => {
+            anyhow::bail!("hub refused the read: {}", sanitise_hub_text(&reason))
+        }
         other => anyhow::bail!("expected index-header, got: {other:?}"),
     };
 

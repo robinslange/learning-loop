@@ -112,6 +112,40 @@ pub enum ClientMsg {
     },
 }
 
+/// Longest hub-supplied string this client will repeat.
+///
+/// A `Reject` reason is written into `sync-state.json`, re-rendered by
+/// `ll status`, and appended to SessionStart context by
+/// `context-assembly.mjs` — three places, none of which bounded it. The only
+/// limit was tungstenite's 64 MiB frame default, on the one string in this
+/// system that comes from off-machine.
+pub const MAX_HUB_TEXT: usize = 500;
+
+/// Make a hub-supplied string safe to repeat: bounded, and with control
+/// characters removed.
+///
+/// Prompt injection is not what this is for — the SessionStart envelope
+/// already marks retrieved content untrusted. Size and terminal control are,
+/// and neither was handled. `ll status` renders this text in a column beside
+/// the `BLOCKED` and `STALE` verdicts, so an ANSI escape in it can repaint
+/// them; C0/C1 are stripped rather than escaped because nothing downstream has
+/// a use for them.
+///
+/// Tabs and newlines go too. A reason is one line in a status row, and a
+/// multi-line one breaks the alignment the row exists for.
+pub fn sanitise_hub_text(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_HUB_TEXT)
+        .collect();
+    if raw.chars().filter(|c| !c.is_control()).count() > MAX_HUB_TEXT {
+        format!("{cleaned}… (truncated)")
+    } else {
+        cleaned
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum HubMsg {
@@ -253,6 +287,50 @@ pub fn client_auth_message(
 mod tests {
     use crate::b64;
     use super::*;
+
+    /// A `Reject` reason is the one string in this system that comes from
+    /// off-machine, and it is written to `sync-state.json`, re-rendered by
+    /// `ll status` in a column beside the BLOCKED and STALE verdicts, and
+    /// appended to SessionStart context. None of the three bounded it.
+    #[test]
+    fn a_hub_reason_cannot_repaint_the_status_verdicts() {
+        let attack = "fine\u{1b}[2K\rBLOCKED   everything is broken";
+
+        let clean = sanitise_hub_text(attack);
+
+        assert!(!clean.contains('\u{1b}'), "the escape survived: {clean:?}");
+        assert!(!clean.contains('\r'), "the carriage return survived: {clean:?}");
+        assert!(clean.starts_with("fine"), "and the real text is kept: {clean:?}");
+    }
+
+    #[test]
+    fn a_hub_reason_is_bounded_and_says_when_it_was_cut() {
+        let huge = "A".repeat(MAX_HUB_TEXT * 3);
+
+        let clean = sanitise_hub_text(&huge);
+
+        assert!(clean.starts_with(&"A".repeat(MAX_HUB_TEXT)));
+        assert!(clean.ends_with("(truncated)"), "a silent cut reads as the hub's own words");
+        assert!(clean.chars().count() < MAX_HUB_TEXT + 20);
+    }
+
+    /// The other side: a reason inside the bound is passed through unchanged,
+    /// or the two assertions above would be satisfied by returning a constant.
+    #[test]
+    fn an_ordinary_reason_is_left_exactly_as_it_came() {
+        let reason = "not authorized to read this vault";
+        assert_eq!(sanitise_hub_text(reason), reason);
+        assert!(!sanitise_hub_text(reason).contains("truncated"));
+    }
+
+    /// Tabs and newlines are control characters too, and a status row is one
+    /// line: a multi-line reason breaks the alignment the row exists for.
+    #[test]
+    fn a_multi_line_reason_becomes_one_line() {
+        let clean = sanitise_hub_text("first\nsecond\tthird");
+        assert_eq!(clean, "firstsecondthird");
+    }
+
 
     /// The wire tags are the contract between two repos that cannot see each
     /// other. Nothing fails to compile when one side renames a variant; the

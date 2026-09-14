@@ -185,18 +185,6 @@ impl VisibilityEngine {
         tier
     }
 
-    /// Evaluate visibility for a batch of `(path, frontmatter_visibility)` pairs.
-    ///
-    /// Returns one tier string per input item, in the same order. Avoids
-    /// per-call overhead of calling `evaluate` in a loop by keeping the
-    /// logic together; callers should build the input slice once and
-    /// look up results by index.
-    pub fn evaluate_batch<'a>(&'a self, items: &'a [(String, Declared)]) -> Vec<&'a str> {
-        items
-            .iter()
-            .map(|(p, declared)| self.evaluate(p, declared))
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -437,43 +425,27 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_batch_empty_input() {
+    fn evaluating_no_items_yields_no_tiers() {
         let engine = VisibilityEngine::new("private", &[]).unwrap();
-        let result = engine.evaluate_batch(&[]);
+        let items: Vec<(&str, Declared)> = Vec::new();
+        let result: Vec<&str> =
+            items.iter().map(|(p, d)| engine.evaluate(p, d)).collect();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn evaluate_batch_matches_per_call_output() {
-        let rules = vec![
-            ("3-permanent/**".to_string(), "public".to_string()),
-            ("1-fleeting/**".to_string(), "listed".to_string()),
-        ];
-        let engine = VisibilityEngine::new("private", &rules).unwrap();
-        let items: Vec<(String, Declared)> = vec![
-            ("3-permanent/note.md".to_string(), Declared::Absent),
-            ("1-fleeting/thought.md".to_string(), Declared::Absent),
-            ("0-inbox/raw.md".to_string(), Declared::from_value("public")),
-            ("0-inbox/raw.md".to_string(), Declared::Absent),
-        ];
-        let batch = engine.evaluate_batch(&items);
-        let per_call: Vec<&str> = items
-            .iter()
-            .map(|(p, d)| engine.evaluate(p, d))
-            .collect();
-        assert_eq!(batch, per_call);
-    }
 
     #[test]
-    fn evaluate_batch_frontmatter_overrides_in_batch() {
+    fn frontmatter_outranks_the_glob_in_both_directions() {
         let rules = vec![("3-permanent/**".to_string(), "public".to_string())];
         let engine = VisibilityEngine::new("private", &rules).unwrap();
-        let items: Vec<(String, Declared)> = vec![
-            ("3-permanent/note.md".to_string(), Declared::from_value("private")),
-            ("0-inbox/note.md".to_string(), Declared::from_value("public")),
-            ("0-inbox/note.md".to_string(), Declared::Absent),
+        let items: Vec<(&str, Declared)> = vec![
+            ("3-permanent/note.md", Declared::from_value("private")),
+            ("0-inbox/note.md", Declared::from_value("public")),
+            ("0-inbox/note.md", Declared::Absent),
         ];
-        let result = engine.evaluate_batch(&items);
+
+        let result: Vec<&str> = items.iter().map(|(p, d)| engine.evaluate(p, d)).collect();
+
         assert_eq!(result, vec!["private", "public", "private"]);
     }
 }

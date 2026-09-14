@@ -41,7 +41,7 @@ use super::config::{self, grants_path, pairing_window_path, FederationConfig, Hu
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
-use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
+use super::protocol_v5::{sanitise_hub_text, ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
 use super::{seed_store, well_known, words};
 
 
@@ -798,7 +798,7 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
                 // Left owed, deliberately. Marking it lodged would make the
                 // complaint go away and lose the grant with it, and the link
                 // it is half of would stay half-built forever.
-                eprintln!("Hub refused a grant ({grant_id}): {reason}");
+                eprintln!("Hub refused a grant ({grant_id}): {}", sanitise_hub_text(&reason));
                 out.refused.push(Refusal { grant_id, reason });
             }
             Err(e) => {

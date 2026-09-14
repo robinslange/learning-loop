@@ -14,6 +14,7 @@ use super::client::{recv_json, send_json, WsStream};
 use super::config::FederationConfig;
 use super::key_id::KeyId;
 use super::protocol_v5::{
+    sanitise_hub_text,
     client_auth_message, hub_challenge_message, ChunkedUploadLimits, ClientMsg, GrantWire, HubMsg,
     RevocationWire, VaultState, PROTOCOL_VERSION,
 };
@@ -87,7 +88,7 @@ pub async fn authenticate(
     // authentication entirely.
     let (nonce_h, hub_key_id, sig_h) = match recv_json::<HubMsg>(ws).await? {
         HubMsg::HubChallenge { nonce_h, hub_key_id, sig_h } => (nonce_h, hub_key_id, sig_h),
-        HubMsg::Reject { reason } => anyhow::bail!("hub rejected: {reason}"),
+        HubMsg::Reject { reason } => anyhow::bail!("hub rejected: {}", sanitise_hub_text(&reason)),
         other => anyhow::bail!("expected hub-challenge, got {other:?}"),
     };
 
@@ -119,7 +120,7 @@ pub async fn authenticate(
             Ok(SyncReadyPayload {
                 protocol_version, vault_state, grants, revocations, chunked_upload,
             }),
-        HubMsg::Reject { reason } => anyhow::bail!("auth failed: {reason}"),
+        HubMsg::Reject { reason } => anyhow::bail!("auth failed: {}", sanitise_hub_text(&reason)),
         other => anyhow::bail!("expected sync-ready, got {other:?}"),
     }
 }

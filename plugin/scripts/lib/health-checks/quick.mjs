@@ -14,6 +14,7 @@ import {
 import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES, shimFileName } from '../paths.mjs';
+import { safeLoad } from '../safe-load.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
@@ -697,15 +698,6 @@ function countDuplicateGateIssues(path) {
 // but log lines. A stale daemon binary (which lacks duplicate-scan support)
 // pays the round-trip + cold subprocess on every vault Write indefinitely.
 // Scans the current + previous UTC month files (`hook-errors-YYYY-MM.jsonl`),
-// the same naming pre-write-check.js writes.
-function readJsonOrNull(path) {
-  try {
-    return JSON.parse(readFileSync(path, 'utf-8'));
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Whether federation is still syncing.
  *
@@ -751,7 +743,7 @@ export function checkFederationSyncHealth({
   let profiles = [{ id: null, config_dir: pluginData }];
   const registryPath = FEDERATION_PATHS.vaultRegistry(pluginData);
   if (existsSync(registryPath)) {
-    const doc = readJsonOrNull(registryPath);
+    const doc = safeLoad(registryPath, { fallback: null }).value;
     // A registry that is present and unreadable is not "no registry". Every
     // vault profile on the machine is named in this file, so nothing can be
     // resolved and nothing syncs -- and reporting that as `not configured`
@@ -772,7 +764,7 @@ export function checkFederationSyncHealth({
     if (typeof dir !== 'string' || !existsSync(FEDERATION_PATHS.config(dir))) continue;
     configured += 1;
     const who = profile.id ? `${profile.id}: ` : '';
-    const state = readJsonOrNull(FEDERATION_PATHS.syncState(dir));
+    const state = safeLoad(FEDERATION_PATHS.syncState(dir), { fallback: null }).value;
 
     if (!state) return bad(`${who}no sync cycle has ever completed`);
 

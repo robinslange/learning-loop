@@ -11,12 +11,6 @@ use super::visibility::{Declared, VisibilityEngine};
 
 const SCHEMA_VERSION: u32 = 2;
 
-/// Maximum notes per multi-row INSERT chunk.
-///
-/// 240 rows × 6 placeholders = 1440 parameters — well under both the
-/// legacy SQLite 999-param ceiling and the modern 32766 ceiling.
-const INSERT_CHUNK: usize = 240;
-
 #[derive(Debug, Serialize)]
 pub struct ExportResult {
     pub exported: usize,
@@ -139,7 +133,7 @@ pub fn export_index(
     // permission errors and non-UTF-8 bytes all reach this line.
     let mut unreadable = 0usize;
     let mut readable = 0usize;
-    let vis_inputs: Vec<(String, Declared)> = all_rows
+    let vis_inputs: Vec<(&str, Declared)> = all_rows
         .iter()
         .map(|r| {
             let declared = match std::fs::read_to_string(vault_path.join(&r.path)) {
@@ -156,7 +150,7 @@ pub fn export_index(
                     Declared::Unknown
                 }
             };
-            (r.path.clone(), declared)
+            (r.path.as_str(), declared)
         })
         .collect();
 
@@ -214,8 +208,12 @@ pub fn export_index(
          );"
     )?;
 
-    // Evaluate the whole batch — O(n) glob matching, no per-row disk I/O.
-    let tiers = engine.evaluate_batch(&vis_inputs);
+    // O(n) glob matching, no per-row disk I/O. `evaluate_batch` used to wrap
+    // this exact `map`, and its signature took owned `String` paths — so it
+    // cost this loop a clone per note (5,077 of them on the real vault) to
+    // satisfy a shape that added nothing.
+    let tiers: Vec<&str> =
+        vis_inputs.iter().map(|(path, declared)| engine.evaluate(path, declared)).collect();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -278,13 +276,10 @@ pub fn export_index(
         .filter(|(id, _)| disclosed.get(id).is_some_and(|d| d.embedding))
         .collect();
 
-    for chunk in emb_rows.chunks(INSERT_CHUNK) {
-        for (id, data) in chunk {
-            export.prepare_cached(
-                "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
-            )?
+    for (id, data) in &emb_rows {
+        export
+            .prepare_cached("INSERT INTO embeddings (id, data) VALUES (?1, ?2)")?
             .execute(params![id, data])?;
-        }
     }
 
     // --- Phase 4: copy links for exported notes -----------------------------
@@ -323,13 +318,12 @@ pub fn export_index(
             })
             .collect();
 
-        for chunk in link_rows.chunks(INSERT_CHUNK) {
-            for (source_id, target_path) in chunk {
-                export.prepare_cached(
+        for (source_id, target_path) in &link_rows {
+            export
+                .prepare_cached(
                     "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
                 )?
                 .execute(params![source_id, target_path])?;
-            }
         }
     }
 
@@ -407,11 +401,6 @@ fn summarize(text: &str, max_chars: usize) -> String {
     scrub(&format!("{}...", &truncated[..last_space]))
 }
 
-/// Build a SOURCE index in the shape `db/schema.rs` produces.
-///
-/// Lives outside `mod tests` because `sync::client`'s tests need a real
-/// export to read metadata back out of, and a second copy of this schema
-/// there would be free to drift from the one `export_index` actually reads.
 /// What one note discloses, derived once from its tier.
 ///
 /// Every phase of the export asks this instead of re-testing `tier` itself.
@@ -452,6 +441,11 @@ impl Disclosure {
 }
 
 #[cfg(test)]
+/// Build a SOURCE index in the shape `db/schema.rs` produces.
+///
+/// Lives outside `mod tests` because `sync::client`'s tests need a real
+/// export to read metadata back out of, and a second copy of this schema
+/// there would be free to drift from the one `export_index` actually reads.
 pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
     let c = Connection::open(path).unwrap();
     c.execute_batch(
