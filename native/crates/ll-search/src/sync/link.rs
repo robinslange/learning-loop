@@ -41,7 +41,7 @@ use super::config::{self, grants_path, pairing_window_path, FederationConfig, Hu
 use super::grant::{self, canonical_bytes, GrantKind, GrantStatement, RevocationStatement};
 use super::handshake::random_nonce;
 use super::key_id::KeyId;
-use super::protocol_v5::{ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
+use super::protocol_v5::{sanitise_hub_text, ClientMsg, GrantWire, HubMsg, PROTOCOL_VERSION};
 use super::{seed_store, well_known, words};
 
 
@@ -644,7 +644,19 @@ pub fn approve_offline(
 /// The reciprocal is signed here rather than waiting for a connection,
 /// because offline is the whole point of this door — there is no
 /// `SyncReady.grants` coming to learn the other key from.
-pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<()> {
+/// What `accept_offline` left the machine able to do.
+///
+/// The link is real either way — it is signed by the approver and verifies
+/// against its own bytes. `can_reach_the_hub` is the separate question of
+/// whether this machine has been told where the hub IS, and Door 3 is the one
+/// door that cannot answer it: the blob carries the issuer's key, not an
+/// endpoint, and a hub key cannot be pinned without seeing the hub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Accepted {
+    pub can_reach_the_hub: bool,
+}
+
+pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<Accepted> {
     let signed = parse_grant_blob(grant_blob)?;
     let st = verify_grant(&signed)?;
     let me = local_key_id(config_dir)?;
@@ -664,7 +676,16 @@ pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<()>
     }
     remember(config_dir, &signed, false)?;
     ensure_link_to(config_dir, &st.from, now)?;
-    Ok(())
+
+    // The gap this reports is real and cannot be closed here. A config needs
+    // a hub endpoint and a PINNED hub key; the blob carries neither, and
+    // pinning a key without seeing the hub is the trust-on-first-use this
+    // handshake exists to refuse (`handshake.rs` bails on an absent pin
+    // rather than accepting whatever is presented). Writing a partial config
+    // would be worse than none: `link::request` refuses to run when a config
+    // already exists, so the half-written one would block the command that
+    // completes it.
+    Ok(Accepted { can_reach_the_hub: config::config_path(config_dir).exists() })
 }
 
 /// Door 4's issuing half: the recovery key holds a `link` from this machine,
@@ -777,7 +798,7 @@ async fn lodge_all(ws: &mut WsStream, config_dir: &Path) -> anyhow::Result<LinkO
                 // Left owed, deliberately. Marking it lodged would make the
                 // complaint go away and lose the grant with it, and the link
                 // it is half of would stay half-built forever.
-                eprintln!("Hub refused a grant ({grant_id}): {reason}");
+                eprintln!("Hub refused a grant ({grant_id}): {}", sanitise_hub_text(&reason));
                 out.refused.push(Refusal { grant_id, reason });
             }
             Err(e) => {
@@ -1318,10 +1339,34 @@ mod tests {
         let dir_old = seeded_dir();
         let request = request_offline(dir_new.path()).unwrap();
         let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
-        accept_offline(dir_new.path(), &grant).unwrap();
+        let accepted = accept_offline(dir_new.path(), &grant).unwrap();
         assert!(
             has_active_link(dir_new.path()).unwrap(),
             "linking must not require the hub — it is a convenience, not an authority"
+        );
+        assert!(
+            !accepted.can_reach_the_hub,
+            "and it says so: a machine through this door holds a link and no hub, which \
+             is the half the caller has to tell the user about"
+        );
+    }
+
+    /// The other side of it. A door that reported every machine as needing a
+    /// hub would satisfy the assertion above while telling an already-enrolled
+    /// machine to go and re-enrol.
+    #[test]
+    fn a_machine_that_already_has_a_hub_is_not_told_to_go_and_get_one() {
+        let dir_new = dir_with_seed(9);
+        let dir_old = seeded_dir();
+        write_hub_config(dir_new.path(), "wss://hub.example/ws", None);
+        let request = request_offline(dir_new.path()).unwrap();
+        let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
+
+        let accepted = accept_offline(dir_new.path(), &grant).unwrap();
+
+        assert!(
+            accepted.can_reach_the_hub,
+            "this machine has a config; accepting a link does not cost it one"
         );
     }
 
@@ -1607,10 +1652,12 @@ mod tests {
 
         // What only the hub knows: A owns a vault, and the hub holds an index
         // for it.
-        let index = b"pretend-this-is-the-other-machines-index";
+        // A real export: installing one runs an FTS rebuild over it, so a
+        // fixture that is not a database cannot be installed at all.
+        let index = crate::sync::fetch::index_bytes("a-machine");
         let world = test_hub::HubVaults::new()
             .owned_by("v-a-machine", &a)
-            .holding("v-a-machine", index);
+            .holding("v-a-machine", &index);
         let (hub, lodged) = test_hub::spawn_grant_hub_over(world, served, vec![]).await;
         write_hub_config(joiner.path(), &hub.ws_url(), None);
 
@@ -1652,10 +1699,7 @@ mod tests {
             "the vault the grant reached was read; this machine's own was left \
              to the upload half"
         );
-        assert_eq!(
-            std::fs::read(config::peer_index_path(joiner.path(), "v-a-machine")).unwrap(),
-            index,
-        );
+        crate::sync::fetch::assert_installed(joiner.path(), "v-a-machine", &index);
         assert_eq!(lodged.lock().unwrap().len(), 1, "one grant lodged: B's own half");
     }
 

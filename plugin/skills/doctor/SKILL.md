@@ -112,10 +112,12 @@ Manual-only fixes (user must run; doctor reports the command):
 
 ## Step 4.5: Federation checks
 
-`health-check.mjs` does not cover federation — it never opens the federation
-directory, so none of what follows appears in its JSON. Run these yourself, and
-only when a config exists. Skip the whole step silently on an install that has
-never federated.
+`health-check.mjs` covers exactly one federation signal: `federation-sync-health`,
+a quick check that reports whether the daemon's last cycle succeeded. Everything
+below it is NOT in that JSON — the checker never opens the federation directory
+for grants, peer caches or hub state — so run these yourself, and only when a
+config exists. Skip the whole step silently on an install that has never
+federated.
 
 For each vault profile in `PLUGIN_DATA/vaults.json` — or the single legacy
 profile at `PLUGIN_DATA` itself when there is no registry — run:

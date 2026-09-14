@@ -56,6 +56,26 @@ fn parent_of(path: &Path) -> anyhow::Result<&Path> {
 /// between the write and the rename, and the safety of that gap is the
 /// filesystem's promise, not ours.
 pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Result<()> {
+    let json = serde_json::to_vec_pretty(value)?;
+    write_bytes(path, &json, |_| Ok(()))
+}
+
+/// Write `bytes` to a uniquely named sibling, let `prepare` work on that
+/// staged file, and rename it over `path` only if `prepare` succeeded.
+///
+/// The staging step is not decoration. A caller that has to post-process what
+/// it wrote — the peer-index fetch rebuilds FTS over it — has no way to do
+/// that in place without publishing a file that is neither the old one nor
+/// the finished one, for as long as the rebuild takes. Preparing the temp
+/// makes the whole sequence a single `rename(2)`, so a concurrent reader
+/// opening it READ_ONLY sees the last finished index or the new one.
+///
+/// `prepare` receives the staged path. If it fails the temp is removed and
+/// `path` is left exactly as it was.
+pub fn write_bytes<F>(path: &Path, bytes: &[u8], prepare: F) -> anyhow::Result<()>
+where
+    F: FnOnce(&Path) -> anyhow::Result<()>,
+{
     let parent = parent_of(path)?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("creating {}", parent.display()))?;
@@ -64,13 +84,39 @@ pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Resu
         path,
         &format!("{}.{}.tmp", std::process::id(), WRITE_SEQ.fetch_add(1, Ordering::Relaxed)),
     );
-    let json = serde_json::to_vec_pretty(value)?;
-    std::fs::write(&tmp, &json).with_context(|| format!("writing {}", tmp.display()))?;
+    let staged = (|| {
+        std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+        prepare(&tmp)
+    })();
+    if let Err(e) = staged {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e).with_context(|| format!("renaming {} into place", tmp.display()));
     }
     Ok(())
+}
+
+/// [`write_bytes`] with the staged file made owner-only before it is
+/// published, for the seed and its sidecars.
+///
+/// Setting the mode on the staged file rather than after the rename is the
+/// point: there is no window, however short, in which the secret is on disk
+/// under the umask's mode. Three callers hand-rolled this pair, each with a
+/// temp name of its own choosing.
+pub fn write_private_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    write_bytes(path, bytes, |staged| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("restricting {}", staged.display()))?;
+        }
+        let _ = staged;
+        Ok(())
+    })
 }
 
 /// How long to keep trying before giving up and saying so. Longer than any
@@ -151,8 +197,30 @@ fn abandoned(modified: SystemTime, now: SystemTime) -> bool {
 }
 
 impl Drop for FileLock {
+    /// Release only a lock this process still holds.
+    ///
+    /// The mtime is stamped once and never refreshed, so a critical section
+    /// longer than `STALE` is declared abandoned and broken by a waiter. The
+    /// original holder then reached `Drop` and removed what had become
+    /// SOMEONE ELSE'S lock, admitting a third process — two concurrent
+    /// `update_grants` cycles, which is the lost update the lock exists to
+    /// prevent, arrived at through the mechanism meant to prevent it.
+    ///
+    /// Re-reading the pid is not free of races in theory: the breaker could
+    /// replace the file between the read and the remove. It closes the window
+    /// that is actually reachable here — a long critical section — and unlike
+    /// an unconditional remove it can never take a lock this process does not
+    /// hold. `flock` would be airtight and is a larger change than this
+    /// finding warrants.
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        match std::fs::read_to_string(&self.path) {
+            Ok(holder) if holder.trim() == std::process::id().to_string() => {
+                let _ = std::fs::remove_file(&self.path);
+            }
+            // Broken and retaken by someone else, or already gone. Either way
+            // it is not ours to remove.
+            _ => {}
+        }
     }
 }
 
@@ -176,6 +244,32 @@ mod tests {
 
     /// The property the fixed `.json.tmp` did not have: two writes in flight
     /// at once are never using the same temp path.
+    /// The seed and its sidecars. `write_private_bytes` sets the mode on the
+    /// staged file, so there is no window — however short — in which the
+    /// secret sits on disk under the umask's mode. Asserting the published
+    /// file's mode is what a caller can actually observe; the staged file is
+    /// gone by then.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_publishes_a_file_only_its_owner_can_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".seed-meta.json");
+
+        write_private_bytes(&path, b"{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a secret was published as {mode:o}");
+
+        // And replacing a world-readable file does not inherit its mode --
+        // the rename publishes the staged file, so the old one's permissions
+        // go with it.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private_bytes(&path, b"{\"a\":1}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "replacing a 0644 file left it at {mode:o}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+    }
+
     #[test]
     fn two_writes_never_share_a_temp_name() {
         let dir = tempfile::tempdir().unwrap();

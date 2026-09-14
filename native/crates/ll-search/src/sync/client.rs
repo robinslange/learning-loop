@@ -23,7 +23,9 @@ use super::key_id::KeyId;
 use super::protocol::{
     manifest_root, ChunkedFrame, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP, HUB_INBOUND_FRAME_CAP,
 };
-use super::protocol_v5::{ClientMsg, HubMsg, VaultState, ChunkedBody, ChunkedUploadLimits};
+use super::protocol_v5::{
+    sanitise_hub_text, ChunkedBody, ChunkedUploadLimits, ClientMsg, HubMsg, VaultState,
+};
 use super::state::{self, HubHolds, SyncState};
 
 const RECV_TIMEOUT: Duration = Duration::from_secs(30);
@@ -294,14 +296,6 @@ pub async fn sync_all_async(
     outcome
 }
 
-/// Whether an export of `export_len` bytes fits in one frame the hub will
-/// accept (R12). The hub closes the connection on an inbound frame over
-/// `HUB_INBOUND_CAP`, so the export that would not fit is refused here, with
-/// its own error, rather than sent and hung up on.
-///
-/// v5 sends the export bytes raw -- there is no envelope header on the wire --
-/// and `max_frame_size` bounds the payload alone, so the export is the whole
-/// of what is measured.
 /// How the body will be sent.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum UploadPlan {
@@ -369,6 +363,14 @@ fn upload_plan(
     Ok(UploadPlan::Chunked { chunk_bytes })
 }
 
+/// Whether an export of `export_len` bytes fits in one frame the hub will
+/// accept (R12). The hub closes the connection on an inbound frame over
+/// `HUB_INBOUND_CAP`, so the export that would not fit is refused here, with
+/// its own error, rather than sent and hung up on.
+///
+/// v5 sends the export bytes raw -- there is no envelope header on the wire --
+/// and `max_frame_size` bounds the payload alone, so the export is the whole
+/// of what is measured.
 fn upload_fits(export_len: usize) -> bool {
     export_len <= HUB_INBOUND_CAP
 }
@@ -809,7 +811,9 @@ async fn upload_index(
             eprintln!("Hub stored the index for {vault_id}");
             sha256
         }
-        HubMsg::Reject { reason } => anyhow::bail!("hub rejected upload: {reason}"),
+        HubMsg::Reject { reason } => {
+            anyhow::bail!("hub rejected upload: {}", sanitise_hub_text(&reason))
+        }
         other => anyhow::bail!("expected upload-ack, got: {other:?}"),
     };
 
@@ -869,16 +873,19 @@ pub(super) async fn send_json<T: serde::Serialize>(
 /// Send one binary frame, and on failure read the socket once more before
 /// giving up.
 ///
+/// How long to wait for a close frame after a failed write. The peer has
+/// already decided; this only collects the reason it gave.
+const CLOSE_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// Send `payload` as one binary frame, and on failure wait briefly for the
+/// peer's close frame before reporting.
+///
 /// A peer that refuses a frame for its size closes with a reason, and that
 /// close frame is still readable after the write has already failed. Returning
 /// the write error immediately threw it away, so a hub saying "index exceeds
 /// max_frame_size" and a hub that simply vanished both surfaced as
 /// `Broken pipe (os error 32)` -- the operator could not tell a permanent
 /// refusal from a transient reset without waiting out another cycle.
-/// How long to wait for a close frame after a failed write. The peer has
-/// already decided; this only collects the reason it gave.
-const CLOSE_DRAIN_TIMEOUT: Duration = Duration::from_millis(500);
-
 async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> {
     let to = send_timeout();
     let n = payload.len();
@@ -904,9 +911,18 @@ async fn send_binary(ws: &mut WsStream, payload: Vec<u8>) -> anyhow::Result<()> 
     }
 }
 
-pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
-    ws: &mut WsStream,
-) -> anyhow::Result<T> {
+/// The next data frame, answering pings and timing out on the way.
+///
+/// Both `recv_json` and `recv_binary` carried this loop, twenty lines apart on
+/// the hot path -- so a bug in the ping answer, which presents as an
+/// unexplained hang, would have had to be found and fixed twice.
+///
+/// It returns `Text` and `Binary` and lets the caller say which it wanted,
+/// because the two callers disagree on purpose: `recv_binary` treats a text
+/// frame as a protocol error, and `recv_json` skips a binary one. That
+/// asymmetry is pre-existing and kept as it was -- this extraction is not the
+/// place to change what the wire is allowed to carry.
+async fn recv_frame(ws: &mut WsStream) -> anyhow::Result<Message> {
     loop {
         let recv_to = recv_timeout();
         let send_to = send_timeout();
@@ -916,7 +932,7 @@ pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
             .ok_or(SyncError::ClosedUnexpected)?
             .map_err(SyncError::from)?;
         match msg {
-            Message::Text(text) => return Ok(serde_json::from_str(text.as_str()).map_err(SyncError::from)?),
+            Message::Text(_) | Message::Binary(_) => return Ok(msg),
             Message::Ping(data) => {
                 tokio::time::timeout(send_to, ws.send(Message::Pong(data)))
                     .await
@@ -929,32 +945,33 @@ pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
     }
 }
 
+pub(super) async fn recv_json<T: serde::de::DeserializeOwned>(
+    ws: &mut WsStream,
+) -> anyhow::Result<T> {
+    loop {
+        match recv_frame(ws).await? {
+            Message::Text(text) => {
+                return Ok(serde_json::from_str(text.as_str()).map_err(SyncError::from)?)
+            }
+            // A binary frame where JSON was expected is skipped rather than
+            // refused. Pre-existing behaviour, kept deliberately.
+            _ => continue,
+        }
+    }
+}
+
 /// Read the next binary frame, answering pings while it waits.
 ///
 /// An `IndexHeader` that holds something promises exactly one binary frame,
 /// so a text frame here is the hub breaking that promise rather than a
 /// message to interpret.
 pub(super) async fn recv_binary(ws: &mut WsStream) -> anyhow::Result<Vec<u8>> {
-    loop {
-        let recv_to = recv_timeout();
-        let send_to = send_timeout();
-        let msg = tokio::time::timeout(recv_to, ws.next())
-            .await
-            .map_err(|_| SyncError::RecvTimeout { timeout: recv_to })?
-            .ok_or(SyncError::ClosedUnexpected)?
-            .map_err(SyncError::from)?;
-        match msg {
-            Message::Binary(data) => return Ok(data.into()),
-            Message::Text(_) => return Err(SyncError::FrameKind.into()),
-            Message::Ping(data) => {
-                tokio::time::timeout(send_to, ws.send(Message::Pong(data)))
-                    .await
-                    .map_err(|_| SyncError::SendTimeout { timeout: send_to })?
-                    .map_err(SyncError::from)?;
-            }
-            Message::Close(_) => return Err(SyncError::ClosedUnexpected.into()),
-            _ => continue,
-        }
+    match recv_frame(ws).await? {
+        Message::Binary(data) => Ok(data.into()),
+        // Refused, not skipped: a text frame here is the hub answering a
+        // binary read with something else, and going round the loop would
+        // read the NEXT vault's frame as this one's body.
+        _ => Err(SyncError::FrameKind.into()),
     }
 }
 

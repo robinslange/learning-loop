@@ -49,7 +49,7 @@ import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { getPluginRoot, getPluginData } from './lib/config.mjs';
 import { env } from './lib/env.mjs';
-import { SHIM_NAMES } from './lib/paths.mjs';
+import { SHIM_NAMES, shimFileName } from './lib/paths.mjs';
 import { migrateRetrievalLogsIfNeeded } from './lib/migrate-retrieval-logs.mjs';
 
 const isWindows = process.platform === 'win32';
@@ -59,10 +59,7 @@ const binDir = join(homedir(), '.local', 'bin');
 
 // One list, in scripts/lib/paths.mjs, shared with the health check and the
 // SessionStart hook that decides whether to re-run this installer.
-const shimPath = (name) => {
-  if (!SHIM_NAMES.includes(name)) throw new Error(`${name} is not in SHIM_NAMES`);
-  return join(binDir, isWindows ? `${name}.cmd` : name);
-};
+const shimPath = (name) => join(binDir, shimFileName(name));
 const llWatchPath = shimPath('ll-watch');
 const llSearchPath = shimPath('ll-search');
 const llPathsPath = shimPath('ll-paths');

@@ -123,9 +123,19 @@ pub fn discover_peer_dbs(
             continue;
         }
 
+        // Every other reason a peer is skipped says so; these two used to be
+        // the exceptions, and they are the two that mean something is wrong
+        // with the cache rather than with the grant. A peer that silently
+        // stops being searched looks exactly like a peer with nothing to say.
         let conn = match Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!(
+                    "Peer {peer_id}: its cached index could not be opened, so it is not \
+                     searched ({e}). `ll sync` refetches it."
+                );
+                continue;
+            }
         };
 
         let model_id: String = match conn.query_row(
@@ -134,7 +144,13 @@ pub fn discover_peer_dbs(
             |r| r.get(0),
         ) {
             Ok(id) => id,
-            Err(_) => continue,
+            Err(e) => {
+                eprintln!(
+                    "Peer {peer_id}: its cached index names no embedding model, so it is \
+                     not searched ({e}). `ll sync` refetches it."
+                );
+                continue;
+            }
         };
 
         if model_id != local_model_id {

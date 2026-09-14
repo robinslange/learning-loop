@@ -165,8 +165,11 @@ enum Commands {
     /// The phrase decides which key that is — this machine's own only if this
     /// is the machine `ll-search join` printed it on.
     Recover {
-        /// The 24 words, quoted as a single argument.
-        phrase: String,
+        /// Only `-` is accepted here, meaning "read the phrase from stdin".
+        /// The words themselves must never be an argument: `ps` shows argv to
+        /// every user on the machine and the shell writes it to history.
+        /// Omit it entirely to be prompted.
+        phrase: Option<String>,
         /// Replace an identity already on this machine with a different one.
         /// Without it that is refused: the old key's grants would survive it,
         /// signed and unreachable.
@@ -407,6 +410,43 @@ struct RecoverOutcome {
     key_id: String,
     backend: ll_search::sync::seed_store::SeedBackend,
     replaced: Option<String>,
+}
+
+/// Where the recovery phrase is allowed to come from, which is anywhere but
+/// `argv`.
+///
+/// The phrase IS the 32-byte seed — `words::seed_from_phrase` turns one into
+/// the other with no stretching — so it is a private key written in English,
+/// and argv is world-readable. `ps` shows it to every user on the machine for
+/// as long as the process lives, `/proc/<pid>/cmdline` for the same window,
+/// and an interactive shell appends it verbatim to history, where it outlives
+/// the machine it was typed on.
+///
+/// `-` is kept so a script can pipe one in. Anything else is refused rather
+/// than accepted-with-a-warning: a warning arrives after the words are already
+/// in the history file.
+fn read_phrase(
+    arg: Option<&str>,
+    input: &mut dyn std::io::BufRead,
+) -> anyhow::Result<zeroize::Zeroizing<String>> {
+    if let Some(given) = arg {
+        if given != "-" {
+            anyhow::bail!(
+                "the recovery phrase must not be passed as an argument — `ps` shows it to \
+                 every user on this machine and your shell has already written it to \
+                 history. Treat these words as compromised and run `ll-search join` for a \
+                 new identity. To recover safely: run `ll-search recover` and type them at \
+                 the prompt, or pipe them in with `ll-search recover -`."
+            );
+        }
+    }
+    let mut line = zeroize::Zeroizing::new(String::new());
+    input.read_line(&mut line)?;
+    let phrase = zeroize::Zeroizing::new(line.trim().to_string());
+    if phrase.is_empty() {
+        anyhow::bail!("no recovery phrase on stdin");
+    }
+    Ok(phrase)
 }
 
 /// Put the signing identity a 24-word recovery phrase names onto this machine.
@@ -815,6 +855,16 @@ async fn main() {
         }
         Commands::Recover { phrase, force, config_dir } => {
             let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            if phrase.is_none() && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                eprintln!("Recovery phrase (24 words). It is not echoed to your shell history:");
+            }
+            let phrase = match read_phrase(phrase.as_deref(), &mut std::io::stdin().lock()) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("recover failed: {e:#}");
+                    std::process::exit(2);
+                }
+            };
             match recover(&dir, &phrase, force) {
                 Ok(o) => {
                     match &o.replaced {
@@ -1009,8 +1059,23 @@ async fn main() {
                 }
                 LinkCommand::Accept { grant, config_dir } => {
                     let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
+                    let accepted = link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
                     eprintln!("Linked. This machine is now one of yours.");
+                    if !accepted.can_reach_the_hub {
+                        // Saying this here rather than letting the next `sync`
+                        // fail with "no vault_id in this federation config",
+                        // which names a field instead of the missing step.
+                        eprintln!();
+                        eprintln!("This machine still has no hub. The link does not carry one —");
+                        eprintln!("it names the machine that signed it, not an endpoint, and a");
+                        eprintln!("hub key cannot be pinned without reaching the hub.");
+                        eprintln!();
+                        eprintln!("  ll-search link request <hub-endpoint> <vault-path>");
+                        eprintln!();
+                        eprintln!("Run that once this machine can reach the hub. It pins the hub");
+                        eprintln!("and writes the config; the link you just accepted stands, so");
+                        eprintln!("the pairing code it prints needs no second approval.");
+                    }
                 }
                 LinkCommand::List { config_dir } => {
                     let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
@@ -1366,6 +1431,47 @@ mod tests {
         ll_search::sync::seed_store::load_only(dir).unwrap().unwrap().signing_key.to_bytes()
     }
 
+    /// The words are a private key in English. Every path that could leave a
+    /// copy of them outside this process is refused, and refused loudly —
+    /// by the time a warning is printed the shell has already written them
+    /// to history, so there is nothing a warning could still save.
+    #[test]
+    fn a_recovery_phrase_given_as_an_argument_is_refused() {
+        let words = "abandon ".repeat(23) + "art";
+        let err = read_phrase(Some(&words), &mut std::io::Cursor::new(b"" as &[u8]))
+            .expect_err("a phrase on argv is refused");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("ps"), "the refusal says who can read argv: {msg}");
+        assert!(msg.contains("history"), "and that the shell kept a copy: {msg}");
+        assert!(
+            !msg.contains("abandon"),
+            "the refusal must not reprint the phrase into the terminal: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_phrase_is_read_from_stdin_with_a_dash_and_with_no_argument_at_all() {
+        let words = "abandon ".repeat(23) + "art";
+        for arg in [Some("-"), None] {
+            let mut input = std::io::Cursor::new(format!("{words}\n").into_bytes());
+            let got = read_phrase(arg, &mut input).unwrap();
+            assert_eq!(*got, words, "read from stdin for {arg:?}");
+        }
+    }
+
+    /// Whitespace-only stdin is the shape of a pipe that produced nothing —
+    /// a `cat` of a file that is not there. Returning it as a phrase would
+    /// hand `seed_from_phrase` an empty string to complain about, one layer
+    /// further from the cause.
+    #[test]
+    fn an_empty_stdin_is_an_error_and_not_an_empty_phrase() {
+        for input in ["", "\n", "   \n"] {
+            let err = read_phrase(Some("-"), &mut std::io::Cursor::new(input.as_bytes()))
+                .expect_err("nothing on stdin is not a phrase");
+            assert!(format!("{err:#}").contains("no recovery phrase"), "for {input:?}");
+        }
+    }
+
     #[test]
     fn recovering_restores_the_same_identity() {
         pin_file_backend();
@@ -1584,20 +1690,32 @@ mod tests {
             .to_string()
     }
 
-    /// `--force` is a flag and the phrase is a positional: the shape clap
-    /// builds its parser from, which it does at runtime.
+    /// `--force` is a flag and the phrase positional is now optional: the
+    /// shape clap builds its parser from, which it does at runtime.
+    ///
+    /// `recover` with no positional has to parse, because that is the safe
+    /// form — the words are typed at a prompt. Clap still accepts a positional
+    /// string; `read_phrase` is what refuses one that is not `-`, and it has
+    /// to be the one to refuse, because only it can say why.
     #[test]
-    fn recover_takes_the_phrase_positionally_and_force_as_a_flag() {
+    fn recover_takes_an_optional_phrase_positionally_and_force_as_a_flag() {
         use clap::Parser;
-        match Cli::parse_from(["ll-search", "recover", "abandon abandon", "--force"]).command {
+        match Cli::parse_from(["ll-search", "recover", "-", "--force"]).command {
             Commands::Recover { phrase, force, .. } => {
-                assert_eq!(phrase, "abandon abandon");
+                assert_eq!(phrase.as_deref(), Some("-"));
                 assert!(force);
             }
             other => panic!("wrong subcommand: {:?}", std::mem::discriminant(&other)),
         }
+        match Cli::parse_from(["ll-search", "recover"]).command {
+            Commands::Recover { phrase, force, .. } => {
+                assert_eq!(phrase, None, "the safe form takes no positional at all");
+                assert!(!force);
+            }
+            other => panic!("wrong subcommand: {:?}", std::mem::discriminant(&other)),
+        }
         assert!(!matches!(
-            Cli::parse_from(["ll-search", "recover", "abandon abandon"]).command,
+            Cli::parse_from(["ll-search", "recover", "-"]).command,
             Commands::Recover { force: true, .. }
         ));
     }

@@ -17,8 +17,30 @@ fn split(raw: &str) -> Option<(&str, &str, &str, &str)> {
     } else {
         return None;
     };
-    let end = after_open.find("\n---")?;
-    Some((bom, open, &after_open[..end], &after_open[end..]))
+    // The closing fence is a line that is exactly `---`, not any line starting
+    // with it. `find("\n---")` was both too strict and too loose at once:
+    // `---\n---\n` never matched (the search starts at index 0, past the
+    // opening fence's own newline) so the scan ran into the body and read
+    // prose as a declaration — federation's own SKILL.md carries a bare
+    // column-zero `visibility: public` line, so a note quoting the docs is the
+    // input. And a `----` rule inside a real block closed it early, dropping a
+    // `private` note to whatever its glob said.
+    let mut offset = 0usize;
+    for line in after_open.split_inclusive('\n') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let content = content.strip_suffix('\r').unwrap_or(content);
+        if content == "---" {
+            // The body stops before the newline that ends the last key line,
+            // and the tail carries it -- the boundary `upsert_key` reassembles
+            // against, and the reason an empty block yields an empty body
+            // rather than a stray terminator.
+            let body_end = after_open[..offset].strip_suffix('\n').map_or(0, |b| b.len());
+            let body_end = after_open[..body_end].strip_suffix('\r').map_or(body_end, |b| b.len());
+            return Some((bom, open, &after_open[..body_end], &after_open[body_end..]));
+        }
+        offset += line.len();
+    }
+    None
 }
 
 fn strip_bom(raw: &str) -> (&str, &str) {
@@ -62,7 +84,13 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
     let mut new_fm = String::with_capacity(fm.len() + key.len() + value.len() + 4);
     let mut replaced = false;
     for seg in fm.split_inclusive('\n') {
-        if !replaced && seg.trim_start().starts_with(&prefix) {
+        // No `trim_start`. `read_key` matches at column zero on purpose --
+        // nesting depth is what tells a declaration from a quoted one -- and a
+        // writer that replaced a NESTED occurrence disagreed with the reader
+        // that dispatches on it. `verify_upsert` then failed its line-count
+        // guard and `visibility-backfill` aborted mid-vault, on a note that was
+        // not malformed.
+        if !replaced && seg.starts_with(&prefix) {
             let terminator = if seg.ends_with("\r\n") {
                 "\r\n"
             } else if seg.ends_with('\n') {
@@ -241,6 +269,57 @@ mod tests {
         assert_eq!(read_key(top, "visibility"), Some("public".to_string()));
     }
     use super::*;
+
+    /// The closing fence is a line that is exactly `---`.
+    ///
+    /// `find("\n---")` searched from index 0, so an EMPTY block never matched
+    /// its own closing fence and the scan ran on into the body. federation's
+    /// SKILL.md carries a bare column-zero `visibility: public` line, so a note
+    /// quoting the docs is the input, and the note would have been published at
+    /// `public` on the strength of prose.
+    #[test]
+    fn an_empty_block_closes_and_the_body_below_it_is_not_frontmatter() {
+        let note = "---\n---\n\nthe stamp reads\nvisibility: public\nin the docs\n";
+        assert_eq!(read_key(note, "visibility"), None, "body prose is not a declaration");
+    }
+
+    /// The converse. A horizontal rule inside a real block used to close it
+    /// early, so every key below the rule vanished -- including a `private`
+    /// that was the only thing holding the note back from its glob tier.
+    #[test]
+    fn a_longer_rule_does_not_close_the_block_early() {
+        let note = "---\ntitle: N\n----\nvisibility: private\n---\n\nBody.\n";
+        assert_eq!(
+            read_key(note, "visibility").as_deref(),
+            Some("private"),
+            "a `----` line is not the fence, and the key below it still counts"
+        );
+    }
+
+    /// The reader matches at column zero so that nesting depth tells a
+    /// declaration from a quotation. The writer used `trim_start`, so it
+    /// replaced a NESTED occurrence the reader would never have read --
+    /// `verify_upsert` dispatches on `read_key`, so the disagreement failed
+    /// its line-count guard and aborted `visibility-backfill` mid-vault on a
+    /// note that was not malformed.
+    #[test]
+    fn the_writer_and_the_reader_agree_on_what_a_top_level_key_is() {
+        let note = "---\ntitle: N\nquoted:\n  visibility: public\n---\n\nBody.\n";
+        assert_eq!(read_key(note, "visibility"), None, "precondition: nested is not read");
+
+        let after = upsert_key(note, "visibility", "private");
+
+        assert_eq!(
+            read_key(&after, "visibility").as_deref(),
+            Some("private"),
+            "the writer must add the top-level key the reader looks for"
+        );
+        assert!(
+            after.contains("  visibility: public"),
+            "and must leave the nested one alone; got:\n{after}"
+        );
+    }
+
 
     #[test]
     fn reads_key_with_bom_and_crlf() {

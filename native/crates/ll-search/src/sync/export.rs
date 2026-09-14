@@ -11,12 +11,6 @@ use super::visibility::{Declared, VisibilityEngine};
 
 const SCHEMA_VERSION: u32 = 2;
 
-/// Maximum notes per multi-row INSERT chunk.
-///
-/// 240 rows × 6 placeholders = 1440 parameters — well under both the
-/// legacy SQLite 999-param ceiling and the modern 32766 ceiling.
-const INSERT_CHUNK: usize = 240;
-
 #[derive(Debug, Serialize)]
 pub struct ExportResult {
     pub exported: usize,
@@ -139,7 +133,7 @@ pub fn export_index(
     // permission errors and non-UTF-8 bytes all reach this line.
     let mut unreadable = 0usize;
     let mut readable = 0usize;
-    let vis_inputs: Vec<(String, Declared)> = all_rows
+    let vis_inputs: Vec<(&str, Declared)> = all_rows
         .iter()
         .map(|r| {
             let declared = match std::fs::read_to_string(vault_path.join(&r.path)) {
@@ -156,7 +150,7 @@ pub fn export_index(
                     Declared::Unknown
                 }
             };
-            (r.path.clone(), declared)
+            (r.path.as_str(), declared)
         })
         .collect();
 
@@ -214,8 +208,12 @@ pub fn export_index(
          );"
     )?;
 
-    // Evaluate the whole batch — O(n) glob matching, no per-row disk I/O.
-    let tiers = engine.evaluate_batch(&vis_inputs);
+    // O(n) glob matching, no per-row disk I/O. `evaluate_batch` used to wrap
+    // this exact `map`, and its signature took owned `String` paths — so it
+    // cost this loop a clone per note (5,077 of them on the real vault) to
+    // satisfy a shape that added nothing.
+    let tiers: Vec<&str> =
+        vis_inputs.iter().map(|(path, declared)| engine.evaluate(path, declared)).collect();
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -278,13 +276,10 @@ pub fn export_index(
         .filter(|(id, _)| disclosed.get(id).is_some_and(|d| d.embedding))
         .collect();
 
-    for chunk in emb_rows.chunks(INSERT_CHUNK) {
-        for (id, data) in chunk {
-            export.prepare_cached(
-                "INSERT INTO embeddings (id, data) VALUES (?1, ?2)",
-            )?
+    for (id, data) in &emb_rows {
+        export
+            .prepare_cached("INSERT INTO embeddings (id, data) VALUES (?1, ?2)")?
             .execute(params![id, data])?;
-        }
     }
 
     // --- Phase 4: copy links for exported notes -----------------------------
@@ -323,13 +318,12 @@ pub fn export_index(
             })
             .collect();
 
-        for chunk in link_rows.chunks(INSERT_CHUNK) {
-            for (source_id, target_path) in chunk {
-                export.prepare_cached(
+        for (source_id, target_path) in &link_rows {
+            export
+                .prepare_cached(
                     "INSERT OR IGNORE INTO links (source_id, target_path) VALUES (?1, ?2)",
                 )?
                 .execute(params![source_id, target_path])?;
-            }
         }
     }
 
@@ -350,26 +344,34 @@ pub fn export_index(
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
 ///
-/// Canonical source: `plugin/scripts/lib/secret-patterns.mjs` — port the 10
-/// patterns from there and keep this list in sync when that file changes.
-/// The PEM pattern uses `(?s:...)` so `.` matches newlines within just that
-/// alternation, mirroring JS's `[\s\S]*?`.
+/// Canonical source: `plugin/scripts/lib/secret-patterns.mjs`, where three
+/// JS scrubbers read the same list. This is a port, and a comment saying
+/// "keep it in sync" is not what keeps it in sync —
+/// `the_rust_and_js_secret_patterns_are_the_same_set` reads that file and
+/// asserts the two agree in both directions. The `kind` names are carried
+/// here for the same reason: they are what makes a divergence name itself.
+pub const SECRET_PATTERN_SOURCES: [(&str, &str); 10] = [
+    ("aws-key", r"AKIA[0-9A-Z]{16}"),
+    ("github-pat", r"gh[po]_[A-Za-z0-9]{36,}"),
+    ("anthropic-key", r"sk-ant-api[A-Za-z0-9_-]{20,}"),
+    ("stripe-key", r"sk_(?:live|test)_[A-Za-z0-9]{20,}"),
+    ("generic-sk-key", r"sk-[A-Za-z0-9_-]{20,}"),
+    ("cloudflare-pat", r"cfpat-[A-Za-z0-9_-]{20,}"),
+    ("bearer-token", r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}"),
+    ("slack-token", r"xox[abprs]-[A-Za-z0-9-]{10,}"),
+    ("jwt", r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    // `(?s:...)` so `.` matches newlines within just this alternation, which
+    // is how JS's `[\s\S]*?` is spelled here. The sync test knows about this
+    // one translation and about `\/`; it knows about no others, so a third
+    // spelling difference fails rather than passing quietly.
+    ("pem-key", r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)"),
+];
+
 static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [
-        r"AKIA[0-9A-Z]{16}",
-        r"gh[po]_[A-Za-z0-9]{36,}",
-        r"sk-ant-api[A-Za-z0-9_-]{20,}",
-        r"sk_(?:live|test)_[A-Za-z0-9]{20,}",
-        r"sk-[A-Za-z0-9_-]{20,}",
-        r"cfpat-[A-Za-z0-9_-]{20,}",
-        r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}",
-        r"xox[abprs]-[A-Za-z0-9-]{10,}",
-        r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
-        r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)",
-    ]
-    .iter()
-    .map(|p| Regex::new(p).expect("secret pattern must compile"))
-    .collect()
+    SECRET_PATTERN_SOURCES
+        .iter()
+        .map(|(_, p)| Regex::new(p).expect("secret pattern must compile"))
+        .collect()
 });
 
 /// Replace any credential-shaped substring with `[REDACTED]`.
@@ -399,48 +401,6 @@ fn summarize(text: &str, max_chars: usize) -> String {
     scrub(&format!("{}...", &truncated[..last_space]))
 }
 
-/// Compute a SQLite patchset from `base_db` to `current_db` covering the four
-/// content-bearing tables (`notes`, `notes_content`, `embeddings`, `links`).
-///
-/// `meta` is intentionally excluded so a re-export that only updates
-/// `exported_at` doesn't generate a one-row meta patchset on every sync.
-///
-/// The returned blob can be applied on the hub via
-/// `Connection::apply_strm` (or `rusqlite::session::Changeset::apply`)
-/// to bring the hub's stored base DB up to the current state. Uses
-/// `patchset_strm` (new values only) rather than `changeset_strm` (before+after)
-/// to halve the wire cost on embedding updates where each row is ~1.5 KB.
-pub fn compute_patchset(base_db: &Path, current_db: &Path) -> anyhow::Result<Vec<u8>> {
-    use rusqlite::session::Session;
-    use rusqlite::DatabaseName;
-
-    let conn = Connection::open(current_db).context("open current db")?;
-    conn.execute(
-        &format!("ATTACH DATABASE '{}' AS base", base_db.display()),
-        [],
-    )
-    .context("attach base db")?;
-
-    let mut session = Session::new(&conn).context("create session")?;
-    session.attach(None).context("attach session to all tables")?;
-
-    let base = DatabaseName::Attached("base");
-    for table in ["notes", "notes_content", "embeddings", "links"] {
-        session
-            .diff(base, table)
-            .with_context(|| format!("session.diff for {table}"))?;
-    }
-
-    let mut buf = Vec::new();
-    session.patchset_strm(&mut buf).context("patchset_strm")?;
-    Ok(buf)
-}
-
-/// Build a SOURCE index in the shape `db/schema.rs` produces.
-///
-/// Lives outside `mod tests` because `sync::client`'s tests need a real
-/// export to read metadata back out of, and a second copy of this schema
-/// there would be free to drift from the one `export_index` actually reads.
 /// What one note discloses, derived once from its tier.
 ///
 /// Every phase of the export asks this instead of re-testing `tier` itself.
@@ -481,6 +441,11 @@ impl Disclosure {
 }
 
 #[cfg(test)]
+/// Build a SOURCE index in the shape `db/schema.rs` produces.
+///
+/// Lives outside `mod tests` because `sync::client`'s tests need a real
+/// export to read metadata back out of, and a second copy of this schema
+/// there would be free to drift from the one `export_index` actually reads.
 pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
     let c = Connection::open(path).unwrap();
     c.execute_batch(
@@ -567,6 +532,16 @@ pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
 pub(crate) fn public_vault_with_note(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
+}
+
+#[cfg(test)]
+/// The same note with no `visibility` in its frontmatter, so the config's
+/// default is what decides its tier. `public_vault_with_note` lifts the note
+/// to `public` whatever the config says, which is the wrong fixture for any
+/// test about the default being applied.
+pub(crate) fn vault_with_note(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("n.md"), "Body.").unwrap();
 }
 
 #[cfg(test)]
@@ -840,19 +815,23 @@ mod tests {
         let out = tmp.path().join("export.db");
         let vault = tmp.path().join("vault");
         build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
-        public_vault_with_note(&vault);
+        // NOT `public_vault_with_note`: that writes `visibility: public` in the
+        // frontmatter, which lifts the note whatever the config default is — so
+        // the note this test called "addressable and withheld" was in fact
+        // addressable and EXPORTED, and the assertion could not tell.
+        vault_with_note(&vault);
 
-        // Default `private` with no rule that lifts it: the note is addressable
-        // and withheld, which is the other column.
+        // Default `private` with no rule that lifts it.
         let config = FederationConfig::test_fixture("private", vec![]);
         let result = export_index(&source, &vault, &out, &config).unwrap();
 
         assert_eq!(result.unindexed, 0, "every row had an id; nothing was unaddressable");
-        assert_eq!(
-            result.exported + result.skipped,
-            1,
-            "an addressable note is either exported or skipped, and counted exactly once"
-        );
+        // `exported + skipped == 1` was what stood here, and it is true of both
+        // columns: the loop increments exactly one per row and there is one row,
+        // so the sum is a partition identity and holds however the note is
+        // classified. Naming the column is the whole assertion.
+        assert_eq!(result.skipped, 1, "the private default withheld it");
+        assert_eq!(result.exported, 0, "and it was not published");
     }
 
     /// Adds a second addressable note to a `build_source_db` fixture, so a
@@ -935,94 +914,6 @@ mod tests {
         assert!(!out.exists(), "no export artefact may be left behind by a refused export");
     }
 
-    fn build_minimal_export_db(path: &Path) {
-        let c = Connection::open(path).unwrap();
-        c.execute_batch(
-            "CREATE TABLE notes (
-                 id INTEGER PRIMARY KEY,
-                 path TEXT NOT NULL,
-                 title TEXT NOT NULL,
-                 tags TEXT,
-                 tier TEXT NOT NULL,
-                 updated_at INTEGER NOT NULL
-             );
-             CREATE TABLE notes_content (
-                 id INTEGER PRIMARY KEY,
-                 title TEXT,
-                 tags TEXT,
-                 body TEXT
-             );
-             CREATE TABLE embeddings (
-                 id INTEGER PRIMARY KEY,
-                 data BLOB NOT NULL
-             );
-             CREATE TABLE links (
-                 source_id INTEGER NOT NULL,
-                 target_path TEXT NOT NULL,
-                 UNIQUE(source_id, target_path)
-             );
-             INSERT INTO notes (id, path, title, tags, tier, updated_at)
-               VALUES (1, 'a.md', 'A', '', 'public', 0),
-                      (2, 'b.md', 'B', '', 'public', 0);
-             INSERT INTO notes_content (id, title, tags, body)
-               VALUES (1, 'A', '', 'body a'),
-                      (2, 'B', '', 'body b');",
-        )
-        .unwrap();
+
+    
     }
-
-    #[test]
-    fn compute_patchset_returns_nonempty_for_insert_and_update() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("base.db");
-        let cur = dir.path().join("cur.db");
-
-        build_minimal_export_db(&base);
-        std::fs::copy(&base, &cur).unwrap();
-
-        {
-            let c = Connection::open(&cur).unwrap();
-            c.execute(
-                "INSERT INTO notes (id, path, title, tags, tier, updated_at) \
-                 VALUES (3, 'c.md', 'C', '', 'public', 0)",
-                [],
-            )
-            .unwrap();
-            c.execute(
-                "INSERT INTO notes_content (id, title, tags, body) VALUES (3, 'C', '', 'body c')",
-                [],
-            )
-            .unwrap();
-            c.execute("UPDATE notes_content SET body = 'body a v2' WHERE id = 1", [])
-                .unwrap();
-        }
-
-        let patch = compute_patchset(&base, &cur).unwrap();
-        assert!(
-            !patch.is_empty(),
-            "expected non-empty patchset for 2 inserts + 1 update"
-        );
-        assert!(
-            patch.len() < 4096,
-            "small change shouldn't produce >4KB patchset, got {}",
-            patch.len()
-        );
-    }
-
-    #[test]
-    fn compute_patchset_empty_when_dbs_identical() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("base.db");
-        let cur = dir.path().join("cur.db");
-
-        build_minimal_export_db(&base);
-        std::fs::copy(&base, &cur).unwrap();
-
-        let patch = compute_patchset(&base, &cur).unwrap();
-        assert!(
-            patch.is_empty(),
-            "identical DBs should produce empty patchset, got {} bytes",
-            patch.len()
-        );
-    }
-}

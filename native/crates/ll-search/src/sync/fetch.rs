@@ -34,7 +34,9 @@ use super::config::{peer_dir, peer_index_path};
 use super::grant::{self, GrantKind, GrantStatement};
 use super::key_id::KeyId;
 use super::protocol::{manifest_root, ChunkedFrame};
-use super::protocol_v5::{ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState};
+use super::protocol_v5::{
+    sanitise_hub_text, ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState,
+};
 
 /// One vault whose index this cycle fetched and wrote.
 #[derive(Debug, Serialize)]
@@ -276,7 +278,9 @@ async fn fetch_one(
 
     let (answered, holds, chunked) = match recv_json::<HubMsg>(ws).await? {
         HubMsg::IndexHeader { vault_id, holds, chunked } => (vault_id, holds, chunked),
-        HubMsg::Reject { reason } => anyhow::bail!("hub refused the read: {reason}"),
+        HubMsg::Reject { reason } => {
+            anyhow::bail!("hub refused the read: {}", sanitise_hub_text(&reason))
+        }
         other => anyhow::bail!("expected index-header, got: {other:?}"),
     };
 
@@ -316,10 +320,10 @@ async fn fetch_one(
     // truncating overwrite of a good file, and the full FTS5 rebuild over
     // every note behind it, on a 1500 ms debounce.
     //
-    // Hashing the file on disk rather than trusting a recorded sha beside it:
-    // a sidecar can disagree with the file it describes, and the thing being
-    // decided is whether these exact bytes are already there.
-    if on_disk_sha(config_dir, vault_id).await? == Some(actual) {
+    // What is compared is the sha this file was *installed from*, not a hash
+    // of the file: installing rebuilds FTS over it, so a finished index is
+    // never byte-equal to the wire it came from. See `installed_source_sha`.
+    if installed_source_sha(config_dir, vault_id).await? == Some(actual) {
         return Ok(Outcome::AlreadyCurrent);
     }
 
@@ -386,43 +390,78 @@ async fn recv_chunked(ws: &mut WsStream, desc: &ChunkedBody) -> anyhow::Result<V
 /// The sha256 of the index already cached for `vault_id`, or `None` when
 /// there is no readable file there. An unreadable one is `None` rather than
 /// an error: the fetch that would replace it is in hand.
-async fn on_disk_sha(config_dir: &Path, vault_id: &str) -> anyhow::Result<Option<String>> {
+/// The sha of the bytes the installed index was built from, as recorded at
+/// install time, or `None` when nothing is installed or it predates the
+/// record.
+///
+/// Hashing the file itself was the obvious thing and it could never work.
+/// Installing an index is not "put these bytes on disk": `ensure_fts` builds
+/// an FTS5 table over them and `ensure_embeddings` may add rows, so the file
+/// stops being byte-equal to the wire the moment it is finished. The question
+/// being asked is about provenance — *are these the bytes this file was built
+/// from* — and provenance has to be recorded, because the file is deliberately
+/// no longer a copy of it.
+///
+/// It goes in `meta`, inside the database, rather than beside it. A sidecar
+/// can disagree with the file it describes; a row renamed into place with the
+/// file it describes cannot.
+async fn installed_source_sha(config_dir: &Path, vault_id: &str) -> anyhow::Result<Option<String>> {
     let path = peer_index_path(config_dir, vault_id);
     tokio::task::spawn_blocking(move || {
-        std::fs::read(&path).ok().map(|bytes| hex::encode(Sha256::digest(&bytes)))
+        let conn = rusqlite::Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .ok()?;
+        conn.query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
+            .ok()
     })
     .await
-    .map_err(|e| anyhow::anyhow!("cached-index hash task panicked: {e}"))
+    .map_err(|e| anyhow::anyhow!("cached-index provenance task panicked: {e}"))
 }
 
+/// Install `bytes` as the cached index for `vault_id`.
+///
+/// Everything happens on a staged sibling and becomes visible in one
+/// `rename(2)`. The previous version wrote in place, which put a reader —
+/// `discover_peer_dbs` opens these READ_ONLY while the daemon fetches — in
+/// front of a truncated file for the length of a 25 MB write, and then in
+/// front of a database being rebuilt for the length of the FTS pass.
 async fn write_index(config_dir: &Path, vault_id: &str, bytes: Vec<u8>) -> anyhow::Result<()> {
     std::fs::create_dir_all(peer_dir(config_dir, vault_id))?;
     let path = peer_index_path(config_dir, vault_id);
+    let source_sha = hex::encode(Sha256::digest(&bytes));
+    let vault = vault_id.to_string();
 
-    let write_to = path.clone();
-    tokio::task::spawn_blocking(move || std::fs::write(&write_to, &bytes))
-        .await
-        .map_err(|e| anyhow::anyhow!("index write task panicked: {e}"))??;
+    tokio::task::spawn_blocking(move || {
+        crate::sync::atomic_file::write_bytes(&path, &bytes, |staged| {
+            // Recording provenance is not best-effort. An export with no
+            // `meta` is one this client cannot search either — the model_id
+            // it matches peers on lives in that same table — so a file that
+            // will not take this row is refused at the boundary rather than
+            // installed and found useless at query time.
+            let conn = rusqlite::Connection::open(staged)?;
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('source_sha256', ?1)",
+                rusqlite::params![source_sha],
+            )?;
+            drop(conn);
 
-    // Both rebuilds are best-effort and neither invalidates the fetch: the
-    // bytes are on disk and verified either way. A missing FTS table costs
-    // this peer its keyword leg on the next query, not the index.
-    let fts_path = path.clone();
-    if let Err(e) = tokio::task::spawn_blocking(move || ensure_fts(&fts_path))
-        .await
-        .map_err(|e| anyhow::anyhow!("FTS rebuild task panicked: {e}"))?
-    {
-        eprintln!("FTS rebuild for {vault_id} failed: {e}");
-    }
-    let embed_path = path;
-    let embed_for = vault_id.to_string();
-    if let Err(e) = tokio::task::spawn_blocking(move || ensure_embeddings(&embed_path, &embed_for))
-        .await
-        .map_err(|e| anyhow::anyhow!("embedding task panicked: {e}"))?
-    {
-        eprintln!("Embedding generation for {vault_id} failed: {e}");
-    }
-    Ok(())
+            // Both rebuilds are best-effort and neither invalidates the
+            // fetch: the bytes are staged and verified either way. A missing
+            // FTS table costs this peer its keyword leg on the next query,
+            // not the index.
+            if let Err(e) = ensure_fts(staged) {
+                eprintln!("FTS rebuild for {vault} failed: {e}");
+            }
+            if let Err(e) = ensure_embeddings(staged, &vault) {
+                eprintln!("Embedding generation for {vault} failed: {e}");
+            }
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("index write task panicked: {e}"))?
 }
 
 fn ensure_fts(db_path: &Path) -> anyhow::Result<()> {
@@ -506,6 +545,93 @@ fn ensure_embeddings(db_path: &Path, vault_id: &str) -> anyhow::Result<()> {
 
     eprintln!("Embeddings for {vault_id} complete");
     Ok(())
+}
+
+#[cfg(test)]
+/// A real exported index, the shape `export_index` produces: the five
+/// tables, `meta` carrying a `model_id`, one note, and one embedding row.
+///
+/// It used to be the literal `"pretend-this-is-a-sqlite-file-{marker}"`,
+/// and that is why nothing here could see the bug it now covers. Those
+/// bytes are not a database, so `ensure_fts` errored on every install,
+/// the error was swallowed by design, and the file was left byte-equal to
+/// what the hub sent — the one condition under which the old
+/// `AlreadyCurrent` check worked. The fixture was holding the code up.
+///
+/// The embedding row is load-bearing too: `ensure_embeddings` returns
+/// early when it finds data, which is what keeps these tests off the
+/// embedding model. A real export always carries them.
+pub(crate) fn index_bytes(marker: &str) -> Vec<u8> {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join("export.db");
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         CREATE TABLE notes (
+             id INTEGER PRIMARY KEY, note_uuid TEXT NOT NULL, path TEXT NOT NULL,
+             title TEXT NOT NULL, tags TEXT, tier TEXT NOT NULL,
+             updated_at INTEGER NOT NULL
+         );
+         CREATE TABLE notes_content (
+             id INTEGER PRIMARY KEY, title TEXT, tags TEXT, body TEXT
+         );
+         CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+         CREATE TABLE embeddings (id INTEGER PRIMARY KEY, data BLOB NOT NULL);
+         CREATE TABLE links (
+             source_id INTEGER NOT NULL, target_path TEXT NOT NULL,
+             UNIQUE(source_id, target_path)
+         );
+         INSERT INTO meta (key, value) VALUES ('model_id', 'test-model');",
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO notes (id, note_uuid, path, title, tags, tier, updated_at)
+         VALUES (1, '01926d7e-0000-7000-8000-00000000000a', ?1, ?2, '', 'listed', 0)",
+        rusqlite::params![format!("3-permanent/{marker}.md"), marker],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO notes_content (id, title, tags, body) VALUES (1, ?1, '', ?2)",
+        rusqlite::params![marker, format!("The body of {marker}.")],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO embeddings (id, data) VALUES (1, ?1)",
+        rusqlite::params![vec![0u8; 16]],
+    )
+    .unwrap();
+    drop(conn);
+    std::fs::read(&path).unwrap()
+}
+
+
+#[cfg(test)]
+/// What an installed peer index is asked to prove: it records the sha of
+/// the bytes the hub sent, and it carries that export's note.
+///
+/// Not `read(path) == body`, which is what these tests used to assert.
+/// That was only ever true because the fixture defeated the two rebuilds
+/// the install runs; an installed index is the hub's bytes *plus* the FTS
+/// table built over them, so it is never byte-equal to the wire again.
+pub(crate) fn assert_installed(dir: &Path, vault_id: &str, body: &[u8]) {
+    let path = peer_index_path(dir, vault_id);
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let recorded: String = conn
+        .query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
+        .unwrap_or_else(|e| panic!("{vault_id} records no source sha: {e}"));
+    assert_eq!(
+        recorded,
+        hex::encode(Sha256::digest(body)),
+        "{vault_id} was installed from bytes other than the ones the hub sent"
+    );
+    let fts: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='notes_fts'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(fts, 1, "{vault_id} was installed without its keyword index");
 }
 
 #[cfg(test)]
@@ -596,10 +722,6 @@ mod tests {
         tokio_tungstenite::connect_async(format!("ws://{addr}")).await.unwrap().0
     }
 
-    fn index_bytes(marker: &str) -> Vec<u8> {
-        format!("pretend-this-is-a-sqlite-file-{marker}").into_bytes()
-    }
-
     /// This client's own vault. The hub lists it because we own it, and the
     /// read half must leave it to the upload half.
     const MY_VAULT: &str = "v-mine";
@@ -650,11 +772,7 @@ mod tests {
         assert_eq!(out.fetched.len(), 1);
         assert_eq!(out.fetched[0].vault_id, "v-other");
         assert_eq!(out.fetched[0].note_count, 42);
-        assert_eq!(
-            std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(),
-            body,
-            "the bytes on disk are the bytes off the wire",
-        );
+        assert_installed(dir.path(), "v-other", &body);
     }
 
     /// R-B, and the belt-and-braces case. The hub here LISTS `v-work` — a
@@ -714,11 +832,7 @@ mod tests {
         // Written to disk byte-for-byte: reassembling in the wrong order, or
         // dropping a frame, still yields "some bytes" and would pass a test
         // that only counted fetches.
-        assert_eq!(
-            std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(),
-            body,
-            "the reassembled index differs from what the hub sent"
-        );
+        assert_installed(dir.path(), "v-other", &body);
     }
 
     /// A chunk stream that does not reassemble to the announced root is
@@ -824,7 +938,7 @@ mod tests {
         assert_eq!(asked, vec!["v-other".to_string()],
             "the hub listed it; the grant naming no vault is not a reason to stay quiet");
         assert_eq!(out.fetched.len(), 1);
-        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-other")).unwrap(), body);
+        assert_installed(dir.path(), "v-other", &body);
     }
 
     /// The brace must not be a veto anyone can exercise. The hub lodges an
@@ -1026,31 +1140,40 @@ mod tests {
     /// granularity decides whether it can tell a same-second rewrite apart.
     #[cfg(unix)]
     #[tokio::test]
+    /// The cached copy has to be one this client *installed*, not one planted
+    /// beside it. That is the whole finding: the previous version of this test
+    /// wrote the hub's bytes to the path by hand, which is a state
+    /// `write_index` cannot produce, and every real cache failed the check it
+    /// was asserting passed.
+    ///
+    /// Inode rather than mtime or content: an atomic replace always lands on a
+    /// new inode, so an unchanged one is proof the expensive half was skipped
+    /// and not merely that it produced the same bytes.
     async fn an_index_identical_to_the_cached_copy_is_not_rewritten() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::fs::MetadataExt;
 
         let dir = tempfile::tempdir().unwrap();
         let body = index_bytes("v-same");
-        std::fs::create_dir_all(peer_dir(dir.path(), "v-same")).unwrap();
-        let path = peer_index_path(dir.path(), "v-same");
-        std::fs::write(&path, &body).unwrap();
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let answer = || vec![("v-same", FetchAnswer::Index(body.clone()))];
+        let grants = || vec![to_me(follow("v-same"))];
 
-        let (out, asked) = run(
-            dir.path(),
-            &["v-same"],
-            vec![to_me(follow("v-same"))],
-            vec![("v-same", FetchAnswer::Index(body.clone()))],
-        )
-        .await;
+        let (first, _) = run(dir.path(), &["v-same"], grants(), answer()).await;
+        assert_eq!(first.fetched.len(), 1, "the first fetch installs it");
+        let path = peer_index_path(dir.path(), "v-same");
+        let installed = std::fs::metadata(&path).unwrap().ino();
+
+        let (out, asked) = run(dir.path(), &["v-same"], grants(), answer()).await;
 
         assert_eq!(asked, vec!["v-same".to_string()], "it is still asked for and still verified");
         assert_eq!(out.unchanged, vec!["v-same".to_string()]);
         assert!(out.fetched.is_empty(), "nothing was written, so nothing downstream should rerun");
-        assert!(out.skipped.is_empty(),
-            "an already-current vault is not a failure — and a write that was attempted \
-             would have failed on the read-only file and landed here");
-        assert_eq!(std::fs::read(&path).unwrap(), body);
+        assert!(out.skipped.is_empty(), "an already-current vault is not a failure");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().ino(),
+            installed,
+            "the cached index was replaced by a fetch that had nothing new to install"
+        );
+        assert_installed(dir.path(), "v-same", &body);
     }
 
     /// The other side. A gate that reports everything as already-current
@@ -1073,7 +1196,58 @@ mod tests {
 
         assert!(out.unchanged.is_empty());
         assert_eq!(out.fetched.len(), 1);
-        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-moved")).unwrap(), fresh);
+        assert_installed(dir.path(), "v-moved", &fresh);
+    }
+
+    /// The other half of staging the write. A fetch that cannot be installed
+    /// must leave the last good index exactly where it was — a peer's search
+    /// keeps working on yesterday's copy, which is the point of caching it.
+    ///
+    /// Writing in place cannot offer that: the truncate lands before anything
+    /// has looked at the bytes, so a hub that serves one bad index costs this
+    /// machine the good one it already had. The failure is made real rather
+    /// than injected — bytes that are not a database are what the install
+    /// actually refuses, and the FTS rebuild is why it has to look.
+    #[tokio::test]
+    async fn an_index_that_cannot_be_installed_does_not_destroy_the_cached_one() {
+        use std::os::unix::fs::MetadataExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let good = index_bytes("v-good-copy");
+        let (first, _) = run(
+            dir.path(),
+            &["v-cached"],
+            vec![to_me(follow("v-cached"))],
+            vec![("v-cached", FetchAnswer::Index(good.clone()))],
+        )
+        .await;
+        assert_eq!(first.fetched.len(), 1, "precondition: a good index is cached");
+        let path = peer_index_path(dir.path(), "v-cached");
+        let cached = std::fs::metadata(&path).unwrap().ino();
+
+        let (out, _) = run(
+            dir.path(),
+            &["v-cached"],
+            vec![to_me(follow("v-cached"))],
+            vec![("v-cached", FetchAnswer::Index(b"not a database".to_vec()))],
+        )
+        .await;
+
+        assert_eq!(out.skipped, vec!["v-cached".to_string()], "the bad index is refused");
+        assert!(out.fetched.is_empty());
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().ino(),
+            cached,
+            "the cached index was replaced by one that could not be installed"
+        );
+        assert_installed(dir.path(), "v-cached", &good);
+        let left_behind: Vec<String> = std::fs::read_dir(peer_dir(dir.path(), "v-cached"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n != "index.db")
+            .collect();
+        assert!(left_behind.is_empty(), "the failed write left {left_behind:?} behind");
     }
 
     /// R-C. The header is a claim; the bytes are the fact.
@@ -1117,7 +1291,7 @@ mod tests {
         assert_eq!(out.skipped, vec!["v-bad".to_string()]);
         assert_eq!(out.fetched.len(), 1);
         assert_eq!(out.fetched[0].vault_id, "v-good");
-        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), body);
+        assert_installed(dir.path(), "v-good", &body);
     }
 
     /// A refused vault leaves no frame in the stream, so the vault after it
@@ -1141,7 +1315,7 @@ mod tests {
 
         assert_eq!(out.skipped, vec!["v-liar".to_string()]);
         assert_eq!(out.fetched.len(), 1, "the rejected frame was consumed, not left in the stream");
-        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), body);
+        assert_installed(dir.path(), "v-good", &body);
     }
 
     /// Every assertion here except `asked` and the trailing good vault is
@@ -1169,7 +1343,7 @@ mod tests {
             "the hub answered both and complained about neither");
         assert_eq!(out.skipped, vec!["v-asked".to_string()]);
         assert_eq!(out.fetched.len(), 1, "the misdirected frame was consumed, not left in the stream");
-        assert_eq!(std::fs::read(peer_index_path(dir.path(), "v-good")).unwrap(), good);
+        assert_installed(dir.path(), "v-good", &good);
         assert!(!peer_dir(dir.path(), "v-else").exists(),
             "an answer for a vault nobody asked for must not create a cache for it");
         assert!(!peer_dir(dir.path(), "v-asked").exists());

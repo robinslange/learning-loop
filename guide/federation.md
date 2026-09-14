@@ -90,7 +90,9 @@ then on a machine already enrolled:
 ll-search link approve <code>
 ```
 
-**No hub, or no network path between them.** On the new machine, `ll-search link code` needs no network at all; on the established one, `ll-search link approve <code> --offline` signs the grant and prints it instead of lodging it; carry that blob across and run `ll-search link accept <grant>`. The grant verifies against nothing but its own bytes and the issuer's public key, so the new machine can act as itself immediately and reaches the hub once the approver next connects.
+**No hub, or no network path between them.** On the new machine, `ll-search link code` needs no network at all; on the established one, `ll-search link approve <code> --offline` signs the grant and prints it instead of lodging it; carry that blob across and run `ll-search link accept <grant>`. The grant verifies against nothing but its own bytes and the issuer's public key, so the new machine can act as itself immediately.
+
+**A machine that came through this door and has never had a hub still needs one.** The grant names the machine that signed it, not an endpoint, and a hub key cannot be pinned without reaching the hub — so `accept` cannot write a federation config, and a `sync` before one exists fails on the missing `vault_id`. Once that machine can reach the hub, run `ll-search link request <hub-endpoint> <vault-path>`: it pins the hub and writes the config. The link already accepted still stands, so the pairing code that command prints needs no second approval. `ll-search link accept` says all of this when it applies.
 
 A link is two grants, not one signed twice: the approver signs A->B, and the new machine signs B->A itself on finding it. `ll-search link list` shows which halves exist.
 
@@ -112,7 +114,7 @@ There is no equivalent for a `follow` someone holds on your vault. Nothing sends
 ## Recovering an identity
 
 ```bash
-ll-search recover "<24 words>"
+ll-search recover        # then type the 24 words at the prompt
 ```
 
 Recovering the identity already on this machine needs nothing extra -- nothing is replaced, so there is nothing to authorise. Recovering a **different** identity over an existing one requires `--force`, and what that guards is the loss, not the write: every grant naming the old key stays signed, valid, and unreachable, while the machine still looks enrolled.
@@ -287,7 +289,9 @@ file is written, so there is nothing to clean up by hand.
 
 ## Retractions
 
-`scripts/retraction-notify.mjs` emits a retraction event when a note that previously reached peers is retracted. Events append to `PLUGIN_DATA/federation/outbox/retractions-YYYY-MM.jsonl`, targeted at each peer whose index contains the retracted note:
+`scripts/retraction-notify.mjs` emits a retraction event when a note that previously reached peers is retracted. Events append to `PLUGIN_DATA/federation/outbox/retractions-YYYY-MM.jsonl`, targeted at each peer whose index contains the retracted note.
+
+**Nothing delivers this outbox yet.** No client or hub code reads `federation/outbox/`; the file is a local record of what you would tell peers. What actually reaches them is the next index they fetch, in which the note is changed or gone. The targeting is computed and written so that a delivery path has something to send when one exists.
 
 ```bash
 node scripts/retraction-notify.mjs <note_path> [--reason "<reason>"] [--replacement <new_note_path>]

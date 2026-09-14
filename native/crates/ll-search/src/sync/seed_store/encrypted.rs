@@ -16,7 +16,7 @@ use sha2::Sha256;
 use zeroize::Zeroizing;
 
 use crate::sync::config::encrypted_seed_path;
-use super::{atomic_write, LoadResult, SeedBackend};
+use super::{LoadResult, SeedBackend};
 
 /// Encrypted file layout v1:
 ///
@@ -109,10 +109,7 @@ pub fn write_encrypted(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<()>
 
     debug_assert_eq!(file_data.len(), ENC_TOTAL_LEN, "encrypted file must be exactly 64 bytes");
 
-    let tmp = path.with_extension("enc.tmp");
-    atomic_write(&tmp, &path, &file_data)?;
-
-    Ok(())
+    crate::sync::atomic_file::write_private_bytes(&path, &file_data)
 }
 
 pub(super) fn load_or_create_seed(config_dir: &Path) -> anyhow::Result<LoadResult> {

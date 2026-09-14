@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
 import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
@@ -260,6 +260,77 @@ test('checkBinaryVersionFile: ok when no pluginVersion is supplied (no compariso
   const result = checkBinaryVersionFile({ pluginData: dir });
   assert.equal(result.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkShimsExist: a correct Windows install is not four missing shims', () => {
+  // `platform` is injected rather than skipped-on-non-Windows, because the
+  // bug is invisible on the machine that finds it: the check looked for the
+  // POSIX name on every platform, so a Windows box with four correctly
+  // written `.cmd` shims reported all four missing and offered to reinstall
+  // them, every session, forever. No test could see that from macOS or Linux.
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-win-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const s of SHIM_NAMES) {
+    writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
+  }
+
+  const result = checkShimsExist({ home, platform: 'win32' });
+
+  assert.equal(result.status, 'ok', `detail: ${result.detail}`);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkShimsExist: the POSIX names do not satisfy a Windows install', () => {
+  // The other side. A check that passed on any file at all would satisfy the
+  // test above while still not knowing what the installer writes.
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-win-posix-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n');
+
+  const result = checkShimsExist({ home, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /ll-watch\.cmd/, 'and it names the file it wanted');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkLocalBinOnPath: splits PATH on the platform delimiter', () => {
+  // On Windows every PATH entry contains a ':' of its own (the drive letter),
+  // so splitting on ':' produced segments like 'C' and '\\Users\\x\\.local\\bin'
+  // and matched nothing. This asserts the POSIX case still works rather than
+  // only the Windows one, because `delimiter` is what makes both true and a
+  // test of one direction cannot see a constant hardcoded the other way.
+  const home = mkdtempSync(join(tmpdir(), 'health-path-'));
+  const target = join(home, '.local', 'bin');
+
+  const onPath = checkLocalBinOnPath({ home, pathEnv: `/usr/bin${delimiter}${target}` });
+  assert.equal(onPath.status, 'ok', `detail: ${onPath.detail}`);
+
+  const offPath = checkLocalBinOnPath({ home, pathEnv: '/usr/bin' });
+  assert.equal(offPath.status, 'fail');
+
+  // The delimiter is INJECTED, not taken from this machine. On macOS and Linux
+  // `delimiter` is ':' and a hardcoded ':' passes every assertion above — the
+  // first version of this test could not fail on the platform it runs on,
+  // which is the whole reason the Windows bug survived.
+  const windowsish = checkLocalBinOnPath({
+    home,
+    pathEnv: `/usr/bin;${target}`,
+    pathDelimiter: ';',
+  });
+  assert.equal(windowsish.status, 'ok', 'a ";"-separated PATH must split on ";"');
+
+  const wrongDelimiter = checkLocalBinOnPath({
+    home,
+    pathEnv: `/usr/bin;${target}`,
+    pathDelimiter: ':',
+  });
+  assert.equal(
+    wrongDelimiter.status,
+    'fail',
+    'and splitting it on ":" must NOT find the target, or the assertion above proves nothing',
+  );
+  rmSync(home, { recursive: true, force: true });
 });
 
 test(
@@ -532,6 +603,109 @@ test('checkFederationSyncHealth: a healthy recent sync is ok', () => {
   const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
   assert.equal(r.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a BOM on sync-state.json is not a dead federation', () => {
+  // `readJsonOrNull` was the 23rd hand-rolled `JSON.parse(readFileSync)` in
+  // this repo, and strictly weaker than the `safeLoad` that exists because an
+  // audit found the other 22: no BOM strip. A BOM'd sync-state.json — what an
+  // editor writes on Windows — made `JSON.parse` throw, which read as "no
+  // state", which reported a healthy vault as never having synced.
+  const dir = fedDir('health-fed-bom-');
+  writeFileSync(
+    join(dir, 'federation', 'sync-state.json'),
+    `\ufeff${JSON.stringify({
+      outcome: 'ok',
+      consecutive_failures: 0,
+      last_success_at: secs(NOW) - 60,
+    })}`,
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'ok', `detail: ${r.detail}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a corrupt registry is a failure, not a fresh install', () => {
+  // `vaults.json` names every profile on the machine. Unreadable means nothing
+  // resolves and nothing syncs -- and the old code returned `ok('not
+  // configured')`, which is exactly what a machine that has never federated
+  // reports. The Rust loader has refused this since
+  // `a_corrupt_registry_errors_instead_of_looking_empty`; this is the same
+  // claim on the side the user actually reads.
+  const dir = mkdtempSync(join(tmpdir(), 'health-fed-corrupt-'));
+  writeFileSync(join(dir, 'vaults.json'), '{not valid json');
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /present but names no vault list/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a registry with an empty vault list is not configured', () => {
+  // The other side. A registry that parses and lists nothing is a real state
+  // -- `ll vault add` writes one before the first profile -- and must stay ok,
+  // or the check above would just be "any registry is a failure".
+  const dir = mkdtempSync(join(tmpdir(), 'health-fed-empty-reg-'));
+  writeFileSync(join(dir, 'vaults.json'), JSON.stringify({ vaults: [] }));
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'ok');
+  assert.match(r.detail, /not configured/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a second vault profile is walked and named', () => {
+  // The multi-vault walk had no test at all: every case above has one implicit
+  // profile, so the registry branch was never entered by any of them.
+  const root = mkdtempSync(join(tmpdir(), 'health-fed-multi-'));
+  const good = fedDir('health-fed-multi-good-', {
+    outcome: 'ok',
+    consecutive_failures: 0,
+    last_success_at: secs(NOW) - 60,
+  });
+  const broken = fedDir('health-fed-multi-bad-', {
+    outcome: 'error',
+    detail: 'hub refused the key',
+    consecutive_failures: 9,
+    last_success_at: secs(NOW) - 60,
+  });
+  writeFileSync(
+    join(root, 'vaults.json'),
+    JSON.stringify({
+      vaults: [
+        { id: 'work', config_dir: good },
+        { id: 'personal', config_dir: broken },
+      ],
+    }),
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: root, now: NOW });
+
+  assert.equal(r.status, 'fail', 'a healthy first profile must not mask a broken second');
+  assert.match(r.detail, /^personal: /, 'the failing profile names itself');
+  assert.match(r.detail, /failed 9 times in a row/);
+  for (const d of [root, good, broken]) rmSync(d, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: every profile healthy is ok across the registry', () => {
+  const root = mkdtempSync(join(tmpdir(), 'health-fed-multi-ok-'));
+  const state = { outcome: 'ok', consecutive_failures: 0, last_success_at: secs(NOW) - 60 };
+  const a = fedDir('health-fed-multi-a-', state);
+  const b = fedDir('health-fed-multi-b-', state);
+  writeFileSync(
+    join(root, 'vaults.json'),
+    JSON.stringify({ vaults: [{ id: 'work', config_dir: a }, { id: 'personal', config_dir: b }] }),
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: root, now: NOW });
+
+  assert.equal(r.status, 'ok');
+  assert.match(r.detail, /syncing/);
+  for (const d of [root, a, b]) rmSync(d, { recursive: true, force: true });
 });
 
 test('checkFederationSyncHealth: severity is fail so the session-start detector shows it', () => {

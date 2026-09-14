@@ -6,6 +6,81 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **Every sync re-wrote and re-indexed every followed peer vault.**
+  `Outcome::AlreadyCurrent` could never fire: installing a fetched index builds
+  an FTS5 table over the hub's bytes, so the file stops being byte-equal to what
+  was sent, and the currency check hashed that file. Measured on a real 25.1 MB
+  export, the installed copy is 32.4 MB — 6.1 MB of index the check was hashing
+  over. The client now records the sha it installed from inside the index's own
+  `meta` table and compares against that. Peer indexes fetched before this
+  upgrade re-install once and then settle.
+
+- **A peer index was written in place, over a file readers had open.** The write
+  truncated the cached index and then rebuilt FTS inside it, so
+  `discover_peer_dbs` — which opens these READ_ONLY during a sync — could meet a
+  truncated file or a half-rebuilt one. The whole install is now staged beside
+  the target and published with one rename, and a fetch that cannot be installed
+  leaves the last good copy exactly where it was.
+
+- **BREAKING: the 24-word recovery phrase is no longer accepted as a command-line
+  argument.** The phrase IS the signing seed, and argv is world-readable: `ps`
+  shows it to every user on the machine and an interactive shell writes it to
+  history. `ll-search recover` now reads it from a prompt, or from stdin under
+  `ll-search recover -`. A phrase passed as an argument is refused, and the
+  refusal says to treat those words as compromised.
+
+- **A store that could not be read minted a second identity.** Every seed
+  backend maps an unreachable store to "nothing there" — an unavailable Secret
+  Service (dbus, gnome-keyring, kwallet) most often — so a momentary failure
+  fell through to creating a fresh key. Everything downstream then looked like
+  it worked while every grant naming the original stayed signed and unreachable.
+  The client now refuses to mint over an identity `.seed-meta.json` records, and
+  points at `ll-search recover`.
+
+- **Frontmatter could be read out of the body.** The closing `---` fence was any
+  line starting with `---`, so an empty block never closed and the scan ran into
+  the note, reading prose as a declaration — and a `----` rule inside a real
+  block closed it early, dropping every key below it. Verified against all 7,654
+  notes in a real vault: the visibility each note resolves to is unchanged.
+
+- **`ll status` and the health check disagreed by 336x on what "stale" meant.**
+  Both read `last_success_at`; one called 7 days stale and the other 30 minutes,
+  so a user who saw the health failure and ran `ll status` was told everything
+  was fine. They are two questions now and both are answered: STALE for data
+  older than 7 days, and a new DAEMON row for a sync daemon that has stopped
+  ticking, on the same window the health check uses.
+
+- **A corrupt `vaults.json` reported as a healthy, unfederated install.** The
+  registry names every vault profile on the machine, so unreadable means nothing
+  syncs — reported with the same words a machine that never federated uses. It
+  is a failure now, and the multi-vault walk it guards has tests for the first
+  time.
+
+- **Windows: the health check looked for shims the installer never writes** (the
+  POSIX names rather than `<name>.cmd`), so a correct install reported all four
+  missing every session, and it split `PATH` on `:` rather than the platform
+  delimiter.
+
+- **Hub-supplied error text is bounded and stripped of control characters**
+  before it is stored, rendered by `ll status`, or added to session context. It
+  was limited only by the WebSocket frame size, and an ANSI escape in it could
+  repaint the status verdicts.
+
+- **`ll-search link accept` now says when the machine still has no hub.** An
+  offline link carries the issuer's key, not an endpoint, so a machine linked
+  this way had no federation config and its next sync failed on a missing
+  `vault_id`. Both guides said the opposite.
+
+- Retraction events are no longer described as delivered. Nothing reads
+  `federation/outbox/`; the file is a local record, and what reaches a peer is
+  the next index it fetches.
+
+### Changed
+
+- The v2/v3 sync protocol, the delta-patchset path and their `zstd` and
+  `rusqlite/session` dependencies are deleted — 541 lines, none of it reachable
+  from a v5 client.
+
 - **A visibility rule the config could not compile was silently dropped.** An
   invalid glob went through `Glob::new(pattern).ok()?` inside a `filter_map` and
   vanished, leaving the engine with a rules list shorter than the file on disk

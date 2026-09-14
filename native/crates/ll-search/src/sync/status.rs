@@ -24,10 +24,29 @@ use super::key_id::KeyId;
 use super::state::{read_state, HubHolds, SyncState, OUTCOME_ERROR, OUTCOME_OK};
 use super::words::fingerprint;
 
-/// A successful sync older than this is called out. Seven days: long enough
-/// that a laptop shut for a long weekend stays quiet, short enough that the
-/// two-month outages this command exists to catch cannot hide inside it.
+/// A successful sync older than this is called out as stale DATA. Seven days:
+/// long enough that a laptop shut for a long weekend stays quiet, short enough
+/// that the two-month outages this command exists to catch cannot hide inside
+/// it.
+///
+/// This is not the same question as [`DAEMON_SILENT_AFTER_SECS`], and the two
+/// used to be told apart by nothing: the health check called 30 minutes
+/// "stale" while this called 7 days "stale", both reading `last_success_at`,
+/// 336x apart. A user who saw the health failure and ran `ll status` was told
+/// the opposite thing. They are separate rows with separate names now, because
+/// they are separate questions — is my federated copy old, and is the thing
+/// that refreshes it still running.
 pub const STALE_AFTER_SECS: i64 = 7 * 86_400;
+
+/// A running daemon syncs every `sync_interval`. Six missed cycles is no
+/// longer a slow tick, it is a daemon that has stopped — the failure no
+/// counter sees, because a process that is not running writes no failures.
+///
+/// Must equal `6 * syncIntervalSecs` in
+/// `plugin/scripts/lib/health-checks/quick.mjs`, which reports the same
+/// condition where a user will see it without asking.
+/// `tests/staleness_thresholds_agree.rs` holds the two together.
+pub const DAEMON_SILENT_AFTER_SECS: i64 = 6 * 300;
 
 /// Width of the label column, so every value and every verdict starts in the
 /// same place and the eye runs straight down them.
@@ -176,6 +195,11 @@ fn sync_block(state: &SyncState, now: i64, local_note_count: Option<i64>) -> Str
     }
     if let Some(v) = stale_verdict(state.last_success_at, now) {
         out.push_str(&row("STALE", &v));
+    } else if let Some(v) = daemon_silent_verdict(state.last_success_at, now) {
+        // `else`: a vault that is already STALE has the louder problem, and
+        // two rows saying the same silence in different units is how the two
+        // readers contradicted each other in the first place.
+        out.push_str(&row("DAEMON", &v));
     }
     if state.hub_holds == Some(HubHolds::Nothing) {
         out.push_str(&row("WARNING", "as of that sync the hub held no index for this vault. The next sync will upload it. If this persists, check the hub's /health."));
@@ -278,6 +302,34 @@ fn holds(holds: Option<&HubHolds>) -> String {
         }
         Some(HubHolds::Nothing) => "nothing".to_string(),
         None => "unknown — the last cycle stopped before it asked".to_string(),
+    }
+}
+
+/// `None` while the daemon is ticking. This is the short window — the one the
+/// health check reports — and it says the refresher has stopped rather than
+/// that the data is old.
+///
+/// Never having succeeded is left to [`stale_verdict`], which already treats
+/// it as the far side of stale; saying it twice in two units helps nobody.
+fn daemon_silent_verdict(last_success_at: Option<i64>, now: i64) -> Option<String> {
+    let at = last_success_at?;
+    let age = now - at;
+    (age >= DAEMON_SILENT_AFTER_SECS).then(|| {
+        format!(
+            "no sync has succeeded in {} minutes, and one is due every {}. The watch \
+             daemon may have stopped: `ll-search watch status`.",
+            age / 60,
+            humanise_interval(DAEMON_SILENT_AFTER_SECS / 6),
+        )
+    })
+}
+
+/// Seconds as the phrase a person would say.
+fn humanise_interval(secs: i64) -> String {
+    if secs % 60 == 0 {
+        format!("{} minutes", secs / 60)
+    } else {
+        format!("{secs} seconds")
     }
 }
 
@@ -697,6 +749,87 @@ mod tests {
         let out = render_status(dir.path(), 1_000 + 7 * 86_400 - 60).unwrap();
         assert!(!out.contains("STALE"),
             "a sync one second inside the threshold is fine; got:\n{out}");
+    }
+
+    /// The short window. `ll status` and the health check both read
+    /// `last_success_at`; the health check called 30 minutes a failure while
+    /// this said nothing until 7 days, so a user who saw the failure and came
+    /// here to find out more was told everything was fine.
+    #[test]
+    fn a_daemon_that_has_stopped_ticking_is_named_here_too() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
+            refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
+        }).unwrap();
+
+        let out = render_status(dir.path(), 1_000 + 47 * 60).unwrap();
+
+        assert!(out.contains("DAEMON"), "got:\n{out}");
+        assert!(out.contains("47 minutes"), "and says how long; got:\n{out}");
+        assert!(!out.contains("STALE"),
+            "47 minutes is not old DATA — saying both is the confusion this replaced; got:\n{out}");
+    }
+
+    /// The other side, in absolute minutes rather than in terms of the
+    /// constant: an implementation that calls every sync silent passes the
+    /// test above.
+    #[test]
+    fn a_sync_inside_the_daemon_window_says_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
+            refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
+        }).unwrap();
+
+        let out = render_status(dir.path(), 1_000 + 5 * 60).unwrap();
+
+        assert!(!out.contains("DAEMON"), "a sync 5 minutes old is a daemon working; got:\n{out}");
+        assert!(!out.contains("STALE"), "got:\n{out}");
+    }
+
+    /// One silence, one row. A vault past the data threshold is also past the
+    /// daemon one by definition, and printing both in different units is how
+    /// the two readers came to disagree in the first place.
+    #[test]
+    fn a_stale_vault_is_not_also_reported_as_a_silent_daemon() {
+        let dir = tempfile::tempdir().unwrap();
+        seeded_profile(dir.path());
+        write_state(dir.path(), &SyncState {
+            last_attempt_at: 1_000,
+            last_success_at: Some(1_000),
+            outcome: OUTCOME_OK.into(),
+            detail: None,
+            hub_holds: Some(HubHolds::Index { sha256: "abc123".into(), note_count: 10 }),
+            skipped_fetches: None,
+            refused_grants: None,
+            consecutive_failures: None,
+            first_failure_at: None,
+            terminal: None,
+        }).unwrap();
+
+        let out = render_status(dir.path(), 1_000 + 8 * 86_400).unwrap();
+
+        assert!(out.contains("STALE"), "got:\n{out}");
+        assert!(!out.contains("DAEMON"), "the louder row stands alone; got:\n{out}");
     }
 
     #[test]
