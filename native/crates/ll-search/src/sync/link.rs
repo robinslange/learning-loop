@@ -644,7 +644,19 @@ pub fn approve_offline(
 /// The reciprocal is signed here rather than waiting for a connection,
 /// because offline is the whole point of this door — there is no
 /// `SyncReady.grants` coming to learn the other key from.
-pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<()> {
+/// What `accept_offline` left the machine able to do.
+///
+/// The link is real either way — it is signed by the approver and verifies
+/// against its own bytes. `can_reach_the_hub` is the separate question of
+/// whether this machine has been told where the hub IS, and Door 3 is the one
+/// door that cannot answer it: the blob carries the issuer's key, not an
+/// endpoint, and a hub key cannot be pinned without seeing the hub.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Accepted {
+    pub can_reach_the_hub: bool,
+}
+
+pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<Accepted> {
     let signed = parse_grant_blob(grant_blob)?;
     let st = verify_grant(&signed)?;
     let me = local_key_id(config_dir)?;
@@ -664,7 +676,16 @@ pub fn accept_offline(config_dir: &Path, grant_blob: &str) -> anyhow::Result<()>
     }
     remember(config_dir, &signed, false)?;
     ensure_link_to(config_dir, &st.from, now)?;
-    Ok(())
+
+    // The gap this reports is real and cannot be closed here. A config needs
+    // a hub endpoint and a PINNED hub key; the blob carries neither, and
+    // pinning a key without seeing the hub is the trust-on-first-use this
+    // handshake exists to refuse (`handshake.rs` bails on an absent pin
+    // rather than accepting whatever is presented). Writing a partial config
+    // would be worse than none: `link::request` refuses to run when a config
+    // already exists, so the half-written one would block the command that
+    // completes it.
+    Ok(Accepted { can_reach_the_hub: config::config_path(config_dir).exists() })
 }
 
 /// Door 4's issuing half: the recovery key holds a `link` from this machine,
@@ -1318,10 +1339,34 @@ mod tests {
         let dir_old = seeded_dir();
         let request = request_offline(dir_new.path()).unwrap();
         let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
-        accept_offline(dir_new.path(), &grant).unwrap();
+        let accepted = accept_offline(dir_new.path(), &grant).unwrap();
         assert!(
             has_active_link(dir_new.path()).unwrap(),
             "linking must not require the hub — it is a convenience, not an authority"
+        );
+        assert!(
+            !accepted.can_reach_the_hub,
+            "and it says so: a machine through this door holds a link and no hub, which \
+             is the half the caller has to tell the user about"
+        );
+    }
+
+    /// The other side of it. A door that reported every machine as needing a
+    /// hub would satisfy the assertion above while telling an already-enrolled
+    /// machine to go and re-enrol.
+    #[test]
+    fn a_machine_that_already_has_a_hub_is_not_told_to_go_and_get_one() {
+        let dir_new = dir_with_seed(9);
+        let dir_old = seeded_dir();
+        write_hub_config(dir_new.path(), "wss://hub.example/ws", None);
+        let request = request_offline(dir_new.path()).unwrap();
+        let grant = approve_offline(dir_old.path(), &request, &mut Yes::default()).unwrap();
+
+        let accepted = accept_offline(dir_new.path(), &grant).unwrap();
+
+        assert!(
+            accepted.can_reach_the_hub,
+            "this machine has a config; accepting a link does not cost it one"
         );
     }
 

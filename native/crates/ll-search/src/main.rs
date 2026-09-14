@@ -1059,8 +1059,23 @@ async fn main() {
                 }
                 LinkCommand::Accept { grant, config_dir } => {
                     let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
+                    let accepted = link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
                     eprintln!("Linked. This machine is now one of yours.");
+                    if !accepted.can_reach_the_hub {
+                        // Saying this here rather than letting the next `sync`
+                        // fail with "no vault_id in this federation config",
+                        // which names a field instead of the missing step.
+                        eprintln!();
+                        eprintln!("This machine still has no hub. The link does not carry one —");
+                        eprintln!("it names the machine that signed it, not an endpoint, and a");
+                        eprintln!("hub key cannot be pinned without reaching the hub.");
+                        eprintln!();
+                        eprintln!("  ll-search link request <hub-endpoint> <vault-path>");
+                        eprintln!();
+                        eprintln!("Run that once this machine can reach the hub. It pins the hub");
+                        eprintln!("and writes the config; the link you just accepted stands, so");
+                        eprintln!("the pairing code it prints needs no second approval.");
+                    }
                 }
                 LinkCommand::List { config_dir } => {
                     let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);

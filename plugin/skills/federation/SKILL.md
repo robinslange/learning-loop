@@ -290,8 +290,21 @@ ll-search link accept <grant> --config-dir <config_dir>
 ```
 
 The grant verifies against nothing but its own bytes and the issuer's public
-key. The new machine can act as itself immediately, and reaches the hub once
-the approver next connects and lodges what it signed.
+key. The new machine can act as itself immediately.
+
+If that machine has never had a hub, it still does not have one: the blob
+carries the issuer's key, not an endpoint, and a hub key cannot be pinned
+without reaching the hub. `accept` therefore writes no federation config, and a
+`sync` before one exists fails on the missing `vault_id`. Once the machine can
+reach the hub:
+
+```bash
+ll-search link request <hub-endpoint> <vault-path> --config-dir <config_dir>
+```
+
+That pins the hub and writes the config. The accepted link stands, so the
+pairing code it prints needs no second approval. `ll-search link accept` prints
+this guidance itself when the config is missing.
 
 **What the machines are linked to:**
 
