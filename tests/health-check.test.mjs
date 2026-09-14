@@ -303,26 +303,26 @@ test('checkLocalBinOnPath: splits PATH on the platform delimiter', () => {
   const home = mkdtempSync(join(tmpdir(), 'health-path-'));
   const target = join(home, '.local', 'bin');
 
-  const onPath = checkLocalBinOnPath({ home, pathEnv: `/usr/bin${delimiter}${target}` });
+  const onPath = checkLocalBinOnPath({
+    home,
+    pathEnv: [join('/usr', 'bin'), target].join(delimiter),
+  });
   assert.equal(onPath.status, 'ok', `detail: ${onPath.detail}`);
 
-  const offPath = checkLocalBinOnPath({ home, pathEnv: '/usr/bin' });
+  const offPath = checkLocalBinOnPath({ home, pathEnv: join('/usr', 'bin') });
   assert.equal(offPath.status, 'fail');
 
   // The delimiter is INJECTED, not taken from this machine. On macOS and Linux
   // `delimiter` is ':' and a hardcoded ':' passes every assertion above — the
   // first version of this test could not fail on the platform it runs on,
   // which is the whole reason the Windows bug survived.
-  const windowsish = checkLocalBinOnPath({
-    home,
-    pathEnv: `/usr/bin;${target}`,
-    pathDelimiter: ';',
-  });
+  const semicolonPath = [join('/usr', 'bin'), target].join(';');
+  const windowsish = checkLocalBinOnPath({ home, pathEnv: semicolonPath, pathDelimiter: ';' });
   assert.equal(windowsish.status, 'ok', 'a ";"-separated PATH must split on ";"');
 
   const wrongDelimiter = checkLocalBinOnPath({
     home,
-    pathEnv: `/usr/bin;${target}`,
+    pathEnv: semicolonPath,
     pathDelimiter: ':',
   });
   assert.equal(
@@ -387,17 +387,24 @@ test(
 );
 
 test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
+  // Built with `join` and `delimiter` rather than a POSIX string, because the
+  // check compares the path the way the platform spells it and splits PATH on
+  // the platform's separator. A hardcoded `/home/test/.local/bin` inside a
+  // ':'-joined PATH is not an input Windows can produce, and asserting it
+  // works there tests nothing about either platform.
+  const home = join('/home', 'test');
+  const target = join(home, '.local', 'bin');
   const result = checkLocalBinOnPath({
-    home: '/home/test',
-    pathEnv: '/usr/bin:/home/test/.local/bin:/bin',
+    home,
+    pathEnv: [join('/usr', 'bin'), target, join('/bin')].join(delimiter),
   });
-  assert.equal(result.status, 'ok');
+  assert.equal(result.status, 'ok', `detail: ${result.detail}`);
 });
 
 test('checkLocalBinOnPath: warn when missing', () => {
   const result = checkLocalBinOnPath({
-    home: '/home/test',
-    pathEnv: '/usr/bin:/bin',
+    home: join('/home', 'test'),
+    pathEnv: [join('/usr', 'bin'), join('/bin')].join(delimiter),
   });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
