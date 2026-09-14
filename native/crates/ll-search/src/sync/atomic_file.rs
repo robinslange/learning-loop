@@ -197,8 +197,30 @@ fn abandoned(modified: SystemTime, now: SystemTime) -> bool {
 }
 
 impl Drop for FileLock {
+    /// Release only a lock this process still holds.
+    ///
+    /// The mtime is stamped once and never refreshed, so a critical section
+    /// longer than `STALE` is declared abandoned and broken by a waiter. The
+    /// original holder then reached `Drop` and removed what had become
+    /// SOMEONE ELSE'S lock, admitting a third process — two concurrent
+    /// `update_grants` cycles, which is the lost update the lock exists to
+    /// prevent, arrived at through the mechanism meant to prevent it.
+    ///
+    /// Re-reading the pid is not free of races in theory: the breaker could
+    /// replace the file between the read and the remove. It closes the window
+    /// that is actually reachable here — a long critical section — and unlike
+    /// an unconditional remove it can never take a lock this process does not
+    /// hold. `flock` would be airtight and is a larger change than this
+    /// finding warrants.
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        match std::fs::read_to_string(&self.path) {
+            Ok(holder) if holder.trim() == std::process::id().to_string() => {
+                let _ = std::fs::remove_file(&self.path);
+            }
+            // Broken and retaken by someone else, or already gone. Either way
+            // it is not ours to remove.
+            _ => {}
+        }
     }
 }
 

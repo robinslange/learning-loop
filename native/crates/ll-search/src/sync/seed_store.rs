@@ -148,6 +148,8 @@ pub fn load_or_create(config_dir: &Path) -> anyhow::Result<LoadResult> {
         return Ok(result);
     }
 
+    refuse_second_identity(config_dir)?;
+
     if let Some(ref f) = force {
         match f.as_str() {
             "" => {}
@@ -238,6 +240,54 @@ pub fn store_seed(config_dir: &Path, seed: &[u8; 32]) -> anyhow::Result<SeedBack
 ///
 /// Extends the existing plugin schema additively: the plugin only reads
 /// `plugin_major` / `plugin_version`; the `backend` field is new in 2K.
+/// Refuse to mint when this machine has already recorded an identity.
+///
+/// "Nothing is there" and "I cannot see what is there" are different states,
+/// and only the first may mint. Every backend read maps a store it cannot
+/// reach to `Ok(None)` — `read_keyring` does it explicitly for an unavailable
+/// Secret Service (no dbus, no gnome-keyring, no kwallet) — which is right for
+/// a machine that has no keyring and wrong for one whose keyring is down. The
+/// fall-through then MINTS A SECOND IDENTITY, and everything after that looks
+/// like it worked: `ll link code` prints a pairing code for the new key, the
+/// peer grants to it, the store recovers, every `load_only` path prefers the
+/// original, and the link is dead with no error anywhere.
+///
+/// `.seed-meta.json` is this machine's own record that a seed was created. It
+/// is written for every backend at creation and at migration, so if it names
+/// one and `load_only` comes back empty, that is a failure to report rather
+/// than a machine to re-enrol.
+///
+/// One call site, before the backend dispatch, rather than one beside each
+/// mint. Guarding each mint left the keyring branch uncovered — the test
+/// binary pins `LL_SEED_BACKEND=encrypted` globally (a per-test override
+/// races, and the production keyring entry is globally namespaced), so a
+/// mutation deleting that branch's guard reddened nothing.
+pub(super) fn refuse_second_identity(config_dir: &Path) -> anyhow::Result<()> {
+    let Some(recorded) = recorded_backend(config_dir) else { return Ok(()) };
+    if load_only(config_dir)?.is_some() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "this machine's identity is recorded in the {recorded} store and that store did \
+         not return it. Refusing to create a second identity: the new key would look like \
+         a working enrolment while every grant naming the old one stayed signed and \
+         unreachable. Restore access to the {recorded} store and retry — on Linux this is \
+         usually an unavailable Secret Service (dbus, gnome-keyring, kwallet). If the \
+         identity is genuinely gone, `ll-search recover` restores it from the 24 words."
+    )
+}
+
+/// The backend `.seed-meta.json` records, if it records one.
+///
+/// It is written every time a seed is created or migrated, so its presence is
+/// this machine's own statement that an identity EXISTS — which is a different
+/// question from whether the store holding it can be read right now.
+pub fn recorded_backend(config_dir: &Path) -> Option<String> {
+    let txt = std::fs::read_to_string(seed_meta_path(config_dir)).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&txt).ok()?;
+    doc.get("backend")?.as_str().map(str::to_string)
+}
+
 pub fn write_seed_meta(
     config_dir: &Path,
     backend: SeedBackend,
@@ -343,6 +393,48 @@ mod tests {
         let tmp = tempdir().unwrap();
         let result = load_or_create(tmp.path()).unwrap();
         assert_eq!(result.backend, SeedBackend::Encrypted);
+    }
+
+    /// A store that cannot return a seed it is recorded as holding must not
+    /// be treated as a machine that has none.
+    ///
+    /// The scenario, reachable without a keyring: the seed file is gone and
+    /// `.seed-meta.json` still names its backend — a half-restored backup, or
+    /// a keyring reset. Every backend read maps an unreachable store to
+    /// `Ok(None)`, so without this the next call mints a second identity and
+    /// reports success.
+    #[test]
+    fn a_recorded_identity_that_cannot_be_read_is_an_error_not_a_new_one() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        let first = load_or_create(tmp.path()).unwrap();
+        assert!(first.created, "precondition: an identity exists and was recorded");
+        assert!(recorded_backend(tmp.path()).is_some(), "precondition: the record is on disk");
+        std::fs::remove_file(super::super::config::encrypted_seed_path(tmp.path())).unwrap();
+
+        // Matched rather than `unwrap_err`: `LoadResult` has no `Debug`, and it
+        // holds a signing key, so it should not grow one for a test's sake.
+        let err = match load_or_create(tmp.path()) {
+            Ok(_) => panic!("minted a second identity over a recorded one"),
+            Err(e) => e.to_string(),
+        };
+
+        assert!(err.contains("Refusing to create a second identity"), "got: {err}");
+        assert!(err.contains("recover"), "and names the way back: {err}");
+    }
+
+    /// The other side. A machine that has genuinely never had an identity has
+    /// no record either, and must still be able to make one — Door 3 links a
+    /// brand-new offline machine, which cannot run `join` to get one.
+    #[test]
+    fn a_machine_with_no_record_at_all_still_mints_its_first_identity() {
+        init_test_backend();
+        let tmp = tempdir().unwrap();
+        assert!(recorded_backend(tmp.path()).is_none(), "precondition: nothing recorded");
+
+        let result = load_or_create(tmp.path()).unwrap();
+
+        assert!(result.created, "a first identity is not a second one");
     }
 
     #[test]
