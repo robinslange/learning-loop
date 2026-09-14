@@ -577,6 +577,15 @@ pub(crate) fn public_vault_with_note(dir: &Path) {
     std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
 }
 
+/// The same note with no `visibility` in its frontmatter, so the config's
+/// default is what decides its tier. `public_vault_with_note` lifts the note
+/// to `public` whatever the config says, which is the wrong fixture for any
+/// test about the default being applied.
+pub(crate) fn vault_with_note(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join("n.md"), "Body.").unwrap();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -848,19 +857,23 @@ mod tests {
         let out = tmp.path().join("export.db");
         let vault = tmp.path().join("vault");
         build_source_db(&source, Some("01926d7e-0000-7000-8000-00000000000a"));
-        public_vault_with_note(&vault);
+        // NOT `public_vault_with_note`: that writes `visibility: public` in the
+        // frontmatter, which lifts the note whatever the config default is — so
+        // the note this test called "addressable and withheld" was in fact
+        // addressable and EXPORTED, and the assertion could not tell.
+        vault_with_note(&vault);
 
-        // Default `private` with no rule that lifts it: the note is addressable
-        // and withheld, which is the other column.
+        // Default `private` with no rule that lifts it.
         let config = FederationConfig::test_fixture("private", vec![]);
         let result = export_index(&source, &vault, &out, &config).unwrap();
 
         assert_eq!(result.unindexed, 0, "every row had an id; nothing was unaddressable");
-        assert_eq!(
-            result.exported + result.skipped,
-            1,
-            "an addressable note is either exported or skipped, and counted exactly once"
-        );
+        // `exported + skipped == 1` was what stood here, and it is true of both
+        // columns: the loop increments exactly one per row and there is one row,
+        // so the sum is a partition identity and holds however the note is
+        // classified. Naming the column is the whole assertion.
+        assert_eq!(result.skipped, 1, "the private default withheld it");
+        assert_eq!(result.exported, 0, "and it was not published");
     }
 
     /// Adds a second addressable note to a `build_source_db` fixture, so a
