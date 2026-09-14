@@ -534,6 +534,87 @@ test('checkFederationSyncHealth: a healthy recent sync is ok', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkFederationSyncHealth: a corrupt registry is a failure, not a fresh install', () => {
+  // `vaults.json` names every profile on the machine. Unreadable means nothing
+  // resolves and nothing syncs -- and the old code returned `ok('not
+  // configured')`, which is exactly what a machine that has never federated
+  // reports. The Rust loader has refused this since
+  // `a_corrupt_registry_errors_instead_of_looking_empty`; this is the same
+  // claim on the side the user actually reads.
+  const dir = mkdtempSync(join(tmpdir(), 'health-fed-corrupt-'));
+  writeFileSync(join(dir, 'vaults.json'), '{not valid json');
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'fail');
+  assert.match(r.detail, /present but names no vault list/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a registry with an empty vault list is not configured', () => {
+  // The other side. A registry that parses and lists nothing is a real state
+  // -- `ll vault add` writes one before the first profile -- and must stay ok,
+  // or the check above would just be "any registry is a failure".
+  const dir = mkdtempSync(join(tmpdir(), 'health-fed-empty-reg-'));
+  writeFileSync(join(dir, 'vaults.json'), JSON.stringify({ vaults: [] }));
+
+  const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });
+
+  assert.equal(r.status, 'ok');
+  assert.match(r.detail, /not configured/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: a second vault profile is walked and named', () => {
+  // The multi-vault walk had no test at all: every case above has one implicit
+  // profile, so the registry branch was never entered by any of them.
+  const root = mkdtempSync(join(tmpdir(), 'health-fed-multi-'));
+  const good = fedDir('health-fed-multi-good-', {
+    outcome: 'ok',
+    consecutive_failures: 0,
+    last_success_at: secs(NOW) - 60,
+  });
+  const broken = fedDir('health-fed-multi-bad-', {
+    outcome: 'error',
+    detail: 'hub refused the key',
+    consecutive_failures: 9,
+    last_success_at: secs(NOW) - 60,
+  });
+  writeFileSync(
+    join(root, 'vaults.json'),
+    JSON.stringify({
+      vaults: [
+        { id: 'work', config_dir: good },
+        { id: 'personal', config_dir: broken },
+      ],
+    }),
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: root, now: NOW });
+
+  assert.equal(r.status, 'fail', 'a healthy first profile must not mask a broken second');
+  assert.match(r.detail, /^personal: /, 'the failing profile names itself');
+  assert.match(r.detail, /failed 9 times in a row/);
+  for (const d of [root, good, broken]) rmSync(d, { recursive: true, force: true });
+});
+
+test('checkFederationSyncHealth: every profile healthy is ok across the registry', () => {
+  const root = mkdtempSync(join(tmpdir(), 'health-fed-multi-ok-'));
+  const state = { outcome: 'ok', consecutive_failures: 0, last_success_at: secs(NOW) - 60 };
+  const a = fedDir('health-fed-multi-a-', state);
+  const b = fedDir('health-fed-multi-b-', state);
+  writeFileSync(
+    join(root, 'vaults.json'),
+    JSON.stringify({ vaults: [{ id: 'work', config_dir: a }, { id: 'personal', config_dir: b }] }),
+  );
+
+  const r = checkFederationSyncHealth({ pluginData: root, now: NOW });
+
+  assert.equal(r.status, 'ok');
+  assert.match(r.detail, /syncing/);
+  for (const d of [root, a, b]) rmSync(d, { recursive: true, force: true });
+});
+
 test('checkFederationSyncHealth: severity is fail so the session-start detector shows it', () => {
   const dir = fedDir('health-fed-sev-', { outcome: 'ok', last_success_at: secs(NOW) - 60 });
   const r = checkFederationSyncHealth({ pluginData: dir, now: NOW });

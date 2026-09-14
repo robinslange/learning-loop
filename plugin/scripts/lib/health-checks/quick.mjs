@@ -741,7 +741,17 @@ export function checkFederationSyncHealth({
   const registryPath = FEDERATION_PATHS.vaultRegistry(pluginData);
   if (existsSync(registryPath)) {
     const doc = readJsonOrNull(registryPath);
-    if (!Array.isArray(doc?.vaults)) return ok('not configured');
+    // A registry that is present and unreadable is not "no registry". Every
+    // vault profile on the machine is named in this file, so nothing can be
+    // resolved and nothing syncs -- and reporting that as `not configured`
+    // makes a broken install indistinguishable from a fresh one, which is
+    // the shape of the outage this check was added for.
+    if (!Array.isArray(doc?.vaults)) {
+      return bad(
+        `${registryPath} is present but names no vault list, so no profile can be ` +
+          'resolved and nothing syncs',
+      );
+    }
     profiles = doc.vaults;
   }
 
