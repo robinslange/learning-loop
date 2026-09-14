@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use super::auth;
 use super::config::{
     export_db_path, export_shape_fingerprint, last_export_mtime_path, last_export_shape_path,
-    seed_path, FederationConfig,
+    seed_path, vault_mtime_and_path_digest, FederationConfig,
 };
 use super::error::SyncError;
 use super::export::{export_index, ExportResult};
@@ -506,8 +506,8 @@ async fn prepare_export(
         .and_then(|s| s.trim().parse().ok())
         .unwrap_or(0);
     let vault_owned = vault_path.to_path_buf();
-    let (current_max_mtime, note_count) =
-        tokio::task::spawn_blocking(move || max_md_mtime_and_count(&vault_owned))
+    let (current_max_mtime, path_digest) =
+        tokio::task::spawn_blocking(move || vault_mtime_and_path_digest(&vault_owned))
             .await
             .map_err(|e| anyhow::anyhow!("mtime scan task panicked: {e}"))?;
     let vault_changed = current_max_mtime > last_mtime;
@@ -518,7 +518,7 @@ async fn prepare_export(
     // mtime -- both used to reuse the cached export and keep publishing the old
     // answer until something unrelated happened to be saved.
     let shape_path = last_export_shape_path(config_dir);
-    let shape = export_shape_fingerprint(config, note_count);
+    let shape = export_shape_fingerprint(config, &path_digest);
     let shape_changed = std::fs::read_to_string(&shape_path)
         .map(|s| s.trim() != shape)
         .unwrap_or(true);
@@ -848,37 +848,9 @@ async fn upload_index(
 /// The count is what notices a deletion: removing a note lowers no mtime, so a
 /// max alone reports "no vault changes" and the export keeps publishing a note
 /// that is gone.
-fn max_md_mtime_and_count(dir: &Path) -> (u64, u64) {
-    let mut max = 0u64;
-    let mut count = 0u64;
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
-                continue;
-            }
-            if path.is_dir() {
-                let (m, c) = max_md_mtime_and_count(&path);
-                max = max.max(m);
-                count += c;
-            } else if path.extension().is_some_and(|e| e == "md") {
-                count += 1;
-                if let Ok(meta) = path.metadata() {
-                    if let Ok(modified) = meta.modified() {
-                        if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {
-                            max = max.max(d.as_secs());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    (max, count)
-}
-
 #[cfg(test)]
 fn max_md_mtime(dir: &Path) -> u64 {
-    max_md_mtime_and_count(dir).0
+    vault_mtime_and_path_digest(dir).0
 }
 
 pub(super) async fn send_json<T: serde::Serialize>(
@@ -1577,7 +1549,7 @@ mod tests {
         let before = FederationConfig::test_fixture("private", vec![]);
         std::fs::write(
             last_export_shape_path(dir.path()),
-            export_shape_fingerprint(&before, 0),
+            export_shape_fingerprint(&before, &vault_mtime_and_path_digest(vault.path()).1),
         )
         .unwrap();
 
@@ -1606,20 +1578,51 @@ mod tests {
         );
     }
 
-    /// A deleted note lowers no mtime, so the max alone reports "no changes"
-    /// and the export keeps publishing a note that is gone.
+    /// Create, delete, move and rename all change the export; re-reading the
+    /// same vault does not.
+    ///
+    /// This used to hash a COUNT, and a count sees creation and deletion only.
+    /// Rename and move leave it identical -- and leave every file's mtime
+    /// identical too, because `rename(2)` touches neither -- so the two
+    /// operations a person performs when they find a note exposed were exactly
+    /// the two nothing could see. The cached export kept the old path at the
+    /// old tier and `ll status` said "No vault changes since last export".
+    ///
+    /// Driven through the real scan over real directories rather than by
+    /// passing numbers to the fingerprint: what was wrong was WHICH FACT the
+    /// key was computed from, and a test that feeds the fact by hand cannot
+    /// tell one fact from another.
     #[test]
-    fn the_export_shape_notices_a_note_disappearing() {
+    fn the_export_shape_sees_every_way_a_vault_can_change_shape() {
         let config = FederationConfig::test_fixture("private", vec![]);
-        assert_ne!(
-            export_shape_fingerprint(&config, 100),
-            export_shape_fingerprint(&config, 99),
-            "the count is what sees a deletion"
-        );
-        assert_eq!(
-            export_shape_fingerprint(&config, 100),
-            export_shape_fingerprint(&config, 100),
-        );
+        let vault = tempfile::tempdir().unwrap();
+        let v = vault.path();
+        std::fs::create_dir_all(v.join("3-permanent")).unwrap();
+        std::fs::create_dir_all(v.join("0-inbox")).unwrap();
+        std::fs::write(v.join("3-permanent/a.md"), "a").unwrap();
+        std::fs::write(v.join("3-permanent/b.md"), "b").unwrap();
+
+        let shape = |v: &std::path::Path| {
+            export_shape_fingerprint(&config, &vault_mtime_and_path_digest(v).1)
+        };
+        let start = shape(v);
+        assert_eq!(start, shape(v), "reading the same vault twice must agree");
+
+        // Rename in place. Same count, same mtimes, different note.
+        std::fs::rename(v.join("3-permanent/b.md"), v.join("3-permanent/b-separation.md")).unwrap();
+        let renamed = shape(v);
+        assert_ne!(start, renamed, "a rename is invisible to a count and must not be here");
+
+        // Move between folders, which is how a note leaves a `listed` glob.
+        std::fs::rename(v.join("3-permanent/a.md"), v.join("0-inbox/a.md")).unwrap();
+        let moved = shape(v);
+        assert_ne!(renamed, moved, "a move between folders changes which rules apply");
+
+        // And the two a count already saw.
+        std::fs::write(v.join("0-inbox/c.md"), "c").unwrap();
+        assert_ne!(moved, shape(v), "a new note must still be seen");
+        std::fs::remove_file(v.join("0-inbox/c.md")).unwrap();
+        assert_eq!(moved, shape(v), "removing it again must return the earlier shape");
     }
 
     /// The declared metadata must describe the bytes on the wire, so it is
@@ -1647,7 +1650,7 @@ mod tests {
         // is empty, so the shape is the rules plus a count of zero.
         std::fs::write(
             last_export_shape_path(dir.path()),
-            export_shape_fingerprint(&config, 0),
+            export_shape_fingerprint(&config, &vault_mtime_and_path_digest(vault.path()).1),
         )
         .unwrap();
         let prepared =

@@ -4,6 +4,55 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **A visibility rule the config could not compile was silently dropped.** An
+  invalid glob went through `Glob::new(pattern).ok()?` inside a `filter_map` and
+  vanished, leaving the engine with a rules list shorter than the file on disk
+  and nothing anywhere reporting it. `FederationConfig::validate` checked the
+  hub key and the endpoint scheme and never looked at the patterns that decide
+  what leaves the machine.
+
+  The direction it fails in is the disclosing one. A config that opens folders
+  to `listed` first and then closes specific subjects back to `private` is
+  last-match-wins, so a dropped blocklist line does not withhold the notes it
+  covered — it lets the earlier `listed` rule win, shipping their path, title,
+  tags and a 300-character body summary. The skill tells people to hand-edit
+  this file.
+
+  `VisibilityEngine::new` is fallible now and `validate` compiles every pattern,
+  so a run stops and names the pattern and globset's reason for refusing it.
+  Tiers are checked too: an unrecognised one already failed closed, because
+  `Disclosure::for_tier` returns `None` for anything it does not know, but it
+  did so silently — a rule written `tier: "listd"` published nothing and
+  reported nothing. An unrecognised `default` is likewise refused rather than
+  quietly read as `private`.
+
+- **Glob rules are matched case-insensitively.** The vault sits on a
+  case-insensitive filesystem and globset is not, so `**/*separation*` did not
+  match `3-permanent/Separation-agreement.md`. No note changes tier under
+  folding today — checked against the live vault — but a blocklist that misses
+  the capitalised spelling of its own token is one rename away from not working,
+  and renaming a note to carry a blocklisted token is the remediation people
+  reach for.
+
+- **A renamed or moved note now re-exports.** The freshness key hashed the
+  visibility rules and a COUNT of notes, and the staleness check beside it
+  compared the highest `.md` mtime. `rename(2)` moves neither: not the count,
+  not any file's mtime. So the two operations someone performs when they find a
+  note exposed — move it out of `3-permanent/`, rename it to carry a
+  blocklisted token — were exactly the two that could not trigger a re-export.
+  The cached export kept publishing the old path at the old tier,
+  `upload_decision` saw an unchanged sha and skipped, and `ll status` reported
+  "No vault changes since last export".
+
+  The key now covers a digest over the vault's sorted `.md` paths, which
+  subsumes the count and closes rename, move, create and delete in one value.
+
+  Verified against the real vault: 5,077 notes export to byte-identical tiers
+  and bodies before and after, so the cluster closes three holes without moving
+  what is published today.
+
 ## v2.0.6
 
 ### Fixed

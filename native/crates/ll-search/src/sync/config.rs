@@ -59,6 +59,20 @@ impl FederationConfig {
         // once. Restating it here as a `starts_with` was how this file came to
         // disagree with `client.rs` about which endpoints are allowed.
         super::client::check_hub_scheme(&self.hub.endpoint)?;
+        // Compile the visibility rules here, not only where they are used.
+        // `validate` checked the hub key and the endpoint scheme and never
+        // looked at the forty patterns that decide what leaves the machine --
+        // so a rule globset could not compile was discovered, if at all, by
+        // nobody: it was dropped inside a `filter_map` and the export ran with
+        // a shorter list. Failing the run names the pattern and globset's
+        // reason for refusing it.
+        let rules: Vec<(String, String)> = self
+            .visibility
+            .rules
+            .iter()
+            .map(|r| (r.pattern.clone(), r.tier.clone()))
+            .collect();
+        super::visibility::VisibilityEngine::new(&self.visibility.default, &rules)?;
         Ok(())
     }
 
@@ -178,7 +192,7 @@ pub fn last_export_mtime_path(config_dir: &Path) -> PathBuf {
 }
 
 /// Fingerprint of everything other than note bodies that decides what an
-/// export contains: the visibility rules, and how many notes exist.
+/// export contains: the visibility rules, and which notes exist.
 pub fn last_export_shape_path(config_dir: &Path) -> PathBuf {
     config_dir.join("federation").join("last-export-shape")
 }
@@ -186,13 +200,80 @@ pub fn last_export_shape_path(config_dir: &Path) -> PathBuf {
 /// The value that file holds. Any change here changes tier decisions or
 /// membership, so a cached export built under a different one is stale even
 /// though no note was touched.
-pub fn export_shape_fingerprint(config: &FederationConfig, note_count: u64) -> String {
+/// Highest `.md` mtime in the vault, and every `.md` path under it.
+///
+/// The paths, not just how many. `rename(2)` changes neither the file's mtime
+/// nor the count, so a note moved out of `3-permanent/` or renamed to carry a
+/// blocklisted token moved NOTHING the freshness key looked at -- and those two
+/// are precisely the remediations someone reaches for when they find a note
+/// exposed. The cached export kept the old path at the old tier,
+/// `upload_decision` saw an unchanged sha and skipped, and `ll status` said
+/// "No vault changes since last export".
+fn vault_md_paths(dir: &Path, root: &Path, paths: &mut Vec<String>) -> u64 {
+    let mut max = 0u64;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
+                continue;
+            }
+            if path.is_dir() {
+                max = max.max(vault_md_paths(&path, root, paths));
+            } else if path.extension().is_some_and(|e| e == "md") {
+                if let Ok(rel) = path.strip_prefix(root) {
+                    paths.push(rel.to_string_lossy().into_owned());
+                }
+                if let Ok(meta) = path.metadata() {
+                    if let Ok(modified) = meta.modified() {
+                        if let Ok(d) = modified.duration_since(std::time::UNIX_EPOCH) {
+                            max = max.max(d.as_secs());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    max
+}
+
+/// The vault's highest mtime and a digest over its sorted `.md` paths.
+///
+/// Sorted, because `read_dir` order is the filesystem's business and a
+/// fingerprint that changed when a directory was re-packed would force
+/// pointless re-exports.
+pub fn vault_mtime_and_path_digest(dir: &Path) -> (u64, String) {
+    use sha2::Digest;
+    let mut paths = Vec::new();
+    let max = vault_md_paths(dir, dir, &mut paths);
+    paths.sort_unstable();
+    let mut hasher = sha2::Sha256::new();
+    for p in &paths {
+        hasher.update(p.as_bytes());
+        hasher.update(b"\n");
+    }
+    (max, hex::encode(hasher.finalize()))
+}
+
+/// Takes a digest over the vault's sorted `.md` paths, not a count of them.
+///
+/// A count closes creation and deletion. It does not close rename or move, and
+/// `rename(2)` touches no file's mtime either -- so the two operations a person
+/// performs when they discover a note is exposed (move it out of
+/// `3-permanent/`, rename it to carry a blocklisted token) were exactly the two
+/// the freshness key could not see. The cached export kept publishing the old
+/// path at the old tier and `ll status` reported "No vault changes since last
+/// export".
+///
+/// The path set subsumes the count, so there is one value here rather than two
+/// that can disagree, and it also closes the second-granularity mtime gap for
+/// any change that moves a path.
+pub fn export_shape_fingerprint(config: &FederationConfig, path_digest: &str) -> String {
     use sha2::Digest;
     let rules = serde_json::to_string(&config.visibility).unwrap_or_default();
     let mut hasher = sha2::Sha256::new();
     hasher.update(rules.as_bytes());
     hasher.update(b"\n");
-    hasher.update(note_count.to_string().as_bytes());
+    hasher.update(path_digest.as_bytes());
     hex::encode(hasher.finalize())
 }
 

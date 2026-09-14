@@ -79,7 +79,10 @@ pub fn export_index(
         .iter()
         .map(|r| (r.pattern.clone(), r.tier.clone()))
         .collect();
-    let engine = VisibilityEngine::new(&config.visibility.default, &rules);
+    // Refuses rather than silently dropping a rule it cannot compile.
+    // A rules list shorter than the one on disk is a config that does not
+    // mean what it says, and the direction it fails in is more disclosing.
+    let engine = VisibilityEngine::new(&config.visibility.default, &rules)?;
 
 
     // --- Phase 1: load all rows from source and pre-compute visibility -------

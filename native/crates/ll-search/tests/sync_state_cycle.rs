@@ -19,7 +19,8 @@ use ll_search::sync::client::sync_all_async;
 use ll_search::sync::error::SyncError;
 use ll_search::sync::protocol::{manifest_root, ChunkedFrame};
 use ll_search::sync::config::{
-    export_db_path, export_shape_fingerprint, last_export_shape_path, FederationConfig,
+    export_db_path, export_shape_fingerprint, last_export_shape_path,
+    vault_mtime_and_path_digest, FederationConfig,
     HubEndpoint, Identity, VisibilityConfig,
 };
 use ll_search::sync::grant::{canonical_bytes, GrantKind, GrantStatement};
@@ -502,19 +503,19 @@ fn config_for(config_dir: &Path, addr: SocketAddr) -> FederationConfig {
 /// Put an export where `prepare_export` will reuse it, so the cycle needs no
 /// source index. Its `meta` contract is pinned by the lib tests in
 /// `sync::client`; duplicating the source schema here would be free to drift.
-fn place_export(config_dir: &Path) {
+fn place_export(config_dir: &Path, vault_dir: &Path) {
     let path = export_db_path(config_dir);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     // A cache is only reusable if it records the rules it was built under.
     // These fixtures pair it with a source index that does not exist, so a
     // rebuild is not merely wasteful here -- it is the failure under test.
-    // The fingerprint covers `visibility` and the note count, and every test
-    // here uses `config_for`'s rules over an empty vault, so the address the
-    // config happens to name does not enter it.
+    // The fingerprint covers `visibility` and the vault's path set, and every
+    // test here uses `config_for`'s rules over an empty vault, so the address
+    // the config happens to name does not enter it.
     let rules_only = config_for(config_dir, "127.0.0.1:1".parse().unwrap());
     std::fs::write(
         last_export_shape_path(config_dir),
-        export_shape_fingerprint(&rules_only, 0),
+        export_shape_fingerprint(&rules_only, &vault_mtime_and_path_digest(vault_dir).1),
     )
     .unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
@@ -574,7 +575,7 @@ async fn a_successful_cycle_writes_a_different_state() {
     let vault = tempfile::tempdir().unwrap();
     let addr = spawn_hub(stale(), OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
 
     let result = sync_all_async(
         &dir.path().join("no-such-source.db"),
@@ -613,7 +614,7 @@ async fn a_cold_hub_that_accepted_the_upload_is_not_recorded_as_holding_nothing(
     let vault = tempfile::tempdir().unwrap();
     let addr = spawn_hub(None, OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
 
     sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
         .await
@@ -634,7 +635,7 @@ async fn a_skipped_upload_records_what_the_hub_reported() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let held = HeldIndex {
         sha256: export_sha(dir.path()),
         note_count: HUB_NOTE_COUNT,
@@ -665,7 +666,7 @@ async fn a_cycle_that_fails_after_the_handshake_records_what_the_hub_reported() 
     let vault = tempfile::tempdir().unwrap();
     let addr = spawn_hub(stale(), OnUpload::Reject).await;
     let config = config_for(dir.path(), addr);
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
 
     let err =
         sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
@@ -695,7 +696,7 @@ async fn a_failure_after_a_success_keeps_the_last_success_time() {
     let vault = tempfile::tempdir().unwrap();
     let addr = spawn_hub(stale(), OnUpload::Ack).await;
     let config = config_for(dir.path(), addr);
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
 
     let source = dir.path().join("no-such-source.db");
     sync_all_async(&source, vault.path(), dir.path(), &config).await.expect("first cycle");
@@ -721,7 +722,7 @@ async fn an_index_the_hub_acked_but_we_never_sent_is_not_recorded() {
     let vault = tempfile::tempdir().unwrap();
     let addr = spawn_hub(stale(), OnUpload::AckWrongSha).await;
     let config = config_for(dir.path(), addr);
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
 
     let err =
         sync_all_async(&dir.path().join("no-such-source.db"), vault.path(), dir.path(), &config)
@@ -755,7 +756,7 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let served = b"pretend-this-is-a-peer-index".to_vec();
     let (addr, asked) = spawn_hub_with(
@@ -798,7 +799,7 @@ async fn a_cycle_that_read_everything_records_no_skips() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (addr, asked) = spawn_hub_with(
         stale(),
@@ -830,7 +831,7 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (_approver, inbound) = link_grant(&me);
     let served = b"pretend-this-is-the-other-machines-index".to_vec();
@@ -898,7 +899,7 @@ async fn a_cycle_records_the_hubs_listing_and_the_reader_serves_only_what_is_on_
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (_approver, inbound) = link_grant(&me);
 
@@ -960,7 +961,7 @@ async fn a_cycle_whose_hub_lists_only_this_vault_asks_for_nothing() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let (addr, asked) = spawn_hub_with(stale(), OnUpload::Ack, OnGrant::Ack, vec![], vec![]).await;
     let config = config_for(dir.path(), addr);
 
@@ -1001,7 +1002,7 @@ async fn a_cycle_answers_an_inbound_link_with_its_own_half() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     // What "a machine that was admitted a minute ago" means in practice: a
     // person ran `ll link request` (or `link code`) HERE and showed the code.
@@ -1045,7 +1046,7 @@ async fn a_cycle_with_nothing_owed_lodges_nothing() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let held = HeldIndex {
         sha256: export_sha(dir.path()),
         note_count: HUB_NOTE_COUNT,
@@ -1078,7 +1079,7 @@ async fn a_refused_grant_does_not_stop_the_upload_or_the_read_half() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     // What "a machine that was admitted a minute ago" means in practice: a
     // person ran `ll link request` (or `link code`) HERE and showed the code.
@@ -1127,7 +1128,7 @@ async fn a_cycle_whose_grants_were_accepted_records_no_refusals() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (_approver, inbound) = link_grant(&me);
     let (addr, _seen) =
@@ -1163,7 +1164,7 @@ async fn an_oversize_export_to_a_hub_without_chunking_is_refused() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_oversize_export(dir.path());
+    place_oversize_export(dir.path(), vault.path());
 
     // A real hub that completes the handshake and advertises nothing.
     let addr = spawn_hub(None, OnUpload::Ack).await;
@@ -1199,7 +1200,7 @@ async fn an_oversize_export_is_chunked_when_the_hub_offers_it() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_oversize_export(dir.path());
+    place_oversize_export(dir.path(), vault.path());
     let expected = std::fs::read(export_db_path(dir.path())).unwrap();
 
     let seen: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -1312,7 +1313,7 @@ async fn spawn_chunking_hub(seen: Arc<Mutex<Vec<String>>>, expected_len: usize) 
 
 /// An export one byte past what a single frame can carry. `zeroblob` grows
 /// the file without this test materialising the bytes.
-fn place_oversize_export(config_dir: &Path) {
+fn place_oversize_export(config_dir: &Path, vault_dir: &Path) {
     // Must track protocol::HUB_INBOUND_CAP, or this synthesises an export in
     // a band that is no longer the boundary and the test stops testing it.
     const CAP: usize = 16 * 1024 * 1024;
@@ -1323,7 +1324,7 @@ fn place_oversize_export(config_dir: &Path) {
     let rules_only = config_for(config_dir, "127.0.0.1:1".parse().unwrap());
     std::fs::write(
         last_export_shape_path(config_dir),
-        export_shape_fingerprint(&rules_only, 0),
+        export_shape_fingerprint(&rules_only, &vault_mtime_and_path_digest(vault_dir).1),
     )
     .unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
@@ -1356,7 +1357,7 @@ async fn a_cycle_that_dies_uploading_has_already_stopped_serving_what_the_hub_dr
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (_approver, inbound) = link_grant(&me);
 
@@ -1427,7 +1428,7 @@ async fn a_cycle_deletes_the_peer_cache_a_revocation_withdraws() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let issuer = SigningKey::from_bytes(&[31u8; 32]);
     let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
@@ -1491,7 +1492,7 @@ async fn a_cycle_that_dies_uploading_has_already_dropped_what_a_revocation_withd
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let issuer = SigningKey::from_bytes(&[31u8; 32]);
     let (granted, grant_id) = scoped_follow(&issuer, &me, "v-other");
@@ -1543,7 +1544,7 @@ async fn a_cycle_ignores_a_revocation_the_grants_issuer_did_not_sign() {
     test_env();
     let dir = tempfile::tempdir().unwrap();
     let vault = tempfile::tempdir().unwrap();
-    place_export(dir.path());
+    place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let issuer = SigningKey::from_bytes(&[31u8; 32]);
     let stranger = SigningKey::from_bytes(&[32u8; 32]);
