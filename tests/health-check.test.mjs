@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
 import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
 import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
@@ -260,6 +260,77 @@ test('checkBinaryVersionFile: ok when no pluginVersion is supplied (no compariso
   const result = checkBinaryVersionFile({ pluginData: dir });
   assert.equal(result.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkShimsExist: a correct Windows install is not four missing shims', () => {
+  // `platform` is injected rather than skipped-on-non-Windows, because the
+  // bug is invisible on the machine that finds it: the check looked for the
+  // POSIX name on every platform, so a Windows box with four correctly
+  // written `.cmd` shims reported all four missing and offered to reinstall
+  // them, every session, forever. No test could see that from macOS or Linux.
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-win-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const s of SHIM_NAMES) {
+    writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
+  }
+
+  const result = checkShimsExist({ home, platform: 'win32' });
+
+  assert.equal(result.status, 'ok', `detail: ${result.detail}`);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkShimsExist: the POSIX names do not satisfy a Windows install', () => {
+  // The other side. A check that passed on any file at all would satisfy the
+  // test above while still not knowing what the installer writes.
+  const home = mkdtempSync(join(tmpdir(), 'health-shims-win-posix-'));
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n');
+
+  const result = checkShimsExist({ home, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /ll-watch\.cmd/, 'and it names the file it wanted');
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('checkLocalBinOnPath: splits PATH on the platform delimiter', () => {
+  // On Windows every PATH entry contains a ':' of its own (the drive letter),
+  // so splitting on ':' produced segments like 'C' and '\\Users\\x\\.local\\bin'
+  // and matched nothing. This asserts the POSIX case still works rather than
+  // only the Windows one, because `delimiter` is what makes both true and a
+  // test of one direction cannot see a constant hardcoded the other way.
+  const home = mkdtempSync(join(tmpdir(), 'health-path-'));
+  const target = join(home, '.local', 'bin');
+
+  const onPath = checkLocalBinOnPath({ home, pathEnv: `/usr/bin${delimiter}${target}` });
+  assert.equal(onPath.status, 'ok', `detail: ${onPath.detail}`);
+
+  const offPath = checkLocalBinOnPath({ home, pathEnv: '/usr/bin' });
+  assert.equal(offPath.status, 'fail');
+
+  // The delimiter is INJECTED, not taken from this machine. On macOS and Linux
+  // `delimiter` is ':' and a hardcoded ':' passes every assertion above — the
+  // first version of this test could not fail on the platform it runs on,
+  // which is the whole reason the Windows bug survived.
+  const windowsish = checkLocalBinOnPath({
+    home,
+    pathEnv: `/usr/bin;${target}`,
+    pathDelimiter: ';',
+  });
+  assert.equal(windowsish.status, 'ok', 'a ";"-separated PATH must split on ";"');
+
+  const wrongDelimiter = checkLocalBinOnPath({
+    home,
+    pathEnv: `/usr/bin;${target}`,
+    pathDelimiter: ':',
+  });
+  assert.equal(
+    wrongDelimiter.status,
+    'fail',
+    'and splitting it on ":" must NOT find the target, or the assertion above proves nothing',
+  );
+  rmSync(home, { recursive: true, force: true });
 });
 
 test(

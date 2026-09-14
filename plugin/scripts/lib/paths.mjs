@@ -18,6 +18,17 @@ export function home() {
  */
 export const SHIM_NAMES = ['ll-watch', 'll-search', 'll-paths', 'll-run'];
 
+// The file the installer actually writes for a shim. On Windows that is
+// `<name>.cmd` -- cmd.exe will not execute an extensionless file -- and every
+// reader of ~/.local/bin has to agree with the writer about that. The health
+// check did not: it looked for the POSIX name on every platform, so a correct
+// Windows install reported all four shims missing and offered to reinstall
+// them, forever.
+export function shimFileName(name, platform = process.platform) {
+  if (!SHIM_NAMES.includes(name)) throw new Error(`${name} is not in SHIM_NAMES`);
+  return platform === 'win32' ? `${name}.cmd` : name;
+}
+
 // Encode a project directory into its ~/.claude/projects/<slug> segment.
 // Claude Code replaces every path separator AND every '.' and ':' with '-',
 // so /Users/x/.claude/p -> -Users-x--claude-p and C:\Users\x -> C--Users-x.

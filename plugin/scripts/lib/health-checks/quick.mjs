@@ -11,9 +11,9 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
-import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES } from '../paths.mjs';
+import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES, shimFileName } from '../paths.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
@@ -256,7 +256,7 @@ export function checkBinaryVersionFile({ pluginData, pluginVersion } = {}) {
   }
 }
 
-export function checkShimsExist({ home } = {}) {
+export function checkShimsExist({ home, platform = process.platform } = {}) {
   if (!home) {
     return makeCheck({
       id: CHECK_IDS['shims-exist'],
@@ -269,16 +269,24 @@ export function checkShimsExist({ home } = {}) {
   }
   const missing = [];
   for (const s of SHIM_NAMES) {
-    const p = join(home, '.local/bin', s);
+    // The name the INSTALLER writes, which is `<name>.cmd` on Windows. Looking
+    // for the POSIX name everywhere reported a correct Windows install as four
+    // missing shims and offered to reinstall them, every session.
+    const file = shimFileName(s, platform);
+    const p = join(home, '.local/bin', file);
     if (!existsSync(p)) {
-      missing.push(s);
+      missing.push(file);
       continue;
     }
+    // Windows decides executability by extension, not by a mode bit, and
+    // `statSync().mode` there has no meaningful 0o111. Asserting it would fail
+    // on every correctly installed .cmd.
+    if (platform === 'win32') continue;
     try {
       const stat = statSync(p);
-      if (!(stat.mode & 0o111)) missing.push(`${s} (not executable)`);
+      if (!(stat.mode & 0o111)) missing.push(`${file} (not executable)`);
     } catch {
-      missing.push(`${s} (stat error)`);
+      missing.push(`${file} (stat error)`);
     }
   }
   if (missing.length === 0) {
@@ -301,7 +309,7 @@ export function checkShimsExist({ home } = {}) {
   });
 }
 
-export function checkLocalBinOnPath({ home, pathEnv } = {}) {
+export function checkLocalBinOnPath({ home, pathEnv, pathDelimiter = delimiter } = {}) {
   if (!home) {
     return makeCheck({
       id: CHECK_IDS['local-bin-on-path'],
@@ -312,8 +320,11 @@ export function checkLocalBinOnPath({ home, pathEnv } = {}) {
       fix: 'Set $HOME',
     });
   }
-  const target = `${home}/.local/bin`;
-  const segments = (pathEnv || '').split(':');
+  const target = join(home, '.local', 'bin');
+  // `path.delimiter`, not ':'. Windows separates PATH entries with ';', so
+  // splitting on ':' there yields one giant segment that matches nothing --
+  // and the drive letters make every entry contain a ':' of its own.
+  const segments = (pathEnv || '').split(pathDelimiter);
   if (segments.includes(target)) {
     return makeCheck({
       id: CHECK_IDS['local-bin-on-path'],
