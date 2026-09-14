@@ -133,20 +133,8 @@ pub fn migrate_rollback(config_dir: &Path) -> anyhow::Result<MigrateResult> {
         anyhow::bail!("no seed found in keyring or encrypted store; cannot roll back");
     };
 
-    // Write plaintext (atomic)
-    if let Some(parent) = plaintext.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let tmp = plaintext.with_extension("seed.tmp");
-    std::fs::write(&tmp, seed)
+    crate::sync::atomic_file::write_private_bytes(&plaintext, &seed)
         .context("failed to write plaintext seed during rollback")?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
-    }
-    std::fs::rename(&tmp, &plaintext)
-        .context("failed to rename plaintext seed during rollback")?;
 
     // Update meta
     write_seed_meta(config_dir, SeedBackend::PlaintextLegacy, false)?;

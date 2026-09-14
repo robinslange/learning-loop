@@ -1237,13 +1237,13 @@ mod tests {
             "the cached index was replaced by one that could not be installed"
         );
         assert_installed(dir.path(), "v-cached", &good);
-        assert!(
-            std::fs::read_dir(peer_dir(dir.path(), "v-cached"))
-                .unwrap()
-                .filter_map(|e| e.ok())
-                .all(|e| !e.file_name().to_string_lossy().ends_with(".tmp")),
-            "the staged file outlived the write that failed"
-        );
+        let left_behind: Vec<String> = std::fs::read_dir(peer_dir(dir.path(), "v-cached"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n != "index.db")
+            .collect();
+        assert!(left_behind.is_empty(), "the failed write left {left_behind:?} behind");
     }
 
     /// R-C. The header is a claim; the bytes are the fact.

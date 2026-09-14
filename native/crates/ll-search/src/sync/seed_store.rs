@@ -18,7 +18,6 @@
 
 use std::path::Path;
 
-use anyhow::Context as _;
 use ed25519_dalek::SigningKey;
 use rand::RngCore;
 use zeroize::Zeroizing;
@@ -265,13 +264,7 @@ pub fn write_seed_meta(
         meta["migrated_at"] = serde_json::Value::String(crate::db::chrono_iso_now());
     }
 
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let tmp = path.with_extension("json.tmp");
-    atomic_write(&tmp, &path, meta.to_string().as_bytes())?;
-    Ok(())
+    crate::sync::atomic_file::write_private_bytes(&path, meta.to_string().as_bytes())
 }
 
 /// Auto-migrate a legacy plaintext seed off cleartext disk before any other
@@ -323,24 +316,6 @@ fn repair_plaintext_mode(config_dir: &Path) {
     }
     #[cfg(not(unix))]
     let _ = config_dir;
-}
-
-/// Atomic write: write to a `.tmp` sibling, then rename over the target.
-/// Sets 0o600 permissions on Unix.
-pub(super) fn atomic_write(tmp: &Path, target: &Path, data: &[u8]) -> anyhow::Result<()> {
-    std::fs::write(tmp, data)
-        .with_context(|| format!("failed to write tmp file {}", tmp.display()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(tmp, std::fs::Permissions::from_mode(0o600))?;
-    }
-
-    std::fs::rename(tmp, target)
-        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), target.display()))?;
-
-    Ok(())
 }
 
 #[cfg(test)]

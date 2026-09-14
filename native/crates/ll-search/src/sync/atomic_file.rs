@@ -99,6 +99,26 @@ where
     Ok(())
 }
 
+/// [`write_bytes`] with the staged file made owner-only before it is
+/// published, for the seed and its sidecars.
+///
+/// Setting the mode on the staged file rather than after the rename is the
+/// point: there is no window, however short, in which the secret is on disk
+/// under the umask's mode. Three callers hand-rolled this pair, each with a
+/// temp name of its own choosing.
+pub fn write_private_bytes(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
+    write_bytes(path, bytes, |staged| {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(staged, std::fs::Permissions::from_mode(0o600))
+                .with_context(|| format!("restricting {}", staged.display()))?;
+        }
+        let _ = staged;
+        Ok(())
+    })
+}
+
 /// How long to keep trying before giving up and saying so. Longer than any
 /// holder's critical section — every one of them is a small file read, a
 /// vector edit and a write — and short enough that a wedged machine reports
@@ -202,6 +222,32 @@ mod tests {
 
     /// The property the fixed `.json.tmp` did not have: two writes in flight
     /// at once are never using the same temp path.
+    /// The seed and its sidecars. `write_private_bytes` sets the mode on the
+    /// staged file, so there is no window — however short — in which the
+    /// secret sits on disk under the umask's mode. Asserting the published
+    /// file's mode is what a caller can actually observe; the staged file is
+    /// gone by then.
+    #[cfg(unix)]
+    #[test]
+    fn a_private_write_publishes_a_file_only_its_owner_can_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".seed-meta.json");
+
+        write_private_bytes(&path, b"{}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "a secret was published as {mode:o}");
+
+        // And replacing a world-readable file does not inherit its mode --
+        // the rename publishes the staged file, so the old one's permissions
+        // go with it.
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private_bytes(&path, b"{\"a\":1}").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "replacing a 0644 file left it at {mode:o}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"a\":1}");
+    }
+
     #[test]
     fn two_writes_never_share_a_temp_name() {
         let dir = tempfile::tempdir().unwrap();

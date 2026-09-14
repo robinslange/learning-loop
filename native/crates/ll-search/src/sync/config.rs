@@ -115,12 +115,7 @@ pub fn load_config(config_dir: &Path) -> anyhow::Result<FederationConfig> {
 /// this file's existence as proof the whole enrollment worked, so a
 /// half-written one would be a lie told to every later run.
 pub fn write_config(config_dir: &Path, config: &FederationConfig) -> anyhow::Result<()> {
-    let path = config_path(config_dir);
-    std::fs::create_dir_all(config_dir.join("federation"))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, serde_json::to_string_pretty(config)?)?;
-    std::fs::rename(&tmp, &path)?;
-    Ok(())
+    crate::sync::atomic_file::write_json(&config_path(config_dir), config)
 }
 
 pub fn resolve_config_dir_opt(opt: Option<String>) -> PathBuf {
