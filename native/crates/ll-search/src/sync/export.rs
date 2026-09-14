@@ -350,26 +350,34 @@ pub fn export_index(
 
 /// Credential-shaped regexes for scrubbing `listed`-tier summaries.
 ///
-/// Canonical source: `plugin/scripts/lib/secret-patterns.mjs` — port the 10
-/// patterns from there and keep this list in sync when that file changes.
-/// The PEM pattern uses `(?s:...)` so `.` matches newlines within just that
-/// alternation, mirroring JS's `[\s\S]*?`.
+/// Canonical source: `plugin/scripts/lib/secret-patterns.mjs`, where three
+/// JS scrubbers read the same list. This is a port, and a comment saying
+/// "keep it in sync" is not what keeps it in sync —
+/// `the_rust_and_js_secret_patterns_are_the_same_set` reads that file and
+/// asserts the two agree in both directions. The `kind` names are carried
+/// here for the same reason: they are what makes a divergence name itself.
+pub const SECRET_PATTERN_SOURCES: [(&str, &str); 10] = [
+    ("aws-key", r"AKIA[0-9A-Z]{16}"),
+    ("github-pat", r"gh[po]_[A-Za-z0-9]{36,}"),
+    ("anthropic-key", r"sk-ant-api[A-Za-z0-9_-]{20,}"),
+    ("stripe-key", r"sk_(?:live|test)_[A-Za-z0-9]{20,}"),
+    ("generic-sk-key", r"sk-[A-Za-z0-9_-]{20,}"),
+    ("cloudflare-pat", r"cfpat-[A-Za-z0-9_-]{20,}"),
+    ("bearer-token", r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}"),
+    ("slack-token", r"xox[abprs]-[A-Za-z0-9-]{10,}"),
+    ("jwt", r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"),
+    // `(?s:...)` so `.` matches newlines within just this alternation, which
+    // is how JS's `[\s\S]*?` is spelled here. The sync test knows about this
+    // one translation and about `\/`; it knows about no others, so a third
+    // spelling difference fails rather than passing quietly.
+    ("pem-key", r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)"),
+];
+
 static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
-    [
-        r"AKIA[0-9A-Z]{16}",
-        r"gh[po]_[A-Za-z0-9]{36,}",
-        r"sk-ant-api[A-Za-z0-9_-]{20,}",
-        r"sk_(?:live|test)_[A-Za-z0-9]{20,}",
-        r"sk-[A-Za-z0-9_-]{20,}",
-        r"cfpat-[A-Za-z0-9_-]{20,}",
-        r"Bearer\s+[A-Za-z0-9._\-/+=]{20,}",
-        r"xox[abprs]-[A-Za-z0-9-]{10,}",
-        r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
-        r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)",
-    ]
-    .iter()
-    .map(|p| Regex::new(p).expect("secret pattern must compile"))
-    .collect()
+    SECRET_PATTERN_SOURCES
+        .iter()
+        .map(|(_, p)| Regex::new(p).expect("secret pattern must compile"))
+        .collect()
 });
 
 /// Replace any credential-shaped substring with `[REDACTED]`.
