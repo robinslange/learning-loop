@@ -165,7 +165,7 @@ ll-run retraction-notify.mjs "<note_path>" \
   --replacement "<vault path of transition note or rewritten note>"
 ```
 
-The script targets only peers whose index contains the note and appends the event to the federation outbox (`retractions-YYYY-MM.jsonl`); the sync daemon delivers it. If the probe prints `not-federated` (exit 1), skip silently. A notify failure is non-fatal: report it in Phase 6 and continue; it must never block or roll back the retraction itself.
+The script targets only peers whose index contains the note and appends the event to the federation outbox (`retractions-YYYY-MM.jsonl`). **Nothing delivers that outbox today** — no client or hub code reads `federation/outbox/`, so the event is a local record of what you would tell peers, not a message they receive. Peers learn of the correction when they next fetch your index and the note is changed or gone. If the probe prints `not-federated` (exit 1), skip silently. A notify failure is non-fatal: report it in Phase 6 and continue; it must never block or roll back the retraction itself.
 
 ### Phase 6: Report
 

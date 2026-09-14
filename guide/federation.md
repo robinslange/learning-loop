@@ -289,7 +289,9 @@ file is written, so there is nothing to clean up by hand.
 
 ## Retractions
 
-`scripts/retraction-notify.mjs` emits a retraction event when a note that previously reached peers is retracted. Events append to `PLUGIN_DATA/federation/outbox/retractions-YYYY-MM.jsonl`, targeted at each peer whose index contains the retracted note:
+`scripts/retraction-notify.mjs` emits a retraction event when a note that previously reached peers is retracted. Events append to `PLUGIN_DATA/federation/outbox/retractions-YYYY-MM.jsonl`, targeted at each peer whose index contains the retracted note.
+
+**Nothing delivers this outbox yet.** No client or hub code reads `federation/outbox/`; the file is a local record of what you would tell peers. What actually reaches them is the next index they fetch, in which the note is changed or gone. The targeting is computed and written so that a delivery path has something to send when one exists.
 
 ```bash
 node scripts/retraction-notify.mjs <note_path> [--reason "<reason>"] [--replacement <new_note_path>]

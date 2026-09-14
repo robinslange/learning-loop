@@ -8,6 +8,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { CHECK_IDS } from '../plugin/scripts/lib/health-checks/types.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
 const SKILLS = join(ROOT, 'plugin', 'skills');
@@ -29,13 +30,40 @@ test('doctor documents the four federation checks', () => {
   assert.deepEqual(missing, [], `doctor must check: ${missing.join(', ')}`);
 });
 
-test('doctor says the federation checks are not in the health-check JSON', () => {
+test('doctor names every federation check health-check.mjs actually runs', () => {
+  // This pinned the prose "health-check.mjs does not cover federation" until
+  // `federation-sync-health` was added to CHECK_IDS and implemented in
+  // quick.mjs. The sentence became false and the test went on enforcing it,
+  // which is the failure mode of asserting a claim instead of deriving it:
+  // the doc-lint kept the documentation wrong on purpose.
+  //
+  // Derived from CHECK_IDS, so a second federation check has to be documented
+  // the day it is added, and a check that is removed stops being required.
+  const doc = readFileSync(join(SKILLS, 'doctor', 'SKILL.md'), 'utf8');
+  const federationChecks = Object.keys(CHECK_IDS).filter((id) => id.includes('federation'));
+
+  assert.ok(
+    federationChecks.length > 0,
+    'CHECK_IDS declares no federation check; if that is deliberate this test ' +
+      'should be asserting the doc says so, not passing vacuously',
+  );
+  const undocumented = federationChecks.filter((id) => !doc.includes(id));
+  assert.deepEqual(
+    undocumented,
+    [],
+    `doctor must name the federation checks health-check.mjs runs: ${undocumented.join(', ')}`,
+  );
+});
+
+test('doctor still says its own federation checks are not in that JSON', () => {
+  // The other half. Naming `federation-sync-health` must not leave a reader
+  // thinking the whole of Step 4.5 appears in the health-check output — it is
+  // one signal, and the rest are manual.
   const doc = readFileSync(join(SKILLS, 'doctor', 'SKILL.md'), 'utf8');
   assert.match(
-    doc,
-    /health-check\.mjs`? does not cover federation/,
-    'health-check.mjs emits no federation row; a doctor that implies otherwise ' +
-      'sends a reader looking for a check that never ran',
+    flat(doc),
+    /NOT in that JSON|does not cover federation/,
+    'doctor must say which federation checks the reader has to run by hand',
   );
 });
 
