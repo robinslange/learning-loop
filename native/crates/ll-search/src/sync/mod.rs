@@ -13,7 +13,6 @@ pub mod grants;
 pub mod handshake;
 pub mod client;
 pub mod fetch;
-pub mod compression;
 pub mod watch;
 pub mod key_id;
 pub mod words;

@@ -407,43 +407,6 @@ fn summarize(text: &str, max_chars: usize) -> String {
     scrub(&format!("{}...", &truncated[..last_space]))
 }
 
-/// Compute a SQLite patchset from `base_db` to `current_db` covering the four
-/// content-bearing tables (`notes`, `notes_content`, `embeddings`, `links`).
-///
-/// `meta` is intentionally excluded so a re-export that only updates
-/// `exported_at` doesn't generate a one-row meta patchset on every sync.
-///
-/// The returned blob can be applied on the hub via
-/// `Connection::apply_strm` (or `rusqlite::session::Changeset::apply`)
-/// to bring the hub's stored base DB up to the current state. Uses
-/// `patchset_strm` (new values only) rather than `changeset_strm` (before+after)
-/// to halve the wire cost on embedding updates where each row is ~1.5 KB.
-pub fn compute_patchset(base_db: &Path, current_db: &Path) -> anyhow::Result<Vec<u8>> {
-    use rusqlite::session::Session;
-    use rusqlite::DatabaseName;
-
-    let conn = Connection::open(current_db).context("open current db")?;
-    conn.execute(
-        &format!("ATTACH DATABASE '{}' AS base", base_db.display()),
-        [],
-    )
-    .context("attach base db")?;
-
-    let mut session = Session::new(&conn).context("create session")?;
-    session.attach(None).context("attach session to all tables")?;
-
-    let base = DatabaseName::Attached("base");
-    for table in ["notes", "notes_content", "embeddings", "links"] {
-        session
-            .diff(base, table)
-            .with_context(|| format!("session.diff for {table}"))?;
-    }
-
-    let mut buf = Vec::new();
-    session.patchset_strm(&mut buf).context("patchset_strm")?;
-    Ok(buf)
-}
-
 /// Build a SOURCE index in the shape `db/schema.rs` produces.
 ///
 /// Lives outside `mod tests` because `sync::client`'s tests need a real
@@ -577,6 +540,7 @@ pub(crate) fn public_vault_with_note(dir: &Path) {
     std::fs::write(dir.join("n.md"), "---\nvisibility: public\n---\n\nBody.").unwrap();
 }
 
+#[cfg(test)]
 /// The same note with no `visibility` in its frontmatter, so the config's
 /// default is what decides its tier. `public_vault_with_note` lifts the note
 /// to `public` whatever the config says, which is the wrong fixture for any
@@ -956,94 +920,6 @@ mod tests {
         assert!(!out.exists(), "no export artefact may be left behind by a refused export");
     }
 
-    fn build_minimal_export_db(path: &Path) {
-        let c = Connection::open(path).unwrap();
-        c.execute_batch(
-            "CREATE TABLE notes (
-                 id INTEGER PRIMARY KEY,
-                 path TEXT NOT NULL,
-                 title TEXT NOT NULL,
-                 tags TEXT,
-                 tier TEXT NOT NULL,
-                 updated_at INTEGER NOT NULL
-             );
-             CREATE TABLE notes_content (
-                 id INTEGER PRIMARY KEY,
-                 title TEXT,
-                 tags TEXT,
-                 body TEXT
-             );
-             CREATE TABLE embeddings (
-                 id INTEGER PRIMARY KEY,
-                 data BLOB NOT NULL
-             );
-             CREATE TABLE links (
-                 source_id INTEGER NOT NULL,
-                 target_path TEXT NOT NULL,
-                 UNIQUE(source_id, target_path)
-             );
-             INSERT INTO notes (id, path, title, tags, tier, updated_at)
-               VALUES (1, 'a.md', 'A', '', 'public', 0),
-                      (2, 'b.md', 'B', '', 'public', 0);
-             INSERT INTO notes_content (id, title, tags, body)
-               VALUES (1, 'A', '', 'body a'),
-                      (2, 'B', '', 'body b');",
-        )
-        .unwrap();
+
+    
     }
-
-    #[test]
-    fn compute_patchset_returns_nonempty_for_insert_and_update() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("base.db");
-        let cur = dir.path().join("cur.db");
-
-        build_minimal_export_db(&base);
-        std::fs::copy(&base, &cur).unwrap();
-
-        {
-            let c = Connection::open(&cur).unwrap();
-            c.execute(
-                "INSERT INTO notes (id, path, title, tags, tier, updated_at) \
-                 VALUES (3, 'c.md', 'C', '', 'public', 0)",
-                [],
-            )
-            .unwrap();
-            c.execute(
-                "INSERT INTO notes_content (id, title, tags, body) VALUES (3, 'C', '', 'body c')",
-                [],
-            )
-            .unwrap();
-            c.execute("UPDATE notes_content SET body = 'body a v2' WHERE id = 1", [])
-                .unwrap();
-        }
-
-        let patch = compute_patchset(&base, &cur).unwrap();
-        assert!(
-            !patch.is_empty(),
-            "expected non-empty patchset for 2 inserts + 1 update"
-        );
-        assert!(
-            patch.len() < 4096,
-            "small change shouldn't produce >4KB patchset, got {}",
-            patch.len()
-        );
-    }
-
-    #[test]
-    fn compute_patchset_empty_when_dbs_identical() {
-        let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().join("base.db");
-        let cur = dir.path().join("cur.db");
-
-        build_minimal_export_db(&base);
-        std::fs::copy(&base, &cur).unwrap();
-
-        let patch = compute_patchset(&base, &cur).unwrap();
-        assert!(
-            patch.is_empty(),
-            "identical DBs should produce empty patchset, got {} bytes",
-            patch.len()
-        );
-    }
-}

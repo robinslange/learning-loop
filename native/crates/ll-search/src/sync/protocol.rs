@@ -1,11 +1,14 @@
-//! Sync protocol surface: cross-cutting constants and re-exports of the
-//! control-plane messages (`messages`) and data-plane frames (`frame`).
+//! Sync protocol surface: cross-cutting constants and the data-plane
+//! frames (`frame`).
+//!
+//! The v2/v3 JSON control plane that sat beside them is gone. `protocol_v5`
+//! is the only control plane this client speaks, and `messages.rs` was the
+//! last place it still knew the word `sync-reject` — a tag no v5 consumer can
+//! decode, kept alive by nothing but its own tests.
 
 mod frame;
-mod messages;
 
 pub use frame::{manifest_root, ChunkedFrame, Envelope};
-pub use messages::{ClientMessage, HubMessage};
 
 /// Maximum envelope size accepted on either send or receive.
 ///
@@ -40,16 +43,6 @@ pub const HUB_INBOUND_CAP: usize = 16 * 1024 * 1024;
 /// refuses to send what it is willing to receive (or the reverse) is a
 /// disagreement waiting for a vault to grow into it.
 pub const HUB_INBOUND_FRAME_CAP: usize = HUB_INBOUND_CAP;
-
-/// Protocol version this client advertises in `SyncHello`.
-pub const PROTOCOL_VERSION_FRAMED: u32 = 2;
-
-/// Protocol version that introduces chunked + body-kind + body-encoding uploads.
-pub const PROTOCOL_VERSION_CHUNKED: u32 = 3;
-
-/// Latest protocol version this client knows how to speak. Sent in `SyncHello`;
-/// the hub negotiates down via `min(client, server)`.
-pub const PROTOCOL_VERSION_LATEST: u32 = PROTOCOL_VERSION_CHUNKED;
 
 /// Bytes preceding the body in a v3 chunked binary message:
 /// 4 (seq BE u32) + 4 (total BE u32) + 4 (body_size BE u32) + 32 (sha256).
