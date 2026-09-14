@@ -123,10 +123,11 @@ impl Confirm for TtyConfirm {
         eprintln!("  {phrase}");
         eprintln!();
         eprintln!("Write it down offline. They are a key of your own: run");
-        eprintln!("`ll-search recover \"<the 24 words>\"` on a machine that has lost its");
-        eprintln!("identity, and this machine's next sync is what lodges the grant that");
-        eprintln!("lets that key in. Nothing on disk holds the words, so losing them is");
-        eprintln!("final.");
+        eprintln!("`ll-search recover` on a machine that has lost its identity and type");
+        eprintln!("them at the prompt — never as an argument, where `ps` and your shell");
+        eprintln!("history would both keep a copy. This machine's next sync is what");
+        eprintln!("lodges the grant that lets that key in. Nothing on disk holds the");
+        eprintln!("words, so losing them is final.");
         Self::ask("Have you written it down?")
     }
 }

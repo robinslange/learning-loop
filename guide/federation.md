@@ -112,7 +112,7 @@ There is no equivalent for a `follow` someone holds on your vault. Nothing sends
 ## Recovering an identity
 
 ```bash
-ll-search recover "<24 words>"
+ll-search recover        # then type the 24 words at the prompt
 ```
 
 Recovering the identity already on this machine needs nothing extra -- nothing is replaced, so there is nothing to authorise. Recovering a **different** identity over an existing one requires `--force`, and what that guards is the loss, not the write: every grant naming the old key stays signed, valid, and unreachable, while the machine still looks enrolled.

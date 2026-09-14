@@ -431,7 +431,7 @@ ll-search sync          <db> <vault> [--hub-endpoint URL] [--config-dir DIR]
 ll-search status        [--config-dir DIR]              # federation status, plain text, local files only
 ll-search join          <hub> <invite> <vault> [--config-dir DIR]
 ll-search identity      [--config-dir DIR]
-ll-search recover       <phrase> [--force] [--config-dir DIR]
+ll-search recover       [-] [--force] [--config-dir DIR]   # phrase on stdin, never argv
 ll-search migrate-seed  [--config-dir DIR] [--rollback]
 ll-search visibility-backfill <vault> [--dry-run] [--config-dir DIR]
 ll-search version
