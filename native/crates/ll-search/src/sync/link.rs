@@ -1607,10 +1607,12 @@ mod tests {
 
         // What only the hub knows: A owns a vault, and the hub holds an index
         // for it.
-        let index = b"pretend-this-is-the-other-machines-index";
+        // A real export: installing one runs an FTS rebuild over it, so a
+        // fixture that is not a database cannot be installed at all.
+        let index = crate::sync::fetch::index_bytes("a-machine");
         let world = test_hub::HubVaults::new()
             .owned_by("v-a-machine", &a)
-            .holding("v-a-machine", index);
+            .holding("v-a-machine", &index);
         let (hub, lodged) = test_hub::spawn_grant_hub_over(world, served, vec![]).await;
         write_hub_config(joiner.path(), &hub.ws_url(), None);
 
@@ -1652,10 +1654,7 @@ mod tests {
             "the vault the grant reached was read; this machine's own was left \
              to the upload half"
         );
-        assert_eq!(
-            std::fs::read(config::peer_index_path(joiner.path(), "v-a-machine")).unwrap(),
-            index,
-        );
+        crate::sync::fetch::assert_installed(joiner.path(), "v-a-machine", &index);
         assert_eq!(lodged.lock().unwrap().len(), 1, "one grant lodged: B's own half");
     }
 

@@ -527,6 +527,20 @@ fn place_export(config_dir: &Path, vault_dir: &Path) {
     .unwrap();
 }
 
+/// An installed peer index records the sha of the bytes it was built from.
+/// Comparing the file to those bytes cannot work: the install adds an FTS
+/// table over them, so it is never byte-equal to the wire again.
+fn assert_peer_index_from(config_dir: &Path, vault_id: &str, bytes: &[u8]) {
+    use sha2::Digest;
+    let path = config_dir.join(format!("federation/data/peers/{vault_id}/index.db"));
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let recorded: String = conn
+        .query_row("SELECT value FROM meta WHERE key = 'source_sha256'", [], |r| r.get(0))
+        .unwrap_or_else(|e| panic!("{vault_id} records no source sha: {e}"));
+    assert_eq!(recorded, hex::encode(sha2::Sha256::digest(bytes)),
+        "{vault_id} was installed from bytes other than the ones the hub served");
+}
+
 /// The sha the client will declare for the export just placed: the hub acks
 /// exactly this, and on the skip path it is what the hub must already hold.
 fn export_sha(config_dir: &Path) -> String {
@@ -758,7 +772,7 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
     let vault = tempfile::tempdir().unwrap();
     place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
-    let served = b"pretend-this-is-a-peer-index".to_vec();
+    let served = peer_index_bytes();
     let (addr, asked) = spawn_hub_with(
         stale(),
         OnUpload::Ack, OnGrant::Ack,
@@ -778,10 +792,7 @@ async fn a_cycle_that_could_not_read_a_followed_vault_records_how_many() {
 
     assert_eq!(result.skipped_fetches, vec!["v-refused".to_string()]);
     assert_eq!(result.fetched.len(), 1, "the second vault was still fetched");
-    assert_eq!(
-        std::fs::read(dir.path().join("federation/data/peers/v-served/index.db")).unwrap(),
-        served,
-    );
+    assert_peer_index_from(dir.path(), "v-served", &served);
 
     assert_eq!(*asked.lock().unwrap(), vec!["v-refused".to_string(), "v-served".to_string()],
         "the refusal did not stop the client asking for the next one");
@@ -805,7 +816,7 @@ async fn a_cycle_that_read_everything_records_no_skips() {
         stale(),
         OnUpload::Ack, OnGrant::Ack,
         vec![follow_grant(&me, "v-served")],
-        vec![("v-served".to_string(), Fetch::Serve(b"peer-index".to_vec()))],
+        vec![("v-served".to_string(), Fetch::Serve(peer_index_bytes()))],
     )
     .await;
     let config = config_for(dir.path(), addr);
@@ -834,7 +845,7 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
     place_export(dir.path(), vault.path());
     let me = client_key_id(dir.path());
     let (_approver, inbound) = link_grant(&me);
-    let served = b"pretend-this-is-the-other-machines-index".to_vec();
+    let served = peer_index_bytes();
     let (addr, seen) = spawn_hub_with(
         stale(),
         OnUpload::Ack, OnGrant::Ack,
@@ -850,10 +861,7 @@ async fn a_linked_machine_reads_the_vault_the_hub_listed_for_it() {
             .expect("the cycle completes");
 
     assert_eq!(result.fetched.len(), 1, "the vault the hub listed was read");
-    assert_eq!(
-        std::fs::read(dir.path().join("federation/data/peers/v-other-machine/index.db")).unwrap(),
-        served,
-    );
+    assert_peer_index_from(dir.path(), "v-other-machine", &served);
     let fetched: Vec<String> = seen
         .lock()
         .unwrap()

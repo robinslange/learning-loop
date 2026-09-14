@@ -56,6 +56,26 @@ fn parent_of(path: &Path) -> anyhow::Result<&Path> {
 /// between the write and the rename, and the safety of that gap is the
 /// filesystem's promise, not ours.
 pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Result<()> {
+    let json = serde_json::to_vec_pretty(value)?;
+    write_bytes(path, &json, |_| Ok(()))
+}
+
+/// Write `bytes` to a uniquely named sibling, let `prepare` work on that
+/// staged file, and rename it over `path` only if `prepare` succeeded.
+///
+/// The staging step is not decoration. A caller that has to post-process what
+/// it wrote — the peer-index fetch rebuilds FTS over it — has no way to do
+/// that in place without publishing a file that is neither the old one nor
+/// the finished one, for as long as the rebuild takes. Preparing the temp
+/// makes the whole sequence a single `rename(2)`, so a concurrent reader
+/// opening it READ_ONLY sees the last finished index or the new one.
+///
+/// `prepare` receives the staged path. If it fails the temp is removed and
+/// `path` is left exactly as it was.
+pub fn write_bytes<F>(path: &Path, bytes: &[u8], prepare: F) -> anyhow::Result<()>
+where
+    F: FnOnce(&Path) -> anyhow::Result<()>,
+{
     let parent = parent_of(path)?;
     std::fs::create_dir_all(parent)
         .with_context(|| format!("creating {}", parent.display()))?;
@@ -64,8 +84,14 @@ pub fn write_json<T: Serialize + ?Sized>(path: &Path, value: &T) -> anyhow::Resu
         path,
         &format!("{}.{}.tmp", std::process::id(), WRITE_SEQ.fetch_add(1, Ordering::Relaxed)),
     );
-    let json = serde_json::to_vec_pretty(value)?;
-    std::fs::write(&tmp, &json).with_context(|| format!("writing {}", tmp.display()))?;
+    let staged = (|| {
+        std::fs::write(&tmp, bytes).with_context(|| format!("writing {}", tmp.display()))?;
+        prepare(&tmp)
+    })();
+    if let Err(e) = staged {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e).with_context(|| format!("renaming {} into place", tmp.display()));
