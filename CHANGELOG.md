@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **Two notes that exchanged paths exchanged `note_uuid`s.** `note_uuid` is the
+  address federation publishes a note under, so this put one note's body out
+  under the other's id — silently, and worse in kind than the reindex abort the
+  guard was added to prevent. The move pass asked each row "is my destination
+  free?" and skipped the move when it was not; in a swap the answer is no for
+  both, because each destination is held by the row that is itself about to
+  leave. Both moves were refused and the insert pass then wrote each file's
+  content onto whichever row already sat at its path. The mapping from id to
+  path is a bijection, so it is now applied as one: every row sitting where a
+  different row belongs is parked first, and only then does anything land.
+  Cycles of any length work — a swap is the shortest. Verified against the real
+  7,099-note index: an unchanged vault parks and moves nothing, and an injected
+  swap plus three-way rotation resolves with no row stranded and no id lost.
+
 - **Every sync re-wrote and re-indexed every followed peer vault.**
   `Outcome::AlreadyCurrent` could never fire: installing a fetched index builds
   an FTS5 table over the hub's bytes, so the file stops being byte-equal to what
