@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.7
+
 ### Fixed
 
 - **rustls 0.23.40 -> 0.23.45 for RUSTSEC-2026-0285**, TLS 1.3 handshake
