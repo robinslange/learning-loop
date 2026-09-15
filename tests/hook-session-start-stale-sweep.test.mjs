@@ -1,7 +1,6 @@
 // Tests for the stale-artifact sweeps that run on SessionStart.
 //
-// cache-cleanup.mjs covers two leftovers the version-prune never reaches
-// because they live in the *current* version's plugin-data:
+// cache-cleanup.mjs covers two leftovers in the current plugin-data:
 //   1. bin/ll-search.*-bak — orphaned backups from the old delta-patch updater.
 //   2. convergence/*.json older than CONVERGENCE_TTL_MS — regenerable telemetry.
 //
@@ -352,4 +351,19 @@ test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backup
   });
 
   rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+test('cache-cleanup leaves superseded sibling versions on disk', async () => {
+  const fx = makeFixture({ version: '2.0.7' });
+  const older = join(fx.sandbox, 'plugin', '2.0.6');
+  mkdirSync(join(older, 'hooks'), { recursive: true });
+  writeFileSync(join(older, 'hooks', 'session-start.js'), '// an open session still runs this\n');
+
+  await withSandbox(fx, async () => {
+    await runCacheCleanup(fx.ctx);
+    assert.ok(
+      existsSync(join(older, 'hooks', 'session-start.js')),
+      'open sessions execute from 2.0.6 until they reload; Claude Code reaps it via .orphaned_at',
+    );
+  });
 });

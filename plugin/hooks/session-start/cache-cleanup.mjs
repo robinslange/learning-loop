@@ -1,25 +1,16 @@
-// hooks/session-start/cache-cleanup.mjs : stale cache version prune + shim installer
+// hooks/session-start/cache-cleanup.mjs : shim installer + stale-artifact sweep
 // + binary auto-update.
-// Removes plugin-data directories strictly older than the running version, ensures
-// the CLI shims are installed, and triggers a detached binary
-// download when the installed ll-search version diverges from the plugin's
-// manifest (.claude-plugin/plugin.json) version (plugin auto-update bumps the
-// marketplace files but the native binary lags otherwise).
+//
+// Superseded plugin versions are NOT removed here. Claude Code marks them with
+// .orphaned_at and reaps them itself after a grace period; deleting them at
+// SessionStart pulled the code out from under every session still running the
+// previous version and forced a reload in all of them.
 
-import {
-  readdirSync,
-  readFileSync,
-  rmSync,
-  mkdirSync,
-  existsSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+import { readdirSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
-import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
 import { DATA_FILES, DATA_PATHS, SHIM_NAMES } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
@@ -30,19 +21,6 @@ function stripV(s) {
 }
 
 export async function run(ctx) {
-  // Stale-version cache prune: remove versions strictly older than running.
-  try {
-    const cacheParent = resolve(ctx.pluginDir, '..');
-    for (const entry of readdirSync(cacheParent)) {
-      if (!isPlainSemver(entry)) continue;
-      if (semverCmp(entry, ctx.pluginVersion) < 0) {
-        rmSync(join(cacheParent, entry), { recursive: true, force: true });
-      }
-    }
-  } catch (err) {
-    logError('session-start.cache-cleanup', err);
-  }
-
   // Shim installer: ensure the stable shell wrappers exist.
   //
   // Driven by SHIM_NAMES rather than a list written out here, because this is
