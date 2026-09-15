@@ -44,8 +44,7 @@ export async function run(ctx) {
   }
 
   // Stale-artifact sweep in the live plugin-data dir. Two leftovers accumulate
-  // here that the version-prune above never reaches (they live in the *current*
-  // version's data, not an old version dir):
+  // in the *current* version's plugin-data:
   //   1. bin/ll-search.*-bak — orphaned binary backups (~290M each) from the
   //      old delta-patch updater. That code path is gone, but installs that
   //      passed through it still carry the backups; nothing ever removed them.
