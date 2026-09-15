@@ -167,6 +167,99 @@ pub fn insert_embedded(
     Ok(())
 }
 
+/// Point every row at the path its note occupies now, so a note that MOVED
+/// stays the same note. Identity is `note_uuid`; `path` is an attribute of it.
+///
+/// Without this, a promoted note is an INSERT at its new path while the stale
+/// row still holds its uuid, and `idx_notes_uuid` (UNIQUE on note_uuid WHERE
+/// NOT NULL) aborts the entire reindex: "UNIQUE constraint failed:
+/// notes.note_uuid". Not the file, the whole run — the deletion pass that
+/// would have cleared the stale row runs after the inserts. Moving a note from
+/// `0-inbox` to `3-permanent` is exactly this, and it is what every promotion
+/// does. Following the id also keeps the note's embedding: a move is not a
+/// content change.
+///
+/// `resolve_note_uuids` gives a BIJECTION — its `seen` set makes ids unique
+/// across the vault, and rel_paths are unique by construction — so this is a
+/// permutation of paths over rows, and `desired_paths` declares both halves of
+/// that as constraints rather than trusting them.
+///
+/// Applying a permutation row by row is where the previous version went wrong.
+/// It asked each row "is my destination free?" and skipped the move when it
+/// was not. For two notes that exchange paths the answer is no for both, since
+/// each destination is held by the row that is itself about to leave, so both
+/// moves were refused — and the insert pass then wrote each file's content onto
+/// whichever row already sat at its path, leaving two notes wearing each
+/// other's `note_uuid`. That id is the address federation publishes a note
+/// under, so the wrong body goes out under it. Silent, and worse in kind than
+/// the abort it replaced.
+///
+/// So no row is asked about its destination. There is one question instead,
+/// asked of every row at once: is the note that belongs at my path a DIFFERENT
+/// row? Everyone for whom that is true is evicted, and then everyone sits
+/// down. By the time anything lands its seat is vacant by construction, so
+/// cycles of any length work and a swap is just the shortest one.
+///
+/// Asking it that way is also what keeps a row with no id off the eviction
+/// list. A NULL `note_uuid` at a path the vault still has is almost always
+/// that note with its column unfilled — the absorbing state the backfill pass
+/// below exists for — and it is a ghost only when the id that owns the path
+/// already has a row elsewhere. "Someone else's row belongs here" separates
+/// those two; "someone else's id belongs here" does not, and evicting on it
+/// strands the note outside the vault's path space where the backfill can
+/// never reach it.
+///
+/// The parking namespace is `moving:<id>`: unique because `id` is the primary
+/// key, and unreachable by any real note because `walk_vault` emits only paths
+/// ending in `.md`.
+///
+/// A row that parks and never lands is that ghost. It stays parked, which puts
+/// it outside `vault_paths`, and the deletion pass in `reindex` collects it.
+fn follow_moved_notes(
+    conn: &Connection,
+    vault_files: &[WalkEntry],
+    note_uuids: &HashMap<String, String>,
+) -> Result<usize> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(
+        "CREATE TEMP TABLE IF NOT EXISTS desired_paths (
+             note_uuid TEXT PRIMARY KEY,
+             path      TEXT NOT NULL UNIQUE
+         );
+         DELETE FROM desired_paths;",
+    )?;
+    {
+        let mut ins =
+            tx.prepare("INSERT INTO desired_paths (note_uuid, path) VALUES (?1, ?2)")?;
+        for file in vault_files {
+            if let Some(uuid) = note_uuids.get(&file.rel_path) {
+                ins.execute(params![uuid, file.rel_path])?;
+            }
+        }
+    }
+
+    tx.execute(
+        "UPDATE notes SET path = 'moving:' || id
+          WHERE EXISTS (SELECT 1 FROM desired_paths d
+                          JOIN notes owner ON owner.note_uuid = d.note_uuid
+                         WHERE d.path = notes.path
+                           AND owner.id <> notes.id)",
+        [],
+    )?;
+
+    let landed = tx.execute(
+        "UPDATE notes
+            SET path = (SELECT d.path FROM desired_paths d WHERE d.note_uuid = notes.note_uuid)
+          WHERE note_uuid IN (SELECT note_uuid FROM desired_paths)
+            AND path <> (SELECT d.path FROM desired_paths d
+                          WHERE d.note_uuid = notes.note_uuid)",
+        [],
+    )?;
+
+    tx.commit()?;
+    Ok(landed)
+}
+
 pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<IndexResult> {
     if force {
         eprintln!("Force rebuild: dropping all tables...");
@@ -182,44 +275,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     // incremental index would leave most of the vault unaddressable.
     let (note_uuids, duplicate_ids) = resolve_note_uuids(Path::new(vault_path), &vault_files)?;
 
-    // A note that MOVED is the same note. Identity is `note_uuid`, so the row
-    // follows the id rather than the path.
-    //
-    // Without this, a promoted note is an INSERT at its new path while the
-    // stale row still holds its uuid, and `idx_notes_uuid` (UNIQUE on
-    // note_uuid WHERE NOT NULL) aborts the entire reindex: "UNIQUE constraint
-    // failed: notes.note_uuid". Not the file, the whole run. The deletion pass
-    // that would have cleared the stale row runs AFTER the inserts, so it
-    // never gets the chance.
-    //
-    // Moving a note from 0-inbox to 3-permanent is exactly this, and it is
-    // what every promotion does, so an ordinary vault workflow could leave the
-    // index unable to rebuild at all.
-    //
-    // Following the id also keeps the note's embedding: a move is not a
-    // content change, and re-embedding it would be work for nothing.
-    let moved = {
-        let tx = conn.unchecked_transaction()?;
-        let mut n = 0usize;
-        {
-            let mut stmt = tx.prepare(
-                // The NOT EXISTS keeps this from colliding on `path` if some
-                // row already sits at the destination; that row is the
-                // authority for the path and the loop below decides its fate.
-                "UPDATE notes SET path = ?1
-                 WHERE note_uuid = ?2
-                   AND path <> ?1
-                   AND NOT EXISTS (SELECT 1 FROM notes n2 WHERE n2.path = ?1)",
-            )?;
-            for file in &vault_files {
-                if let Some(uuid) = note_uuids.get(&file.rel_path) {
-                    n += stmt.execute(rusqlite::params![file.rel_path, uuid])?;
-                }
-            }
-        }
-        tx.commit()?;
-        n
-    };
+    let moved = follow_moved_notes(conn, &vault_files, &note_uuids)?;
     if moved > 0 {
         eprintln!("Followed {moved} note(s) to a new path by their stable id.");
     }
@@ -927,4 +983,196 @@ mod tests {
              re-embedded for having changed folder"
         );
     }
+
+    /// Two notes that exchange paths must exchange rows, not identities.
+    ///
+    /// `note_uuid` is the address federation publishes a note under, so a row
+    /// that keeps its old id while the other note's file arrives at its path
+    /// publishes one note's body under the other's id. The old guard refused
+    /// BOTH moves — each destination was held by the row that was itself about
+    /// to leave — and left each row sitting under a path whose file is now a
+    /// different note.
+    ///
+    /// Both files carry the same mtime, which is what a swap done by one
+    /// script produces, and it keeps the assertion on identity: nothing is
+    /// re-read or re-embedded, so what the rows say afterwards is entirely the
+    /// work of the move pass.
+    #[test]
+    fn two_notes_that_swap_paths_swap_rows_rather_than_identities() {
+        let dir = TempDir::new().unwrap();
+        let db = TempDir::new().unwrap();
+        let conn = open_or_create_db(db.path().join("i.db").to_str().unwrap()).unwrap();
+
+        let id_a = "01926d7e-0000-7000-8000-0000000000a0";
+        let id_b = "01926d7e-0000-7000-8000-0000000000b0";
+
+        // On disk AFTER the swap: a.md holds the note whose id is B.
+        std::fs::write(
+            dir.path().join("a.md"),
+            format!("---\nid: {id_b}\ntitle: B\n---\n\nBody of B."),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("b.md"),
+            format!("---\nid: {id_a}\ntitle: A\n---\n\nBody of A."),
+        )
+        .unwrap();
+
+        let mtimes: HashMap<String, f64> = walk_vault(dir.path().to_str().unwrap())
+            .into_iter()
+            .map(|e| (e.rel_path, e.mtime))
+            .collect();
+
+        // The index as it stood BEFORE the swap: A at a.md, B at b.md. Each
+        // row carries the mtime of the file it will end up under, so a correct
+        // move leaves both notes unchanged rather than re-embedded.
+        conn.execute(
+            "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+             VALUES ('a.md', 'hash-a', ?2, 'A', '', ?1)",
+            rusqlite::params![id_a, mtimes["b.md"]],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+             VALUES ('b.md', 'hash-b', ?2, 'B', '', ?1)",
+            rusqlite::params![id_b, mtimes["a.md"]],
+        )
+        .unwrap();
+
+        reindex(&conn, dir.path().to_str().unwrap(), false)
+            .expect("a swap must not abort the reindex");
+
+        let path_of = |id: &str| -> String {
+            conn.query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+                .unwrap()
+        };
+        let title_at = |path: &str| -> String {
+            conn.query_row("SELECT title FROM notes WHERE path = ?1", [path], |r| r.get(0))
+                .unwrap()
+        };
+
+        assert_eq!(path_of(id_a), "b.md", "note A must follow its id to b.md");
+        assert_eq!(path_of(id_b), "a.md", "note B must follow its id to a.md");
+        assert_eq!(
+            title_at("a.md"),
+            "B",
+            "the row at a.md must be the row for the note now at a.md; holding id A there \
+             publishes B's body under A's id"
+        );
+        assert_eq!(title_at("b.md"), "A", "and the same the other way round");
+
+        let rows: i64 =
+            conn.query_row("SELECT count(*) FROM notes", [], |r| r.get(0)).unwrap();
+        assert_eq!(rows, 2, "two notes, two rows");
+    }
+
+    /// Lay `(path, note_uuid)` rows down and hand back the connection, so a
+    /// test of the move pass says only what it is about.
+    #[cfg(test)]
+    fn rows_at(db: &TempDir, rows: &[(&str, Option<&str>)]) -> Connection {
+        let conn = open_or_create_db(db.path().join("i.db").to_str().unwrap()).unwrap();
+        for (path, uuid) in rows {
+            conn.execute(
+                "INSERT INTO notes (path, content_hash, mtime, title, tags, note_uuid)
+                 VALUES (?1, 'h', 1.0, ?1, '', ?2)",
+                rusqlite::params![path, uuid],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    /// Build the `(WalkEntry, note_uuids)` pair the move pass takes, without
+    /// touching a disk: what it does is decided entirely by the mapping.
+    #[cfg(test)]
+    fn desired(pairs: &[(&str, &str)]) -> (Vec<WalkEntry>, HashMap<String, String>) {
+        let files: Vec<WalkEntry> = pairs
+            .iter()
+            .map(|(path, _)| WalkEntry {
+                rel_path: (*path).to_string(),
+                full_path: (*path).to_string(),
+                mtime: 1.0,
+            })
+            .collect();
+        let ids = pairs
+            .iter()
+            .map(|(path, id)| ((*path).to_string(), (*id).to_string()))
+            .collect();
+        (files, ids)
+    }
+
+    /// A swap is the shortest cycle, not a case of its own. Three notes
+    /// rotating through each other's paths is the same permutation problem,
+    /// and the old per-row guard refused all three moves for the same reason
+    /// it refused both halves of a swap.
+    #[test]
+    fn a_three_way_rotation_lands_every_note_on_its_own_path() {
+        let db = TempDir::new().unwrap();
+        let (ida, idb, idc) = ("id-a", "id-b", "id-c");
+        let conn = rows_at(
+            &db,
+            &[("a.md", Some(ida)), ("b.md", Some(idb)), ("c.md", Some(idc))],
+        );
+
+        // a -> b -> c -> a
+        let (files, ids) = desired(&[("b.md", ida), ("c.md", idb), ("a.md", idc)]);
+        let moved = follow_moved_notes(&conn, &files, &ids).unwrap();
+
+        assert_eq!(moved, 3, "all three rows moved");
+        for (id, path) in [(ida, "b.md"), (idb, "c.md"), (idc, "a.md")] {
+            let got: String = conn
+                .query_row("SELECT path FROM notes WHERE note_uuid = ?1", [id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(got, path, "{id} must land on {path}");
+        }
+    }
+
+    /// A row already where it belongs is not touched, and is not counted as a
+    /// move. Without this the parking pass could churn the whole table on
+    /// every reindex and the log would claim a vault-sized migration each run.
+    #[test]
+    fn a_note_that_did_not_move_is_left_alone() {
+        let db = TempDir::new().unwrap();
+        let conn = rows_at(&db, &[("a.md", Some("id-a")), ("b.md", Some("id-b"))]);
+        let (files, ids) = desired(&[("a.md", "id-a"), ("b.md", "id-b")]);
+
+        assert_eq!(follow_moved_notes(&conn, &files, &ids).unwrap(), 0);
+        let paths: Vec<String> = conn
+            .prepare("SELECT path FROM notes ORDER BY path")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(paths, vec!["a.md".to_string(), "b.md".to_string()]);
+    }
+
+    /// A row holding a path that now belongs to a different id, with no claim
+    /// of its own — an index written before ids existed, whose note was
+    /// replaced in place. It must not block the rightful id from landing, and
+    /// it must not survive: it is parked, which puts it outside `vault_paths`,
+    /// and `reindex`'s deletion pass collects it from there.
+    #[test]
+    fn a_row_squatting_on_another_notes_path_yields_it() {
+        let db = TempDir::new().unwrap();
+        let conn = rows_at(&db, &[("a.md", None), ("b.md", Some("id-b"))]);
+        let (files, ids) = desired(&[("a.md", "id-b")]);
+
+        assert_eq!(follow_moved_notes(&conn, &files, &ids).unwrap(), 1);
+
+        let landed: String = conn
+            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(landed, "a.md", "the id that owns a.md must get it");
+
+        let ghost: String = conn
+            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            !ghost.ends_with(".md"),
+            "the squatter must be left outside the vault's path space so the deletion \
+             pass reaches it, got {ghost}"
+        );
+    }
+
 }
