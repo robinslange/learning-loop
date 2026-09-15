@@ -122,7 +122,6 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
   // $TMPDIR — otherwise we'd seed one dir and the resolver would read another.
   const SID = 'reflect-test';
   let sidFileBare;
-  let savedSidBare;
 
   before(() => {
     skill = readFileSync(SKILL_PATH, 'utf8') + '\n' + readFileSync(REFINEMENT_STEP_PATH, 'utf8');
@@ -145,13 +144,26 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     process.env.TMPDIR = tmpRoot;
     process.env.CLAUDE_PLUGIN_DATA = pluginData;
     delete process.env.CLAUDE_CODE_SESSION_ID;
-    // Clear LL_SESSION_TMP_DIR so getSessionId()'s tmp candidate resolves via
-    // the $TMPDIR=tmpRoot we set above — not a developer's exported dir.
-    delete process.env.LL_SESSION_TMP_DIR;
-
-    // Seed getSessionId()'s tmp fallback at the tmpdir it resolves NOW ($TMPDIR=tmpRoot).
-    sidFileBare = join(tmpdir(), 'learning-loop-session-id');
-    savedSidBare = existsSync(sidFileBare) ? readFileSync(sidFileBare, 'utf8') : null;
+    // Point getSessionId()'s tmp candidate at THIS suite's private dir, the
+    // same seam every other session-id test uses (lib-session, common,
+    // hook-session-start).
+    //
+    // This used to `delete` the var and lean on $TMPDIR=tmpRoot instead, which
+    // is a POSIX-only trick: os.tmpdir() consults $TMPDIR on POSIX but reads
+    // %TEMP%/%TMP% on Windows and ignores $TMPDIR entirely. So the id file was
+    // private on macOS and Linux and MACHINE-GLOBAL on Windows, where this
+    // suite then wrote it, deleted it, and restored it while other test files
+    // ran in parallel against the same path. Every flip of that file moves the
+    // marker getSessionId() keys, and a hook that finds no marker returns
+    // without appending -- silently, because an absent marker is a legitimate
+    // "not inside a Step 4 window" answer. That is how `appends one line per
+    // vault Write` came back with one line instead of four on windows-latest.
+    //
+    // LL_SESSION_TMP_DIR wins over os.tmpdir() in getSessionId(), so this is
+    // private on every platform and no longer depends on how the OS spells its
+    // temp dir.
+    process.env.LL_SESSION_TMP_DIR = tmpRoot;
+    sidFileBare = join(tmpRoot, 'learning-loop-session-id');
     writeFileSync(sidFileBare, SID);
   });
 
@@ -169,8 +181,26 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
     else delete process.env.LL_VAULT_PATH;
     if (savedSessionTmpDir !== undefined) process.env.LL_SESSION_TMP_DIR = savedSessionTmpDir;
     else delete process.env.LL_SESSION_TMP_DIR;
-    if (savedSidBare !== null) writeFileSync(sidFileBare, savedSidBare);
-    else rmSync(sidFileBare, { force: true });
+  });
+
+  // The suite must never read, write, or delete the machine-global session-id
+  // file. It did on Windows for as long as the anchor was $TMPDIR, because
+  // os.tmpdir() ignores $TMPDIR there — and a suite that mutates a global path
+  // races every test file running beside it.
+  //
+  // Asserted as containment rather than inequality on purpose. On POSIX,
+  // $TMPDIR=tmpRoot makes os.tmpdir() RETURN tmpRoot, so the global path and
+  // the private one are the same string and an inequality check would be
+  // vacuously green on the two platforms that were never broken. Containment
+  // holds on both, and fails on exactly the platform whose temp dir this suite
+  // cannot move.
+  it('keeps its session-id file inside the suite’s own temp root', () => {
+    assert.ok(
+      sidFileBare.startsWith(tmpRoot),
+      `session-id file must live under the suite temp root, got ${sidFileBare} ` +
+        `outside ${tmpRoot} — that is the machine-global file other test files share`,
+    );
+    assert.equal(process.env.LL_SESSION_TMP_DIR, tmpRoot);
   });
 
   describe('SKILL.md contract', () => {
@@ -768,12 +798,13 @@ describe('/reflect Step 4 new-notes tracking handshake', () => {
       // the unsuffixed plugin-data id). The fix must ignore this and key off
       // LL_REFLECT_SID instead.
       //
-      // NOTE: sidFileBare lives at a SHARED tmp path (learning-loop-session-id),
-      // not a per-suite one, so this value is visible to any test file running
-      // concurrently. Anything that spawns a resolver and compares ids across
-      // two spawns must pin CLAUDE_CODE_SESSION_ID rather than inherit it — see
-      // the mode-agreement test in resolve-paths-sh.test.mjs, which this string
-      // used to break on Windows.
+      // sidFileBare is private to this suite (LL_SESSION_TMP_DIR=tmpRoot), so
+      // this value is invisible to test files running concurrently. It was a
+      // shared path until the Windows isolation fix; anything that spawns a
+      // resolver and compares ids across two spawns should still pin
+      // CLAUDE_CODE_SESSION_ID rather than inherit it — see the mode-agreement
+      // test in resolve-paths-sh.test.mjs, which this string used to break on
+      // Windows.
       writeFileSync(sidFileBare, 'other-concurrent-session');
       const mod = await import(
         '../plugin/hooks/modules/reflect-track.mjs?bust=reflectsid' + Date.now()
