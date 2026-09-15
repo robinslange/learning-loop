@@ -12,27 +12,30 @@ import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
-import { DATA_FILES, DATA_PATHS, SHIM_NAMES } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, DATA_PATHS, SHIM_NAMES, shimFileName } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
+import { renderShim } from '../../scripts/lib/shims.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
 }
 
 export async function run(ctx) {
-  // Shim installer: ensure the stable shell wrappers exist.
-  //
-  // Driven by SHIM_NAMES rather than a list written out here, because this is
-  // the only thing that installs a NEW shim onto an install that already has
-  // the old ones — name them locally and every existing user keeps passing the
-  // check while missing the shim that was added.
+  // Shim installer: rewrite the shims when any is missing or its text differs
+  // from what this version renders. A shim on disk never updates itself, so an
+  // existence-only check left every install on the shim it was first given.
+  // Driven by SHIM_NAMES so a shim added later reaches existing installs too.
   try {
-    const missing = SHIM_NAMES.some((s) => !existsSync(join(home(), '.local', 'bin', s)));
-    if (missing) {
+    const binDir = join(home(), '.local', 'bin');
+    const stale = SHIM_NAMES.some((name) => {
+      const path = join(binDir, shimFileName(name));
+      return !existsSync(path) || readFileSync(path, 'utf-8') !== renderShim(name);
+    });
+    if (stale) {
       const installer = join(ctx.pluginDir, 'scripts', 'install-shims.mjs');
       if (existsSync(installer)) {
-        mkdirSync(join(home(), '.local', 'bin'), { recursive: true });
+        mkdirSync(binDir, { recursive: true });
         execFileSync('node', [installer, '--install'], {
           stdio: 'ignore',
           timeout: HookConfig.DEPS_CHECK_TIMEOUT_MS,
