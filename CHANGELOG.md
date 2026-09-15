@@ -4,6 +4,20 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The `/reflect` handshake test suite mutated a machine-global file on
+  Windows**, which is what turned the v2.0.7 release run red. It anchored
+  `getSessionId()`'s tmp candidate by setting `$TMPDIR` — a POSIX-only trick, as
+  `os.tmpdir()` reads `%TEMP%`/`%TMP%` on Windows and ignores `$TMPDIR`. The
+  session-id file was therefore private on macOS and Linux and shared on
+  Windows, where the suite wrote, deleted and restored it while other test files
+  ran in parallel. Each flip moves the marker path `getSessionId()` keys, and a
+  hook that finds no marker returns without appending, so `appends one line per
+  vault Write` recorded one line instead of four. It now uses
+  `LL_SESSION_TMP_DIR`, the seam every other session-id test already used.
+  Test-only; no shipped behaviour changes.
+
 ## v2.0.7
 
 ### Fixed
