@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **rustls 0.23.40 -> 0.23.45 for RUSTSEC-2026-0285**, TLS 1.3 handshake
+  messages accepted across encryption level boundaries. A direct dependency, and
+  it is the TLS every `wss://` connection to a federation hub runs over. Pulls
+  `rustls-webpki` 0.103.13 -> 0.103.15 with it. Lockfile only; the `0.23`
+  requirement in `ll-search/Cargo.toml` is unchanged.
+
 - **`/reflect` leaked a transient field into the vault when it was interrupted.**
   `reflect_sid` is written by Step 4, read by Step 4.4, and stripped by Step
   4.6.g. A run that died in between left the stamp in the note forever, because
