@@ -12,11 +12,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { scanVaultCandidates } from '../plugin/scripts/sweep-hook-replay.mjs';
+import {
+  scanVaultCandidates,
+  stripAbandonedStamps,
+  ABANDONED_AFTER_MS,
+} from '../plugin/scripts/sweep-hook-replay.mjs';
+import { reflectNewNotesPath } from '../plugin/hooks/modules/reflect-track.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../plugin/scripts/sweep-hook-replay.mjs', import.meta.url));
 
@@ -52,7 +57,7 @@ for (const folder of ['0-inbox', '1-fleeting', '2-literature', '3-permanent', '5
     try {
       const p = join(root, folder, 'unlinked.md');
       writeFileSync(p, '---\nname: unlinked\n---\n\nNo wikilinks here.\n');
-      assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+      assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [p]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -64,7 +69,7 @@ test('does NOT flag a linked note that is not this session', () => {
   try {
     const p = join(root, '3-permanent', 'linked.md');
     writeFileSync(p, '---\nname: linked\n---\n\nHas a [[wikilink]] and no reflect_sid.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), []);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -76,7 +81,7 @@ test('flags a linked note when its frontmatter reflect_sid matches the session',
     const p = join(root, '2-literature', 'mine.md');
     // linked body (so set (1) does NOT catch it) but stamped with our sid (set (2))
     writeFileSync(p, '---\nname: mine\nreflect_sid: sess-1\n---\n\nLinked [[note]] body.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [p]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -87,7 +92,7 @@ test('does NOT flag a note stamped with a DIFFERENT session', () => {
   try {
     const p = join(root, '2-literature', 'other.md');
     writeFileSync(p, '---\nname: other\nreflect_sid: sess-OTHER\n---\n\nLinked [[note]] body.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), []);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -105,7 +110,7 @@ test('EXCLUDES 4-projects even when the note is unlinked (the S2 trap)', () => {
     // and an unlinked note in an allowlisted folder, to prove the walk ran
     const ok = join(root, '0-inbox', 'real.md');
     writeFileSync(ok, '---\nname: real\n---\n\nUnlinked.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [ok]);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [ok]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -121,7 +126,7 @@ test('flags a CRLF note whose frontmatter reflect_sid matches the session', () =
       p,
       '---\r\nname: crlf\r\nreflect_sid: sess-1\r\n---\r\n\r\nLinked [[note]] body.\r\n',
     );
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [p]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -133,7 +138,7 @@ test('finds an unlinked note in a SUBFOLDER of an allowlisted folder', () => {
     mkdirSync(join(root, '0-inbox', 'topic'), { recursive: true });
     const p = join(root, '0-inbox', 'topic', 'nested.md');
     writeFileSync(p, '---\nname: nested\n---\n\nNo wikilinks here.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [p]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -147,7 +152,7 @@ test('skips _archive subfolders inside allowlisted folders', () => {
       join(root, '0-inbox', '_archive', 'old.md'),
       '---\nname: old\n---\n\nNo wikilinks here.\n',
     );
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), []);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -159,7 +164,7 @@ test('emits each matching note once even if it satisfies both sets', () => {
     const p = join(root, '0-inbox', 'both.md');
     // unlinked body AND our sid -> both sets, must appear once
     writeFileSync(p, '---\nname: both\nreflect_sid: sess-1\n---\n\nUnlinked.\n');
-    assert.deepEqual(scanVaultCandidates(root, 'sess-1'), [p]);
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').candidates, [p]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -202,4 +207,120 @@ test('--scan-vault with a dangling --sid is a usage error (exit 2)', () => {
 test('--help lists the --scan-vault mode', () => {
   const { stdout } = runCli(['--help']);
   assert.match(stdout, /--scan-vault <root> --sid <sid>/, '--help must document --scan-vault');
+});
+
+
+// --- abandoned reflect_sid self-heal -----------------------------------------
+//
+// `reflect_sid` is transient: Step 4 stamps it, 4.4 reads it, 4.6.g strips it.
+// A run that dies in between leaks the stamp permanently, because 4.6.g is its
+// only remover. Found in the wild on seven notes from four dead sessions, two
+// of them already promoted to 3-permanent.
+//
+// The marker file is the liveness signal, so these tests drive the REAL marker
+// path (reflectNewNotesPath) rather than a stub: a stub would pass while the
+// two sides resolved different directories, which is exactly the handshake bug
+// the reflect-track header warns about.
+
+function withMarker(sid, ageMs) {
+  const marker = reflectNewNotesPath(sid);
+  writeFileSync(marker, '');
+  if (ageMs) {
+    const when = (Date.now() - ageMs) / 1000;
+    utimesSync(marker, when, when);
+  }
+  return () => rmSync(marker, { force: true });
+}
+
+function stamped(root, folder, name, sid) {
+  const p = join(root, folder, name);
+  writeFileSync(p, `---\nname: ${name}\nreflect_sid: ${sid}\n---\n\nBody [[link]].\n`);
+  return p;
+}
+
+test('a stamp whose session left no marker is abandoned', () => {
+  const root = setupVault();
+  try {
+    const p = stamped(root, '3-permanent', 'orphan.md', 'dead-sess');
+    const { abandoned } = scanVaultCandidates(root, 'sess-1');
+    assert.deepEqual(abandoned, [p], 'no marker means nothing is left to consume the stamp');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a stamp whose marker is older than the window is abandoned', () => {
+  const root = setupVault();
+  const cleanup = withMarker('dead-sess', ABANDONED_AFTER_MS + 60_000);
+  try {
+    const p = stamped(root, '0-inbox', 'stale.md', 'dead-sess');
+    assert.deepEqual(scanVaultCandidates(root, 'sess-1').abandoned, [p]);
+  } finally {
+    cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The one that makes this safe to ship. Two /reflect runs can overlap -- Step
+// 4.4 passes LL_REFLECT_SID so that they can -- and taking a live run's stamp
+// before its own 4.4 reads it hides its sub-agent notes from the sweep they
+// exist for.
+test('a live concurrent run’s stamp is left alone', () => {
+  const root = setupVault();
+  const cleanup = withMarker('other-live-sess', 0);
+  try {
+    stamped(root, '0-inbox', 'theirs.md', 'other-live-sess');
+    assert.deepEqual(
+      scanVaultCandidates(root, 'sess-1').abandoned,
+      [],
+      'a fresh marker means that run is still going; its stamp is working state',
+    );
+  } finally {
+    cleanup();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('this session’s own stamp is never abandoned, marker or not', () => {
+  const root = setupVault();
+  try {
+    stamped(root, '0-inbox', 'mine.md', 'sess-1');
+    const { candidates, abandoned } = scanVaultCandidates(root, 'sess-1');
+    assert.deepEqual(abandoned, [], 'stripping our own stamp would break our own 4.4');
+    assert.equal(candidates.length, 1, 'and it still lands in the sweep set');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stripping removes only the frontmatter stamp', () => {
+  const root = setupVault();
+  try {
+    const p = join(root, '0-inbox', 'body-mention.md');
+    writeFileSync(
+      p,
+      '---\nname: body-mention\nreflect_sid: dead-sess\ntags: [x]\n---\n\n' +
+        'reflect_sid: is documented here and must survive.\n',
+    );
+    assert.equal(stripAbandonedStamps([p]), 1);
+    const after = readFileSync(p, 'utf-8');
+    assert.match(after, /^reflect_sid: is documented here/m, 'the body line survives');
+    assert.doesNotMatch(after.split('---')[1], /reflect_sid:/, 'the frontmatter stamp is gone');
+    assert.match(after, /tags: \[x\]/, 'the rest of the frontmatter survives');
+    assert.equal(stripAbandonedStamps([p]), 0, 'idempotent: a second pass writes nothing');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('--scan-vault reports how many abandoned stamps it healed', () => {
+  const root = setupVault();
+  try {
+    stamped(root, '0-inbox', 'orphan.md', 'dead-sess');
+    const { stdout } = runCli(['--scan-vault', root, '--sid', 'sess-1']);
+    const summary = JSON.parse(stdout);
+    assert.equal(summary.abandonedStripped, 1, 'the heal must be observable, not silent');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

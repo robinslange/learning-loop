@@ -173,11 +173,15 @@ ll-search index "$VAULT" "$VAULT/.vault-search/vault-index.db" 2>&1 | tail -1
 #         -> marker backfill for sub-agent writes the live hook missed
 # LL_REFLECT_SID=$SESSION_ID routes each replayed Write to THIS session's marker
 # even under concurrent /reflect runs (see hooks/post-tool.js).
+# The walk also strips reflect_sid stamps abandoned by dead /reflect runs; a
+# live run's stamps are identified by its marker and left alone.
 LL_REFLECT_SID="$SESSION_ID" ll-run sweep-hook-replay.mjs \
   --scan-vault "$VAULT" --sid "$SESSION_ID"
 ```
 
-Expected output is a JSON summary `{processed, ok, failed, failures}` (and `{processed:0,...}` when no candidates). Report failures in Step 5 if any. Typical cost: <1s per file, usually 0–5 candidates per session.
+The same walk self-heals abandoned `reflect_sid` stamps. The field is transient — Step 4 writes it, this step reads it, Step 4.6.g strips it — so a run that dies in between leaks it into the vault permanently, since 4.6.g is its only remover. A stamp belonging to another session is stripped when that session's marker file is gone or has sat untouched for six hours; a marker still being written to means that run is live, and its stamps are working state this sweep must not take.
+
+Expected output is a JSON summary `{processed, ok, failed, failures, abandonedStripped}` (and `{processed:0,...}` when no candidates). Report failures in Step 5 if any, and `abandonedStripped` when non-zero. Typical cost: <1s per file, usually 0–5 candidates per session.
 
 ### Step 4.5: Intention Extraction
 

@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **`/reflect` leaked a transient field into the vault when it was interrupted.**
+  `reflect_sid` is written by Step 4, read by Step 4.4, and stripped by Step
+  4.6.g. A run that died in between left the stamp in the note forever, because
+  4.6.g is its only remover. Found on seven notes from four dead sessions, two
+  already promoted to `3-permanent`. Step 4.4's vault walk now strips a stamp
+  belonging to another session once that session's marker file is gone or has
+  sat untouched for six hours. A marker still being written to means the run is
+  live, so its stamps are left alone — two `/reflect` runs can overlap, and
+  taking a live run's stamp before its own Step 4.4 reads it would hide its
+  sub-agent notes from the sweep they exist for. The count is reported as
+  `abandonedStripped`.
+
 - **Two notes that exchanged paths exchanged `note_uuid`s.** `note_uuid` is the
   address federation publishes a note under, so this put one note's body out
   under the other's id — silently, and worse in kind than the reindex abort the
