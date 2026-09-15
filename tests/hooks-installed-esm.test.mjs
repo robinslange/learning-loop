@@ -33,7 +33,7 @@ after(() => {
 
 function hookFilesFromHooksJson(pluginRoot) {
   const hooksJson = readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf8');
-  const files = [...hooksJson.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([\w./-]+)/g)].map((m) => m[1]);
+  const files = [...hooksJson.matchAll(/\bhooks\/[\w.-]+\.m?js\b/g)].map((m) => m[0]);
   return [...new Set(files)];
 }
 
