@@ -175,6 +175,17 @@ export const FEDERATION_PATHS = {
   vaultRegistry: (pd) => join(pd, 'vaults.json'),
 };
 
+// Whether the warm duplicate-scan daemon can serve this platform at all.
+// The server is a Unix domain socket -- native/crates/ll-search/src/nli_server.rs
+// is `#![cfg(unix)]` and sync/watch.rs spawns it under `#[cfg(unix)]` -- so on
+// Windows there is no socket and no named pipe, and every duplicate-gate call
+// takes the cold subprocess path. Callers use this to avoid prescribing a
+// daemon that cannot exist: the reporter of #5 had ll-watch already running and
+// 55 logged timeouts, and was told to start it.
+export function daemonSocketSupported(platform = process.platform) {
+  return platform !== 'win32';
+}
+
 export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),
   nliSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only

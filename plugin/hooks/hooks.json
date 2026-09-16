@@ -52,7 +52,7 @@
           {
             "type": "command",
             "command": "cd \"$HOME\" && node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js\"",
-            "timeout": 3
+            "timeout": 8
           }
         ]
       },

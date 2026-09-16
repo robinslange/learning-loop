@@ -836,6 +836,71 @@ test('checkDuplicateGateHealth: daemon-sourced timeouts do not advise starting l
   rmSync(dir, { recursive: true, force: true });
 });
 
+test('checkDuplicateGateHealth: does not advise ll-watch on a platform with no socket', () => {
+  // The daemon serves the gate over a UDS socket, and nli_server.rs is
+  // `#![cfg(unix)]` -- there is no socket and no named pipe on Windows, so the
+  // warm path does not exist there at all. Every timeout is therefore
+  // subprocess- or budget-sourced, which the daemonIsUp heuristic reads as
+  // "daemon down" and answers with "start the warm daemon (ll-watch)". That is
+  // advice that cannot work: the reporter of #5 had ll-watch already running
+  // and still had 55 timeouts, because starting it changes nothing here.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-nosock-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(6)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.fix,
+    /ll-watch/,
+    'there is no socket transport on this platform -- a daemon cannot serve the gate here',
+  );
+  assert.match(
+    result.fix,
+    /budget|LL_PRE_WRITE_BUDGET_MS/i,
+    'the actionable lever on a no-socket host is the write budget, not the daemon',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: still advises ll-watch where a socket exists', () => {
+  // The other side, so the fix above cannot be satisfied by dropping the advice
+  // everywhere: on a platform that does have the warm path, a gate timing out
+  // with no daemon-sourced entries is still a daemon worth starting.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-sock-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(6)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'darwin' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.fix, /ll-watch/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkDuplicateGateHealth: warns on stale-daemon error code with restart advice', () => {
   // A single stale-daemon entry triggers a distinct warning with restart advice,
   // not the generic ll-watch start advice.

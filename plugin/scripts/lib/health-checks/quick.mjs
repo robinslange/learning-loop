@@ -18,6 +18,7 @@ import {
   FEDERATION_PATHS,
   SHIM_NAMES,
   binaryFileName,
+  daemonSocketSupported,
   shimFileName,
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
@@ -798,7 +799,11 @@ export function checkFederationSyncHealth({
   return ok(configured === 0 ? 'not configured' : 'syncing');
 }
 
-export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) {
+export function checkDuplicateGateHealth({
+  pluginData,
+  now = new Date(),
+  platform = process.platform,
+} = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
@@ -836,6 +841,21 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
     // live daemon accepted the connection — it just answered too slowly. Advising
     // a start would send the user to fix a daemon that is already running.
     const daemonIsUp = totalDaemonTimeouts > 0;
+
+    // On a platform with no socket transport there is no warm path to start, so
+    // every call pays a cold subprocess and the only lever is the write budget.
+    // Prescribing ll-watch here is advice that cannot work at any daemon state.
+    if (!daemonSocketSupported(platform)) {
+      return makeCheck({
+        id: CHECK_IDS['duplicate-gate-health'],
+        name: 'Duplicate gate',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.warn,
+        detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — this platform has no daemon socket, so every write pays a cold model start and the gate falls open when it overruns`,
+        fix: 'No daemon can serve the gate here, so starting one changes nothing. Raise the ceiling instead: set LL_PRE_WRITE_BUDGET_MS above your measured cold start, and raise the matching pre-write-check timeout in plugin/hooks/hooks.json.',
+      });
+    }
+
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
       name: 'Duplicate gate',
