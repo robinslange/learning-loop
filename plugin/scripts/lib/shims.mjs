@@ -10,9 +10,14 @@
 //
 // LOCATE is one line of CommonJS for `node -e`, shared by both platforms. It
 // avoids double quotes, $, backticks and % so the same bytes survive a POSIX
-// double-quoted string and cmd.exe. `--` stops node from reading the shim's own
-// flags (`ll-paths --sh`). The argv splice makes shim.mjs see the argv it would
-// get if node had been handed it directly.
+// double-quoted string and cmd.exe. `!` is safe too: the non-search .cmd shims
+// carry `setlocal DisableDelayedExpansion`, so cmd.exe never reads `!root!` as
+// a delayed-expansion reference -- without that, a machine with delayed
+// expansion on by default (HKCU\Software\Microsoft\Command Processor) would
+// strip everything between the `!` pairs in LOCATE and corrupt the script.
+// `--` stops node from reading the shim's own flags (`ll-paths --sh`). The
+// argv splice makes shim.mjs see the argv it would get if node had been
+// handed it directly.
 
 import { INSTALL_KEY } from './plugin-meta.mjs';
 
@@ -102,7 +107,9 @@ export function renderShim(name, platform = process.platform) {
       ? win
         ? SEARCH_CMD
         : SEARCH_SH
-      : [win ? `${run} %*` : `exec ${run} "$@"`];
+      : win
+        ? ['setlocal DisableDelayedExpansion', `${run} %*`]
+        : [`exec ${run} "$@"`];
   const note = `${name}: learning-loop shim. The plugin rewrites it when this text changes.`;
   const lines = win ? ['@echo off', `rem ${note}`, ...body] : ['#!/bin/sh', `# ${note}`, ...body];
   const eol = win ? '\r\n' : '\n';

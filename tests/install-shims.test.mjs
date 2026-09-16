@@ -108,6 +108,13 @@ writeFileSync(join(fakeHome, 'shims.json'), JSON.stringify(shims));
         new RegExp(`node -e ".*" -- ${name} %\\*\\r\\n$`),
         `${name}: hands its name to node`,
       );
+      const setlocalIdx = text.indexOf('setlocal DisableDelayedExpansion');
+      const nodeIdx = text.indexOf('node -e');
+      assert.ok(setlocalIdx !== -1, `${name}: disables delayed expansion`);
+      assert.ok(
+        setlocalIdx !== -1 && nodeIdx !== -1 && setlocalIdx < nodeIdx,
+        `${name}: disables delayed expansion before invoking node, so cmd.exe never reads the ! in LOCATE as a variable reference`,
+      );
       assert.match(
         text,
         /installed_plugins\.json/,
