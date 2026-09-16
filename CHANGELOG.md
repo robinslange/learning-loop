@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.8
+
 ### Added
 
 - **`searxng` is now a selectable `sources.web_search` provider**, for pointing
