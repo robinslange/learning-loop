@@ -806,7 +806,11 @@ test('checkDuplicateGateHealth: warns on repeated duplicate-gate timeouts', () =
   lines.push(JSON.stringify({ ts: now.toISOString(), module: 'other', message: 'boom' }));
   writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
 
-  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  // platform is pinned, not inherited. This case is about the socket-bearing
+  // host, where advising ll-watch is right; on win32 the check correctly takes
+  // the no-socket branch and offers the write budget instead, so a runner-
+  // dependent platform made this assert whichever host it happened to run on.
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
   assert.match(result.detail, /4 duplicate-gate timeouts/);
@@ -849,7 +853,11 @@ test('checkDuplicateGateHealth: daemon-sourced timeouts do not advise starting l
   }
   writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
 
-  const result = checkDuplicateGateHealth({ pluginData: dir, now });
+  // Pinned for the same reason as above: a daemon-sourced timeout only means
+  // "the daemon answered slowly" where a daemon can exist at all. On win32 there
+  // is no socket, so the check reports the no-socket detail and this assertion
+  // could never hold there.
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
   assert.equal(result.status, 'fail');
   assert.doesNotMatch(
     result.fix,
