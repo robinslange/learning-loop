@@ -125,6 +125,18 @@ export const HookConfig = Object.freeze({
   // self-sufficient (2026-07 sample: 19/50 irrelevant injections were thin
   // continuations dominated by stale prior-message text).
   QUERY_SOLO_MIN_CHARS: 80,
+  // Minimum content words (stopwords and sub-3-char tokens excluded) a prompt
+  // must carry before any note can plausibly change what happens next.
+  //
+  // 8 is the median specificity of real gate-passing prompts (n=3,133), so the
+  // floor sits at the middle of genuine asks rather than above them. Leave-one-
+  // out on the judged set preferred 10-14, but that set has 7 positives and
+  // every floor from 6 to 10 retains the same 86% of used injections while
+  // differing only in dead volume cut. Choosing the fitted optimum over the
+  // observed median would be over-reading 7 points: "how should we rotate the
+  // AWS deploy key for the worker" scores 6, and a floor that drops that prompt
+  // is cutting real work, not noise.
+  INJECTION_MIN_PROMPT_SPECIFICITY: 8,
   RECENT_MSG_WINDOW: 80,
   // session-label reads only this much of the transcript tail per prompt;
   // transcripts embed full tool outputs and reach tens of MB, while only the

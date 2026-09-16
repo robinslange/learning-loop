@@ -18,6 +18,7 @@ import {
   buildInjection,
   enrichVaultHits,
   buildQueryParts,
+  promptSpecificity,
   emitHookOutput,
   rerankCandidates,
   runBackendsWithRaceCap,
@@ -321,6 +322,23 @@ try {
     trimmed.startsWith('<')
   ) {
     logShadow({ type: 'gate-fail-fast-path', gate: { passed: false, fast_path_skip: true } });
+    process.exit(0);
+  }
+
+  // Impact gate, before retrieval so a hopeless turn costs no search spawn.
+  // The fast path above catches literal "ok"/"yes"; this catches the wider
+  // class of turns carrying too little subject of their own for any note to
+  // change what happens next.
+  const specificityFloor = env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY_SET
+    ? env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY
+    : (resolveConfig().injection_min_prompt_specificity ??
+      HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY);
+  const specificity = promptSpecificity(prompt);
+  if (specificity < specificityFloor) {
+    logShadow({
+      type: 'gate-fail-low-impact',
+      gate: { passed: false, prompt_specificity: specificity, floor: specificityFloor },
+    });
     process.exit(0);
   }
 

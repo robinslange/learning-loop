@@ -12,6 +12,7 @@ import {
   scrubForLog,
   buildQuery,
   buildQueryParts,
+  promptSpecificity,
   emitHookOutput,
   rerankCandidates,
   runBackendsWithRaceCap,
@@ -1121,5 +1122,32 @@ describe('buildInjection delimiter is unforgeable', () => {
     ]) {
       assert.ok(ctx.includes(clause), `delimiters alone measured worse than none: "${clause}"`);
     }
+  });
+});
+
+// Characterisation tests: written AFTER the implementation, so they pass
+// immediately and prove nothing about catching a regression at authoring time.
+// They earn their place by pinning the counting rule, without which
+// INJECTION_MIN_PROMPT_SPECIFICITY's value of 8 has no fixed meaning.
+describe('promptSpecificity', () => {
+  it('counts distinct content words, dropping stopwords and short tokens', () => {
+    // how/rotate/aws/deploy/key/worker survive; should/for/the are stopwords
+    // and "we" is under the length floor.
+    assert.equal(promptSpecificity('how should we rotate the AWS deploy key for the worker'), 6);
+    assert.equal(promptSpecificity('yes please go ahead and do that one'), 2);
+  });
+
+  it('treats an absent prompt as carrying no subject matter', () => {
+    assert.equal(promptSpecificity(''), 0);
+    assert.equal(promptSpecificity(null), 0);
+    assert.equal(promptSpecificity(undefined), 0);
+  });
+
+  it('does not let repetition stand in for specificity', () => {
+    assert.equal(
+      promptSpecificity('deploy deploy deploy'),
+      1,
+      'specificity measures distinct subject matter, not length',
+    );
   });
 });

@@ -35,7 +35,16 @@ const SANDBOX = mkdtempSync(join(tmpdir(), 'session-label-data-'));
 // Sandbox paths live under tmpdir(), which isTransientPath excludes from the
 // marker file, so tests cannot stomp the real install's saved path either.
 function hookEnv({ env = {}, pluginData = SANDBOX } = {}) {
-  return { ...process.env, ...env, CLAUDE_PLUGIN_DATA: pluginData };
+  return {
+    ...process.env,
+    // The impact gate would drop most fixture prompts before retrieval. These
+    // tests exercise dedupe, scrubbing and telemetry, not the gate, so pin the
+    // floor off here and let the impact-gate tests own that behaviour. Placed
+    // before ...env so a caller can still override it.
+    LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+    ...env,
+    CLAUDE_PLUGIN_DATA: pluginData,
+  };
 }
 
 function runHook({ env, pluginData, ...opts } = {}) {
@@ -368,6 +377,7 @@ describe('session-label', () => {
         timeout: 5000,
         env: {
           ...process.env,
+          LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
           LEARNING_LOOP_INJECTION_MODE: 'off',
         },
@@ -476,6 +486,7 @@ describe(
           ...process.env,
           HOME: home,
           TMPDIR: base,
+          LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
           VAULT_PATH: vault,
           LEARNING_LOOP_INJECTION_MODE: 'live',
@@ -535,6 +546,7 @@ describe(
           ...process.env,
           HOME: home,
           TMPDIR: base,
+          LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
           VAULT_PATH: vault,
           LEARNING_LOOP_INJECTION_MODE: 'live',
@@ -592,6 +604,7 @@ describe(
           ...process.env,
           HOME: home,
           TMPDIR: base,
+          LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
           VAULT_PATH: vault,
           LEARNING_LOOP_INJECTION_MODE: 'live',
@@ -676,6 +689,7 @@ describe(
             ...process.env,
             HOME: home,
             TMPDIR: base,
+            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
             CLAUDE_PLUGIN_DATA: pluginData,
             VAULT_PATH: vault,
             LEARNING_LOOP_INJECTION_MODE: 'live',
@@ -743,6 +757,7 @@ describe(
             ...process.env,
             HOME: home,
             TMPDIR: base,
+            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
             CLAUDE_PLUGIN_DATA: pluginData,
             VAULT_PATH: vault,
             LEARNING_LOOP_INJECTION_MODE: 'live',
@@ -823,6 +838,7 @@ describe(
             ...process.env,
             HOME: home,
             TMPDIR: base,
+            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
             CLAUDE_PLUGIN_DATA: pluginData,
             VAULT_PATH: vault,
             LEARNING_LOOP_INJECTION_MODE: 'shadow',
@@ -913,3 +929,85 @@ describe('session-label test isolation', () => {
     );
   });
 });
+
+// The impact gate. Relevance ("is this note about what was asked") and impact
+// ("can any note change what happens next") are different quantities, and the
+// RRF gate only sees the first. A prompt carrying almost no subject matter of
+// its own is a continuation or a reaction, and no note helps on those turns —
+// so the check runs BEFORE retrieval and a hopeless turn costs no search spawn.
+//
+// This spawns directly rather than through hookEnv(), which pins the floor to 0
+// for the rest of the file; pinning it here would disable the behaviour under
+// test. The inline CLAUDE_PLUGIN_DATA keeps the isolation guard satisfied.
+describe(
+  'session-label impact gate',
+  { skip: skipOnWindows('the stub ll-search is a #!/bin/sh script, not an .exe') },
+  () => {
+    it('skips retrieval entirely on a low-specificity prompt', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-impact-'));
+      try {
+        const pluginData = join(base, 'plugin-data');
+        const stubBin = join(pluginData, 'bin');
+        const vault = join(base, 'vault');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+        mkdirSync(join(base, 'home'), { recursive: true });
+        writeFileSync(join(vault, 'notes', 'x.md'), 'Body text about deployment.\n');
+        // A stub that clears any threshold if it is ever consulted. If the
+        // impact gate works, it never is.
+        writeFileSync(
+          join(stubBin, 'll-search'),
+          '#!/bin/sh\nprintf \'%s\' \'[{"path":"notes/x.md","title":"x","score":0.99}]\'\n',
+          { mode: 0o755 },
+        );
+        const out = execFileSync('node', [HOOK], {
+          input: JSON.stringify({
+            session_id: randomUUID(),
+            prompt: 'ah right ok so what do you think about that then',
+            transcript_path: '',
+            cwd: '/tmp',
+          }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: join(base, 'home'),
+            TMPDIR: base,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_SYNTHETIC: '1',
+            LEARNING_LOOP_INJECTION_MODE: 'live',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+          },
+        });
+        assert.equal(out, '', 'a low-impact turn must inject nothing');
+
+        // Scan the bucket files rather than computing the month: the writer
+        // names them in LOCAL time and toISOString() is UTC, which disagree for
+        // the first hours of every month.
+        const retrieval = join(pluginData, 'retrieval');
+        const kinds = existsSync(retrieval)
+          ? readdirSync(retrieval)
+              .filter((f) => f.startsWith('shadow-injection-'))
+              .flatMap((f) =>
+                readFileSync(join(retrieval, f), 'utf8')
+                  .trim()
+                  .split('\n')
+                  .filter(Boolean)
+                  .map((l) => JSON.parse(l).type),
+              )
+          : [];
+        assert.ok(
+          kinds.includes('gate-fail-low-impact'),
+          `expected a low-impact record, got: ${kinds.join(', ')}`,
+        );
+        assert.ok(
+          !kinds.some((k) => k.startsWith('gate-pass')),
+          'a suppressed turn must not also record a gate pass',
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  },
+);
