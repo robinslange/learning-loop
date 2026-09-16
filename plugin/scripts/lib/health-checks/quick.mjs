@@ -141,7 +141,7 @@ export function checkVaultSystemFiles({ vaultRoot } = {}) {
   });
 }
 
-export function checkBinaryExists({ pluginData } = {}) {
+export function checkBinaryExists({ pluginData, platform = process.platform } = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
@@ -152,7 +152,10 @@ export function checkBinaryExists({ pluginData } = {}) {
       fix: 'Run /learning-loop:init to download the binary',
     });
   }
-  const binPath = join(pluginData, 'bin', 'll-search');
+  // The name the DOWNLOADER writes, which is `ll-search.exe` on Windows.
+  // `lib/binary.mjs` already resolved it that way, so semantic search worked
+  // while this check reported the binary missing and offered to re-download it.
+  const binPath = join(pluginData, 'bin', platform === 'win32' ? 'll-search.exe' : 'll-search');
   if (!existsSync(binPath)) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
@@ -165,7 +168,9 @@ export function checkBinaryExists({ pluginData } = {}) {
   }
   try {
     const stat = statSync(binPath);
-    if (!(stat.mode & 0o111)) {
+    // Same reason as the shims below: no meaningful 0o111 on a Windows `.exe`,
+    // so existence is the only signal the mode bit could have added.
+    if (platform !== 'win32' && !(stat.mode & 0o111)) {
       return makeCheck({
         id: CHECK_IDS['binary-exists'],
         name: 'll-search binary',

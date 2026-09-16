@@ -386,6 +386,38 @@ test(
   },
 );
 
+// The native binary is `ll-search.exe` on Windows, and Node reports no POSIX
+// exec bit for it. `platform` is injected for the same reason the shim tests
+// inject it: the bug is invisible from the machine that finds it, because the
+// check looked for the POSIX name on every platform. A Windows box with a
+// correctly downloaded binary reported it missing and offered to re-download,
+// every session, while `lib/binary.mjs` resolved the same file fine.
+test('checkBinaryExists: a downloaded ll-search.exe is not a missing binary', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-win-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/ll-search.exe'), 'MZ');
+
+  const result = checkBinaryExists({ pluginData: dir, platform: 'win32' });
+
+  assert.equal(result.status, 'ok', `detail: ${result.detail}`);
+  assert.match(result.detail, /ll-search\.exe$/, 'and it names the file it found');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkBinaryExists: the POSIX name does not satisfy a Windows install', () => {
+  // The other side. A check that passed on any file at all would satisfy the
+  // test above while still not knowing what the downloader writes.
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-win-posix-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/ll-search'), '#!/bin/sh\n');
+
+  const result = checkBinaryExists({ pluginData: dir, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /ll-search\.exe$/, 'and it names the file it wanted');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
   // Built with `join` and `delimiter` rather than a POSIX string, because the
   // check compares the path the way the platform spells it and splits PATH on
