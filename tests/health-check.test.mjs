@@ -908,6 +908,62 @@ test('checkDuplicateGateHealth: does not advise ll-watch on a platform with no s
   rmSync(dir, { recursive: true, force: true });
 });
 
+// A daemon timeout is not the gate failing. checkDuplicateNote falls through to
+// a cold subprocess, and the write only goes unchecked when THAT also fails
+// (source 'subprocess' or 'budget'). Measured on a real install: 20 daemon
+// timeouts produced 2 unchecked writes. Reporting "silently disabled" off the
+// daemon count alone tells the user they have lost a safety net they still have,
+// and hides the two occasions they actually lost it.
+test('checkDuplicateGateHealth: daemon timeouts alone report degraded, not disabled', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-degraded-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(4)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'daemon',
+        message: 'timeout',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.detail,
+    /silently disabled|falls open|gate is disabled/i,
+    'no subprocess or budget failure was logged, so no write went unchecked',
+  );
+  assert.match(result.detail, /slow/i, 'the daemon answering slowly is the real symptom');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: reports unchecked writes only when the fallback also failed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-open-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    ...Array(4).fill(null).map(() =>
+      JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
+    ),
+    JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'subprocess' }),
+  ];
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.equal(result.status, 'fail');
+  assert.match(
+    result.detail,
+    /unchecked|without a duplicate check|1 write/i,
+    'a subprocess failure is the case where a write really did skip the gate',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkDuplicateGateHealth: still advises ll-watch where a socket exists', () => {
   // The other side, so the fix above cannot be satisfied by dropping the advice
   // everywhere: on a platform that does have the warm path, a gate timing out

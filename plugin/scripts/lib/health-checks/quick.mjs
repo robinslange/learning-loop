@@ -678,7 +678,7 @@ const DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD = 3;
 // socket, which is what tells "no daemon" apart from "daemon too slow".
 // Tolerant of partial/corrupt lines (best-effort diagnostic, never throws).
 function countDuplicateGateIssues(path) {
-  const empty = { timeouts: 0, daemonTimeouts: 0, staleDaemon: 0 };
+  const empty = { timeouts: 0, daemonTimeouts: 0, staleDaemon: 0, hardFailures: 0 };
   if (!existsSync(path)) return empty;
   let raw;
   try {
@@ -689,6 +689,7 @@ function countDuplicateGateIssues(path) {
   let timeouts = 0;
   let daemonTimeouts = 0;
   let staleDaemon = 0;
+  let hardFailures = 0;
   for (const line of raw.split('\n')) {
     if (!line.trim()) continue;
     try {
@@ -696,12 +697,15 @@ function countDuplicateGateIssues(path) {
       if (obj?.code === 'duplicate-gate-timeout') {
         timeouts++;
         if (obj?.source === 'daemon') daemonTimeouts++;
+        // A daemon timeout still falls through to the subprocess. Only a
+        // subprocess or budget failure means the write itself skipped the gate.
+        if (obj?.source === 'subprocess' || obj?.source === 'budget') hardFailures++;
       } else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
     } catch {
       // Skip a corrupt line — keep counting the rest.
     }
   }
-  return { timeouts, daemonTimeouts, staleDaemon };
+  return { timeouts, daemonTimeouts, staleDaemon, hardFailures };
 }
 
 // Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
@@ -818,13 +822,15 @@ export function checkDuplicateGateHealth({
   let totalTimeouts = 0;
   let totalDaemonTimeouts = 0;
   let totalStaleDaemon = 0;
+  let totalHardFailures = 0;
   for (const month of months) {
-    const { timeouts, daemonTimeouts, staleDaemon } = countDuplicateGateIssues(
+    const { timeouts, daemonTimeouts, staleDaemon, hardFailures } = countDuplicateGateIssues(
       join(pluginData, `hook-errors-${month}.jsonl`),
     );
     totalTimeouts += timeouts;
     totalDaemonTimeouts += daemonTimeouts;
     totalStaleDaemon += staleDaemon;
+    totalHardFailures += hardFailures;
   }
   if (totalStaleDaemon > 0) {
     return makeCheck({
@@ -862,10 +868,13 @@ export function checkDuplicateGateHealth({
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: daemonIsUp
-        ? `${totalTimeouts} duplicate-gate timeouts in recent logs (${totalDaemonTimeouts} from the daemon socket) — the daemon is running but too slow to answer inside the write budget, so the gate is silently disabled on writes`
+        ? `${totalTimeouts} duplicate-gate timeouts in recent logs (${totalDaemonTimeouts} from the daemon socket) — the daemon is running but answered too slowly, so each of those writes fell back to a cold subprocess` +
+          (totalHardFailures > 0
+            ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
+            : ' (the fallback caught every one, so no write went unchecked)')
         : `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
       fix: daemonIsUp
-        ? 'The daemon is up but slow — usually because it is mid-reindex. Check ll-watch status and whether a reindex is in flight; the gate falls open until it settles.'
+        ? 'The daemon is up and answering, just not inside the 800ms socket budget — measured on a healthy vault the scan runs ~240ms at the median but ~750ms at p95, so the budget sits on top of its own tail and ordinary jitter (machine load, several writes at once) crosses it. Raise LL_PRE_WRITE_BUDGET_MS to widen the whole hook budget; a slow answer still beats the cold subprocess it currently falls back to.'
         : 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
     });
   }
