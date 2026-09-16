@@ -353,9 +353,15 @@ export async function run(ctx) {
   if (pluginData) {
     try {
       const cached = readMarker(MARKER_PATHS.intentions(pluginData));
-      if (Array.isArray(cached) && cached.length > 0) {
+      // One marker entry per distinct `context` string, and most group a single
+      // note: cue-shaped sentences get written into the context slot, so each
+      // produces its own one-note "context". Rendering them all overruns
+      // MEMORY_INDEX_MAX_BYTES, so the list is cut mid-way and ships an
+      // arbitrary prefix while dropping the contexts that group real work.
+      const grouped = Array.isArray(cached) ? cached.filter((item) => item.count > 1) : [];
+      if (grouped.length > 0) {
         let list = '';
-        for (const item of cached) {
+        for (const item of grouped) {
           list += `- ${item.context} (${item.count} notes)\n`;
         }
         retrieved += '\n## Notes with active intentions:\n';

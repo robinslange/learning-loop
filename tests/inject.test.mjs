@@ -12,8 +12,8 @@ import {
   scrubForLog,
   buildQuery,
   buildQueryParts,
+  promptSpecificity,
   emitHookOutput,
-  rerankCandidates,
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
@@ -465,6 +465,28 @@ describe('buildQueryParts', () => {
     const args = { prompt: 'short', messages, soloMinChars: 80 };
     assert.equal(buildQuery(args), buildQueryParts(args).query);
   });
+
+  // `padded` drives the thin-continuation counterfactual and the padded-rate
+  // telemetry, so it has to mean "prior context actually got blended in", not
+  // "the prompt was short enough that we tried to". slice(-3, -1) yields
+  // nothing on a first turn, and the query is then byte-identical to the
+  // prompt alone -- calling that padded overstates the padded rate and feeds
+  // the gate a query that was never padded.
+  it('a first turn has no priors to blend, so it is not padded', () => {
+    const parts = buildQueryParts({ prompt: 'short ask', messages: ['short ask'], soloMinChars: 80 });
+    assert.equal(parts.query, parts.soloQuery, 'nothing was blended in');
+    assert.equal(parts.padded, false);
+  });
+
+  it('empty prior messages are not blended and do not mark the query padded', () => {
+    const parts = buildQueryParts({
+      prompt: 'short ask',
+      messages: ['', '', 'short ask'],
+      soloMinChars: 80,
+    });
+    assert.equal(parts.query, parts.soloQuery);
+    assert.equal(parts.padded, false);
+  });
 });
 
 describe('runBackendsWithRaceCap vault-only', () => {
@@ -799,106 +821,6 @@ describe('runBackendsWithRaceCap zombie kill', () => {
   });
 });
 
-describe('rerankCandidates', () => {
-  function spawnReturning(json, { exitCode = 0 } = {}) {
-    return (_cmd, args) => {
-      const dataCallbacks = [];
-      const closeCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') dataCallbacks.push(cb);
-          },
-        },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-        _args: args,
-      };
-      setTimeout(() => {
-        for (const cb of dataCallbacks) cb(json);
-        for (const cb of closeCallbacks) cb(exitCode);
-      }, 5);
-      return child;
-    };
-  }
-
-  it('invokes the rerank subcommand and returns hits in rerank order', async () => {
-    let seenArgs = null;
-    const json = JSON.stringify([
-      { index: 3, score: 3.6, path: 'a.md' },
-      { index: 0, score: 1.6, path: 'b.md' },
-    ]);
-    const mockSpawn = (cmd, args, opts) => {
-      seenArgs = args;
-      return spawnReturning(json)(cmd, args, opts);
-    };
-
-    const out = await rerankCandidates({
-      query: 'graphql auth',
-      vaultDbPath: '/db',
-      topN: 5,
-      candidates: 20,
-      timeoutMs: 2000,
-      _spawnFn: mockSpawn,
-    });
-
-    assert.equal(seenArgs[0], 'rerank', 'first arg is the rerank subcommand');
-    assert.deepEqual(seenArgs.slice(1, 3), ['/db', 'graphql auth'], 'db then query');
-    assert.ok(seenArgs.includes('--candidates') && seenArgs.includes('20'));
-    assert.deepEqual(
-      out.hits.map((h) => h.path),
-      ['a.md', 'b.md'],
-    );
-  });
-
-  it('a rerank timeout resolves to empty hits with an error, never throws', async () => {
-    // A spawn that never fires close: the internal timeout must abort + resolve.
-    const hangingSpawn = () => {
-      const closeCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-          for (const cb of closeCallbacks) cb(143);
-        },
-        stdout: { on: () => {} },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      return child;
-    };
-
-    const out = await rerankCandidates({
-      query: 'q',
-      vaultDbPath: '/db',
-      timeoutMs: 20,
-      _spawnFn: hangingSpawn,
-    });
-
-    assert.deepEqual(out.hits, [], 'timeout yields no hits');
-    assert.ok(out.error, 'timeout surfaces an error, not a throw');
-  });
-
-  it('malformed rerank output yields a parse_error, not a throw', async () => {
-    const out = await rerankCandidates({
-      query: 'q',
-      vaultDbPath: '/db',
-      timeoutMs: 2000,
-      _spawnFn: spawnReturning('not json'),
-    });
-    assert.deepEqual(out.hits, []);
-    assert.equal(out.error, 'parse_error');
-  });
-});
-
 // Peer-strip parity. wrapRetrieval() has never let a federated peer row carry a
 // body across the Node boundary — awareness only, pointer never content. The
 // JIT path is the same trust boundary and had none of that guard.
@@ -1121,5 +1043,32 @@ describe('buildInjection delimiter is unforgeable', () => {
     ]) {
       assert.ok(ctx.includes(clause), `delimiters alone measured worse than none: "${clause}"`);
     }
+  });
+});
+
+// Characterisation tests: written AFTER the implementation, so they pass
+// immediately and prove nothing about catching a regression at authoring time.
+// They earn their place by pinning the counting rule, without which
+// INJECTION_MIN_PROMPT_SPECIFICITY's value of 8 has no fixed meaning.
+describe('promptSpecificity', () => {
+  it('counts distinct content words, dropping stopwords and short tokens', () => {
+    // how/rotate/aws/deploy/key/worker survive; should/for/the are stopwords
+    // and "we" is under the length floor.
+    assert.equal(promptSpecificity('how should we rotate the AWS deploy key for the worker'), 6);
+    assert.equal(promptSpecificity('yes please go ahead and do that one'), 2);
+  });
+
+  it('treats an absent prompt as carrying no subject matter', () => {
+    assert.equal(promptSpecificity(''), 0);
+    assert.equal(promptSpecificity(null), 0);
+    assert.equal(promptSpecificity(undefined), 0);
+  });
+
+  it('does not let repetition stand in for specificity', () => {
+    assert.equal(
+      promptSpecificity('deploy deploy deploy'),
+      1,
+      'specificity measures distinct subject matter, not length',
+    );
   });
 });

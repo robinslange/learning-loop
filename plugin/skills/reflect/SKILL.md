@@ -195,7 +195,8 @@ If an intention pattern is found, extract to frontmatter:
 
 ```yaml
 intentions:
-  - '<extracted project/topic>: <the full intention sentence>'
+  - context: <extracted project/topic>
+    cue: <the full intention sentence>
 status: intentioned
 ```
 

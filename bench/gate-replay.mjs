@@ -30,7 +30,7 @@ const argv = process.argv.slice(2);
 const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
 const SAMPLE = Number(arg('--sample', 400));
 const OUT = arg('--out', 'bench/baselines/replay.jsonl');
-const CANDIDATES = Number(arg('--candidates', String(HookConfig.INJECTION_RERANK_CANDIDATES)));
+const CANDIDATES = Number(arg('--candidates', '20'));
 const CONCURRENCY = Number(arg('--concurrency', '4'));
 const LIVE_ONLY = argv.includes('--live-only');
 

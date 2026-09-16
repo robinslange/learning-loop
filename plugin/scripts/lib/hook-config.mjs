@@ -27,12 +27,6 @@ export const HookConfig = Object.freeze({
   POST_TOOL_TIMEOUT_MS: 5000,
   PROVENANCE_TIMEOUT_MS: 3000,
   INJECTION_RACE_CAP_MS: 1500,
-  // Rerank runs AFTER fusion (it needs the gate to have passed) and is strictly
-  // slower (~750ms warm at 20 candidates, measured), so it gets its own timeout
-  // rather than sharing the fusion race-cap. Log-only today: a timeout drops the
-  // rerank telemetry for that prompt, injection still proceeds in fusion order.
-  INJECTION_RERANK_TIMEOUT_MS: 1200,
-  INJECTION_RERANK_CANDIDATES: 20,
   // Per-session suppression window for re-injecting a note already shown. The
   // window is the only thing standing between the payload and a note that keeps
   // winning fusion turn after turn.
@@ -99,7 +93,23 @@ export const HookConfig = Object.freeze({
   // never did that, and tests/pre-write-check-duplicate-gate.test.mjs pins the
   // single-clock behaviour deliberately ("one clock, not two"). That constant
   // turned out to have no production reader at all, so it has been deleted.
-  PRE_WRITE_DAEMON_TIMEOUT_MS: 800,
+  // How long the pre-write duplicate gate waits on the warm daemon before
+  // falling through to a cold subprocess.
+  //
+  // Measured against a live daemon on a ~7,200-note vault, using the request
+  // the gate actually sends (top 1, candidates 5): p50 ~240ms, p90 ~270ms,
+  // p95 ~750ms idle; under local model inference p50 ~350ms, p90 ~470ms,
+  // p95 ~820ms; eight concurrent scans 739-1148ms. At 800 the budget sat on
+  // top of the scan's own tail, so ordinary jitter crossed it with nothing
+  // wrong -- 20 daemon timeouts in five months, climbing as the vault grew.
+  //
+  // 2500 is ~3x the measured p95 and clears the concurrent worst case. The
+  // cost of raising it is bounded: a slow daemon answer is still cheaper than
+  // the cold subprocess it would otherwise fall back to. The floor it must not
+  // cross is the subprocess fallback's, asserted in lib-hook-config.test.mjs:
+  // hook budget (8000) - this (2500) - safety margin (300) = 5200, well above
+  // PRE_WRITE_SUBPROCESS_FLOOR_MS.
+  PRE_WRITE_DAEMON_TIMEOUT_MS: 2500,
   PRE_WRITE_SAFETY_MARGIN_MS: 300,
   PRE_WRITE_SUBPROCESS_FLOOR_MS: 300,
 
@@ -125,6 +135,18 @@ export const HookConfig = Object.freeze({
   // self-sufficient (2026-07 sample: 19/50 irrelevant injections were thin
   // continuations dominated by stale prior-message text).
   QUERY_SOLO_MIN_CHARS: 80,
+  // Minimum content words (stopwords and sub-3-char tokens excluded) a prompt
+  // must carry before any note can plausibly change what happens next.
+  //
+  // 8 is the median specificity of real gate-passing prompts (n=3,133), so the
+  // floor sits at the middle of genuine asks rather than above them. Leave-one-
+  // out on the judged set preferred 10-14, but that set has 7 positives and
+  // every floor from 6 to 10 retains the same 86% of used injections while
+  // differing only in dead volume cut. Choosing the fitted optimum over the
+  // observed median would be over-reading 7 points: "how should we rotate the
+  // AWS deploy key for the worker" scores 6, and a floor that drops that prompt
+  // is cutting real work, not noise.
+  INJECTION_MIN_PROMPT_SPECIFICITY: 8,
   RECENT_MSG_WINDOW: 80,
   // session-label reads only this much of the transcript tail per prompt;
   // transcripts embed full tool outputs and reach tens of MB, while only the

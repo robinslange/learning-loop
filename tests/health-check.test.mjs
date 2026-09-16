@@ -908,6 +908,122 @@ test('checkDuplicateGateHealth: does not advise ll-watch on a platform with no s
   rmSync(dir, { recursive: true, force: true });
 });
 
+// A daemon timeout is not the gate failing. checkDuplicateNote falls through to
+// a cold subprocess, and the write only goes unchecked when THAT also fails
+// (source 'subprocess' or 'budget'). Measured on a real install: 20 daemon
+// timeouts produced 2 unchecked writes. Reporting "silently disabled" off the
+// daemon count alone tells the user they have lost a safety net they still have,
+// and hides the two occasions they actually lost it.
+test('checkDuplicateGateHealth: daemon timeouts alone report degraded, not disabled', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-degraded-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(4)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'daemon',
+        message: 'timeout',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.detail,
+    /silently disabled|falls open|gate is disabled/i,
+    'no subprocess or budget failure was logged, so no write went unchecked',
+  );
+  assert.match(result.detail, /slow/i, 'the daemon answering slowly is the real symptom');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// PRE_WRITE_DAEMON_TIMEOUT_MS has no env or config override: it is read once at
+// pre-write-check.js:161 and nowhere else. LL_PRE_WRITE_BUDGET_MS overrides
+// preWriteBudgetMs(), the OUTER hook deadline, which only sizes the subprocess
+// fallback's window. So on a daemon-sourced timeout that variable cannot help,
+// and naming it sends the user to twiddle a knob with no path to the failure.
+//
+// The advice also must not quote measured latencies. Whatever p50/p95 a scan
+// shows is a property of one machine and one vault size on one day; baked into
+// a string it reads as authoritative long after it stops being true.
+test('checkDuplicateGateHealth: daemon advice names no lever that cannot reach the failure', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-lever-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(4)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'daemon',
+        message: 'timeout',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.doesNotMatch(
+    result.fix,
+    /LL_PRE_WRITE_BUDGET_MS/,
+    'that override sizes the subprocess window; it cannot widen the daemon socket wait',
+  );
+  assert.doesNotMatch(
+    result.fix,
+    /p50|p95|~\d+ms at|median/i,
+    'measured latencies are machine- and vault-specific; they do not belong in shipped advice',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// Pinning, not TDD-derived: this passes before and after the change. It exists
+// so the lever cannot be dropped everywhere to satisfy the assertion above --
+// where the fallback itself failed, the outer budget IS the thing to widen.
+test('checkDuplicateGateHealth: hard failures still name the budget override', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-lever2-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    ...Array(4).fill(null).map(() =>
+      JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
+    ),
+    JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'subprocess' }),
+  ];
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.match(result.fix, /LL_PRE_WRITE_BUDGET_MS/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: reports unchecked writes only when the fallback also failed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-open-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    ...Array(4).fill(null).map(() =>
+      JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
+    ),
+    JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'subprocess' }),
+  ];
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.equal(result.status, 'fail');
+  assert.match(
+    result.detail,
+    /unchecked|without a duplicate check|1 write/i,
+    'a subprocess failure is the case where a write really did skip the gate',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkDuplicateGateHealth: still advises ll-watch where a socket exists', () => {
   // The other side, so the fix above cannot be satisfied by dropping the advice
   // everywhere: on a platform that does have the warm path, a gate timing out

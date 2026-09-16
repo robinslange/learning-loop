@@ -264,6 +264,146 @@ fn unquote(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Extract the contents of every ```yaml fence, preserving indentation.
+    fn yaml_blocks(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur: Option<Vec<String>> = None;
+        for line in text.lines() {
+            let t = line.trim_start();
+            if t.starts_with("```") {
+                if let Some(b) = cur.take() {
+                    out.push(b.join("\n"));
+                } else if t.starts_with("```yaml") {
+                    cur = Some(Vec::new());
+                }
+                continue;
+            }
+            if let Some(b) = cur.as_mut() {
+                b.push(line.to_string());
+            }
+        }
+        out
+    }
+
+    /// The skills and agents tell the model what to write into `intentions:`.
+    /// Nothing checked that the shape they prescribe is a shape this parser
+    /// reads, so a one-character edit (em-dash to colon, in a commit titled
+    /// "quick wins") silently voided every intention written since: the flat
+    /// branch treats any colon as a `key:` and discards what it cannot match.
+    ///
+    /// Asserting a cue survives, not merely that parsing yields something, is
+    /// load-bearing — a separator-less example still produces one intention
+    /// whose context is the entire sentence, which is the other failure mode.
+    #[test]
+    fn documented_intentions_examples_parse() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("..");
+        let docs = [
+            "plugin/skills/reflect/SKILL.md",
+            "plugin/agents/inbox-organiser.md",
+        ];
+        let mut checked = 0;
+        for rel in docs {
+            let path = root.join(rel);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            for block in yaml_blocks(&text) {
+                if !block.contains("intentions:") {
+                    continue;
+                }
+                let intents = parse_intentions(&block);
+                assert!(
+                    !intents.is_empty(),
+                    "{rel}: documented intentions example parses to nothing:\n{block}"
+                );
+                for i in &intents {
+                    assert!(!i.context.is_empty(), "{rel}: parsed an empty context:\n{block}");
+                    assert!(
+                        i.cue.is_some(),
+                        "{rel}: documented example yields no cue, so the cue text \
+                         was swallowed into the context:\n{block}"
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "found no documented intentions examples to check");
+    }
+
+    /// The fence-scoped test above only sees ```yaml examples in two files.
+    /// The same prescription also reaches the model through a JSON-escaped
+    /// worked example (refinement-proposer) and through inline prose, and both
+    /// drifted independently. Walk every plugin doc instead, unescape the
+    /// JSON-embedded newlines, and require the block form everywhere.
+    ///
+    /// The block form is the fix for a real collision: agents-shared style bans
+    /// em-dashes in prose, and the em-dash was the flat form's ONLY separator,
+    /// so complying with the style rule silently broke the data. `context:` /
+    /// `cue:` has no separator to ban.
+    #[test]
+    fn every_documented_intentions_block_uses_block_form() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            let Ok(entries) = std::fs::read_dir(dir) else { return };
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "md") {
+                    out.push(p);
+                }
+            }
+        }
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..").join("..").join("..");
+        let mut docs = Vec::new();
+        walk(&root.join("plugin"), &mut docs);
+        assert!(!docs.is_empty(), "found no plugin docs to scan");
+
+        let mut offenders = Vec::new();
+        for doc in &docs {
+            let raw = std::fs::read_to_string(doc).unwrap_or_default();
+            // Deliberately NOT unescaping JSON-embedded newlines. A doc that
+            // PRESCRIBES a format writes real multi-line YAML; a doc that
+            // REPRODUCES a note's frontmatter carries it inside a single JSON
+            // line (refinement-proposer's worked example, which rule 4 requires
+            // be copied byte-for-byte and is not a prescription at all).
+            // Unescaping conflated the two and flagged the reproduction.
+            let text = raw;
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                if line.trim_end() != "intentions:" && !line.trim_start().starts_with("intentions:")
+                {
+                    continue;
+                }
+                if line.trim_start() != "intentions:" {
+                    continue; // inline list form, parsed elsewhere
+                }
+                for entry in lines.iter().skip(i + 1) {
+                    let t = entry.trim_start();
+                    if !t.starts_with("- ") {
+                        break;
+                    }
+                    let after = t[2..].trim();
+                    if after.starts_with("context:") || after.starts_with('{') {
+                        continue;
+                    }
+                    offenders.push(format!(
+                        "{}: {}",
+                        doc.strip_prefix(&root).unwrap_or(doc).display(),
+                        after
+                    ));
+                }
+            }
+        }
+        assert!(
+            offenders.is_empty(),
+            "these docs prescribe a flat intentions entry; use `- context:` / `cue:`:\n  {}",
+            offenders.join("\n  ")
+        );
+    }
+
     #[test]
     fn test_parse_intentions_block_form() {
         let fm = "tags: []\nintentions:\n  - context: vault hygiene\n    cue: review weekly\n  - context: focus time\n";

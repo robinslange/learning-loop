@@ -38,6 +38,39 @@ export function scrubForLog(text, max) {
   return scrubSecrets(String(text ?? '')).slice(0, max);
 }
 
+// Words too common to carry topic. Deliberately small: this runs per prompt
+// inside a hard timeout, and a longer list buys nothing measurable.
+const STOPWORDS = new Set(
+  (
+    'the a an and or but if then of to in on for with is are was were be been do does did this ' +
+    'that it its as at by from we you i me my our your can could should would will just so now ' +
+    'not no yes please lets let s t re ve ll m d'
+  ).split(' '),
+);
+
+function contentTokens(text) {
+  return new Set(
+    (text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOPWORDS.has(w)),
+  );
+}
+
+// How specific is the ask? On judged real traffic this separates injections
+// that changed the answer from those that did not far better than the
+// retrieval score does (AUC 0.79 vs 0.43, n=44). A prompt carrying few content
+// words is usually a continuation, an acknowledgement or a reaction, and no
+// note can change what happens next on those turns.
+//
+// This does not replace the relevance gate. Relevance and impact are different
+// quantities: the RRF gate cuts notes that do not match, this cuts turns no
+// note can help. Both, in that order.
+export function promptSpecificity(prompt) {
+  return contentTokens(prompt).size;
+}
+
 function truncateAtSentenceBoundary(text, maxTokens) {
   const charLimit = maxTokens * 4;
   if (text.length <= charLimit) return text;
@@ -65,7 +98,14 @@ export function buildQueryParts({ prompt, messages = [], soloMinChars }) {
   }
   const prior = messages
     .slice(-3, -1)
-    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
+    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS))
+    .filter(Boolean);
+  // `padded` must mean "prior context actually got blended in", not merely
+  // "the prompt was short enough that we tried". On a first turn slice(-3, -1)
+  // yields nothing and the query is byte-identical to the prompt alone, so
+  // reporting padded:true there overstates the padded rate in telemetry and
+  // hands the thin-continuation counterfactual a query that was never padded.
+  if (prior.length === 0) return { query: head, soloQuery: head, padded: false };
   return { query: [head, ...prior].join(' '), soloQuery: head, padded: true };
 }
 
@@ -248,39 +288,4 @@ export async function runBackendsWithRaceCap({
   const out = { vault: toVault(settled[0]) };
   if (runSolo) out.vaultSolo = toVault(settled[1]);
   return out;
-}
-
-// Cross-encoder rerank of the query's candidates via the `rerank` subcommand
-// (ll-search ships a MiniLM cross-encoder the plain `query` path never invokes).
-// Returns { hits: [{ index, score, path }] } in rerank order, or { hits: [],
-// error } on timeout/failure — callers use it log-only, so a miss degrades to
-// "no rerank data", never a thrown error. Warm cost ~750ms at 20 candidates,
-// ~1150ms at 40 (measured), so it gets its OWN timeout: reranking is strictly
-// slower than fusion and must not be able to hang the hook.
-export async function rerankCandidates({
-  query,
-  vaultDbPath,
-  topN = 5,
-  candidates = 20,
-  timeoutMs,
-  _spawnFn,
-}) {
-  const spawnFn = _spawnFn || defaultSpawn;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const useRealBinaries = !_spawnFn;
-  const llBinary = useRealBinaries ? findBinary() : null;
-  const llCmd = llBinary ? llBinary.bin : 'll-search';
-  const llEnv = llBinary ? ortSpawnEnv(llBinary.binDir) : undefined;
-
-  const result = await spawnSearch(
-    spawnFn,
-    llCmd,
-    ['rerank', vaultDbPath, query, '--top', String(topN), '--candidates', String(candidates)],
-    controller.signal,
-    llEnv,
-  );
-  clearTimeout(timer);
-  return parseVault(result);
 }
