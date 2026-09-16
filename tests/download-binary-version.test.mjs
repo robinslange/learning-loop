@@ -59,6 +59,51 @@ test('getVersion falls back to latest when plugin.json is absent', (t) => {
   assert.equal(out.stdout.trim(), 'latest');
 });
 
+// Regression: argv[2] is a release tag, and a flag is never one. `--help` used
+// to be taken as the tag, sending the downloader after a release named
+// `--help` and printing "release still building, will retry next session" --
+// indistinguishable from a genuinely mid-build release. Hermetic env (empty
+// HOME, no CLAUDE_PLUGIN_DATA) so the run cannot reach the network or a real
+// plugin-data dir; both cases must exit inside getVersion, before the
+// plugin-data guard that the test below pins.
+test('download-binary --help prints usage and exits 0', (t) => {
+  const fakeHome = mkdtempSync(join(tmpdir(), 'll-dl-help-'));
+  t.after(() => rmSync(fakeHome, { recursive: true, force: true }));
+
+  for (const flag of ['--help', '-h']) {
+    const out = spawnSync(process.execPath, [MOD_PATH, flag], {
+      encoding: 'utf-8',
+      env: { PATH: process.env.PATH, HOME: fakeHome, USERPROFILE: fakeHome },
+    });
+
+    assert.equal(out.status, 0, `${flag}: expected exit 0; stderr: ${out.stderr}`);
+    assert.match(out.stdout, /Usage: download-binary\.mjs/, `${flag}: must print usage`);
+    assert.doesNotMatch(
+      out.stderr,
+      /release still building/,
+      `${flag}: must not be treated as a release tag`,
+    );
+  }
+});
+
+test('download-binary rejects a flag-shaped version instead of fetching it', (t) => {
+  const fakeHome = mkdtempSync(join(tmpdir(), 'll-dl-badflag-'));
+  t.after(() => rmSync(fakeHome, { recursive: true, force: true }));
+
+  const out = spawnSync(process.execPath, [MOD_PATH, '--bogus'], {
+    encoding: 'utf-8',
+    env: { PATH: process.env.PATH, HOME: fakeHome, USERPROFILE: fakeHome },
+  });
+
+  assert.equal(out.status, 2, `expected exit 2; stderr: ${out.stderr}`);
+  assert.match(out.stderr, /not a release tag: --bogus/);
+  assert.doesNotMatch(
+    out.stderr,
+    /release still building/,
+    'a bad flag must not masquerade as a mid-build release',
+  );
+});
+
 // Regression: the detached session-start spawn runs in a stripped environment.
 // When neither CLAUDE_PLUGIN_DATA nor the saved data-path marker resolves,
 // main() must exit 1 with a clear message — NOT throw join(null) into ignored
