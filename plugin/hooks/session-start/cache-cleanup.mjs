@@ -14,6 +14,7 @@ import {
   existsSync,
   statSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -21,12 +22,67 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
 import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
-import { DATA_FILES, DATA_PATHS, SHIM_NAMES } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, DATA_PATHS, SHIM_NAMES, shimFileName } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
+}
+
+// Records which plugin version last wrote the shims. Kept in plugin-data
+// rather than beside the shims: ~/.local/bin belongs to the user, and a
+// bookkeeping file of ours is not theirs to inherit.
+const SHIM_STAMP = 'shims-version';
+
+function readShimStamp(pluginData) {
+  if (!pluginData) return null;
+  try {
+    return readFileSync(join(DATA_PATHS.markers(pluginData), SHIM_STAMP), 'utf8').trim() || null;
+  } catch {
+    // Absent or unreadable both mean "vintage unknown", which is reinstallable.
+    return null;
+  }
+}
+
+function writeShimStamp(pluginData, version) {
+  if (!pluginData) return;
+  try {
+    const dir = DATA_PATHS.markers(pluginData);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, SHIM_STAMP), `${version}\n`);
+  } catch (err) {
+    logError('session-start.shim-stamp', err);
+  }
+}
+
+/**
+ * Whether SessionStart should re-run the shim installer.
+ *
+ * Two triggers, because presence alone answered the wrong question. A plugin
+ * upgrade replaces the plugin but does not re-run its installers, so shims
+ * keep the shape they had the day they were written: a 1.x install carried
+ * ll-watch/ll-paths/ll-run that exec'd `scripts/shim.mjs`, a dispatcher 2.x
+ * stopped shipping, and all three failed with "learning-loop is not installed"
+ * on an install that was complete. A presence check passes through that
+ * forever.
+ *
+ * @returns {boolean}
+ */
+export function shimsNeedInstall({
+  binDir,
+  platform = process.platform,
+  stampedVersion,
+  pluginVersion,
+} = {}) {
+  // A shim this install has never received. Driven by SHIM_NAMES so a newly
+  // added shim reaches installs that already have the others, and spelled the
+  // way the INSTALLER writes it: probing the POSIX name on Windows reported
+  // four correct `.cmd` shims missing and re-spawned the installer every
+  // session, which is the same spelling bug the health check had.
+  if (SHIM_NAMES.some((s) => !existsSync(join(binDir, shimFileName(s, platform))))) return true;
+  // Present is not current.
+  return stampedVersion !== pluginVersion;
 }
 
 export async function run(ctx) {
@@ -50,15 +106,24 @@ export async function run(ctx) {
   // the old ones — name them locally and every existing user keeps passing the
   // check while missing the shim that was added.
   try {
-    const missing = SHIM_NAMES.some((s) => !existsSync(join(home(), '.local', 'bin', s)));
-    if (missing) {
+    const binDir = join(home(), '.local', 'bin');
+    const shimPluginData = resolvePluginData();
+    const needed = shimsNeedInstall({
+      binDir,
+      stampedVersion: readShimStamp(shimPluginData),
+      pluginVersion: ctx.pluginVersion,
+    });
+    if (needed) {
       const installer = join(ctx.pluginDir, 'scripts', 'install-shims.mjs');
       if (existsSync(installer)) {
-        mkdirSync(join(home(), '.local', 'bin'), { recursive: true });
+        mkdirSync(binDir, { recursive: true });
         execFileSync('node', [installer, '--install'], {
           stdio: 'ignore',
           timeout: HookConfig.DEPS_CHECK_TIMEOUT_MS,
         });
+        // Only after the installer returned. A stamp written past a failed
+        // install would mark stale shims as current and never retry them.
+        writeShimStamp(shimPluginData, ctx.pluginVersion);
       }
     }
   } catch (err) {
