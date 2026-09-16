@@ -225,15 +225,23 @@ pub fn insert_embedded(
 /// same wrong-body-under-the-wrong-id this function exists to prevent.
 ///
 /// It is not a regression (the previous `WHERE note_uuid = ?2` never matched
-/// NULL either) and it is narrow: it needs two id-less rows, a swap, and
-/// mtimes close enough that `(ex_mtime - file.mtime).abs() < 1.0` skips the
-/// re-read. Any re-read repairs it, because by then the row carries the
-/// backfilled id and `insert_embedded`'s `COALESCE` keeps it while the content
-/// is replaced. The exposed window is a vault's FIRST reindex after the column
-/// is added, when every row is NULL at once. Fixing it properly means the
-/// backfill refusing to stamp a row whose content no longer matches the file,
-/// which costs a read per id-less row; that is a separate change, not a
-/// comment.
+/// NULL either) and it is narrow: it needs two id-less rows, a swap, and the
+/// two notes' mtimes within 1 MILLISECOND of each other, which is what
+/// `(ex_mtime - file.mtime).abs() < 1.0` compares — `walk_vault` stores
+/// `as_secs_f64() * 1000.0`, so the tolerance reads as seconds and is not.
+/// Any re-read repairs it, because by then the row carries the backfilled id
+/// and `insert_embedded`'s `COALESCE` keeps it while the content is replaced.
+/// The exposed window is a vault's FIRST reindex after the column is added,
+/// when every row is NULL at once.
+///
+/// The statement that writes the wrong id is the backfill, not this pass:
+/// `UPDATE notes SET note_uuid = ?1 WHERE path = ?2 AND note_uuid IS NULL`
+/// asserts "the row at path P is the note now at P", which is the assumption
+/// this pass exists to stop trusting. Moving the backfill earlier does not
+/// help — it stamps the same wrong id, sooner. Fixing it means either claiming
+/// NULL rows by path here before the backfill runs, or the backfill refusing a
+/// row whose `content_hash` does not match the file it is about to adopt, at a
+/// cost of one read per id-less row. That is a change, not a comment.
 fn follow_moved_notes(
     conn: &Connection,
     vault_files: &[WalkEntry],

@@ -76,7 +76,12 @@ export const ABANDONED_AFTER_MS = 6 * 60 * 60 * 1000;
 // marker untouched for [`ABANDONED_AFTER_MS`] means the run that owned it is
 // not coming back.
 export function isAbandonedStamp(stamp, currentSid) {
-  if (!stamp || stamp === currentSid) return false;
+  // No stamp, or our own, is never abandoned. Neither is anything at all when
+  // the caller did not say who it is: `--sid` is optional at the CLI, and with
+  // an empty `currentSid` every stamp looks foreign, including this session's.
+  // The marker check alone would then be the only thing standing between a
+  // hand-invoked sweep and the live run's own working state.
+  if (!stamp || !currentSid || stamp === currentSid) return false;
   let mtimeMs;
   try {
     mtimeMs = statSync(reflectNewNotesPath(stamp)).mtimeMs;
@@ -96,8 +101,9 @@ export function isAbandonedStamp(stamp, currentSid) {
 //     A note matching either set is emitted once.
 //
 //   `abandoned` — notes carrying a dead session's `reflect_sid`
-//     (see [`isAbandonedStamp`]). Disjoint from this session's stamps by
-//     construction, so nothing here is ever this run's own working state.
+//     (see [`isAbandonedStamp`]). Disjoint from this session's stamps whenever
+//     `sid` is given, so nothing here is ever this run's own working state;
+//     with no `sid` the set is empty rather than everything.
 export function scanVaultCandidates(vaultRoot, sid) {
   const candidates = [];
   const abandoned = [];

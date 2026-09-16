@@ -380,3 +380,24 @@ test('--scan-vault reports how many abandoned stamps it healed', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// `--sid` is optional at the CLI, so `currentSid` can arrive empty. Without a
+// guard every stamp then looks foreign — including the caller's own — and only
+// the marker's existence stands between a hand-invoked sweep and a live run's
+// working state.
+test('an empty session id abandons nothing rather than everything', () => {
+  const root = setupVault();
+  useOwnPluginData();
+  try {
+    stamped(root, '0-inbox', 'someone.md', 'some-other-session');
+    assert.deepEqual(
+      scanVaultCandidates(root, '').abandoned,
+      [],
+      'not knowing whose run this is must mean judging nothing, not judging everything',
+    );
+  } finally {
+    restorePluginData();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
