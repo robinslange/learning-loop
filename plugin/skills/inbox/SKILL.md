@@ -117,7 +117,7 @@ The agent returns a structured summary. Present it to the user, including the to
 The agent only presents that list — it cannot converse. Relay the user's per-note replies by executing the frontmatter edits the agent documented:
 
 - **"close"** or **"close all"**: add `status: resolved` to the note's frontmatter via `Edit`
-- **"plan"**: ask the user for a one-line intention, then write `intentions:` frontmatter as `- "<context>: <cue>"` and set `status: intentioned`
+- **"plan"**: ask the user for a one-line intention, then write `intentions:` frontmatter as a `- context: <context>` entry with a `cue: <cue>` line indented under it, and set `status: intentioned`
 - **"skip"**: leave the note as-is
 
 Limbo notes the skill edits here join the hook-replay scope: pipe them through the same 2c snippet if any were edited after 2c already ran.

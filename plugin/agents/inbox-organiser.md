@@ -51,7 +51,8 @@ Before clustering, classify each inbox note's intention status:
    If found, extract to frontmatter if not already present:
    ```yaml
    intentions:
-     - "<extracted project/topic>: <the full intention sentence>"
+     - context: <extracted project/topic>
+       cue: <the full intention sentence>
    status: intentioned
    ```
 
@@ -200,7 +201,7 @@ After presenting the cluster summary, if any LIMBO notes exist:
 
 3. The skill executes responses after you return — you cannot converse, so do NOT claim to handle them. Your job ends at presenting the list; for the skill's benefit, each reply maps to:
    - **"close"** or **"close all"**: the skill adds `status: resolved` to frontmatter via `Edit`
-   - **"plan"**: the skill asks for a one-line intention, writes it to `intentions:` frontmatter as `- "<context>: <cue>"`, and sets `status: intentioned`
+   - **"plan"**: the skill asks for a one-line intention, writes it to `intentions:` frontmatter as a `- context: <context>` entry with a `cue: <cue>` line indented under it, and sets `status: intentioned`
    - **"skip"**: leave as-is
 
 Do NOT display:
