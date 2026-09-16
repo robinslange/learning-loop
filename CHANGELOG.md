@@ -4,7 +4,75 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **An impact gate now runs before retrieval, not after it.** The relevance
+  gate answers "is this note about what was asked"; measurement says that is
+  not the binding question, because injections are relevant far more often than
+  they change the answer. Probed against judged real traffic, prompt
+  specificity ranks used-vs-unused injections at AUC 0.79 where the retrieval
+  score manages 0.43 — the winning signal is a property of the ask, not of the
+  candidate. A content-word floor (`injection_min_prompt_specificity`, env
+  `LEARNING_LOOP_INJECTION_MIN_SPECIFICITY`) is therefore checked before any
+  search spawns, so a turn no note can help costs nothing.
+
+- **A contract test parses the intentions examples in the skills' own docs.**
+  Nothing previously checked that the shape the skills prescribe is a shape the
+  parser reads. It asserts through the real parser, and requires a cue to
+  survive rather than merely that parsing returns something — a separator-less
+  example still yields one intention whose context is the entire sentence.
+
+### Changed
+
+- **The pre-write duplicate gate waits 2500ms on the warm daemon, up from 800.** At 800 the budget sat on top of the scan's own latency tail, so
+  ordinary jitter crossed it with nothing actually wrong. Measured with the
+  request the gate sends (top 1, candidates 5) on a ~7,200-note vault: p50
+  ~240ms and p95 ~750ms idle, p95 ~820ms under local model inference, and
+  739-1148ms across eight concurrent scans. Waiting longer on a warm daemon is
+  cheaper than the cold ONNX subprocess it otherwise falls back to, so this
+  lowers worst-case write latency rather than raising it.
+
+- **The skills prescribe the block form for `intentions:` frontmatter.** The
+  flat `"<context> — <cue>"` form depends on an em-dash, which this vault's
+  prose rules ban; `- context:` / `cue:` has no separator to get wrong.
+
+- **The SessionStart intention summary ships only contexts that group more than
+  one note.** Most contexts group exactly one, so the rendered list overran its
+  byte cap and was truncated mid-way, shipping an arbitrary prefix while
+  dropping the contexts that group real bodies of work.
+
+- **`/doctor` no longer reports a daemon timeout as the gate failing.** A
+  daemon timeout falls through to a cold subprocess; only a subprocess or
+  budget failure means a write skipped the gate. The check counts those
+  separately and derives its message from them, and the advice names a lever
+  that can actually reach the observed failure.
+
+### Removed
+
+- **The cross-encoder rerank is gone from the JIT injection hot path.** It was
+  wired log-only to test whether reordering puts the note that gets used nearer
+  the top than raw RRF fusion. Joining a year of that telemetry answers no: of
+  69 used notes comparable under both orderings, mean rank was 0.75 under
+  fusion against 1.51 under rerank, moving the used note up 11 times and down 38. It was a measurable regression costing a second subprocess on every gate
+  pass, so the call, the helper and its constants are removed.
+
 ### Fixed
+
+- **`intentions:` entries written as `<context>: <cue>` were silently discarded
+  at index time.** The flat-string branch treats any colon as a `key:`, matches
+  it against `context`/`cue`, and the final filter then drops the empty
+  intention it produced — so those entries did not degrade, they vanished. On
+  the vault this was found in, 766 entries and 740 of 2,390 notes carrying
+  intentions were contributing nothing at all. The cause was a single
+  character: a tidy-up commit changed the prescribed separator from an em-dash
+  to a colon to satisfy the prose style rule that bans em-dashes, and nothing
+  tested that the emitter and the parser still agreed.
+
+- **`padded` in injection telemetry meant "the prompt was short enough that we
+  tried to blend priors", not "priors were blended".** On a first turn there is
+  nothing to blend and the query is byte-identical to the prompt alone, yet it
+  was still recorded as padded — inflating the padded rate and handing the
+  thin-continuation counterfactual a query that was never padded.
 
 - **The `/reflect` sweep's test suite wrote into the developer's live
   plugin-data.** It resolved marker paths through `reflectNewNotesPath` without
@@ -142,7 +210,7 @@ All notable changes to this project are documented here. The format is based on 
   Windows, where the suite wrote, deleted and restored it while other test files
   ran in parallel. Each flip moves the marker path `getSessionId()` keys, and a
   hook that finds no marker returns without appending, so `appends one line per
-  vault Write` recorded one line instead of four. It now uses
+vault Write` recorded one line instead of four. It now uses
   `LL_SESSION_TMP_DIR`, the seam every other session-id test already used.
   Test-only; no shipped behaviour changes.
 
@@ -336,7 +404,7 @@ All notable changes to this project are documented here. The format is based on 
   The matcher accepted only the bare lowercase words, so `visibility: "private"` — which is
   what Obsidian's property editor writes — was an unrecognised value, and unrecognised meant
   "use the globs". The existing test asserted this behaviour and reasoned only about the
-  publishing direction: it checked that a typo could not reach an *uncapped* tier, and missed
+  publishing direction: it checked that a typo could not reach an _uncapped_ tier, and missed
   that falling through to the capped tier is still more disclosing than the `private` the
   author was trying to write. Values are now normalised (matched quotes, case, a trailing
   `# comment`) before matching, and anything still unrecognised resolves to `private`.
@@ -354,7 +422,7 @@ All notable changes to this project are documented here. The format is based on 
 - **A validly signed inbound `link` no longer earns an automatic, unprompted reciprocal,
   and `ll link revoke` is no longer undone by the next sync.** These were one bug wearing
   two faces. `reconcile`'s only gates on minting a reciprocal were a valid signature, the
-  right kind, expiry and addressing — and a signature proves that *some* key signed a
+  right kind, expiry and addressing — and a signature proves that _some_ key signed a
   statement, not that anyone at this machine agreed to it. `GrantKind::Link` transfers
   authority, so answering one handed `from` the standing of "the same person at another
   keyboard" over every vault this identity owns, unscoped, for a year. Any member who
@@ -379,9 +447,9 @@ All notable changes to this project are documented here. The format is based on 
 
 - **Promoting a note between folders no longer breaks the whole index.** `note_uuid` carries a
   partial UNIQUE index, and a moved note arrived as an INSERT at its new path while the stale row
-  still held its id, so SQLite aborted the entire reindex with "UNIQUE constraint failed:
-  notes.note_uuid" — not one note, the whole run. The deletion pass that would have cleared the
-  stale row runs *after* the inserts, so it never got the chance. Moving a note from `0-inbox/` to
+  still held its id, so SQLite aborted the entire reindex with `UNIQUE constraint failed:
+notes.note_uuid` — not one note, the whole run. The deletion pass that would have cleared the
+  stale row runs _after_ the inserts, so it never got the chance. Moving a note from `0-inbox/` to
   `3-permanent/` is exactly this, which means an ordinary vault promotion could leave the index
   permanently unable to rebuild. Found on a live vault where one promoted note had already done it.
 
@@ -392,9 +460,9 @@ All notable changes to this project are documented here. The format is based on 
 - **A keyring that refuses to answer is no longer read as a machine without a keyring.**
   `is_platform_unavailable` matched the substring `"platform"` against the error text —
   and keyring 3.6.3 renders `PlatformFailure` as "Platform secure storage failure: …"
-  *and* `NoStorageAccess` as "Couldn't access platform secure storage: …". Since
+  _and_ `NoStorageAccess` as "Couldn't access platform secure storage: …". Since
   `NoStorageAccess` is documented as "typically… the credential store is locked", both of
-  the variants that mean *I could not read it* were classified as *there is nothing here*.
+  the variants that mean _I could not read it_ were classified as _there is nothing here_.
   A locked keychain, a denied prompt and a cancelled prompt all became `Ok(None)`.
 
   `load_only` then fell through to `.seed.enc` while the real key sat in the keychain, so
@@ -411,12 +479,12 @@ All notable changes to this project are documented here. The format is based on 
 - **An incremental reindex now writes each note's stable id into the index, not only onto
   disk.** `resolve_note_uuids` assigns an `id:` to every walked note — its comment says
   "every note gets a stable id, whether or not its content changed" — but the only writer
-  of the `note_uuid` *column* was `insert_embedded`, reachable only for notes that get
+  of the `note_uuid` _column_ was `insert_embedded`, reachable only for notes that get
   re-embedded. A note whose id had just been written was then skipped and kept `note_uuid`
   NULL permanently.
 
   The steady state was a trap rather than a delay. Run 1 writes `id:` into the file, but
-  `walk_vault` captured the mtime *before* that write, so the note is skipped. Run 2 sees
+  `walk_vault` captured the mtime _before_ that write, so the note is skipped. Run 2 sees
   the new mtime, re-reads, and finds the content hash unchanged — the hash is taken over
   the frontmatter-stripped body, so an added `id:` line moves none of it — and takes the
   update-mtime branch, which writes mtime and nothing else. Run 3 onward the mtimes agree
@@ -430,7 +498,7 @@ All notable changes to this project are documented here. The format is based on 
   duplicate `note_uuid` anywhere in the table.
 
   This also makes the remedy the exporter already prints true: `ll-search index <vault>
-  <db>` now does assign one to each, and they do arrive on the next sync.
+<db>` now does assign one to each, and they do arrive on the next sync.
 
 - **An over-long `key_id` is refused on length before it is base58-decoded.** base58
   is a base conversion, not a block transform, so `bs58::decode(..).into_vec()` is
@@ -502,7 +570,6 @@ All notable changes to this project are documented here. The format is based on 
 
 - **A Windows path is not an ESM specifier.** `install-shims.test.mjs` spawned a child importing the installer by absolute path, which on Windows is `D:\...` — refused by the ESM loader with "Received protocol 'd:'". posix accepts a bare absolute path, so this could only fail on the runner nobody develops on. It had been red on main since the `fix/fedv5-docs` merge, and v2.0.3 shipped with it red.
 
-
 ## v2.0.3
 
 ### Fixed
@@ -528,12 +595,11 @@ Everything below was found by running federation against a real 6,025-note vault
 - The tier decision is made once per note and read by every phase of the export, rather than each phase re-deriving it. Both leaks above were a phase that never asked; a new table added to the export now has to answer for itself.
 - Tests that name the artefact rather than the counters. Deleting the `private` skip entirely -- publishing every withheld note with its body -- left 580 lib tests and all twelve integration targets green, because the assertion that looked like cover was `exported + skipped == 1`, a sum over a partition that both branches satisfy. Removing the `listed` body cap was equally invisible. The upload boundary test computed its bound from the constant under test, so it agreed with a 50 MB cap while the wire refused 16 MiB.
 
-
 ## v2.0.2
 
 ### Fixed
 
-- **A running `ll-search watch` daemon never re-read `config.json`, so it overwrote a successful `join` with the pre-join hub's failure.** The watcher loaded the federation config once, before its loop, and reused that value on every tick forever — but `join`, `link accept` and `recover` all rewrite that file underneath a live daemon. After any of them the watcher went on dialling the hub the machine had left, and wrote *that* failure into `federation/sync-state.json`, which is the file `ll-search status` renders. The stale answer did not merely persist: it overwrote the true one every cycle, so even a successful manual `sync` was undone within one interval, and the page read as though federation had never moved. Observed end to end — a join rewrote the endpoint at 11:02:39 and three minutes later the daemon stamped `refusing cleartext ws:// connection to hub "ws://100.64.0.2:9473/ws"`, an endpoint no longer on disk. The tick re-reads now. A config that stops parsing keeps the last good one rather than dropping to none, so a half-written save cannot cost a working daemon its federation until someone restarts it, and a daemon that started before `join` picks the file up when it appears.
+- **A running `ll-search watch` daemon never re-read `config.json`, so it overwrote a successful `join` with the pre-join hub's failure.** The watcher loaded the federation config once, before its loop, and reused that value on every tick forever — but `join`, `link accept` and `recover` all rewrite that file underneath a live daemon. After any of them the watcher went on dialling the hub the machine had left, and wrote _that_ failure into `federation/sync-state.json`, which is the file `ll-search status` renders. The stale answer did not merely persist: it overwrote the true one every cycle, so even a successful manual `sync` was undone within one interval, and the page read as though federation had never moved. Observed end to end — a join rewrote the endpoint at 11:02:39 and three minutes later the daemon stamped `refusing cleartext ws:// connection to hub "ws://100.64.0.2:9473/ws"`, an endpoint no longer on disk. The tick re-reads now. A config that stops parsing keeps the last good one rather than dropping to none, so a half-written save cannot cost a working daemon its federation until someone restarts it, and a daemon that started before `join` picks the file up when it appears.
 - **The export never counted the notes it could not address.** Rows without a stable `note_uuid` are excluded in SQL, so they never reached the `skipped` tally either — and `skipped` means "held back by a visibility tier", which these are not. An index built before stable identity could have most of itself in that gap while the report said "N exported, 0 skipped", which reads as though the export considered the whole vault and sent that much. On a real 6025-note index, 4424 rows were in it. They are counted and reported separately now, naming the reindex that fixes them.
 - **`ll-search sync` panicked instead of saying what was wrong.** A source index with no `model_id` failed as `Query returned no rows` behind a backtrace note — the mechanism, not the fix. The index has simply never been built, usually because the db path is not the one the watcher maintains. The error says both, and every failure on that path now exits 1 with its error chain rather than a panic.
 - **`ll-search status` diagnosed an absent read authority with a cause it could not know.** `readable-vaults.json` is reported absent for at least five reasons — never written, corrupt, predating the key field, written by a newer build, or an unreadable seed — and the row named one of them for all five, pointing a person at re-enrolment when the answer was "unlock your keychain" or "run one sync". It names none now. The same filter is also no longer written twice: `ll status` and the reader share one expression of whose listing it is, so the count on the page cannot drift from what federated search actually serves.
@@ -580,7 +646,7 @@ may connect and never decides trust between keys.
   consequence of which folder it landed in. A misspelled value falls through
   to the glob rules and their cap rather than to an uncapped tier. **A vault
   that federated before this** should run `ll-search visibility-backfill
-  <vault-path>` once (`--dry-run` first) to stamp the previously-published set
+<vault-path>` once (`--dry-run` first) to stamp the previously-published set
   explicitly; without it, notes that were public become `listed`.
 - One machine can hold several vaults. A single-vault install needs no
   migration: `vaults.json` appears only when `ll-search vault add` registers a
@@ -593,7 +659,7 @@ may connect and never decides trust between keys.
   not. The offline door needs no hub at all.
 - `ll-search recover "<24 words>"` restores an identity from the phrase
   `join` printed. Recovering the identity already present needs no `--force`;
-  recovering a *different* one over it does, and what `--force` authorises is
+  recovering a _different_ one over it does, and what `--force` authorises is
   the loss — every grant naming the old key survives it, signed and
   unreachable.
 - **The public knowledge map is withdrawn, pending a revisit.** The shared
@@ -650,6 +716,7 @@ What does work: a withdrawn or lapsed `follow` carries the `vault_id` it was
 granted for, and removes exactly `federation/data/peers/<vault_id>/` unless a
 still-live grant justifies keeping it. `/uninstall` sweeps that directory
 itself, because on the main path nothing else will.
+
 ## v1.41.2
 
 ### Fixed
