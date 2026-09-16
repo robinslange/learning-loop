@@ -15,7 +15,10 @@ All notable changes to this project are documented here. The format is based on 
   startup.
   Skill and agent text and hook registrations are still read once per session;
   `/reload-plugins` picks those up. Sessions opened before this release keep
-  their old hook commands until they reload once.
+  their old hook commands until they reload once. That includes the old
+  `cache-cleanup`, which still prunes older sibling versions -- so until every
+  open session has reloaded onto at least this release, one of them can still
+  delete a cache directory another session is running from.
 
 ### Fixed
 

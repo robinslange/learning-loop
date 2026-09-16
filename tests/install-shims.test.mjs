@@ -105,7 +105,7 @@ writeFileSync(join(fakeHome, 'shims.json'), JSON.stringify(shims));
       if (name === 'll-search') continue;
       assert.match(
         text,
-        new RegExp(`node -e ".*" -- ${name} %\\*\\r\\n$`),
+        new RegExp(`node -e "[^"]*" -- ${name} %\\*\\r\\n$`),
         `${name}: hands its name to node`,
       );
       const setlocalIdx = text.indexOf('setlocal DisableDelayedExpansion');

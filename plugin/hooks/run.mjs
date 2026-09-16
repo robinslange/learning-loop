@@ -13,6 +13,10 @@ import { pathToFileURL } from 'node:url';
 import { activeRoot } from '../scripts/lib/plugin-meta.mjs';
 
 const hook = process.argv[2];
+if (!hook) {
+  console.error('usage: run.mjs <hooks/name.js>');
+  process.exit(1);
+}
 const target = join(activeRoot({ need: hook }), hook);
 process.argv.splice(1, 2, target);
 await import(pathToFileURL(target).href);

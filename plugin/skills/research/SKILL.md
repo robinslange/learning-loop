@@ -40,9 +40,10 @@ path** so the command never hard-breaks.
 
 ## How to run
 
-**First, resolve the plugin root** — `${CLAUDE_PLUGIN_ROOT}` is set in your main
-session but is NOT exported into Workflow subagent shells, so the workflow must be
-handed a concrete absolute path. In a Bash block, run:
+**First, resolve the plugin root** — `${CLAUDE_PLUGIN_ROOT}` is not an
+environment variable in any shell; the Skill tool substitutes it only when it
+loads this SKILL.md, so the workflow must be handed a concrete absolute path.
+In a Bash block, run:
 
 ```
 ll-run resolve-paths.mjs PLUGIN

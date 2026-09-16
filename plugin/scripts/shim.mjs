@@ -6,7 +6,7 @@
 // instead of waiting for someone to reinstall the shims. ll-search is not here:
 // it is a node-free shell shim, because node startup would triple its cost.
 
-import { existsSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
@@ -36,7 +36,7 @@ const SHIMS = {
     }
     const path = ['scripts', 'bin']
       .map((dir) => join(ROOT, dir, script))
-      .find((p) => existsSync(p));
+      .find((p) => statSync(p, { throwIfNoEntry: false })?.isFile());
     if (!path) {
       console.error(
         `error: no such learning-loop script: ${script}\n  Looked in: scripts/ and bin/ under ${ROOT}`,
@@ -49,4 +49,8 @@ const SHIMS = {
 };
 
 const [name, ...args] = process.argv.slice(2);
+if (!Object.hasOwn(SHIMS, name)) {
+  console.error(`error: no such shim: ${name}\n  Valid shims: ${Object.keys(SHIMS).join(', ')}`);
+  process.exit(2);
+}
 await SHIMS[name](args);

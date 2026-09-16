@@ -9,26 +9,35 @@
 // spot a stale shim by comparing content (cache-cleanup.mjs).
 //
 // LOCATE is one line of CommonJS for `node -e`, shared by both platforms. It
-// avoids double quotes, $, backticks and % so the same bytes survive a POSIX
-// double-quoted string and cmd.exe. `!` is safe too: the non-search .cmd shims
-// carry `setlocal DisableDelayedExpansion`, so cmd.exe never reads `!root!` as
-// a delayed-expansion reference -- without that, a machine with delayed
-// expansion on by default (HKCU\Software\Microsoft\Command Processor) would
-// strip everything between the `!` pairs in LOCATE and corrupt the script.
-// `--` stops node from reading the shim's own flags (`ll-paths --sh`). The
-// argv splice makes shim.mjs see the argv it would get if node had been
-// handed it directly.
+// avoids double quotes, backticks and % so the same bytes survive a POSIX
+// double-quoted string and cmd.exe. `$` is fine -- it shows up in the version
+// regex below and is literal in both shells there. `!` is safe too: the
+// non-search .cmd shims carry `setlocal DisableDelayedExpansion`, so cmd.exe
+// never reads `!root!` as a delayed-expansion reference -- without that, a
+// machine with delayed expansion on by default
+// (HKCU\Software\Microsoft\Command Processor) would strip everything between
+// the `!` pairs in LOCATE and corrupt the script. `--` stops node from
+// reading the shim's own flags (`ll-paths --sh`). The argv splice makes
+// shim.mjs see the argv it would get if node had been handed it directly.
+//
+// Candidates are tried in order and the first whose scripts/shim.mjs exists
+// wins: the installed_plugins.json record, then the newest version under the
+// Claude Code cache, then the newest under the Codex cache. A record pointing
+// at a directory that no longer exists (or a different marketplace key) no
+// longer hard-fails when a good version still sits in a cache.
 
 import { INSTALL_KEY } from './plugin-meta.mjs';
 
 const LOCATE = [
   "const fs=require('node:fs'),path=require('node:path'),home=require('node:os').homedir();",
   `const key='${INSTALL_KEY}';`,
-  'let root;',
-  "try{const j=JSON.parse(fs.readFileSync(path.join(home,'.claude','plugins','installed_plugins.json'),'utf8'));root=(j.plugins||j)[key][0].installPath}catch{}",
-  "if(!root){const c=path.join(home,'.codex','plugins','cache','learning-loop-marketplace','learning-loop');try{const v=fs.readdirSync(c).filter((d)=>/^\\d+\\.\\d+\\.\\d+$/.test(d)).sort((a,b)=>a.localeCompare(b,'en',{numeric:true})).pop();if(v)root=path.join(c,v)}catch{}}",
-  "const shim=root&&path.join(root,'scripts','shim.mjs');",
-  "if(!shim||!fs.existsSync(shim)){console.error('learning-loop is not installed. Run: claude plugin install '+key);process.exit(1)}",
+  "function newest(base){try{const v=fs.readdirSync(base).filter((d)=>/^\\d+\\.\\d+\\.\\d+$/.test(d)).sort((a,b)=>a.localeCompare(b,'en',{numeric:true})).pop();return v?path.join(base,v):null}catch{return null}}",
+  'let installed;',
+  "try{const j=JSON.parse(fs.readFileSync(path.join(home,'.claude','plugins','installed_plugins.json'),'utf8'));installed=(j.plugins||j)[key][0].installPath}catch{}",
+  "const candidates=[installed,newest(path.join(home,'.claude','plugins','cache','learning-loop-marketplace','learning-loop')),newest(path.join(home,'.codex','plugins','cache','learning-loop-marketplace','learning-loop'))];",
+  "const root=candidates.find((r)=>r&&fs.existsSync(path.join(r,'scripts','shim.mjs')));",
+  "if(!root){console.error('learning-loop is not installed. Run: claude plugin install '+key);process.exit(1)}",
+  "const shim=path.join(root,'scripts','shim.mjs');",
   'process.argv.splice(1,0,shim);',
   "import(require('node:url').pathToFileURL(shim).href);",
 ].join('');
@@ -53,11 +62,15 @@ const SEARCH_SH = [
   '  fi',
   'done',
   'echo "error: ll-search binary not found" >&2',
+  'echo "  Tried: \\$CLAUDE_PLUGIN_DATA, \\$HOME/.claude/plugins/data/.ll-data-path, \\$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace" >&2',
   'echo "  Run /learning-loop:init to install." >&2',
   'exit 1',
 ];
 
-// The cmd.exe ll-search install-shims.mjs wrote before this change, unchanged.
+// The cmd.exe ll-search body. renderShim supplies the shared @echo off / rem
+// header (below), so this is the body only -- install-shims.mjs used to own
+// the whole file including that header. The "Tried ..." diagnostic mirrors
+// SEARCH_SH's.
 const SEARCH_CMD = String.raw`setlocal enabledelayedexpansion
 set "BIN="
 if defined CLAUDE_PLUGIN_DATA (
@@ -82,6 +95,7 @@ if "!BIN!"=="" (
 )
 if "!BIN!"=="" (
   echo error: ll-search binary not found 1>&2
+  echo   Tried: %CLAUDE_PLUGIN_DATA%, %USERPROFILE%\.claude\plugins\data\.ll-data-path, %USERPROFILE%\.claude\plugins\data\learning-loop-learning-loop-marketplace 1>&2
   echo   Run /learning-loop:init to install. 1>&2
   exit /b 1
 )

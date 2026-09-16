@@ -16,7 +16,7 @@ Agent and skill files use two path placeholders for the plugin and vault roots:
 - **Inside Bash, and in any command written inline in prose, name the command instead — `ll-run <script> [args]`, or `VAULT="$(ll-paths VAULT)"` when a block needs a path of its own.** `${CLAUDE_PLUGIN_ROOT}` is NOT an environment variable; nothing in a Bash tool shell sets it. The Skill tool substitutes it when it loads a `SKILL.md`, and nothing substitutes it anywhere else — this file, agent definitions and step files all arrive through `Read`. Left in a Bash block it expands to the empty string and the command runs against `/`, silently. Never `eval "$(ll-paths --sh)"` either: the worktree isolation guard refuses a command it cannot statically verify. `tests/bash-blocks-resolve-paths.test.mjs` fails the build over both.
 - **Never guess.** If a placeholder reaches you unresolved in prompt or input TEXT you must use as a path, report it as a dispatch error instead of inventing a value.
 
-Writing a bare `PLUGIN` prefix before a path is banned (a lint test enforces this); always write `${CLAUDE_PLUGIN_ROOT}/`.
+Writing a bare `PLUGIN` prefix before a path is banned (a lint test enforces this); write `${CLAUDE_PLUGIN_ROOT}/` in prose path references -- inside Bash, or any command written inline in prose, use `ll-run <script>` / `ll-paths <FIELD>` per the rule above instead.
 
 ## Reading Notes
 

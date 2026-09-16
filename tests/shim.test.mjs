@@ -202,6 +202,28 @@ test(
   },
 );
 
+test('a stale installed_plugins.json record falls through to the Claude cache', posixOnly, () => {
+  const s = sandbox();
+  try {
+    s.installClaude(join(s.home, 'gone', 'nowhere'));
+    const cache = join(
+      s.home,
+      '.claude',
+      'plugins',
+      'cache',
+      'learning-loop-marketplace',
+      'learning-loop',
+    );
+    mkdirSync(join(cache, '1.2.3'), { recursive: true });
+    symlinkSync(REPO_PLUGIN, join(cache, '9.9.9'));
+    const r = s.run('ll-paths', ['PLUGIN']);
+    assert.equal(r.status, 0, `a dead installPath must not hard-fail: ${r.stderr}`);
+    assert.equal(r.stdout.trim(), REPO_PLUGIN);
+  } finally {
+    s.cleanup();
+  }
+});
+
 test('with no install anywhere the shim says so and exits 1', posixOnly, () => {
   const s = sandbox();
   try {

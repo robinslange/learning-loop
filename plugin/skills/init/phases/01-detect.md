@@ -72,7 +72,7 @@ Learning Loop Setup
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   AGENTS.md:     ~/.codex/AGENTS.md (learning-loop section present)
   Librarian:     [status]
-  Shims:         ll-watch, ll-search, ll-paths installed (watcher not running)
+  Shims:         ll-watch, ll-search, ll-paths, ll-run installed (watcher not running)
 
 Everything looks good. Nothing to set up.
 ```

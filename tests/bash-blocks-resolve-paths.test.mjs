@@ -37,6 +37,11 @@ const ROOT = join(import.meta.dirname, '..');
 
 const PLACEHOLDER = '${CLAUDE_PLUGIN_ROOT}';
 
+// doctor is the one file allowed to write the placeholder: it repairs broken
+// shims, so it cannot depend on them, and as a SKILL.md its placeholder is
+// substituted by the Skill tool.
+const RECOVERY = new Set(['plugin/skills/doctor/SKILL.md']);
+
 /** Every tracked markdown file under `plugin/`, repo-relative. */
 function pluginDocs() {
   return execFileSync('git', ['-C', ROOT, 'ls-files', 'plugin/**/*.md'], { encoding: 'utf8' })
@@ -71,6 +76,7 @@ test('the sweep reaches the files, and finds shell in them', () => {
 test('no shell block under plugin/ writes ${CLAUDE_PLUGIN_ROOT}', () => {
   const offenders = [];
   for (const rel of pluginDocs()) {
+    if (RECOVERY.has(rel)) continue;
     for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
       const n = block.split(PLACEHOLDER).length - 1;
       if (n)
@@ -108,7 +114,7 @@ test('the shim the rule points at is one install-shims.mjs actually writes', () 
   assert.match(src, /shimPath\('ll-run'\)/, 'install-shims.mjs must write ll-run');
 
   // What ll-paths and ll-run actually DO lives in shim.mjs, not the shim text
-  // itself (Task 4) -- the shim only locates the install and hands off there.
+  // itself -- the shim only locates the install and hands off there.
   const dispatcher = readFileSync(join(ROOT, 'plugin', 'scripts', 'shim.mjs'), 'utf8');
   assert.match(
     dispatcher,
@@ -191,7 +197,6 @@ test('a block that uses a resolver field is the block that resolves it', () => {
 // doctor is the one exception: it repairs broken shims, so it cannot use them,
 // and as a SKILL.md its placeholder is substituted.
 test('no plugin doc runs a script through ${CLAUDE_PLUGIN_ROOT}', () => {
-  const RECOVERY = new Set(['plugin/skills/doctor/SKILL.md']);
   const RUNS = /(?:\b(?:node|bash)\s+"?|import\(')\$\{CLAUDE_PLUGIN_ROOT\}\//;
   const offenders = [];
   for (const rel of pluginDocs()) {
