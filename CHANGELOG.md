@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.0.9
+
 ### Added
 
 - **An impact gate now runs before retrieval, not after it.** The relevance
