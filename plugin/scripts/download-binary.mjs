@@ -36,8 +36,38 @@ function getRepo() {
   return env.LL_REPO;
 }
 
+const USAGE = `Usage: download-binary.mjs [version]
+
+Downloads and installs the ll-search binary for this platform.
+
+  version      release tag to install. Defaults to the plugin manifest
+               version (e.g. v2.0.9). Cannot begin with "-".
+
+Options:
+  -h, --help   show this message and exit
+`;
+
+// argv[2] is a release tag, so a flag is never a valid value for it. Without
+// this guard `--help` was taken as the tag: the downloader looked for a
+// release named `--help`, found no artifact, and reported "Release --help has
+// no ll-search-darwin-arm64.tar.gz yet, release still building, will retry
+// next session". That reads as a broken release rather than a bad argument,
+// and it is the same message a genuinely mid-build release produces, so the
+// two were indistinguishable.
 export function getVersion(root = join(import.meta.dirname, '..')) {
-  if (process.argv[2]) return process.argv[2];
+  const arg = process.argv[2];
+
+  if (arg === '-h' || arg === '--help') {
+    process.stdout.write(USAGE);
+    process.exit(0);
+  }
+
+  if (arg && arg.startsWith('-')) {
+    process.stderr.write(`download-binary.mjs: not a release tag: ${arg}\n\n${USAGE}`);
+    process.exit(2);
+  }
+
+  if (arg) return arg;
 
   const metaPath = join(root, '.claude-plugin', 'plugin.json');
   const { value: meta } = safeLoad(metaPath);
