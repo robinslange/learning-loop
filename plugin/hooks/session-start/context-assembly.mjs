@@ -154,7 +154,7 @@ export async function run(ctx) {
   } = ctx;
 
   const VAULT_INBOX = join(vaultRoot, '0-inbox');
-  const searchCmd = `node ${join(pluginDir, 'scripts', 'vault-search.mjs')}`;
+  const searchCmd = 'll-run vault-search.mjs';
 
   // 0.5. Inject resolved paths for skill consumption.
   ctx.context += `## Learning Loop Paths\n`;
@@ -360,7 +360,7 @@ export async function run(ctx) {
         }
         retrieved += '\n## Notes with active intentions:\n';
         retrieved += `${capSection(list, `[truncated — run \`${searchCmd} intentions\` for the full list]`)}\n`;
-        operatorTail += `\nTo see notes for a specific context: node ${join(pluginDir, 'scripts', 'vault-search.mjs')} intentions "<context name>"\n`;
+        operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
       }
       // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
       const child = spawn(

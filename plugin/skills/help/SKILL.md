@@ -193,7 +193,7 @@ librarian  → /learning-loop:health --librarian → approve links + tags, revie
 
 If you've configured federation via `/learning-loop:federation` (also reachable from `/learning-loop:init`), search results include notes from vaults you follow. Those results carry a `peer:<vault_id>/` prefix in their path.
 
-- **Manual sync:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` uploads this vault's index and refreshes the ones it may read
+- **Manual sync:** `ll-run vault-search.mjs sync` uploads this vault's index and refreshes the ones it may read
 - **Status:** `ll-search status` says when the last cycle ran, whether it worked, and what the hub held. It reads local files only
 - **Peer results:** ranked alongside your notes by the same scoring -- the reranker decides relevance regardless of source
 - **Visibility:** you control what others see of your vault (public/listed/private). `public` requires `visibility: public` in the note's own frontmatter; a folder rule grants at most `listed`

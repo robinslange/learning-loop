@@ -39,7 +39,7 @@ Check that `librarian.enabled` is `true` in your config, ollama is running (`oll
 
 ## `ll-search: command not found`
 
-`ll-watch`, `ll-search` and `ll-paths` are stable shell shims that the SessionStart hook auto-installs into `~/.local/bin/`. If `ll-search` is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or just `node PLUGIN/scripts/install-shims.mjs --check` to see which shims exist). Make sure `~/.local/bin` is on your `PATH`. The shims resolve their targets at runtime, so they survive plugin updates.
+`ll-watch`, `ll-search`, `ll-paths` and `ll-run` are shims the SessionStart hook writes into `~/.local/bin/` and rewrites whenever a release changes them. If one is missing, run `node PLUGIN/scripts/install-shims.mjs --install` (or `--check` to see which exist). Make sure `~/.local/bin` is on your `PATH`. A shim that prints `learning-loop is not installed` found no entry in `~/.claude/plugins/installed_plugins.json` and no Codex cache version.
 
 ## Episodic memory not available
 

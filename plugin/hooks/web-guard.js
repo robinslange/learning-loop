@@ -11,9 +11,9 @@ const URL_RE = /https?:\/\/[^\s'"`<>]+/gi;
 const LOCAL = /^https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?:[:/]|$)/i;
 
 const GATEWAY =
-  'Route web access through the source gateway instead: node ' +
-  '"${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<query>" --json ' +
-  '(or fetch --url <url>, or research --q "<question>"). This keeps every source config-selected.';
+  'Route web access through the source gateway instead: ll-run source-gateway.mjs ' +
+  'search --q "<query>" --json (or fetch --url <url>, or research --q "<question>"). ' +
+  'This keeps every source config-selected.';
 
 /**
  * Names the ungoverned web access in a tool call, or null when there is none.

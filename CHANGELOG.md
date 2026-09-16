@@ -23,7 +23,95 @@ All notable changes to this project are documented here. The format is based on 
   self-hosted instance lives, and this URL is operator-authored config rather
   than one scraped out of a note body.
 
+### Changed
+
+- **Updates reach open sessions without a reload.** Every hook now enters
+  through `hooks/run.mjs`, which runs the handler from the version Claude Code
+  has installed rather than the one the session loaded. `ll-run`, `ll-paths`
+  and `ll-watch` find the active install at call time and dispatch through the
+  plugin's `scripts/shim.mjs`, and skills and agents call scripts through
+  `ll-run`. `ll-search` stays node-free and drops from ~12ms to ~6ms of
+  startup.
+  Skill and agent text and hook registrations are still read once per session;
+  `/reload-plugins` picks those up. Sessions opened before this release keep
+  their old hook commands until they reload once. That includes the old
+  `cache-cleanup`, which still prunes older sibling versions -- so until every
+  open session has reloaded onto at least this release, one of them can still
+  delete a cache directory another session is running from.
+
+- **`/dream`'s DATE NORMALIZE operator decides mechanically.** It matched 44
+  times across five runs and applied zero conversions, and the one run that did
+  apply its matches turned "in the data model today" into "in the data model
+  2026-08-05". The decision now lives in `scripts/dream-normalize.mjs`, which
+  converts only a reference resolving to exactly one calendar day — `yesterday`,
+  `tomorrow`, N days or weeks ago, and `last`/`next <weekday>` — and stays
+  silent on every shape the corpus showed to be a false positive: tense-words,
+  quoted and backticked text, lines already carrying an ISO date, the `->`
+  records in `_dream_log.md`, fenced code, frontmatter, and a bare week span,
+  which names seven candidate days rather than one. Phase 2 no longer asks for
+  an inspection pass. Reported in #6.
+
 ### Fixed
+
+- **Updating deleted the version every open session was running.**
+  `cache-cleanup` removed every cache version older than its own at
+  SessionStart, so the first session on a new release broke hooks in all the
+  others and forced a reload everywhere. Claude Code already marks superseded
+  versions `.orphaned_at` and reaps them after a grace period; the prune is gone.
+
+- **Installed shims never updated.** SessionStart only reinstalled a missing
+  shim, so a fixed shim template never reached an existing install. It now
+  rewrites any shim whose text differs from what the running version renders.
+
+- **Windows: `/doctor` reported three hard failures on a correct install.**
+  `binary-exists`, `binary-runs` and `claude-version` all failed while semantic
+  search worked the whole time. The checks looked for an extensionless
+  `ll-search` where the downloader writes `ll-search.exe`; the POSIX exec-bit
+  test (`statSync().mode & 0o111`) is always 0 for a `.exe`, so after the path
+  fix the binary still read as not executable; and `execFileSync` does not honor
+  PATHEXT, so a bare `claude` missed `claude.cmd`, reported not-found, and then
+  suggested the Linux `install.sh`. `platform` is injected rather than read from
+  `process.platform`, so both win32 branches are covered from a POSIX runner.
+  Reported in #3.
+
+- **Windows: `ll-watch` could never start a daemon.** `scripts/watch.mjs` probed
+  `bin/ll-search` and exited 1 with "ll-search not installed — run
+  /learning-loop:init" when the file on disk is `ll-search.exe` — advice
+  pointing at an install that had already succeeded. Four call sites each
+  carried their own `win32 ? 'll-search.exe' : 'll-search'` and two were wrong,
+  which is invisible from POSIX. `binaryFileName(platform)` in `lib/paths.mjs`
+  is now the single spelling authority, and the new test guards the class rather
+  than the instance: no source file outside `paths.mjs` may spell the win32
+  name, so a fifth call site added later fails the suite instead of shipping.
+
+- **The duplicate gate disabled itself on every vault write on platforms with
+  no socket transport.** `nli_server.rs` is `#![cfg(unix)]`, so there is no warm
+  path at all there and every write pays a full ONNX cold start — one measured
+  at 2905ms against a 3000ms budget less a 300ms margin. The subprocess fallback
+  was killed every time, the gate failed open, and `/doctor` still reported it
+  healthy; 55 consecutive writes went unchecked. The deadline is now 8s, and it
+  is a ceiling rather than a delay: the warm path still answers in ~430ms, and a
+  write outside the vault returns before the gate is reached. The deadline also
+  had two declarations — `hooks.json` is the one the harness enforces and
+  SIGKILLs on, so the `hook-config` copy is gone. `/doctor` no longer prescribes
+  starting a warm daemon that cannot exist on that platform. Reported in #5.
+
+- **`pre-write-check`'s main-guard admitted every contract violation under a
+  symlinked install.** It compared `import.meta.url` against a raw
+  `process.argv[1]`; Node resolves an ESM entry to its realpath while `argv[1]`
+  keeps whatever path the caller spelled, so the guard was false, and the hook
+  exited 0 having checked nothing and reported success — a write gate that
+  admitted everything. Both sides are realpathed now, and a test spawns the hook
+  through a symlink and demands the same deny.
+
+- **`/dream` Phase 4 stated a 16KB budget for `MEMORY.md` against a shipped
+  `MEMORY_INDEX_MAX_BYTES` of 3072**, a 5.3x gap that inverted the guidance:
+  at the real cap a split index is the normal steady state, not the exception.
+  The failure concealed itself — the operator finished a run, saw a freshly
+  rebuilt and well-organised index, and got no signal that session-start had
+  been truncating it. Phase 4 reads the live constant out of `hook-config.mjs`
+  now instead of restating one, and the split thresholds re-derive from it.
+  Reported in #6.
 
 - **The `/reflect` handshake test suite mutated a machine-global file on
   Windows**, which is what turned the v2.0.7 release run red. It anchored

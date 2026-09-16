@@ -1,126 +1,38 @@
-// hooks/session-start/cache-cleanup.mjs : stale cache version prune + shim installer
+// hooks/session-start/cache-cleanup.mjs : shim installer + stale-artifact sweep
 // + binary auto-update.
-// Removes plugin-data directories strictly older than the running version, ensures
-// the CLI shims are installed, and triggers a detached binary
-// download when the installed ll-search version diverges from the plugin's
-// manifest (.claude-plugin/plugin.json) version (plugin auto-update bumps the
-// marketplace files but the native binary lags otherwise).
+//
+// Superseded plugin versions are NOT removed here. Claude Code marks them with
+// .orphaned_at and reaps them itself after a grace period; deleting them at
+// SessionStart pulled the code out from under every session still running the
+// previous version and forced a reload in all of them.
 
-import {
-  readdirSync,
-  readFileSync,
-  rmSync,
-  mkdirSync,
-  existsSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { readdirSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
-import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
 import { DATA_FILES, DATA_PATHS, SHIM_NAMES, shimFileName } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
+import { renderShim } from '../../scripts/lib/shims.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
 }
 
-// Records which plugin version last wrote the shims. In plugin-data rather
-// than beside the shims, because ~/.local/bin belongs to the user and a
-// bookkeeping file of ours is not theirs to inherit -- but in bin/, NOT in
-// markers/. vault-snapshot sweeps markers/ unconditionally by mtime on a 7-day
-// TTL, so a stamp there is reaped weekly, reads back as "never stamped", and
-// re-spawns the installer every seventh session forever. See
-// DATA_FILES.shimsVersion.
-function readShimStamp(pluginData) {
-  if (!pluginData) return null;
-  try {
-    return readFileSync(DATA_FILES.shimsVersion(pluginData), 'utf8').trim() || null;
-  } catch {
-    // Absent or unreadable both mean "vintage unknown", which is reinstallable.
-    return null;
-  }
-}
-
-function writeShimStamp(pluginData, version) {
-  if (!pluginData) return;
-  try {
-    mkdirSync(DATA_PATHS.bin(pluginData), { recursive: true });
-    writeFileSync(DATA_FILES.shimsVersion(pluginData), `${version}\n`);
-  } catch (err) {
-    logError('session-start.shim-stamp', err);
-  }
-}
-
-/**
- * Whether SessionStart should re-run the shim installer.
- *
- * Two triggers, because presence alone answered the wrong question. A plugin
- * upgrade replaces the plugin but does not re-run its installers, so shims
- * keep the shape they had the day they were written: a 1.x install carried
- * ll-watch/ll-paths/ll-run that exec'd `scripts/shim.mjs`, a dispatcher 2.x
- * stopped shipping, and all three failed with "learning-loop is not installed"
- * on an install that was complete. A presence check passes through that
- * forever.
- *
- * @returns {boolean}
- */
-export function shimsNeedInstall({
-  binDir,
-  platform = process.platform,
-  stampedVersion,
-  pluginVersion,
-} = {}) {
-  // A shim this install has never received. Driven by SHIM_NAMES so a newly
-  // added shim reaches installs that already have the others, and spelled the
-  // way the INSTALLER writes it: probing the POSIX name on Windows reported
-  // four correct `.cmd` shims missing and re-spawned the installer every
-  // session, which is the same spelling bug the health check had.
-  if (SHIM_NAMES.some((s) => !existsSync(join(binDir, shimFileName(s, platform))))) return true;
-  // Present is not current.
-  return stampedVersion !== pluginVersion;
-}
-
 export async function run(ctx) {
-  // Stale-version cache prune: remove versions strictly older than running.
-  try {
-    const cacheParent = resolve(ctx.pluginDir, '..');
-    for (const entry of readdirSync(cacheParent)) {
-      if (!isPlainSemver(entry)) continue;
-      if (semverCmp(entry, ctx.pluginVersion) < 0) {
-        rmSync(join(cacheParent, entry), { recursive: true, force: true });
-      }
-    }
-  } catch (err) {
-    logError('session-start.cache-cleanup', err);
-  }
-
-  // Shim installer: ensure the stable shell wrappers exist.
-  //
-  // Driven by SHIM_NAMES rather than a list written out here, because this is
-  // the only thing that installs a NEW shim onto an install that already has
-  // the old ones — name them locally and every existing user keeps passing the
-  // check while missing the shim that was added.
+  // Shim installer: rewrite the shims when any is missing or its text differs
+  // from what this version renders. A shim on disk never updates itself, so an
+  // existence-only check left every install on the shim it was first given.
+  // Driven by SHIM_NAMES so a shim added later reaches existing installs too.
   try {
     const binDir = join(home(), '.local', 'bin');
-    const shimPluginData = resolvePluginData();
-    // With nowhere to record the answer, the version trigger can only ever say
-    // "reinstall": the stamp is never written, so it never matches, and every
-    // session pays a synchronous installer spawn with no way out of the loop.
-    // A degraded install should degrade to the OLD behaviour -- reinstall only
-    // when a shim is actually missing -- not to reinstalling forever.
-    const stampedVersion = shimPluginData ? readShimStamp(shimPluginData) : ctx.pluginVersion;
-    const needed = shimsNeedInstall({
-      binDir,
-      stampedVersion,
-      pluginVersion: ctx.pluginVersion,
+    const stale = SHIM_NAMES.some((name) => {
+      const path = join(binDir, shimFileName(name));
+      return !existsSync(path) || readFileSync(path, 'utf-8') !== renderShim(name);
     });
-    if (needed) {
+    if (stale) {
       const installer = join(ctx.pluginDir, 'scripts', 'install-shims.mjs');
       if (existsSync(installer)) {
         mkdirSync(binDir, { recursive: true });
@@ -128,9 +40,6 @@ export async function run(ctx) {
           stdio: 'ignore',
           timeout: HookConfig.DEPS_CHECK_TIMEOUT_MS,
         });
-        // Only after the installer returned. A stamp written past a failed
-        // install would mark stale shims as current and never retry them.
-        writeShimStamp(shimPluginData, ctx.pluginVersion);
       }
     }
   } catch (err) {
@@ -138,8 +47,7 @@ export async function run(ctx) {
   }
 
   // Stale-artifact sweep in the live plugin-data dir. Two leftovers accumulate
-  // here that the version-prune above never reaches (they live in the *current*
-  // version's data, not an old version dir):
+  // in the *current* version's plugin-data:
   //   1. bin/ll-search.*-bak — orphaned binary backups (~290M each) from the
   //      old delta-patch updater. That code path is gone, but installs that
   //      passed through it still carry the backups; nothing ever removed them.

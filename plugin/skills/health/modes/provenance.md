@@ -19,11 +19,11 @@ If the report includes a **Recommendations** section, present each recommendatio
 > - "all" to review all recommendations
 > - "done" to finish
 
-When user selects "pattern N", draft a positive behavior-based pattern following the format in `PLUGIN_DATA/provenance/learned-patterns.md` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`) and present for approval before writing.
+When user selects "pattern N", draft a positive behavior-based pattern following the format in `PLUGIN_DATA/provenance/learned-patterns.md` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`) and present for approval before writing.
 
 After the local report, check for peer provenance data:
 
-1. Read `PLUGIN_DATA/federation/provenance-peers.json` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`)
+1. Read `PLUGIN_DATA/federation/provenance-peers.json` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`)
 2. If exists and has peer entries, display a **Network** section:
 
 ```
@@ -32,6 +32,6 @@ Network (last 7 days):
   peer-b:   5 sessions, 12 notes, 1 fix
 ```
 
-3. If no peer data exists, show: "No peer provenance data. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs sync` to fetch."
+3. If no peer data exists, show: "No peer provenance data. Run `ll-run vault-search.mjs sync` to fetch."
 
 Then stop (do not proceed to Step 1).

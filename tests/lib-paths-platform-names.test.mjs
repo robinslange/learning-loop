@@ -16,11 +16,12 @@ import { shimFileName, binaryFileName, SHIM_NAMES } from '../plugin/scripts/lib/
 
 const PLUGIN_DIR = join(import.meta.dirname, '..', 'plugin');
 
-// paths.mjs is the authority. install-shims.mjs embeds the name inside the
-// generated `.cmd` text it writes, which is cmd.exe source, not a JS path.
+// paths.mjs is the authority. lib/shims.mjs embeds the name inside the `.cmd`
+// shim body it renders, which is cmd.exe source, not a JS path -- the same
+// exemption install-shims.mjs used to need, moved here with the text itself.
 const MAY_SPELL_THE_NAME = new Set([
   join('scripts', 'lib', 'paths.mjs'),
-  join('scripts', 'install-shims.mjs'),
+  join('scripts', 'lib', 'shims.mjs'),
 ]);
 
 function* sourceFiles(dir) {

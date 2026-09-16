@@ -3,9 +3,9 @@
 // inheriting "type": "module" from an ancestor: Node ≥22 falls back to
 // per-process syntax detection with a stderr warning on every hook fire
 // ("Failed to load the ES module: ... Make sure to set \"type\": \"module\""),
-// and runtimes without detection hard-fail. These tests run each hook from
-// a copy of plugin/ outside the repo with detection disabled, so module
-// type must be explicit, not inferred.
+// and runtimes without detection hard-fail. These tests run each hook through
+// run.mjs (the real hooks.json entry path) from a copy of plugin/ outside the
+// repo with detection disabled, so module type must be explicit, not inferred.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -33,17 +33,17 @@ after(() => {
 
 function hookFilesFromHooksJson(pluginRoot) {
   const hooksJson = readFileSync(join(pluginRoot, 'hooks', 'hooks.json'), 'utf8');
-  const files = [...hooksJson.matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([\w./-]+)/g)].map((m) => m[1]);
+  const files = [...hooksJson.matchAll(/\bhooks\/[\w-]+\.js\b/g)].map((m) => m[0]);
   return [...new Set(files)];
 }
 
-test('every hooks.json hook loads as ESM from an installed-layout plugin copy', () => {
+test('every hooks.json hook loads as ESM through run.mjs from an installed-layout plugin copy', () => {
   const files = hookFilesFromHooksJson(installedPlugin);
   assert.ok(files.length >= 8, `expected at least 8 hook files in hooks.json, got ${files.length}`);
   for (const file of files) {
     const res = spawnSync(
       process.execPath,
-      ['--no-experimental-detect-module', join(installedPlugin, file)],
+      ['--no-experimental-detect-module', join(installedPlugin, 'hooks', 'run.mjs'), file],
       { input: '{}', cwd: sandbox, encoding: 'utf8', timeout: 15000 },
     );
     assert.ok(

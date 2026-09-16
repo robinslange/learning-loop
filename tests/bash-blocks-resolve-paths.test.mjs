@@ -37,6 +37,11 @@ const ROOT = join(import.meta.dirname, '..');
 
 const PLACEHOLDER = '${CLAUDE_PLUGIN_ROOT}';
 
+// doctor is the one file allowed to write the placeholder: it repairs broken
+// shims, so it cannot depend on them, and as a SKILL.md its placeholder is
+// substituted by the Skill tool.
+const RECOVERY = new Set(['plugin/skills/doctor/SKILL.md']);
+
 /** Every tracked markdown file under `plugin/`, repo-relative. */
 function pluginDocs() {
   return execFileSync('git', ['-C', ROOT, 'ls-files', 'plugin/**/*.md'], { encoding: 'utf8' })
@@ -71,9 +76,13 @@ test('the sweep reaches the files, and finds shell in them', () => {
 test('no shell block under plugin/ writes ${CLAUDE_PLUGIN_ROOT}', () => {
   const offenders = [];
   for (const rel of pluginDocs()) {
+    if (RECOVERY.has(rel)) continue;
     for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
       const n = block.split(PLACEHOLDER).length - 1;
-      if (n) offenders.push(`${rel}: ${n} occurrence(s) — use \`ll-run <script>\` or \`ll-paths <FIELD>\``);
+      if (n)
+        offenders.push(
+          `${rel}: ${n} occurrence(s) — use \`ll-run <script>\` or \`ll-paths <FIELD>\``,
+        );
     }
   }
   assert.deepEqual(offenders.sort(), [], `unsubstitutable placeholders:\n${offenders.join('\n')}`);
@@ -102,13 +111,17 @@ test('the shim the rule points at is one install-shims.mjs actually writes', () 
   // through it, because the placeholder would still be absent.
   const src = readFileSync(join(ROOT, 'plugin', 'scripts', 'install-shims.mjs'), 'utf8');
   assert.match(src, /shimPath\('ll-paths'\)/, 'install-shims.mjs must write ll-paths');
-  assert.match(src, /exec node "\\\$\{LATEST\}scripts\/resolve-paths\.mjs"/,
-    'the POSIX shim must exec resolve-paths.mjs');
-  assert.match(src, /node "!LATEST!\\\\scripts\\\\resolve-paths\.mjs" %\*/,
-    'and so must the .cmd, or the guard stops guarding on Windows');
   assert.match(src, /shimPath\('ll-run'\)/, 'install-shims.mjs must write ll-run');
-  assert.match(src, /exec node "\\\$SCRIPT" "\$@"/, 'the POSIX ll-run must exec the named script');
-  assert.match(src, /node "!SCRIPT!" !ARGS!/, 'and so must the .cmd');
+
+  // What ll-paths and ll-run actually DO lives in shim.mjs, not the shim text
+  // itself -- the shim only locates the install and hands off there.
+  const dispatcher = readFileSync(join(ROOT, 'plugin', 'scripts', 'shim.mjs'), 'utf8');
+  assert.match(
+    dispatcher,
+    /'ll-paths':[\s\S]*?resolve-paths\.mjs/,
+    'shim.mjs must run resolve-paths.mjs for ll-paths',
+  );
+  assert.match(dispatcher, /'ll-run':/, 'shim.mjs must handle ll-run');
 });
 
 test('a shim the rule names is a shim SHIM_NAMES carries', () => {
@@ -134,7 +147,9 @@ test('no shell block under plugin/ evals a resolver', () => {
   for (const rel of pluginDocs()) {
     for (const block of shellBlocks(readFileSync(join(ROOT, rel), 'utf8'))) {
       if (/\beval\s+"\$\(/.test(block)) {
-        offenders.push(`${rel}: eval of a command substitution — use \`ll-run\` / \`ll-paths <FIELD>\``);
+        offenders.push(
+          `${rel}: eval of a command substitution — use \`ll-run\` / \`ll-paths <FIELD>\``,
+        );
       }
     }
   }
@@ -146,8 +161,14 @@ test('a block that uses a resolver field is the block that resolves it', () => {
   // uses is what replaced the one-line eval, so the check that used to look
   // for that line now looks for the assignments themselves.
   const FIELDS = [
-    'PLUGIN_DATA', 'VAULT', 'SESSION_ID',
-    'REFLECT_SCRATCH', 'REFLECT_PREFIX', 'LAST_DREAM', 'LAST_REFLECT', 'DREAM_LOCK',
+    'PLUGIN_DATA',
+    'VAULT',
+    'SESSION_ID',
+    'REFLECT_SCRATCH',
+    'REFLECT_PREFIX',
+    'LAST_DREAM',
+    'LAST_REFLECT',
+    'DREAM_LOCK',
   ];
   const offenders = [];
   for (const rel of pluginDocs()) {
@@ -163,5 +184,28 @@ test('a block that uses a resolver field is the block that resolves it', () => {
       }
     }
   }
-  assert.deepEqual([...new Set(offenders)].sort(), [], `unresolved fields:\n${offenders.join('\n')}`);
+  assert.deepEqual(
+    [...new Set(offenders)].sort(),
+    [],
+    `unresolved fields:\n${offenders.join('\n')}`,
+  );
+});
+
+// Prose too, not only fences. A command in an inline code span gets copied into
+// a Bash call exactly like a fenced one, and through ${CLAUDE_PLUGIN_ROOT} it
+// runs the version the session loaded (or nothing, in a file read via Read).
+// doctor is the one exception: it repairs broken shims, so it cannot use them,
+// and as a SKILL.md its placeholder is substituted.
+test('no plugin doc runs a script through ${CLAUDE_PLUGIN_ROOT}', () => {
+  const RUNS = /(?:\b(?:node|bash)\s+"?|import\(')\$\{CLAUDE_PLUGIN_ROOT\}\//;
+  const offenders = [];
+  for (const rel of pluginDocs()) {
+    if (RECOVERY.has(rel)) continue;
+    readFileSync(join(ROOT, rel), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (RUNS.test(line)) offenders.push(`${rel}:${i + 1}`);
+      });
+  }
+  assert.deepEqual(offenders, [], `use \`ll-run <script>\` or \`ll-paths PLUGIN\`:\n${offenders.join('\n')}`);
 });

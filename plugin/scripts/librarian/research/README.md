@@ -75,7 +75,7 @@ workflow.js). The integration is a contract, not a code edit:
 2. **Shell out** (replaces the Search + Fetch + Extract phases):
 
    ```
-   node ${CLAUDE_PLUGIN_ROOT}/scripts/librarian/research.mjs \
+   ll-run librarian/research.mjs \
      --angles '<scope-json>' --question "<q>" --json
    ```
 

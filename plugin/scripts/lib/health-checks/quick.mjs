@@ -579,7 +579,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: 'no index — run vault-search.mjs index to build',
-      fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+      fix: 'Run: ll-run vault-search.mjs index',
     });
   }
   try {
@@ -591,7 +591,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
         status: SEVERITIES.fail,
         severity: SEVERITIES.warn,
         detail: 'index file is empty',
-        fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+        fix: 'Run: ll-run vault-search.mjs index',
       });
     }
     return makeCheck({
@@ -609,7 +609,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: `stat error: ${err.message}`,
-      fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+      fix: 'Run: ll-run vault-search.mjs index',
     });
   }
 }

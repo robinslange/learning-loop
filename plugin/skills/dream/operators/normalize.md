@@ -46,4 +46,4 @@ Record the script's output verbatim:
 - `filename.md`: "last Thursday" -> "2026-03-20"
 ```
 
-Emit provenance after the run: `node "${CLAUDE_PLUGIN_ROOT}/scripts/provenance-emit.js" '{"agent":"dream","skill":"dream","action":"normalize","target":"FILENAME"}'`
+Emit provenance after the run: `ll-run provenance-emit.js '{"agent":"dream","skill":"dream","action":"normalize","target":"FILENAME"}'`

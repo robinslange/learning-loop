@@ -29,9 +29,9 @@ You will receive:
 You do **not** read the SQLite edge database directly. Instead, you call the edges CLI with `Bash`:
 
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs list <note_path>
-node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs sole-dependents <note_path>
-node ${CLAUDE_PLUGIN_ROOT}/scripts/edges-cli.mjs downstream <note_path> --max-depth 5
+ll-run edges-cli.mjs list <note_path>
+ll-run edges-cli.mjs sole-dependents <note_path>
+ll-run edges-cli.mjs downstream <note_path> --max-depth 5
 ```
 
 **Critical: query both directions.** The classifier can produce edges in either direction depending on the prose pattern that triggered them. "[[X]] confirms the finding" stores from=source, to=X with evidence_for, but semantically X is the evidence and source is the claim. "this proves [[X]]" has the opposite reading. You cannot tell from the edge alone which way the dependency flows.

@@ -190,13 +190,6 @@ export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),
   nliSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only
   binVersion: (pd) => join(pd, 'bin', '.version'),
-  // Which plugin version last wrote the CLI shims. In bin/ beside .version --
-  // NOT in markers/ -- because vault-snapshot sweeps markers/ unconditionally
-  // by mtime on a 7-day TTL (`sweepDir(markers, () => true, weekCutoff)`). A
-  // stamp there is reaped weekly, which reads as "never stamped", so the
-  // installer would re-spawn and rewrite ~/.local/bin every seventh session
-  // forever. Nothing sweeps bin/.
-  shimsVersion: (pd) => join(pd, 'bin', '.shims-version'),
   harvestDenylist: (pd) => join(pd, '.harvest-denylist'),
   harvestedLog: (pd) => join(pd, '.harvested-log'),
 };
