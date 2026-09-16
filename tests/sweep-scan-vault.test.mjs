@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   scanVaultCandidates,
@@ -222,8 +222,44 @@ test('--help lists the --scan-vault mode', () => {
 // two sides resolved different directories, which is exactly the handshake bug
 // the reflect-track header warns about.
 
+// Marker files must land in a dir this suite owns, not the developer's real
+// plugin-data. `reflectNewNotesPath` resolves through `resolvePluginData()`,
+// which reads $CLAUDE_PLUGIN_DATA or a persisted marker, so without this
+// override the suite wrote into
+// ~/.claude/plugins/data/.../reflect-scratch/ — a directory nothing ever
+// reaps (33 files on the machine this was found on) and which other sessions
+// are using live. It also only passed here because that directory happened to
+// exist: on a fresh install, where `/reflect` has never run, `writeFileSync`
+// hit ENOENT and two tests ERRORED rather than asserting, one of them the
+// concurrency test this suite calls the reason it is safe to ship. CI passed
+// for a third reason again — plugin-data is unresolvable there, so the path
+// falls back to `tmpdir()`.
+//
+// The sibling suite (tests/reflect-new-notes-track.test.mjs) already set
+// CLAUDE_PLUGIN_DATA per-suite. Hardening that file against a machine-global
+// path in the same change that introduced a new one is the joke this comment
+// exists to stop repeating.
+let pluginDataRoot;
+let savedPluginData;
+
+function useOwnPluginData() {
+  savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  pluginDataRoot = mkdtempSync(join(tmpdir(), 'sweep-scan-pd-'));
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataRoot;
+}
+
+function restorePluginData() {
+  if (savedPluginData !== undefined) process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+  else delete process.env.CLAUDE_PLUGIN_DATA;
+  if (pluginDataRoot) rmSync(pluginDataRoot, { recursive: true, force: true });
+  pluginDataRoot = undefined;
+}
+
 function withMarker(sid, ageMs) {
   const marker = reflectNewNotesPath(sid);
+  // Create the scratch dir rather than assuming it: a fresh plugin-data has
+  // no reflect-scratch/ until the first /reflect run creates one.
+  mkdirSync(dirname(marker), { recursive: true });
   writeFileSync(marker, '');
   if (ageMs) {
     const when = (Date.now() - ageMs) / 1000;
@@ -231,6 +267,23 @@ function withMarker(sid, ageMs) {
   }
   return () => rmSync(marker, { force: true });
 }
+
+// The suite must not touch the real plugin-data, on any machine, in any
+// install state. Asserted by containment, the same way the sibling suite
+// asserts its session-id file: an equality check against some known-bad
+// constant would pass vacuously wherever that constant is not what resolves.
+test('keeps its marker files inside a temp plugin-data it owns', () => {
+  useOwnPluginData();
+  try {
+    const marker = reflectNewNotesPath('containment-check');
+    assert.ok(
+      marker.startsWith(pluginDataRoot),
+      `marker must live under this suite's plugin-data, got ${marker} outside ${pluginDataRoot}`,
+    );
+  } finally {
+    restorePluginData();
+  }
+});
 
 function stamped(root, folder, name, sid) {
   const p = join(root, folder, name);
@@ -245,6 +298,7 @@ test('a stamp whose session left no marker is abandoned', () => {
     const { abandoned } = scanVaultCandidates(root, 'sess-1');
     assert.deepEqual(abandoned, [p], 'no marker means nothing is left to consume the stamp');
   } finally {
+    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -257,6 +311,7 @@ test('a stamp whose marker is older than the window is abandoned', () => {
     assert.deepEqual(scanVaultCandidates(root, 'sess-1').abandoned, [p]);
   } finally {
     cleanup();
+    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -277,6 +332,7 @@ test('a live concurrent run’s stamp is left alone', () => {
     );
   } finally {
     cleanup();
+    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });

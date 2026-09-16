@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **The `/reflect` sweep's own test suite wrote into the developer's live
+  plugin-data.** It resolved marker paths through `reflectNewNotesPath` without
+  overriding `CLAUDE_PLUGIN_DATA`, so it created and deleted files in
+  `~/.claude/plugins/data/.../reflect-scratch/` — a directory nothing reaps and
+  other sessions use. It also only passed where that directory already existed:
+  on a fresh install two tests raised `ENOENT` instead of asserting, one of them
+  the concurrency test that makes the feature safe to ship. Now uses a per-suite
+  temp plugin-data, creates the scratch dir rather than assuming it, and asserts
+  containment so it cannot regress.
+
 - **The `/reflect` handshake test suite mutated a machine-global file on
   Windows**, which is what turned the v2.0.7 release run red. It anchored
   `getSessionId()`'s tmp candidate by setting `$TMPDIR` — a POSIX-only trick, as
@@ -53,6 +63,11 @@ All notable changes to this project are documented here. The format is based on 
   Cycles of any length work — a swap is the shortest. Verified against the real
   7,099-note index: an unchanged vault parks and moves nothing, and an injected
   swap plus three-way rotation resolves with no row stranded and no id lost.
+  Does NOT cover rows whose `note_uuid` is still NULL: both statements key on
+  that column, so an index's first reindex after the column is added is still
+  exposed to the same wrong-id-on-the-wrong-body outcome until each note is
+  re-read. Not a regression — the previous version never matched NULL either —
+  and pinned by a test so the limit is visible in code.
 
 - **Every sync re-wrote and re-indexed every followed peer vault.**
   `Outcome::AlreadyCurrent` could never fire: installing a fetched index builds
