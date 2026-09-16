@@ -423,7 +423,7 @@ ll-search benchmark <db> --model-a A --model-b B <queries...>
 ll-search tune-prf     <db> <queries...>
 ll-search eval-prf     <db> [--min-links N]
 ll-search eval-funnel  <db> [--min-links N] [--limit N]
-ll-search tune-weights <db> [--min-links N] [--limit N]   # fusion lane weights, train/holdout
+ll-search tune-weights <db> [--min-links N] [--limit N]   # DIAGNOSTIC only: labels leak to BM25, cannot choose weights
 ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane stats; probes is a JSON array of [set, gold_path, query] triples
 ```
 
