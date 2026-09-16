@@ -55,10 +55,11 @@ test('shimFileName refuses a name the installer does not write', () => {
   assert.throws(() => shimFileName('ll-nope', 'linux'), /not in SHIM_NAMES/);
 });
 
-// Guards the bug CLASS rather than the two instances of it that were found.
-// Every call site that spells the name itself is a site that can be forgotten,
-// and forgetting is invisible from POSIX -- so the spelling may exist in one
-// place only. A new consumer must import binaryFileName() instead.
+// Catches the COPY-PASTE instance, which is how this bug travelled twice, and
+// not the class. It greps for the literal string under plugin/ only, so a call
+// site written as `ll-search${ext}` or 'll-search' + EXE evades it, as does any
+// spelling under tests/ or a repo-root script. Worth having, not worth
+// trusting as the barrier: a new consumer must import binaryFileName().
 test('paths.mjs is the only source file that spells the Windows binary name', () => {
   const offenders = [];
   for (const file of sourceFiles(PLUGIN_DIR)) {

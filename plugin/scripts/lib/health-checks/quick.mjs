@@ -852,7 +852,7 @@ export function checkDuplicateGateHealth({
         status: SEVERITIES.fail,
         severity: SEVERITIES.warn,
         detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — this platform has no daemon socket, so every write pays a cold model start and the gate falls open when it overruns`,
-        fix: 'No daemon can serve the gate here, so starting one changes nothing. Raise the ceiling instead: set LL_PRE_WRITE_BUDGET_MS above your measured cold start, and raise the matching pre-write-check timeout in plugin/hooks/hooks.json.',
+        fix: 'No daemon can serve the gate here, so starting one changes nothing. Set LL_PRE_WRITE_BUDGET_MS above your measured cold start: it is the only part of this that survives an upgrade, because the plugin replaces hooks.json on every release. Raising the pre-write-check timeout in plugin/hooks/hooks.json to match makes the longer budget usable now, but expect to redo it after the next update.',
       });
     }
 

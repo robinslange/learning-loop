@@ -355,6 +355,49 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
   });
 
+  it('LL_PRE_WRITE_BUDGET_MS overrides the deadline hooks.json declares', () => {
+    // preWriteBudgetMs() is not exported, so this asserts its BEHAVIOUR: with
+    // the override set far below the 8s deadline hooks.json declares, the gate
+    // must run out of budget before it can spawn the subprocess, and say so.
+    //
+    // Every other use of this variable in this file raises it to 30s to stop
+    // contended runs flaking, which means none of them could distinguish "the
+    // override is consulted" from "the override is ignored" -- a knob only ever
+    // set to generous is indistinguishable from a knob nobody reads. Driving it
+    // the other way is the only assertion that proves precedence.
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '400' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        // A stub that would answer correctly given time, so the budget is the
+        // only reason the gate can have for not consulting it.
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+      },
+    });
+    try {
+      // Fails OPEN, as the gate always does: the write proceeds, and the only
+      // trace is the log line. That is precisely why it needs a test.
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.ok(
+        readHookErrorsByCode(r.pluginDataDir, 'duplicate-gate-timeout') >= 1,
+        'a 400ms budget cannot reach the subprocess floor, and the gate must record giving up',
+      );
+    } finally {
+      r.cleanup();
+    }
+  });
+
   it('socket timeout: logs the distinct duplicate-gate-timeout code, then falls back to subprocess', () => {
     const { result, timeoutCount } = runWithSocket('hang', join(VAULT, '0-inbox', 'new-note.md'), {
       // Working subprocess stub so the gate still produces a warning after the

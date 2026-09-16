@@ -20,11 +20,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { shimsNeedInstall } from '../plugin/hooks/session-start/cache-cleanup.mjs';
-import { SHIM_NAMES, shimFileName } from '../plugin/scripts/lib/paths.mjs';
+import {
+  shimsNeedInstall,
+  run as runCacheCleanup,
+} from '../plugin/hooks/session-start/cache-cleanup.mjs';
+import { SHIM_NAMES, shimFileName, DATA_FILES } from '../plugin/scripts/lib/paths.mjs';
 
 function binDirWith(names) {
   const dir = mkdtempSync(join(tmpdir(), 'll-shimcheck-'));
@@ -32,6 +35,74 @@ function binDirWith(names) {
   for (const n of names) writeFileSync(join(dir, 'bin', n), 'shim\n');
   return join(dir, 'bin');
 }
+
+// The six cases below exercise the pure decision with injected values, which a
+// review pointed out is not the same as exercising the MECHANISM: delete
+// writeShimStamp entirely and every one of them stays green while SessionStart
+// re-spawns the installer on every session forever. These two run the real
+// cache-cleanup and watch the stamp.
+//
+// The installer is a stub that records each invocation, so "did it spawn again"
+// is a fact rather than an inference. ~/.local/bin already holds a complete
+// shim set on any machine running this suite, so the missing-shim trigger is
+// quiet and the version stamp is the only thing under test.
+function stampFixture(version = '9.9.9') {
+  const sandbox = mkdtempSync(join(tmpdir(), 'll-stamp-'));
+  const pluginDir = join(sandbox, 'plugin', version);
+  const pluginData = join(sandbox, 'plugin-data');
+  const log = join(sandbox, 'installer-runs.log');
+  mkdirSync(join(pluginDir, 'scripts'), { recursive: true });
+  mkdirSync(join(pluginData, 'bin'), { recursive: true });
+  writeFileSync(join(pluginData, 'bin', '.version'), `v${version}\n`);
+  writeFileSync(
+    join(pluginDir, 'scripts', 'install-shims.mjs'),
+    `import { appendFileSync } from 'node:fs';\nappendFileSync(${JSON.stringify(log)}, 'ran\\n');\n`,
+  );
+  return {
+    sandbox,
+    log,
+    ctx: { pluginDir, pluginVersion: version, pluginData },
+    runs: () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').length : 0),
+    cleanup: () => rmSync(sandbox, { recursive: true, force: true }),
+  };
+}
+
+async function withPluginData(fx, fn) {
+  const prev = process.env.CLAUDE_PLUGIN_DATA;
+  process.env.CLAUDE_PLUGIN_DATA = fx.ctx.pluginData;
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prev;
+    fx.cleanup();
+  }
+}
+
+test('the installer runs once for a version and the stamp records it', async () => {
+  const fx = stampFixture();
+  await withPluginData(fx, async () => {
+    await runCacheCleanup(fx.ctx);
+    assert.equal(fx.runs(), 1, 'an unstamped install must install');
+    assert.ok(
+      existsSync(DATA_FILES.shimsVersion(fx.ctx.pluginData)),
+      'and must record which version wrote the shims',
+    );
+    assert.equal(readFileSync(DATA_FILES.shimsVersion(fx.ctx.pluginData), 'utf8').trim(), '9.9.9');
+  });
+});
+
+test('a second session at the same version does not re-run the installer', async () => {
+  // This is the assertion that dies if writeShimStamp is removed: without the
+  // stamp the second run looks exactly like the first, and every session pays
+  // a synchronous node spawn that rewrites the user's ~/.local/bin.
+  const fx = stampFixture();
+  await withPluginData(fx, async () => {
+    await runCacheCleanup(fx.ctx);
+    await runCacheCleanup(fx.ctx);
+    assert.equal(fx.runs(), 1, 'nothing changed between the sessions, so nothing to rewrite');
+  });
+});
 
 test('a correct Windows install is not four missing shims', () => {
   // The existence probe used the POSIX name on every platform. On Windows the

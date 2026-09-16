@@ -136,6 +136,54 @@ test('sweep: deletes convergence files older than the TTL, keeps fresh ones', as
   });
 });
 
+// The shim stamp records which plugin version last wrote ~/.local/bin, and it
+// lives in bin/ for exactly one reason: markers/ is swept unconditionally by
+// mtime on this same 7-day TTL. A stamp there is reaped weekly, reads back as
+// "never stamped", and re-spawns the installer every seventh session forever.
+// That is a code-reading argument until something pins it, so this pins it.
+//
+// The stamp is seeded at the RUNNING plugin version deliberately: at any other
+// value the installer fires, rewrites the stamp, and it survives because it was
+// recreated rather than because it was spared. The markers/ file is the control
+// -- if that is still there, the sweep never ran and this proves nothing.
+test('TTL sweep does not reap the shim version stamp', { timeout: 12000 }, () => {
+  const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-stamp-'));
+  const version = JSON.parse(
+    readFileSync(new URL('../plugin/.claude-plugin/plugin.json', import.meta.url), 'utf8'),
+  ).version;
+
+  const r = runHook(HOOK, {
+    env: { VAULT_PATH: VAULT, TMPDIR: isolatedTmp, LL_SESSION_TMP_DIR: isolatedTmp },
+    stdin: '',
+    seed: (pluginDataDir) => {
+      mkdirSync(join(pluginDataDir, 'bin'), { recursive: true });
+      const stamp = join(pluginDataDir, 'bin', '.shims-version');
+      writeFileSync(stamp, `${version}\n`);
+      utimesSync(stamp, eightDaysAgo, eightDaysAgo);
+
+      const markers = join(pluginDataDir, 'markers');
+      mkdirSync(markers, { recursive: true });
+      writeFileSync(join(markers, 'memory-snapshot-stale'), '[]');
+      utimesSync(join(markers, 'memory-snapshot-stale'), eightDaysAgo, eightDaysAgo);
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(
+      !existsSync(join(r.pluginDataDir, 'markers', 'memory-snapshot-stale')),
+      'control: an equally old markers/ file must be gone, or the sweep did not run',
+    );
+    assert.ok(
+      existsSync(join(r.pluginDataDir, 'bin', '.shims-version')),
+      'the stamp must outlive the sweep, or the installer respawns every seventh session',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(isolatedTmp, { recursive: true, force: true });
+  }
+});
+
 test(
   'TTL sweep reaps markers/, tmp legacies, and edges tmp orphans — never the session-id file',
   { timeout: 12000 },

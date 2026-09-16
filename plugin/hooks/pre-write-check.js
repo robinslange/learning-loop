@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -30,7 +30,8 @@ import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../scripts/lib/is-main.mjs';
 import { emitJson } from './lib/io.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 
@@ -43,14 +44,32 @@ const HOOK_START_MS = Date.now();
 // SIGKILLs this process on it. A second copy in hook-config could only agree
 // or drift, and drift is silent in both directions -- an inner budget above
 // the outer deadline is inert, one below it throws away time we were given.
-export function outerDeadlineMs(hooksJson) {
-  const entry = hooksJson?.hooks?.PreToolUse?.find((e) =>
-    String(e?.matcher ?? '')
-      .split('|')
-      .includes('Write'),
-  );
-  const seconds = entry?.hooks?.[0]?.timeout;
-  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null;
+// Found by the COMMAND that invokes this hook, not by parsing the matcher.
+// Matchers are regexes Claude Code owns, so `Write.*`, `.*`, `Write | Edit` and
+// an absent matcher are all legal spellings of "this entry" -- and the previous
+// version returned null for every one of them, silently reinstating the 3s
+// budget this change exists to raise. The hook knows its own filename, so
+// asking that question deletes the guessing instead of improving it.
+//
+// Array.isArray at both levels rather than optional chaining alone: `?.` covers
+// absent but not wrong-typed, so a PreToolUse that was an object THREW here --
+// out of a call site (budgetOkForStyle) that is not inside a try, which meant
+// emitVerdict() never ran and every warning and deny already computed for that
+// write was discarded. A deadline reader must be total.
+export function outerDeadlineMs(hooksJson, hookFile = 'pre-write-check.js') {
+  const groups = hooksJson?.hooks?.PreToolUse;
+  if (!Array.isArray(groups)) return null;
+  for (const group of groups) {
+    const hooks = Array.isArray(group?.hooks) ? group.hooks : [];
+    for (const h of hooks) {
+      if (typeof h?.command !== 'string' || !h.command.includes(hookFile)) continue;
+      const seconds = h.timeout;
+      if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {
+        return seconds * 1000;
+      }
+    }
+  }
+  return null;
 }
 
 // Used only when hooks.json cannot be read from here. A failsafe, not a
@@ -586,28 +605,11 @@ async function checkWrite(tool, input) {
 // gate error codes otherwise blocks until stdin closes -- which under
 // `node --test` is never, and the suite hangs with no failing assertion.
 //
-// REALPATHS BOTH SIDES, which most guards in scripts/ do not. Node resolves an
-// ESM entry to its realpath for import.meta.url while process.argv[1] keeps the
-// path the caller spelled, so the naive comparison is false under any symlinked
-// install -- a dotfile-managed ~/.claude, or a dev install pointing at a
-// checkout. In a CLI script that misfire means the command quietly does
-// nothing. Here it means the write gate exits 0 having checked nothing and
-// admits every contract violation, so this file gets the careful form that
-// scripts/provenance.mjs and scripts/codex/generate-agents.mjs already use.
-//
-// The fallback compares unresolved paths rather than giving up: failing to run
-// in production is the dangerous direction, and a test importing this module
-// has an argv[1] that matches neither way, so import safety is preserved.
-function isMain() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
-  }
-}
-
-if (isMain()) {
+// isMainModule realpaths both sides. Node resolves an ESM entry to its realpath
+// for import.meta.url while process.argv[1] keeps the path the caller spelled,
+// so a naive comparison is false under any symlinked install -- and here that
+// means the write gate exits 0 having checked nothing. See lib/is-main.mjs.
+if (isMainModule(import.meta.url)) {
   runHook(async ({ raw }) => {
     for (const write of normalizeWrites(raw)) {
       if (write.tool === 'Delete') continue;

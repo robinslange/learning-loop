@@ -30,15 +30,17 @@ function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
 }
 
-// Records which plugin version last wrote the shims. Kept in plugin-data
-// rather than beside the shims: ~/.local/bin belongs to the user, and a
-// bookkeeping file of ours is not theirs to inherit.
-const SHIM_STAMP = 'shims-version';
-
+// Records which plugin version last wrote the shims. In plugin-data rather
+// than beside the shims, because ~/.local/bin belongs to the user and a
+// bookkeeping file of ours is not theirs to inherit -- but in bin/, NOT in
+// markers/. vault-snapshot sweeps markers/ unconditionally by mtime on a 7-day
+// TTL, so a stamp there is reaped weekly, reads back as "never stamped", and
+// re-spawns the installer every seventh session forever. See
+// DATA_FILES.shimsVersion.
 function readShimStamp(pluginData) {
   if (!pluginData) return null;
   try {
-    return readFileSync(join(DATA_PATHS.markers(pluginData), SHIM_STAMP), 'utf8').trim() || null;
+    return readFileSync(DATA_FILES.shimsVersion(pluginData), 'utf8').trim() || null;
   } catch {
     // Absent or unreadable both mean "vintage unknown", which is reinstallable.
     return null;
@@ -48,9 +50,8 @@ function readShimStamp(pluginData) {
 function writeShimStamp(pluginData, version) {
   if (!pluginData) return;
   try {
-    const dir = DATA_PATHS.markers(pluginData);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, SHIM_STAMP), `${version}\n`);
+    mkdirSync(DATA_PATHS.bin(pluginData), { recursive: true });
+    writeFileSync(DATA_FILES.shimsVersion(pluginData), `${version}\n`);
   } catch (err) {
     logError('session-start.shim-stamp', err);
   }
@@ -108,9 +109,15 @@ export async function run(ctx) {
   try {
     const binDir = join(home(), '.local', 'bin');
     const shimPluginData = resolvePluginData();
+    // With nowhere to record the answer, the version trigger can only ever say
+    // "reinstall": the stamp is never written, so it never matches, and every
+    // session pays a synchronous installer spawn with no way out of the loop.
+    // A degraded install should degrade to the OLD behaviour -- reinstall only
+    // when a shim is actually missing -- not to reinstalling forever.
+    const stampedVersion = shimPluginData ? readShimStamp(shimPluginData) : ctx.pluginVersion;
     const needed = shimsNeedInstall({
       binDir,
-      stampedVersion: readShimStamp(shimPluginData),
+      stampedVersion,
       pluginVersion: ctx.pluginVersion,
     });
     if (needed) {

@@ -17,10 +17,17 @@
 // the reader would otherwise have to reconstruct. Everything else is left
 // alone. A missed conversion costs a relative date that stays relative; a
 // wrong one silently edits what a note claims.
+//
+// The protections below are not guesses. Two adversarial reviews fed this
+// module text until it corrupted something, and every rule here is one of the
+// answers: matches inside wikilink targets and URLs, digit runs beginning after
+// a comma or decimal point, hyphen-adjacent tokens, an apostrophe earlier in a
+// line swallowing a quoted span, unterminated and multi-line quotes, `~~~`
+// fences, and indented code.
 
-import { readFileSync, writeFileSync, statSync, realpathSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 const WORD_NUMBERS = {
   one: 1,
@@ -49,16 +56,26 @@ const WEEKDAYS = {
 // year". The first four are tense-words far more often than dates, and a bare
 // week or year names a span, so choosing a day inside it is the judgement this
 // module exists to avoid.
+//
+// (?<![-\w]) / (?![-\w]) rather than \b: \b treats a hyphen as a word boundary,
+// so "non-yesterday", "two days ago-style" and the link target
+// [[yesterday-standup]] all matched and were rewritten mid-token.
+// (?<![-\w.,\d]) additionally refuses a digit run that begins after a comma or
+// a decimal point, which turned "paid 1,000 days ago" into "paid 1,2026-09-16".
 const PATTERN = new RegExp(
   [
-    String.raw`\b(yesterday|tomorrow)\b`,
-    String.raw`\b(\d{1,3}|${Object.keys(WORD_NUMBERS).join('|')})\s+(day|week)s?\s+ago\b`,
-    String.raw`\b(last|next)\s+(${Object.keys(WEEKDAYS).join('|')})\b`,
+    String.raw`(?<![-\w])(yesterday|tomorrow)(?![-\w])`,
+    String.raw`(?<![-\w.,\d])(\d{1,3}|${Object.keys(WORD_NUMBERS).join('|')})\s+(day|week)s?\s+ago(?![-\w])`,
+    String.raw`(?<![-\w])(last|next)\s+(${Object.keys(WEEKDAYS).join('|')})(?![-\w])`,
   ].join('|'),
   'gi',
 );
 
 const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
+const FENCE = /^\s*(?:```|~~~)/;
+// Four spaces or a tab opens a Markdown code block. Skipping one costs a missed
+// conversion; converting inside one corrupts a command.
+const INDENTED_CODE = /^(?: {4,}|\t)/;
 
 function isoOf(date) {
   return date.toISOString().slice(0, 10);
@@ -95,20 +112,76 @@ function weekdayDate(anchorISO, targetDow, forward) {
   return addDays(anchorISO, forward ? diff : -diff);
 }
 
-// Quoted and backticked runs are off limits. Memories that document the date
-// rules quote the trigger words as examples, so rewriting inside a quote
-// corrupts the description of the behaviour rather than a stale date.
-function protectedSpans(line) {
+// Quote and code-span delimiters, scanned character by character so an opener
+// with no closer protects to end of line and CARRIES to the next one. The
+// previous version matched balanced pairs with a regex, which protected only
+// the case that rarely occurs in prose: a quote opening on one line and closing
+// on the next is ordinary writing, and the text inside it was being converted.
+function delimiterSpans(line, carried) {
   const spans = [];
-  const re = /"[^"]*"|'[^']*'|`[^`]*`/g;
-  let m;
-  while ((m = re.exec(line)) !== null) spans.push([m.index, m.index + m[0].length]);
-  return spans;
+  let open = carried;
+  let i = 0;
+
+  if (open) {
+    const close = line.indexOf(open);
+    if (close === -1) return { spans: [[0, line.length]], open };
+    spans.push([0, close + 1]);
+    i = close + 1;
+    open = null;
+  }
+
+  while (i < line.length) {
+    const ch = line[i];
+    if (ch === '"' || ch === '`') {
+      const close = line.indexOf(ch, i + 1);
+      if (close === -1) {
+        spans.push([i, line.length]);
+        open = ch;
+        break;
+      }
+      spans.push([i, close + 1]);
+      i = close + 1;
+      continue;
+    }
+    i += 1;
+  }
+  return { spans, open };
 }
 
-function normalizeLine(line, anchorISO, changes, lineNo) {
-  const spans = protectedSpans(line);
-  return line.replace(PATTERN, (match, simple, count, unit, dir, weekday, offset) => {
+// Structural spans that are never prose: a wikilink target, a markdown link
+// destination, a URL. Rewriting inside one does not produce a wrong date, it
+// produces a broken link -- in a vault whose write gate warns about exactly
+// that. Line-local, so they do not carry.
+const STRUCTURAL = [/\[\[[^\]]*\]\]/g, /\]\([^)]*\)/g, /\bhttps?:\/\/\S+/gi, /\bwww\.\S+/gi];
+
+// Single quotes last, and only where they read as quotation rather than as an
+// apostrophe: opened off a word character and closed before one. Without this,
+// "don't ship it yesterday, it's fine" had a span running from the apostrophe
+// in don't to the one in it's, silently suppressing a real conversion -- while
+// in `it's a rule: "don't say yesterday"` the same pairing swallowed the double
+// quote that should have protected the sentence.
+const SINGLE_QUOTED = /(?<![A-Za-z0-9])'[^']*'(?![A-Za-z0-9])/g;
+
+function protectedSpans(line, carried) {
+  const { spans, open } = delimiterSpans(line, carried);
+  const overlaps = (s, e) => spans.some(([a, b]) => s < b && e > a);
+  const collect = (re) => {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+      const s = m.index;
+      const e = s + m[0].length;
+      if (!overlaps(s, e)) spans.push([s, e]);
+    }
+  };
+  for (const re of STRUCTURAL) collect(re);
+  collect(SINGLE_QUOTED);
+  return { spans, open };
+}
+
+function normalizeLine(line, anchorISO, changes, lineNo, carried) {
+  const { spans, open } = protectedSpans(line, carried);
+  const text = line.replace(PATTERN, (match, simple, count, unit, dir, weekday, offset) => {
     if (spans.some(([start, end]) => offset >= start && offset < end)) return match;
 
     let iso = null;
@@ -126,6 +199,7 @@ function normalizeLine(line, anchorISO, changes, lineNo) {
     changes.push({ from: match, to: iso, line: lineNo + 1 });
     return iso;
   });
+  return { text, open };
 }
 
 /**
@@ -138,18 +212,25 @@ export function normalizeText(text, anchorISO) {
   const changes = [];
   const lines = text.split('\n');
   let inFence = false;
-  let inFrontmatter = lines[0]?.trim() === '---';
+  // A leading `---` only opens frontmatter if something later CLOSES it.
+  // Without that second condition, a document whose first line is a thematic
+  // break was treated as one unterminated frontmatter block and skipped whole,
+  // reporting "0 convertible" indistinguishably from a file with no dates.
+  let inFrontmatter = lines[0]?.trim() === '---' && lines.slice(1).some((l) => l.trim() === '---');
+  let carried = null;
 
   const out = lines.map((line, i) => {
     if (inFrontmatter) {
       if (i > 0 && line.trim() === '---') inFrontmatter = false;
       return line;
     }
-    if (/^\s*```/.test(line)) {
+    if (FENCE.test(line)) {
       inFence = !inFence;
+      carried = null;
       return line;
     }
     if (inFence) return line;
+    if (INDENTED_CODE.test(line)) return line;
 
     // A line already carrying an absolute date is either done or is stating
     // both forms on purpose ("today, 2026-05-29"); either way, leave it.
@@ -158,7 +239,9 @@ export function normalizeText(text, anchorISO) {
     // re-match every run and are the single largest source of empty hits.
     if (line.includes('->')) return line;
 
-    return normalizeLine(line, anchorISO, changes, i);
+    const { text: nextLine, open } = normalizeLine(line, anchorISO, changes, i, carried);
+    carried = open;
+    return nextLine;
   });
 
   return { text: out.join('\n'), changes };
@@ -167,7 +250,7 @@ export function normalizeText(text, anchorISO) {
 /**
  * Normalize one file against its own mtime, which is the closest thing to the
  * date its relative references were written on.
- * @returns {{ changes: {from: string, to: string, line: number}[] }}
+ * @returns {{ changes: {from: string, to: string, line: number}[], anchorISO: string }}
  */
 export function normalizeFile(path, { apply = false } = {}) {
   const anchorISO = localISO(statSync(path).mtime);
@@ -177,21 +260,12 @@ export function normalizeFile(path, { apply = false } = {}) {
   return { changes, anchorISO };
 }
 
-// Realpaths both sides: /dream reaches this through `ll-run`, which execs
-// `<cache>/<version>/scripts/dream-normalize.mjs`, and that path runs through a
-// symlink on any symlink-managed ~/.claude. The naive comparison is false
-// there, so the operator would report nothing to convert and the run would look
-// clean -- the same silent no-op this module exists to remove.
-function isMain() {
-  if (!process.argv[1]) return false;
-  try {
-    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
-  }
-}
-
-if (isMain()) {
+// /dream reaches this through `ll-run`, which execs
+// `<cache>/<version>/scripts/dream-normalize.mjs` -- a path that runs through a
+// symlink on any symlink-managed ~/.claude. Without realpathing both sides the
+// operator would report nothing to convert and the run would look clean, which
+// is the same silent no-op this module exists to remove. See lib/is-main.mjs.
+if (isMainModule(import.meta.url)) {
   const apply = process.argv.includes('--apply');
   const files = process.argv.slice(2).filter((a) => !a.startsWith('--'));
   if (files.length === 0) {

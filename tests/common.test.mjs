@@ -178,7 +178,7 @@ describe('readFileTail', () => {
   });
 });
 
-// The shared containment fixture (REMEDIATION-PLAN P4.5): across 165 test files
+// The shared containment fixture: across 165 test files
 // none fed a '../' path to a containment check — every "traversal" hit was
 // GRAPH traversal. That gap is why isVaultNote and vaultRelPath compared raw
 // string prefixes for so long. One table, run against both functions; add a row

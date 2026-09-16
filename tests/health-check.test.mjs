@@ -404,6 +404,30 @@ test('checkBinaryExists: a downloaded ll-search.exe is not a missing binary', ()
   rmSync(dir, { recursive: true, force: true });
 });
 
+test(
+  'checkBinaryExists: a present but non-executable binary still fails on POSIX',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    // The win32 fix put `platform !== 'win32' &&` in front of the mode test.
+    // Nothing asserted the POSIX half still fires, so changing that condition
+    // to `false &&` -- disabling the executability check on every platform --
+    // left the whole suite green. A downloaded-but-unchmodded binary is a real
+    // install state, and it is one /doctor exists to name.
+    const dir = mkdtempSync(join(tmpdir(), 'health-bin-noexec-'));
+    mkdirSync(join(dir, 'bin'));
+    const bin = join(dir, 'bin/ll-search');
+    writeFileSync(bin, '#!/usr/bin/env bash\n');
+    chmodSync(bin, 0o644);
+
+    const result = checkBinaryExists({ pluginData: dir });
+
+    assert.equal(result.status, 'fail');
+    assert.match(result.detail, /not executable/);
+    assert.match(result.fix, /chmod/);
+    rmSync(dir, { recursive: true, force: true });
+  },
+);
+
 test('checkBinaryExists: the POSIX name does not satisfy a Windows install', () => {
   // The other side. A check that passed on any file at all would satisfy the
   // test above while still not knowing what the downloader writes.

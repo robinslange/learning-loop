@@ -219,42 +219,80 @@ test('the pre-write budget fits a cold model start, not just a warm daemon', () 
 // an inner budget above the outer deadline is inert, one below it throws away
 // time the hook was given. The mirror test that used to police those two
 // literals is gone with the literal it policed.
+// The live file, asserted against a LITERAL. The previous version of this test
+// recomputed the expectation the same way the implementation does -- find the
+// Write entry, read [0].timeout, multiply -- so it would have passed against a
+// broken parser. A review caught it. An assertion that re-derives its own
+// expected value tests nothing but arithmetic.
 test('outerDeadlineMs reads the deadline the harness actually enforces', () => {
-  assert.equal(
-    outerDeadlineMs(HOOKS_JSON),
-    HOOKS_JSON.hooks.PreToolUse.find((e) => e.matcher.split('|').includes('Write')).hooks[0]
-      .timeout * 1000,
+  assert.equal(outerDeadlineMs(HOOKS_JSON), 8000);
+});
+
+// A ceiling as well as a floor. The cold-start test below pins the deadline
+// above 2905ms; nothing pinned it below anything, so a bump to 30s would have
+// passed both. This is a hook in front of the user's Write: on a host with no
+// daemon and a cold binary they wait this long before the tool call proceeds.
+test('the pre-write deadline stays inside what a user will sit through', () => {
+  assert.ok(
+    outerDeadlineMs(HOOKS_JSON) <= 10_000,
+    'a PreToolUse hook blocks the user\'s own Write; past ~10s it reads as a hang, not a check',
   );
 });
 
-test('outerDeadlineMs picks the Write entry, not whichever PreToolUse hook is first', () => {
-  // hooks.json declares more than one PreToolUse group (web-guard is the
-  // other). Taking [0] would silently budget the duplicate gate against a
-  // different hook's deadline.
-  const deadline = outerDeadlineMs({
+// Found by the COMMAND, not the matcher. Matchers are regexes Claude Code
+// owns, so every spelling below is a legal way to say "Write or Edit" -- and
+// the matcher-parsing version returned null for all of them, silently
+// reinstating the 3s budget this change exists to raise, with no test failing.
+// The wrong-typed rows are the other half: `?.` covers absent but not
+// wrong-typed, so PreToolUse-as-an-object used to THROW out of a call site
+// that is not inside a try, discarding every verdict computed for that write.
+const PWC = 'cd "$HOME" && node "${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js"';
+const OTHER = 'cd "$HOME" && node "${CLAUDE_PLUGIN_ROOT}/hooks/web-guard.js"';
+const oneGroup = (matcher, timeout, command = PWC) => ({
+  hooks: { PreToolUse: [{ matcher, hooks: [{ command, timeout }] }] },
+});
+
+const DEADLINE_CASES = [
+  ['the shipped matcher', oneGroup('Write|Edit', 8), 8000],
+  ['a reversed matcher', oneGroup('Edit|Write', 8), 8000],
+  ['a regex matcher', oneGroup('Write.*', 8), 8000],
+  ['a catch-all matcher', oneGroup('.*', 8), 8000],
+  ['a spaced matcher', oneGroup('Write | Edit', 8), 8000],
+  ['no matcher at all', { hooks: { PreToolUse: [{ hooks: [{ command: PWC, timeout: 8 }] }] } }, 8000],
+  ['another hook\'s group first', {
     hooks: {
       PreToolUse: [
-        { matcher: 'WebSearch|WebFetch', hooks: [{ timeout: 3 }] },
-        { matcher: 'Write|Edit', hooks: [{ timeout: 8 }] },
+        { matcher: 'WebSearch|WebFetch', hooks: [{ command: OTHER, timeout: 3 }] },
+        { matcher: 'Write|Edit', hooks: [{ command: PWC, timeout: 8 }] },
       ],
     },
-  });
-  assert.equal(deadline, 8000);
-});
+  }, 8000],
+  ['our hook second within a group', {
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Write|Edit', hooks: [{ command: OTHER, timeout: 3 }, { command: PWC, timeout: 8 }] },
+      ],
+    },
+  }, 8000],
+  ['PreToolUse is an object', { hooks: { PreToolUse: { matcher: 'Write|Edit' } } }, null],
+  ['PreToolUse is a string', { hooks: { PreToolUse: 'nope' } }, null],
+  ['hooks is an array', { hooks: [] }, null],
+  ['group.hooks is an object', { hooks: { PreToolUse: [{ matcher: 'Write|Edit', hooks: {} }] } }, null],
+  ['null', null, null],
+  ['undefined', undefined, null],
+  ['no entry for this hook', oneGroup('WebSearch', 3, OTHER), null],
+  ['a string timeout', oneGroup('Write|Edit', '8'), null],
+  ['a zero timeout', oneGroup('Write|Edit', 0), null],
+  ['a negative timeout', oneGroup('Write|Edit', -5), null],
+  ['a NaN timeout', oneGroup('Write|Edit', NaN), null],
+  ['no timeout', oneGroup('Write|Edit', undefined), null],
+];
 
-test('outerDeadlineMs returns null when the deadline cannot be read', () => {
-  // The caller floors low on null rather than guessing: under-running the real
-  // deadline only wastes time the hook was given, while over-running it is the
-  // SIGKILL that loses every warning already computed.
-  for (const bad of [null, undefined, {}, { hooks: {} }, { hooks: { PreToolUse: [] } }]) {
-    assert.equal(outerDeadlineMs(bad), null, `expected null for ${JSON.stringify(bad)}`);
-  }
-  assert.equal(
-    outerDeadlineMs({ hooks: { PreToolUse: [{ matcher: 'Write', hooks: [{}] }] } }),
-    null,
-    'an entry with no timeout is unreadable, not zero',
-  );
-});
+for (const [name, input, expected] of DEADLINE_CASES) {
+  test(`outerDeadlineMs: ${name}`, () => {
+    assert.equal(outerDeadlineMs(input), expected);
+  });
+}
 
 // Regression: any hook that reads stdin via the shared readStdin() (which
 // races HookConfig.STDIN_TIMEOUT_MS) must declare a hooks.json timeout long

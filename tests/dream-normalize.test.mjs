@@ -157,6 +157,73 @@ console.log(m.normalizeFile(f).anchorISO);
   );
 });
 
+// --- the shapes two adversarial reviews fed it until it corrupted something ---
+//
+// Every row below was CONFIRMED rewriting real text, one of them reproduced on
+// disk with --apply. They are asserted as "unchanged" because the operator's
+// stated bias is silence: the defect is always that it edited something it had
+// no business editing. The wikilink rows are the worst of them -- this is a
+// wikilink vault and pre-write-check warns on broken wikilinks, so the operator
+// was manufacturing exactly the breakage the write gate reports.
+//
+// Fails if: the structural spans stop being collected, the numeric lookbehind
+// is relaxed, the hyphen lookarounds revert to \b, single quotes are collected
+// before double quotes again, the delimiter scan stops carrying across lines,
+// or fence handling drops ~~~ / indented code.
+const MUST_NOT_CHANGE = [
+  ['a wikilink target is a link, not prose', 'see [[2 weeks ago in review]]'],
+  ['a piped wikilink too', 'see [[yesterday|the note]]'],
+  ['a hyphenated wikilink target', 'See [[yesterday-standup]] for the notes'],
+  ['a URL path segment is not a date', 'https://example.com/2-weeks-ago/yesterday'],
+  ['nor is one mid-URL', 'Docs: https://ex.com/tomorrow/plan'],
+  ['nor a bare www URL', 'ref www.example.com/yesterday/x'],
+  ['nor a markdown link target', 'see [the note](./2-weeks-ago.md)'],
+  ['a thousands separator is not a count', 'paid 1,000 days ago'],
+  ['nor is a decimal fraction', 'took 1.5 days ago'],
+  ['a hyphenated suffix is one token', 'a two days ago-style note'],
+  ['so is a hyphenated prefix', 'a non-yesterday problem'],
+  ['so is a hyphenated compound', 'A yesterday-only workaround.'],
+  ['an apostrophe must not open a quote span', 'it\'s a rule: "don\'t say yesterday"'],
+  ['a possessive before a quote is safe too', 'the team\'s rule: "never write yesterday"'],
+  ['a quote that closes on the next line', 'he said "remember yesterday\nand nothing else" ok'],
+  ['the second line of a multi-line quote', 'he said "remember\nyesterday" clearly'],
+  ['an unterminated code span', 'the `yesterday keyword and yesterday again'],
+  ['a tilde fence is a fence', '~~~bash\necho yesterday\n~~~'],
+  ['four spaces open a code block', '    echo yesterday'],
+  ['so does a tab', '\techo yesterday'],
+];
+
+// The other half of the contract. A fix that simply stopped converting would
+// satisfy every assertion above, so these pin that the operator still works --
+// including the case the old quote handling wrongly SUPPRESSED.
+const MUST_CONVERT = [
+  ['capitalised at the start of a sentence', 'Yesterday we shipped', '2026-09-15 we shipped'],
+  ['two references on one line', 'yesterday and tomorrow', '2026-09-15 and 2026-09-17'],
+  ['a reference ending a sentence', 'it shipped yesterday.', 'it shipped 2026-09-15.'],
+  [
+    'apostrophes on both sides of it',
+    "don't ship it yesterday, it's fine",
+    "don't ship it 2026-09-15, it's fine",
+  ],
+  [
+    'a leading --- is a thematic break, not frontmatter',
+    '---\nbody says yesterday\nmore yesterday',
+    '---\nbody says 2026-09-15\nmore 2026-09-15',
+  ],
+];
+
+for (const [name, input] of MUST_NOT_CHANGE) {
+  test(`leaves it alone: ${name}`, () => {
+    assert.equal(normalizeText(input, ANCHOR).text, input);
+  });
+}
+
+for (const [name, input, expected] of MUST_CONVERT) {
+  test(`still converts: ${name}`, () => {
+    assert.equal(normalizeText(input, ANCHOR).text, expected);
+  });
+}
+
 // --- the module is only a fix if /dream actually calls it ---
 
 // Everything above can be perfect and change nothing. The first version of
