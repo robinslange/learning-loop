@@ -22,13 +22,24 @@ import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 
-// Record a Write/Edit into the auto-memory dir against THIS session's write
-// log, so stop-nudge can count what this session actually wrote rather than
-// diffing the shared memory dir (which conflates concurrent sessions). The
-// memory dir is ~/.claude/projects/<encoded-project-dir>/memory. Fail-open:
-// any error here must not disturb the enrichment modules below.
-function recordMemoryWriteIfApplicable(filePath) {
+// Record the CREATION of an auto-memory file against THIS session's write log,
+// so stop-nudge can count what this session actually added rather than diffing
+// the shared memory dir (which conflates concurrent sessions). Only `Write`
+// counts: `Edit` requires the file to already exist, so it can never add one,
+// and stop-nudge renders this log as "created N new memory files". Counting
+// edits reported six creations to a session that had only updated six existing
+// memories. Birthtime cannot stand in for the check, because an Edit rewrites
+// the file and resets btime on macOS. The memory dir is
+// ~/.claude/projects/<encoded-project-dir>/memory. Fail-open: any error here
+// must not disturb the enrichment modules below.
+//
+// Known gap: a `Write` that overwrites an existing memory still counts as a
+// creation. PostToolUse fires after the write, so existsSync cannot tell the
+// two apart, and the session-start memory snapshot that could have was removed
+// when the concurrent-session conflation was fixed.
+function recordMemoryWriteIfApplicable(filePath, tool) {
   try {
+    if (tool !== 'Write') return;
     if (!filePath || !filePath.endsWith('.md')) return;
     const projectDir = env.CLAUDE_PROJECT_DIR;
     if (!projectDir) return;
@@ -117,7 +128,7 @@ const loadSnapshotOnce = () => (vaultSnapshot ??= loadVaultSnapshot(ctx.vaultRoo
 for (const pass of passes) {
   const isWriteEdit = pass.tool === 'Write' || pass.tool === 'Edit';
   if (isWriteEdit) {
-    recordMemoryWriteIfApplicable(pass.input.file_path);
+    recordMemoryWriteIfApplicable(pass.input.file_path, pass.tool);
     if (pass.vaultRoot && isVaultNote(pass.input.file_path, pass.vaultRoot)) {
       pass.snapshot = loadSnapshotOnce();
     }
