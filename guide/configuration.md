@@ -278,24 +278,17 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 /plugin install learning-loop@learning-loop-marketplace
 ```
 
-Restart Claude Code. Your `config.json` lives in `PLUGIN_DATA` and is read as-is on the next run — an update never rewrites it, so edits take effect immediately and nothing is migrated over them. (The one exception is a first-ever run with no `PLUGIN_DATA/config.json`, where the plugin's own `config.json` is copied in to seed it.) The session-start hook re-checks every shim in `~/.local/bin` (`ll-watch`, `ll-search`, `ll-paths`); if any is missing it runs `scripts/install-shims.mjs --install` to write them all. The shims resolve their targets at runtime, so they survive cache version changes.
+Open sessions pick the update up without a restart: every hook enters through `hooks/run.mjs`, which runs the handler from the version Claude Code has installed, and skills call scripts through `ll-run`. Skill and agent text and the hook registrations themselves are read once per session, so run `/reload-plugins` when a release changes those. The previous version directory stays on disk for sessions still using it; Claude Code marks it `.orphaned_at` and removes it later. Your `config.json` lives in `PLUGIN_DATA` and is read as-is on the next run -- an update never rewrites it, so edits take effect immediately and nothing is migrated over them. (The one exception is a first-ever run with no `PLUGIN_DATA/config.json`, where the plugin's own `config.json` is copied in to seed it.) The session-start hook compares every shim in `~/.local/bin` against the text the running version renders and rewrites them when any is missing or different.
 
 Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed.
 
 ## CLI shims
 
-Two shell scripts in `~/.local/bin/` give vault tools a stable name regardless of plugin version:
+Four shims in `~/.local/bin/` give the plugin's tools a stable name regardless of plugin version: `ll-search` (search, indexing, identity, similarity), `ll-watch` (vault watcher and librarian), `ll-paths` (print a resolved path, e.g. `ll-paths VAULT`) and `ll-run` (run a plugin script by name, e.g. `ll-run health-check.mjs`).
 
-- `~/.local/bin/ll-search` -- search, indexing, identity, and similarity queries.
-- `~/.local/bin/ll-watch` -- vault watcher that runs the librarian and incremental reindex.
+`ll-watch`, `ll-paths` and `ll-run` are each one `node -e` line that finds the active install and hands off to its `scripts/shim.mjs`, where their behaviour lives and updates with the plugin. The install is the `learning-loop@learning-loop-marketplace` entry in `~/.claude/plugins/installed_plugins.json`, or, when Claude Code has none, the newest version under `~/.codex/plugins/cache/learning-loop-marketplace/learning-loop/`. `ll-run` looks under `scripts/` then `bin/`. `ll-search` never starts node: it is a shell shim that runs `$PLUGIN_DATA/bin/ll-search` (plugin-data from `$CLAUDE_PLUGIN_DATA`, the `~/.claude/plugins/data/.ll-data-path` marker, or the default location) with the ONNX runtime env, for about 3ms of overhead. The ONNX runtime is not bundled next to the binary; `ll-core`'s `dylib::ensure_dylib()` downloads and SHA-256-verifies `libonnxruntime` on first run (override with `ORT_DYLIB_PATH` or `LL_ORT_DIR`).
 
-The `ll-search` shim resolves `PLUGIN_DATA` from `$CLAUDE_PLUGIN_DATA` if set, otherwise from the marker file at `~/.claude/plugins/data/.ll-data-path` that the SessionStart hook writes, otherwise from the canonical default `~/.claude/plugins/data/learning-loop-learning-loop-marketplace`. It then exec's the binary at `$PLUGIN_DATA/bin/ll-search`. The ONNX runtime is not bundled next to the binary; `ll-core`'s `dylib::ensure_dylib()` downloads and SHA-256-verifies `libonnxruntime` on first run and sets `ORT_DYLIB_PATH` so the loader finds it (override the location with `ORT_DYLIB_PATH` or `LL_ORT_DIR`).
-
-The `ll-watch` shim picks the latest version-named directory under `~/.claude/plugins/cache/learning-loop-marketplace/learning-loop/` and exec's `node ${LATEST}/scripts/watch.mjs`. Filtering to digit-prefixed names skips orphan hash directories the plugin manager leaves behind.
-
-The point of the indirection: each shim resolves its target at runtime. Plugin updates that move the binary inside `PLUGIN_DATA/bin/` or land a new cache version are invisible to the shim, which is why `ll-search` and `ll-watch` continue working after `/plugin install learning-loop@learning-loop-marketplace` without a restart of the shell.
-
-The SessionStart hook auto-installs both shims if either is missing. To install or repair them manually:
+The shim text carries no version or machine path, so SessionStart rewrites a shim only when a release actually changes it. To install or repair them manually:
 
 ```bash
 node scripts/install-shims.mjs --install

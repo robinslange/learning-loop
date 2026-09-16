@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **Updates reach open sessions without a reload.** Every hook now enters
+  through `hooks/run.mjs`, which runs the handler from the version Claude Code
+  has installed rather than the one the session loaded. `ll-run`, `ll-paths`
+  and `ll-watch` find the active install at call time and dispatch through the
+  plugin's `scripts/shim.mjs`, and skills and agents call scripts through
+  `ll-run`. `ll-search` stays node-free and drops from ~12ms to ~6ms of
+  startup.
+  Skill and agent text and hook registrations are still read once per session;
+  `/reload-plugins` picks those up. Sessions opened before this release keep
+  their old hook commands until they reload once.
+
+### Fixed
+
+- **Updating deleted the version every open session was running.**
+  `cache-cleanup` removed every cache version older than its own at
+  SessionStart, so the first session on a new release broke hooks in all the
+  others and forced a reload everywhere. Claude Code already marks superseded
+  versions `.orphaned_at` and reaps them after a grace period; the prune is gone.
+
+- **Installed shims never updated.** SessionStart only reinstalled a missing
+  shim, so a fixed shim template never reached an existing install. It now
+  rewrites any shim whose text differs from what the running version renders.
+
 ## v2.0.7
 
 ### Fixed
