@@ -66,6 +66,7 @@ import { DATA_PATHS } from './lib/paths.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from './lib/hook-config.mjs';
 import { loadNoteUsageEvents } from './lib/retrieval-usage.mjs';
 import { logError } from './lib/log.mjs';
+import { isMainModule } from './lib/is-main.mjs';
 
 const MAX_RANK = 5; // rank 0 body + up to 4 pointers (inject.mjs caps pointers at 4)
 
@@ -339,7 +340,7 @@ function printReport(report) {
 }
 
 // CLI entry — thin: resolve plugin-data, compute, print.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMainModule(import.meta.url)) {
   const PD = getPluginData();
   if (!PD) {
     console.error('injection-precision: no plugin-data dir resolved.');

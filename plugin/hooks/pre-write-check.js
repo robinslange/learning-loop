@@ -29,6 +29,9 @@ import { logError } from '../scripts/lib/log.mjs';
 import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
+import { safeLoad } from '../scripts/lib/safe-load.mjs';
+import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../scripts/lib/is-main.mjs';
 import { emitJson } from './lib/io.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 
@@ -36,14 +39,63 @@ import { normalizeWrites } from './lib/tool-payload.mjs';
 // does; the duplicate gate budgets its subprocess fallback from what's left.
 const HOOK_START_MS = Date.now();
 
-// Default mirrors the hooks.json deadline (pinned by lib-hook-config.test).
-// LL_PRE_WRITE_BUDGET_MS lets a contended test harness extend the wall-clock
-// budget so the subprocess fallback is exercised deterministically under load
-// — the production default is unchanged.
-const PRE_WRITE_BUDGET_MS = coerceNumber(
-  env.LL_PRE_WRITE_BUDGET_MS,
-  HookConfig.PRE_WRITE_HOOK_BUDGET_MS,
-);
+// hooks.json is the ONLY place this deadline is declared, because it is the
+// copy that is actually enforced: the harness parses it at session start and
+// SIGKILLs this process on it. A second copy in hook-config could only agree
+// or drift, and drift is silent in both directions -- an inner budget above
+// the outer deadline is inert, one below it throws away time we were given.
+// Found by the COMMAND that invokes this hook, not by parsing the matcher.
+// Matchers are regexes Claude Code owns, so `Write.*`, `.*`, `Write | Edit` and
+// an absent matcher are all legal spellings of "this entry" -- and the previous
+// version returned null for every one of them, silently reinstating the 3s
+// budget this change exists to raise. The hook knows its own filename, so
+// asking that question deletes the guessing instead of improving it.
+//
+// Array.isArray at both levels rather than optional chaining alone: `?.` covers
+// absent but not wrong-typed, so a PreToolUse that was an object THREW here --
+// out of a call site (budgetOkForStyle) that is not inside a try, which meant
+// emitVerdict() never ran and every warning and deny already computed for that
+// write was discarded. A deadline reader must be total.
+export function outerDeadlineMs(hooksJson, hookFile = 'pre-write-check.js') {
+  const groups = hooksJson?.hooks?.PreToolUse;
+  if (!Array.isArray(groups)) return null;
+  for (const group of groups) {
+    const hooks = Array.isArray(group?.hooks) ? group.hooks : [];
+    for (const h of hooks) {
+      if (typeof h?.command !== 'string' || !h.command.includes(hookFile)) continue;
+      const seconds = h.timeout;
+      if (typeof seconds === 'number' && Number.isFinite(seconds) && seconds > 0) {
+        return seconds * 1000;
+      }
+    }
+  }
+  return null;
+}
+
+// Used only when hooks.json cannot be read from here. A failsafe, not a
+// mirror: the harness read the real value at session start and we cannot see
+// what it got, so this may drift from hooks.json without consequence. It
+// floors LOW deliberately -- under-running the deadline wastes time we were
+// given, over-running it is the SIGKILL that loses every warning computed so far.
+const DEADLINE_UNREADABLE_FLOOR_MS = 3000;
+
+// Resolved lazily and once: a write outside the vault returns before the gate
+// runs, and must not pay a file read for a budget it never spends.
+let _budgetMs = null;
+function preWriteBudgetMs() {
+  if (_budgetMs !== null) return _budgetMs;
+  // The operator override. The plugin's hooks.json is replaced on every
+  // update, so a host needing a longer deadline than the shipped one sets this
+  // instead of editing a file that will be overwritten. A contended test
+  // harness raises it for the same reason.
+  const override = coerceNumber(env.LL_PRE_WRITE_BUDGET_MS, 0);
+  if (override > 0) return (_budgetMs = override);
+  const { value } = safeLoad(fileURLToPath(new URL('./hooks.json', import.meta.url)), {
+    fallback: null,
+  });
+  _budgetMs = outerDeadlineMs(value) ?? DEADLINE_UNREADABLE_FLOOR_MS;
+  return _budgetMs;
+}
 
 // Distinguishable error code for a duplicate-gate timeout (socket or
 // subprocess). /doctor's duplicate-gate-health check scans the monthly
@@ -294,7 +346,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
     if (!binary) return SCAN_FAILED;
 
     const elapsedMs = Date.now() - HOOK_START_MS;
-    const remainingMs = PRE_WRITE_BUDGET_MS - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    const remainingMs = preWriteBudgetMs() - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
     if (remainingMs < HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS) {
       logDuplicateGateIssue(
         pluginData,
@@ -500,7 +552,7 @@ async function checkWrite(tool, input) {
   const isNewFile = !existsSync(filePath);
   const elapsedForStyle = Date.now() - HOOK_START_MS;
   const budgetOkForStyle =
-    PRE_WRITE_BUDGET_MS - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    preWriteBudgetMs() - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
   const styleAdvisory = checkFilenameStyle(
     filePath,
     vaultRoot,
@@ -548,11 +600,22 @@ async function checkWrite(tool, input) {
 // apply_patch where Claude Code sends a single Write or Edit. Gate every file,
 // stopping only once something is denied — nothing can outrank a deny, and
 // stopping at the first advisory would let later violations through.
-runHook(async ({ raw }) => {
-  for (const write of normalizeWrites(raw)) {
-    if (write.tool === 'Delete') continue;
-    await checkWrite(write.tool, write);
-    if (verdict?.kind === 'deny') break;
-  }
-  emitVerdict();
-});
+// Guarded so that IMPORTING this module does not RUN the hook. runHook reads
+// stdin the moment it is called, so a test importing outerDeadlineMs or the
+// gate error codes otherwise blocks until stdin closes -- which under
+// `node --test` is never, and the suite hangs with no failing assertion.
+//
+// isMainModule realpaths both sides. Node resolves an ESM entry to its realpath
+// for import.meta.url while process.argv[1] keeps the path the caller spelled,
+// so a naive comparison is false under any symlinked install -- and here that
+// means the write gate exits 0 having checked nothing. See lib/is-main.mjs.
+if (isMainModule(import.meta.url)) {
+  runHook(async ({ raw }) => {
+    for (const write of normalizeWrites(raw)) {
+      if (write.tool === 'Delete') continue;
+      await checkWrite(write.tool, write);
+      if (verdict?.kind === 'deny') break;
+    }
+    emitVerdict();
+  });
+}

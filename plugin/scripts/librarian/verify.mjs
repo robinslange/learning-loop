@@ -8,7 +8,7 @@
 // rejects, so the CLI exits 1 and the router defers the claim to the Claude fallback
 // rather than half-verifying it. (Exit 3 means no GLM provider is configured.)
 
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../lib/is-main.mjs';
 import { chatJSON } from '../lib/model-client.mjs';
 import { loadLibrarianConfig } from './config.mjs';
 
@@ -101,7 +101,7 @@ async function readStdin() {
   return JSON.parse(s);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   readStdin()
     .then(async ({ question, claim }) => {
       const cfg = loadLibrarianConfig();

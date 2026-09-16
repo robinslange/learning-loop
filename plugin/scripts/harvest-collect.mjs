@@ -2,7 +2,7 @@
 // Keep ONLY notes with frontmatter `portable: true`. Never consult `visibility`.
 // Default-absent = excluded. Mechanical, fails closed.
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 /**
  * @param {{path: string, text: string}[]} notes
@@ -15,7 +15,7 @@ export function collectPortable(notes) {
   });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // CLI: harvest-collect.mjs <vaultDir> <memDir>  -> prints kept paths.
   // Takes DIRECTORIES and walks them internally — never receives a path list
   // through argv (a ~600-note vault would blow argv limits).

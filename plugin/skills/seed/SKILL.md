@@ -12,7 +12,7 @@ Produces a `seed-bundle-<date>/` an empty learning-loop instance can boot from v
 
 Resolve `PLUGIN_DATA`, `VAULT`, and the plugin root per `${CLAUDE_PLUGIN_ROOT}/skills-shared/paths-preamble.md` (read it and apply). Resolve the auto-memory dir mechanically (do NOT hand-construct the slug):
 ```
-node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
+node -e "import(process.argv[1]+'/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))" "$(ll-paths PLUGIN)"
 ```
 
 ## Process
@@ -25,7 +25,7 @@ node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>co
 ### 2. Mechanical selection
 Run:
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/seed-select.mjs <memDir> <types-csv> <deny-csv>
+ll-run seed-select.mjs <memDir> <types-csv> <deny-csv>
 ```
 This returns `{kept, dropped}`. The `type` filter and name deny-list are mechanical. Do not add files the script dropped.
 
@@ -35,7 +35,7 @@ Show the operator the `kept` list and the `dropped` list with reasons. Ask: any 
 ### 4. Scrub (only if --tiers used)
 If vault tiers were opted in, run the candidate notes through the same scrubber harvest uses (pass PLUGIN_DATA so instance facts merge in):
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <note-path...>
+ll-run harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" <note-path...>
 ```
 Block anything the scrub blocks. (Reuses the harvest scrubber — same mechanical gate.) A vault tier can hold hundreds of notes; if the path list is large, pipe paths on stdin instead of argv: `... harvest-scrub.mjs "<denylistFile>" "<PLUGIN_DATA>" < notes.txt`. For `--for-job` (no tiers) this step is skipped entirely.
 

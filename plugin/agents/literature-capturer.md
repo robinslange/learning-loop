@@ -37,9 +37,9 @@ Read and follow these skills during work:
 
 ### 1. Fetch the Source
 
-**If URL:** Fetch via the gateway (`node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json`, run with Bash). Extract title, author, date, and content. If fetch fails or returns partial content, note the limitation and work with what's available.
+**If URL:** Fetch via the gateway (`ll-run source-gateway.mjs fetch --url "<url>" --json`, run with Bash). Extract title, author, date, and content. If fetch fails or returns partial content, note the limitation and work with what's available.
 
-**If title/citation:** search via the gateway (`node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<title/citation>" --json`, run with Bash). Present options if multiple matches. Fetch the best match with `... fetch --url "<url>" --json`.
+**If title/citation:** search via the gateway (`ll-run source-gateway.mjs search --q "<title/citation>" --json`, run with Bash). Present options if multiple matches. Fetch the best match with `... fetch --url "<url>" --json`.
 
 ### 2. Check Overlap
 
@@ -60,7 +60,7 @@ Launch two searches in parallel:
 
 **a) Vault connections:** Search the vault for notes on the same topic/domain. These become wiki-links in the literature note.
 
-**b) Landscape context:** Search via the gateway (`node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "<topic>" --json`, run with Bash) for:
+**b) Landscape context:** Search via the gateway (`ll-run source-gateway.mjs search --q "<topic>" --json`, run with Bash) for:
 
 - Opposing arguments or critiques of the source's core claims
 - Supporting evidence or corroborating work

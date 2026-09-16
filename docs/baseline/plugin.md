@@ -291,7 +291,6 @@ The full constant inventory from `.planning/inventory/coverage-and-magic.md:177-
 | `HookConfig.LABEL_TIMEOUT_MS` | 3000 | session-label timeout |
 | `HookConfig.DEDUPE_WINDOW_MS` | 180000 | session deduplication window |
 | `HookConfig.INJECTION_RACE_CAP_MS` | 1500 | JIT injection race cap |
-| `HookConfig.QUERY_TIMEOUT_MS` | 2000 | pre-write-check query timeout |
 | `HookConfig.DEPS_CHECK_TIMEOUT_MS` | 5000 | session-start deps check |
 | `HookConfig.SNAPSHOT_TIMEOUT_MS` | 10000 | vault snapshot timeout |
 | `HookConfig.REINDEX_TIMEOUT_MS` | 5000 | daemon reindex timeout |
@@ -369,7 +368,10 @@ Calls to ll-search go through `scripts/lib/binary.mjs`:
 ```js
 import { runBinary } from '../lib/binary.mjs';
 const result = await runBinary(['search', '--vault', vaultPath], inputJson, {
-  timeout: HookConfig.QUERY_TIMEOUT_MS,
+  // The caller's own remaining wall clock, not a shared constant. A hook's
+  // deadline belongs to the hook: pre-write-check reads its own from
+  // hooks.json and spends what is left of it.
+  timeout: remainingBudgetMs,
 });
 ```
 

@@ -10,11 +10,11 @@ import { env } from './lib/env.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { getConfig } from './lib/config.mjs';
 import { buildAbiDrift, satisfiesVersion } from './check-deps-impl.mjs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 export { detectAbiDrift } from './check-deps-impl.mjs';
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 
 if (isMain) {
   const INSTALLED_PATH = join(

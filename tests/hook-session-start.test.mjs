@@ -1013,3 +1013,23 @@ test('LL_SESSION_TMP_DIR redirects the legacy tmp session-id write', { timeout: 
     rmSync(isolatedTmp, { recursive: true, force: true });
   }
 });
+
+test(
+  'session-start names vault search by its PATH command, not a version directory',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'll-run-command' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit code: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'll-run-command').additionalContext;
+      assert.match(ctx, /ll-run vault-search\.mjs search/);
+      assert.doesNotMatch(ctx, /node \S+\/scripts\/vault-search\.mjs/);
+    } finally {
+      r.cleanup();
+    }
+  },
+);

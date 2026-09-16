@@ -1,60 +1,41 @@
-// hooks/session-start/cache-cleanup.mjs : stale cache version prune + shim installer
+// hooks/session-start/cache-cleanup.mjs : shim installer + stale-artifact sweep
 // + binary auto-update.
-// Removes plugin-data directories strictly older than the running version, ensures
-// the CLI shims are installed, and triggers a detached binary
-// download when the installed ll-search version diverges from the plugin's
-// manifest (.claude-plugin/plugin.json) version (plugin auto-update bumps the
-// marketplace files but the native binary lags otherwise).
+//
+// Superseded plugin versions are NOT removed here. Claude Code marks them with
+// .orphaned_at and reaps them itself after a grace period; deleting them at
+// SessionStart pulled the code out from under every session still running the
+// previous version and forced a reload in all of them.
 
-import {
-  readdirSync,
-  readFileSync,
-  rmSync,
-  mkdirSync,
-  existsSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+import { readdirSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
-import { semverCmp, isPlainSemver } from '../../scripts/lib/semver.mjs';
 import { home, recordDetachedChild } from '../lib/common.mjs';
-import { DATA_FILES, DATA_PATHS, SHIM_NAMES } from '../../scripts/lib/paths.mjs';
+import { DATA_FILES, DATA_PATHS, SHIM_NAMES, shimFileName } from '../../scripts/lib/paths.mjs';
 import { resolvePluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
+import { renderShim } from '../../scripts/lib/shims.mjs';
 
 function stripV(s) {
   return typeof s === 'string' && s.startsWith('v') ? s.slice(1) : s;
 }
 
 export async function run(ctx) {
-  // Stale-version cache prune: remove versions strictly older than running.
+  // Shim installer: rewrite the shims when any is missing or its text differs
+  // from what this version renders. A shim on disk never updates itself, so an
+  // existence-only check left every install on the shim it was first given.
+  // Driven by SHIM_NAMES so a shim added later reaches existing installs too.
   try {
-    const cacheParent = resolve(ctx.pluginDir, '..');
-    for (const entry of readdirSync(cacheParent)) {
-      if (!isPlainSemver(entry)) continue;
-      if (semverCmp(entry, ctx.pluginVersion) < 0) {
-        rmSync(join(cacheParent, entry), { recursive: true, force: true });
-      }
-    }
-  } catch (err) {
-    logError('session-start.cache-cleanup', err);
-  }
-
-  // Shim installer: ensure the stable shell wrappers exist.
-  //
-  // Driven by SHIM_NAMES rather than a list written out here, because this is
-  // the only thing that installs a NEW shim onto an install that already has
-  // the old ones — name them locally and every existing user keeps passing the
-  // check while missing the shim that was added.
-  try {
-    const missing = SHIM_NAMES.some((s) => !existsSync(join(home(), '.local', 'bin', s)));
-    if (missing) {
+    const binDir = join(home(), '.local', 'bin');
+    const stale = SHIM_NAMES.some((name) => {
+      const path = join(binDir, shimFileName(name));
+      return !existsSync(path) || readFileSync(path, 'utf-8') !== renderShim(name);
+    });
+    if (stale) {
       const installer = join(ctx.pluginDir, 'scripts', 'install-shims.mjs');
       if (existsSync(installer)) {
-        mkdirSync(join(home(), '.local', 'bin'), { recursive: true });
+        mkdirSync(binDir, { recursive: true });
         execFileSync('node', [installer, '--install'], {
           stdio: 'ignore',
           timeout: HookConfig.DEPS_CHECK_TIMEOUT_MS,
@@ -66,8 +47,7 @@ export async function run(ctx) {
   }
 
   // Stale-artifact sweep in the live plugin-data dir. Two leftovers accumulate
-  // here that the version-prune above never reaches (they live in the *current*
-  // version's data, not an old version dir):
+  // in the *current* version's plugin-data:
   //   1. bin/ll-search.*-bak — orphaned binary backups (~290M each) from the
   //      old delta-patch updater. That code path is gone, but installs that
   //      passed through it still carry the backups; nothing ever removed them.

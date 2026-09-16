@@ -4,6 +4,7 @@ import { existsSync, readdirSync } from 'fs';
 import { getPluginData } from './config.mjs';
 import { warnOnce } from './warn-once.mjs';
 import { spawnEnv } from './env.mjs';
+import { binaryFileName } from './paths.mjs';
 
 // True when an ONNX Runtime shared library is staged in `dir`. Keyed on the
 // library name prefix (not a version-pinned filename) so it never drifts from
@@ -31,7 +32,7 @@ export function ortSpawnEnv(binDir) {
   return spawnEnv({});
 }
 
-const BINARY_NAME = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
+const BINARY_NAME = binaryFileName();
 
 function findBinary() {
   const pluginData = getPluginData();

@@ -1,4 +1,4 @@
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 export function buildGatePrompt(profile) {
   return `You decide whether to fan out 4 deep-mapper agents (~15x token cost) or use the surface profile as-is for a personal second-brain ingest.
 
@@ -34,7 +34,7 @@ export function parseGateResponse(text) {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const cmd = process.argv[2];
   if (cmd === 'build-prompt') {
     const profileJson = process.argv[3];

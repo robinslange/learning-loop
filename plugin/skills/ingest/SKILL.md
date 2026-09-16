@@ -71,7 +71,7 @@ Restores a `harvest-bundle-<date>/` emitted by `/learning-loop:harvest` on anoth
 2. **Confirm.** Read the manifest. Show the operator the source instance label and carried file counts, then confirm via `AskUserQuestion` before writing anything.
 3. **Restore memory.** Resolve the auto-memory dir mechanically:
    ```
-   node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))"
+   node -e "import(process.argv[1]+'/scripts/lib/memory-paths.mjs').then(m=>console.log(m.resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR)))" "$(ll-paths PLUGIN)"
    ```
    For each file in `memory/`: if a file with the same name already exists, skip it and record a conflict (never overwrite); otherwise copy verbatim. Append one index line per newly added file to `MEMORY.md` in the standard format (`- [filename.md](filename.md): description`, under 150 chars).
 4. **Restore notes.** For each file in `notes/`: check for an existing vault note with the same basename (Glob across the vault); if found, skip and record a conflict. Otherwise Write it to `VAULT/0-inbox/<basename>`; carried notes re-enter this instance's triage pipeline (`/inbox`, promote-gate) rather than landing directly in permanent folders. Main-thread Writes fire the PostToolUse hooks natively; no hook replay needed.
@@ -371,7 +371,7 @@ LL_TMP_PREFIX="${TMPDIR:-/tmp}/ll-${CLAUDE_CODE_SESSION_ID:-session}-ingest"
 ll-run refinement-candidates.mjs --stdin --pairs-out "${LL_TMP_PREFIX}-refinement-pairs.json" < "${LL_TMP_PREFIX}-new-notes.txt" > /dev/null
 ```
 
-If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation, which has no batch cap: reflect's Step 4.6 gate fires whenever this queue is non-empty, even in a session that wrote no vault notes (see `skills/reflect/steps/refinement.md` 4.6.a).
+If the resulting pairs JSON has more than **50** entries, truncate to the first 50 (highest cosine first since the candidate script sorts that way) and append the deferred remainder to `${CLAUDE_PLUGIN_DATA:-$(ll-run resolve-paths.mjs PLUGIN_DATA)}/refinement-deferred.jsonl` as one JSON object per line. The deferred queue is drained by the next `/reflect` invocation, which has no batch cap: reflect's Step 4.6 gate fires whenever this queue is non-empty, even in a session that wrote no vault notes (see `skills/reflect/steps/refinement.md` 4.6.a).
 
 ```bash
 PLUGIN_DATA="$(ll-paths PLUGIN_DATA)"

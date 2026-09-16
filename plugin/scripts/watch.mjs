@@ -14,6 +14,7 @@ import { existsSync, openSync, readFileSync, unlinkSync } from 'fs';
 import { setTimeout as delay } from 'timers/promises';
 import { dirname, join } from 'path';
 import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
+import { binaryFileName } from './lib/paths.mjs';
 import { ortSpawnEnv } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
@@ -64,7 +65,7 @@ if (!vault) {
   process.exit(1);
 }
 
-const bin = join(pluginData, 'bin', 'll-search');
+const bin = join(pluginData, 'bin', binaryFileName());
 if (!existsSync(bin)) {
   console.error('error: ll-search not installed — run /learning-loop:init');
   process.exit(1);

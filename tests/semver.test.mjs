@@ -25,7 +25,7 @@ test('isPlainSemver accepts only X.Y.Z form', () => {
   assert.strictEqual(isPlainSemver('0.0.1'), true);
   assert.strictEqual(isPlainSemver('100.200.300'), true);
 
-  // Reject anything that could be a directory we should NOT prune.
+  // Reject anything that is not a plain release version.
   assert.strictEqual(isPlainSemver('1.16.13.bak'), false);
   assert.strictEqual(isPlainSemver('1.16'), false);
   assert.strictEqual(isPlainSemver('1.16.13-beta'), false);
@@ -33,13 +33,4 @@ test('isPlainSemver accepts only X.Y.Z form', () => {
   assert.strictEqual(isPlainSemver(''), false);
   assert.strictEqual(isPlainSemver('node_modules'), false);
   assert.strictEqual(isPlainSemver('1.16.13/'), false);
-});
-
-test('cache-prune logic: only strictly older versions are flagged for deletion', () => {
-  const current = '1.16.13';
-  const sample = ['1.16.12', '1.16.13', '1.16.14', '2.0.0', '1.5.99', '0.9.0', '1.16.13-rc'];
-  const flagged = sample.filter((v) => isPlainSemver(v) && semverCmp(v, current) < 0);
-  assert.deepStrictEqual(flagged.sort(), ['0.9.0', '1.16.12', '1.5.99']);
-  // Critically, 1.16.13 itself, 1.16.14 (newer), 2.0.0 (newer), and 1.16.13-rc
-  // (non-plain semver) are NOT flagged.
 });

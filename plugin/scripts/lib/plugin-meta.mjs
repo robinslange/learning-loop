@@ -9,11 +9,12 @@
 // config.mjs already exports getPluginRoot() and getPluginData(). Those stay
 // unchanged in phase 0; consumers migrate in phase 1I. The two co-exist.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { env } from './env.mjs';
+import { safeLoad } from './safe-load.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -85,4 +86,30 @@ export function dataDir() {
 export function cacheDir() {
   const d = dataDir();
   return d ? join(d, 'cache') : null;
+}
+
+/** Key of this plugin's entry in ~/.claude/plugins/installed_plugins.json. */
+export const INSTALL_KEY = 'learning-loop@learning-loop-marketplace';
+
+/**
+ * Root of the install Claude Code has active, when that install ships `need`.
+ *
+ * A running session stays pinned to the version directory it loaded, while the
+ * installed_plugins.json entry moves the moment a newer version installs.
+ * Following the entry lets an open session run the newest code without a
+ * reload. It only wins when it sits next to `selfRoot` in the same cache
+ * directory, which keeps a Codex install, a --plugin-dir checkout and a test
+ * fixture running themselves, and when it still ships `need`, so a session
+ * keeps a hook the new version removed.
+ *
+ * @param {{ need: string, selfRoot?: string, home?: string }} opts
+ * @returns {string}
+ */
+export function activeRoot({ need, selfRoot = pluginRoot(), home = env.HOME }) {
+  const { value } = safeLoad(join(home, '.claude', 'plugins', 'installed_plugins.json'));
+  const installed = (value?.plugins ?? value)?.[INSTALL_KEY]?.[0]?.installPath;
+  if (installed && dirname(installed) === dirname(selfRoot) && existsSync(join(installed, need))) {
+    return installed;
+  }
+  return selfRoot;
 }

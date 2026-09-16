@@ -54,7 +54,7 @@ Repeat:
 
 1. **Formulate a query** based on the topic, angle, and what you've found so far.
 
-2. **Search the web** for the query. Run the source gateway via Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" search --q "your query" --json` — it returns `{ hits: [{url,title,snippet}], source_used }`. Read the top hits' snippets; when you need a page's full content, fetch it via `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json` (returns `{ doc: {text,ok,reason} }`). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" search-pubmed "topic" --mesh`.
+2. **Search the web** for the query. Run the source gateway via Bash: `ll-run source-gateway.mjs search --q "your query" --json` — it returns `{ hits: [{url,title,snippet}], source_used }`. Read the top hits' snippets; when you need a page's full content, fetch it via `ll-run source-gateway.mjs fetch --url "<url>" --json` (returns `{ doc: {text,ok,reason} }`). Compile a concise text summary of what you learned — claims, sources, page snippets. For academic topics, also run `ll-run source-resolver.mjs search-pubmed "topic" --mesh`.
 
 3. **Check convergence** by piping the search result text directly into the checker via stdin (a single Bash call — no Write tool, no temp file):
 
@@ -75,7 +75,7 @@ Do NOT override the convergence checker's verdict. It uses mechanical signals (e
 
 ### 3b. Resolve Sources (Layer 1 Verification)
 
-After the search loop ends, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
+After the search loop ends, run `ll-run source-resolver.mjs resolve "Author Year Topic"` on every academic source found. LLM-inferred metadata is wrong ~15% of the time on author names and DOIs, so this step uses API ground truth instead. Returns:
 - Correct author list (ground truth, not LLM inference)
 - Correct year, journal, DOI
 - Abstract text (for claim verification in later steps)
@@ -186,7 +186,7 @@ ll-run provenance-emit.js '{"agent":"discovery-researcher","action":"research","
 
 Prefer gateway `search` over `fetch`: search returns fast snippets; only `fetch` a URL when you need to verify a specific claim against the page content. The gateway enforces a per-session fetch budget (default 10) and returns `{ doc: { ok:false, reason:'fetch_budget_exceeded' } }` once you exceed it — when you see that, stop fetching and mark remaining URLs as `unfetched` in the verified-sources table.
 
-**Avoid fetching paywalled or bot-blocking domains.** The canonical blocklist lives in `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md` (Paywalled Domain Blocklist); do not keep a local copy. For academic sources use `node "${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs" resolve "Author Year Topic"` instead: it hits PubMed/Semantic Scholar/CrossRef, which respond reliably.
+**Avoid fetching paywalled or bot-blocking domains.** The canonical blocklist lives in `${CLAUDE_PLUGIN_ROOT}/agents-shared/source-verification.md` (Paywalled Domain Blocklist); do not keep a local copy. For academic sources use `ll-run source-resolver.mjs resolve "Author Year Topic"` instead: it hits PubMed/Semantic Scholar/CrossRef, which respond reliably.
 
 **Never re-fetch a URL you already fetched** — its content is already in your context.
 

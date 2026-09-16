@@ -1,6 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
@@ -131,6 +131,53 @@ describe('pre-write-check', () => {
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(result.hookSpecificOutput.permissionDecisionReason, /sleep/);
+  });
+
+  // The gate must still fire when the hook is reached through a symlink.
+  //
+  // Node resolves an ESM entry to its REALPATH for import.meta.url, while
+  // process.argv[1] keeps whatever path the caller spelled. A main-guard that
+  // compares the two naively is therefore false under any symlinked install --
+  // and this guard's failure mode is not a crash but SILENCE: the hook exits 0
+  // having checked nothing, so every contract violation is admitted while the
+  // run looks clean. A symlinked plugin directory is ordinary (dotfile-managed
+  // ~/.claude, a dev install pointing at a checkout), which is why
+  // scripts/provenance.mjs and scripts/codex/generate-agents.mjs both realpath
+  // before comparing.
+  //
+  // Same payload as the block-format case above, so the ONLY variable is how
+  // the hook was addressed.
+  it('denies through a symlinked hook path, not just the real one', () => {
+    const linkDir = mkdtempSync(join(tmpdir(), 'll-pwc-link-'));
+    const linkedHook = join(linkDir, 'pre-write-check.js');
+    symlinkSync(HOOK, linkedHook);
+    try {
+      const content = '---\ntags:\n  - sleep\n  - circadian\n  - sleep\n---\nBody text.';
+      const r = runHook(linkedHook, {
+        stdin: {
+          hook_event_name: 'PreToolUse',
+          tool_name: 'Write',
+          tool_input: { file_path: join(VAULT, '0-inbox', 'test.md'), content },
+        },
+        env: { VAULT_PATH: VAULT },
+      });
+      try {
+        assert.equal(r.exitCode, 0, r.stderr);
+        const out = r.stdout.trim();
+        assert.ok(
+          out,
+          'the hook emitted NOTHING through the symlink: the write gate is silently disabled, ' +
+            'so every frontmatter violation would be admitted with a clean exit',
+        );
+        const result = JSON.parse(out);
+        assert.equal(result.hookSpecificOutput.permissionDecision, 'deny');
+        assert.match(result.hookSpecificOutput.permissionDecisionReason, /sleep/);
+      } finally {
+        r.cleanup();
+      }
+    } finally {
+      rmSync(linkDir, { recursive: true, force: true });
+    }
   });
 
   it('allows clean notes with no issues', () => {

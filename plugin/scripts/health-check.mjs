@@ -21,22 +21,37 @@ import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
-import { DATA_FILES } from './lib/paths.mjs';
+import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 // fileURLToPath, not .pathname: on Windows a file URL's pathname is
 // `/D:/a/...`, which resolves against the drive root as `D:\D:\a\...`.
 const PLUGIN_DIR = fileURLToPath(new URL('..', import.meta.url));
 
+// The options every version probe runs under.
+//
+// Windows: execFileSync does not honor PATHEXT, so bare 'claude'/'node' miss
+// their .cmd shims and read as "not found". Route through cmd.exe.
+//
+// Split out and exported because that decision is platform-dependent and was
+// otherwise unreachable from a POSIX runner -- observing it in place would mean
+// mocking execFileSync, which is the middle of what is under test rather than
+// its boundary. `platform` is injected with a default, matching binaryFileName
+// and checkShimsExist.
+export function execOptions(platform = process.platform) {
+  return {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 3000,
+    shell: platform === 'win32',
+  };
+}
+
 function safeExec(cmd, args, opts = {}) {
   try {
-    return execFileSync(cmd, args, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 3000,
-      ...opts,
-    }).trim();
+    return execFileSync(cmd, args, { ...execOptions(), ...opts }).trim();
   } catch {
     return null;
   }
@@ -79,9 +94,13 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkVaultPath({ vaultRoot: c.vaultRoot }),
     quick.checkVaultFolders({ vaultRoot: c.vaultRoot }),
     quick.checkVaultSystemFiles({ vaultRoot: c.vaultRoot }),
-    quick.checkBinaryExists({ pluginData: c.pluginData }),
+    quick.checkBinaryExists({ pluginData: c.pluginData, platform: c.platform }),
     quick.checkBinaryVersionFile({ pluginData: c.pluginData, pluginVersion: c.pluginVersion }),
-    quick.checkShimsExist({ home: c.home }),
+    // Both of these accept an injected platform and neither was given one, so
+    // the orchestrator resolved every win32 spelling from process.platform --
+    // correct at runtime, unreachable from a POSIX runner. An absent c.platform
+    // still falls through to each check's own default.
+    quick.checkShimsExist({ home: c.home, platform: c.platform }),
     quick.checkLocalBinOnPath({ home: c.home, pathEnv: c.pathEnv }),
     quick.checkClaudemdSectionPresent({ home: c.home }),
     quick.checkClaudemdSectionCurrent({ home: c.home, templateVersion: c.templateVersion }),
@@ -89,7 +108,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkPluginCacheVersionPresent({ home: c.home, installedVersion: c.installedVersion }),
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
     quick.checkNliSocketFresh({ pluginData: c.pluginData }),
-    quick.checkDuplicateGateHealth({ pluginData: c.pluginData }),
+    quick.checkDuplicateGateHealth({ pluginData: c.pluginData, platform: c.platform }),
     quick.checkFederationSyncHealth({ pluginData: c.pluginData }),
     quick.checkHookErrors({ pluginData: c.pluginData }),
     quick.checkInjectionShadowGate({
@@ -191,7 +210,11 @@ export async function runFullChecks(ctx = {}) {
     return data?.plugins || data || {};
   })();
 
-  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', 'll-search') : null;
+  // c.platform, not process.platform: quick.mjs's checks already take an
+  // injected platform, and this one silently did not -- so the full-check
+  // binary path was the one win32 spelling a POSIX runner could never reach.
+  // An absent c.platform falls through to binaryFileName's own default.
+  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', binaryFileName(c.platform)) : null;
   let binaryVersionOutput = null;
   let binaryExitCode = 127;
   if (binaryPath && existsSync(binaryPath)) {
@@ -302,7 +325,7 @@ function formatText({ checks }) {
 }
 
 // CLI entry
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 if (isMain) {
   const args = process.argv.slice(2);
   const wantFull = args.includes('--full');

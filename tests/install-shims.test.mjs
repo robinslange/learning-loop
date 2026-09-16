@@ -48,11 +48,11 @@ describe('install-shims --check (macOS smoke test)', () => {
   });
 });
 
-describe('install-shims Windows cmd shim content (unit test via node -e override)', () => {
+describe('install-shims Windows cmd shim content', () => {
   // Spawn a child that pretends process.platform === 'win32' by monkey-patching
   // before import, writes shims to a temp dir, then prints them to stdout.
   // We do NOT actually run the shims — we verify their textual content.
-  it('cmd shims contain @echo off, setlocal, and no bash syntax', () => {
+  it('cmd shims hand their name to node and carry nothing cmd.exe would expand', () => {
     const snippet = `
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -65,26 +65,19 @@ Object.defineProperty(process, 'platform', { value: 'win32' });
 // reads them, which is what keeps the shims out of the real ~/.local/bin.
 const fakeHome = homedir();
 mkdirSync(join(fakeHome, '.local', 'bin'), { recursive: true });
-mkdirSync(join(fakeHome, '.claude', 'plugins', 'cache',
-  'learning-loop-marketplace', 'learning-loop', '1.0.0'), { recursive: true });
-
-// Provide a fake CLAUDE_PLUGIN_ROOT so getPluginRoot doesn't throw.
-process.env.CLAUDE_PLUGIN_ROOT = join(fakeHome, '.claude', 'plugins', 'cache',
-  'learning-loop-marketplace', 'learning-loop', '1.0.0');
 
 // Run the installer. A file:// URL, not a bare path: an absolute Windows
 // path is not a valid ESM specifier ("Received protocol 'd:'"), and posix
 // accepts both, so this only ever fails on the runner nobody develops on.
 await import(${JSON.stringify(pathToFileURL(SCRIPT).href + '?bust=' + Date.now())});
 
-// Read back what was written.
-const watchCmd = readFileSync(join(fakeHome, '.local', 'bin', 'll-watch.cmd'), 'utf-8');
-const searchCmd = readFileSync(join(fakeHome, '.local', 'bin', 'll-search.cmd'), 'utf-8');
-const pathsCmd = readFileSync(join(fakeHome, '.local', 'bin', 'll-paths.cmd'), 'utf-8');
-
-// Through a file, not stdout: the installer prints its own "Wrote ..." lines
-// there and they are not JSON.
-writeFileSync(join(fakeHome, 'shims.json'), JSON.stringify({ watchCmd, searchCmd, pathsCmd }));
+const shims = Object.fromEntries(
+  ${JSON.stringify(SHIM_NAMES)}.map((name) => [
+    name,
+    readFileSync(join(fakeHome, '.local', 'bin', name + '.cmd'), 'utf-8'),
+  ]),
+);
+writeFileSync(join(fakeHome, 'shims.json'), JSON.stringify(shims));
 `;
     const fakeHome = mkdtempSync(join(tmpdir(), 'shim-test-'));
     const result = spawnSync('node', ['--input-type=module'], {
@@ -104,37 +97,36 @@ writeFileSync(join(fakeHome, 'shims.json'), JSON.stringify({ watchCmd, searchCmd
     // coverage.
     assert.equal(result.status, 0, `child failed: ${result.stderr?.slice(0, 600)}`);
 
-    const { watchCmd, searchCmd, pathsCmd } = JSON.parse(
-      readFileSync(join(fakeHome, 'shims.json'), 'utf-8'),
-    );
-
-    // ll-watch.cmd assertions
-    assert.match(watchCmd, /@echo off/, 'watch: starts with @echo off');
-    assert.match(watchCmd, /setlocal enabledelayedexpansion/, 'watch: setlocal');
-    assert.match(watchCmd, /CACHE_DIR=/, 'watch: sets CACHE_DIR');
-    assert.match(watchCmd, /node.*scripts\\watch\.mjs/, 'watch: invokes node');
-    assert.doesNotMatch(watchCmd, /#!/, 'watch: no shebang');
-    assert.doesNotMatch(watchCmd, /\/bin\/bash/, 'watch: no bash');
-
-    // ll-search.cmd assertions
-    assert.match(searchCmd, /@echo off/, 'search: starts with @echo off');
-    assert.match(searchCmd, /setlocal enabledelayedexpansion/, 'search: setlocal');
-    assert.match(searchCmd, /ORT_DYLIB_PATH/, 'search: sets ORT_DYLIB_PATH');
-    assert.match(searchCmd, /ORT_LIB_LOCATION/, 'search: sets ORT_LIB_LOCATION');
-    assert.match(searchCmd, /ll-search\.exe/, 'search: invokes .exe');
-    assert.match(searchCmd, /USERPROFILE/, 'search: uses USERPROFILE');
-    assert.doesNotMatch(searchCmd, /#!/, 'search: no shebang');
-    assert.doesNotMatch(searchCmd, /\/bin\/bash/, 'search: no bash');
-
-    // ll-paths.cmd assertions. Without these the bootstrap every Bash block in
-    // the plugin now depends on would be verified on POSIX only — a guard that
-    // stops guarding on one platform, which is where the last one went.
-    assert.match(pathsCmd, /@echo off/, 'paths: starts with @echo off');
-    assert.match(pathsCmd, /setlocal enabledelayedexpansion/, 'paths: setlocal');
-    assert.match(pathsCmd, /CACHE_DIR=/, 'paths: sets CACHE_DIR');
-    assert.match(pathsCmd, /node.*scripts\\resolve-paths\.mjs/, 'paths: invokes resolve-paths.mjs');
-    assert.doesNotMatch(pathsCmd, /#!/, 'paths: no shebang');
-    assert.doesNotMatch(pathsCmd, /\/bin\/bash/, 'paths: no bash');
+    const shims = JSON.parse(readFileSync(join(fakeHome, 'shims.json'), 'utf-8'));
+    assert.deepEqual(Object.keys(shims).sort(), [...SHIM_NAMES].sort());
+    for (const [name, text] of Object.entries(shims)) {
+      assert.match(text, /^@echo off\r\n/, `${name}: starts with @echo off`);
+      assert.doesNotMatch(text, /#!|\/bin\/(ba)?sh/, `${name}: no POSIX syntax`);
+      if (name === 'll-search') continue;
+      assert.match(
+        text,
+        new RegExp(`node -e "[^"]*" -- ${name} %\\*\\r\\n$`),
+        `${name}: hands its name to node`,
+      );
+      const setlocalIdx = text.indexOf('setlocal DisableDelayedExpansion');
+      const nodeIdx = text.indexOf('node -e');
+      assert.ok(setlocalIdx !== -1, `${name}: disables delayed expansion`);
+      assert.ok(
+        setlocalIdx !== -1 && nodeIdx !== -1 && setlocalIdx < nodeIdx,
+        `${name}: disables delayed expansion before invoking node, so cmd.exe never reads the ! in LOCATE as a variable reference`,
+      );
+      assert.match(
+        text,
+        /installed_plugins\.json/,
+        `${name}: finds the install through Claude Code's record`,
+      );
+      assert.doesNotMatch(text, /%(?!\*\r\n$)/, `${name}: no % for cmd.exe to expand except %*`);
+    }
+    const search = shims['ll-search'];
+    assert.match(search, /ll-search\.exe/, 'search: runs the .exe');
+    assert.match(search, /ORT_DYLIB_PATH/, 'search: sets ORT_DYLIB_PATH');
+    assert.match(search, /ORT_LIB_LOCATION/, 'search: sets ORT_LIB_LOCATION');
+    assert.match(search, /USERPROFILE/, 'search: falls back through USERPROFILE');
     rmSync(fakeHome, { recursive: true, force: true });
   });
 });

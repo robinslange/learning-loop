@@ -16,7 +16,7 @@ import arxiv from '../lib/sources/adapters/arxiv.mjs';
 import rfc from '../lib/sources/adapters/rfc.mjs';
 import openlibrary from '../lib/sources/adapters/openlibrary.mjs';
 import { verifyDoi } from '../lib/sources/adapters/crossref.mjs';
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../lib/is-main.mjs';
 
 // Author/year mismatches are surfaced as flags rather than treated as kill
 // triggers (see header). No other issue type from these adapters is fatal, so
@@ -111,7 +111,7 @@ async function readStdin() {
   return JSON.parse(s);
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMainModule(import.meta.url)) {
   readStdin()
     .then(({ claim }) => verifyClaimSource(claim, claim.sourceId, defaultDeps))
     .then((r) => {
