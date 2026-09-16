@@ -98,7 +98,14 @@ export function buildQueryParts({ prompt, messages = [], soloMinChars }) {
   }
   const prior = messages
     .slice(-3, -1)
-    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS));
+    .map((m) => (m || '').slice(0, HookConfig.PRIOR_MSG_SLICE_CHARS))
+    .filter(Boolean);
+  // `padded` must mean "prior context actually got blended in", not merely
+  // "the prompt was short enough that we tried". On a first turn slice(-3, -1)
+  // yields nothing and the query is byte-identical to the prompt alone, so
+  // reporting padded:true there overstates the padded rate in telemetry and
+  // hands the thin-continuation counterfactual a query that was never padded.
+  if (prior.length === 0) return { query: head, soloQuery: head, padded: false };
   return { query: [head, ...prior].join(' '), soloQuery: head, padded: true };
 }
 

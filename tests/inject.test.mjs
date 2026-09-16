@@ -465,6 +465,28 @@ describe('buildQueryParts', () => {
     const args = { prompt: 'short', messages, soloMinChars: 80 };
     assert.equal(buildQuery(args), buildQueryParts(args).query);
   });
+
+  // `padded` drives the thin-continuation counterfactual and the padded-rate
+  // telemetry, so it has to mean "prior context actually got blended in", not
+  // "the prompt was short enough that we tried to". slice(-3, -1) yields
+  // nothing on a first turn, and the query is then byte-identical to the
+  // prompt alone -- calling that padded overstates the padded rate and feeds
+  // the gate a query that was never padded.
+  it('a first turn has no priors to blend, so it is not padded', () => {
+    const parts = buildQueryParts({ prompt: 'short ask', messages: ['short ask'], soloMinChars: 80 });
+    assert.equal(parts.query, parts.soloQuery, 'nothing was blended in');
+    assert.equal(parts.padded, false);
+  });
+
+  it('empty prior messages are not blended and do not mark the query padded', () => {
+    const parts = buildQueryParts({
+      prompt: 'short ask',
+      messages: ['', '', 'short ask'],
+      soloMinChars: 80,
+    });
+    assert.equal(parts.query, parts.soloQuery);
+    assert.equal(parts.padded, false);
+  });
 });
 
 describe('runBackendsWithRaceCap vault-only', () => {
