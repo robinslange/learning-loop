@@ -9,7 +9,7 @@
 // excluded). The walk goes through vault-walk.mjs#listVaultNotes with its
 // `dirs` restriction; this test pins that the restriction never drops.
 
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
@@ -242,18 +242,24 @@ test('--help lists the --scan-vault mode', () => {
 let pluginDataRoot;
 let savedPluginData;
 
-function useOwnPluginData() {
+// Installed ONCE for the file, not per test. It was per test, and three of the
+// tests that needed it silently never called it — including both tests that
+// actually write marker files. A helper you must remember to call is a helper
+// that eventually is not called; a hook cannot be forgotten.
+before(() => {
   savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
   pluginDataRoot = mkdtempSync(join(tmpdir(), 'sweep-scan-pd-'));
+  // Child processes (`runCli` → execFileSync) inherit process.env, so the CLI
+  // resolves the same override rather than the real plugin-data.
   process.env.CLAUDE_PLUGIN_DATA = pluginDataRoot;
-}
+});
 
-function restorePluginData() {
+after(() => {
   if (savedPluginData !== undefined) process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
   else delete process.env.CLAUDE_PLUGIN_DATA;
   if (pluginDataRoot) rmSync(pluginDataRoot, { recursive: true, force: true });
   pluginDataRoot = undefined;
-}
+});
 
 function withMarker(sid, ageMs) {
   const marker = reflectNewNotesPath(sid);
@@ -272,17 +278,22 @@ function withMarker(sid, ageMs) {
 // install state. Asserted by containment, the same way the sibling suite
 // asserts its session-id file: an equality check against some known-bad
 // constant would pass vacuously wherever that constant is not what resolves.
+// Two assertions, because the first one passed while the suite was still
+// writing into the real plugin-data: it only proved the resolver agreed with
+// whatever `before` had set, and `before` was not setting it for the tests that
+// write. The second states the property directly, in terms of the directory
+// that must never be touched, so it holds regardless of how the override is
+// plumbed.
 test('keeps its marker files inside a temp plugin-data it owns', () => {
-  useOwnPluginData();
-  try {
-    const marker = reflectNewNotesPath('containment-check');
-    assert.ok(
-      marker.startsWith(pluginDataRoot),
-      `marker must live under this suite's plugin-data, got ${marker} outside ${pluginDataRoot}`,
-    );
-  } finally {
-    restorePluginData();
-  }
+  const marker = reflectNewNotesPath('containment-check');
+  assert.ok(
+    marker.startsWith(pluginDataRoot),
+    `marker must live under this suite's plugin-data, got ${marker} outside ${pluginDataRoot}`,
+  );
+  assert.ok(
+    !marker.includes(join('.claude', 'plugins', 'data')),
+    `marker must never resolve into the real plugin-data, got ${marker}`,
+  );
 });
 
 function stamped(root, folder, name, sid) {
@@ -298,7 +309,6 @@ test('a stamp whose session left no marker is abandoned', () => {
     const { abandoned } = scanVaultCandidates(root, 'sess-1');
     assert.deepEqual(abandoned, [p], 'no marker means nothing is left to consume the stamp');
   } finally {
-    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -311,7 +321,6 @@ test('a stamp whose marker is older than the window is abandoned', () => {
     assert.deepEqual(scanVaultCandidates(root, 'sess-1').abandoned, [p]);
   } finally {
     cleanup();
-    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -332,7 +341,6 @@ test('a live concurrent run’s stamp is left alone', () => {
     );
   } finally {
     cleanup();
-    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -387,7 +395,6 @@ test('--scan-vault reports how many abandoned stamps it healed', () => {
 // working state.
 test('an empty session id abandons nothing rather than everything', () => {
   const root = setupVault();
-  useOwnPluginData();
   try {
     stamped(root, '0-inbox', 'someone.md', 'some-other-session');
     assert.deepEqual(
@@ -396,7 +403,6 @@ test('an empty session id abandons nothing rather than everything', () => {
       'not knowing whose run this is must mean judging nothing, not judging everything',
     );
   } finally {
-    restorePluginData();
     rmSync(root, { recursive: true, force: true });
   }
 });
