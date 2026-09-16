@@ -1529,6 +1529,47 @@ test('formatMissingDeps: injection-shadow-gate readiness is not a missing depend
 // whose install is correct. safeExec routes through cmd.exe to fix that, and
 // the decision lives in execOptions so it can be asked directly rather than by
 // mocking execFileSync -- which is the middle of this, not its boundary.
+// The checks above are called directly. These two pin the ORCHESTRATOR, which
+// is where the platform was being dropped: checkBinaryExists and
+// checkShimsExist both accept an injected platform, and runQuickChecks passed
+// neither, so every win32 spelling resolved from process.platform and no POSIX
+// runner could reach it. Deleting the two `platform: c.platform` arguments
+// leaves every direct-call test above green.
+test('runQuickChecks threads platform to the win32 binary and shim spellings', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-orch-win-'));
+  const pluginData = join(home, 'plugin-data');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  mkdirSync(join(pluginData, 'bin'), { recursive: true });
+  // Exactly what a correct Windows install holds, and nothing a POSIX probe
+  // would accept: .cmd shims and an .exe binary.
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
+  writeFileSync(join(pluginData, 'bin', 'll-search.exe'), 'MZ');
+
+  const result = await runQuickChecks({ home, pluginData, platform: 'win32' });
+  const byId = (id) => result.checks.find((c) => c.id === id);
+
+  assert.equal(byId('shims-exist').status, 'ok', `shims: ${byId('shims-exist').detail}`);
+  assert.equal(byId('binary-exists').status, 'ok', `binary: ${byId('binary-exists').detail}`);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('runQuickChecks without a platform still resolves the running one', async () => {
+  // The SessionStart caller (health-detector.mjs) passes no platform, so the
+  // argument has to stay optional or every session starts reporting a missing
+  // binary. POSIX names here, no platform passed.
+  const home = mkdtempSync(join(tmpdir(), 'health-orch-default-'));
+  const pluginData = join(home, 'plugin-data');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  mkdirSync(join(pluginData, 'bin'), { recursive: true });
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n', { mode: 0o755 });
+
+  const result = await runQuickChecks({ home, pluginData });
+  const shims = result.checks.find((c) => c.id === 'shims-exist');
+
+  assert.equal(shims.status, process.platform === 'win32' ? 'fail' : 'ok', shims.detail);
+  rmSync(home, { recursive: true, force: true });
+});
+
 test('execOptions routes through the shell on win32, so PATHEXT is honored', () => {
   assert.equal(execOptions('win32').shell, true);
 });

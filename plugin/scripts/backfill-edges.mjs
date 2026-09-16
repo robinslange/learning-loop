@@ -14,7 +14,7 @@
 
 import { readFileSync } from 'fs';
 import { basename, sep } from 'path';
-import { pathToFileURL } from 'url';
+import { isMainModule } from './lib/is-main.mjs';
 import { logError } from './lib/log.mjs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
@@ -212,7 +212,7 @@ async function main() {
   console.log(JSON.stringify({ ...stats, dry_run: dryRun }, null, 2));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     console.error(err.stack || err.message);
     process.exit(1);

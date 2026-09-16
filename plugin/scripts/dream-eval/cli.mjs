@@ -2,7 +2,7 @@
 // parseArgs is the unit-tested surface; the main guard below wires the
 // in-session Task dispatch (pick/invokeDream) and is exercised by a live run.
 import { readFileSync, existsSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../lib/is-main.mjs';
 import { getPluginData } from '../lib/config.mjs';
 import { resolveMemoryDir } from '../lib/memory-paths.mjs';
 import { DATA_PATHS } from '../lib/paths.mjs';
@@ -48,7 +48,7 @@ function readProbes(pd) {
     .map((line) => JSON.parse(line));
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const { mode, passes, mine } = parseArgs(process.argv.slice(2));
   const pd = getPluginData();
   const memoryDir = resolveMemoryDir(process.env.CLAUDE_PROJECT_DIR);

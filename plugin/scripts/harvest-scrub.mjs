@@ -9,7 +9,7 @@
 import { basename } from 'node:path';
 import { denyTermRegExp } from './lib/deny-match.mjs';
 import { SECRET_PATTERNS, EMAIL_RE } from './lib/secret-patterns.mjs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 import { logError } from './lib/log.mjs';
 
 // Credential-shaped content and bare email addresses are always a hard block,
@@ -88,7 +88,7 @@ export function scrubNotes(notes, opts) {
   return { blocked, tripwire, clean, droppedTripwires };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   // CLI: harvest-scrub.mjs <denylistFile> <pluginData> [note-path...]  -> JSON report.
   // Note paths come from argv (small sets) OR, when none are passed, from stdin
   // (one per line) so a large bulk-marked set never exceeds ARG_MAX.

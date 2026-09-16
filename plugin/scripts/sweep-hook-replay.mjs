@@ -30,6 +30,7 @@ import { readFileSync, existsSync, statSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 import { stripReflectSid } from './strip-reflect-sid.mjs';
@@ -291,6 +292,6 @@ success, 1 if any file failed, 2 on usage error.
   process.exit(failures.length > 0 ? 1 : 0);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   await main();
 }

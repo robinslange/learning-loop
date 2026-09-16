@@ -14,7 +14,7 @@
 // skipped silently. Reads newline-separated absolute paths from stdin (--stdin).
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 import { splitRawFrontmatter } from './lib/markdown-parse.mjs';
 
 function readStdinPaths() {
@@ -60,6 +60,6 @@ function main() {
   process.stdout.write(JSON.stringify({ stripped }) + '\n');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

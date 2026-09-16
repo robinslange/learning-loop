@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../scripts/lib/is-main.mjs';
 import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/registry.mjs';
 import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
 import { getSessionId } from '../scripts/lib/session.mjs';
@@ -125,6 +125,6 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }
