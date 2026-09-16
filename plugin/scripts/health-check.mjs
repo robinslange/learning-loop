@@ -21,7 +21,7 @@ import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
-import { DATA_FILES } from './lib/paths.mjs';
+import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -194,8 +194,7 @@ export async function runFullChecks(ctx = {}) {
     return data?.plugins || data || {};
   })();
 
-  const binaryName = process.platform === 'win32' ? 'll-search.exe' : 'll-search';
-  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', binaryName) : null;
+  const binaryPath = c.pluginData ? join(c.pluginData, 'bin', binaryFileName()) : null;
   let binaryVersionOutput = null;
   let binaryExitCode = 127;
   if (binaryPath && existsSync(binaryPath)) {

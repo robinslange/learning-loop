@@ -13,7 +13,13 @@ import {
 } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
-import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES, shimFileName } from '../paths.mjs';
+import {
+  DATA_FILES,
+  FEDERATION_PATHS,
+  SHIM_NAMES,
+  binaryFileName,
+  shimFileName,
+} from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
@@ -152,10 +158,10 @@ export function checkBinaryExists({ pluginData, platform = process.platform } = 
       fix: 'Run /learning-loop:init to download the binary',
     });
   }
-  // The name the DOWNLOADER writes, which is `ll-search.exe` on Windows.
-  // `lib/binary.mjs` already resolved it that way, so semantic search worked
-  // while this check reported the binary missing and offered to re-download it.
-  const binPath = join(pluginData, 'bin', platform === 'win32' ? 'll-search.exe' : 'll-search');
+  // The name the DOWNLOADER writes, which differs by platform. `lib/binary.mjs`
+  // already resolved it correctly, so semantic search worked while this check
+  // reported the binary missing and offered to re-download it.
+  const binPath = join(pluginData, 'bin', binaryFileName(platform));
   if (!existsSync(binPath)) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
