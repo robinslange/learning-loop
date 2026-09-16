@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **The `/reflect` sweep's test suite wrote into the developer's live
+  plugin-data.** It resolved marker paths through `reflectNewNotesPath` without
+  overriding `CLAUDE_PLUGIN_DATA`, so two tests created and deleted files in
+  `~/.claude/plugins/data/.../reflect-scratch/` — a directory nothing reaps and
+  other sessions use. A first attempt made the override a per-test helper, and
+  three of the tests that needed it silently never called it; it is a file-level
+  `before`/`after` hook now, which cannot be forgotten, and the containment
+  assertion names the directory that must never be touched rather than the one
+  that should. Verified by watching the real directory across a full run.
+
+- **The move pass's NULL-row caveat gave the wrong reason.** Only the land half
+  keys on `note_uuid`; the park half keys on the row's path, so an id-less row
+  holding a path another row's id owns IS parked, never lands, and is collected
+  — costing an embedding, not an identity. The exposed case is narrower than
+  stated: it needs no row to own any desired id, which is a vault's first
+  reindex after the column is added. Both halves are pinned by tests now.
+
 ## v2.0.8
 
 ### Added
@@ -162,6 +181,13 @@ All notable changes to this project are documented here. The format is based on 
   Cycles of any length work — a swap is the shortest. Verified against the real
   7,099-note index: an unchanged vault parks and moves nothing, and an injected
   swap plus three-way rotation resolves with no row stranded and no id lost.
+  Does NOT cover a swap between rows that are all still id-less. Only the land
+  half keys on `note_uuid`; the park half keys on the row's path, so an id-less
+  row holding a path another row's id owns IS parked, never lands, and is
+  collected — costing an embedding, not an identity. The exposed case needs no
+  row to own any desired id, which is a vault's first reindex after the column
+  is added. Not a regression — the previous version never matched NULL either —
+  and both halves are pinned by tests.
 
 - **Every sync re-wrote and re-indexed every followed peer vault.**
   `Outcome::AlreadyCurrent` could never fire: installing a fetched index builds

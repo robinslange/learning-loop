@@ -215,6 +215,42 @@ pub fn insert_embedded(
 ///
 /// A row that parks and never lands is that ghost. It stays parked, which puts
 /// it outside `vault_paths`, and the deletion pass in `reindex` collects it.
+///
+/// WHAT THIS DOES NOT COVER: a swap between rows that are ALL still id-less.
+///
+/// Only the LAND half is keyed on `note_uuid`; the park half is keyed on the
+/// candidate row's PATH, and asks whether the id owning that path belongs to a
+/// different row. So an id-less row IS parked whenever some other row owns the
+/// id its path now belongs to — the ordinary half-backfilled state — and since
+/// it can never land, it stays parked, outside `vault_paths`, and the deletion
+/// pass collects it. That costs its embedding and nothing else: the note's
+/// `id:` is on disk, so it is re-indexed as itself. It is the SAFE outcome.
+///
+/// The unsafe case is narrower than "NULL rows": it needs NO row to own any of
+/// the desired ids, so that nothing parks at all. Then the backfill below
+/// stamps each row with the id of whatever file now sits at its path, without
+/// checking the row's content is still that file's, and the result is the same
+/// wrong-body-under-the-wrong-id this function exists to prevent.
+///
+/// It is not a regression (the previous `WHERE note_uuid = ?2` never matched
+/// NULL either) and it is narrow: it needs two id-less rows, a swap, and the
+/// two notes' mtimes within 1 MILLISECOND of each other, which is what
+/// `(ex_mtime - file.mtime).abs() < 1.0` compares — `walk_vault` stores
+/// `as_secs_f64() * 1000.0`, so the tolerance reads as seconds and is not.
+/// Any re-read repairs it, because by then the row carries the backfilled id
+/// and `insert_embedded`'s `COALESCE` keeps it while the content is replaced.
+/// The exposed window is therefore precisely a vault's FIRST reindex after the
+/// column is added, when every row is id-less at once and no row owns
+/// anything.
+///
+/// The statement that writes the wrong id is the backfill, not this pass:
+/// `UPDATE notes SET note_uuid = ?1 WHERE path = ?2 AND note_uuid IS NULL`
+/// asserts "the row at path P is the note now at P", which is the assumption
+/// this pass exists to stop trusting. Moving the backfill earlier does not
+/// help — it stamps the same wrong id, sooner. Fixing it means either claiming
+/// NULL rows by path here before the backfill runs, or the backfill refusing a
+/// row whose `content_hash` does not match the file it is about to adopt, at a
+/// cost of one read per id-less row. That is a change, not a comment.
 fn follow_moved_notes(
     conn: &Connection,
     vault_files: &[WalkEntry],
@@ -1172,6 +1208,76 @@ mod tests {
             !ghost.ends_with(".md"),
             "the squatter must be left outside the vault's path space so the deletion \
              pass reaches it, got {ghost}"
+        );
+    }
+
+
+    /// Pins the NULL-`note_uuid` blind spot so the doc comment above cannot
+    /// drift back into claiming coverage this pass does not have.
+    ///
+    /// Asserting the LIMITATION rather than the fix is deliberate: the two
+    /// statements are keyed on `note_uuid`, so id-less rows are invisible to
+    /// both, and a reader who trusts "two notes that swap paths swap rows"
+    /// would be wrong for exactly the population a freshly-upgraded index is
+    /// made of. If someone teaches the pass to handle NULL rows, this test
+    /// fails and tells them to update the comment with the good news.
+    #[test]
+    fn the_move_pass_is_a_no_op_for_rows_that_have_no_id_yet() {
+        let db = TempDir::new().unwrap();
+        let conn = rows_at(&db, &[("a.md", None), ("b.md", None)]);
+        // The mapping a swap produces: each path now belongs to the other id.
+        let (files, ids) = desired(&[("a.md", "id-b"), ("b.md", "id-a")]);
+
+        assert_eq!(
+            follow_moved_notes(&conn, &files, &ids).unwrap(),
+            0,
+            "no id on the rows means nothing for this pass to follow"
+        );
+        let paths: Vec<String> = conn
+            .prepare("SELECT path FROM notes ORDER BY id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            vec!["a.md".to_string(), "b.md".to_string()],
+            "the rows are left exactly where they were; the backfill, not this pass, \
+             decides what id they get, and it decides by path"
+        );
+    }
+
+
+    /// The mixed, ordinary case: one id-less row, one with an id. The park is
+    /// keyed on PATH, not on the candidate's `note_uuid`, so the id-less row
+    /// IS parked here — it holds a path that another row's id now owns. It can
+    /// never land, so it stays parked, outside `vault_paths`, and `reindex`'s
+    /// deletion pass collects it.
+    ///
+    /// That is the safe outcome and the counterexample to "the pass ignores
+    /// NULL rows", which is what the doc used to say. Losing the row costs its
+    /// embedding; it costs no identity, because the note's `id:` is on disk and
+    /// it is re-indexed as itself.
+    #[test]
+    fn an_id_less_row_holding_another_notes_path_is_parked_and_left_for_collection() {
+        let db = TempDir::new().unwrap();
+        let conn = rows_at(&db, &[("a.md", None), ("b.md", Some("id-b"))]);
+        let (files, ids) = desired(&[("a.md", "id-b"), ("b.md", "id-a")]);
+
+        assert_eq!(follow_moved_notes(&conn, &files, &ids).unwrap(), 1, "id-b lands on a.md");
+
+        let landed: String = conn
+            .query_row("SELECT path FROM notes WHERE note_uuid = 'id-b'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(landed, "a.md");
+
+        let ghost: String = conn
+            .query_row("SELECT path FROM notes WHERE note_uuid IS NULL", [], |r| r.get(0))
+            .unwrap();
+        assert!(
+            !ghost.ends_with(".md"),
+            "the id-less row must be parked outside the vault's path space, got {ghost}"
         );
     }
 

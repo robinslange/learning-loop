@@ -9,12 +9,12 @@
 // excluded). The walk goes through vault-walk.mjs#listVaultNotes with its
 // `dirs` restriction; this test pins that the restriction never drops.
 
-import { test } from 'node:test';
+import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import {
   scanVaultCandidates,
@@ -222,8 +222,50 @@ test('--help lists the --scan-vault mode', () => {
 // two sides resolved different directories, which is exactly the handshake bug
 // the reflect-track header warns about.
 
+// Marker files must land in a dir this suite owns, not the developer's real
+// plugin-data. `reflectNewNotesPath` resolves through `resolvePluginData()`,
+// which reads $CLAUDE_PLUGIN_DATA or a persisted marker, so without this
+// override the suite wrote into
+// ~/.claude/plugins/data/.../reflect-scratch/ — a directory nothing ever
+// reaps (33 files on the machine this was found on) and which other sessions
+// are using live. It also only passed here because that directory happened to
+// exist: on a fresh install, where `/reflect` has never run, `writeFileSync`
+// hit ENOENT and two tests ERRORED rather than asserting, one of them the
+// concurrency test this suite calls the reason it is safe to ship. CI passed
+// for a third reason again — plugin-data is unresolvable there, so the path
+// falls back to `tmpdir()`.
+//
+// The sibling suite (tests/reflect-new-notes-track.test.mjs) already set
+// CLAUDE_PLUGIN_DATA per-suite. Hardening that file against a machine-global
+// path in the same change that introduced a new one is the joke this comment
+// exists to stop repeating.
+let pluginDataRoot;
+let savedPluginData;
+
+// Installed ONCE for the file, not per test. It was per test, and three of the
+// tests that needed it silently never called it — including both tests that
+// actually write marker files. A helper you must remember to call is a helper
+// that eventually is not called; a hook cannot be forgotten.
+before(() => {
+  savedPluginData = process.env.CLAUDE_PLUGIN_DATA;
+  pluginDataRoot = mkdtempSync(join(tmpdir(), 'sweep-scan-pd-'));
+  // Child processes (`runCli` → execFileSync) inherit process.env, so the CLI
+  // resolves the same override rather than the real plugin-data.
+  process.env.CLAUDE_PLUGIN_DATA = pluginDataRoot;
+});
+
+after(() => {
+  if (savedPluginData !== undefined) process.env.CLAUDE_PLUGIN_DATA = savedPluginData;
+  else delete process.env.CLAUDE_PLUGIN_DATA;
+  if (pluginDataRoot) rmSync(pluginDataRoot, { recursive: true, force: true });
+  pluginDataRoot = undefined;
+});
+
 function withMarker(sid, ageMs) {
   const marker = reflectNewNotesPath(sid);
+  // Create the scratch dir rather than assuming it: a fresh plugin-data has
+  // no reflect-scratch/ until the first /reflect run creates one.
+  mkdirSync(dirname(marker), { recursive: true });
   writeFileSync(marker, '');
   if (ageMs) {
     const when = (Date.now() - ageMs) / 1000;
@@ -231,6 +273,28 @@ function withMarker(sid, ageMs) {
   }
   return () => rmSync(marker, { force: true });
 }
+
+// The suite must not touch the real plugin-data, on any machine, in any
+// install state. Asserted by containment, the same way the sibling suite
+// asserts its session-id file: an equality check against some known-bad
+// constant would pass vacuously wherever that constant is not what resolves.
+// Two assertions, because the first one passed while the suite was still
+// writing into the real plugin-data: it only proved the resolver agreed with
+// whatever `before` had set, and `before` was not setting it for the tests that
+// write. The second states the property directly, in terms of the directory
+// that must never be touched, so it holds regardless of how the override is
+// plumbed.
+test('keeps its marker files inside a temp plugin-data it owns', () => {
+  const marker = reflectNewNotesPath('containment-check');
+  assert.ok(
+    marker.startsWith(pluginDataRoot),
+    `marker must live under this suite's plugin-data, got ${marker} outside ${pluginDataRoot}`,
+  );
+  assert.ok(
+    !marker.includes(join('.claude', 'plugins', 'data')),
+    `marker must never resolve into the real plugin-data, got ${marker}`,
+  );
+});
 
 function stamped(root, folder, name, sid) {
   const p = join(root, folder, name);
@@ -324,3 +388,22 @@ test('--scan-vault reports how many abandoned stamps it healed', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// `--sid` is optional at the CLI, so `currentSid` can arrive empty. Without a
+// guard every stamp then looks foreign — including the caller's own — and only
+// the marker's existence stands between a hand-invoked sweep and a live run's
+// working state.
+test('an empty session id abandons nothing rather than everything', () => {
+  const root = setupVault();
+  try {
+    stamped(root, '0-inbox', 'someone.md', 'some-other-session');
+    assert.deepEqual(
+      scanVaultCandidates(root, '').abandoned,
+      [],
+      'not knowing whose run this is must mean judging nothing, not judging everything',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
