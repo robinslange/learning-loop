@@ -37,9 +37,6 @@ export const EXCLUDED = [
   // Records of the past, which MUST name the thing they record: the changelog
   // entry announcing that `peer_id` is gone has to be able to write `peer_id`.
   { path: 'CHANGELOG.md', why: 'a historical record names what it removed' },
-  { path: 'REMEDIATION-PLAN.md', why: 'a historical record of a past remediation' },
-  { path: 'INTEGRITY-AUDIT-REPORT.md', why: 'a historical audit record' },
-  { path: 'SPIKE-injection-framing.md', why: 'a historical spike write-up' },
 ];
 
 /**
