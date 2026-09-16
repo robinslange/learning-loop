@@ -93,7 +93,23 @@ export const HookConfig = Object.freeze({
   // never did that, and tests/pre-write-check-duplicate-gate.test.mjs pins the
   // single-clock behaviour deliberately ("one clock, not two"). That constant
   // turned out to have no production reader at all, so it has been deleted.
-  PRE_WRITE_DAEMON_TIMEOUT_MS: 800,
+  // How long the pre-write duplicate gate waits on the warm daemon before
+  // falling through to a cold subprocess.
+  //
+  // Measured against a live daemon on a ~7,200-note vault, using the request
+  // the gate actually sends (top 1, candidates 5): p50 ~240ms, p90 ~270ms,
+  // p95 ~750ms idle; under local model inference p50 ~350ms, p90 ~470ms,
+  // p95 ~820ms; eight concurrent scans 739-1148ms. At 800 the budget sat on
+  // top of the scan's own tail, so ordinary jitter crossed it with nothing
+  // wrong -- 20 daemon timeouts in five months, climbing as the vault grew.
+  //
+  // 2500 is ~3x the measured p95 and clears the concurrent worst case. The
+  // cost of raising it is bounded: a slow daemon answer is still cheaper than
+  // the cold subprocess it would otherwise fall back to. The floor it must not
+  // cross is the subprocess fallback's, asserted in lib-hook-config.test.mjs:
+  // hook budget (8000) - this (2500) - safety margin (300) = 5200, well above
+  // PRE_WRITE_SUBPROCESS_FLOOR_MS.
+  PRE_WRITE_DAEMON_TIMEOUT_MS: 2500,
   PRE_WRITE_SAFETY_MARGIN_MS: 300,
   PRE_WRITE_SUBPROCESS_FLOOR_MS: 300,
 
