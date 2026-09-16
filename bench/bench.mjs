@@ -281,10 +281,11 @@ function runPluginBenches() {
 // Retrieval-quality eval (finding: bench + CI measured latency only)
 //
 // Runs `ll-search eval-funnel` against a fixed seeded fixture vault and
-// records recall@10 / ndcg@10 / mrr per funnel stage, for both query
+// records recall@10 / ndcg@10 / mrr / hits@1 per funnel stage, for both query
 // distributions ([title] = short queries, [long] = body-derived NL queries
-// matching the JIT injection path). compareBaselines() hard-fails on a >3%
-// absolute drop in the gated production-shaped stage (+prf).
+// matching the JIT injection path). compareBaselines() REFUSES to compare when
+// the baseline's platform differs from the current one, and otherwise hard-fails
+// on a >25% relative drop in the gated production-shaped stage (+prf).
 // ---------------------------------------------------------------------------
 
 // Fixed fixture — independent of --quick so baselines stay comparable.
@@ -293,8 +294,15 @@ const QUALITY_EVAL_LIMIT = 200;
 const QUALITY_MIN_LINKS = 2;
 // Production pipeline shape: all four signals + PRF, rerank off.
 const QUALITY_GATE_LABELS = ['+prf [title]', '+prf [long]'];
-const QUALITY_GATE_METRICS = ['recall_at_10', 'ndcg_at_10'];
-const QUALITY_DROP_ABS = 0.03;
+// hits_at_1 is the metric the product acts on. The injection gives exactly one
+// note a body and the rest a title line, and a body-slot note is used ~6x more
+// often, so recall_at_10 scores nine slots the model barely reads.
+const QUALITY_GATE_METRICS = ['recall_at_10', 'ndcg_at_10', 'hits_at_1'];
+// Relative, not absolute. hits_at_1 sits near 0.045 on this fixture, where a
+// 0.03 absolute cut is two thirds of the metric's entire value and float noise
+// crosses it at random. At recall's 0.1158 this same 25% is 0.029, which is
+// what the absolute threshold was chosen to catch.
+const QUALITY_DROP_REL = 0.25;
 const QUALITY_BASELINE_PATH = join(BASELINES_DIR, 'quality.json');
 
 // ---------------------------------------------------------------------------
@@ -447,7 +455,7 @@ function runQualityEval() {
     gate: {
       labels: QUALITY_GATE_LABELS,
       metrics: QUALITY_GATE_METRICS,
-      maxAbsoluteDrop: QUALITY_DROP_ABS,
+      maxRelativeDrop: QUALITY_DROP_REL,
     },
     provenance,
     funnel,
@@ -477,7 +485,6 @@ const BUDGETS = {
 function compareBaselines(current, baseline) {
   const currentPlatform = current.quality?.provenance?.platform;
   const baselinePlatform = baseline.quality?.provenance?.platform;
-  const crossPlatform = currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform;
 
   // The platforms ride along in the report: the gate reporter runs outside the
   // scope that holds `baseline`, and reading them off the comparison is the
@@ -488,7 +495,6 @@ function compareBaselines(current, baseline) {
     qualityRegressions: [],
     currentPlatform,
     baselinePlatform,
-    crossPlatform: crossPlatform || undefined,
   };
 
   function check(name, curr, prev, thresholdPct = 20) {
@@ -520,14 +526,27 @@ function compareBaselines(current, baseline) {
     }
   }
 
-  // Retrieval quality: hard gate on absolute drop (latency checks above are
-  // relative-percentage and soft). recall/ndcg live in [0,1], so an absolute
-  // threshold is the meaningful unit.
+  // Retrieval quality: hard gate on a relative drop in the gated stage (latency
+  // checks above are relative-percentage and soft).
   //
-  // Fails closed: a missing gated label, a missing gated metric, or zero
-  // queries in either run is a hard failure rather than a silent skip.
+  // Fails closed: a provenance mismatch, a missing gated label, a missing gated
+  // metric, or zero queries in either run is a hard failure rather than a silent
+  // skip. A baseline captured on another platform is not a baseline for this
+  // one: demoting those regressions to warnings is what let a 64% PPR recall
+  // loss sit behind a green build for six weeks. A cross-environment comparison
+  // does not fail loudly, it fails plausibly, so refuse to make it at all.
   const currQ = current.quality;
   const prevQ = baseline.quality;
+
+  if (currentPlatform && baselinePlatform && currentPlatform !== baselinePlatform) {
+    report.qualityRegressions.push({
+      name: 'quality/provenance',
+      error:
+        `baseline platform (${baselinePlatform}) differs from current (${currentPlatform}) — refusing to compare. ` +
+        `Regenerate via the "Regenerate quality baseline" workflow_dispatch on GitHub.`,
+    });
+    return report;
+  }
 
   if (currQ?.numQueries === 0) {
     report.qualityRegressions.push({
@@ -578,15 +597,16 @@ function compareBaselines(current, baseline) {
           continue;
         }
         const drop = prev - curr;
-        if (drop > QUALITY_DROP_ABS) {
+        const relDrop = prev > 0 ? drop / prev : 0;
+        if (relDrop > QUALITY_DROP_REL) {
           report.qualityRegressions.push({
             name: `quality/${label}/${metric}`,
             prev,
             curr,
             absoluteDrop: parseFloat(drop.toFixed(4)),
-            crossPlatform: crossPlatform || undefined,
+            relativeDrop: parseFloat(relDrop.toFixed(4)),
           });
-        } else if (drop < -QUALITY_DROP_ABS) {
+        } else if (relDrop < -QUALITY_DROP_REL) {
           report.improvements.push({
             name: `quality/${label}/${metric}`,
             prev,
@@ -711,51 +731,26 @@ async function main() {
   }
   // Latency: soft gate, exit 0. Phase 1 flips to hard fail.
 
-  // Quality: hard gate — a recall/ndcg drop is a real retrieval regression.
-  // Cross-platform: when the baseline was generated on a different OS/arch,
-  // demote metric regressions to loud warnings (ONNX arithmetic diverges
-  // between e.g. arm64 NEON and x86_64 AVX2). Bless a matching baseline via
-  // the "Regenerate quality baseline" workflow_dispatch on GitHub.
+  // Quality: hard gate. A drop in the gated stage is a real retrieval
+  // regression, and compareBaselines refuses outright when the baseline was
+  // measured elsewhere, so everything reaching here is comparable by
+  // construction. One path, no demotion.
   const qualityRegressions = output.comparison?.qualityRegressions ?? [];
   if (qualityRegressions.length > 0) {
-    const hardRegressions = qualityRegressions.filter((r) => !r.crossPlatform);
-    const softRegressions = qualityRegressions.filter((r) => r.crossPlatform);
-
-    if (softRegressions.length > 0) {
-      const bp = output.comparison?.baselinePlatform ?? 'unknown';
-      const cp = output.comparison?.currentPlatform ?? 'unknown';
-      process.stderr.write(
-        `\nWARNING: ${softRegressions.length} quality regression(s) demoted to warning` +
-          ` — baseline platform (${bp}) differs from current (${cp}).\n` +
-          `  Bless a platform-matching baseline via the "Regenerate quality baseline"` +
-          ` workflow_dispatch on GitHub.\n`,
-      );
-      for (const r of softRegressions) {
-        if (r.error) {
-          process.stderr.write(`  ${r.name}: ${r.error}\n`);
-        } else {
-          process.stderr.write(
-            `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
-          );
-        }
+    process.stderr.write(
+      `\nFAIL: ${qualityRegressions.length} retrieval-quality regression(s) (hard gate)\n`,
+    );
+    for (const r of qualityRegressions) {
+      if (r.error) {
+        process.stderr.write(`  ${r.name}: ${r.error}\n`);
+      } else {
+        const pct = ((r.relativeDrop ?? 0) * 100).toFixed(1);
+        process.stderr.write(
+          `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop}, ${pct}%)\n`,
+        );
       }
     }
-
-    if (hardRegressions.length > 0) {
-      process.stderr.write(
-        `\nFAIL: ${hardRegressions.length} retrieval-quality regression(s) (hard gate)\n`,
-      );
-      for (const r of hardRegressions) {
-        if (r.error) {
-          process.stderr.write(`  ${r.name}: ${r.error}\n`);
-        } else {
-          process.stderr.write(
-            `  ${r.name}: ${r.prev?.toFixed(4)} -> ${r.curr?.toFixed(4)} (drop ${r.absoluteDrop})\n`,
-          );
-        }
-      }
-      process.exit(1);
-    }
+    process.exit(1);
   }
 }
 

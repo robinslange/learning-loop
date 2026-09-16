@@ -95,10 +95,15 @@ jobs:
         run: cargo test --workspace --locked
 
   # Retrieval-quality regression gate: runs ll-search eval-funnel against a
-  # seeded fixture vault and hard-fails on a >3% absolute drop in recall@10 /
-  # ndcg@10 versus the committed baseline (bench/baselines/quality.json).
+  # seeded fixture vault and hard-fails on a >25% relative drop in recall@10 /
+  # ndcg@10 / hits@1 versus the committed baseline (bench/baselines/quality.json).
   # Covers both short [title] queries and long body-derived [long] queries
   # (the JIT injection distribution).
+  #
+  # The gate REFUSES to compare when the baseline's platform differs from the
+  # runner's, so a baseline blessed anywhere but ubuntu-latest fails this job
+  # outright. It used to demote those regressions to warnings, which hid a 64%
+  # PPR recall loss behind a green build for six weeks.
   #
   # Bless path (update the baseline):
   #   1. Trigger the "Regenerate quality baseline" workflow_dispatch on GitHub.
