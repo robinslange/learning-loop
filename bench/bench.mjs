@@ -542,7 +542,7 @@ function compareBaselines(current, baseline) {
     report.qualityRegressions.push({
       name: 'quality/provenance',
       error:
-        `baseline platform (${baselinePlatform}) differs from current (${currentPlatform}) — refusing to compare. ` +
+        `baseline platform (${baselinePlatform}) differs from current (${currentPlatform}): refusing to compare. ` +
         `Regenerate via the "Regenerate quality baseline" workflow_dispatch on GitHub.`,
     });
     return report;
