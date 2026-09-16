@@ -23,7 +23,7 @@ import {
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
-import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
+import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
 import {
   isVaultOk,
@@ -874,7 +874,9 @@ export function checkDuplicateGateHealth({
             : ' (the fallback caught every one, so no write went unchecked)')
         : `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
       fix: daemonIsUp
-        ? 'The daemon is up and answering, just not inside the 800ms socket budget — measured on a healthy vault the scan runs ~240ms at the median but ~750ms at p95, so the budget sits on top of its own tail and ordinary jitter (machine load, several writes at once) crosses it. Raise LL_PRE_WRITE_BUDGET_MS to widen the whole hook budget; a slow answer still beats the cold subprocess it currently falls back to.'
+        ? totalHardFailures > 0
+          ? `The daemon answered outside its ${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms socket wait and the cold subprocess behind it ran out of room as well. That second window is what the outer hook deadline sizes, so raise LL_PRE_WRITE_BUDGET_MS to give a cold scan time to finish.`
+          : `The daemon is answering, just not inside its ${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms socket wait, so these writes paid a cold subprocess instead of the warm path. The scan's slowest responses sit close to that wait, so load on the machine or several writes landing together will cross it. Nothing was left unchecked and there is no override for this constant: the cost is latency. If it is frequent, cut what competes with the daemon, or change PRE_WRITE_DAEMON_TIMEOUT_MS in the plugin.`
         : 'Start the warm daemon (ll-watch) so the gate uses the socket instead of cold-starting the model: ll-watch',
     });
   }
