@@ -1,6 +1,7 @@
 import { sleep } from './http.mjs';
 import { bestAuthorMatch } from './author-match.mjs';
 import braveSource from './web-search.mjs';
+import searxngSource from './searxng.mjs';
 import rawFetch from './fetch-source.mjs';
 import { loadSourcesConfig } from './config.mjs';
 import pubmed from './adapters/pubmed.mjs';
@@ -46,7 +47,7 @@ export function sourcesWith(capability) {
   return SOURCES.filter((s) => s.capabilities.includes(capability));
 }
 
-const SOURCES_BY_ID = { brave: braveSource, raw: rawFetch };
+const SOURCES_BY_ID = { brave: braveSource, searxng: searxngSource, raw: rawFetch };
 
 export function resolveSlot(slot, { cfg, sourcesById = SOURCES_BY_ID } = {}) {
   const resolved = cfg || loadSourcesConfig();
