@@ -22,7 +22,7 @@ ll-run provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","t
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
-At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `node ${CLAUDE_PLUGIN_ROOT}/scripts/provenance-consolidate.mjs`.
+At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `ll-run provenance-consolidate.mjs`.
 
 ## Phase 1: Orient
 
@@ -93,7 +93,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 Process in strict order: **DATE NORMALIZE, MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK.**
 
-Acquire the dream lock first using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP, tell the user, and take no further /dream action this invocation. Exit 2 = usage/installation error — report the stderr message to the user and abort; do not treat it as 'already running' and do not proceed without a lock.
+Acquire the dream lock first using Bash: `ll-run marker.mjs lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP, tell the user, and take no further /dream action this invocation. Exit 2 = usage/installation error — report the stderr message to the user and abort; do not treat it as 'already running' and do not proceed without a lock.
 
 For each operator, read its instruction file from `operators/` and execute:
 
@@ -109,7 +109,7 @@ For each operator, read its instruction file from `operators/` and execute:
 
 Log every operation to `_dream_log.md` (append, create if needed).
 
-Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-release dream`
+Remove the lock when done using Bash: `ll-run marker.mjs lock-release dream`
 
 ## Phase 4: Rebuild Index and Report
 
@@ -120,7 +120,7 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
    - Keep MEMORY.md slim: the User-type entries inline (the small, always-relevant set), plus exactly one pointer line per split type (e.g. `- [_index_feedback.md](_index_feedback.md) — all feedback entries, grep when a task might match past feedback`), and a one-line note that the split was made to stay under budget.
    Only keep a single monolithic MEMORY.md when the whole index fits under 16KB. Never regenerate a monolithic index above budget.
 
-2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
+2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `ll-run marker.mjs stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
 
 3. Report:
    ```

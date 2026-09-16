@@ -184,3 +184,23 @@ test('a block that uses a resolver field is the block that resolves it', () => {
     `unresolved fields:\n${offenders.join('\n')}`,
   );
 });
+
+// Prose too, not only fences. A command in an inline code span gets copied into
+// a Bash call exactly like a fenced one, and through ${CLAUDE_PLUGIN_ROOT} it
+// runs the version the session loaded (or nothing, in a file read via Read).
+// doctor is the one exception: it repairs broken shims, so it cannot use them,
+// and as a SKILL.md its placeholder is substituted.
+test('no plugin doc runs a script through ${CLAUDE_PLUGIN_ROOT}', () => {
+  const RECOVERY = new Set(['plugin/skills/doctor/SKILL.md']);
+  const RUNS = /(?:\b(?:node|bash)\s+"?|import\(')\$\{CLAUDE_PLUGIN_ROOT\}\//;
+  const offenders = [];
+  for (const rel of pluginDocs()) {
+    if (RECOVERY.has(rel)) continue;
+    readFileSync(join(ROOT, rel), 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        if (RUNS.test(line)) offenders.push(`${rel}:${i + 1}`);
+      });
+  }
+  assert.deepEqual(offenders, [], `use \`ll-run <script>\` or \`ll-paths PLUGIN\`:\n${offenders.join('\n')}`);
+});

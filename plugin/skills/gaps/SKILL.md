@@ -66,7 +66,7 @@ Proceed immediately.
 ### Step 0: Select (auto-pick and sweep modes only)
 
 **Auto-pick (`/gaps` with no topic):**
-1. Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs cluster --threshold 0.7`
+1. Run `ll-run vault-search.mjs cluster --threshold 0.7`
 2. Find the densest cluster not recently reviewed: read the candidate notes' frontmatter and skip clusters where the majority of notes carry a `gaps-reviewed:` date within the last ~30 days (Step 5 writes this frontmatter key — there is no `#gaps-reviewed` tag)
 3. Tell the user: "Analysing [cluster topic]: [N] notes, last reviewed [date/never]"
 4. Proceed to Step 1 with inferred topic

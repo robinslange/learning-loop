@@ -45,7 +45,7 @@ session but is NOT exported into Workflow subagent shells, so the workflow must 
 handed a concrete absolute path. In a Bash block, run:
 
 ```
-node "${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs" PLUGIN
+ll-run resolve-paths.mjs PLUGIN
 ```
 
 That prints the absolute plugin root. Then invoke the `Workflow` tool:

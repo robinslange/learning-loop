@@ -32,7 +32,7 @@ You will receive:
 5. Derive maturity tier from the note-level score (shallow < 0.4, medium 0.4-0.7, deep > 0.7).
 6. Recommend an action.
 
-For linking assessment, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps: notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
+For linking assessment, use `ll-run vault-search.mjs similar "<note-path>" --top 5` to detect linking gaps: notes with similarity > 0.7 that aren't linked to each other should lower the linking score.
 
 ## Output Format
 

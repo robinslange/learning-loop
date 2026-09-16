@@ -64,10 +64,10 @@ Collect the raw data needed for all checks. Run these in parallel:
 3. **Permanent files:** `Glob` pattern `*.md` in `{{VAULT}}/3-permanent/`
 4. **Literature files:** `Glob` pattern `*.md` in `{{VAULT}}/2-literature/`
 5. **System files:** `Glob` pattern `*.md` in `{{VAULT}}/_system/`
-6. **Near-duplicate clusters:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs cluster --threshold 0.85`
-7. **Indexed notes:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs list`
-8. **Plugin dependencies:** `node ${CLAUDE_PLUGIN_ROOT}/scripts/check-deps.mjs`
-9. **Binary version:** Check `ll-search` binary via `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/lib/binary.mjs').then(m => console.log(m.binaryVersion()))"` -- returns version string or null
+6. **Near-duplicate clusters:** `ll-run vault-search.mjs cluster --threshold 0.85`
+7. **Indexed notes:** `ll-run vault-search.mjs list`
+8. **Plugin dependencies:** `ll-run check-deps.mjs`
+9. **Binary version:** Check `ll-search` binary via `node -e "import(process.argv[1]+'/scripts/lib/binary.mjs').then(m => console.log(m.binaryVersion()))" "$(ll-paths PLUGIN)"` -- returns version string or null
 
 ### Step 1.5: Check: Plugin Dependencies
 
@@ -102,7 +102,7 @@ Parse the cluster output from Step 1. Filter to pairs with similarity > 0.85 tha
 For each note across all content folders (0-inbox, 1-fleeting, 3-permanent), grep for `\[\[` outgoing wikilinks. Notes with zero outgoing links are orphans. Exclude `_system/` and `2-literature/` from orphan checks (system docs and literature notes don't need outlinks).
 
 **Light:** List orphan filenames with their folder.
-**Deep:** For each orphan, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 3` to suggest link targets.
+**Deep:** For each orphan, run `ll-run vault-search.mjs similar "<note-path>" --top 3` to suggest link targets.
 
 ### Step 5: Check: Stale Inbox
 
@@ -134,7 +134,7 @@ Grep all `\[\[...\]\]` wikilink references across all vault notes. For each uniq
 
 ### Step 7.5: Check: Librarian Queue
 
-Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
 
 If the queue file doesn't exist or is empty, skip this step silently.
 

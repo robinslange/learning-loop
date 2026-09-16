@@ -29,7 +29,7 @@ Run the full process below for each note in the list. Batch mechanical resolver 
 
 ### 1. Extract Claims and Sources
 
-When given a topic-based scope rather than a specific note, use `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
+When given a topic-based scope rather than a specific note, use `ll-run vault-search.mjs search "<keywords>" --rerank` to find relevant notes beyond keyword matching.
 
 Read each note. Identify:
 - Every factual claim (not opinions or framing)
@@ -70,7 +70,7 @@ The resolver returns:
 - **metadata**: actual authors, title, year, journal, abstract, study type, species, sample size, funding
 
 **For sources without PMID/DOI** (web pages, blog posts, framework docs):
-1. Fetch the URL via the gateway: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" fetch --url "<url>" --json` (run with Bash) — the returned `doc.text` is the page content, `doc.ok`/`doc.reason` tell you if it failed
+1. Fetch the URL via the gateway: `ll-run source-gateway.mjs fetch --url "<url>" --json` (run with Bash) — the returned `doc.text` is the page content, `doc.ok`/`doc.reason` tell you if it failed
 2. Check: does the page exist? Does the content match what's cited?
 3. Flag dead links or content mismatches
 

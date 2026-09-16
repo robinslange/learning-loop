@@ -104,8 +104,8 @@ After investigation, ask user what to do with each: "update", "dismiss", or "fla
 
 After both phases:
 
-1. Expire processed/old items: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/librarian/queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))"` (replace `VAULT_PATH` with the resolved vault path; `expireStaleItems(vaultPath)` lives at `scripts/librarian/queue.mjs`)
-2. Reset librarian state to allow re-investigation: `node -e "import('${CLAUDE_PLUGIN_ROOT}/scripts/librarian/queue.mjs').then(m => m.resetState())"`
+1. Expire processed/old items: `node -e "import(process.argv[1]+'/scripts/librarian/queue.mjs').then(m => m.expireStaleItems('VAULT_PATH'))" "$(ll-paths PLUGIN)"` (replace `VAULT_PATH` with the resolved vault path; `expireStaleItems(vaultPath)` lives at `scripts/librarian/queue.mjs`)
+2. Reset librarian state to allow re-investigation: `node -e "import(process.argv[1]+'/scripts/librarian/queue.mjs').then(m => m.resetState())" "$(ll-paths PLUGIN)"`
 3. Report summary: "Processed N items: X links applied, Y tags applied, V voice flags acknowledged, D duplicates resolved, Z suspects investigated."
 
 Then stop (do not proceed to Step 1).
