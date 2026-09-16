@@ -42,6 +42,7 @@ import { cpus, totalmem } from 'node:os';
 import { env as pluginEnv, spawnEnv } from '../plugin/scripts/lib/env.mjs';
 import { logError } from '../plugin/scripts/lib/log.mjs';
 import { safeLoad } from '../plugin/scripts/lib/safe-load.mjs';
+import { isMainModule } from '../plugin/scripts/lib/is-main.mjs';
 
 const BENCH_DIR = import.meta.dirname;
 const REPO_ROOT = resolve(BENCH_DIR, '..');
@@ -482,7 +483,7 @@ const BUDGETS = {
 // Comparison logic
 // ---------------------------------------------------------------------------
 
-function compareBaselines(current, baseline) {
+export function compareBaselines(current, baseline) {
   const currentPlatform = current.quality?.provenance?.platform;
   const baselinePlatform = baseline.quality?.provenance?.platform;
 
@@ -754,7 +755,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  process.stderr.write(`bench/bench.mjs failed: ${err.message}\n`);
-  process.exit(1);
-});
+// Run the benches when executed; expose compareBaselines when imported. The
+// quality gate had no test because reaching it needs a 500-note ONNX eval, so
+// the verdict function has to be reachable without one.
+if (isMainModule(import.meta.url)) {
+  main().catch((err) => {
+    process.stderr.write(`bench/bench.mjs failed: ${err.message}\n`);
+    process.exit(1);
+  });
+}
