@@ -1011,3 +1011,75 @@ describe(
     });
   },
 );
+
+// The JIT path must not pay for a cross-encoder rerank. The reranker was wired
+// log-only to test whether reordering lifts rank-0 precision; measured against
+// a year of accumulated rerank_order telemetry it does the opposite (it moves
+// the note that actually got used DOWN more often than up), so the call has no
+// remaining purpose and costs a second subprocess on every gate pass.
+describe(
+  'session-label rerank is not in the hot path',
+  { skip: skipOnWindows('the stub ll-search is a #!/bin/sh script, not an .exe') },
+  () => {
+    it('does not spawn a rerank subprocess on a gate pass', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-norerank-'));
+      try {
+        const pluginData = join(base, 'plugin-data');
+        const stubBin = join(pluginData, 'bin');
+        const vault = join(base, 'vault');
+        const argsLog = join(base, 'll-args.log');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+        mkdirSync(join(base, 'home'), { recursive: true });
+        writeFileSync(join(vault, 'notes', 'gamma.md'), 'Gamma note body about dedupe windows.\n');
+
+        // The stub records every argv it is called with, which is the only way
+        // to observe a subprocess the hook spawns internally.
+        const hits = '[{"path":"notes/gamma.md","title":"gamma","score":0.99}]';
+        writeFileSync(
+          join(stubBin, 'll-search'),
+          '#!/bin/sh\necho "$*" >> ' + JSON.stringify(argsLog) + '\nprintf \'%s\' \'' + hits + '\'\n',
+          { mode: 0o755 },
+        );
+
+        const out = execFileSync('node', [HOOK], {
+          input: JSON.stringify({
+            session_id: randomUUID(),
+            prompt: 'walk me through the dedupe window behaviour for injected pointer notes in this session',
+            transcript_path: '',
+            cwd: '/tmp',
+          }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: join(base, 'home'),
+            TMPDIR: base,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_SYNTHETIC: '1',
+            LEARNING_LOOP_INJECTION_MODE: 'live',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+          },
+        });
+
+        // Negative control: without this, the assertion below would also pass
+        // if the gate never opened and the binary was never consulted at all.
+        assert.ok(
+          out.includes('Gamma note body'),
+          'the gate must have passed, so rerank had its chance to run',
+        );
+
+        assert.ok(existsSync(argsLog), 'the stub must have been invoked at least once');
+        const invocations = readFileSync(argsLog, 'utf8');
+        assert.ok(
+          !/\brerank\b/.test(invocations),
+          'the hot path must not invoke the rerank subcommand; got: ' + invocations.trim(),
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
+  },
+);

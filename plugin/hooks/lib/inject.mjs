@@ -282,38 +282,3 @@ export async function runBackendsWithRaceCap({
   if (runSolo) out.vaultSolo = toVault(settled[1]);
   return out;
 }
-
-// Cross-encoder rerank of the query's candidates via the `rerank` subcommand
-// (ll-search ships a MiniLM cross-encoder the plain `query` path never invokes).
-// Returns { hits: [{ index, score, path }] } in rerank order, or { hits: [],
-// error } on timeout/failure — callers use it log-only, so a miss degrades to
-// "no rerank data", never a thrown error. Warm cost ~750ms at 20 candidates,
-// ~1150ms at 40 (measured), so it gets its OWN timeout: reranking is strictly
-// slower than fusion and must not be able to hang the hook.
-export async function rerankCandidates({
-  query,
-  vaultDbPath,
-  topN = 5,
-  candidates = 20,
-  timeoutMs,
-  _spawnFn,
-}) {
-  const spawnFn = _spawnFn || defaultSpawn;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  const useRealBinaries = !_spawnFn;
-  const llBinary = useRealBinaries ? findBinary() : null;
-  const llCmd = llBinary ? llBinary.bin : 'll-search';
-  const llEnv = llBinary ? ortSpawnEnv(llBinary.binDir) : undefined;
-
-  const result = await spawnSearch(
-    spawnFn,
-    llCmd,
-    ['rerank', vaultDbPath, query, '--top', String(topN), '--candidates', String(candidates)],
-    controller.signal,
-    llEnv,
-  );
-  clearTimeout(timer);
-  return parseVault(result);
-}
