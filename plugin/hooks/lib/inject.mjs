@@ -11,7 +11,7 @@ import { SECRET_PATTERNS } from '../../scripts/lib/secret-patterns.mjs';
 // wrapRetrieval(), from the same string.
 //
 // The three clauses of UNTRUSTED_NOTE are load-bearing and measured
-// (agents-shared/adversarial-content.md, spike/verify-framing): delimiters
+// (agents-shared/adversarial-content.md, bench/verify-framing): delimiters
 // ALONE scored worse than no guard at all, so do not reduce this to the tags.
 import { UNTRUSTED_NOTE, sealedDelimiters } from '../../scripts/lib/origin-envelope.mjs';
 import { stripPointerContent, deriveOrigin } from '../../scripts/lib/row-origin.mjs';

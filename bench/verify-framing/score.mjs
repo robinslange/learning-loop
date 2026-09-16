@@ -1,4 +1,4 @@
-// spike/verify-framing/score.mjs
+// bench/verify-framing/score.mjs
 //
 // Mechanical scoring. No judgement calls — every verdict is checkable from the
 // structured output alone, so the harness can be re-run and compared over time.

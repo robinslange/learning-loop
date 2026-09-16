@@ -1,4 +1,4 @@
-// spike/verify-framing/framings.mjs
+// bench/verify-framing/framings.mjs
 //
 // Candidate framings for the untrusted slots in VERIFY_PROMPT (claim + quote).
 // Each takes {claim, quote} and returns the prompt fragment that replaces the

@@ -1,4 +1,4 @@
-// spike/verify-framing/corpus.mjs
+// bench/verify-framing/corpus.mjs
 //
 // Two corpora for measuring P0.2's framing change on the research verify step.
 //

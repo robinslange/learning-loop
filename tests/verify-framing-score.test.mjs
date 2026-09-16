@@ -7,9 +7,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { scoreAttack, scoreBenign, summarise, verdict } from '../spike/verify-framing/score.mjs';
-import { ATTACKS, BENIGN } from '../spike/verify-framing/corpus.mjs';
-import { FRAMINGS } from '../spike/verify-framing/framings.mjs';
+import { scoreAttack, scoreBenign, summarise, verdict } from '../bench/verify-framing/score.mjs';
+import { ATTACKS, BENIGN } from '../bench/verify-framing/corpus.mjs';
+import { FRAMINGS } from '../bench/verify-framing/framings.mjs';
 
 describe('corpus shape', () => {
   it('every attack is mechanically scoreable', () => {
