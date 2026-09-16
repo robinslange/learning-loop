@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **`searxng` is now a selectable `sources.web_search` provider**, for pointing
+  the source gateway at a self-hosted SearXNG instance instead of a keyed API.
+  Configure it with `sources.web_search: "searxng"` and
+  `sources.providers.searxng.url`; there is no key to resolve. `SLOT_DEFAULTS`
+  is unchanged, so this is opt-in and nothing moves for existing installs.
+
+  Two notes for anyone enabling it. The instance must list `json` under
+  `search.formats` in its `settings.yml` — the shipped SearXNG default is
+  `formats: [html]`, and a JSON request against a default instance answers
+  either `403` or `200` carrying HTML. Both are indistinguishable from "no
+  results", so the client names them on stderr rather than returning a bare
+  empty array, and the message text is asserted in tests. The client also calls
+  `fetch` directly rather than routing through `url-guard.mjs`, matching
+  `brave.mjs`: the guard blocks loopback and RFC1918 by design, which is where a
+  self-hosted instance lives, and this URL is operator-authored config rather
+  than one scraped out of a note body.
+
 ### Fixed
 
 - **The `/reflect` handshake test suite mutated a machine-global file on
