@@ -1033,3 +1033,86 @@ test(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Intention summary: singleton contexts are noise, not signal.
+// ---------------------------------------------------------------------------
+// The marker holds one entry per distinct `context` string. In a real vault the
+// overwhelming majority have a count of 1, because cue-shaped sentences get
+// written into the context slot ("A dependency upgrade hits a resolution
+// problem..."), so each produces its own single-note "context". Rendering them
+// all blows past MEMORY_INDEX_MAX_BYTES and the section is truncated mid-list,
+// shipping an arbitrary prefix and dropping the contexts that group real work.
+test(
+  'session-start omits single-note intention contexts from the summary',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'intentions-singleton-session' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(
+          join(cacheDir, 'intentions.json'),
+          JSON.stringify([
+            { context: 'a cue shaped sentence that only ever matched one note', count: 1 },
+            { context: 'real-grouping-ctx', count: 4 },
+            { context: 'another one-off cue', count: 1 },
+          ]),
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const hso = parseOutput(r.stdout, 'intentions-singleton');
+      assert.match(hso.additionalContext, /- real-grouping-ctx \(4 notes\)/);
+      assert.ok(
+        !hso.additionalContext.includes('a cue shaped sentence'),
+        'a single-note context must not reach the pack',
+      );
+      assert.ok(
+        !hso.additionalContext.includes('another one-off cue'),
+        'a single-note context must not reach the pack',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
+
+// When nothing survives the filter the heading must go too, rather than
+// shipping a section with no entries under it.
+test(
+  'session-start drops the intentions heading when every context is a singleton',
+  { timeout: 12000 },
+  () => {
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'intentions-all-singleton-session' },
+      env: { VAULT_PATH: VAULT },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        const cacheDir = join(pd, 'session-start-cache');
+        mkdirSync(cacheDir, { recursive: true });
+        writeFileSync(
+          join(cacheDir, 'intentions.json'),
+          JSON.stringify([
+            { context: 'lonely-ctx-one', count: 1 },
+            { context: 'lonely-ctx-two', count: 1 },
+          ]),
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const hso = parseOutput(r.stdout, 'intentions-all-singleton');
+      assert.ok(
+        !hso.additionalContext.includes('## Notes with active intentions:'),
+        'an empty list must not ship a bare heading',
+      );
+    } finally {
+      r.cleanup();
+    }
+  },
+);
