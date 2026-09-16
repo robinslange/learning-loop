@@ -115,10 +115,18 @@ Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marke
 
 1. Rebuild the index from scratch: scan all `.md` files (excluding MEMORY.md, the `_index_*.md` files, _dream_log.md, _archived/), format each as `- [filename.md](filename.md): description`, one line, under 150 chars.
 
-   **MEMORY.md has a hard 16KB budget.** It is read into context whole at session start; an over-budget index is silently truncated there, and every rule past the cut stops surfacing — the failure this budget prevents. When a single monolithic MEMORY.md would exceed 16KB, do NOT emit one and do NOT rely on line-count heuristics. Use the per-type split structure instead:
+   **MEMORY.md has a hard byte budget, and it is far smaller than it looks.** The index is read into context whole at session start, where `hooks/session-start/context-assembly.mjs` caps it at `HookConfig.MEMORY_INDEX_MAX_BYTES`. Read the live value instead of trusting a number written here -- this file claimed 16KB against a shipped 3072 B for several releases, a 5.3x error that silently truncated the index on every session:
+
+   ```bash
+   grep -o 'MEMORY_INDEX_MAX_BYTES: [0-9_]*' "$(ll-paths PLUGIN)/scripts/lib/hook-config.mjs"
+   ```
+
+   Over budget the reader does not discard the index: it keeps whole lines up to the cap and appends `… N more entries -- read <path>`. So the head still surfaces and the pointer names the file, but every entry past the cut stops reaching the session.
+
+   At the shipped cap a monolithic index is the EXCEPTION, not the default -- a few dozen entries exhaust it. Assume the per-type split unless the whole index measurably fits:
    - Write the full per-type entry lists to `_index_feedback.md`, `_index_project.md`, and `_index_reference.md` (one line per memory, no frontmatter — these hold the bulk).
    - Keep MEMORY.md slim: the User-type entries inline (the small, always-relevant set), plus exactly one pointer line per split type (e.g. `- [_index_feedback.md](_index_feedback.md) — all feedback entries, grep when a task might match past feedback`), and a one-line note that the split was made to stay under budget.
-   Only keep a single monolithic MEMORY.md when the whole index fits under 16KB. Never regenerate a monolithic index above budget.
+   Keep a single monolithic MEMORY.md only when the whole index measurably fits under the cap -- verify with `wc -c`, never by eye or by line count. Never regenerate a monolithic index above budget.
 
 2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
 
