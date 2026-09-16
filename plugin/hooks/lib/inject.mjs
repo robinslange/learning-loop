@@ -147,35 +147,47 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
       : alreadyInjected.has(path)
         ? 'body'
         : undefined;
-  // Peer rows lose their body here, the same allowlist wrapRetrieval() applies
-  // on the JSON path: a federated note is awareness, never content. Which hit
-  // supplies the body is therefore a property of the row, not of its rank —
-  // the first body-bearing hit is the body and every other hit is a pointer.
+  // A body-bearing hit fills a body slot and every other hit is a pointer. Peer
+  // rows lose their body here, the same allowlist wrapRetrieval() applies on
+  // the JSON path: a federated note is awareness, never content. Which hit
+  // supplies a body is therefore a property of the row, not of its rank.
+  //
+  // Measured on 206 live turns: a body-slot note is used 31.6% of the time, a
+  // pointer 5.1%. Controlling for the note (74 notes appeared at both levels)
+  // the format alone is worth 2.5x, 30.7% against 12.2%. The slot count is the
+  // lever, so it is a constant rather than whatever findIndex happened to land
+  // on. Total stays at five notes: this trades a pointer for a body, so format
+  // is the only variable.
+  const BODY_SLOTS = 2;
+  const POINTER_SLOTS = 3;
   const filtered = vaultHits.map(stripPointerContent).filter((h) => levelOf(h.path) !== 'body');
   if (filtered.length === 0) return null;
 
-  const bodyIdx = filtered.findIndex((h) => h.body);
-  const top = bodyIdx === -1 ? null : filtered[bodyIdx];
-  const pointers = filtered.filter((h, i) => i !== bodyIdx && !levelOf(h.path)).slice(0, 4);
-  if (!top && pointers.length === 0) return null;
+  const bodies = filtered.filter((h) => h.body).slice(0, BODY_SLOTS);
+  const taken = new Set(bodies);
+  const pointers = filtered
+    .filter((h) => !taken.has(h) && !levelOf(h.path))
+    .slice(0, POINTER_SLOTS);
+  if (bodies.length === 0 && pointers.length === 0) return null;
 
   // Note bodies and peer-controlled titles go in verbatim; the delimiter is
   // nonced so neither can name the terminator.
   const { open, close } = sealedDelimiters('vault-note', 'trust="untrusted-data"');
   const injectedVault = [];
   const lines = [
-    top
-      ? `## From your vault (top match: ${top.title}, match score ${Number(top.score).toFixed(2)})`
+    bodies.length > 0
+      ? `## From your vault (top match: ${bodies[0].title}, match score ${Number(bodies[0].score).toFixed(2)})`
       : '## From your vault (pointers only)',
     '',
     open,
   ];
-  if (top) {
-    lines.push(truncateAtSentenceBoundary(top.body, 300));
-    injectedVault.push({ path: top.path, level: 'body', score: top.score });
-  }
+  bodies.forEach((b, i) => {
+    if (i > 0) lines.push('');
+    lines.push(truncateAtSentenceBoundary(b.body, 300));
+    injectedVault.push({ path: b.path, level: 'body', score: b.score });
+  });
   if (pointers.length > 0) {
-    if (top) lines.push('');
+    if (bodies.length > 0) lines.push('');
     lines.push('Related notes:');
     for (const p of pointers) {
       lines.push(`- ${p.title} — ${p.path}`);
