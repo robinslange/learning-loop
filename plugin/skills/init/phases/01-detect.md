@@ -45,7 +45,7 @@ The following items stay inline in this phase (NOT delegated to the health libra
 
 **Federation connectivity:** If federation config exists and has a hub endpoint, run the ll-search binary: `ll-search sync <VAULT>/.vault-search/vault-index.db <VAULT> --config-dir <PLUGIN_DATA>`. Both positionals and the config dir are required — the first is the search index the watch daemon writes, and a path that does not exist ends the command in a panic. This exports the local index, connects to the hub, uploads, and downloads peer indexes. Report what actually happened, not what you think should happen.
 
-**Cache health statusline:** Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
+**Cache health statusline:** Run `ll-run install-cache-health.mjs --check` and capture the JSON output. Note whether `omc_installed` is true and whether `configured` is true. This determines whether Phase 6 has anything to do.
 
 **Librarian:** Check if `ollama` is installed (`which ollama`), system RAM (`sysctl -n hw.memsize` on macOS, `/proc/meminfo` on Linux), and librarian config from `config.json` (`librarian.enabled`, `librarian.model`). Derive the model **tier** from RAM: ≥32GB → `gemma3:12b` (triage + research); 16–32GB → `gemma4:e2b` (triage only, research uses Claude); <16GB → skip. Footprints are measured at ~7.2GB resident (e2b) and ~8.9GB (12b). Check whether the tier's model is pulled (`ollama list | grep <tier model>`).
 
@@ -72,7 +72,7 @@ Learning Loop Setup
   CLAUDE.md:     ~/.claude/CLAUDE.md (learning-loop section present)
   AGENTS.md:     ~/.codex/AGENTS.md (learning-loop section present)
   Librarian:     [status]
-  Shims:         ll-watch, ll-search, ll-paths installed (watcher not running)
+  Shims:         ll-watch, ll-search, ll-paths, ll-run installed (watcher not running)
 
 Everything looks good. Nothing to set up.
 ```

@@ -92,12 +92,16 @@ export const env = Object.freeze({
   // sandbox. Unset in production.
   LL_CHILD_PID_FILE: pick('LL_CHILD_PID_FILE', ''),
 
-  // --- Test seam ---
-  // Overrides the pre-write-check wall-clock budget (default mirrors the
-  // hooks.json deadline via HookConfig.PRE_WRITE_HOOK_BUDGET_MS). A contended
-  // full-suite run can burn the 3s budget on cold Node startup before the
-  // duplicate-gate subprocess fallback runs, flaking the fallback tests; they
-  // set this to a generous value. Unset in production.
+  // --- Operator knob ---
+  // Overrides the pre-write-check wall-clock budget, which otherwise comes
+  // from the hook's own hooks.json deadline. This is the supported way to
+  // raise it: the plugin's hooks.json is replaced on every update, so a host
+  // whose cold model start exceeds the shipped deadline (no socket transport
+  // means no warm path, and one measured cold start was 2905ms) would lose
+  // the edit on the next release. Raise the hooks.json timeout to match, or
+  // the outer SIGKILL still wins. A contended full-suite run sets it for the
+  // same reason: cold Node startup can burn the budget before the
+  // duplicate-gate subprocess fallback ever runs.
   LL_PRE_WRITE_BUDGET_MS: pick('LL_PRE_WRITE_BUDGET_MS', ''),
 
   // --- Test seam ---

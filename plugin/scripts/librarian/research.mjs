@@ -11,7 +11,7 @@
 import { writeFileSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from '../lib/is-main.mjs';
 import { extractClaims } from './research/extract.mjs';
 import { sourceIdFromUrl } from './research/source-id.mjs';
 import { loadLibrarianConfig, researchModelOk } from './config.mjs';
@@ -205,7 +205,7 @@ async function main() {
   }
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main().catch((err) => {
     process.stderr.write('research failed: ' + err.message + '\n');
     process.exit(1);

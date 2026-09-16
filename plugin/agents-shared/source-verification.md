@@ -12,7 +12,7 @@ A source URL is a verified artifact or it is a hallucination risk. There is no m
 
 ## Gateway Fetch Discipline
 
-Web access runs through the source gateway, called via Bash: `node "${CLAUDE_PLUGIN_ROOT}/bin/source-gateway.mjs" <search|fetch|research> --json`.
+Web access runs through the source gateway, called via Bash: `ll-run source-gateway.mjs <search|fetch|research> --json`.
 
 - `search --q "<query>"` returns `{ hits: [{url,title,snippet}], source_used }`. Prefer search: snippets are fast and cost no fetch budget.
 - `fetch --url "<url>"` returns `{ doc: {text,ok,reason}, source_used }`. Fetch only when a claim must be checked against full page content.
@@ -104,7 +104,7 @@ When called from note-writer or other agents that need deterministic verificatio
 The temp-file steps below use the Write tool — they are the variant for Write-granted agents (note-writer, note-deepener, literature-capturer). Read/Bash-only agents (note-verifier) have no Write tool: materialize the note via the Bash-heredoc variant in `agents/note-verifier.md` (Step 2) instead, then run the same resolver commands against that temp path.
 
 1. Write the note content to a temp file using the Write tool: `<tmpdir>/ll-note-verify-TIMESTAMP.md` (epoch ms for TIMESTAMP, where tmpdir is the OS temp directory)
-2. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
+2. Run: `ll-run source-resolver.mjs verify-note <tmpdir>/ll-note-verify-TIMESTAMP.md`
 3. Parse the JSON output. For each source:
    - `verified: true` -- no action needed
    - `wrong_author` (high) -- the only claimed surname is absent from the resolved work; replace with the resolver's `metadata.firstAuthor` surname + "et al."
@@ -123,7 +123,7 @@ The temp-file steps below use the Write tool — they are the variant for Write-
 
 ### Check quantitative claims
 
-1. Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/source-resolver.mjs check-claims <tmpdir>/ll-note-verify-TIMESTAMP.md`
+1. Run: `ll-run source-resolver.mjs check-claims <tmpdir>/ll-note-verify-TIMESTAMP.md`
 2. The script checks numbers against:
    - **Abstracts** (when source has PMID, DOI, or arXiv ID) — `source_kind: "abstract"` in output
    - **Page text** (when source is a non-academic URL — docs, blogs, vendor pages) — `source_kind: "page"` in output. Paywalled/PDF domains are skipped.

@@ -33,7 +33,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { stripFrontmatter, splitRawFrontmatter } from './lib/markdown-parse.mjs';
@@ -455,6 +455,6 @@ function main() {
   process.stdout.write(JSON.stringify({ summary, decisions: validated }, null, 2) + '\n');
 }
 
-if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   main();
 }

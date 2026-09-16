@@ -18,7 +18,6 @@
  */
 export const HookConfig = Object.freeze({
   // --- Timeouts (ms) ---
-  QUERY_TIMEOUT_MS: 2000,
   DEPS_CHECK_TIMEOUT_MS: 5000,
   SNAPSHOT_TIMEOUT_MS: 10000,
   REINDEX_TIMEOUT_MS: 5000,
@@ -80,17 +79,26 @@ export const HookConfig = Object.freeze({
   NPM_INSTALL_TIMEOUT_MS: 10000,
 
   // --- Pre-write duplicate-gate budget (ms) ---
-  // hooks.json gives pre-write-check 3s total, and the duplicate gate can
-  // spend from that budget twice: a daemon attempt, then a subprocess
-  // fallback. The composition must fit inside the outer deadline or Claude
-  // Code SIGKILLs the hook mid-subprocess and every warning is lost. The
-  // daemon gets a short timer (the warm path answers in ~430ms); the
-  // subprocess timer is computed at runtime from the remaining budget
-  // (min(QUERY_TIMEOUT_MS, budget - elapsed - safety margin)) and the
-  // fallback is skipped entirely when the remainder is under the measured
-  // cold-start floor. PRE_WRITE_HOOK_BUDGET_MS must mirror the hooks.json
-  // timeout — tests/lib-hook-config.test.mjs pins both.
-  PRE_WRITE_HOOK_BUDGET_MS: 3000,
+  // The OUTER deadline is deliberately absent from this file. It lives once,
+  // in hooks/hooks.json, because that is the copy the harness enforces: it is
+  // parsed at session start and the hook is SIGKILLed on it. A mirrored
+  // constant here could only agree or drift, and drift is silent in both
+  // directions -- an inner budget above the outer deadline is inert, one below
+  // throws away time the hook was given. pre-write-check.js reads it via
+  // outerDeadlineMs(); operators override with LL_PRE_WRITE_BUDGET_MS.
+  //
+  // The gate can spend that deadline twice: a daemon attempt, then a
+  // subprocess fallback. The composition must fit inside it or Claude Code
+  // SIGKILLs the hook mid-subprocess and every computed warning is lost. The
+  // daemon gets the short timer below (the warm path answers in ~430ms); the
+  // subprocess gets whatever wall clock remains, and is skipped entirely when
+  // that remainder is under the cold-start floor.
+  //
+  // The wall clock is the only cap. This block claimed for several releases
+  // that the subprocess timer was min(QUERY_TIMEOUT_MS, remaining); the code
+  // never did that, and tests/pre-write-check-duplicate-gate.test.mjs pins the
+  // single-clock behaviour deliberately ("one clock, not two"). That constant
+  // turned out to have no production reader at all, so it has been deleted.
   PRE_WRITE_DAEMON_TIMEOUT_MS: 800,
   PRE_WRITE_SAFETY_MARGIN_MS: 300,
   PRE_WRITE_SUBPROCESS_FLOOR_MS: 300,

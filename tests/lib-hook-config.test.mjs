@@ -2,6 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { outerDeadlineMs } from '../plugin/hooks/pre-write-check.js';
+
+const HOOKS_JSON = JSON.parse(
+  readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
+);
 
 test('HookConfig is frozen', () => {
   assert.equal(Object.isFrozen(HookConfig), true);
@@ -57,7 +62,6 @@ test('INJECTION_THRESHOLD is calibrated to the RRF fusion-sum scale', () => {
 test('required keys are all present (regression guard)', () => {
   const required = [
     'STDIN_TIMEOUT_MS',
-    'QUERY_TIMEOUT_MS',
     'INJECTION_RACE_CAP_MS',
     'DEDUPE_WINDOW_MS',
     'SESSION_SWEEP_TTL_MS',
@@ -142,14 +146,15 @@ test('post-tool inner budgets compose inside its hooks.json timeout', () => {
 
 // Regression: pre-write-check's worst-case inner spend (daemon attempt +
 // subprocess fallback + safety margin) must fit inside its hooks.json deadline.
-// Pre-fix the daemon used QUERY_TIMEOUT_MS (2s) and the subprocess used another
-// full QUERY_TIMEOUT_MS (2s), summing to ~4s+ against a 3s outer deadline —
-// Claude Code SIGKILLed the hook mid-subprocess and silently lost all warnings.
+// Pre-fix the daemon took a fixed 2s and the subprocess another fixed 2s,
+// summing to ~4s+ against a 3s outer deadline -- Claude Code SIGKILLed the hook
+// mid-subprocess and silently lost every warning it had already computed.
 //
-// The fix uses elapsed-aware budgeting: the subprocess timeout is computed as
-// min(QUERY_TIMEOUT_MS, budget - elapsed - margin), so the composed spend is
-// always at most PRE_WRITE_HOOK_BUDGET_MS. The static checks here pin the
-// invariants that make that arithmetic safe.
+// The fix uses elapsed-aware budgeting: the subprocess timeout is whatever
+// remains (budget - elapsed - margin), so the composed spend is always at most
+// the outer deadline. The static checks here pin the invariants that make that
+// arithmetic safe. The budget itself is NOT restated in hook-config -- it is
+// read from hooks.json, the only file the harness actually enforces.
 test('pre-write-check composed worst case (daemon + subprocess) fits inside its hooks.json timeout', () => {
   const hooksJson = JSON.parse(
     readFileSync(new URL('../plugin/hooks/hooks.json', import.meta.url), 'utf8'),
@@ -158,16 +163,6 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
   assert.ok(entry, 'hooks.json must have a PreToolUse entry whose matcher includes Write');
   assert.ok(entry.hooks?.[0]?.timeout, 'the PreToolUse Write entry must declare a timeout');
   const hookBudgetMs = entry.hooks[0].timeout * 1000;
-
-  // PRE_WRITE_HOOK_BUDGET_MS must mirror the hooks.json timeout — the runtime
-  // budget computation uses this constant, so a divergence silently breaks
-  // the guard.
-  assert.equal(
-    HookConfig.PRE_WRITE_HOOK_BUDGET_MS,
-    hookBudgetMs,
-    `PRE_WRITE_HOOK_BUDGET_MS (${HookConfig.PRE_WRITE_HOOK_BUDGET_MS}ms) must mirror the ` +
-      `hooks.json timeout (${hookBudgetMs}ms) — the runtime budget computation uses this constant`,
-  );
 
   // The daemon timer must leave headroom for at least the subprocess floor +
   // safety margin inside the outer budget. If this fails the code always skips
@@ -183,10 +178,10 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
       `slow-path fallback is permanently skipped`,
   );
 
-  // The subprocess timer is min(QUERY_TIMEOUT_MS, remaining), so the composed
-  // worst case is exactly PRE_WRITE_HOOK_BUDGET_MS (the runtime arithmetic
-  // guarantees this). Verify the daemon timer is strictly shorter than the
-  // budget so a wedged daemon doesn't eat the whole window before the fallback.
+  // The subprocess timer is the remaining wall clock, so the composed worst
+  // case is exactly the outer deadline (the runtime arithmetic guarantees it).
+  // Verify the daemon timer is strictly shorter than the budget so a wedged
+  // daemon doesn't eat the whole window before the fallback.
   assert.ok(
     HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS < hookBudgetMs,
     `PRE_WRITE_DAEMON_TIMEOUT_MS (${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms) must be ` +
@@ -194,6 +189,110 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
       `the outer budget leaves no time for the subprocess fallback`,
   );
 });
+
+// Regression: the budget has to fit a COLD start, not just a warm daemon. On a
+// platform with no socket transport there is no warm path at all (nli_server.rs
+// is `#![cfg(unix)]`), so every vault-note write pays a full ONNX model load. A
+// measured cold `ll-search query` on a Windows host with a 98-note vault took
+// 2905ms, against a 3000ms budget less a 300ms margin -- so the subprocess
+// fallback could never finish, every call logged ETIMEDOUT, and the gate passed
+// silently on 55 consecutive writes (#5) while reporting itself healthy.
+//
+// The budget is a CEILING, not a delay: a warm daemon still answers in ~430ms,
+// and pre-write-check early-exits on any path outside the vault, so ordinary
+// code edits never reach the gate and never pay this.
+test('the pre-write budget fits a cold model start, not just a warm daemon', () => {
+  const COLD_START_OBSERVED_MS = 2905;
+  const usable = outerDeadlineMs(HOOKS_JSON) - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+  assert.ok(
+    usable > COLD_START_OBSERVED_MS,
+    `usable subprocess window (${usable}ms = hooks.json deadline less margin ` +
+      `${HookConfig.PRE_WRITE_SAFETY_MARGIN_MS}) must exceed the observed ${COLD_START_OBSERVED_MS}ms cold ` +
+      `start, or the fallback is killed before it can answer and the gate fails open on every vault write`,
+  );
+});
+
+// The outer deadline has exactly one declaration, and this is the reader for
+// it. hooks.json is the authority because it is the copy the harness enforces:
+// Claude Code parses it at session start and SIGKILLs the hook on it. A second
+// copy in hook-config could only ever agree or drift, and drift is silent --
+// an inner budget above the outer deadline is inert, one below it throws away
+// time the hook was given. The mirror test that used to police those two
+// literals is gone with the literal it policed.
+// The live file, asserted against a LITERAL. The previous version of this test
+// recomputed the expectation the same way the implementation does -- find the
+// Write entry, read [0].timeout, multiply -- so it would have passed against a
+// broken parser. A review caught it. An assertion that re-derives its own
+// expected value tests nothing but arithmetic.
+test('outerDeadlineMs reads the deadline the harness actually enforces', () => {
+  assert.equal(outerDeadlineMs(HOOKS_JSON), 8000);
+});
+
+// A ceiling as well as a floor. The cold-start test below pins the deadline
+// above 2905ms; nothing pinned it below anything, so a bump to 30s would have
+// passed both. This is a hook in front of the user's Write: on a host with no
+// daemon and a cold binary they wait this long before the tool call proceeds.
+test('the pre-write deadline stays inside what a user will sit through', () => {
+  assert.ok(
+    outerDeadlineMs(HOOKS_JSON) <= 10_000,
+    'a PreToolUse hook blocks the user\'s own Write; past ~10s it reads as a hang, not a check',
+  );
+});
+
+// Found by the COMMAND, not the matcher. Matchers are regexes Claude Code
+// owns, so every spelling below is a legal way to say "Write or Edit" -- and
+// the matcher-parsing version returned null for all of them, silently
+// reinstating the 3s budget this change exists to raise, with no test failing.
+// The wrong-typed rows are the other half: `?.` covers absent but not
+// wrong-typed, so PreToolUse-as-an-object used to THROW out of a call site
+// that is not inside a try, discarding every verdict computed for that write.
+const PWC = 'cd "$HOME" && node "${CLAUDE_PLUGIN_ROOT}/hooks/pre-write-check.js"';
+const OTHER = 'cd "$HOME" && node "${CLAUDE_PLUGIN_ROOT}/hooks/web-guard.js"';
+const oneGroup = (matcher, timeout, command = PWC) => ({
+  hooks: { PreToolUse: [{ matcher, hooks: [{ command, timeout }] }] },
+});
+
+const DEADLINE_CASES = [
+  ['the shipped matcher', oneGroup('Write|Edit', 8), 8000],
+  ['a reversed matcher', oneGroup('Edit|Write', 8), 8000],
+  ['a regex matcher', oneGroup('Write.*', 8), 8000],
+  ['a catch-all matcher', oneGroup('.*', 8), 8000],
+  ['a spaced matcher', oneGroup('Write | Edit', 8), 8000],
+  ['no matcher at all', { hooks: { PreToolUse: [{ hooks: [{ command: PWC, timeout: 8 }] }] } }, 8000],
+  ['another hook\'s group first', {
+    hooks: {
+      PreToolUse: [
+        { matcher: 'WebSearch|WebFetch', hooks: [{ command: OTHER, timeout: 3 }] },
+        { matcher: 'Write|Edit', hooks: [{ command: PWC, timeout: 8 }] },
+      ],
+    },
+  }, 8000],
+  ['our hook second within a group', {
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Write|Edit', hooks: [{ command: OTHER, timeout: 3 }, { command: PWC, timeout: 8 }] },
+      ],
+    },
+  }, 8000],
+  ['PreToolUse is an object', { hooks: { PreToolUse: { matcher: 'Write|Edit' } } }, null],
+  ['PreToolUse is a string', { hooks: { PreToolUse: 'nope' } }, null],
+  ['hooks is an array', { hooks: [] }, null],
+  ['group.hooks is an object', { hooks: { PreToolUse: [{ matcher: 'Write|Edit', hooks: {} }] } }, null],
+  ['null', null, null],
+  ['undefined', undefined, null],
+  ['no entry for this hook', oneGroup('WebSearch', 3, OTHER), null],
+  ['a string timeout', oneGroup('Write|Edit', '8'), null],
+  ['a zero timeout', oneGroup('Write|Edit', 0), null],
+  ['a negative timeout', oneGroup('Write|Edit', -5), null],
+  ['a NaN timeout', oneGroup('Write|Edit', NaN), null],
+  ['no timeout', oneGroup('Write|Edit', undefined), null],
+];
+
+for (const [name, input, expected] of DEADLINE_CASES) {
+  test(`outerDeadlineMs: ${name}`, () => {
+    assert.equal(outerDeadlineMs(input), expected);
+  });
+}
 
 // Regression: any hook that reads stdin via the shared readStdin() (which
 // races HookConfig.STDIN_TIMEOUT_MS) must declare a hooks.json timeout long

@@ -47,7 +47,7 @@ Spawn the `inbox-organiser` agent (dispatch: `skills-shared/dispatch.md`) with t
 
 While the inbox-organiser agent runs (this check is independent of its output), check the librarian queue for pending observations targeting inbox notes.
 
-Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `node ${CLAUDE_PLUGIN_ROOT}/scripts/resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`, `target` starts with `0-inbox/`, and `task` is one of: `voice_flag`, `tag_suggestion`, `duplicate_flag`.
+Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`, `target` starts with `0-inbox/`, and `task` is one of: `voice_flag`, `tag_suggestion`, `duplicate_flag`.
 
 If matches exist, include them as advisory context when presenting the agent's results, grouped by task type:
 

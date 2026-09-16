@@ -16,10 +16,10 @@ import { getPluginData } from './lib/config.mjs';
 import { env, isOffline } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
-import { DATA_FILES } from './lib/paths.mjs';
+import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
 import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
 import { semverCmp, isPlainSemver } from './lib/semver.mjs';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -168,7 +168,7 @@ async function main() {
     process.exit(1);
   }
   const binDir = join(pluginData, 'bin');
-  const binaryName = platform() === 'win32' ? 'll-search.exe' : 'll-search';
+  const binaryName = binaryFileName(platform());
   const binaryPath = join(binDir, binaryName);
 
   // Check if already installed at this version
@@ -284,6 +284,6 @@ async function main() {
   writeFileSync(versionFile, version + '\n');
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   main();
 }

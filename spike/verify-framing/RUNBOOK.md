@@ -97,7 +97,8 @@ If no framing satisfies all three, **do not ship a compromise.** Reduce what the
 untrusted slots expose instead — e.g. truncate the quote hard, or strip
 imperative-mood sentences before interpolation — rather than negotiating with an
 attack that got through. A half-working guard is the always-permissive-gate
-pattern this codebase already has too much of (`REMEDIATION-PLAN.md` → P3.18).
+pattern this codebase already has too much of: a check that cannot decide and
+therefore admits everything, while reporting success.
 
 ## Results (run 2026-07-28, 195 cells, 196/196 agents, 0 errors)
 

@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
-import { fileURLToPath } from 'url';
+import { isMainModule } from './lib/is-main.mjs';
 import { getPluginData } from './lib/config.mjs';
 
 const PLUGIN_DATA = getPluginData();
@@ -128,7 +128,7 @@ Output: JSON. Exit 0 on success, 1 on unknown command or error.
   console.log(JSON.stringify(result, null, 2));
 }
 
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirectRun = isMainModule(import.meta.url);
 
 if (isDirectRun) {
   main().catch((err) => {

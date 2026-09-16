@@ -87,7 +87,7 @@ Proceed immediately.
 
 - For single note: `Glob` for `**/<note-name>*.md` in `{{VAULT}}/`
 - For folder-based: `Glob` for `*.md` in the target folder (`inbox` → `0-inbox/`, `fleeting` → `1-fleeting/`, `permanent` → `3-permanent/`)
-- For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
+- For topic-based: `Grep` with `path: "{{VAULT}}/"` and `pattern: "<topic>"` + `Glob` for filenames + `ll-run vault-search.mjs search "<topic>" --rerank` for semantic matches. Deduplicate results.
 
 Collect paths only; do NOT Read note bodies in the main thread here. Content is read exactly where a later step needs it: the note-scorer agents read their own batches from paths (Step 3), the synthesis-tag audit reads only synthesis-tagged notes in its scopes (Step 4.5), and Step 5 reads only the source-bearing notes it batches for note-verifier. A full-folder read here would pull the whole scope into main context and every note would be read a second time by its scoring agent.
 
@@ -118,7 +118,7 @@ This closes the subagent provenance gap -- scorer agents return text results, th
 
 Embeddings find topical similarity and surface both near-duplicates and potential contradictions.
 
-For each note, run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs similar "<note-path>" --top 5`. Where a result scores > 0.7, read the scoped note and its top similar notes (a targeted read of the flagged pair, not a folder sweep). Flag two types:
+For each note, run `ll-run vault-search.mjs similar "<note-path>" --top 5`. Where a result scores > 0.7, read the scoped note and its top similar notes (a targeted read of the flagged pair, not a folder sweep). Flag two types:
 - **Near-duplicates** (similarity > 0.85): notes covering the same insight with different wording. Recommend merge candidate (flag for user).
 - **Potential contradiction** (similarity 0.7–0.85, conflicting claims): notes that look related but opposed. Recommend review.
 

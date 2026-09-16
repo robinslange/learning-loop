@@ -18,10 +18,10 @@ test('uninstall is operator-only (disable-model-invocation: true)', () => {
   assert.match(fm[1], /^disable-model-invocation: true$/m);
 });
 
-test('dream operators emit provenance in the canonical node form with the bucket field', () => {
+test('dream operators emit provenance in the canonical ll-run form with the bucket field', () => {
   // provenance-consolidate.mjs buckets on event.skill first (skill || agent ||
-  // action). Operators that omit "skill" and the node prefix rely on the file
-  // being executable and fall through to the agent field, diverging from
+  // action). Operators that omit "skill" and the ll-run prefix rely on the
+  // file being executable and fall through to the agent field, diverging from
   // dream/SKILL.md's canonical emit form.
   const dir = join(ROOT, 'skills', 'dream', 'operators');
   const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
@@ -30,8 +30,8 @@ test('dream operators emit provenance in the canonical node form with the bucket
     const src = readFileSync(join(dir, f), 'utf8');
     assert.match(
       src,
-      /node "\$\{CLAUDE_PLUGIN_ROOT\}\/scripts\/provenance-emit\.js"/,
-      `${f} must invoke provenance-emit.js with a node prefix`,
+      /ll-run provenance-emit\.js/,
+      `${f} must invoke provenance-emit.js via ll-run`,
     );
     assert.ok(src.includes('"skill":"dream"'), `${f} must carry the "skill" bucket field`);
   }

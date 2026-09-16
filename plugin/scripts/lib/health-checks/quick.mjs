@@ -13,7 +13,14 @@ import {
 } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
-import { DATA_FILES, FEDERATION_PATHS, SHIM_NAMES, shimFileName } from '../paths.mjs';
+import {
+  DATA_FILES,
+  FEDERATION_PATHS,
+  SHIM_NAMES,
+  binaryFileName,
+  daemonSocketSupported,
+  shimFileName,
+} from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
@@ -141,7 +148,7 @@ export function checkVaultSystemFiles({ vaultRoot } = {}) {
   });
 }
 
-export function checkBinaryExists({ pluginData } = {}) {
+export function checkBinaryExists({ pluginData, platform = process.platform } = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
@@ -152,7 +159,10 @@ export function checkBinaryExists({ pluginData } = {}) {
       fix: 'Run /learning-loop:init to download the binary',
     });
   }
-  const binPath = join(pluginData, 'bin', 'll-search');
+  // The name the DOWNLOADER writes, which differs by platform. `lib/binary.mjs`
+  // already resolved it correctly, so semantic search worked while this check
+  // reported the binary missing and offered to re-download it.
+  const binPath = join(pluginData, 'bin', binaryFileName(platform));
   if (!existsSync(binPath)) {
     return makeCheck({
       id: CHECK_IDS['binary-exists'],
@@ -165,7 +175,9 @@ export function checkBinaryExists({ pluginData } = {}) {
   }
   try {
     const stat = statSync(binPath);
-    if (!(stat.mode & 0o111)) {
+    // Same reason as the shims below: no meaningful 0o111 on a Windows `.exe`,
+    // so existence is the only signal the mode bit could have added.
+    if (platform !== 'win32' && !(stat.mode & 0o111)) {
       return makeCheck({
         id: CHECK_IDS['binary-exists'],
         name: 'll-search binary',
@@ -567,7 +579,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: 'no index — run vault-search.mjs index to build',
-      fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+      fix: 'Run: ll-run vault-search.mjs index',
     });
   }
   try {
@@ -579,7 +591,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
         status: SEVERITIES.fail,
         severity: SEVERITIES.warn,
         detail: 'index file is empty',
-        fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+        fix: 'Run: ll-run vault-search.mjs index',
       });
     }
     return makeCheck({
@@ -597,7 +609,7 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
       detail: `stat error: ${err.message}`,
-      fix: 'Run: node PLUGIN/scripts/vault-search.mjs index',
+      fix: 'Run: ll-run vault-search.mjs index',
     });
   }
 }
@@ -787,7 +799,11 @@ export function checkFederationSyncHealth({
   return ok(configured === 0 ? 'not configured' : 'syncing');
 }
 
-export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) {
+export function checkDuplicateGateHealth({
+  pluginData,
+  now = new Date(),
+  platform = process.platform,
+} = {}) {
   if (!pluginData) {
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
@@ -825,6 +841,21 @@ export function checkDuplicateGateHealth({ pluginData, now = new Date() } = {}) 
     // live daemon accepted the connection — it just answered too slowly. Advising
     // a start would send the user to fix a daemon that is already running.
     const daemonIsUp = totalDaemonTimeouts > 0;
+
+    // On a platform with no socket transport there is no warm path to start, so
+    // every call pays a cold subprocess and the only lever is the write budget.
+    // Prescribing ll-watch here is advice that cannot work at any daemon state.
+    if (!daemonSocketSupported(platform)) {
+      return makeCheck({
+        id: CHECK_IDS['duplicate-gate-health'],
+        name: 'Duplicate gate',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.warn,
+        detail: `${totalTimeouts} duplicate-gate timeouts in recent logs — this platform has no daemon socket, so every write pays a cold model start and the gate falls open when it overruns`,
+        fix: 'No daemon can serve the gate here, so starting one changes nothing. Set LL_PRE_WRITE_BUDGET_MS above your measured cold start: it is the only part of this that survives an upgrade, because the plugin replaces hooks.json on every release. Raising the pre-write-check timeout in plugin/hooks/hooks.json to match makes the longer budget usable now, but expect to redo it after the next update.',
+      });
+    }
+
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
       name: 'Duplicate gate',

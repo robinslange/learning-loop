@@ -386,6 +386,62 @@ test(
   },
 );
 
+// The native binary is `ll-search.exe` on Windows, and Node reports no POSIX
+// exec bit for it. `platform` is injected for the same reason the shim tests
+// inject it: the bug is invisible from the machine that finds it, because the
+// check looked for the POSIX name on every platform. A Windows box with a
+// correctly downloaded binary reported it missing and offered to re-download,
+// every session, while `lib/binary.mjs` resolved the same file fine.
+test('checkBinaryExists: a downloaded ll-search.exe is not a missing binary', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-win-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/ll-search.exe'), 'MZ');
+
+  const result = checkBinaryExists({ pluginData: dir, platform: 'win32' });
+
+  assert.equal(result.status, 'ok', `detail: ${result.detail}`);
+  assert.match(result.detail, /ll-search\.exe$/, 'and it names the file it found');
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test(
+  'checkBinaryExists: a present but non-executable binary still fails on POSIX',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    // The win32 fix put `platform !== 'win32' &&` in front of the mode test.
+    // Nothing asserted the POSIX half still fires, so changing that condition
+    // to `false &&` -- disabling the executability check on every platform --
+    // left the whole suite green. A downloaded-but-unchmodded binary is a real
+    // install state, and it is one /doctor exists to name.
+    const dir = mkdtempSync(join(tmpdir(), 'health-bin-noexec-'));
+    mkdirSync(join(dir, 'bin'));
+    const bin = join(dir, 'bin/ll-search');
+    writeFileSync(bin, '#!/usr/bin/env bash\n');
+    chmodSync(bin, 0o644);
+
+    const result = checkBinaryExists({ pluginData: dir });
+
+    assert.equal(result.status, 'fail');
+    assert.match(result.detail, /not executable/);
+    assert.match(result.fix, /chmod/);
+    rmSync(dir, { recursive: true, force: true });
+  },
+);
+
+test('checkBinaryExists: the POSIX name does not satisfy a Windows install', () => {
+  // The other side. A check that passed on any file at all would satisfy the
+  // test above while still not knowing what the downloader writes.
+  const dir = mkdtempSync(join(tmpdir(), 'health-bin-win-posix-'));
+  mkdirSync(join(dir, 'bin'));
+  writeFileSync(join(dir, 'bin/ll-search'), '#!/bin/sh\n');
+
+  const result = checkBinaryExists({ pluginData: dir, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.detail, /ll-search\.exe$/, 'and it names the file it wanted');
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkLocalBinOnPath: ok when ~/.local/bin in PATH', () => {
   // Built with `join` and `delimiter` rather than a POSIX string, because the
   // check compares the path the way the platform spells it and splits PATH on
@@ -801,6 +857,71 @@ test('checkDuplicateGateHealth: daemon-sourced timeouts do not advise starting l
     'the daemon is already running -- advising a start is the wrong fix',
   );
   assert.match(result.detail, /too slow|not responding|slow/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: does not advise ll-watch on a platform with no socket', () => {
+  // The daemon serves the gate over a UDS socket, and nli_server.rs is
+  // `#![cfg(unix)]` -- there is no socket and no named pipe on Windows, so the
+  // warm path does not exist there at all. Every timeout is therefore
+  // subprocess- or budget-sourced, which the daemonIsUp heuristic reads as
+  // "daemon down" and answers with "start the warm daemon (ll-watch)". That is
+  // advice that cannot work: the reporter of #5 had ll-watch already running
+  // and still had 55 timeouts, because starting it changes nothing here.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-nosock-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(6)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'win32' });
+
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.fix,
+    /ll-watch/,
+    'there is no socket transport on this platform -- a daemon cannot serve the gate here',
+  );
+  assert.match(
+    result.fix,
+    /budget|LL_PRE_WRITE_BUDGET_MS/i,
+    'the actionable lever on a no-socket host is the write budget, not the daemon',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkDuplicateGateHealth: still advises ll-watch where a socket exists', () => {
+  // The other side, so the fix above cannot be satisfied by dropping the advice
+  // everywhere: on a platform that does have the warm path, a gate timing out
+  // with no daemon-sourced entries is still a daemon worth starting.
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-sock-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(6)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'darwin' });
+
+  assert.equal(result.status, 'fail');
+  assert.match(result.fix, /ll-watch/);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1314,7 +1435,7 @@ test('readHealthCache returns null on corrupt JSON', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-import { runQuickChecks, formatMissingDeps } from '../plugin/scripts/health-check.mjs';
+import { runQuickChecks, formatMissingDeps, execOptions } from '../plugin/scripts/health-check.mjs';
 
 test('runQuickChecks: returns ran=quick + non-empty checks array', async () => {
   const result = await runQuickChecks({
@@ -1399,4 +1520,77 @@ test('formatMissingDeps: injection-shadow-gate readiness is not a missing depend
     ],
   };
   assert.equal(formatMissingDeps(result), '');
+});
+
+// The third of the four #3 false positives, and the only one with no test until
+// now. It is invisible from a POSIX runner by construction: execFileSync does
+// not consult PATHEXT, so on Windows a bare `claude` misses claude.cmd, reads
+// as "not found", and /doctor then recommends the Linux install.sh to someone
+// whose install is correct. safeExec routes through cmd.exe to fix that, and
+// the decision lives in execOptions so it can be asked directly rather than by
+// mocking execFileSync -- which is the middle of this, not its boundary.
+// The checks above are called directly. These two pin the ORCHESTRATOR, which
+// is where the platform was being dropped: checkBinaryExists and
+// checkShimsExist both accept an injected platform, and runQuickChecks passed
+// neither, so every win32 spelling resolved from process.platform and no POSIX
+// runner could reach it. Deleting the two `platform: c.platform` arguments
+// leaves every direct-call test above green.
+test('runQuickChecks threads platform to the win32 binary and shim spellings', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'health-orch-win-'));
+  const pluginData = join(home, 'plugin-data');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  mkdirSync(join(pluginData, 'bin'), { recursive: true });
+  // Exactly what a correct Windows install holds, and nothing a POSIX probe
+  // would accept: .cmd shims and an .exe binary.
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
+  writeFileSync(join(pluginData, 'bin', 'll-search.exe'), 'MZ');
+
+  const result = await runQuickChecks({ home, pluginData, platform: 'win32' });
+  const byId = (id) => result.checks.find((c) => c.id === id);
+
+  assert.equal(byId('shims-exist').status, 'ok', `shims: ${byId('shims-exist').detail}`);
+  assert.equal(byId('binary-exists').status, 'ok', `binary: ${byId('binary-exists').detail}`);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('runQuickChecks without a platform still resolves the running one', async () => {
+  // The SessionStart caller (health-detector.mjs) passes no platform, so the
+  // argument has to stay optional or every session starts reporting a missing
+  // binary. POSIX names here, no platform passed.
+  const home = mkdtempSync(join(tmpdir(), 'health-orch-default-'));
+  const pluginData = join(home, 'plugin-data');
+  mkdirSync(join(home, '.local/bin'), { recursive: true });
+  mkdirSync(join(pluginData, 'bin'), { recursive: true });
+  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n', { mode: 0o755 });
+
+  const result = await runQuickChecks({ home, pluginData });
+  const shims = result.checks.find((c) => c.id === 'shims-exist');
+
+  assert.equal(shims.status, process.platform === 'win32' ? 'fail' : 'ok', shims.detail);
+  rmSync(home, { recursive: true, force: true });
+});
+
+test('execOptions routes through the shell on win32, so PATHEXT is honored', () => {
+  assert.equal(execOptions('win32').shell, true);
+});
+
+test('execOptions does not invoke a shell anywhere else', () => {
+  // The other side, so the case above cannot be satisfied by shelling out
+  // everywhere -- which would hand every probe's argv to a shell parser on
+  // platforms that never needed one.
+  assert.equal(execOptions('darwin').shell, false);
+  assert.equal(execOptions('linux').shell, false);
+});
+
+test('execOptions defaults to the running platform', () => {
+  assert.equal(execOptions().shell, process.platform === 'win32');
+});
+
+test('execOptions carries the probe contract safeExec depends on', () => {
+  // safeExec no longer spells these itself. Dropping one here would strip the
+  // timeout from every version probe, and nothing else would notice.
+  const o = execOptions('linux');
+  assert.equal(o.timeout, 3000);
+  assert.equal(o.encoding, 'utf-8');
+  assert.deepEqual(o.stdio, ['ignore', 'pipe', 'ignore']);
 });

@@ -29,6 +29,17 @@ export function shimFileName(name, platform = process.platform) {
   return platform === 'win32' ? `${name}.cmd` : name;
 }
 
+// The file the DOWNLOADER writes for the native binary, in one place, for the
+// same reason as shimFileName above: on Windows it is `ll-search.exe`, and
+// every reader of `<plugin-data>/bin` has to agree with the writer about that.
+// Four call sites each carried their own copy of this ternary and two of them
+// were wrong -- the health check reported a correct install as a missing binary,
+// and `ll-watch` refused to start because it probed the POSIX name. Neither is
+// visible from a POSIX machine, which is why the spelling lives here now.
+export function binaryFileName(platform = process.platform) {
+  return platform === 'win32' ? 'll-search.exe' : 'll-search';
+}
+
 // Encode a project directory into its ~/.claude/projects/<slug> segment.
 // Claude Code replaces every path separator AND every '.' and ':' with '-',
 // so /Users/x/.claude/p -> -Users-x--claude-p and C:\Users\x -> C--Users-x.
@@ -163,6 +174,17 @@ export const FEDERATION_PATHS = {
   // it appears only when a second vault is registered.
   vaultRegistry: (pd) => join(pd, 'vaults.json'),
 };
+
+// Whether the warm duplicate-scan daemon can serve this platform at all.
+// The server is a Unix domain socket -- native/crates/ll-search/src/nli_server.rs
+// is `#![cfg(unix)]` and sync/watch.rs spawns it under `#[cfg(unix)]` -- so on
+// Windows there is no socket and no named pipe, and every duplicate-gate call
+// takes the cold subprocess path. Callers use this to avoid prescribing a
+// daemon that cannot exist: the reporter of #5 had ll-watch already running and
+// 55 logged timeouts, and was told to start it.
+export function daemonSocketSupported(platform = process.platform) {
+  return platform !== 'win32';
+}
 
 export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),

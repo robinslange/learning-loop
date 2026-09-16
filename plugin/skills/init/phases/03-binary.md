@@ -39,7 +39,7 @@ Use Node `fs.rmSync(path, { force: true })`. Do not prompt: these files are unco
 
 ## 3c: Initial Vault Index
 
-Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` to build the search index (the wrapper resolves the vault and db paths; the bare binary requires explicit positionals). Report progress.
+Run `ll-run vault-search.mjs index` to build the search index (the wrapper resolves the vault and db paths; the bare binary requires explicit positionals). Report progress.
 
 ## 3d: Install CLI shims
 
@@ -47,14 +47,12 @@ Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/vault-search.mjs index` to build the sea
 ll-run install-shims.mjs --install
 ```
 
-Writes three stable shims to `~/.local/bin/`:
+Writes four shims to `~/.local/bin/`: `ll-watch`, `ll-search`, `ll-paths` and `ll-run`. `ll-search` runs the plugin-data binary directly; the other three find the active plugin install at call time and run its `scripts/shim.mjs`. All four survive plugin updates, and the session-start hook rewrites them when a release changes them.
 
-- `ll-watch`: resolves the latest plugin cache version at runtime and exec's `scripts/watch.mjs`. Wraps `ll-search watch` with paths pre-resolved from config.
-- `ll-search`: resolves `PLUGIN_DATA` (via `$CLAUDE_PLUGIN_DATA` or the `~/.claude/plugins/data/.ll-data-path` marker) and exec's the binary at `$PLUGIN_DATA/bin/ll-search` with the right ORT env vars.
-- `ll-paths`: same cache resolution as `ll-watch`, exec'ing `scripts/resolve-paths.mjs`. It is how a Bash block gets one path without an environment set up first — `VAULT="$(ll-paths VAULT)"` — since nothing substitutes `${CLAUDE_PLUGIN_ROOT}` outside a `SKILL.md`.
-- `ll-run`: same cache resolution, running a named script under `scripts/` — `ll-run health-check.mjs`. This is what most blocks use; they only ever wanted to run something, and naming it skips the path entirely.
+- `ll-paths <FIELD>` prints one resolved path -- `VAULT="$(ll-paths VAULT)"` -- because nothing substitutes `${CLAUDE_PLUGIN_ROOT}` outside a `SKILL.md`.
+- `ll-run <script>` runs a plugin script by name -- `ll-run health-check.mjs` -- and is what most commands use.
 
-All three survive plugin updates because they resolve their targets at runtime. If `~/.local/bin` is not in the user's PATH, inform them to add it. The legacy `node ${CLAUDE_PLUGIN_ROOT}/scripts/watch.mjs --install` still works (it delegates to `install-shims.mjs`).
+If `~/.local/bin` is not in the user's PATH, inform them to add it.
 
 ## 3e.5: Optional - ygrep (local indexed code search)
 
@@ -100,7 +98,7 @@ Idempotent: re-running when `ygrep` is already on PATH is a no-op (the `command 
 
 ## 3e: Plugin Dependencies
 
-Run `node ${CLAUDE_PLUGIN_ROOT}/scripts/check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
+Run `ll-run check-deps.mjs`. For each entry where `status !== "installed"`, present it using the `required` field to set urgency.
 
 For required deps (`required: true`) — block until the user confirms or explicitly declines:
 

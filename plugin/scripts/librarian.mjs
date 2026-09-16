@@ -7,7 +7,7 @@
 // SIGTERM/SIGINT: signals AbortController, gives 5s for state drain, then exits.
 // __test__ surface preserved for existing bust-import tests.
 
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 import { runDaemon, investigateNote } from './librarian/daemon.mjs';
 import { waitForOllama } from './librarian/ollama-client.mjs';
 import { voiceCheck } from './librarian/tools/voice.mjs';
@@ -59,7 +59,7 @@ async function cli() {
   }
 }
 
-const isDirectRun = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
+const isDirectRun = isMainModule(import.meta.url);
 if (isDirectRun) cli();
 
 // Test surface: __test__ must remain on this module for existing bust-import tests.

@@ -22,7 +22,7 @@ ll-run provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","t
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
-At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `node ${CLAUDE_PLUGIN_ROOT}/scripts/provenance-consolidate.mjs`.
+At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `ll-run provenance-consolidate.mjs`.
 
 ## Phase 1: Orient
 
@@ -53,7 +53,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
    *Steps 2–8 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
 
 2. **Flag DATE NORMALIZE candidates.**
-   Files containing relative temporal references ("yesterday", "last week", etc.).
+   Files containing a relative reference that resolves to a single day ("yesterday", "tomorrow", "two days ago", "last Thursday"). Do not inspect or pre-filter them: the script in Phase 3 decides, and it refuses tense-words and bare week spans, so flagging those only sends it to files where nothing will happen.
 
 3. **Flag MERGE candidates.**
    Within each type group, flag pairs where both descriptions reference the same tool/concept, one is a subset of the other, or both contain the same rule. Skip pairs that contradict each other (those go to RESOLVE).
@@ -93,13 +93,13 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 
 Process in strict order: **DATE NORMALIZE, MERGE, RESOLVE, ABSTRACT, COMPRESS, PRUNE, LINK.**
 
-Acquire the dream lock first using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP, tell the user, and take no further /dream action this invocation. Exit 2 = usage/installation error — report the stderr message to the user and abort; do not treat it as 'already running' and do not proceed without a lock.
+Acquire the dream lock first using Bash: `ll-run marker.mjs lock-acquire dream`. Exit 0 = lock acquired, proceed. Exit 1 = another /dream is running (or one crashed less than an hour ago and its lock has not gone stale yet) — STOP, tell the user, and take no further /dream action this invocation. Exit 2 = usage/installation error — report the stderr message to the user and abort; do not treat it as 'already running' and do not proceed without a lock.
 
 For each operator, read its instruction file from `operators/` and execute:
 
 | Operator | File | Input |
 |---|---|---|
-| DATE NORMALIZE | `operators/normalize.md` | Flagged files with relative dates |
+| DATE NORMALIZE | `operators/normalize.md` | Flagged files; the script decides what converts |
 | MERGE | `operators/merge.md` | Candidate pairs (excluding contradictions) |
 | RESOLVE | `operators/resolve.md` | Contradiction pairs |
 | ABSTRACT | `operators/abstract.md` | Flagged clusters (per-cluster user gate) |
@@ -109,18 +109,26 @@ For each operator, read its instruction file from `operators/` and execute:
 
 Log every operation to `_dream_log.md` (append, create if needed).
 
-Remove the lock when done using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" lock-release dream`
+Remove the lock when done using Bash: `ll-run marker.mjs lock-release dream`
 
 ## Phase 4: Rebuild Index and Report
 
 1. Rebuild the index from scratch: scan all `.md` files (excluding MEMORY.md, the `_index_*.md` files, _dream_log.md, _archived/), format each as `- [filename.md](filename.md): description`, one line, under 150 chars.
 
-   **MEMORY.md has a hard 16KB budget.** It is read into context whole at session start; an over-budget index is silently truncated there, and every rule past the cut stops surfacing — the failure this budget prevents. When a single monolithic MEMORY.md would exceed 16KB, do NOT emit one and do NOT rely on line-count heuristics. Use the per-type split structure instead:
+   **MEMORY.md has a hard byte budget, and it is far smaller than it looks.** The index is read into context whole at session start, where `hooks/session-start/context-assembly.mjs` caps it at `HookConfig.MEMORY_INDEX_MAX_BYTES`. Read the live value instead of trusting a number written here -- this file claimed 16KB against a shipped 3072 B for several releases, a 5.3x error that silently truncated the index on every session:
+
+   ```bash
+   grep -o 'MEMORY_INDEX_MAX_BYTES: [0-9_]*' "$(ll-paths PLUGIN)/scripts/lib/hook-config.mjs"
+   ```
+
+   Over budget the reader does not discard the index: it keeps whole lines up to the cap and appends `… N more entries -- read <path>`. So the head still surfaces and the pointer names the file, but every entry past the cut stops reaching the session.
+
+   At the shipped cap a monolithic index is the EXCEPTION, not the default -- a few dozen entries exhaust it. Assume the per-type split unless the whole index measurably fits:
    - Write the full per-type entry lists to `_index_feedback.md`, `_index_project.md`, and `_index_reference.md` (one line per memory, no frontmatter — these hold the bulk).
    - Keep MEMORY.md slim: the User-type entries inline (the small, always-relevant set), plus exactly one pointer line per split type (e.g. `- [_index_feedback.md](_index_feedback.md) — all feedback entries, grep when a task might match past feedback`), and a one-line note that the split was made to stay under budget.
-   Only keep a single monolithic MEMORY.md when the whole index fits under 16KB. Never regenerate a monolithic index above budget.
+   Keep a single monolithic MEMORY.md only when the whole index measurably fits under the cap -- verify with `wc -c`, never by eye or by line count. Never regenerate a monolithic index above budget.
 
-2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `node "${CLAUDE_PLUGIN_ROOT}/scripts/marker.mjs" stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
+2. Write MEMORY.md (full overwrite; write the `_index_*.md` files too when split). Write the dream timestamp using Bash: `ll-run marker.mjs stamp last-dream` (this is what the SessionStart dream gate and the Stop-hook cooldown read, and it also clears any cached session-start dream nudge — do not write the timestamp by hand; this command is the single writer).
 
 3. Report:
    ```

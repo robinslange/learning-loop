@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { isMainModule } from './lib/is-main.mjs';
 
 const KNOWN_FRAMEWORKS = [
   'next',
@@ -187,7 +187,7 @@ export function generateProfile(repoPath) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMainModule(import.meta.url)) {
   const repo = process.argv[2];
   if (!repo) {
     console.error('Usage: ingest-profile.mjs <repo-path>');

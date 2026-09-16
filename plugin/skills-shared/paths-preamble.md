@@ -36,6 +36,6 @@ and it swallows the resolver's own failure — `eval` of a command that died
 consumes nothing and leaves every name unset. `tests/bash-blocks-resolve-paths.test.mjs`
 fails the build over it.
 
-**`${CLAUDE_PLUGIN_ROOT}` must not appear inside a Bash block.** It is not an environment variable — a Bash tool shell has no such name — and the only thing that ever fills it in is the Skill tool, when it loads a `SKILL.md`. A block in any other file arrives through `Read`, unsubstituted, and the placeholder expands to the empty string: `node "${CLAUDE_PLUGIN_ROOT}/scripts/x.mjs"` becomes `node "/scripts/x.mjs"`, which fails while `eval` consumes nothing, leaving every path unset and the work rooted at `/`. `tests/bash-blocks-resolve-paths.test.mjs` fails the build over it.
+**`${CLAUDE_PLUGIN_ROOT}` must not appear inside a Bash block.** It is not an environment variable — a Bash tool shell has no such name — and the only thing that ever fills it in is the Skill tool, when it loads a `SKILL.md`. A block in any other file arrives through `Read`, unsubstituted, and the placeholder expands to the empty string: a command built directly on `${CLAUDE_PLUGIN_ROOT}/scripts/x.mjs` resolves to `/scripts/x.mjs`, which fails while `eval` consumes nothing, leaving every path unset and the work rooted at `/`. `tests/bash-blocks-resolve-paths.test.mjs` fails the build over it.
 
 Never hardcode a fallback path; `resolve-paths.mjs` is the single source of truth (see `tests/agent-architecture-lint.test.mjs` M18).
