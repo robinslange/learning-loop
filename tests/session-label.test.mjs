@@ -471,11 +471,18 @@ describe(
           join(vault, 'notes', 'beta.md'),
           'Beta note body about dedupe windows and pointer suppression.\n',
         );
+        writeFileSync(
+          join(vault, 'notes', 'gamma.md'),
+          'Gamma note body about promoting a pointer across turns.\n',
+        );
 
-        // Stub returns the same two above-threshold hits on both prompts.
+        // Stub returns the same three above-threshold hits on both prompts.
+        // Three, not two: the injection fills two body slots, so a two-hit
+        // fixture produces no pointer at all and this test needs one to promote.
         const hits = JSON.stringify([
           { path: 'notes/alpha.md', title: 'alpha', score: 0.99 },
           { path: 'notes/beta.md', title: 'beta', score: 0.9 },
+          { path: 'notes/gamma.md', title: 'gamma', score: 0.8 },
         ]);
         writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hits}'\n`, {
           mode: 0o755,
@@ -503,12 +510,12 @@ describe(
 
         const out1 = runPrompt('tell me about hook injection ordering and budgets');
         assert.ok(out1.includes('Alpha note body'), 'prompt 1 must body-inject the top hit');
-        assert.ok(out1.includes('notes/beta.md'), 'prompt 1 must list beta as a pointer');
-        assert.ok(!out1.includes('Beta note body'), 'prompt 1 must not inject the pointer body');
+        assert.ok(out1.includes('notes/gamma.md'), 'prompt 1 must list gamma as a pointer');
+        assert.ok(!out1.includes('Gamma note body'), 'prompt 1 must not inject the pointer body');
 
         const out2 = runPrompt('now drill into dedupe windows and pointer suppression');
         assert.ok(
-          out2.includes('Beta note body'),
+          out2.includes('Gamma note body'),
           `pointer-seen note must be body-injected on the follow-up prompt; got: ${out2}`,
         );
       } finally {
@@ -1038,14 +1045,15 @@ describe(
         const hits = '[{"path":"notes/gamma.md","title":"gamma","score":0.99}]';
         writeFileSync(
           join(stubBin, 'll-search'),
-          '#!/bin/sh\necho "$*" >> ' + JSON.stringify(argsLog) + '\nprintf \'%s\' \'' + hits + '\'\n',
+          '#!/bin/sh\necho "$*" >> ' + JSON.stringify(argsLog) + "\nprintf '%s' '" + hits + "'\n",
           { mode: 0o755 },
         );
 
         const out = execFileSync('node', [HOOK], {
           input: JSON.stringify({
             session_id: randomUUID(),
-            prompt: 'walk me through the dedupe window behaviour for injected pointer notes in this session',
+            prompt:
+              'walk me through the dedupe window behaviour for injected pointer notes in this session',
             transcript_path: '',
             cwd: '/tmp',
           }),

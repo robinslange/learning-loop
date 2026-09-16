@@ -244,10 +244,13 @@ describe('buildInjection', () => {
   });
 
   it('pointer-level dedupe entry suppresses a repeat pointer', () => {
+    // B carries no body, so a body slot cannot rescue it: a pointer-level
+    // dedupe entry is the only thing deciding its fate, which is what this
+    // pins. A body-bearing B would be promoted instead, covered below.
     const result = buildInjection({
       vaultHits: [
         { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
-        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.9 },
+        { title: 'Note B', path: 'b.md', body: '', score: 0.9 },
         { title: 'Note C', path: 'c.md', body: 'Body C content here.', score: 0.85 },
       ],
       query: 'test',
@@ -258,7 +261,7 @@ describe('buildInjection', () => {
     assert.ok(!result.additionalContext.includes('Note B'), 'pointer must not repeat');
     assert.deepEqual(result.injectedVault, [
       { path: 'a.md', level: 'body', score: 0.95 },
-      { path: 'c.md', level: 'pointer', score: 0.85 },
+      { path: 'c.md', level: 'body', score: 0.85 },
     ]);
   });
 
@@ -266,10 +269,12 @@ describe('buildInjection', () => {
     // The gate logs vault_top_score (rank 0 only), so without per-hit scores an
     // offline threshold sweep cannot tell whether a POINTER that got used was a
     // marginal admit or a strong match. injection-precision.mjs joins on these.
+    // B is body-less so it lands in a pointer slot: the point here is that a
+    // POINTER carries its own score, not the top match's.
     const result = buildInjection({
       vaultHits: [
         { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
-        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.41 },
+        { title: 'Note B', path: 'b.md', body: '', score: 0.41 },
       ],
       query: 'q',
       alreadyInjected: new Map(),
@@ -317,17 +322,58 @@ describe('buildInjection', () => {
     assert.ok(!result.additionalContext.includes('## From past conversations'));
   });
 
-  it('caps pointers at 4, dropping the 5th related note', () => {
+  it('fills two body slots and three pointer slots, dropping the 6th note', () => {
     const vaultHits = [{ title: 'Top', path: 'top.md', body: 'Top body.', score: 0.99 }];
     for (let i = 0; i < 5; i++) {
       vaultHits.push({ title: `Related ${i}`, path: `r${i}.md`, body: 'x', score: 0.5 - i * 0.01 });
     }
     const result = buildInjection({ vaultHits, query: 'test', alreadyInjected: new Map() });
+    const bodyPaths = result.injectedVault.filter((v) => v.level === 'body').map((v) => v.path);
     const pointerPaths = result.injectedVault
       .filter((v) => v.level === 'pointer')
       .map((v) => v.path);
-    assert.deepEqual(pointerPaths, ['r0.md', 'r1.md', 'r2.md', 'r3.md']);
-    assert.ok(!result.additionalContext.includes('Related 4'), '5th related note must be dropped');
+    assert.deepEqual(bodyPaths, ['top.md', 'r0.md']);
+    assert.deepEqual(pointerPaths, ['r1.md', 'r2.md', 'r3.md']);
+    assert.equal(result.injectedVault.length, 5, 'total stays at five notes');
+    assert.ok(!result.additionalContext.includes('Related 4'), '6th note must be dropped');
+  });
+
+  it('gives the second body-bearing hit a body, not a title line', () => {
+    // Measured on live turns: a body slot converts at 31.6% against a pointer's
+    // 5.1%, and 2.5x of that survives controlling for the note itself. The
+    // second slot is the lever, so it is pinned.
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'First', path: 'a.md', body: 'Body A content here.', score: 0.9 },
+        { title: 'Second', path: 'b.md', body: 'Body B content here.', score: 0.8 },
+      ],
+      query: 'test',
+      alreadyInjected: new Map(),
+    });
+    assert.ok(result.additionalContext.includes('Body A content here.'));
+    assert.ok(result.additionalContext.includes('Body B content here.'));
+    assert.deepEqual(result.injectedVault, [
+      { path: 'a.md', level: 'body', score: 0.9 },
+      { path: 'b.md', level: 'body', score: 0.8 },
+    ]);
+  });
+
+  it('promotes a pointer-seen note into a body slot', () => {
+    // The dedupe map records 'pointer' when the model saw only a title line, so
+    // the note still owes it a body. This was reachable only at rank 0 before a
+    // second slot existed.
+    const result = buildInjection({
+      vaultHits: [
+        { title: 'Fresh', path: 'a.md', body: 'Body A content here.', score: 0.9 },
+        { title: 'Seen', path: 'b.md', body: 'Body B content here.', score: 0.8 },
+      ],
+      query: 'test',
+      alreadyInjected: new Map([['b.md', 'pointer']]),
+    });
+    assert.deepEqual(result.injectedVault, [
+      { path: 'a.md', level: 'body', score: 0.9 },
+      { path: 'b.md', level: 'body', score: 0.8 },
+    ]);
   });
 
   it('omits the "Related notes:" header when there are no pointers', () => {
@@ -473,7 +519,11 @@ describe('buildQueryParts', () => {
   // prompt alone -- calling that padded overstates the padded rate and feeds
   // the gate a query that was never padded.
   it('a first turn has no priors to blend, so it is not padded', () => {
-    const parts = buildQueryParts({ prompt: 'short ask', messages: ['short ask'], soloMinChars: 80 });
+    const parts = buildQueryParts({
+      prompt: 'short ask',
+      messages: ['short ask'],
+      soloMinChars: 80,
+    });
     assert.equal(parts.query, parts.soloQuery, 'nothing was blended in');
     assert.equal(parts.padded, false);
   });
