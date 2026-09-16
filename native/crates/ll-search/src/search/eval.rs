@@ -3,11 +3,11 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K, TOP_K_INITIAL};
+use crate::config::{PRF_ALPHA, PRF_BETA, PRF_K};
 use crate::embed::embed_query;
 use crate::rerank::rerank_with_report;
 
-use super::scoring::{finalize_rrf, rocchio_prf_with, PrfParams, add_ranked_rrf, FusionWeights};
+use super::scoring::{finalize_rrf, PrfParams, FusionWeights};
 use super::store::EmbeddingStore;
 use super::context::{SearchContext, StageFlags};
 use super::federation::batch_load_bodies_federated;
@@ -152,17 +152,12 @@ fn eval_ranking(
     source_path: &str,
     prf_params: Option<&PrfParams>,
 ) -> Vec<String> {
-    let all_embeddings = ctx.store.all();
     let signals = ctx.compute_signals_holdout(conn, query_vec, query_text, source_path);
 
     let mut rrf = ctx.rrf_from_signals(&signals, None);
 
     if let Some(params) = prf_params {
-        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
-        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        initial.truncate(30);
-        let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, params);
-        add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+        ctx.apply_prf(&mut rrf, query_vec, params);
     }
 
     finalize_rrf(rrf, 10).into_iter().map(|(p, _)| p).collect()
@@ -374,17 +369,11 @@ fn funnel_with_signals(
     query_text: &str,
     flags: &StageFlags,
 ) -> Vec<String> {
-    let all_embeddings = ctx.store.all();
-
     let mut rrf = ctx.rrf_from_signals_gated(signals, flags, None);
 
     if flags.prf {
-        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
-        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        initial.truncate(TOP_K_INITIAL);
         let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
-        let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
-        add_ranked_rrf(&mut rrf, prf_results.iter().map(|(p, _)| p.as_str()));
+        ctx.apply_prf(&mut rrf, query_vec, &prf_params);
     }
 
     let fused = finalize_rrf(rrf, 20);
@@ -408,7 +397,42 @@ fn funnel_with_signals(
 
 #[cfg(test)]
 mod tests {
+    use super::super::test_helpers::helpers::*;
     use super::*;
+
+    #[test]
+    fn reciprocal_label_rate_counts_only_targets_that_link_back() {
+        // b links back to a, so b's indexed body carries a's slug and the slug
+        // tokenizes into a's title terms: BM25 can match the query title as
+        // literal text. c does not link back, so surfacing c needs retrieval.
+        // The rate separates the two, which is the whole point of printing it.
+        let emb = norm(&[1.0, 0.0]);
+        let conn = create_graph_db(
+            &[
+                ("notes/a.md", "alpha", "body a", &emb),
+                ("notes/b.md", "beta", "body b", &emb),
+                ("notes/c.md", "gamma", "body c", &emb),
+            ],
+            &[("notes/a.md", "b"), ("notes/a.md", "c"), ("notes/b.md", "a")],
+        );
+
+        let mut relevant = HashSet::new();
+        relevant.insert("notes/b.md".to_string());
+        relevant.insert("notes/c.md".to_string());
+        let queries = vec![EvalQuery {
+            title: "alpha".to_string(),
+            path: "notes/a.md".to_string(),
+            relevant,
+            long_query: None,
+        }];
+
+        let (reciprocal, total) = reciprocal_label_rate(&conn, &queries);
+        // `tune_weights` only prints the leak warning when `total > 0`, so a
+        // zero here would make the warning vanish silently and leave the sweep
+        // table looking authoritative again.
+        assert_eq!(total, 2, "every relevant pair must be counted");
+        assert_eq!(reciprocal, 1, "only the target that links back is leaked");
+    }
 
     #[test]
     fn test_strip_wikilinks_removes_targets() {
@@ -448,6 +472,47 @@ mod tests {
 /// Queries are split train/holdout on an even/odd stride. The winner is chosen
 /// on train and reported on holdout, because a grid search that picks and
 /// reports on the same queries measures the search, not the weights.
+/// How many (query, relevant target) pairs have the target linking back.
+///
+/// The eval holds the query note's adjacency out of the PPR walk so the graph
+/// lane cannot simply read the gold edges. Nothing holds the same information
+/// out of the FTS index: `clean_wikilinks` keeps a link's target slug verbatim
+/// in the indexed body, and a slug tokenizes into exactly its title's terms. So
+/// on a reciprocal pair the target note contains the query title as literal
+/// text, and BM25 matches it lexically while the graph lane is blindfolded. A
+/// sweep over this eval set therefore ranks weightings by how well they exploit
+/// that asymmetry, which is how the graph lanes came to be scored as worthless.
+///
+/// Approximate on purpose: this matches the raw slug a wikilink stores, which
+/// is the target's stem, so a link written as a full path is not counted. It is
+/// a floor on the leak, not a measurement of it.
+fn reciprocal_label_rate(conn: &Connection, queries: &[EvalQuery]) -> (usize, usize) {
+    let mut stmt = match conn.prepare(
+        "SELECT 1 FROM links l JOIN notes n ON n.id = l.source_id
+         WHERE n.path = ?1 AND l.target_path = ?2 LIMIT 1",
+    ) {
+        Ok(s) => s,
+        Err(_) => return (0, 0),
+    };
+    let mut reciprocal = 0usize;
+    let mut total = 0usize;
+    for q in queries {
+        let stem = q
+            .path
+            .rsplit('/')
+            .next()
+            .unwrap_or(q.path.as_str())
+            .trim_end_matches(".md");
+        for target in &q.relevant {
+            total += 1;
+            if stmt.exists(rusqlite::params![target, stem]).unwrap_or(false) {
+                reciprocal += 1;
+            }
+        }
+    }
+    (reciprocal, total)
+}
+
 pub fn tune_weights(
     conn: &Connection,
     _store: &EmbeddingStore,
@@ -463,6 +528,17 @@ pub fn tune_weights(
     }
     let ctx = SearchContext::build(conn);
     eprintln!("Tuning on {} queries", queries.len());
+
+    // Measured after sampling, so it describes the set actually swept.
+    let (recip, pairs) = reciprocal_label_rate(conn, &queries);
+    if pairs > 0 {
+        let pct = 100.0 * recip as f64 / pairs as f64;
+        eprintln!("LABEL LEAK: {recip}/{pairs} ({pct:.1}%) of (query, target) pairs are reciprocal.");
+        eprintln!("  A reciprocal target carries the query note's title as wikilink text, so BM25");
+        eprintln!("  matches it lexically while the PPR holdout denies the graph lane those same");
+        eprintln!("  edges. This sweep ranks weightings by how well they exploit that asymmetry.");
+        eprintln!("  Read the table as a diagnostic. It cannot choose weights.");
+    }
 
     // Tune on TITLE queries, not the body-derived long ones.
     //

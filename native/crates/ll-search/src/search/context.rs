@@ -294,24 +294,36 @@ impl SearchContext {
         rrf
     }
 
+    /// Hybrid-feedback PRF, applied to a fused score map in place.
+    ///
+    /// One implementation, three callers: production, the funnel eval and the
+    /// PRF sweep. The eval harnesses each carried their own copy and it drifted.
+    /// They fused the PRF lane at an implicit 1.0 while production weighted it
+    /// at PRF_WEIGHT, so the gate was certifying a pipeline that does not ship.
+    pub(crate) fn apply_prf(
+        &self,
+        rrf: &mut HashMap<String, f64>,
+        query_vec: &[f32],
+        params: &PrfParams,
+    ) {
+        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
+        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        initial.truncate(TOP_K_INITIAL);
+        let prf_results = rocchio_prf_with(query_vec, &initial, self.store.all(), params);
+        add_weighted_rrf(rrf, FusionWeights::default().prf, prf_results.iter().map(|(p, _)| p.as_str()));
+    }
+
     pub(crate) fn local_rrf_scores(
         &self,
         conn: &Connection,
         query_vec: &[f32],
         query_text: &str,
     ) -> HashMap<String, f64> {
-        let all_embeddings = self.store.all();
         let signals = self.compute_signals(conn, query_vec, query_text);
 
         let mut rrf = self.rrf_from_signals(&signals, None);
-
-        // Hybrid-feedback PRF
-        let mut initial: Vec<(String, f64)> = rrf.iter().map(|(p, s)| (p.clone(), *s)).collect();
-        initial.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        initial.truncate(TOP_K_INITIAL);
         let prf_params = PrfParams { alpha: PRF_ALPHA, beta: PRF_BETA, k: PRF_K };
-        let prf_results = rocchio_prf_with(query_vec, &initial, all_embeddings, &prf_params);
-        add_weighted_rrf(&mut rrf, FusionWeights::default().prf, prf_results.iter().map(|(p, _)| p.as_str()));
+        self.apply_prf(&mut rrf, query_vec, &prf_params);
 
         rrf
     }

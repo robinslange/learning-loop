@@ -268,7 +268,13 @@ pub fn try_fts_bm25_query(
 /// the equal-weight funnel for 25%: PPR and tag expansion, which had never seen
 /// the text, agreed on a wrong note and outvoted it.
 ///
-/// Set by `ll-search tune-weights` against the wikilink eval set, not by taste.
+/// These values came from `ll-search tune-weights`, but that sweep cannot
+/// choose them: its wikilink labels reach the lexical lane as literal text
+/// while the PPR holdout denies the graph lane the same edges, so it ranks
+/// weightings by how well they exploit that asymmetry. Run it as a diagnostic.
+/// Choose weights from demonstrably-used notes instead: `bench/recall-labels.mjs`
+/// mines the labels, `bench/gate-replay.mjs` replays real prompts per binary.
+/// On that measurement these weights beat equal weighting 24 paired to 2.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FusionWeights {
     pub vec: f64,

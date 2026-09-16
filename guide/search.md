@@ -24,9 +24,11 @@ The top 30 candidates from each signal enter the RRF merge, where each lane cont
 | Personalized PageRank | 0.05 |
 | Tag expansion       | 0.05   |
 
-Equal weighting was measurably worse. On tail passages, BM25 alone put the source note at rank 1 for 85% of queries; the equal-weight funnel managed 25%. PPR and tag expansion, which never see the query text, agreed on a wrong note and outvoted the lane that did. The weights are set by `ll-search tune-weights` against the wikilink eval set, not by taste.
+Equal weighting was measurably worse. On tail passages, BM25 alone put the source note at rank 1 for 85% of queries; the equal-weight funnel managed 25%. PPR and tag expansion, which never see the query text, agreed on a wrong note and outvoted the lane that did. Replaying real logged prompts against notes the model demonstrably used agrees: these weights beat equal weighting in 24 paired comparisons to 2, and put the used note at rank 0 36% of the time against 28%.
 
-The graph lanes are therefore deliberately near-silent: at 0.05 they are statistically tied with the sweep's optimum of zero. They are kept above zero so their candidates still enter the pool the reranker judges — their value is recall into that pool, not votes in the ranking. PRF improves recall for paraphrased queries without needing query rewriting.
+These values came out of `ll-search tune-weights`, but that sweep is not what justifies them, and it cannot choose weights. Its wikilink labels reach the lexical lane as literal text — a link's target slug is indexed verbatim and tokenizes into that note's title terms, and 94% of this vault's links are reciprocal — while the PPR holdout denies the graph lane those same edges. It therefore rewards whichever weighting best exploits that asymmetry. Weights are chosen from used-note replay (`bench/recall-labels.mjs`, `bench/gate-replay.mjs`).
+
+The graph lanes are therefore deliberately near-silent. They are kept above zero so their candidates still enter the pool the reranker judges — their value is recall into that pool, not votes in the ranking. Note that at these magnitudes a graph lane cannot promote anything into the top 10 on its own: with `k = 5` and each lane truncated at 30, PPR's best item scores `0.05/6 = 0.0083` against BM25's thirtieth at `1/35 = 0.0286`. PRF improves recall for paraphrased queries without needing query rewriting.
 
 Because the weights sum to 2.6 rather than 5, the achievable fusion score tops out at `2.6/(5+1) = 0.4333`. Any threshold denominated in this raw sum — notably `injection_threshold` — is on that scale. See [configuration.md](configuration.md#context-injection).
 

@@ -983,12 +983,17 @@ async fn main() {
                 println!("{:>6.2} {:>6.2} {:>6.2}   {:>9.4} {:>9.4}", w.vec, w.ppr, w.tag, train, hold);
             }
             let dflt = ll_search::search::scoring_defaults();
-            if let Some((w, train, hold)) =
-                results.iter().find(|(w, _, _)| *w == dflt)
-            {
-                println!("\nshipped default: ppr {:.2} tag {:.2} -> train {:.4} holdout {:.4}",
-                    w.ppr, w.tag, train, hold);
-            }
+            println!(
+                "\nshipped: ppr {:.2} tag {:.2}\n\
+                 \n\
+                 This table is a DIAGNOSTIC, not a recommendation. See the LABEL LEAK line above:\n\
+                 the wikilink labels reach the lexical lane as literal text while the PPR holdout\n\
+                 denies the graph lane the same edges, so the ranking rewards whichever weighting\n\
+                 best exploits that asymmetry rather than whichever retrieves best. Choose weights\n\
+                 from demonstrably-used notes instead: bench/recall-labels.mjs mines the labels and\n\
+                 bench/gate-replay.mjs replays real prompts through a given binary.",
+                dflt.ppr, dflt.tag
+            );
         }
         Commands::TunePrf { db_path, queries } => {
             let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
