@@ -63,11 +63,13 @@ All notable changes to this project are documented here. The format is based on 
   Cycles of any length work — a swap is the shortest. Verified against the real
   7,099-note index: an unchanged vault parks and moves nothing, and an injected
   swap plus three-way rotation resolves with no row stranded and no id lost.
-  Does NOT cover rows whose `note_uuid` is still NULL: both statements key on
-  that column, so an index's first reindex after the column is added is still
-  exposed to the same wrong-id-on-the-wrong-body outcome until each note is
-  re-read. Not a regression — the previous version never matched NULL either —
-  and pinned by a test so the limit is visible in code.
+  Does NOT cover a swap between rows that are all still id-less. Only the land
+  half keys on `note_uuid`; the park half keys on the row's path, so an id-less
+  row holding a path another row's id owns IS parked, never lands, and is
+  collected — costing an embedding, not an identity. The exposed case needs no
+  row to own any desired id, which is a vault's first reindex after the column
+  is added. Not a regression — the previous version never matched NULL either —
+  and both halves are pinned by tests.
 
 - **Every sync re-wrote and re-indexed every followed peer vault.**
   `Outcome::AlreadyCurrent` could never fire: installing a fetched index builds
