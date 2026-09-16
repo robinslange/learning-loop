@@ -192,6 +192,47 @@ test('post-tool Write into the vault does not record a memory-write entry', () =
   }
 });
 
+// An Edit into the auto-memory dir must NOT be recorded. Edit requires the
+// file to already exist, so it can never add one, and stop-nudge reports this
+// log as "created N new memory files". Counting edits made a session that only
+// updated existing memories report having created them: six edits, zero new
+// files, "created 6 new memory files". Note birthtime cannot stand in for this
+// check, because an Edit rewrites the file and resets btime on macOS.
+test('post-tool Edit into the memory dir does not record a write-log entry', () => {
+  const projectDir = mkdtempSync(join(tmpdir(), 'll-pt-memedit-proj-'));
+  const encodedPath = encodeProjectDir(projectDir);
+  const sid = 'pt-mem-edit-session';
+  const memFileFor = (sandboxRoot) =>
+    join(sandboxRoot, '.claude', 'projects', encodedPath, 'memory', 'feedback_thing.md');
+  const r = runHook(HOOK, {
+    env: { CLAUDE_PROJECT_DIR: projectDir, CLAUDE_CODE_SESSION_ID: sid },
+    seed: (_pluginDataDir, sandboxRoot) => {
+      const memFile = memFileFor(sandboxRoot);
+      mkdirSync(join(memFile, '..'), { recursive: true });
+      writeFileSync(memFile, '# an existing memory');
+    },
+    stdin: (sandboxRoot) => ({
+      tool_name: 'Edit',
+      tool_input: {
+        file_path: memFileFor(sandboxRoot),
+        old_string: 'an existing memory',
+        new_string: 'an updated memory',
+      },
+      tool_response: { success: true },
+    }),
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    assert.ok(
+      !existsSync(join(r.pluginDataDir, 'markers', `memory-writes-${sid}`)),
+      'editing an existing memory must not be counted as creating one',
+    );
+  } finally {
+    r.cleanup();
+    rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test('post-tool malformed stdin: exits 0, nothing written', () => {
   const r = runHook(HOOK, {
     stdin: 'this is not valid json {{{',
