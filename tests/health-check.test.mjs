@@ -1435,7 +1435,7 @@ test('readHealthCache returns null on corrupt JSON', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-import { runQuickChecks, formatMissingDeps } from '../plugin/scripts/health-check.mjs';
+import { runQuickChecks, formatMissingDeps, execOptions } from '../plugin/scripts/health-check.mjs';
 
 test('runQuickChecks: returns ran=quick + non-empty checks array', async () => {
   const result = await runQuickChecks({
@@ -1520,4 +1520,36 @@ test('formatMissingDeps: injection-shadow-gate readiness is not a missing depend
     ],
   };
   assert.equal(formatMissingDeps(result), '');
+});
+
+// The third of the four #3 false positives, and the only one with no test until
+// now. It is invisible from a POSIX runner by construction: execFileSync does
+// not consult PATHEXT, so on Windows a bare `claude` misses claude.cmd, reads
+// as "not found", and /doctor then recommends the Linux install.sh to someone
+// whose install is correct. safeExec routes through cmd.exe to fix that, and
+// the decision lives in execOptions so it can be asked directly rather than by
+// mocking execFileSync -- which is the middle of this, not its boundary.
+test('execOptions routes through the shell on win32, so PATHEXT is honored', () => {
+  assert.equal(execOptions('win32').shell, true);
+});
+
+test('execOptions does not invoke a shell anywhere else', () => {
+  // The other side, so the case above cannot be satisfied by shelling out
+  // everywhere -- which would hand every probe's argv to a shell parser on
+  // platforms that never needed one.
+  assert.equal(execOptions('darwin').shell, false);
+  assert.equal(execOptions('linux').shell, false);
+});
+
+test('execOptions defaults to the running platform', () => {
+  assert.equal(execOptions().shell, process.platform === 'win32');
+});
+
+test('execOptions carries the probe contract safeExec depends on', () => {
+  // safeExec no longer spells these itself. Dropping one here would strip the
+  // timeout from every version probe, and nothing else would notice.
+  const o = execOptions('linux');
+  assert.equal(o.timeout, 3000);
+  assert.equal(o.encoding, 'utf-8');
+  assert.deepEqual(o.stdio, ['ignore', 'pipe', 'ignore']);
 });

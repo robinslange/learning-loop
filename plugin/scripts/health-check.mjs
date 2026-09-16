@@ -29,17 +29,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // `/D:/a/...`, which resolves against the drive root as `D:\D:\a\...`.
 const PLUGIN_DIR = fileURLToPath(new URL('..', import.meta.url));
 
+// The options every version probe runs under.
+//
+// Windows: execFileSync does not honor PATHEXT, so bare 'claude'/'node' miss
+// their .cmd shims and read as "not found". Route through cmd.exe.
+//
+// Split out and exported because that decision is platform-dependent and was
+// otherwise unreachable from a POSIX runner -- observing it in place would mean
+// mocking execFileSync, which is the middle of what is under test rather than
+// its boundary. `platform` is injected with a default, matching binaryFileName
+// and checkShimsExist.
+export function execOptions(platform = process.platform) {
+  return {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    timeout: 3000,
+    shell: platform === 'win32',
+  };
+}
+
 function safeExec(cmd, args, opts = {}) {
   try {
-    return execFileSync(cmd, args, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 3000,
-      // Windows: execFileSync does not honor PATHEXT, so bare 'claude'/'node'
-      // miss their .cmd shims and read as "not found". Route through cmd.exe.
-      shell: process.platform === 'win32',
-      ...opts,
-    }).trim();
+    return execFileSync(cmd, args, { ...execOptions(), ...opts }).trim();
   } catch {
     return null;
   }

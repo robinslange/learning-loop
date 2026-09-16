@@ -15,17 +15,19 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { normalizeText } from '../plugin/scripts/dream-normalize.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
 const DREAM = join(ROOT, 'plugin', 'skills', 'dream');
-const MOD = JSON.stringify(
-  pathToFileURL(join(ROOT, 'plugin', 'scripts', 'dream-normalize.mjs')).href,
-);
+// One spelling of the script's path. The operator names it in prose, the CLI
+// cases spawn it, and the import at the top of this file binds it -- three
+// places that must agree about one filename, so they all derive from here.
+const SCRIPT = join(ROOT, 'plugin', 'scripts', 'dream-normalize.mjs');
+const MOD = JSON.stringify(pathToFileURL(SCRIPT).href);
 
 const ANCHOR = '2026-09-16';
 
@@ -233,10 +235,16 @@ for (const [name, input, expected] of MUST_CONVERT) {
 // itself and this file. A green suite over an unreachable module reads exactly
 // like a fix, which is the most expensive kind of green there is.
 test('the DATE NORMALIZE operator runs the script instead of editing by judgement', () => {
+  // Renaming the module breaks the import above loudly. What this pins is the
+  // quieter half: the operator names the command in prose, so the doc can be
+  // reworded to invoke something that is not there while every test still
+  // loads. The expected command is derived from SCRIPT rather than written out
+  // again, so the doc and the file cannot drift apart.
+  assert.ok(existsSync(SCRIPT), `the operator invokes ${basename(SCRIPT)}, which must exist`);
   const operator = readFileSync(join(DREAM, 'operators', 'normalize.md'), 'utf8');
   assert.match(
     operator,
-    /ll-run dream-normalize\.mjs/,
+    new RegExp(`ll-run\\s+${basename(SCRIPT).replace(/\./g, '\\.')}`),
     'the operator must invoke the deterministic script',
   );
   assert.doesNotMatch(
