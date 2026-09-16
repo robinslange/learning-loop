@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createConnection } from 'node:net';
@@ -584,9 +584,30 @@ async function checkWrite(tool, input) {
 // Guarded so that IMPORTING this module does not RUN the hook. runHook reads
 // stdin the moment it is called, so a test importing outerDeadlineMs or the
 // gate error codes otherwise blocks until stdin closes -- which under
-// `node --test` is never, and the suite hangs with no failing assertion to
-// explain it. Matches the main-guard convention already used across scripts/.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// `node --test` is never, and the suite hangs with no failing assertion.
+//
+// REALPATHS BOTH SIDES, which most guards in scripts/ do not. Node resolves an
+// ESM entry to its realpath for import.meta.url while process.argv[1] keeps the
+// path the caller spelled, so the naive comparison is false under any symlinked
+// install -- a dotfile-managed ~/.claude, or a dev install pointing at a
+// checkout. In a CLI script that misfire means the command quietly does
+// nothing. Here it means the write gate exits 0 having checked nothing and
+// admits every contract violation, so this file gets the careful form that
+// scripts/provenance.mjs and scripts/codex/generate-agents.mjs already use.
+//
+// The fallback compares unresolved paths rather than giving up: failing to run
+// in production is the dangerous direction, and a test importing this module
+// has an argv[1] that matches neither way, so import safety is preserved.
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  }
+}
+
+if (isMain()) {
   runHook(async ({ raw }) => {
     for (const write of normalizeWrites(raw)) {
       if (write.tool === 'Delete') continue;

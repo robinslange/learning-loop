@@ -62,7 +62,6 @@ test('INJECTION_THRESHOLD is calibrated to the RRF fusion-sum scale', () => {
 test('required keys are all present (regression guard)', () => {
   const required = [
     'STDIN_TIMEOUT_MS',
-    'QUERY_TIMEOUT_MS',
     'INJECTION_RACE_CAP_MS',
     'DEDUPE_WINDOW_MS',
     'SESSION_SWEEP_TTL_MS',
@@ -147,9 +146,9 @@ test('post-tool inner budgets compose inside its hooks.json timeout', () => {
 
 // Regression: pre-write-check's worst-case inner spend (daemon attempt +
 // subprocess fallback + safety margin) must fit inside its hooks.json deadline.
-// Pre-fix the daemon used QUERY_TIMEOUT_MS (2s) and the subprocess used another
-// full QUERY_TIMEOUT_MS (2s), summing to ~4s+ against a 3s outer deadline —
-// Claude Code SIGKILLed the hook mid-subprocess and silently lost all warnings.
+// Pre-fix the daemon took a fixed 2s and the subprocess another fixed 2s,
+// summing to ~4s+ against a 3s outer deadline -- Claude Code SIGKILLed the hook
+// mid-subprocess and silently lost every warning it had already computed.
 //
 // The fix uses elapsed-aware budgeting: the subprocess timeout is whatever
 // remains (budget - elapsed - margin), so the composed spend is always at most

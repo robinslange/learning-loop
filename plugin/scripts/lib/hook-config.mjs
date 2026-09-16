@@ -18,7 +18,6 @@
  */
 export const HookConfig = Object.freeze({
   // --- Timeouts (ms) ---
-  QUERY_TIMEOUT_MS: 2000,
   DEPS_CHECK_TIMEOUT_MS: 5000,
   SNAPSHOT_TIMEOUT_MS: 10000,
   REINDEX_TIMEOUT_MS: 5000,
@@ -95,10 +94,11 @@ export const HookConfig = Object.freeze({
   // subprocess gets whatever wall clock remains, and is skipped entirely when
   // that remainder is under the cold-start floor.
   //
-  // NOT min(QUERY_TIMEOUT_MS, remaining): this said so for several releases
-  // and the code never did it. The wall clock is the only cap, which
-  // tests/pre-write-check-duplicate-gate.test.mjs pins on purpose ("one clock,
-  // not two"). QUERY_TIMEOUT_MS reaches this path nowhere.
+  // The wall clock is the only cap. This block claimed for several releases
+  // that the subprocess timer was min(QUERY_TIMEOUT_MS, remaining); the code
+  // never did that, and tests/pre-write-check-duplicate-gate.test.mjs pins the
+  // single-clock behaviour deliberately ("one clock, not two"). That constant
+  // turned out to have no production reader at all, so it has been deleted.
   PRE_WRITE_DAEMON_TIMEOUT_MS: 800,
   PRE_WRITE_SAFETY_MARGIN_MS: 300,
   PRE_WRITE_SUBPROCESS_FLOOR_MS: 300,

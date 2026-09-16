@@ -18,9 +18,9 @@
 // alone. A missed conversion costs a relative date that stays relative; a
 // wrong one silently edits what a note claims.
 
-import { readFileSync, writeFileSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, statSync, realpathSync } from 'node:fs';
 import { basename } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WORD_NUMBERS = {
   one: 1,
@@ -62,6 +62,21 @@ const ISO_DATE = /\d{4}-\d{2}-\d{2}/;
 
 function isoOf(date) {
   return date.toISOString().slice(0, 10);
+}
+
+// The mtime anchor is a LOCAL calendar date. isoOf reads a Date in UTC, and
+// east of Greenwich that is the PREVIOUS day for any file touched before local
+// noon, which would shift every conversion in that file by one -- inside the
+// one operator whose whole job is producing a correct date.
+//
+// The arithmetic elsewhere stays in UTC on purpose: addDays builds its dates
+// from a Z-anchored string, so it cannot be moved by a DST boundary. Only the
+// step where a wall-clock mtime becomes a calendar day needs local components.
+function localISO(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function addDays(anchorISO, n) {
@@ -155,14 +170,28 @@ export function normalizeText(text, anchorISO) {
  * @returns {{ changes: {from: string, to: string, line: number}[] }}
  */
 export function normalizeFile(path, { apply = false } = {}) {
-  const anchorISO = isoOf(statSync(path).mtime);
+  const anchorISO = localISO(statSync(path).mtime);
   const original = readFileSync(path, 'utf8');
   const { text, changes } = normalizeText(original, anchorISO);
   if (apply && changes.length > 0) writeFileSync(path, text);
   return { changes, anchorISO };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// Realpaths both sides: /dream reaches this through `ll-run`, which execs
+// `<cache>/<version>/scripts/dream-normalize.mjs`, and that path runs through a
+// symlink on any symlink-managed ~/.claude. The naive comparison is false
+// there, so the operator would report nothing to convert and the run would look
+// clean -- the same silent no-op this module exists to remove.
+function isMain() {
+  if (!process.argv[1]) return false;
+  try {
+    return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  }
+}
+
+if (isMain()) {
   const apply = process.argv.includes('--apply');
   const files = process.argv.slice(2).filter((a) => !a.startsWith('--'));
   if (files.length === 0) {

@@ -344,10 +344,14 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     // was SIGTERMed, the gate logged an error and returned SCAN_FAILED, and these
     // assertions flaked -- with nothing wrong in the code under test. A binary
     // slower than the old cap but well inside the raised budget must still warn.
+    // 2.5s: longer than the fixed 2s cap the gate used to apply on top of the
+    // wall clock, and well inside the budget these tests raise. That cap lived
+    // in HookConfig.QUERY_TIMEOUT_MS, a constant no production code ever read;
+    // it is deleted now, so the number lives here beside the reason for it.
     const slowStub = envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note')
-      .replace('#!/bin/sh\n', `#!/bin/sh\nsleep ${(HookConfig.QUERY_TIMEOUT_MS + 500) / 1000}\n`);
+      .replace('#!/bin/sh\n', '#!/bin/sh\nsleep 2.5\n');
     const { result } = runWithStub(slowStub, join(VAULT, '0-inbox', 'new-note.md'));
-    assert.ok(result, 'a stub slower than QUERY_TIMEOUT_MS must still be awaited within the budget');
+    assert.ok(result, 'a stub slower than the old 2s cap must still be awaited within the budget');
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
   });
 

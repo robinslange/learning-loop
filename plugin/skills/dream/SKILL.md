@@ -53,7 +53,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
    *Steps 2–8 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
 
 2. **Flag DATE NORMALIZE candidates.**
-   Files containing relative temporal references ("yesterday", "last week", etc.).
+   Files containing a relative reference that resolves to a single day ("yesterday", "tomorrow", "two days ago", "last Thursday"). Do not inspect or pre-filter them: the script in Phase 3 decides, and it refuses tense-words and bare week spans, so flagging those only sends it to files where nothing will happen.
 
 3. **Flag MERGE candidates.**
    Within each type group, flag pairs where both descriptions reference the same tool/concept, one is a subset of the other, or both contain the same rule. Skip pairs that contradict each other (those go to RESOLVE).
@@ -99,7 +99,7 @@ For each operator, read its instruction file from `operators/` and execute:
 
 | Operator | File | Input |
 |---|---|---|
-| DATE NORMALIZE | `operators/normalize.md` | Flagged files with relative dates |
+| DATE NORMALIZE | `operators/normalize.md` | Flagged files; the script decides what converts |
 | MERGE | `operators/merge.md` | Candidate pairs (excluding contradictions) |
 | RESOLVE | `operators/resolve.md` | Contradiction pairs |
 | ABSTRACT | `operators/abstract.md` | Flagged clusters (per-cluster user gate) |
