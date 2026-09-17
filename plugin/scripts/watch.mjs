@@ -17,6 +17,8 @@ import { getPluginRoot, getPluginData, getVaultPath } from './lib/config.mjs';
 import { binaryFileName } from './lib/paths.mjs';
 import { ortSpawnEnv } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
+import { capLogFile } from './lib/log-rotate.mjs';
+import { HookConfig } from './lib/hook-config.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 
 const USAGE = `Usage:
@@ -139,6 +141,7 @@ if (foreground) {
   child.on('exit', (code) => process.exit(code ?? 1));
 } else {
   const logPath = join(pluginData, 'watch.log');
+  capLogFile(logPath, HookConfig.WATCH_LOG_MAX_BYTES);
   const logFd = openSync(logPath, 'a');
   const child = spawn(bin, args, {
     detached: true,
