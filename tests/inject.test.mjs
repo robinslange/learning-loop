@@ -974,6 +974,40 @@ describe('enrichVaultHits', () => {
     assert.equal(out[0].body, undefined);
   });
 
+  // Invalidation: a note whose claim has stopped being true must not be
+  // injected as current. Ranking carries no validity signal of its own -- the
+  // only temporal input the engine has is an mtime half-life that the JIT path
+  // does not enable, and that this vault's bulk rewrites have flattened
+  // anyway. So the note itself has to say so, and retrieval has to honour it.
+  it('drops a hit whose note has been invalidated', () => {
+    writeFileSync(
+      join(vault, 'stale.md'),
+      '---\ntitle: S\ninvalidated: 2026-01-05\n---\n\nonce true, no longer\n',
+    );
+    const out = enrichVaultHits([{ path: 'stale.md', title: 'S', score: 0.9 }], vault);
+    assert.equal(out.length, 0, 'an invalidated note is not served as current');
+  });
+
+  it('keeps a note whose invalidation date has not arrived yet', () => {
+    writeFileSync(
+      join(vault, 'future.md'),
+      '---\ntitle: F\ninvalidated: 2099-01-01\n---\n\nstill true for now\n',
+    );
+    const out = enrichVaultHits([{ path: 'future.md', title: 'F', score: 0.9 }], vault);
+    assert.equal(out.length, 1, 'a known future expiry is still current today');
+  });
+
+  it('keeps a note with an unparseable invalidated value rather than dropping it', () => {
+    // Silently dropping on a typo would remove a good note with no signal
+    // anywhere. Failing open keeps the note and the error visible.
+    writeFileSync(
+      join(vault, 'garbled.md'),
+      '---\ntitle: G\ninvalidated: sometime last year\n---\n\nbody\n',
+    );
+    const out = enrichVaultHits([{ path: 'garbled.md', title: 'G', score: 0.9 }], vault);
+    assert.equal(out.length, 1, 'an unreadable date must not silently drop the note');
+  });
+
   it('drops a local hit whose file is unreadable or empty', () => {
     const out = enrichVaultHits(
       [
