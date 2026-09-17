@@ -64,6 +64,14 @@ describe('stripTags', () => {
     assert.equal(stripTags('<scr<x>ipt>payload'), 'ipt>payload');
   });
 
+  it('drops a trailing unterminated tag even when an earlier < is plain text', () => {
+    // The scan must keep looking past a `<` that opens nothing. Returning at the first
+    // one left the `<script` in place, which a differential run against the regex
+    // implementation caught and no test above would have.
+    assert.equal(stripTags('if a < b then <script'), 'if a < b then ');
+    assert.equal(stripTags('a < b < c'), 'a < b < c');
+  });
+
   it('is idempotent, so no second pass is needed', () => {
     for (const s of ['<scr<x>ipt>payload', '<a><b', 'x > <a', '<<a>>', 'a<b>c<d']) {
       assert.equal(stripTags(stripTags(s)), stripTags(s), `not idempotent on ${JSON.stringify(s)}`);
