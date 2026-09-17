@@ -29,6 +29,21 @@ npx eslint .
 
 If a test fails on your branch but passes on `main`, rebuild the native binary (`cd native && cargo build --release`) and re-run; stale binaries account for most local-only failures.
 
+## Git hooks
+
+`pre-commit` runs the checks above over staged files, through lefthook. The hook is tracked at `.githooks/pre-commit` and `core.hooksPath` points at that directory:
+
+```bash
+brew install lefthook                 # any install method works; it must be on PATH
+git config core.hooksPath .githooks   # npm install does this for you
+```
+
+`.git/hooks/` is not version controlled, so a hook written there keeps the shape it had on the day it was written, and a newly declared hook type never reaches a machine that did not re-run `lefthook install`. Tracking the hook makes adding one a commit and a review instead of an install step nobody ran. `lefthook.yml` is read at run time, so adding, re-globbing or removing a command needs no reinstall.
+
+A linked worktree resolves `.githooks` against its own root, so a worktree on a branch from before this directory existed has no hook and runs nothing. Rebase it onto `main` to get one back.
+
+Set `LEFTHOOK=0` to skip deliberately. lefthook missing from PATH fails the commit rather than passing quietly, because a gate that has stopped running looks exactly like one that passes.
+
 ## CI
 
 `.github/workflows/test.yml` runs on every push to `main` and on every pull request. Five jobs:
