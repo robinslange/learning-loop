@@ -7,6 +7,7 @@ import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
 import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
+import { pluginVersion } from '../plugin/scripts/lib/plugin-meta.mjs';
 import {
   checkVaultPath,
   checkVaultFolders,
@@ -1598,18 +1599,19 @@ test('writeHealthCache + readHealthCache round-trip', () => {
   };
   writeHealthCache({ pluginData: dir, result: payload });
   const back = readHealthCache({ pluginData: dir });
-  assert.deepEqual(back, payload);
+  // the writer stamps the version that rendered this advice
+  assert.deepEqual(back, { ...payload, version: pluginVersion() });
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('isCacheStale: false when ts is recent', () => {
+test('isCacheStale: false when ts is recent and the version matches', () => {
   const recent = new Date(Date.now() - 60 * 1000).toISOString();
-  assert.equal(isCacheStale({ ts: recent }), false);
+  assert.equal(isCacheStale({ ts: recent, version: pluginVersion() }), false);
 });
 
 test('isCacheStale: true when ts > 12h old', () => {
   const old = new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString();
-  assert.equal(isCacheStale({ ts: old }), true);
+  assert.equal(isCacheStale({ ts: old, version: pluginVersion() }), true);
 });
 
 test('isCacheStale: true when cache is null', () => {
@@ -1785,4 +1787,17 @@ test('execOptions carries the probe contract safeExec depends on', () => {
   assert.equal(o.timeout, 3000);
   assert.equal(o.encoding, 'utf-8');
   assert.deepEqual(o.stdio, ['ignore', 'pipe', 'ignore']);
+});
+
+test('isCacheStale: true when the cache was written by another plugin version', () => {
+  // last-health.json holds rendered advice prose, so a cache that outlives the
+  // version that wrote it keeps serving guidance the code has since corrected.
+  const recent = new Date().toISOString();
+  assert.equal(isCacheStale({ ts: recent, version: '2.1.0' }, '2.1.0'), false);
+  assert.equal(isCacheStale({ ts: recent, version: '2.0.8' }, '2.1.0'), true);
+});
+
+test('isCacheStale: true when the cache predates version stamping', () => {
+  const recent = new Date().toISOString();
+  assert.equal(isCacheStale({ ts: recent }, '2.1.0'), true);
 });

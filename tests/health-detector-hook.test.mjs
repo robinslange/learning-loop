@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pluginVersion } from '../plugin/scripts/lib/plugin-meta.mjs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { run as runHealthDetector } from '../plugin/hooks/session-start/health-detector.mjs';
@@ -69,6 +70,8 @@ test('health-detector: emits a one-line shadow-gate nudge when the cached check 
   const dir = mkdtempSync(join(tmpdir(), 'health-detector-shadowgate-'));
   const cache = {
     ts: new Date().toISOString(),
+    // a cache the current build did not write is stale regardless of age
+    version: pluginVersion(),
     ran: 'quick',
     checks: [
       {
