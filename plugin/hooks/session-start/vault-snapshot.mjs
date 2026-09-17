@@ -134,14 +134,25 @@ export async function run(ctx) {
     }
   }
 
-  // retrieval/<prefix>-YYYY-MM.jsonl retention: keep only the newest
-  // RETRIEVAL_LOG_KEEP_MONTHS months per prefix. Grouping and cutoff are both
-  // derived from the filename's YYYY-MM suffix — never from mtime or file
-  // content — because a month bucket is written to (and its mtime bumped)
-  // all month long; mtime can't tell a live current-month file from a stale
-  // one. YYYY-MM sorts lexically = chronologically, so string comparison is
-  // enough. The current month is always kept, even if the prefix has fewer
-  // than RETRIEVAL_LOG_KEEP_MONTHS files. provenance/ is a different
+  // retrieval/<prefix>-YYYY-MM.jsonl retention: drop anything older than a
+  // single cutoff month, shared by every prefix. The cutoff is derived from
+  // the filename's YYYY-MM suffix, never from mtime or file content, because
+  // a month bucket is written to (and its mtime bumped) all month long and
+  // mtime cannot tell a live current-month file from a stale one. YYYY-MM
+  // sorts lexically = chronologically, so string comparison is enough.
+  //
+  // This was previously keep-the-newest-N-per-prefix, which is a count rather
+  // than an age. A prefix that stops being written never grows past its own
+  // window, so nothing was ever evicted from it and its last N files were
+  // pinned for good: `access-*` (17.7MB, no writer left in the tree) and
+  // `cache-health-*` (28MB, written by a separate plugin that stopped) held
+  // 47MB between them under a rule meant to cap retention at three months.
+  // One cutoff drains a dead prefix and leaves a live one the same window.
+  //
+  // The trade-off it accepts: telemetry does not survive a gap in use longer
+  // than the window. That is the intended reading of "keep three months", and
+  // measurement data older than the window is pre-change data that the
+  // calibration epoch would discard anyway. provenance/ is a different
   // directory entirely and this function never touches it.
   function sweepRetrievalLogs(dir, keepMonths) {
     let names;
@@ -150,28 +161,18 @@ export async function run(ctx) {
     } catch {
       return;
     }
-    const currentMonth = monthStr();
-    const byPrefix = new Map();
+    const d = new Date();
+    d.setUTCDate(1);
+    d.setUTCMonth(d.getUTCMonth() - (keepMonths - 1));
+    const cutoff = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
     const re = /^(.+)-(\d{4}-\d{2})\.jsonl$/;
     for (const f of names) {
       const m = re.exec(f);
-      if (!m) continue;
-      const [, prefix, month] = m;
-      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
-      byPrefix.get(prefix).push({ file: f, month });
-    }
-    for (const entries of byPrefix.values()) {
-      const months = [...new Set(entries.map((e) => e.month))].sort();
-      const keep = new Set(months.slice(-keepMonths));
-      keep.add(currentMonth);
-      for (const { file, month } of entries) {
-        if (keep.has(month)) continue;
-        try {
-          rmSync(join(dir, file), { force: true });
-        } catch (err) {
-          if (err?.code !== 'ENOENT')
-            logError('session-start.vault-snapshot.retrievalLogSweep', err);
-        }
+      if (!m || m[2] >= cutoff) continue;
+      try {
+        rmSync(join(dir, f), { force: true });
+      } catch (err) {
+        if (err?.code !== 'ENOENT') logError('session-start.vault-snapshot.retrievalLogSweep', err);
       }
     }
   }
