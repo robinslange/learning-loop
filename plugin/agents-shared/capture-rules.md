@@ -53,6 +53,23 @@ Two fields have strict semantics — do not overload them:
 - **`source:`** — capture origin only (`session`, `discovery`, `ingest`, `literature`, `synthesis`, `unverified`). Never put a URL or citation here. The pre-write gate denies a note that is missing this field.
 - **`status:`** — intention tracking only. Legal values: `intentioned | resolved | limbo`. Managed by inbox-organiser. Never write `status: inbox`, `status: permanent`, or `status: fleeting` — the folder location IS the maturity status. A note in `3-permanent/` is permanent by virtue of being there.
 
+## `intentions:`
+
+An intention is a **context** (the situation that should surface this note) plus a **cue** (what to do or check when it does). They are two keys, never one string:
+
+```yaml
+intentions:
+  - context: web development
+    cue: when implementing WebSocket reconnection or choosing between WebSocket and SSE
+  - context: any-codebase
+```
+
+`cue` is optional; `context` is not. An entry with no `context` is dropped from the index entirely.
+
+Keep `context` short and reusable, a project or domain handle such as `learning-loop`, `product design`, `any-codebase`. It is a grouping key: the session-start summary lists contexts with note counts, and `vault-search.mjs intentions "<context>"` drills in. A context that reads as a full sentence is a cue that landed in the wrong key, and it fragments the index into buckets of one.
+
+**Do not write the flat string form.** `parse_intentions` splits a flat string on an em dash and on nothing else, so `- "web development: when implementing X"` files the entire string as the context and loses the cue. `- "web development — when implementing X"` still parses, but it is legacy and collides with the no-em-dash voice rule. Write the mapping.
+
 ## Tag Hygiene
 
 When writing or rewriting frontmatter tags, de-duplicate the list before writing. If the counter-argument-linking skill adds topic tags from the target note, merge them with existing tags and remove duplicates. Final tag list must contain no repeated entries.

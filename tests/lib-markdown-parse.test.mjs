@@ -171,3 +171,25 @@ test('splitRawFrontmatter handles a closing fence at EOF (no trailing newline)',
   assert.equal(parts.trailing, '');
   assert.equal(parts.body, '');
 });
+
+test('parseFrontmatter does not invent root keys from a nested mapping', () => {
+  const text =
+    '---\n' +
+    'tags: [a]\n' +
+    'intentions:\n' +
+    '  - context: blog post\n' +
+    '    cue: when authoring long-form video\n' +
+    'date: 2026-09-17\n' +
+    '---\n\nBody.\n';
+  const { fm } = parseFrontmatter(text);
+  assert.equal('cue' in fm, false, 'an indented inner field must not become a root key');
+  assert.equal('context' in fm, false);
+  assert.equal(fm.date, '2026-09-17', 'a real root key after the block still parses');
+  assert.deepEqual(fm.tags, ['a']);
+});
+
+test('parseFrontmatter still collects an indented block array', () => {
+  const { fm } = parseFrontmatter('---\nsource:\n  - "one"\n  - "two"\nname: x\n---\n\nB.\n');
+  assert.deepEqual(fm.source, ['one', 'two']);
+  assert.equal(fm.name, 'x');
+});
