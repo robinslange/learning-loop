@@ -18,6 +18,9 @@ on:
       - 'tests/install/**'
       - '.github/workflows/install-script.yml'
 
+permissions:
+  contents: read
+
 jobs:
   unit:
     name: bats unit tests
