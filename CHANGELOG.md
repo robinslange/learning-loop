@@ -12,8 +12,6 @@ All notable changes to this project are documented here. The format is based on 
 
 - **CI jobs run with a read-only token.** None of the seven jobs across `test.yml`, `install-script.yml` and `regen-quality-baseline.yml` declared `permissions`, so each inherited the repository default. All three workflows now declare `contents: read` at the top level. Nothing here writes to the repo: the quality baseline leaves as an artifact a human downloads and commits, as its own header already documented.
 
-- **No known-vulnerable dependencies.** Thirteen advisories across six transitive packages (`fast-uri`, `js-yaml`, `brace-expansion`, `browserslist`, `baseline-browser-mapping`, `qs`) are resolved. All were dev-only -- this package declares no runtime dependencies, so none of it ever reached a plugin install. `qs` reached the tree through `typed-rest-client`, pinned by `@stryker-mutator/core`, so it is held at a patched version by an `overrides` entry rather than by force-upgrading the mutation runner.
-
 ## v2.1.0
 
 ### Fixed
