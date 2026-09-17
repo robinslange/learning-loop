@@ -64,9 +64,13 @@ export const HookConfig = Object.freeze({
   // librarian/queue.jsonl.bak.* backups (crash-safety copies taken before a
   // queue rewrite) older than this are reaped by the same TTL sweep.
   LIBRARIAN_QUEUE_BAK_TTL_MS: 604_800_000, // 7 days
-  // retrieval/<prefix>-YYYY-MM.jsonl: months kept per prefix, by filename
-  // month, not mtime. The current month is always kept regardless of count.
+  // retrieval/<prefix>-YYYY-MM.jsonl: how many months back the cutoff sits,
+  // by filename month, not mtime. One cutoff for every prefix, so a prefix
+  // that stops being written drains instead of pinning its last few files.
   RETRIEVAL_LOG_KEEP_MONTHS: 3,
+  // watch.log is the daemon's stdout/stderr, appended to for the life of the
+  // install. Capped at daemon start, keeping the newest half.
+  WATCH_LOG_MAX_BYTES: 4_194_304, // 4 MiB
   AUTOLINK_ML_TIMEOUT_MS: 1000,
   STDIN_TIMEOUT_MS: 3000,
   SWEEP_HOOK_TIMEOUT_MS: 15000,
