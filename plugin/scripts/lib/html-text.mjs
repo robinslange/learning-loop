@@ -6,8 +6,8 @@
 //   - script/style bodies are dropped BEFORE tag stripping, and a body with no closing
 //     tag runs to end-of-input. Otherwise `<script>var x=1` loses only its opening tag
 //     and the script source survives as prose.
-//   - a trailing `<tag ...` with no `>` is dropped after tag stripping. One pass leaves
-//     an unterminated tag whole, which is how `<div class="x` reached the output.
+//   - a tag with no closing `>` runs to the end of the input and is dropped with it.
+//     A single `<[^>]+>` replace needs the `>`, which is how `<div class="x` survived.
 //   - entities decode in ONE pass over the string. Decoding `&amp;` and then `&lt;` in
 //     separate passes re-reads its own output, so `&amp;lt;` became `<` and rebuilt the
 //     markup that tag stripping had just removed.
@@ -25,22 +25,37 @@ const ENTITIES = {
 };
 
 const RAW_TEXT_ELEMENT = /<(script|style)\b[\s\S]*?(?:<\/\1[^>]*>|$)/gi;
-const TAG = /<[^>]*>/g;
-const UNTERMINATED_TAG = /<[a-z!/][^>]*$/i;
+const TAG_START = /<[a-z!/]/i;
 const ENTITY = new RegExp(`&(${Object.keys(ENTITIES).join('|')});`, 'gi');
 
 /**
  * Strip markup tags, including a trailing tag that is never closed.
  *
- * One pass suffices, and re-running it is provably a no-op: `[^>]*` cannot cross a `>`,
- * so every match spans a `<` to the next `>` and swallows any `<` between them. Whatever
- * `<` survives has no `>` after it, so no match can form from the joined remainder.
- * Verified over 400k random strings drawn from `<>ab/ "!` — zero inputs changed on a
- * second pass. Left as one pass rather than a fixpoint loop that can never iterate.
+ * A scan rather than a replace. Copying the text between tags means the output is built
+ * from spans that were never markup, so there is no pass over a partly-stripped string
+ * for a `<` and a `>` to find each other across -- the class of bug a strip-and-rescan
+ * has to loop to defend against.
+ *
+ * Once no `>` remains there can be no further complete tag, so the rest is text up to the
+ * first `<` that opens one, and everything from there is dropped as a tag that ran off the
+ * end of the input. That keeps "if a < b" whole while still dropping a trailing `<script`.
  */
 export function stripTags(markup) {
   if (typeof markup !== 'string') return '';
-  return markup.replace(TAG, '').replace(UNTERMINATED_TAG, '');
+  let out = '';
+  let i = 0;
+  for (;;) {
+    const lt = markup.indexOf('<', i);
+    if (lt === -1) return out + markup.slice(i);
+    out += markup.slice(i, lt);
+    const gt = markup.indexOf('>', lt);
+    if (gt === -1) {
+      const rest = markup.slice(lt);
+      const opens = rest.search(TAG_START);
+      return opens === -1 ? out + rest : out + rest.slice(0, opens);
+    }
+    i = gt + 1;
+  }
 }
 
 /** Decode the named entities we emit, in a single pass so no output is re-read. */
