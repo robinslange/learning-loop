@@ -13,6 +13,7 @@ import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
 import { recordDetachedChild, emitProvenance, home } from '../lib/common.mjs';
 import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
+import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -116,6 +117,23 @@ function federationLines(pluginData, now) {
 // cut at the last full line and tagged with a pointer line, so the assembled
 // SessionStart context stays within the hook stdout budget instead of relying
 // on emitJson's blind backstop trim.
+// What the intentions block SHIPPED, read back off the rendered text rather
+// than taken from the list that went in. capSection drops whole lines to fit
+// MEM_CAP, so the assembled set overstates what the session was shown, and a
+// join built on the assembled set would score impressions that never
+// happened. The count suffix is stripped from the right so a context whose
+// own name contains parentheses survives intact.
+export function shippedIntentionContexts(text) {
+  if (!text) return [];
+  const out = [];
+  for (const line of String(text).split('\n')) {
+    if (!line.startsWith('- ')) continue;
+    const m = /^- (.+) \(\d+ notes?\)$/.exec(line.trim());
+    if (m) out.push(m[1]);
+  }
+  return out;
+}
+
 function capSection(text, pointer) {
   if (Buffer.byteLength(text, 'utf8') <= MEM_CAP) return text.trim();
   let head = text.slice(0, MEM_CAP);
@@ -364,9 +382,28 @@ export async function run(ctx) {
         for (const item of grouped) {
           list += `- ${item.context} (${item.count} notes)\n`;
         }
+        const capped = capSection(
+          list,
+          `[truncated — run \`${searchCmd} intentions\` for the full list]`,
+        );
         retrieved += '\n## Notes with active intentions:\n';
-        retrieved += `${capSection(list, `[truncated — run \`${searchCmd} intentions\` for the full list]`)}\n`;
+        retrieved += `${capped}\n`;
         operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
+        // The pack has never had a surfaced->used join, so the value of this
+        // block is unmeasured rather than low. Record what shipped, read back
+        // off the capped text: assembled_count alongside it is what the cap
+        // dropped, which is the block's other open question.
+        writeRetrieval({
+          pluginData,
+          prefix: 'session-start-pack',
+          command: 'intentions',
+          query: '',
+          results: null,
+          meta: {
+            contexts: shippedIntentionContexts(capped),
+            assembled_count: grouped.length,
+          },
+        });
       }
       // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
       const child = spawn(
