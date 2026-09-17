@@ -8,6 +8,7 @@
   "type": "module",
   "description": "Self-improving learning loop across Claude sessions",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks || true",
     "test": "node --test --test-force-exit tests/*.test.mjs tests/**/*.test.mjs",
     "lint": "eslint .",
     "bench": "node bench/bench.mjs",

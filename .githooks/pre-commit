@@ -1,0 +1,19 @@
+#!/bin/sh
+# Tracked on purpose. `lefthook install` writes into .git/hooks, which is not
+# version controlled, so that copy keeps whatever shape it had on the day it
+# was written and a newly declared hook type never reaches a machine that does
+# not re-run the installer. core.hooksPath points here instead, so adding a
+# hook type is a commit and a review rather than an install step nobody ran.
+#
+# lefthook reads lefthook.yml at runtime, so this file never needs to change
+# when a command is added, re-globbed or removed.
+
+[ "$LEFTHOOK" = "0" ] && exit 0
+
+if ! command -v lefthook >/dev/null 2>&1; then
+  echo "pre-commit: lefthook is not on PATH, so no checks ran." >&2
+  echo "  install it (brew install lefthook), or set LEFTHOOK=0 to skip deliberately." >&2
+  exit 1
+fi
+
+exec lefthook run pre-commit "$@"
