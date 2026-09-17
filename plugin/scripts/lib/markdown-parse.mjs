@@ -10,6 +10,12 @@
 // produced by any hook in the vault (per grep). Multi-line YAML lists are not
 // produced by any current consumer; if needed in future, adopt js-yaml then.
 //
+// Nested mappings (`- context: x` / `  cue: y`) are NOT represented: the item
+// is kept as the raw string `"context: x"` and the inner fields are dropped.
+// Nothing is invented, but a caller cannot tell a nested mapping from a flat
+// string, so this parser must not be used to VALIDATE the shape of such a
+// field -- read the raw frontmatter text, or adopt js-yaml.
+//
 // Line endings: both LF and CRLF are handled throughout.
 
 const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -34,6 +40,13 @@ export function parseFrontmatter(text) {
   const lines = rawFm.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    // A root key starts at column 0. Indented lines are either block-array
+    // items (consumed below) or the inner fields of a nested mapping, and an
+    // inner field is not a key of this note. Reading `    cue: x` as a root
+    // `cue` invented a field the YAML never declared, and handed every caller
+    // -- including pre-write-check's frontmatter gate -- an object the file
+    // disagrees with. Skipping is lossy but honest: nested values do not appear.
+    if (/^[ \t]/.test(line)) continue;
     const idx = line.indexOf(':');
     if (idx <= 0) continue;
     const key = line.slice(0, idx).trim();
