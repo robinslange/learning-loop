@@ -16,6 +16,11 @@ name: Regenerate quality baseline
 on:
   workflow_dispatch:
 
+# The baseline leaves as an artifact a human downloads and commits, per the note
+# above, so this never needs write access to the repo.
+permissions:
+  contents: read
+
 jobs:
   regen:
     runs-on: ubuntu-latest

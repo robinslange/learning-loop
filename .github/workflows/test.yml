@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Every job here checks out, builds and tests. None writes to the repo or the API,
+# so the token stays read-only rather than inheriting whatever the repo default is.
+permissions:
+  contents: read
+
 jobs:
   # The plugin ships a Windows binary and win32 code paths, so the Node suite
   # runs on all three OSes, all blocking. A handful of tests that can only be
