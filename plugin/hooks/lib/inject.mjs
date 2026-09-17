@@ -15,7 +15,7 @@ import { SECRET_PATTERNS } from '../../scripts/lib/secret-patterns.mjs';
 // ALONE scored worse than no guard at all, so do not reduce this to the tags.
 import { UNTRUSTED_NOTE, sealedDelimiters } from '../../scripts/lib/origin-envelope.mjs';
 import { stripPointerContent, deriveOrigin } from '../../scripts/lib/row-origin.mjs';
-import { stripFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
+import { parseFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from '../../scripts/lib/log.mjs';
@@ -120,13 +120,34 @@ const DIRECTIVE =
 // on purpose: its `peer:` path is a locator, not a file under vaultRoot, and
 // buildInjection strips peer bodies anyway — it still belongs in the list so it
 // can surface as a pointer. A local hit with no readable body is dropped.
+// A note that says its claim has stopped being true is not served as current.
+// Nothing else in the pipeline can work this out: the only temporal input the
+// engine has is a half-life on mtime, the JIT path never passes `--recency` to
+// enable it, and mtime here measures the last bulk rewrite rather than the
+// last time the claim was checked (a frontmatter backfill touched 2,862 of
+// 7,496 notes in two days). So validity has to be stated on the note.
+//
+// Fails open. An `invalidated` value that is not a readable date keeps the
+// note: a typo should not silently remove a good note from every future
+// session, which is the failure mode with no signal anywhere to find it by.
+// A date in the future is a known expiry that has not arrived, so it is still
+// current today.
+function isInvalidated(fm, now = Date.now()) {
+  const raw = fm?.invalidated;
+  if (!raw) return false;
+  const t = Date.parse(String(raw).trim());
+  return Number.isFinite(t) && t <= now;
+}
+
 export function enrichVaultHits(hits, vaultRoot) {
   return (hits || [])
     .map((h) => {
       if (h.body || deriveOrigin(h).origin === 'peer') return h;
       try {
         const raw = readFileSync(join(vaultRoot, h.path), 'utf8');
-        return { ...h, body: stripFrontmatter(raw).trim() };
+        const { fm, body } = parseFrontmatter(raw);
+        if (isInvalidated(fm)) return { ...h, body: '' };
+        return { ...h, body: body.trim() };
       } catch (err) {
         logError('inject.enrichVaultHits', err);
         return { ...h, body: '' };

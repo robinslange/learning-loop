@@ -31,6 +31,28 @@ source_grounded: 0-2
 ---
 ```
 
+## Invalidation
+
+A note whose claim has stopped being true carries `invalidated:` with the date it stopped:
+
+```yaml
+---
+tags: [graphql, auth]
+date: 2026-03-18
+source: session
+invalidated: 2026-09-17
+superseded_by: 3-permanent/the-note-that-replaces-it.md
+---
+```
+
+The JIT injector drops an invalidated note rather than serving it as current (`enrichVaultHits`). `superseded_by` is optional and is a pointer for a reader, not something retrieval acts on.
+
+Invalidate, do not delete. The note stays on disk and stays readable, so "what did I believe in June, and what changed it" is still answerable. That history is most of what a Zettelkasten is for, which is why the operation is a field and not an `rm`.
+
+Nothing infers this. Ranking has no validity signal: the engine's only temporal input is a half-life on file mtime, the JIT path does not enable it, and mtime here records the last bulk rewrite rather than the last time anyone checked the claim. If a note is wrong now, the note has to say so.
+
+A date in the future is a known expiry that has not arrived, and the note stays current until it does. A value that is not a readable date is ignored and the note is kept, so a typo cannot silently remove a good note from every future session.
+
 `source:` records **where the note came from**, not what it cites. Legal values:
 
 | Value        | Means                                                              |
