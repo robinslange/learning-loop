@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Security
+
+- **Markup reduction is one shared step, and no longer hands the model markup it was meant to remove.** Four call sites reduced fetched markup to text by hand (`web-fetch.mjs`, plus the abstract readers in `crossref.mjs`, `pubmed.mjs` and `check-claims.mjs`), and the page-level chain leaked three ways, each reproduced before it was fixed. Entities decoded in separate passes over the same string, so `&amp;lt;script&amp;gt;` became a literal `<script>` _after_ tag stripping had already run -- the same trick reconstitutes `<vault-note trust="...">`, the shape of the trust envelope itself, which is why this matters here and not merely as the XSS the scanner names. A `<script>` body with no closing tag matched nothing and its source survived as prose: `<p>real text</p><script>var pwn=1;alert("leak")` extracted as `real text var pwn=1;alert("leak")`. And an unterminated `<div class="x` was left whole, because one pass of `<[^>]+>` needs the `>`. All four now share `scripts/lib/html-text.mjs`: raw-text elements are dropped first and run to end-of-input when unclosed, a trailing unterminated tag is dropped, and entities decode in a single pass so no output is ever re-read. Decoding still runs after stripping, deliberately -- a page that writes `&lt;script&gt;` is displaying that text, and one decode is the faithful reading of what it shows. Pinned by 18 tests, each built from an input that leaked against the old chain.
+
+- **The trust-envelope lint rule is linear.** `no-handwritten-trust-envelope` matched `<tag\s[^>]*\btrust\s*=\s*"`, where `[^>]*` could also match `trust`, so the engine retried the tail at every position and the match was polynomial in the literal's length. It is two disjoint tests now, a tag opening and a trust attribute. Dropping the requirement that the attribute sit inside that same tag widens what the rule catches, which is the safe direction for a guard rail that already has an allowlist.
+
+- **CI jobs run with a read-only token.** None of the seven jobs across `test.yml`, `install-script.yml` and `regen-quality-baseline.yml` declared `permissions`, so each inherited the repository default. All three workflows now declare `contents: read` at the top level. Nothing here writes to the repo: the quality baseline leaves as an artifact a human downloads and commits, as its own header already documented.
+
+- **No known-vulnerable dependencies.** Thirteen advisories across six transitive packages (`fast-uri`, `js-yaml`, `brace-expansion`, `browserslist`, `baseline-browser-mapping`, `qs`) are resolved. All were dev-only -- this package declares no runtime dependencies, so none of it ever reached a plugin install. `qs` reached the tree through `typed-rest-client`, pinned by `@stryker-mutator/core`, so it is held at a patched version by an `overrides` entry rather than by force-upgrading the mutation runner.
+
 ## v2.1.0
 
 ### Fixed
