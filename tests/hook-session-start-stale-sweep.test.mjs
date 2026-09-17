@@ -367,3 +367,45 @@ test('cache-cleanup leaves superseded sibling versions on disk', async () => {
     );
   });
 });
+
+test('sweep: a prefix that stopped being written drains instead of keeping its last N forever', async () => {
+  const fx = makeFixture();
+  const retrievalDir = join(fx.ctx.pluginData, 'retrieval');
+  mkdirSync(retrievalDir, { recursive: true });
+
+  // `access` stopped being written months ago and has fewer files than the
+  // keep-window. Retention keyed on months.slice(-keepMonths) keeps every one
+  // of them forever, because a dead prefix never grows past the window that
+  // would evict anything. Live effect: 17.7MB of access-* and 28MB of
+  // cache-health-* pinned in plugin-data with no writer and no reader.
+  const deadMonths = [monthOffset(5), monthOffset(4), monthOffset(3)];
+  for (const month of deadMonths) {
+    writeFileSync(join(retrievalDir, `access-${month}.jsonl`), '{}\n');
+  }
+  // an active prefix in the same directory must keep its window
+  const liveMonth = monthOffset(0);
+  writeFileSync(join(retrievalDir, `queries-${liveMonth}.jsonl`), '{}\n');
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-dead-prefix-'));
+  await withSandbox(fx, async () => {
+    await run({
+      ...fx.ctx,
+      tmp: isolatedTmp,
+      projectDir: null,
+      memoryDir: join(fx.sandbox, 'memdir'),
+      payloadSessionId: 'dead-prefix-sid',
+    });
+    for (const month of deadMonths) {
+      assert.equal(
+        existsSync(join(retrievalDir, `access-${month}.jsonl`)),
+        false,
+        `access-${month}.jsonl is outside the retention window and must be pruned`,
+      );
+    }
+    assert.ok(
+      existsSync(join(retrievalDir, `queries-${liveMonth}.jsonl`)),
+      'the current month of a live prefix survives',
+    );
+  });
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
