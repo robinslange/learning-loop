@@ -1,5 +1,6 @@
 import { warnOnce } from '../warn-once.mjs';
 import { isOffline } from '../env.mjs';
+import { htmlToText } from '../html-text.mjs';
 import { fetchGuarded } from './url-guard.mjs';
 
 export const WEB_FETCH_BLOCKLIST = [
@@ -54,15 +55,5 @@ export async function fetchPageText(url) {
   } catch (err) {
     return { ok: false, kind: 'parse', error: err.message };
   }
-  const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return { ok: true, text };
+  return { ok: true, text: htmlToText(html) };
 }

@@ -2,6 +2,7 @@ import { fetchJSON, fetchXML, sleep, RATE_LIMIT_MS } from '../http.mjs';
 import { parseXMLTag, parseXMLTags } from '../xml.mjs';
 import { inferStudyType, inferSpecies, inferSampleSize } from '../heuristics.mjs';
 import { authorMatches, firstAuthorMatches } from '../author-match.mjs';
+import { stripTags } from '../../html-text.mjs';
 
 export function parseAuthors(xml) {
   const authorList = parseXMLTag(xml, 'AuthorList');
@@ -63,7 +64,7 @@ export async function pubmedFetch(pmid) {
   let doi = null;
   for (const eid of elocationIds) {
     if (eid.includes('doi')) {
-      doi = eid.replace(/<[^>]+>/g, '').trim();
+      doi = stripTags(eid).trim();
     }
   }
   if (!doi) {

@@ -5,6 +5,7 @@ import { extractNumbers, findNumberInAbstract } from '../lib/sources/claim-numbe
 import { isBlockedFetch, fetchPageText } from '../lib/sources/web-fetch.mjs';
 import { pubmedFetch } from '../lib/sources/adapters/pubmed.mjs';
 import { fetchJSON } from '../lib/sources/http.mjs';
+import { stripTags } from '../lib/html-text.mjs';
 import arxiv from '../lib/sources/adapters/arxiv.mjs';
 
 export async function checkClaims(notePath) {
@@ -30,7 +31,7 @@ export async function checkClaims(notePath) {
       const url = 'https://api.crossref.org/works/' + encodeURIComponent(src.doi);
       const crData = await fetchJSON(url);
       if (crData?.message) {
-        const abstract = (crData.message.abstract || '').replace(/<[^>]+>/g, '');
+        const abstract = stripTags(crData.message.abstract || '');
         metadata = { abstract, title: crData.message.title?.[0] };
         sourceKind = 'abstract';
       }

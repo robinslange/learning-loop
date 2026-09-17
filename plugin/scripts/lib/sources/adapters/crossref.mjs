@@ -2,6 +2,7 @@ import { fetchJSON } from '../http.mjs';
 import { inferSpecies, inferSampleSize } from '../heuristics.mjs';
 import { authorMatches, firstAuthorMatches } from '../author-match.mjs';
 import biorxiv from './biorxiv.mjs';
+import { stripTags } from '../../html-text.mjs';
 
 async function search(query, rows = 5) {
   const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(query)}&rows=${rows}&select=DOI,title,author,published-print,published-online,container-title,abstract,type`;
@@ -13,7 +14,7 @@ async function search(query, rows = 5) {
       item['published-print']?.['date-parts']?.[0] || item['published-online']?.['date-parts']?.[0];
     const year = dateArr?.[0] || null;
     const abstractRaw = item.abstract || '';
-    const abstractClean = abstractRaw.replace(/<[^>]+>/g, '');
+    const abstractClean = stripTags(abstractRaw);
     return {
       source: 'crossref',
       pmid: null,
