@@ -11,11 +11,19 @@
 const ALLOWED = new Set(['scripts/lib/origin-envelope.mjs']);
 
 // `<tag ... trust="...">` opening a boundary, or a bare `</tag>` closing one.
-const OPEN_RE = /<[a-z][a-z0-9-]*\s[^>]*\btrust\s*=\s*"/i;
+//
+// The opening is two independent probes rather than one `<tag\s[^>]*\btrust=` pattern.
+// There, `[^>]*` could also match `trust`, so the engine retried the tail at every
+// position and the match was polynomial in the literal's length. Two disjoint tests are
+// linear, and dropping the requirement that the attribute sit inside that same tag only
+// widens what the rule catches -- the safe direction for a guard rail with an allowlist.
+const TAG_OPEN_RE = /<[a-z][a-z0-9-]*\s/i;
+const TRUST_ATTR_RE = /\btrust\s*=\s*"/i;
 const CLOSE_RE = /<\/(?:vault-note|retrieved-context)\s*>/i;
 
 function offends(text) {
-  return typeof text === 'string' && (OPEN_RE.test(text) || CLOSE_RE.test(text));
+  if (typeof text !== 'string') return false;
+  return (TAG_OPEN_RE.test(text) && TRUST_ATTR_RE.test(text)) || CLOSE_RE.test(text);
 }
 
 export default {
