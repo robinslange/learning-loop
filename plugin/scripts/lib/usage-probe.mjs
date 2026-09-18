@@ -128,9 +128,14 @@ export function probeTranscriptUsage(transcript, surfaced, opts = {}) {
         // version guarded on `block._meta.hook`, a field nothing in Claude
         // Code or this plugin ever sets: the guard could not fire, and its
         // test passed only by fabricating the field. `caller.type` is what
-        // real transcripts actually carry. Absent (older transcripts) is
-        // treated as direct, so the probe keeps working on history rather
-        // than silently scoring it as zero.
+        // real transcripts actually carry.
+        //
+        // Absent counts as direct, and that branch carries real weight: a
+        // survey of ~60 local transcripts found 5,498 tool calls stamped
+        // {"type":"direct"} and 2,014 with no caller field at all, and no
+        // third value. Treating absent as non-direct would discard a quarter
+        // of the evidence as non-engagement, which is the same silent
+        // under-crediting the dead guard caused, pointing the other way.
         if (opts.directOnly && (block.caller?.type ?? 'direct') !== 'direct') continue;
         const target = matchPath(block.input?.file_path ?? block.input?.notebook_path);
         if (!target) continue;
