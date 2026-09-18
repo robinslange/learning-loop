@@ -144,3 +144,34 @@ test('getSoleJustificationDependents excludes nli-sourced edges from notePath it
   const rows = getSoleJustificationDependents(db, 'a.md');
   assert.equal(rows.length, 0, 'an nli edge from the note must not register as justification');
 });
+
+test('getDownstream and getDownstreamSymmetric exclude comention edges', async (t) => {
+  // Co-mention rows exist for graph breadth (ranking), not for impact
+  // analysis: a "see also" link must not put a note downstream of a claim.
+  const db = await freshDb(t);
+  addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports' });
+  addEdge(db, {
+    fromPath: 'a.md',
+    toPath: 'c.md',
+    edgeType: 'associative',
+    confidence: 'low',
+    sourceGraph: 'comention',
+  });
+  addEdge(db, {
+    fromPath: 'b.md',
+    toPath: 'd.md',
+    edgeType: 'associative',
+    confidence: 'low',
+    sourceGraph: 'comention',
+  });
+  const down = getDownstream(db, 'a.md');
+  assert.deepEqual(
+    down.map((e) => e.to_path),
+    ['b.md'],
+  );
+  const sym = getDownstreamSymmetric(db, 'a.md');
+  assert.deepEqual(
+    sym.map((r) => r.node),
+    ['b.md'],
+  );
+});

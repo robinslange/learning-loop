@@ -197,21 +197,45 @@ function detectFlip(beforeTail, afterHead, patterns) {
 export function classifyNoteEdges(content, sourceName, resolveLink = null) {
   const links = extractLinksWithContext(content);
   const edges = [];
+  const classifiedTargets = new Set();
+  const plainResolved = new Map();
   for (const link of links) {
     if (link.target === sourceName) continue;
     const classification = classifyLink(link.context, link.target, link.offset);
-    if (!classification) continue;
     let toPath = link.target;
     if (resolveLink) {
       const resolved = resolveLink(link.target);
       if (!resolved) continue;
       toPath = resolved;
     }
+    if (!classification) {
+      // Resolution is the qualifying bar for a co-mention: an unresolvable
+      // link cannot join graph traversal, and without a resolver we cannot
+      // tell a real note from a typo.
+      if (resolveLink) plainResolved.set(link.target, toPath);
+      continue;
+    }
+    classifiedTargets.add(link.target);
     edges.push({
       toPath,
       edgeType: classification.type,
       confidence: classification.confidence,
       flip: classification.flip,
+    });
+  }
+  // Co-mention tier: a resolved wikilink with no argumentative verb nearby
+  // still records that the two notes travel together. One low-confidence
+  // associative edge per distinct target, tagged source_graph 'comention' so
+  // justification and impact traversal can keep filtering to argued edges. A
+  // target that classified anywhere in the note is already represented.
+  for (const [target, toPath] of plainResolved) {
+    if (classifiedTargets.has(target)) continue;
+    edges.push({
+      toPath,
+      edgeType: 'associative',
+      confidence: 'low',
+      flip: false,
+      sourceGraph: 'comention',
     });
   }
   return edges;

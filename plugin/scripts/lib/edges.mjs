@@ -109,6 +109,10 @@ export async function openEdgeDb(dbPath) {
 //   'nli'      — legacy: written by the removed NLI contradiction subsystem. Still
 //                excluded from traversal queries so pre-cleanup DBs behave; deleted
 //                by scripts/nli-cleanup.mjs
+//   'comention' — low-confidence associative edge from a resolved wikilink with no
+//                argumentative verb nearby (edge-classifier co-mention tier). Gives
+//                the graph breadth for ranking; excluded from impact traversal so
+//                justification analysis stays on argued edges
 //   <peer-id>  — edge originating from a peer envelope (federation, future use)
 export function addEdge(
   db,
@@ -182,12 +186,12 @@ export function getDownstream(db, notePath, maxDepth = 10) {
   const sql = `
     WITH RECURSIVE downstream(id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, depth) AS (
       SELECT id, from_path, to_path, edge_type, confidence, source_graph, direction_flipped, created_at, 1
-      FROM edges WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli')
+      FROM edges WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli', 'comention')
       UNION
       SELECT e.id, e.from_path, e.to_path, e.edge_type, e.confidence, e.source_graph, e.direction_flipped, e.created_at, d.depth + 1
       FROM edges e
       JOIN downstream d ON e.from_path = d.to_path
-      WHERE d.depth < ? AND e.source_graph NOT IN ('archived', 'nli')
+      WHERE d.depth < ? AND e.source_graph NOT IN ('archived', 'nli', 'comention')
     )
     SELECT DISTINCT * FROM downstream ORDER BY depth, to_path
   `;
@@ -224,7 +228,7 @@ export function getDownstreamSymmetric(db, notePath, maxDepth = 10) {
         r.depth + 1
       FROM edges e
       JOIN reachable r ON (e.from_path = r.node OR e.to_path = r.node)
-      WHERE r.depth < ? AND e.source_graph NOT IN ('archived', 'nli')
+      WHERE r.depth < ? AND e.source_graph NOT IN ('archived', 'nli', 'comention')
     )
     SELECT node, MIN(depth) AS depth
     FROM reachable

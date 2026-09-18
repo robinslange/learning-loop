@@ -123,7 +123,7 @@ async function main() {
     notes_with_edges: 0,
     edges_total: 0,
     by_type: {},
-    by_confidence: { high: 0, medium: 0 },
+    by_confidence: { high: 0, medium: 0, low: 0 },
   };
 
   const walkedSourceRels = new Set(
@@ -184,6 +184,7 @@ async function main() {
             edgeType: edge.edgeType,
             confidence: edge.confidence,
             directionFlipped: edge.flip ? 1 : 0,
+            ...(edge.sourceGraph ? { sourceGraph: edge.sourceGraph } : {}),
           });
         }
       }

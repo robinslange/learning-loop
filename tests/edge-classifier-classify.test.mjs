@@ -101,18 +101,27 @@ describe('edge-classifier: classifyLink window boundaries', () => {
   it('ignores a verb that sits before a sentence boundary (. )', () => {
     // "proves" is trimmed off the before-window at ". " → no verb before, and
     // nothing after → null. Kills the beforeBoundary slice / !== -1 mutants.
-    assert.equal(classifyLink('X proves something. Then we cite [[target]] casually.', 'target'), null);
+    assert.equal(
+      classifyLink('X proves something. Then we cite [[target]] casually.', 'target'),
+      null,
+    );
   });
 
   it('ignores a verb that sits after a following-sentence boundary', () => {
     // The after-window is cut at ". " so the verb in the next sentence is unseen.
-    assert.equal(classifyLink('We mention [[target]] here. This proves an unrelated claim.', 'target'), null);
+    assert.equal(
+      classifyLink('We mention [[target]] here. This proves an unrelated claim.', 'target'),
+      null,
+    );
   });
 
   it('stops the after-window at the next wiki-link', () => {
     // "proves" belongs to the [[other]] link, not [[target]]; the after-window is
     // cut at "[[" so target stays unclassified.
-    assert.equal(classifyLink('We list [[target]] then [[other]] proves the point.', 'target'), null);
+    assert.equal(
+      classifyLink('We list [[target]] then [[other]] proves the point.', 'target'),
+      null,
+    );
   });
 
   it('reads a verb immediately before the link (no boundary in between)', () => {
@@ -157,7 +166,10 @@ describe('edge-classifier: extractLinksWithContext', () => {
 
   it('finds multiple links in one body', () => {
     const links = extractLinksWithContext('proves [[a]] and refutes [[b]] here');
-    assert.deepEqual(links.map((l) => l.target), ['a', 'b']);
+    assert.deepEqual(
+      links.map((l) => l.target),
+      ['a', 'b'],
+    );
   });
 });
 
@@ -181,7 +193,10 @@ describe('edge-classifier: classifyNoteEdges guards', () => {
   });
 
   it('drops a link the resolver cannot resolve', () => {
-    assert.deepEqual(classifyNoteEdges('proves [[target]] here', 'src', () => null), []);
+    assert.deepEqual(
+      classifyNoteEdges('proves [[target]] here', 'src', () => null),
+      [],
+    );
   });
 
   it('stores the resolver path as toPath when resolved', () => {
@@ -194,13 +209,10 @@ describe('edge-classifier: classifyNoteEdges guards', () => {
     const content = 'This proves [[a]] and this refutes [[b]] entirely.';
     const edges = classifyNoteEdges(content, 'src', resolver);
     assert.equal(edges.length, 2);
-    assert.deepEqual(
-      edges.map((e) => [e.toPath, e.edgeType]).sort(),
-      [
-        ['3-permanent/a.md', 'evidence_for'],
-        ['3-permanent/b.md', 'challenges_undermining'],
-      ],
-    );
+    assert.deepEqual(edges.map((e) => [e.toPath, e.edgeType]).sort(), [
+      ['3-permanent/a.md', 'evidence_for'],
+      ['3-permanent/b.md', 'challenges_undermining'],
+    ]);
   });
 });
 
@@ -246,7 +258,7 @@ describe('edge-classifier: repeated links to the same target', () => {
   // both times, and the second link silently inherits the first's verdict —
   // wrong edge_type and confidence in a DB that justification and cycle
   // queries read as ground truth.
-  it('gives each link its own verdict, not the first occurrence\'s', () => {
+  it("gives each link its own verdict, not the first occurrence's", () => {
     const note = 'This contradicts [[foo]] in every respect. Later it reinforces [[foo]] instead.';
     const edges = classifyNoteEdges(note, 'src');
     assert.equal(edges.length, 2);
@@ -274,6 +286,49 @@ describe('edge-classifier: repeated links to the same target', () => {
   });
 
   it('still classifies when the caller passes no offset', () => {
-    assert.equal(classifyLink('This proves [[target]] conclusively.', 'target').type, 'evidence_for');
+    assert.equal(
+      classifyLink('This proves [[target]] conclusively.', 'target').type,
+      'evidence_for',
+    );
+  });
+});
+
+describe('edge-classifier: co-mention tier', () => {
+  const resolver = (name) => `3-permanent/${name}.md`;
+
+  it('emits a low-confidence comention edge for a resolved link with no verb', () => {
+    const edges = classifyNoteEdges('see also [[target]] for context', 'src', resolver);
+    assert.equal(edges.length, 1);
+    assert.deepEqual(edges[0], {
+      toPath: '3-permanent/target.md',
+      edgeType: 'associative',
+      confidence: 'low',
+      flip: false,
+      sourceGraph: 'comention',
+    });
+  });
+
+  it('suppresses the comention when any occurrence of the target classifies', () => {
+    const content = 'This proves [[target]] here. See also [[target]] again.';
+    const edges = classifyNoteEdges(content, 'src', resolver);
+    assert.equal(edges.length, 1);
+    assert.equal(edges[0].edgeType, 'evidence_for');
+  });
+
+  it('emits one comention per distinct plain target, not per occurrence', () => {
+    const content = 'See [[a]] and later [[a]] once more, plus [[b]].';
+    const edges = classifyNoteEdges(content, 'src', resolver);
+    assert.deepEqual(edges.map((e) => e.toPath).sort(), ['3-permanent/a.md', '3-permanent/b.md']);
+    assert.ok(edges.every((e) => e.sourceGraph === 'comention'));
+  });
+
+  it('emits no comention without a resolver (resolution is the qualifying bar)', () => {
+    assert.deepEqual(classifyNoteEdges('see [[target]] casually', 'src'), []);
+  });
+
+  it('classified edges carry no sourceGraph (callers default them to local)', () => {
+    const edges = classifyNoteEdges('proves [[target]] here', 'src', resolver);
+    assert.equal(edges.length, 1);
+    assert.equal(edges[0].sourceGraph, undefined);
   });
 });

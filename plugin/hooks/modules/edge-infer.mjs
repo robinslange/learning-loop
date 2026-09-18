@@ -190,6 +190,7 @@ export async function runEdgeInfer(ctx) {
     edgeType: e.edgeType,
     confidence: e.confidence,
     flip: e.flip,
+    sourceGraph: e.sourceGraph,
   }));
 
   if (edges.length === 0) return;
@@ -212,6 +213,7 @@ export async function runEdgeInfer(ctx) {
         edgeType: edge.edgeType,
         confidence: edge.confidence,
         directionFlipped: edge.flip ? 1 : 0,
+        ...(edge.sourceGraph ? { sourceGraph: edge.sourceGraph } : {}),
       });
     }
 
