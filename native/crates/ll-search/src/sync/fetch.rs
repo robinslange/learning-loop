@@ -33,7 +33,7 @@ use super::client::{recv_binary, recv_json, send_json, WsStream};
 use super::config::{peer_dir, peer_index_path};
 use super::grant::{self, GrantKind, GrantStatement};
 use super::key_id::KeyId;
-use super::protocol::{manifest_root, ChunkedFrame};
+use super::protocol::{manifest_root, ChunkedFrame, MAX_CHUNKS};
 use super::protocol_v5::{
     sanitise_hub_text, ChunkedBody, ClientMsg, GrantWire, HubMsg, VaultState,
 };
@@ -358,6 +358,13 @@ async fn fetch_one(
 async fn recv_chunked(ws: &mut WsStream, desc: &ChunkedBody) -> anyhow::Result<Vec<u8>> {
     if desc.chunks == 0 {
         anyhow::bail!("the hub described a chunked body of zero frames");
+    }
+    if desc.chunks > MAX_CHUNKS {
+        anyhow::bail!(
+            "the hub described a chunked body of {} frames, over the {} cap",
+            desc.chunks,
+            MAX_CHUNKS
+        );
     }
     let mut hashes = Vec::with_capacity(desc.chunks as usize);
     let mut body = Vec::new();
@@ -885,6 +892,43 @@ mod tests {
         .await;
 
         assert!(out.fetched.is_empty(), "a corrupted frame was accepted");
+        assert!(!peer_index_path(dir.path(), "v-other").exists());
+    }
+
+    /// A frame count is not an allocation instruction.
+    ///
+    /// `chunks` is the one field acted on before any frame is read: it sized a
+    /// `Vec::with_capacity`, so `u32::MAX` requests four billion 32-byte hashes
+    /// from a number the hub chose, having sent no body at all. The hub below
+    /// sends the descriptor and then nothing, which is all it ever needed to
+    /// send.
+    ///
+    /// Asserted as a deadline, not as an outcome, because the outcome alone
+    /// does not distinguish the fix: without the bound the client accepts the
+    /// descriptor, enters the frame loop and blocks on frames that never come,
+    /// and eventually reports the same empty fetch and single skip that the
+    /// refusal does -- measured at 30s against 0.00s. Refusing on the
+    /// descriptor is the behaviour, so the deadline is what tests it. The
+    /// margin is wide because the passing path does no I/O at all.
+    #[tokio::test]
+    async fn a_frame_count_over_the_cap_is_refused_without_waiting_for_frames() {
+        let dir = tempfile::tempdir().unwrap();
+        let fetched = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            run(
+                dir.path(),
+                &["v-other"],
+                vec![to_me(of_kind(GrantKind::Follow, "v-other"))],
+                vec![("v-other", FetchAnswer::ChunkedOverCap(u32::MAX))],
+            ),
+        )
+        .await;
+
+        let (out, _asked) = fetched.expect(
+            "the descriptor must be refused on its own: the client waited for frames instead",
+        );
+        assert!(out.fetched.is_empty(), "a descriptor over the frame cap was accepted");
+        assert_eq!(out.skipped.len(), 1, "the refusal must be reported, not swallowed");
         assert!(!peer_index_path(dir.path(), "v-other").exists());
     }
 

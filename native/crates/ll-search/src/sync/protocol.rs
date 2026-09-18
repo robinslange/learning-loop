@@ -51,3 +51,23 @@ pub const CHUNKED_HEADER_LEN: usize = 4 + 4 + 4 + 32;
 /// Per-chunk frame ceiling. 8 MiB stays under tokio-tungstenite's 16 MiB
 /// `max_frame_size` default so chunked uploads don't need that ceiling raised.
 pub const CHUNK_MAX_BODY_SIZE: usize = 8 * 1024 * 1024;
+
+/// Upper bound on the frame count a hub may claim in a `ChunkedBody`.
+///
+/// `chunks` is the one number in the descriptor that is acted on before any
+/// frame is read, and it sized a `Vec::with_capacity`. A hub sending
+/// `chunks: u32::MAX` requests four billion 32-byte hashes, ~128 GiB, from a
+/// number it chose, with no body sent and none required. The send path clamps
+/// against [`CHUNK_MAX_BODY_SIZE`] and the hub's `max_total_bytes`; the receive
+/// path had no counterpart, which is the asymmetry rather than the size.
+///
+/// What an unbounded request does is allocator- and platform-dependent, so the
+/// test asserts the part that is not: without this cap the client accepts the
+/// descriptor and blocks in the frame loop on frames the hub never has to send,
+/// measured at 30s against 0.00s. Refusing on the descriptor alone is the
+/// behaviour, and a hub pinning a client that way costs it nothing.
+///
+/// 4096 frames at the 8 MiB ceiling describes a 32 GiB body, two orders above
+/// the 200 MiB hubs advertise as `max_total_bytes`, so this refuses only
+/// descriptors that were never going to reassemble into anything.
+pub const MAX_CHUNKS: u32 = 4096;
