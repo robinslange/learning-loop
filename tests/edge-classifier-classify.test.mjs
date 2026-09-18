@@ -239,3 +239,41 @@ describe('edge-classifier: detectFlip AND-not-OR', () => {
     assert.equal(r.flip, true);
   });
 });
+
+describe('edge-classifier: repeated links to the same target', () => {
+  // The context window is +/-150 chars, so two links to one target usually sit
+  // in each other's window. Locating the target by NAME finds the first one
+  // both times, and the second link silently inherits the first's verdict —
+  // wrong edge_type and confidence in a DB that justification and cycle
+  // queries read as ground truth.
+  it('gives each link its own verdict, not the first occurrence\'s', () => {
+    const note = 'This contradicts [[foo]] in every respect. Later it reinforces [[foo]] instead.';
+    const edges = classifyNoteEdges(note, 'src');
+    assert.equal(edges.length, 2);
+    assert.equal(edges[0].edgeType, 'challenges_undermining');
+    assert.equal(edges[1].edgeType, 'supports');
+    assert.notEqual(edges[0].edgeType, edges[1].edgeType);
+  });
+
+  it('does not let a later verb reclassify an earlier link', () => {
+    const note = 'This proves [[foo]] clearly. But it also undermines [[foo]] elsewhere.';
+    const edges = classifyNoteEdges(note, 'src');
+    assert.equal(edges.length, 2);
+    assert.equal(edges[0].edgeType, 'evidence_for');
+    assert.equal(edges[1].edgeType, 'challenges_undermining');
+  });
+
+  it('offset locates the link inside its own context slice, not the body', () => {
+    // position is absolute; using it as a slice offset would point past the
+    // link once the body is longer than the window.
+    const pad = 'x'.repeat(400);
+    const links = extractLinksWithContext(`${pad} proves [[target]] omega`);
+    assert.equal(links.length, 1);
+    assert.equal(links[0].context.slice(links[0].offset, links[0].offset + 10), '[[target]]');
+    assert.notEqual(links[0].offset, links[0].position);
+  });
+
+  it('still classifies when the caller passes no offset', () => {
+    assert.equal(classifyLink('This proves [[target]] conclusively.', 'target').type, 'evidence_for');
+  });
+});

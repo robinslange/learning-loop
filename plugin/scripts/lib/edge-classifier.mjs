@@ -113,15 +113,27 @@ export function extractLinksWithContext(content) {
     const start = Math.max(0, m.index - 150);
     const end = Math.min(body.length, m.index + m[0].length + 150);
     const context = body.slice(start, end);
-    results.push({ target, context, position: m.index });
+    // offset locates THIS link inside its own context slice. position is the
+    // absolute index in the body and is not a valid offset into the slice.
+    results.push({ target, context, position: m.index, offset: m.index - start });
   }
   return results;
 }
 
-export function classifyLink(context, targetName) {
+// offset says which occurrence of the target this call is about. A note that
+// links the same target twice ("contradicts [[foo]] ... reinforces [[foo]]")
+// hands both calls a window containing both links, so locating the target by
+// searching for its name returns the first one every time and the second link
+// inherits the first one's verdict — wrong edge_type and confidence rows in a
+// DB that justification and cycle queries read as ground truth. The caller
+// already knows the index; -1 keeps the search for callers that pass a window
+// holding exactly one link.
+export function classifyLink(context, targetName, offset = -1) {
   const targetRe = new RegExp(
     `\\[\\[${targetName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\|[^\\]]+)?\\]\\]`,
+    'g',
   );
+  targetRe.lastIndex = offset > 0 ? offset : 0;
   const targetMatch = targetRe.exec(context);
   if (!targetMatch) return null;
 
@@ -187,7 +199,7 @@ export function classifyNoteEdges(content, sourceName, resolveLink = null) {
   const edges = [];
   for (const link of links) {
     if (link.target === sourceName) continue;
-    const classification = classifyLink(link.context, link.target);
+    const classification = classifyLink(link.context, link.target, link.offset);
     if (!classification) continue;
     let toPath = link.target;
     if (resolveLink) {
