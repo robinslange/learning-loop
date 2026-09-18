@@ -16,13 +16,19 @@ import assert from 'node:assert/strict';
 import { compareBaselines } from '../bench/bench.mjs';
 
 const GATED = '+prf [title]';
+const GATED_PPR = 'vec+bm25+ppr [title]';
 
 // Figures from the blessed linux/x64 baseline, so a drop below is the shape of
 // a real one rather than an invented scale.
 const HEALTHY = { recall_at_10: 0.0667, ndcg_at_10: 0.0428, hits_at_1: 0.045 };
 
-function funnel(title, long = HEALTHY) {
-  return { [GATED]: title, '+prf [long]': long };
+function funnel(title, long = HEALTHY, ppr = HEALTHY) {
+  return {
+    [GATED]: title,
+    '+prf [long]': long,
+    [GATED_PPR]: ppr,
+    'vec+bm25+ppr [long]': ppr,
+  };
 }
 
 function run(platform, stages) {
@@ -90,5 +96,23 @@ describe('retrieval quality gate', () => {
     );
     assert.equal(pastThreshold.qualityRegressions.length, 1);
     assert.equal(pastThreshold.qualityRegressions[0].relativeDrop, 0.5);
+  });
+
+  it('fires on a graph-lane drop even when the downstream +prf stages hold', () => {
+    // The gate previously watched only +prf, two stages downstream of PPR, so
+    // a graph-lane regression that PRF happened to wash out passed silently.
+    const report = compareBaselines(
+      run('linux/x64', funnel(HEALTHY, HEALTHY, { ...HEALTHY, ndcg_at_10: 0.02 })),
+      run('linux/x64', funnel(HEALTHY, HEALTHY, HEALTHY)),
+    );
+
+    const pprHits = report.qualityRegressions.filter((r) => r.name.includes('ppr'));
+    assert.equal(pprHits.length, 2, JSON.stringify(report.qualityRegressions));
+    assert.ok(pprHits.every((r) => r.name.endsWith('/ndcg_at_10')));
+    assert.equal(
+      report.qualityRegressions.length,
+      2,
+      'healthy +prf stages must not fire alongside',
+    );
   });
 });
