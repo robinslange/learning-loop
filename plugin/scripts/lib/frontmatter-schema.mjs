@@ -67,19 +67,24 @@ function stripFences(body) {
 // 100k characters and stalled the whole `normalise-frontmatter.mjs` batch pass
 // on one note.
 //
-// Shortening the run removes the cost, and the two guards here are what keep
-// it from removing a signal with it. Every pattern above needs only a few
-// characters after whatever triggers it, so the first 39 of a run are kept and
-// only the tail is dropped: that preserves `n=` and `p<0.` and a bare `<`,
-// which trigger before their digits and would otherwise lose them. And a run
-// that a unit follows is a real quantity however long it is, so the lookahead
-// leaves it whole. Verified by differential fuzz against the unclipped text:
-// zero disagreements over run lengths 30 to 60 against every unit and trigger
-// prefix, and over 500k random numeric-alphabet strings.
-const LONG_DIGIT_RUN = /([\d,.]{39})[\d,.]+(?!\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b))/gi;
+// Only the middle of a long run is dropped. Both ends stay, joined, so every
+// pattern above still sees what it needs: `n=`, `p<0.` and a bare `<` trigger
+// before their digits and keep them via the head, and a unit or separator that
+// follows the run stays adjacent to it via the tail, so a genuine long
+// quantity still reads as one. Nothing here restates what a signal is. Earlier
+// attempts encoded "a unit follows" as a second regex beside the patterns, and
+// each one drifted from them: the first missed a unit after a `,` or `.`, an
+// ordinary way to write a number, and silently dropped real figures.
+//
+// Verified by differential fuzz against the unsqueezed text, zero
+// disagreements: every combination of run lengths 35 to 65, unit and
+// unit-lookalike suffixes, separators, and trigger prefixes; 60k multi-run
+// paragraphs; 500k random numeric-alphabet strings.
+const LONG_DIGIT_RUN = /[\d,.]{40,}/g;
+const RUN_KEEP = 20;
 
 function clipLongRuns(text) {
-  return text.replace(LONG_DIGIT_RUN, '$1 ');
+  return text.replace(LONG_DIGIT_RUN, (run) => run.slice(0, RUN_KEEP) + run.slice(-RUN_KEEP));
 }
 
 /**

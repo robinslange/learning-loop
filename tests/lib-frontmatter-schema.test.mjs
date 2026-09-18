@@ -132,9 +132,13 @@ describe('frontmatter-schema grounding signals', () => {
 
   it('keeps a long digit run that a unit follows', () => {
     // The clip exists to drop id lists, not quantities. A run past the bound
-    // with a unit after it is a real figure however implausible its length.
+    // with a unit after it is a real figure however implausible its length,
+    // including when a separator sits between them: a decimal point or a
+    // thousands comma directly before the unit is an ordinary way to write one.
     assert.equal(hasUngroundedFactualSignal('9'.repeat(60) + 'mg of it'), true);
     assert.equal(hasUngroundedFactualSignal('9'.repeat(60) + ' mg of it'), true);
+    assert.equal(hasUngroundedFactualSignal('1'.repeat(40) + '.%'), true);
+    assert.equal(hasUngroundedFactualSignal('1'.repeat(40) + ',mg'), true);
   });
 
   it('keeps the digits a trigger needs when the run past them is clipped', () => {
