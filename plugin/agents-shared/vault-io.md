@@ -40,6 +40,7 @@ Use the `Write` tool directly to `{{VAULT}}/`. Never use `obsidian_put_file`, `o
 | `5-maps/` | Synthesis maps and MOCs |
 | `Excalidraw/` | Excalidraw diagram files (.excalidraw.md) |
 | `_system/` | persona.md, capture-rules.md (read-only, never write here without asking) |
+| `_archive/0-inbox/` | Archived inbox notes (the /inbox ratchet exit, consent-gated) |
 | `_archive/1-fleeting/` | Archived fleeting notes (fleeting-sweep moves old notes here) |
 
 ## Filename Convention
