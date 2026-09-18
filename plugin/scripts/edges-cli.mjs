@@ -5,6 +5,7 @@ import { readFileSync } from 'fs';
 import { PLUGIN_DATA, VAULT_PATH } from './lib/constants.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { stripFrontmatter } from './lib/markdown-parse.mjs';
+import { findContradictionCycles } from './lib/cycle-detect.mjs';
 import {
   openEdgeDb,
   addEdge,
@@ -16,6 +17,7 @@ import {
   getDownstreamSymmetric,
   getSoleJustificationDependents,
   getSoleJustificationDependentsSymmetric,
+  getContradictionGraphEdges,
   getPendingReview,
   confirmEdge,
   rejectEdge,
@@ -40,6 +42,7 @@ Commands:
   list <note-path>
   downstream <note-path> [--max-depth 10] [--symmetric]
   sole-dependents <note-path> [--symmetric]
+  cycles [--max-depth 4]
   review                          Show pending edges with source-note context
   review-count
   super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]
@@ -93,6 +96,7 @@ function usage() {
       'list <note-path>',
       'downstream <note-path> [--max-depth 10] [--symmetric]',
       'sole-dependents <note-path> [--symmetric]',
+      'cycles [--max-depth 4]',
       'review (shows context from source notes)',
       'review-count',
       'super-add <pattern> [--replacement <note-path>] [--reason <text>] [--date YYYY-MM-DD]',
@@ -197,6 +201,24 @@ async function main() {
           ? getSoleJustificationDependentsSymmetric(db, notePath)
           : getSoleJustificationDependents(db, notePath);
         out({ root: notePath, symmetric, sole_dependents: dependents });
+        break;
+      }
+
+      case 'cycles': {
+        const maxDepth = parseInt(parseFlag('--max-depth', '4'), 10);
+        const cycles = findContradictionCycles(getContradictionGraphEdges(db), { maxDepth });
+        out({
+          count: cycles.length,
+          cycles: cycles.map((c) => ({
+            nodes: c.nodes,
+            contradictions: c.contradictions.map((e) => ({
+              id: e.id,
+              from: e.fromPath,
+              to: e.toPath,
+              type: e.edgeType,
+            })),
+          })),
+        });
         break;
       }
 

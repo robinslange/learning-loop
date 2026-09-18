@@ -276,6 +276,22 @@ export function getSoleJustificationDependentsSymmetric(db, notePath) {
   return rowsToObjects(db.exec(sql, [notePath, notePath]));
 }
 
+// Edge rows shaped for cycle-detect (camelCase from/to/type plus id). Same
+// eligibility filter as the recursive traversals: argued local edges only.
+export function getContradictionGraphEdges(db) {
+  const rows = rowsToObjects(
+    db.exec(
+      "SELECT id, from_path, to_path, edge_type FROM edges WHERE source_graph NOT IN ('archived', 'nli', 'comention')",
+    ),
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    fromPath: r.from_path,
+    toPath: r.to_path,
+    edgeType: r.edge_type,
+  }));
+}
+
 export function getPendingReview(db) {
   return rowsToObjects(db.exec("SELECT * FROM edges WHERE confidence = 'medium'"));
 }

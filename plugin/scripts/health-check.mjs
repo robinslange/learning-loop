@@ -179,26 +179,69 @@ export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount } = {})
   });
 }
 
+// Flags contradiction cycles in the argumentation graph: notes that dispute
+// each other in a loop. Knowledge state, not a dependency problem, so
+// formatMissingDeps excludes this id; /health renders it. Pure formatter.
+export function checkContradictionCycles({ dbExists, cycles } = {}) {
+  if (!dbExists || cycles == null) {
+    return makeCheck({
+      id: 'contradiction-cycles',
+      name: 'Contradiction cycles',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'no edges index to scan',
+      fix: null,
+    });
+  }
+  if (cycles.length === 0) {
+    return makeCheck({
+      id: 'contradiction-cycles',
+      name: 'Contradiction cycles',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'no contradiction cycles',
+      fix: null,
+    });
+  }
+  const shown = cycles
+    .slice(0, 3)
+    .map((c) => [...c.nodes, c.nodes[0]].join(' -> '))
+    .join('; ');
+  const more = cycles.length > 3 ? ` (+${cycles.length - 3} more)` : '';
+  return makeCheck({
+    id: 'contradiction-cycles',
+    name: 'Contradiction cycles',
+    status: SEVERITIES.fail,
+    severity: SEVERITIES.warn,
+    detail: `${cycles.length} contradiction cycle(s): ${shown}${more}`,
+    fix: 'Review with /learning-loop:gaps; full list: node PLUGIN/scripts/edges-cli.mjs cycles',
+  });
+}
+
 async function collectEdgesBackfillInputs({ pluginData, vaultRoot }) {
   const vaultNoteCount = vaultRoot && existsSync(vaultRoot) ? listVaultNotes(vaultRoot).length : 0;
   const dbPath = pluginData ? DATA_FILES.edgesDb(pluginData) : null;
   const dbExists = Boolean(dbPath && existsSync(dbPath));
   let edgeCount = null;
+  let cycles = null;
   if (dbExists) {
     try {
-      const { openEdgeDb } = await import('./lib/edges.mjs');
+      const { openEdgeDb, getContradictionGraphEdges } = await import('./lib/edges.mjs');
+      const { findContradictionCycles } = await import('./lib/cycle-detect.mjs');
       const db = await openEdgeDb(dbPath);
       try {
         const res = db.exec('SELECT COUNT(*) FROM edges');
         edgeCount = res[0] ? Number(res[0].values[0][0]) : 0;
+        cycles = findContradictionCycles(getContradictionGraphEdges(db));
       } finally {
         db.close();
       }
     } catch {
       edgeCount = null;
+      cycles = null;
     }
   }
-  return { vaultNoteCount, dbExists, edgeCount };
+  return { vaultNoteCount, dbExists, edgeCount, cycles };
 }
 
 export async function runFullChecks(ctx = {}) {
@@ -270,6 +313,7 @@ export async function runFullChecks(ctx = {}) {
     full.checkWatchDaemon({ pidfileExists, pidIsAlive, pid }),
     full.checkOfflineMode({ offline: isOffline() }),
     checkEdgesBackfill(edgesInputs),
+    checkContradictionCycles(edgesInputs),
   ];
 
   return {
@@ -281,10 +325,12 @@ export async function runFullChecks(ctx = {}) {
 
 export function formatMissingDeps(result) {
   if (!result?.checks) return '';
-  // injection-shadow-gate is a readiness nudge, not a missing dependency —
-  // the session-start detector surfaces it on its own line.
+  // injection-shadow-gate is a readiness nudge and contradiction-cycles is
+  // knowledge state; neither is a missing dependency. The session-start
+  // detector and /health surface those on their own lines.
   const failed = result.checks.filter(
-    (c) => c.status === 'fail' && c.id !== 'injection-shadow-gate',
+    (c) =>
+      c.status === 'fail' && c.id !== 'injection-shadow-gate' && c.id !== 'contradiction-cycles',
   );
   const required = failed.filter((c) => c.severity === 'fail');
   const optional = failed.filter((c) => c.severity === 'warn');
