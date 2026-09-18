@@ -59,7 +59,7 @@ export function runUsageProbe({ pluginData, sessionId, transcriptPath } = {}) {
     if (statSync(transcriptPath).size > MAX_TRANSCRIPT_BYTES) return 0;
 
     const found = probeTranscriptUsage(readFileSync(transcriptPath, 'utf8'), surfaced, {
-      skipHookReads: true,
+      directOnly: true,
     });
     if (found.length === 0) return 0;
 
