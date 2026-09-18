@@ -17,6 +17,10 @@ export function capLogFile(path, maxBytes) {
   }
   if (size <= maxBytes) return;
   const keep = Math.floor(maxBytes / 2);
+  // At maxBytes <= 3 the halving floors to 0, and a 0-byte read writes an empty
+  // file: the cap would delete the log rather than bound it. Unreachable at the
+  // shipped 4 MiB, but the function takes maxBytes as an argument.
+  if (keep < 1) return;
   let fd;
   try {
     fd = openSync(path, 'r');
@@ -25,16 +29,21 @@ export function capLogFile(path, maxBytes) {
     closeSync(fd);
     fd = undefined;
     // The read starts mid-line, so drop that fragment and open on a whole
-    // record. If the retained tail has no newline in it at all -- one very
-    // long line, or a daemon killed mid-write -- there is no whole record to
-    // find, and dropping to the first newline would write an empty file. That
-    // destroys exactly the output the caller reads after a failed start, so
-    // the fragment is kept instead: opening mid-line is the smaller loss.
-    // A multibyte character split by the byte-offset read decodes to one
-    // replacement char at the head, which is likewise better than no log.
-    const text = buf.toString('utf-8');
-    const nl = text.indexOf('\n');
-    writeFileSync(path, nl === -1 ? text : text.slice(nl + 1));
+    // record. Two shapes leave no whole record to open on: no newline at all
+    // (one very long line, or a daemon killed mid-write), and a newline that
+    // is the final byte. Both slice to nothing, and writing that destroys
+    // exactly the output the caller reads after a failed start, so the buffer
+    // is kept whole instead: opening mid-line is the smaller loss.
+    //
+    // Searched and sliced on the Buffer, not on a decoded string, for two
+    // reasons rather than one. watch.log is raw daemon stdout and stderr, so
+    // an invalid byte decodes to a 3-byte U+FFFD: 5000 bytes of 0xFF against a
+    // 1024 cap wrote 1536, breaking the bound the caller asked for and the
+    // tests assert. And the byte-offset read can split a multibyte character,
+    // which as bytes stays one truncated character at the head rather than
+    // becoming a replacement char that then costs more than it replaced.
+    const nl = buf.indexOf(0x0a);
+    writeFileSync(path, nl === -1 || nl === buf.length - 1 ? buf : buf.subarray(nl + 1));
   } catch (err) {
     logError('lib.log-rotate.capLogFile', err);
   } finally {
