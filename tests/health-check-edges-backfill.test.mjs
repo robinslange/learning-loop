@@ -62,3 +62,36 @@ test('runFullChecks includes the edges-backfill check with collected inputs', as
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('a comention-only index is populated, not a backfill failure', async () => {
+  // A vault whose resolved wikilinks all lack an argumentative verb produces
+  // only comention rows. That index is correctly populated and backfill is
+  // idempotent, so a zero-argued count must not trip the zero-edges failure.
+  const { openEdgeDb, addEdge, saveDb } = await import('../plugin/scripts/lib/edges.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'll-comention-only-'));
+  try {
+    const dbPath = join(dir, 'edges.db');
+    const db = await openEdgeDb(dbPath);
+    addEdge(db, {
+      fromPath: 'a.md',
+      toPath: 'b.md',
+      edgeType: 'associative',
+      confidence: 'low',
+      sourceGraph: 'comention',
+    });
+    saveDb(db, dbPath);
+    db.close();
+
+    const vaultRoot = join(dir, 'vault');
+    mkdirSync(join(vaultRoot, '0-inbox'), { recursive: true });
+    writeFileSync(join(vaultRoot, '0-inbox', 'a.md'), '# a\n\nsee [[b]]\n');
+    writeFileSync(join(vaultRoot, '0-inbox', 'b.md'), '# b\n');
+
+    const result = await runFullChecks({ pluginData: dir, vaultRoot, home: dir });
+    const check = result.checks.find((c) => c.id === 'edges-backfill');
+    assert.equal(check.status, 'ok', check.detail);
+    assert.match(check.detail, /0 argued edge\(s\), 1 co-mention\(s\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

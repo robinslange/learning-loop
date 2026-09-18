@@ -128,7 +128,7 @@ export async function runQuickChecks(ctx = {}) {
 // Flags a justification index that has fallen behind the vault: edges.db
 // missing entirely, or present with zero edges, while the vault has notes to
 // classify. Pure formatter; the runner collects the inputs.
-export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount } = {}) {
+export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount, arguedEdgeCount } = {}) {
   if (!vaultNoteCount) {
     return makeCheck({
       id: 'edges-backfill',
@@ -169,12 +169,21 @@ export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount } = {})
       fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
     });
   }
+  // edgeCount (all rows) decides the branches above: a comention-only vault
+  // has a populated index and re-running backfill cannot change it, so it must
+  // not fail here. arguedEdgeCount is display: the number this check has
+  // always shown is how many argued edges the index holds.
+  const argued = arguedEdgeCount ?? edgeCount;
+  const comentions = edgeCount - argued;
   return makeCheck({
     id: 'edges-backfill',
     name: 'Edges index',
     status: SEVERITIES.ok,
     severity: SEVERITIES.warn,
-    detail: `${edgeCount} edge(s)`,
+    detail:
+      comentions > 0
+        ? `${argued} argued edge(s), ${comentions} co-mention(s)`
+        : `${argued} edge(s)`,
     fix: null,
   });
 }
@@ -183,7 +192,7 @@ export function checkEdgesBackfill({ vaultNoteCount, dbExists, edgeCount } = {})
 // each other in a loop. Knowledge state, not a dependency problem, so
 // formatMissingDeps excludes this id; /health renders it. Pure formatter.
 export function checkContradictionCycles({ dbExists, cycles } = {}) {
-  if (!dbExists || cycles == null) {
+  if (!dbExists) {
     return makeCheck({
       id: 'contradiction-cycles',
       name: 'Contradiction cycles',
@@ -191,6 +200,18 @@ export function checkContradictionCycles({ dbExists, cycles } = {}) {
       severity: SEVERITIES.warn,
       detail: 'no edges index to scan',
       fix: null,
+    });
+  }
+  if (cycles == null) {
+    // Same collector failure checkEdgesBackfill reports: the db exists but
+    // could not be read. Healthy is the one thing that is not.
+    return makeCheck({
+      id: 'contradiction-cycles',
+      name: 'Contradiction cycles',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: 'edges.db unreadable',
+      fix: 'Run: node PLUGIN/scripts/backfill-edges.mjs',
     });
   }
   if (cycles.length === 0) {
@@ -223,6 +244,7 @@ async function collectEdgesBackfillInputs({ pluginData, vaultRoot }) {
   const dbPath = pluginData ? DATA_FILES.edgesDb(pluginData) : null;
   const dbExists = Boolean(dbPath && existsSync(dbPath));
   let edgeCount = null;
+  let arguedEdgeCount = null;
   let cycles = null;
   if (dbExists) {
     try {
@@ -230,18 +252,22 @@ async function collectEdgesBackfillInputs({ pluginData, vaultRoot }) {
       const { findContradictionCycles } = await import('./lib/cycle-detect.mjs');
       const db = await openEdgeDb(dbPath);
       try {
-        const res = db.exec('SELECT COUNT(*) FROM edges');
+        const res = db.exec(
+          "SELECT COUNT(*), COALESCE(SUM(source_graph != 'comention'), 0) FROM edges",
+        );
         edgeCount = res[0] ? Number(res[0].values[0][0]) : 0;
+        arguedEdgeCount = res[0] ? Number(res[0].values[0][1]) : 0;
         cycles = findContradictionCycles(getContradictionGraphEdges(db));
       } finally {
         db.close();
       }
     } catch {
       edgeCount = null;
+      arguedEdgeCount = null;
       cycles = null;
     }
   }
-  return { vaultNoteCount, dbExists, edgeCount, cycles };
+  return { vaultNoteCount, dbExists, edgeCount, arguedEdgeCount, cycles };
 }
 
 export async function runFullChecks(ctx = {}) {

@@ -22,6 +22,13 @@ test('ok when there is no edges index to scan', () => {
   assert.match(c.detail, /no edges index/);
 });
 
+test('warn-severity fail when the db exists but could not be read', () => {
+  const c = checkContradictionCycles({ dbExists: true, cycles: null });
+  assert.equal(c.status, 'fail');
+  assert.equal(c.severity, 'warn');
+  assert.match(c.detail, /unreadable/);
+});
+
 test('ok when the graph holds no contradiction cycles', () => {
   const c = checkContradictionCycles({ dbExists: true, cycles: [] });
   assert.equal(c.status, 'ok');
@@ -75,7 +82,7 @@ test('edges-cli cycles reports a contradiction cycle from a real db', async () =
     const child = spawnSync(process.execPath, [CLI, 'cycles'], {
       encoding: 'utf8',
       timeout: 10000,
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir, LL_EDGES_DB: dbPath },
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: dir },
     });
     assert.equal(child.status, 0, child.stderr);
     const parsed = JSON.parse(child.stdout);
