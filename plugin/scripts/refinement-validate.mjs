@@ -254,6 +254,25 @@ export function validateEdit(decision, currentBody) {
   };
 }
 
+// A supersede decision never edits the upstream body: the driver stamps
+// `invalidated:`/`superseded_by:` frontmatter and records a supersessions row.
+// Validation here is field-shape only, plus the same upstream hash the edit
+// path emits so the driver's stale-read guard covers frontmatter stamping too.
+export function validateSupersede(decision, upstreamBody) {
+  const flags = [];
+  const oldPatternQuery = stripEmDashes(decision.old_pattern_query || '').cleaned.trim();
+  const reason = stripEmDashes(decision.reason || '').cleaned.trim();
+  if (!oldPatternQuery) flags.push({ type: 'missing_old_pattern_query' });
+  if (!reason) flags.push({ type: 'missing_reason' });
+  return {
+    old_pattern_query: oldPatternQuery,
+    reason,
+    upstream_hash: createHash('sha256').update(upstreamBody).digest('hex'),
+    flags,
+    status: flags.length ? 'malformed' : 'ok',
+  };
+}
+
 function validateCounterpoint(decision) {
   const flags = [];
   const newNoteLinkText = stripEmDashes(decision.new_note_link_text).cleaned;
@@ -404,6 +423,34 @@ function main() {
           upstream_hash: result.upstream_hash,
         },
       });
+    } else if (d.decision === 'supersede') {
+      let currentBody = '';
+      try {
+        currentBody = readFileSync(pair.candidate, 'utf-8');
+      } catch (e) {
+        validated.push({
+          ...d,
+          validation: {
+            status: 'upstream_unreadable',
+            flags: [{ type: 'read_error', detail: e.message }],
+          },
+        });
+        continue;
+      }
+      const result = validateSupersede(d, currentBody);
+      validated.push({
+        ...d,
+        old_pattern_query: result.old_pattern_query,
+        reason: result.reason,
+        upstream_path: pair.candidate,
+        new_note_path: pair.new_note,
+        cosine: pair.cosine,
+        validation: {
+          status: result.status,
+          flags: result.flags,
+          upstream_hash: result.upstream_hash,
+        },
+      });
     } else if (d.decision === 'counterpoint') {
       const result = validateCounterpoint(d);
       validated.push({
@@ -440,6 +487,9 @@ function main() {
     ).length,
     counterpoint_ok: validated.filter(
       (d) => d.decision === 'counterpoint' && d.validation.status === 'ok',
+    ).length,
+    supersede_ok: validated.filter(
+      (d) => d.decision === 'supersede' && d.validation.status === 'ok',
     ).length,
     em_dash_violations: validated.filter((d) =>
       d.validation.flags.some((f) => f.type === 'em_dash_violation'),

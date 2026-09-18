@@ -287,3 +287,53 @@ test('CRLF note body: frontmatter is extracted, not treated as absent', () => {
     'reassembled body must keep the UPSTREAM frontmatter verbatim, never the proposed one',
   );
 });
+
+test('validateSupersede: ok with pattern and reason, carries the upstream hash', async () => {
+  const { validateSupersede } = await import('../plugin/scripts/refinement-validate.mjs');
+  const upstream = FM + '\n# Old claim\n\nThe old advice.\n';
+  const result = validateSupersede(
+    {
+      decision: 'supersede',
+      id: 1,
+      old_pattern_query: 'websocket reconnection backoff advice',
+      reason: 'The new note shows the library now handles reconnection natively.',
+    },
+    upstream,
+  );
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.flags, []);
+  assert.equal(result.upstream_hash, createHash('sha256').update(upstream).digest('hex'));
+});
+
+test('validateSupersede: malformed without a pattern query or reason', async () => {
+  const { validateSupersede } = await import('../plugin/scripts/refinement-validate.mjs');
+  const upstream = FM + '\nbody\n';
+  const missingPattern = validateSupersede(
+    { decision: 'supersede', id: 1, old_pattern_query: '  ', reason: 'r' },
+    upstream,
+  );
+  assert.equal(missingPattern.status, 'malformed');
+  assert.ok(missingPattern.flags.some((f) => f.type === 'missing_old_pattern_query'));
+  const missingReason = validateSupersede(
+    { decision: 'supersede', id: 1, old_pattern_query: 'q words here', reason: '' },
+    upstream,
+  );
+  assert.equal(missingReason.status, 'malformed');
+  assert.ok(missingReason.flags.some((f) => f.type === 'missing_reason'));
+});
+
+test('validateSupersede: strips em-dashes from pattern and reason', async () => {
+  const { validateSupersede } = await import('../plugin/scripts/refinement-validate.mjs');
+  const result = validateSupersede(
+    {
+      decision: 'supersede',
+      id: 1,
+      old_pattern_query: 'old advice — the stale half',
+      reason: 'replaced — fully',
+    },
+    FM + '\nbody\n',
+  );
+  assert.equal(result.status, 'ok');
+  assert.ok(!result.old_pattern_query.includes('—'));
+  assert.ok(!result.reason.includes('—'));
+});
