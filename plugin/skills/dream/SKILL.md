@@ -50,31 +50,34 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
 1. **Group by type, sort newest-last within each group.**
    Order: feedback, user, project, reference. Within each group, oldest first: transformer attention favors recent tokens, so placing the memories you want the consolidator to weight most heavily last in each group keeps them in the recency-favored position.
 
-   *Steps 2–8 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
+   *Steps 3–9 below mirror the Phase 3 execution order so flagging and consolidation walk the operators in the same sequence.*
 
-2. **Flag DATE NORMALIZE candidates.**
+2. **Fetch the read signal.** Run `ll-run retrieval-report.mjs --memory-reads --json` (Bash, silently). The result maps each memory file to how often a session actually read it in the last 90 days. This is the difference between a memory that works and one that merely exists; the flagging steps below use it, mtimes alone cannot (a consolidation pass touches every file it rewrites).
+
+3. **Flag DATE NORMALIZE candidates.**
    Files containing a relative reference that resolves to a single day ("yesterday", "tomorrow", "two days ago", "last Thursday"). Do not inspect or pre-filter them: the script in Phase 3 decides, and it refuses tense-words and bare week spans, so flagging those only sends it to files where nothing will happen.
 
-3. **Flag MERGE candidates.**
-   Within each type group, flag pairs where both descriptions reference the same tool/concept, one is a subset of the other, or both contain the same rule. Skip pairs that contradict each other (those go to RESOLVE).
+4. **Flag MERGE candidates.**
+   Within each type group, flag pairs where both descriptions reference the same tool/concept, one is a subset of the other, or both contain the same rule. Skip pairs that contradict each other (those go to RESOLVE). When a pair merges, the read signal picks the survivor: keep the file sessions actually read, fold the unread one into it.
 
-4. **Flag RESOLVE candidates.**
+5. **Flag RESOLVE candidates.**
    Within each type group, flag pairs where two memories assert opposite rules or facts about the same subject.
 
-5. **Flag ABSTRACT candidates.**
+6. **Flag ABSTRACT candidates.**
    Clusters of 4+ memories within the same type group describing variations of the same pattern. For each cluster, note: the memories, the candidate abstraction (one sentence), which would be archived (fully subsumed), which would remain (unique detail). Conservative: only flag clear patterns.
 
-6. **Flag COMPRESS candidates.**
-   Memory files exceeding 15 lines or exceeding size limits (feedback/user: 500 chars, project/reference: 1,000 chars body).
+7. **Flag COMPRESS candidates.**
+   Memory files exceeding 15 lines or exceeding size limits (feedback/user: 500 chars, project/reference: 1,000 chars body). A heavily-read file that is over budget still gets compressed, carefully: its content is demonstrably load-bearing, so cut filler, never claims.
 
-7. **Flag PRUNE candidates.**
+8. **Flag PRUNE candidates.**
    - Orphaned index entries
    - Outdated project memories (superseded versions, ended sprints, reversed decisions, "resolved" handoffs)
+   - Never-read memories: zero reads in the 90-day window AND older than 90 days (by frontmatter date or file birth). The read signal nominates; content decides. A feedback rule can be silently load-bearing without a Read event (it may act through the index line alone), so a never-read flag is a candidate for review, not a verdict.
 
-8. **Flag LINK candidates.**
+9. **Flag LINK candidates.**
    Cross-type pairs sharing a keyword or concept. Descriptions only. Cap at 30 most recent files if 50+.
 
-9. **Present signal summary and ask for approval:**
+10. **Present signal summary and ask for approval:**
    ```
    Dream signal (operators in execution order):
    - DATE NORMALIZE: N candidates
@@ -82,7 +85,7 @@ At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged
    - RESOLVE: N contradiction pairs
    - ABSTRACT: N clusters (N source memories)
    - COMPRESS: N candidates (N over size limit)
-   - PRUNE: N candidates (N orphaned, N stale)
+   - PRUNE: N candidates (N orphaned, N stale, N never-read)
    - LINK: N candidate pairs
 
    Proceed with consolidation? [yes/no]
