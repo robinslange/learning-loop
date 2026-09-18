@@ -126,11 +126,22 @@ function stripNliFrontmatter(content) {
   if (!parts) return { changed: false, content };
 
   const lines = parts.fm.split(/\r?\n/);
-  const filtered = lines.filter((line) => {
-    const key = line.match(/^(\S+):\s*/)?.[1];
-    if (!key) return true;
-    return !NLI_FRONTMATTER_KEYS.includes(key);
-  });
+  // Group by key first, so a block-form value leaves with its own key:
+  //   nli_tension_partners:
+  //     - 3-permanent/foo.md
+  // Filtering bare lines drops only the header and leaves the `- foo` items
+  // dangling under whatever key precedes them, which is corruption rather than
+  // cleanup. normalise-frontmatter.mjs groups for the same reason.
+  const groups = [];
+  for (const line of lines) {
+    const key = line.match(/^(\S+):/)?.[1];
+    if (key) groups.push({ key, lines: [line] });
+    else if (groups.length > 0) groups[groups.length - 1].lines.push(line);
+    else groups.push({ key: null, lines: [line] });
+  }
+  const filtered = groups
+    .filter((g) => !(g.key && NLI_FRONTMATTER_KEYS.includes(g.key)))
+    .flatMap((g) => g.lines);
 
   if (filtered.length === lines.length) return { changed: false, content };
 
