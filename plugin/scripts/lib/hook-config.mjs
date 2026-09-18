@@ -257,6 +257,36 @@ export const HookConfig = Object.freeze({
 // unweighted-fusion data and cannot be compared to what follows.
 export const INJECTION_CALIBRATION_EPOCH = '2026-08-04T00:00:00.000Z';
 
+// The SLOT LAYOUT epoch, which is deliberately not the calibration epoch above.
+// v2.1.0 moved BODY_SLOTS 1 -> 2 and POINTER_SLOTS 4 -> 3 (hooks/lib/inject.mjs),
+// so every rank- and level-resolved precision figure recorded before it is
+// denominated in a payload shape that no longer ships.
+//
+// Two epochs rather than one, because the two measurements ask different
+// questions. injection-precision.mjs windows on THIS constant: it reports which
+// slot a note landed in and whether the session used it, so the slot split is
+// its unit. The shadow-gate readiness check and review-shadow keep using
+// INJECTION_CALIBRATION_EPOCH: they count gate decisions, and neither
+// INJECTION_THRESHOLD (0.34) nor the fusion weights moved in v2.1.0, so scores
+// either side of this date remain commensurable. Bumping one shared constant
+// for both would discard six weeks of valid gate telemetry to answer a question
+// about slots.
+//
+// What this timestamp is: the install moment. What it is NOT: the moment
+// emission changed shape. A session already running keeps executing the inject
+// hook it loaded, so old-layout bursts keep arriving after this date -- a
+// 1-body/4-pointer payload was recorded 20 hours past it, 12% of the window at
+// the time. So the implication only runs one way: everything BEFORE the epoch is
+// old-layout, and that is all the epoch is good for. injection-precision.mjs
+// therefore also drops any burst whose shape is unreachable under the shipped
+// BODY_SLOTS/POINTER_SLOTS (hooks/lib/inject.mjs); read that as the load-bearing
+// filter and this constant as the coarse bound around it.
+//
+// Bump whenever BODY_SLOTS or POINTER_SLOTS changes.
+// Set 2026-09-17: v2.1.0 installed at this timestamp (the `lastUpdated` of the
+// learning-loop entry in installed_plugins.json).
+export const INJECTION_LAYOUT_EPOCH = '2026-09-17T06:30:07.278Z';
+
 /**
  * Read the pre_write_fail_mode setting from a loaded config object.
  * Returns 'closed' only when explicitly set; all other values (including

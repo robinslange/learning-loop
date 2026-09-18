@@ -252,3 +252,98 @@ test('hits are attributed by engagement, so precision resting on informed shows 
   assert.equal(r.diagnostics.used_pairs_by_source.note_usage_informed, 1);
   assert.equal(r.diagnostics.used_pairs_by_source.note_usage_engaged, 1);
 });
+
+test('the default window is the layout epoch, not the gate-calibration one', async () => {
+  const { INJECTION_LAYOUT_EPOCH, INJECTION_CALIBRATION_EPOCH } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'hook-config.mjs')).href
+  );
+  const r = injectionPrecision(makePluginData());
+  assert.equal(r.epoch, INJECTION_LAYOUT_EPOCH);
+  // Two epochs on purpose. This file reports which SLOT a note landed in, so a
+  // layout change resets its denominators; the shadow-gate readiness check and
+  // review-shadow count gate decisions, which v2.1.0 did not touch. One shared
+  // constant would have thrown away six weeks of still-valid gate telemetry.
+  assert.notEqual(INJECTION_LAYOUT_EPOCH, INJECTION_CALIBRATION_EPOCH);
+});
+
+test('a burst unreachable under the shipped layout is dropped, whatever its timestamp', () => {
+  const pd = makePluginData({
+    injections: [
+      // Four pointers cannot happen under POINTER_SLOTS = 3, so pre-2.1.0 code
+      // wrote this. That is not hypothetical: a session already running keeps
+      // executing the inject hook it loaded, so old-shape bursts arrive after
+      // the layout epoch (one was recorded 20 hours past it).
+      burst('s1', afterEpoch, [
+        { path: '3-permanent/old.md', level: 'body' },
+        { path: '3-permanent/p1.md', level: 'pointer' },
+        { path: '3-permanent/p2.md', level: 'pointer' },
+        { path: '3-permanent/p3.md', level: 'pointer' },
+        { path: '3-permanent/p4.md', level: 'pointer' },
+      ]),
+      burst('s1', afterEpoch, [{ path: '3-permanent/new.md', level: 'body' }]),
+    ],
+    provenance: [usage('s1', afterEpoch, '3-permanent/old.md', 'used')],
+  });
+  const r = injectionPrecision(pd, { epoch: EPOCH });
+  assert.equal(r.diagnostics.foreign_layout_bursts_dropped, 1);
+  // old.md was used, but the burst that surfaced it is denominated in the other
+  // layout, so it must not contribute a hit to this window's numbers.
+  assert.equal(r.diagnostics.ranked_injection_bursts_rows, 1);
+  assert.equal(r.overall.total, 1);
+  assert.equal(r.overall.hit, 0);
+});
+
+test('rank 1 is a body when the injector recorded one, not a pointer by arithmetic', () => {
+  const pd = makePluginData({
+    injections: [
+      burst('s1', afterEpoch, [
+        { path: '3-permanent/a.md', level: 'body' },
+        { path: '3-permanent/b.md', level: 'body' },
+        { path: '3-permanent/c.md', level: 'pointer' },
+      ]),
+    ],
+    provenance: [usage('s1', afterEpoch, '3-permanent/b.md', 'used')],
+  });
+  const r = injectionPrecision(pd, { epoch: EPOCH });
+  // The label was `rank === 0 ? 'body' : 'pointer'`, so this hit — a body — read
+  // as a pointer in the one table used to compare the two formats. With the
+  // window now holding only the 2-body layout, that was wrong for every row.
+  assert.equal(r.per_rank[1].slot, 'body');
+  assert.equal(r.per_rank[1].hit, 1);
+  assert.equal(r.per_rank[2].slot, 'pointer');
+  assert.equal(r.per_level.find((l) => l.level === 'body').total, 2);
+});
+
+test('a rank that carried both levels across the window reads as mixed', () => {
+  const pd = makePluginData({
+    injections: [
+      burst('s1', afterEpoch, [
+        { path: '3-permanent/a.md', level: 'body' },
+        { path: '3-permanent/p.md', level: 'pointer' },
+      ]),
+      burst('s1', afterEpoch, [
+        { path: '3-permanent/x.md', level: 'body' },
+        { path: '3-permanent/y.md', level: 'body' },
+      ]),
+    ],
+    provenance: [usage('s1', afterEpoch, '3-permanent/a.md', 'used')],
+  });
+  const r = injectionPrecision(pd, { epoch: EPOCH });
+  assert.equal(r.per_rank[1].slot, 'mixed');
+  assert.equal(r.per_rank[1].body, 1);
+  assert.equal(r.per_rank[1].pointer, 1);
+});
+
+test('an unparseable epoch throws instead of windowing on NaN', () => {
+  // Date.parse gives NaN, every `ts < NaN` is false, and the filter would admit
+  // the entire history as though it were post-epoch — silently widening the
+  // window rather than narrowing it, which is the failure worth being loud.
+  const pd = makePluginData({
+    injections: [burst('s1', beforeEpoch, [{ path: '3-permanent/a.md', level: 'body' }])],
+    provenance: [usage('s1', beforeEpoch, '3-permanent/a.md', 'used')],
+  });
+  assert.throws(
+    () => injectionPrecision(pd, { epoch: 'last Tuesday' }),
+    /not a parseable timestamp/,
+  );
+});
