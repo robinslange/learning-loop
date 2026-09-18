@@ -129,4 +129,19 @@ describe('frontmatter-schema grounding signals', () => {
   it('reads a figure written without a leading zero', () => {
     assert.equal(hasUngroundedFactualSignal('The error rate dropped to .5% after the fix.'), true);
   });
+
+  it('keeps a long digit run that a unit follows', () => {
+    // The clip exists to drop id lists, not quantities. A run past the bound
+    // with a unit after it is a real figure however implausible its length.
+    assert.equal(hasUngroundedFactualSignal('9'.repeat(60) + 'mg of it'), true);
+    assert.equal(hasUngroundedFactualSignal('9'.repeat(60) + ' mg of it'), true);
+  });
+
+  it('keeps the digits a trigger needs when the run past them is clipped', () => {
+    // n=, p<0. and a bare comparator trigger BEFORE their digits, so a clip
+    // that ate the whole run would take the signal with it.
+    assert.equal(hasUngroundedFactualSignal('n=' + '9'.repeat(60)), true);
+    assert.equal(hasUngroundedFactualSignal('p<0.' + '9'.repeat(60)), true);
+    assert.equal(hasUngroundedFactualSignal('<' + '9'.repeat(60)), true);
+  });
 });
