@@ -296,7 +296,10 @@ const QUALITY_MIN_LINKS = 2;
 // Production pipeline shape: all four signals + PRF, rerank off. The ppr
 // stages are gated too: they sit two stages upstream of +prf, and a graph-lane
 // regression that PRF washes out at the fused stage was invisible to a gate
-// that only watched the end of the funnel.
+// that only watched the end of the funnel. One cell is inert until the next
+// baseline regen: the blessed baseline's `vec+bm25+ppr [title]` hits_at_1 is
+// exactly 0, and the relDrop guard treats prev === 0 as no drop possible.
+// recall/ndcg gate live on both lanes today.
 const QUALITY_GATE_LABELS = [
   '+prf [title]',
   '+prf [long]',

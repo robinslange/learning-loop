@@ -542,3 +542,45 @@ test('retrieval-report --memory-reads emits per-file JSON', () => {
     rmSync(pd, { recursive: true, force: true });
   }
 });
+
+test('memoryReadStats scopes by project and keeps legacy unstamped records', async () => {
+  const { memoryReadStats } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const pd = makePluginData();
+  writeMonthlyShards(join(pd, 'retrieval'), 'reads', [
+    {
+      ts: daysAgo(1),
+      session_id: 's1',
+      command: 'memory-read',
+      file: 'MEMORY.md',
+      project: '-proj-a',
+    },
+    {
+      ts: daysAgo(1),
+      session_id: 's2',
+      command: 'memory-read',
+      file: 'MEMORY.md',
+      project: '-proj-b',
+    },
+    // legacy record with no project stamp: counted regardless, erring toward
+    // "was read", the safe direction for an archive decision
+    { ts: daysAgo(2), session_id: 's3', command: 'memory-read', file: 'MEMORY.md' },
+    // malformed timestamp: skipped, not thrown on
+    {
+      ts: 'not-a-date',
+      session_id: 's4',
+      command: 'memory-read',
+      file: 'MEMORY.md',
+      project: '-proj-a',
+    },
+  ]);
+  try {
+    const scoped = memoryReadStats(pd, { days: 90, project: '-proj-a' });
+    assert.equal(scoped.get('MEMORY.md').reads, 2, 'own project + legacy, not project b');
+    const unscoped = memoryReadStats(pd, { days: 90 });
+    assert.equal(unscoped.get('MEMORY.md').reads, 3);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});

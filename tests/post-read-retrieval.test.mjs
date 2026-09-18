@@ -57,6 +57,7 @@ describe('post-read-retrieval', () => {
     assert.equal(events.length, 1);
     assert.equal(events[0].type, 'memory-read');
     assert.equal(events[0].file, 'user_age.md');
+    assert.equal(events[0].project, '-Users-somebody-proj');
   });
 
   it('writes nothing for non-memory file reads', () => {
