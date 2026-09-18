@@ -29,9 +29,12 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { run as runCacheCleanup } from '../plugin/hooks/session-start/cache-cleanup.mjs';
 import { run } from '../plugin/hooks/session-start/vault-snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
+import { retentionCutoffMonth } from '../plugin/hooks/session-start/vault-snapshot.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/session-start.js', import.meta.url));
@@ -408,4 +411,61 @@ test('sweep: a prefix that stopped being written drains instead of keeping its l
     );
   });
   rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+// I1: the cutoff must be computed on the SAME local basis monthStr() uses for
+// the filenames. retrieval.mjs states this twice ("Local time on purpose",
+// "Readers must not compute these in UTC"). A UTC cutoff against local-named
+// files disagrees for the first hours of every month: east of UTC it spares a
+// file the rule says to prune, and west of UTC it deletes one up to half a day
+// early. This is a delete path, so the western direction is the dangerous one.
+test('retentionCutoffMonth is computed on monthStr local basis', () => {
+  // local noon, mid-month: no UTC/local ambiguity, pins the plain arithmetic
+  assert.equal(retentionCutoffMonth(3, new Date(2026, 8, 15, 12, 0)), '2026-07');
+  assert.equal(retentionCutoffMonth(1, new Date(2026, 8, 15, 12, 0)), '2026-09');
+});
+
+test('retentionCutoffMonth crosses the year boundary', () => {
+  assert.equal(retentionCutoffMonth(3, new Date(2026, 0, 15, 12, 0)), '2025-11');
+  assert.equal(retentionCutoffMonth(6, new Date(2026, 1, 15, 12, 0)), '2025-09');
+});
+
+test('retentionCutoffMonth agrees with monthStr at a local month boundary', () => {
+  // 1st of the month, 00:30 local. East of UTC this instant is still the
+  // PREVIOUS month in UTC, which is where a UTC cutoff goes wrong.
+  const boundary = new Date(2026, 9, 1, 0, 30);
+  assert.equal(monthStr(boundary), '2026-10');
+  assert.equal(retentionCutoffMonth(1, boundary), '2026-10', 'keepMonths=1 keeps only the current local month');
+  assert.equal(retentionCutoffMonth(3, boundary), '2026-08');
+});
+
+// The bug this guards is a timezone bug, so it cannot be caught from a single
+// zone: on a UTC runner (which CI is) a UTC implementation and a local one
+// agree everywhere, and the test would pass against the defect. Each zone runs
+// in its own process because TZ is read once, at first Date use.
+test('retentionCutoffMonth follows the writer in both hemispheres', () => {
+  const probe = `
+    process.env.TZ;
+    const { monthStr } = await import('${process.cwd()}/plugin/scripts/lib/retrieval.mjs');
+    const { retentionCutoffMonth } = await import('${process.cwd()}/plugin/hooks/session-start/vault-snapshot.mjs');
+    // an instant that is a different calendar month in UTC than it is locally
+    const boundary = new Date(Date.UTC(2026, 8, 30, 12, 0));
+    console.log(JSON.stringify({
+      writer: monthStr(boundary),
+      cutoff1: retentionCutoffMonth(1, boundary),
+    }));
+  `;
+  for (const tz of ['Pacific/Auckland', 'America/Los_Angeles', 'UTC']) {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+      env: { ...process.env, TZ: tz },
+      encoding: 'utf-8',
+    });
+    assert.equal(r.status, 0, `probe failed in ${tz}: ${r.stderr}`);
+    const { writer, cutoff1 } = JSON.parse(r.stdout.trim());
+    assert.equal(
+      cutoff1,
+      writer,
+      `in ${tz} the keepMonths=1 cutoff must equal the month the writer names`,
+    );
+  }
 });

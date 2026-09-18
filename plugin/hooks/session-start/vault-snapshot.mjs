@@ -16,6 +16,19 @@ import { monthStr } from '../../scripts/lib/retrieval.mjs';
 // Sweep at most once per 24h regardless of session cadence.
 const SWEEP_GATE_MS = 24 * 60 * 60 * 1000;
 
+// The oldest month bucket retention keeps, on the SAME local basis the
+// filenames are written with. `monthStr` is local on purpose (retrieval.mjs:
+// "Local time on purpose", and again "Readers must not compute these in UTC"),
+// so computing this cutoff from UTC getters compares two different calendars.
+// They disagree for the first hours of every month: east of UTC that spares a
+// file the rule says to prune, and west of UTC it deletes one up to half a day
+// early. Deleting early is the direction that loses data, so this follows the
+// writer rather than the clock. `new Date(y, m - n, 1)` normalises a negative
+// month across the year boundary.
+export function retentionCutoffMonth(keepMonths, now = new Date()) {
+  return monthStr(new Date(now.getFullYear(), now.getMonth() - (keepMonths - 1), 1));
+}
+
 export async function run(ctx) {
   // Federation seed-meta backfill (one-shot for existing federations).
   if (ctx.pluginData) {
@@ -161,10 +174,7 @@ export async function run(ctx) {
     } catch {
       return;
     }
-    const d = new Date();
-    d.setUTCDate(1);
-    d.setUTCMonth(d.getUTCMonth() - (keepMonths - 1));
-    const cutoff = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+    const cutoff = retentionCutoffMonth(keepMonths);
     const re = /^(.+)-(\d{4}-\d{2})\.jsonl$/;
     for (const f of names) {
       const m = re.exec(f);

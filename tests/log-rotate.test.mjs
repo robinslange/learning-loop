@@ -57,3 +57,36 @@ test('capLogFile is a no-op on a missing file', () => {
     assert.equal(existsSync(p), false);
   });
 });
+
+test('capLogFile keeps the tail when it contains no newline at all', () => {
+  withDir((dir) => {
+    // A daemon that dies mid-write, or logs one very long line, leaves a tail
+    // with no newline in it. Dropping to the first newline then wipes the file
+    // to zero bytes and destroys the only diagnostic after a failed start --
+    // the exact output the caller reads. Starting mid-line is the lesser loss.
+    const p = join(dir, 'watch.log');
+    writeFileSync(p, 'x'.repeat(5000));
+    capLogFile(p, 1024);
+    const after = readFileSync(p, 'utf-8');
+    assert.ok(after.length > 0, 'a newline-free tail must not wipe the log');
+    assert.ok(statSync(p).size <= 1024);
+  });
+});
+
+test('capLogFile keeps the tail when only the head had newlines', () => {
+  withDir((dir) => {
+    const p = join(dir, 'watch.log');
+    writeFileSync(p, 'header\n' + 'y'.repeat(5000));
+    capLogFile(p, 1024);
+    assert.ok(readFileSync(p, 'utf-8').length > 0, 'retained tail must survive');
+  });
+});
+
+test('capLogFile does not wipe a tail made of multibyte characters', () => {
+  withDir((dir) => {
+    const p = join(dir, 'watch.log');
+    writeFileSync(p, 'A'.repeat(2000) + '\n' + '🙂'.repeat(300));
+    capLogFile(p, 1024);
+    assert.ok(readFileSync(p, 'utf-8').length > 0, 'emoji tail must not wipe the log');
+  });
+});
