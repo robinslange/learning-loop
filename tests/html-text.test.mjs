@@ -102,3 +102,30 @@ describe('decodeEntities', () => {
     assert.equal(decodeEntities('&copy; &#39;'), '&copy; &#39;');
   });
 });
+
+describe('a tag is a word boundary', () => {
+  // stripTags copies the spans between tags. Without a separator the text on
+  // either side of a tag arrives as one token, and minified markup supplies no
+  // whitespace of its own to fall back on.
+  it('does not glue adjacent block elements into one token', () => {
+    assert.equal(htmlToText('<td>alpha</td><td>beta</td>'), 'alpha beta');
+    assert.equal(htmlToText('<li>one</li><li>two</li>'), 'one two');
+    assert.equal(htmlToText('<h1>Title</h1><p>First.</p>'), 'Title First.');
+  });
+
+  it('collapses the separator against whitespace already in the source', () => {
+    assert.equal(htmlToText('<p>a</p>\n<p>b</p>'), 'a b');
+    assert.equal(htmlToText('<p>  a  </p>  <p>  b  </p>'), 'a b');
+  });
+
+  it('leaves stripTags itself unseparated for its non-prose callers', () => {
+    // pubmed reduces a DOI and crossref a JATS abstract through stripTags
+    // directly; an inserted space there is noise, not a boundary.
+    assert.equal(stripTags('<jats:p>a &amp; b</jats:p>'), 'a &amp; b');
+    assert.equal(stripTags('10.1<i></i>234/x'), '10.1234/x');
+  });
+
+  it('still keeps a bare less-than that never opens a tag', () => {
+    assert.equal(htmlToText('if a < b then'), 'if a < b then');
+  });
+});

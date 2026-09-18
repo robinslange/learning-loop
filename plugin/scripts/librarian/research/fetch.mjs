@@ -2,37 +2,20 @@
 //
 // fetchText() pulls a URL and returns { text, ok, reason }. Failures (paywall,
 // timeout, network) degrade to ok:false with a reason rather than throwing, so a
-// single bad source never aborts a research run. htmlToText() strips scripts,
-// styles, and markup to plain prose. fetchOverride is injected for tests.
+// single bad source never aborts a research run. fetchOverride is injected for
+// tests.
+//
+// Markup reduction is lib/html-text.mjs, the same one web-fetch and the abstract
+// readers use. This file carried its own copy through the e20d4ad/e21e5d1
+// hardening and kept the bypass those commits closed: `<[^>]+>` needs the `>`,
+// so an unterminated tag survived and its attribute text was emitted as prose.
+// extract.mjs concatenates this output into the local model's prompt, so a page
+// author could plant instructions in an unclosed attribute and have them read as
+// page content with structural cover.
 
 import { isOffline } from '../../lib/env.mjs';
 import { fetchGuarded } from '../../lib/sources/url-guard.mjs';
-
-const DROP_BLOCKS = /<(script|style|noscript|nav|footer|header|aside)[\s\S]*?<\/\1>/gi;
-// An unclosed script/style (no end tag) would otherwise survive the balanced pass
-// and leak its body as text; drop from the opening tag to end-of-string.
-const DROP_UNCLOSED = /<(script|style)\b[\s\S]*$/i;
-
-const ENTITIES = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&nbsp;': ' ',
-};
-
-export function htmlToText(html) {
-  let s = html.replace(DROP_BLOCKS, ' ');
-  s = s.replace(DROP_UNCLOSED, ' ');
-  s = s.replace(/<[^>]+>/g, ' ');
-  s = s.replace(/&[a-z#0-9]+;/gi, (m) => ENTITIES[m] ?? m);
-  s = s
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\s*\n\s*/g, '\n')
-    .replace(/\n{3,}/g, '\n\n');
-  return s.trim();
-}
+import { htmlToText } from '../../lib/html-text.mjs';
 
 const DEFAULT_MAX_BYTES = 5 * 1024 * 1024;
 
