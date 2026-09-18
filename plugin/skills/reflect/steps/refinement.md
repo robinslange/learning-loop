@@ -86,6 +86,12 @@ Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json`. Build a
 | 1   | websocket-has-no-built-in-reconnection     | extends   | 12% | Added Vercel/CF/AWS proxy timeout numbers |
 | 2   | (warn) digital-signatures-prove-authorship | qualifies | 28% | Added challenge-response gap discussion   |
 
+### Supersessions ({supersede_ok})
+
+| #   | upstream                                   | reason                                                |
+| --- | ------------------------------------------ | ----------------------------------------------------- |
+| 4   | websocket-has-no-built-in-reconnection     | the library now reconnects natively; note is obsolete |
+
 ### Counterpoints ({counterpoint_ok})
 
 | #   | upstream                                   | reason                                                |
@@ -99,7 +105,7 @@ Read the validated JSON at `${LL_TMP_PREFIX}-refinement-validated.json`. Build a
 | 4   | ...      | 73% | exceeded 50% body change ceiling                      |
 | 5   | ...      | 4%  | removed 2 original sentences (edits must be additive) |
 
-**Actions**: type `apply all` to apply every ok + oversized item, `apply ok` to apply only `ok` items, `apply N M` for specific IDs, `diff N` to print the unified diff for one item, or `none` to cancel.
+**Actions**: type `apply all` to apply every ok + oversized item (supersessions included), `apply ok` to apply only `ok` items, `apply N M` for specific IDs, `diff N` to print the unified diff for one item, or `none` to cancel.
 ```
 
 Use `AskUserQuestion` for the action selection.
@@ -121,6 +127,14 @@ For each decision in the approved set:
      - Append ` ([[<new-note-stem>]])` to the end of the paragraph the edit touched (the lines that differ from the upstream), unless the body already wikilinks the new note.
        These additions happen after validation, so they cannot trip the validator's frontmatter or sentence checks. Never re-run `refinement-validate.mjs` on a stamped body — it would flag the driver's own additions as violations.
   3. **Write** the stamped body to `upstream_path` using the `Write` tool. The post-write hook chain re-fires (autolink, edge-infer, provenance).
+- **supersede**: four sub-steps, in order:
+  1. **Stale-read guard.** Same check as the edit path: re-read `upstream_path`, compare against `validation.upstream_hash`, and on mismatch skip the decision, reporting it as `stale`. The proposal was judged against a version of the upstream that no longer exists.
+  2. **Frontmatter stamp.** Via `Edit` on the upstream's frontmatter only, add `invalidated: <today's date>` and `superseded_by: "[[<new-note-stem>]]"`. The body is never touched: the claim stays readable as history, retrieval just stops serving it as current (capture-rules.md defines both keys and `enrichVaultHits` honours `invalidated:`). Skip either key that is already present.
+  3. **Supersessions row.** Record it for episodic annotation:
+     ```bash
+     ll-run edges-cli.mjs super-add "<old_pattern_query>" --replacement "<new-note vault-relative path>" --reason "<reason>"
+     ```
+  4. Skip the whole decision (report `already superseded`) when the upstream frontmatter already carries `invalidated:`.
 - **counterpoint**: append `new_note_link_text` to the new note's body via `Edit`, and append `upstream_link_text` to the upstream's body via `Edit`. Do NOT modify the upstream's claim. Both edits should append to the body, not modify existing lines. Skip if a link with the same target already exists in either file.
 - **auto_rejected**: never apply. Log only.
 - **pass**: never apply. Log only.
@@ -133,7 +147,7 @@ For each applied refinement:
 ll-run provenance-emit.js '{"agent":"refinement-proposer","skill":"reflect","action":"refinement-applied","target":"<upstream-path>","new_note":"<new-note-path>","subtype":"<edit_subtype>","cosine":<cosine>}'
 ```
 
-For counterpoints emit `action: "counterpoint-linked"`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"` or `reason: "sentences_removed"` per the validation flag. For edits skipped by the 4.6.e stale-read guard emit `action: "refinement-skipped"` with `reason: "stale"`.
+For counterpoints emit `action: "counterpoint-linked"`. For applied supersessions emit `action: "supersession-recorded"` with `target`, `new_note`, and `reason`. For auto-rejected emit `action: "refinement-rejected"` with `reason: "oversized"` or `reason: "sentences_removed"` per the validation flag. For edits skipped by the 4.6.e stale-read guard emit `action: "refinement-skipped"` with `reason: "stale"`.
 
 ## 4.6.g: Cleanup
 
@@ -153,4 +167,4 @@ fi
 rm -f "${LL_TMP_PREFIX}-new-notes.txt" "${LL_TMP_PREFIX}-refinement-pairs.json" "${LL_TMP_PREFIX}-refinement-agent-output.json" "${LL_TMP_PREFIX}-refinement-validated.json"
 ```
 
-Report counts in Step 5: `Refinement: N edits applied, M counterpoints linked, K passed, J auto-rejected, S skipped stale`.
+Report counts in Step 5: `Refinement: N edits applied, M counterpoints linked, P supersessions recorded, K passed, J auto-rejected, S skipped stale`.

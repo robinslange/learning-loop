@@ -72,6 +72,18 @@ Return the **full proposed body** of the upstream note with the change applied. 
 ### `counterpoint`
 The new note materially contradicts a claim in the upstream. Do NOT propose an edit. Return link texts the driver will append to both notes via the existing counter-argument-linking pattern. The upstream note's body is never modified for counterpoints: the link is the entire intervention.
 
+### `supersede`
+The new note makes the upstream's central claim obsolete as a whole: the fact changed, the tool now does what the note says it cannot, the measured number replaced the estimate the note is built on. This is stronger than `counterpoint` (which records a live disagreement between two standing claims) and different in kind from `edit` (which strengthens a claim that still holds). The bar is strict:
+
+- The upstream's central claim, not a side remark, has stopped being true, and the new note says so with evidence.
+- A reader served the upstream today would act wrongly on it.
+- If the two claims could both be argued by reasonable people, that is `counterpoint`. If any part of the upstream still stands, that is `counterpoint` or `edit`.
+
+Do NOT propose a body. The driver stamps `invalidated:` and `superseded_by:` frontmatter on the upstream (retrieval stops serving it as current) and records a supersessions row so episodic recall of the old advice gets annotated. Return:
+
+- `old_pattern_query`: the words a searcher would use to find the outdated advice (content words, not a full sentence).
+- `reason`: one sentence naming what changed and the evidence in the new note.
+
 ## Process
 
 1. Read the `pairs_file` JSON.
@@ -90,13 +102,14 @@ Respond with **only** a single JSON object, no preamble, no markdown fences, no 
   "decisions": [
     {
       "id": 1,
-      "decision": "pass | edit | counterpoint",
+      "decision": "pass | edit | counterpoint | supersede",
       "reason": "one sentence explaining the call",
       "proposed_body": "full replacement body including frontmatter (edit only, omit otherwise)",
       "change_summary": "one-liner describing what changed (edit only, omit otherwise)",
       "edit_subtype": "sharpens | qualifies | extends (edit only, omit otherwise)",
       "new_note_link_text": "Challenges [[upstream-stem]] - reason. (counterpoint only, omit otherwise)",
-      "upstream_link_text": "[[new-note-stem]] - counter-evidence. (counterpoint only, omit otherwise)"
+      "upstream_link_text": "[[new-note-stem]] - counter-evidence. (counterpoint only, omit otherwise)",
+      "old_pattern_query": "search words for the outdated advice (supersede only, omit otherwise)"
     }
   ]
 }
