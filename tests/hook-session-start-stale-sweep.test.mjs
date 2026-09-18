@@ -261,7 +261,7 @@ test('sweep: no-ops cleanly when bin/ and convergence/ are absent', async () => 
   });
 });
 
-test('sweep: retrieval logs pruned to newest RETRIEVAL_LOG_KEEP_MONTHS per prefix, current month untouched', async () => {
+test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are pruned, current month untouched', async () => {
   const fx = makeFixture();
   const retrievalDir = join(fx.ctx.pluginData, 'retrieval');
   mkdirSync(retrievalDir, { recursive: true });
@@ -294,12 +294,16 @@ test('sweep: retrieval logs pruned to newest RETRIEVAL_LOG_KEEP_MONTHS per prefi
     await run({ ...baseCtx });
 
     const currentMonth = months[months.length - 1];
-    const keep = new Set(months.slice(-HookConfig.RETRIEVAL_LOG_KEEP_MONTHS));
+    // The cutoff is absolute and shared by every prefix, not a per-prefix
+    // count. These fixtures have contiguous months so both rules agree here;
+    // the dead-prefix test below is the one that separates them.
+    const cutoff = retentionCutoffMonth(HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
+    const keep = new Set(months.filter((m) => m >= cutoff));
     for (const prefix of prefixes) {
       for (const month of months) {
         const p = join(retrievalDir, `${prefix}-${month}.jsonl`);
         if (keep.has(month)) {
-          assert.ok(existsSync(p), `${prefix}-${month}.jsonl (newest ${HookConfig.RETRIEVAL_LOG_KEEP_MONTHS}) must survive`);
+          assert.ok(existsSync(p), `${prefix}-${month}.jsonl (at or after ${cutoff}) must survive`);
         } else {
           assert.equal(existsSync(p), false, `${prefix}-${month}.jsonl (beyond the window) must be pruned`);
         }
@@ -307,7 +311,7 @@ test('sweep: retrieval logs pruned to newest RETRIEVAL_LOG_KEEP_MONTHS per prefi
     }
     assert.ok(
       existsSync(join(retrievalDir, `shadow-injection-${currentMonth}.jsonl`)),
-      'current month is always kept regardless of the keep-window count',
+      'the current month is never below the cutoff',
     );
     assert.ok(
       existsSync(join(provenanceDir, `history-${months[0]}.jsonl`)),
@@ -468,4 +472,17 @@ test('retentionCutoffMonth follows the writer in both hemispheres', () => {
       `in ${tz} the keepMonths=1 cutoff must equal the month the writer names`,
     );
   }
+});
+
+test('retentionCutoffMonth never sweeps past the current month', () => {
+  // The old rule carried an unconditional `keep.add(currentMonth)` floor. The
+  // cutoff rule dropped it, so keepMonths=0 put the cutoff one month in the
+  // FUTURE and every file including the live bucket the writer is appending to
+  // became eligible for deletion. One character in hook-config makes a delete
+  // path delete everything, so the floor belongs in the function.
+  const now = new Date(2026, 8, 18, 12, 0);
+  assert.equal(retentionCutoffMonth(0, now), '2026-09', 'keep=0 must not reach into the future');
+  assert.equal(retentionCutoffMonth(-5, now), '2026-09', 'a negative window cannot widen the sweep');
+  assert.equal(retentionCutoffMonth(1, now), '2026-09');
+  assert.equal(retentionCutoffMonth(3, now), '2026-07');
 });

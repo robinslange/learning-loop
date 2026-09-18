@@ -31,6 +31,21 @@ source_grounded: 0-2
 ---
 ```
 
+`source:` records **where the note came from**, not what it cites. Legal values:
+
+| Value        | Means                                                              |
+| ------------ | ------------------------------------------------------------------ |
+| `session`    | Captured from a working session                                    |
+| `discovery`  | Produced by a `/discovery` research pass                           |
+| `ingest`     | Extracted from an ingested repo, ticket, or document               |
+| `literature` | A capture of an external work; its citations go on a `Source:` line |
+| `synthesis`  | First-hand reasoning that asserts nothing a reader could check     |
+| `unverified` | Makes an external claim, but no source survived verification       |
+
+Citation URLs do **not** go here — they belong on a body `Source:` line, and the two coexist. Only when a note makes an external claim and you have no citation anywhere, write `source: "[no URL found]"` so the gap stays visible.
+
+`claim_specificity` and `source_grounded` are set by the promote-gate scoring pass. Values: 0 (vague/none), 1 (bounded/vault-linked), 2 (falsifiable/externally-cited). Omit both fields if the note has not been scored yet.
+
 ## Invalidation
 
 A note whose claim has stopped being true carries `invalidated:` with the date it stopped:
@@ -52,21 +67,6 @@ Invalidate, do not delete. The note stays on disk and stays readable, so "what d
 Nothing infers this. Ranking has no validity signal: the engine's only temporal input is a half-life on file mtime, the JIT path does not enable it, and mtime here records the last bulk rewrite rather than the last time anyone checked the claim. If a note is wrong now, the note has to say so.
 
 A date in the future is a known expiry that has not arrived, and the note stays current until it does. A value that is not a readable date is ignored and the note is kept, so a typo cannot silently remove a good note from every future session.
-
-`source:` records **where the note came from**, not what it cites. Legal values:
-
-| Value        | Means                                                              |
-| ------------ | ------------------------------------------------------------------ |
-| `session`    | Captured from a working session                                    |
-| `discovery`  | Produced by a `/discovery` research pass                           |
-| `ingest`     | Extracted from an ingested repo, ticket, or document               |
-| `literature` | A capture of an external work; its citations go on a `Source:` line |
-| `synthesis`  | First-hand reasoning that asserts nothing a reader could check     |
-| `unverified` | Makes an external claim, but no source survived verification       |
-
-Citation URLs do **not** go here — they belong on a body `Source:` line, and the two coexist. Only when a note makes an external claim and you have no citation anywhere, write `source: "[no URL found]"` so the gap stays visible.
-
-`claim_specificity` and `source_grounded` are set by the promote-gate scoring pass. Values: 0 (vague/none), 1 (bounded/vault-linked), 2 (falsifiable/externally-cited). Omit both fields if the note has not been scored yet.
 
 ## Reserved Fields
 

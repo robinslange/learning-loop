@@ -117,6 +117,16 @@ function federationLines(pluginData, now) {
 // cut at the last full line and tagged with a pointer line, so the assembled
 // SessionStart context stays within the hook stdout budget instead of relying
 // on emitJson's blind backstop trim.
+
+function capSection(text, pointer) {
+  if (Buffer.byteLength(text, 'utf8') <= MEM_CAP) return text.trim();
+  let head = text.slice(0, MEM_CAP);
+  while (Buffer.byteLength(head, 'utf8') > MEM_CAP) head = head.slice(0, -1);
+  const cut = head.lastIndexOf('\n');
+  if (cut > 0) head = head.slice(0, cut);
+  return `${head.trim()}\n${pointer}`;
+}
+
 // What the intentions block SHIPPED, read back off the rendered text rather
 // than taken from the list that went in. capSection drops whole lines to fit
 // MEM_CAP, so the assembled set overstates what the session was shown, and a
@@ -127,20 +137,14 @@ export function shippedIntentionContexts(text) {
   if (!text) return [];
   const out = [];
   for (const line of String(text).split('\n')) {
-    if (!line.startsWith('- ')) continue;
+    // One shape, checked once. Guarding on the raw line and matching on the
+    // trimmed one meant the trim could never change the outcome, and an
+    // indented row would be rejected by the guard before the trim it was
+    // there to survive.
     const m = /^- (.+) \(\d+ notes?\)$/.exec(line.trim());
     if (m) out.push(m[1]);
   }
   return out;
-}
-
-function capSection(text, pointer) {
-  if (Buffer.byteLength(text, 'utf8') <= MEM_CAP) return text.trim();
-  let head = text.slice(0, MEM_CAP);
-  while (Buffer.byteLength(head, 'utf8') > MEM_CAP) head = head.slice(0, -1);
-  const cut = head.lastIndexOf('\n');
-  if (cut > 0) head = head.slice(0, cut);
-  return `${head.trim()}\n${pointer}`;
 }
 
 // Memory index injection. When the index fits under the cap, inject it whole —

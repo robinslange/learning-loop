@@ -26,7 +26,15 @@ const SWEEP_GATE_MS = 24 * 60 * 60 * 1000;
 // writer rather than the clock. `new Date(y, m - n, 1)` normalises a negative
 // month across the year boundary.
 export function retentionCutoffMonth(keepMonths, now = new Date()) {
-  return monthStr(new Date(now.getFullYear(), now.getMonth() - (keepMonths - 1), 1));
+  // Clamped at 1. The old rule kept the current month unconditionally
+  // (`keep.add(currentMonth)`); folding that floor into the cutoff is what
+  // lets the per-prefix grouping go away, but it also means a keepMonths of 0
+  // would put the cutoff a month in the future and make every file, including
+  // the bucket the writer is appending to right now, eligible for deletion.
+  // A delete path should not be one character in hook-config away from
+  // deleting everything.
+  const months = Math.max(1, Math.floor(Number(keepMonths) || 1));
+  return monthStr(new Date(now.getFullYear(), now.getMonth() - (months - 1), 1));
 }
 
 export async function run(ctx) {
@@ -163,10 +171,17 @@ export async function run(ctx) {
   // One cutoff drains a dead prefix and leaves a live one the same window.
   //
   // The trade-off it accepts: telemetry does not survive a gap in use longer
-  // than the window. That is the intended reading of "keep three months", and
-  // measurement data older than the window is pre-change data that the
-  // calibration epoch would discard anyway. provenance/ is a different
-  // directory entirely and this function never touches it.
+  // than the window, which is the intended reading of "keep three months".
+  // Note what that does NOT mean. `INJECTION_CALIBRATION_EPOCH` has a lower
+  // bound and no upper one, so `injectionPrecision` reads every bucket at or
+  // after 2026-08-04 and this sweep will, from roughly 2026-11, begin deleting
+  // calibration data that is still in-window for the join. That is not a
+  // regression, because the old per-prefix rule capped a continuously-written
+  // prefix at the same three calendar months, but the epoch provides no safety
+  // here and must not be cited as though it did. If the precision baseline
+  // needs a longer horizon than retention, that is a conflict to resolve
+  // deliberately, not one to assume away. provenance/ is a different directory
+  // entirely and this function never touches it.
   function sweepRetrievalLogs(dir, keepMonths) {
     let names;
     try {

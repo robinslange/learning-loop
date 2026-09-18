@@ -120,6 +120,11 @@ const DIRECTIVE =
 // on purpose: its `peer:` path is a locator, not a file under vaultRoot, and
 // buildInjection strips peer bodies anyway — it still belongs in the list so it
 // can surface as a pointer. A local hit with no readable body is dropped.
+// One consequence worth stating: skipping the file read also skips the
+// invalidation check below, so `invalidated:` is honoured for local hits only.
+// That covers every hit the live path produces, because the native
+// SearchResult carries no body and so never takes the early return, but a peer
+// note cannot be checked at all -- there is no local file to read it from.
 // A note that says its claim has stopped being true is not served as current.
 // Nothing else in the pipeline can work this out: the only temporal input the
 // engine has is a half-life on mtime, the JIT path never passes `--recency` to
@@ -127,15 +132,25 @@ const DIRECTIVE =
 // last time the claim was checked (a frontmatter backfill touched 2,862 of
 // 7,496 notes in two days). So validity has to be stated on the note.
 //
-// Fails open. An `invalidated` value that is not a readable date keeps the
-// note: a typo should not silently remove a good note from every future
-// session, which is the failure mode with no signal anywhere to find it by.
-// A date in the future is a known expiry that has not arrived, so it is still
-// current today.
+// Fails open. An `invalidated` value that is not an ISO date keeps the note: a
+// typo should not silently remove a good note from every future session, which
+// is the failure mode with no signal anywhere to find it by. A date in the
+// future is a known expiry that has not arrived, so it is still current today.
+//
+// The ISO shape is checked before `Date.parse`, which is far too permissive to
+// carry this decision on its own. `Date.parse('2020')` is a valid instant, so
+// a half-typed year would drop the note while this comment promised the
+// reverse, and `05/01/2026` is read as May 1 whatever the author meant. A
+// value specific enough to delete a note from every future session has to be
+// unambiguous, so only `YYYY-MM-DD` counts.
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/;
+
 function isInvalidated(fm, now = Date.now()) {
   const raw = fm?.invalidated;
   if (!raw) return false;
-  const t = Date.parse(String(raw).trim());
+  const text = String(raw).trim();
+  if (!ISO_DATE.test(text)) return false;
+  const t = Date.parse(text);
   return Number.isFinite(t) && t <= now;
 }
 
