@@ -1025,6 +1025,87 @@ describe('enrichVaultHits', () => {
     assert.equal(out.length, 1, 'an unreadable date must not silently drop the note');
   });
 
+  it('keeps a note invalidated on a day that does not exist', () => {
+    // The shape gate proves the digits are well formed, not that they name a
+    // real day. V8 rolls the overflow forward, so 2026-02-30 became March 2 and
+    // the note was dropped on a date the author never wrote. Its siblings
+    // (2026-13-45, 2026-01-32, 2026-01-00, 9999-99-99) already failed open
+    // through Date.parse returning NaN; this is the one that did not.
+    for (const [name, value] of [
+      ['feb30', '2026-02-30'],
+      ['apr31', '2026-04-31'],
+      ['notleap', '2026-02-29'],
+    ]) {
+      writeFileSync(
+        join(vault, `${name}.md`),
+        `---\ntitle: X\ninvalidated: ${value}\n---\n\nbody\n`,
+      );
+      const out = enrichVaultHits([{ path: `${name}.md`, title: 'X', score: 0.9 }], vault);
+      assert.equal(out.length, 1, `${value} names no real day, so it is a typo and keeps the note`);
+    }
+  });
+
+  it('still drops a note on a real date at a month boundary', () => {
+    // The round-trip must not reject the dates that do exist. A leap day in a
+    // leap year and the 31st of a 31-day month are the two it would break on.
+    for (const [name, value] of [
+      ['leap', '2024-02-29'],
+      ['jan31', '2026-01-31'],
+      ['apr30', '2026-04-30'],
+    ]) {
+      writeFileSync(
+        join(vault, `${name}.md`),
+        `---\ntitle: X\ninvalidated: ${value}\n---\n\nbody\n`,
+      );
+      const out = enrichVaultHits([{ path: `${name}.md`, title: 'X', score: 0.9 }], vault);
+      assert.equal(out.length, 0, `${value} is a real past date and must still invalidate`);
+    }
+  });
+
+  it('says so once when an invalidated value is unreadable, instead of silently keeping the note', () => {
+    // Failing open is right for a typo; silence makes it permanent. The note is
+    // served as current for every future session and the author has no signal
+    // anywhere that the date they wrote does nothing. Once per distinct value,
+    // because a vault-wide bad backfill should not produce one line per note.
+    const realWrite = process.stderr.write.bind(process.stderr);
+    let captured = '';
+    process.stderr.write = (chunk) => {
+      captured += chunk;
+      return true;
+    };
+    try {
+      // Values unique to this test: the dedupe set is module-level, so a value
+      // another test already pushed through would be suppressed here and the
+      // count would depend on test order.
+      for (const [name, value] of [
+        ['bad1', '2026-3-7'],
+        ['bad2', '2026-3-7'],
+        ['bad3', '2026-06-31'],
+      ]) {
+        writeFileSync(
+          join(vault, `${name}.md`),
+          `---\ntitle: X\ninvalidated: ${value}\n---\n\nbody\n`,
+        );
+        enrichVaultHits([{ path: `${name}.md`, title: 'X', score: 0.9 }], vault);
+      }
+    } finally {
+      process.stderr.write = realWrite;
+    }
+    const lines = captured
+      .split('\n')
+      .filter((l) => l.includes('isInvalidated'))
+      .map((l) => JSON.parse(l));
+    assert.equal(lines.length, 2, 'one line per distinct value, not per note');
+    assert.ok(
+      lines.some((l) => l.msg.includes('2026-3-7') && l.msg.includes('not YYYY-MM-DD')),
+      'the shape failure names the value and the reason',
+    );
+    assert.ok(
+      lines.some((l) => l.msg.includes('2026-06-31') && l.msg.includes('does not exist')),
+      'the impossible-day failure is distinguished from a shape failure',
+    );
+  });
+
   it('drops a local hit whose file is unreadable or empty', () => {
     const out = enrichVaultHits(
       [

@@ -143,13 +143,53 @@ const DIRECTIVE =
 // reverse, and `05/01/2026` is read as May 1 whatever the author meant. A
 // value specific enough to delete a note from every future session has to be
 // unambiguous, so only `YYYY-MM-DD` counts.
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}(?:[T ]|$)/;
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]|$)/;
+
+// Both fail-open paths below say so out loud, once per distinct value. Failing
+// open is the right default for a typo, but silence makes it permanent: the
+// note is served as current for every future session and the author has no
+// signal anywhere that the date they wrote does nothing. `2026-1-5`,
+// `2026/01/05`, `2026-01-05Z` and a value with a trailing YAML comment all
+// land here, and all of them are legible enough that the intent is obvious.
+const warnedInvalidDates = new Set();
+
+function warnBadInvalidation(text, why) {
+  if (warnedInvalidDates.has(text)) return;
+  warnedInvalidDates.add(text);
+  logError(
+    'inject.isInvalidated',
+    new Error(`invalidated: ${JSON.stringify(text)} ${why}; the note is still served as current`),
+  );
+}
 
 function isInvalidated(fm, now = Date.now()) {
   const raw = fm?.invalidated;
   if (!raw) return false;
   const text = String(raw).trim();
-  if (!ISO_DATE.test(text)) return false;
+  const m = ISO_DATE.exec(text);
+  if (!m) {
+    warnBadInvalidation(text, 'is not YYYY-MM-DD');
+    return false;
+  }
+  // The shape gate proves the digits are well formed, not that they name a day
+  // that exists. V8 rolls an overflowing day forward, so `2026-02-30` parses to
+  // March 2 and drops the note on a date the author never wrote. Round-trip the
+  // components: a value that does not survive the trip is a typo, and the
+  // comment above promises a typo keeps the note. `2026-13-45`, `2026-01-32`,
+  // `2026-01-00` and `9999-99-99` already failed open through `Date.parse`
+  // returning NaN; this closes the one case that did not.
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() !== month - 1 ||
+    probe.getUTCDate() !== day
+  ) {
+    warnBadInvalidation(text, 'names a day that does not exist');
+    return false;
+  }
   const t = Date.parse(text);
   return Number.isFinite(t) && t <= now;
 }

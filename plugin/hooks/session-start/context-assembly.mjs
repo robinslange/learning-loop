@@ -127,6 +127,12 @@ function capSection(text, pointer) {
   return `${head.trim()}\n${pointer}`;
 }
 
+// The block's heading, declared once because two things now depend on it: the
+// assembler that writes it and the reader below that finds it again in the
+// emitted payload. A literal in both places is a rename away from a reader
+// that silently matches nothing and reports every context as dropped.
+const INTENTIONS_HEADING = '## Notes with active intentions:';
+
 // What the intentions block SHIPPED, read back off the rendered text rather
 // than taken from the list that went in. capSection drops whole lines to fit
 // MEM_CAP, so the assembled set overstates what the session was shown, and a
@@ -145,6 +151,49 @@ export function shippedIntentionContexts(text) {
     if (m) out.push(m[1]);
   }
   return out;
+}
+
+// Record what the intentions block shipped, against the payload emitJson says
+// it wrote.
+//
+// Two truncations stand between the assembled list and the model. capSection
+// is the first and is visible to the assembler. emitJson's backstop trim is
+// the second, fires only when the whole payload is oversized, and takes this
+// block first by design. Measured on a live install: 9,538 bytes assembled,
+// 8,054 emitted, 59 contexts recorded, 21 of them absent from what was sent.
+// Reading the emitted text instead makes the row true by construction rather
+// than by comment.
+//
+// A truncation that removes the heading removes every context with it, and
+// that is the right answer: nothing of the block reached the session.
+export function recordIntentionsShipped(ctx, emitted, pluginData) {
+  if (!ctx?.intentionsBlock) return null;
+  const text = String(emitted ?? '');
+  const start = text.indexOf(INTENTIONS_HEADING);
+  let section = '';
+  if (start !== -1) {
+    const rest = text.slice(start + INTENTIONS_HEADING.length);
+    const end = rest.indexOf('\n## ');
+    section = end === -1 ? rest : rest.slice(0, end);
+  }
+  const meta = {
+    // writeRetrieval stamps getSessionId(), the env/marker resolution.
+    // vault-snapshot already resolved the canonical id (the stdin payload
+    // first, M4) onto ctx.sessionId, and the used-side events key on that one.
+    // A row stamped the other way joins against nothing, which is its only job.
+    session_id: ctx.sessionId,
+    contexts: shippedIntentionContexts(section),
+    assembled_count: ctx.intentionsAssembledCount ?? 0,
+  };
+  writeRetrieval({
+    pluginData,
+    prefix: 'session-start-pack',
+    command: 'intentions',
+    query: '',
+    results: null,
+    meta,
+  });
+  return meta;
 }
 
 // Memory index injection. When the index fits under the cap, inject it whole —
@@ -390,30 +439,20 @@ export async function run(ctx) {
           list,
           `[truncated — run \`${searchCmd} intentions\` for the full list]`,
         );
-        retrieved += '\n## Notes with active intentions:\n';
+        retrieved += `\n${INTENTIONS_HEADING}\n`;
         retrieved += `${capped}\n`;
         operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
         // The pack has never had a surfaced->used join, so the value of this
-        // block is unmeasured rather than low. Record what shipped, read back
-        // off the capped text: assembled_count alongside it is what the cap
-        // dropped, which is the block's other open question.
-        writeRetrieval({
-          pluginData,
-          prefix: 'session-start-pack',
-          command: 'intentions',
-          query: '',
-          results: null,
-          meta: {
-            // writeRetrieval stamps getSessionId(), which is the env/marker
-            // resolution. vault-snapshot already resolved the canonical id —
-            // the stdin payload first (M4) — into ctx.sessionId, and the
-            // used-side events key on that one. A row stamped with the other
-            // resolution joins against nothing, which is the row's only job.
-            session_id: ctx.sessionId,
-            contexts: shippedIntentionContexts(capped),
-            assembled_count: grouped.length,
-          },
-        });
+        // block is unmeasured rather than low. The row that records it is NOT
+        // written here: capSection above is only the first of two truncations,
+        // and this block is deliberately positioned to be the first victim of
+        // the second one (emitJson's backstop trim, see the section order at
+        // :210). Reading back off `capped` therefore records impressions the
+        // model never received, which is the exact error this feature exists
+        // to prevent. session-start.js emits the row after emitJson, against
+        // the text emitJson says it actually wrote.
+        ctx.intentionsBlock = capped;
+        ctx.intentionsAssembledCount = grouped.length;
       }
       // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
       const child = spawn(
