@@ -13,20 +13,23 @@ Read `PLUGIN_DATA/librarian/queue.jsonl`. Parse all lines. Filter to `status ===
 Group pending items into link suggestions, tag suggestions, voice flags, and duplicate flags. Each subsection is independent: present and resolve one at a time.
 
 **Link suggestions:**
-Present in a table grouped by confidence:
+Present in a table grouped by confidence. Within each group, sort by `model_prob` descending (the daemon's calibrated token probability for its confidence call; items without one sort last on `cosine_score`). Show the probability so the user sees which calls the model itself was sure of; mark any item whose `model_prob` is below 0.7 with `(borderline)` regardless of its confidence label, since a "high" the model was 55% sure of belongs under scrutiny, not under all-high approval:
 
 ```
 High confidence (N):
-  Orphan                                    → Suggested link                           Reason
-  3-permanent/cadences-are-harmonic...      → 3-permanent/chord-progressions-are...    Both discuss harmonic function
+  P     Orphan                                  → Suggested link                          Reason
+  0.94  3-permanent/cadences-are-harmonic...    → 3-permanent/chord-progressions-are...   Both discuss harmonic function
+  0.58  3-permanent/modal-mixture-borrows...    → 3-permanent/parallel-keys-share...      Same tonic (borderline)
   ...
 
 Review (N):
-  Orphan                                    → Suggested link                           Reason
+  P     Orphan                                  → Suggested link                          Reason
   ...
 ```
 
-Ask user: "Apply approved links? Enter numbers to approve (e.g., '1,3,5'), 'all-high' for all high-confidence, or 'skip'."
+`all-high` excludes borderline items: they are approved individually or not at all.
+
+Ask user: "Apply approved links? Enter numbers to approve (e.g., '1,3,5'), 'all-high' for all high-confidence except borderline, or 'skip'."
 
 For each approved link suggestion:
 
