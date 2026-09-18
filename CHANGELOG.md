@@ -10,7 +10,9 @@ All notable changes to this project are documented here. The format is based on 
 
   The iteration constants' documentation was wrong in a way worth naming. ll-core's said twenty steps converge "for graphs up to ~100k nodes with damping 0.85", describing a damping factor no caller uses: ll-search runs 0.5, deliberately and with its own documented reason, and lower damping settles faster, so the claim was both unmeasured and about the wrong configuration. Both constants now say what they are, a ceiling rather than a cost.
 
-  Verified by equivalence rather than by timing: the new tests assert that a capped run and a 400-iteration run return the same nodes in the same order with scores within `1e-6`, on a dense graph and on a long cycle, for the holdout path as well. A change to how long the walk runs that altered the ranking would be a silent quality regression, so that is the property the tests pin. The `+ppr` funnel stages gated in the last release are the other half of that check.
+  Verified by equivalence rather than by timing: the new tests assert that a capped run and a 400-iteration run return the same nodes with the same scores, within `1e-6`, on a dense graph, on a long cycle, and through the holdout path. A change to how long the walk runs that altered the ranking would be a silent quality regression, so that is the property the tests pin. The `+ppr` funnel stages gated in the last release are the other half of that check.
+
+  Scores, not positions, because the first version of these tests compared positions and CI failed them: `n1` against `n11`. In a clique every non-seed node scores identically, and `sort_by` leaves equal keys in whatever order the `HashMap` yielded, which Rust randomises per process. That tie order is nondeterministic on main too, so the original assertion was pinning noise rather than behaviour. Rank order is still asserted where it means something, on a chain whose hops carry distinct decreasing scores.
 
 ### Fixed
 

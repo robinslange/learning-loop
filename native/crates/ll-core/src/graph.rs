@@ -192,6 +192,13 @@ mod tests {
     // how long it takes to get there. Comparing against a high iteration cap is
     // the check that matters -- if stopping early changed the ranking, the
     // whole change would be a silent quality regression.
+    //
+    // Scores, not positions, are what these compare. A clique gives every
+    // non-seed node the same score, and `sort_by` on equal keys leaves them in
+    // whatever order the HashMap yielded, which Rust randomises per process. An
+    // earlier version of this test asserted position equality and failed in CI
+    // on exactly that: n1 against n11, two nodes with identical scores. That
+    // tie order is nondeterministic on main too, so asserting it pins noise.
     fn dense_graph(n: usize) -> GraphEdges {
         let mut graph: GraphEdges = HashMap::new();
         for i in 0..n {
@@ -201,37 +208,70 @@ mod tests {
         graph
     }
 
+    /// Path -> score, so a comparison is about values rather than tie order.
+    fn score_map(results: &[(String, f64)]) -> HashMap<&str, f64> {
+        results.iter().map(|(p, s)| (p.as_str(), *s)).collect()
+    }
+
+    fn assert_same_scores(capped: &[(String, f64)], uncapped: &[(String, f64)], case: &str) {
+        let a = score_map(capped);
+        let b = score_map(uncapped);
+        assert_eq!(
+            a.len(),
+            b.len(),
+            "{case}: early stop changed how many nodes survive the score floor"
+        );
+        for (path, score) in &a {
+            let other = b
+                .get(path)
+                .unwrap_or_else(|| panic!("{case}: {path} missing from the uncapped run"));
+            assert!(
+                (score - other).abs() < 1e-6,
+                "{case}: early stop changed {path} score: {score} vs {other}"
+            );
+        }
+    }
+
     #[test]
     fn test_ppr_early_stop_matches_full_iteration() {
         // Same call twice, once with room to converge and once with far more
-        // than it needs. Identical output means the stop fires only after the
+        // than it needs. Identical scores mean the stop fires only after the
         // vector has settled.
-        for graph in [dense_graph(12), {
-            let mut chain: GraphEdges = HashMap::new();
-            for i in 0..30 {
-                chain.insert(format!("n{i}"), vec![format!("n{}", (i + 1) % 30)]);
-            }
-            chain
-        }] {
+        let mut chain: GraphEdges = HashMap::new();
+        for i in 0..30 {
+            chain.insert(format!("n{i}"), vec![format!("n{}", (i + 1) % 30)]);
+        }
+        for (case, graph) in [("dense", dense_graph(12)), ("cycle", chain)] {
             let seeds = vec!["n0".to_string()];
             let capped = personalized_pagerank(&graph, &seeds, 0.5, 20);
             let uncapped = personalized_pagerank(&graph, &seeds, 0.5, 400);
-            assert_eq!(
-                capped.len(),
-                uncapped.len(),
-                "early stop changed how many nodes survive the score floor"
-            );
-            for (a, b) in capped.iter().zip(uncapped.iter()) {
-                assert_eq!(a.0, b.0, "early stop changed rank order");
-                assert!(
-                    (a.1 - b.1).abs() < 1e-6,
-                    "early stop changed {} score: {} vs {}",
-                    a.0,
-                    a.1,
-                    b.1
-                );
-            }
+            assert_same_scores(&capped, &uncapped, case);
         }
+    }
+
+    #[test]
+    fn test_ppr_early_stop_preserves_a_real_ranking() {
+        // The tie-free case: a chain gives each hop a distinct, decreasing
+        // score, so position equality IS meaningful here and pins that the
+        // early stop preserves genuine rank order.
+        let mut graph: GraphEdges = HashMap::new();
+        graph.insert("a".into(), vec!["b".into()]);
+        graph.insert("b".into(), vec!["c".into()]);
+        graph.insert("c".into(), vec!["d".into()]);
+        graph.insert("d".into(), vec!["e".into()]);
+
+        let seeds = vec!["a".to_string()];
+        let capped = personalized_pagerank(&graph, &seeds, 0.5, 20);
+        let uncapped = personalized_pagerank(&graph, &seeds, 0.5, 400);
+
+        let order: Vec<&str> = capped.iter().map(|r| r.0.as_str()).collect();
+        assert_eq!(order, vec!["b", "c", "d", "e"], "hop order is score order on a chain");
+        assert_eq!(
+            order,
+            uncapped.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(),
+            "early stop changed rank order on a graph with no ties"
+        );
+        assert_same_scores(&capped, &uncapped, "chain");
     }
 
     #[test]
@@ -241,11 +281,11 @@ mod tests {
         let seeds = vec!["n0".to_string()];
         let capped = personalized_pagerank_holdout(&graph, &seeds, 0.5, 20, Some("n3"));
         let uncapped = personalized_pagerank_holdout(&graph, &seeds, 0.5, 400, Some("n3"));
-        assert_eq!(capped.len(), uncapped.len());
-        for (a, b) in capped.iter().zip(uncapped.iter()) {
-            assert_eq!(a.0, b.0);
-            assert!((a.1 - b.1).abs() < 1e-6);
-        }
+        assert!(
+            !score_map(&capped).contains_key("n3"),
+            "held-out node must stay out of the result"
+        );
+        assert_same_scores(&capped, &uncapped, "holdout");
     }
 
     #[test]
