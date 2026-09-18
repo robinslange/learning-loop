@@ -196,10 +196,10 @@ test('loadNoteUsageEvents reads the pre-rename `note` key as well as `target`', 
   });
   try {
     const events = loadNoteUsageEvents(pd);
-    assert.deepStrictEqual(
-      events.map((e) => e.path).sort(),
-      ['0-inbox/new-shape.md', '0-inbox/old-shape.md']
-    );
+    assert.deepStrictEqual(events.map((e) => e.path).sort(), [
+      '0-inbox/new-shape.md',
+      '0-inbox/old-shape.md',
+    ]);
     assert.ok(events.every((e) => e.status === 'used'));
   } finally {
     rmSync(pd, { recursive: true, force: true });
@@ -223,7 +223,7 @@ test('loadUnevidencedInformed reads the pre-rename `note` key too', () => {
   try {
     assert.deepStrictEqual(
       loadUnevidencedInformed(pd).map((e) => e.path),
-      ['0-inbox/old-shape.md']
+      ['0-inbox/old-shape.md'],
     );
   } finally {
     rmSync(pd, { recursive: true, force: true });
@@ -495,6 +495,49 @@ test('usageReport: a used event with no signals stays used, counted as unspecifi
     assert.strictEqual(r.used_unspecified_events, 1);
     assert.strictEqual(r.used_engaged_events, 0);
     assert.strictEqual(r.used_informed_events, 0);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('memoryReadStats aggregates memory-read events per file inside the window', async () => {
+  const { memoryReadStats } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const pd = makePluginData();
+  writeMonthlyShards(join(pd, 'retrieval'), 'reads', [
+    { ts: daysAgo(1), session_id: 's1', command: 'memory-read', file: 'feedback_a.md' },
+    { ts: daysAgo(2), session_id: 's2', command: 'memory-read', file: 'feedback_a.md' },
+    { ts: daysAgo(5), session_id: 's3', command: 'memory-read', file: 'project_b.md' },
+    // outside the window: must not count
+    { ts: daysAgo(120), session_id: 's4', command: 'memory-read', file: 'project_b.md' },
+    // not a memory-read: must not count
+    { ts: daysAgo(1), session_id: 's5', command: 'query', file: 'feedback_a.md' },
+  ]);
+  try {
+    const stats = memoryReadStats(pd, { days: 90 });
+    assert.equal(stats.get('feedback_a.md').reads, 2);
+    assert.equal(stats.get('feedback_a.md').last_read, daysAgo(1));
+    assert.equal(stats.get('project_b.md').reads, 1);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('retrieval-report --memory-reads emits per-file JSON', () => {
+  const pd = makePluginData();
+  writeMonthlyShards(join(pd, 'retrieval'), 'reads', [
+    { ts: daysAgo(1), session_id: 's1', command: 'memory-read', file: 'feedback_a.md' },
+  ]);
+  try {
+    const out = spawnSync(process.execPath, [REPORT, '--memory-reads', '--json'], {
+      encoding: 'utf8',
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: pd },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    const parsed = JSON.parse(out.stdout);
+    assert.equal(parsed.window_days, 90);
+    assert.deepEqual(parsed.reads, [{ file: 'feedback_a.md', reads: 1, last_read: daysAgo(1) }]);
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }
