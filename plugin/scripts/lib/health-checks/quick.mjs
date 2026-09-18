@@ -22,6 +22,7 @@ import {
   shimFileName,
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
+import { resolveShimRoot } from '../shims.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths } from '../retrieval.mjs';
@@ -303,6 +304,24 @@ export function checkShimsExist({ home, platform = process.platform } = {}) {
     }
   }
   if (missing.length === 0) {
+    // Existence and an exec bit are not what a shim has to satisfy. Each one
+    // resolves an install and runs its scripts/shim.mjs, so a shim pointing at
+    // a tree without that file is present, executable, and guaranteed to exit
+    // 1 — which is what 2.0.7 shipped, for a whole session, while this check
+    // reported four shims ready. Mirror the resolution instead of the file.
+    const root = resolveShimRoot(home);
+    if (!root) {
+      return makeCheck({
+        id: CHECK_IDS['shims-exist'],
+        name: 'CLI shims',
+        status: SEVERITIES.fail,
+        severity: SEVERITIES.fail,
+        detail: 'installed, but no resolved root ships scripts/shim.mjs — every shim exits 1',
+        // Deliberately not install-shims: rewriting four correct files that
+        // resolve to a tree with no shim.mjs reproduces the same failure.
+        fix: 'Upgrade the plugin, or call scripts directly: node PLUGIN/scripts/<script>.mjs',
+      });
+    }
     return makeCheck({
       id: CHECK_IDS['shims-exist'],
       name: 'CLI shims',
