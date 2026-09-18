@@ -40,7 +40,7 @@ const ENTITY = new RegExp(`&(${Object.keys(ENTITIES).join('|')});`, 'gi');
  * first `<` that opens one, and everything from there is dropped as a tag that ran off the
  * end of the input. That keeps "if a < b" whole while still dropping a trailing `<script`.
  */
-export function stripTags(markup) {
+export function stripTags(markup, separator = '') {
   if (typeof markup !== 'string') return '';
   let out = '';
   let i = 0;
@@ -54,6 +54,7 @@ export function stripTags(markup) {
       const opens = rest.search(TAG_START);
       return opens === -1 ? out + rest : out + rest.slice(0, opens);
     }
+    out += separator;
     i = gt + 1;
   }
 }
@@ -64,9 +65,24 @@ export function decodeEntities(text) {
   return text.replace(ENTITY, (_, name) => ENTITIES[name.toLowerCase()]);
 }
 
-/** Reduce a full HTML document to collapsed plain text. */
+/**
+ * Reduce a full HTML document to collapsed plain text.
+ *
+ * A tag is a word boundary here: `<td>alpha</td><td>beta</td>` is two words, and stripTags
+ * copies the spans between tags, so with no separator they arrive as `alphabeta`. Source
+ * whitespace cannot be relied on to supply the gap -- minified markup has none, which is
+ * most of what gets fetched. The separator is passed here rather than defaulted inside
+ * stripTags because its other callers reduce a DOI or a JATS abstract, where an inserted
+ * space is noise rather than a boundary.
+ *
+ * The cost is that markup inside a word splits it: `un<b>der</b>` reads as `un der`. That
+ * is the trade the pre-e21e5d1 chain also made, and it is the right side of it -- a split
+ * word is still readable to the model this text is handed to, where a glued one is a token
+ * that never existed. Distinguishing block from inline would fix both and needs a tag list
+ * that would then have to stay correct; nothing downstream is asking for that yet.
+ */
 export function htmlToText(html) {
   if (typeof html !== 'string') return '';
-  const stripped = stripTags(html.replace(RAW_TEXT_ELEMENT, ' '));
+  const stripped = stripTags(html.replace(RAW_TEXT_ELEMENT, ' '), ' ');
   return decodeEntities(stripped).replace(/\s+/g, ' ').trim();
 }
