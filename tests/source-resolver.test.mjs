@@ -191,4 +191,53 @@ describe('fetchPageText error surfacing', () => {
     assert.equal(result.ok, true);
     assert.match(result.text, /hello world/);
   });
+
+  it('rejects an oversized body by content-length without buffering it', async () => {
+    let bodyRead = false;
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: (h) => (h === 'content-length' ? String(64 * 1024 * 1024) : null) },
+      text: async () => {
+        bodyRead = true;
+        return 'never reached';
+      },
+    });
+    const { __test__ } = await import(
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/big');
+    assert.equal(result.ok, false);
+    assert.equal(result.kind, 'too_large');
+    assert.equal(bodyRead, false, 'the body must be rejected before it is buffered');
+  });
+
+  it('rejects an oversized body that under-declared its content-length', async () => {
+    // content-length comes from the same server as the body, so the pre-check
+    // is an optimisation and the post-check is the actual bound.
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: (h) => (h === 'content-length' ? '10' : null) },
+      text: async () => 'x'.repeat(6 * 1024 * 1024),
+    });
+    const { __test__ } = await import(
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/lying');
+    assert.equal(result.ok, false);
+    assert.equal(result.kind, 'too_large');
+  });
+
+  it('accepts a body with no content-length header at all', async () => {
+    globalThis.fetch = async () => ({
+      ok: true,
+      headers: { get: () => null },
+      text: async () => '<html><body>small page</body></html>',
+    });
+    const { __test__ } = await import(
+      `../plugin/scripts/source-resolver.mjs?bust=${randomBytes(4).toString('hex')}`
+    );
+    const result = await __test__.fetchPageText('https://example.com/nolen');
+    assert.equal(result.ok, true);
+    assert.match(result.text, /small page/);
+  });
 });
