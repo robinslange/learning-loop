@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, isAbsolute, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 import {
@@ -19,8 +19,12 @@ const MOD = JSON.stringify(new URL('../plugin/scripts/lib/plugin-meta.mjs', impo
 
 test('pluginRoot resolves to the plugin root', () => {
   const root = pluginRoot().replace(/\\/g, '/');
-  // Should end with /learning-loop/plugin (direct checkout or worktree under .worktrees/ or .claude/worktrees/).
-  assert.match(root, /learning-loop(\/(\.claude\/)?\.?worktrees\/[^/]+)?\/plugin$/);
+  // Structural assertion, not a directory-name one: a checkout is free to be
+  // named anything (clone, worktree, CI scratch dir), so the test asserts the
+  // relationship that defines the plugin root instead: it ends in /plugin and
+  // carries the manifest.
+  assert.match(root, /\/plugin$/);
+  assert.ok(existsSync(join(root, '.claude-plugin/plugin.json')), `${root} has no plugin manifest`);
 });
 
 test('pluginRoot is an absolute path', () => {
@@ -93,7 +97,14 @@ test('cacheDir ends with /cache', () => {
 
 function cacheFixture() {
   const home = mkdtempSync(join(tmpdir(), 'll-active-root-'));
-  const parent = join(home, '.claude', 'plugins', 'cache', 'learning-loop-marketplace', 'learning-loop');
+  const parent = join(
+    home,
+    '.claude',
+    'plugins',
+    'cache',
+    'learning-loop-marketplace',
+    'learning-loop',
+  );
   const old = join(parent, '2.0.6');
   const current = join(parent, '2.0.7');
   for (const root of [old, current]) {
@@ -105,7 +116,13 @@ function cacheFixture() {
       join(home, '.claude', 'plugins', 'installed_plugins.json'),
       JSON.stringify({ version: 2, plugins: { [INSTALL_KEY]: [{ scope: 'user', installPath }] } }),
     );
-  return { home, old, current, install, cleanup: () => rmSync(home, { recursive: true, force: true }) };
+  return {
+    home,
+    old,
+    current,
+    install,
+    cleanup: () => rmSync(home, { recursive: true, force: true }),
+  };
 }
 
 test('activeRoot follows the installed sibling version', () => {
@@ -134,7 +151,15 @@ test('activeRoot stays on its own version for a file the installed version dropp
 test('activeRoot ignores an install that is not a sibling (Codex cache, --plugin-dir)', () => {
   const fx = cacheFixture();
   try {
-    const elsewhere = join(fx.home, '.codex', 'plugins', 'cache', 'learning-loop-marketplace', 'learning-loop', '2.0.7');
+    const elsewhere = join(
+      fx.home,
+      '.codex',
+      'plugins',
+      'cache',
+      'learning-loop-marketplace',
+      'learning-loop',
+      '2.0.7',
+    );
     mkdirSync(join(elsewhere, 'hooks'), { recursive: true });
     writeFileSync(join(elsewhere, 'hooks', 'stop-nudge.js'), '');
     fx.install(elsewhere);
