@@ -135,7 +135,7 @@ If you've enabled the librarian (see below), `/health` also shows pending librar
 
 If `/health` reports installation problems (missing binary, broken shims, stale daemons), run `/learning-loop:doctor` — it diagnoses your install and walks you through fixes one at a time, re-checking each after you apply it.
 
-**The vault librarian** runs in the background when `ll-watch` is active, using a local Gemma model via ollama: `gemma3:12b` by default (also the research tier), or `gemma4:e2b` on 16-32GB machines (triage only). It wanders the vault autonomously, finding orphan notes that should be linked, suggesting tags for under-tagged notes, flagging topic-style titles, flagging duplicates against near-neighbours, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
+**The vault librarian** runs in the background when `ll-watch` is active, using a local Gemma model via ollama, chosen by tier from system RAM: `gemma3:12b` at 32GB and above (triage and local research), `gemma4:e2b` from 16 to 32GB (triage only, the shipped default in `config.json`), skipped below 16GB. It wanders the vault autonomously, finding orphan notes that should be linked, suggesting tags for under-tagged notes, flagging topic-style titles, flagging duplicates against near-neighbours, and marking potentially stale claims. It queues observations; you review them with `/health --librarian`.
 
 ```
 /learning-loop:health --librarian
