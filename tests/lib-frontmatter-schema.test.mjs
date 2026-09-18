@@ -101,4 +101,22 @@ describe('frontmatter-schema grounding signals', () => {
   it('treats a first-hand note with no checkable claim as clean', () => {
     assert.equal(hasUngroundedFactualSignal('The gate denies what the write introduces.'), false);
   });
+
+  it('still reads a figure whose digit run carries separators', () => {
+    assert.equal(hasUngroundedFactualSignal('The dump was 1,234.5mb before the sweep.'), true);
+    assert.equal(hasUngroundedFactualSignal('Throughput held at 1,000x baseline.'), true);
+  });
+
+  it('finishes on a long separator-heavy digit run that matches nothing', () => {
+    // A pasted id list or a long decimal is ordinary vault content. The old
+    // quantity pattern let `[\d,.]*` re-enter the digit `\d` already consumed,
+    // so a non-matching run of this shape backtracked quadratically: measured
+    // 20s at this length, which stalls the whole normalise-frontmatter pass on
+    // one note.
+    const body = '1' + ',1'.repeat(100_000);
+    const start = Date.now();
+    assert.equal(hasUngroundedFactualSignal(body), false);
+    const elapsed = Date.now() - start;
+    assert.ok(elapsed < 500, `expected a linear scan, took ${elapsed}ms`);
+  });
 });
