@@ -7,8 +7,9 @@
 // vault-snapshot.mjs runs the TTL sweep: retrieval/session-dedupe + markers/
 // (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d)
 // — never the live learning-loop-session-id fallback — plus retrieval log
-// month-pruning (keep newest RETRIEVAL_LOG_KEEP_MONTHS per prefix, current
-// month always kept) and librarian queue.jsonl.bak.* reaping (7d TTL).
+// month-pruning (drop months older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff,
+// by age rather than per-prefix count) and librarian queue.jsonl.bak.* reaping
+// (7d TTL).
 //
 // Fixtures use matching installed/running versions so the binary-update block
 // early-returns and never spawns a downloader — isolating the sweep behaviour.
@@ -456,28 +457,61 @@ test('retentionCutoffMonth follows the writer in both hemispheres', () => {
   const snapshotUrl = pathToFileURL(
     join(process.cwd(), 'plugin/hooks/session-start/vault-snapshot.mjs'),
   ).href;
-  const probe = `
+  // Two instants, because they are not the same test. The eastward one is an
+  // instant already past month end in UTC but not yet locally, where a UTC
+  // cutoff spares a file the rule says to prune. The westward one is an instant
+  // already in the new month in UTC but still in the old one locally, where a
+  // UTC cutoff deletes a file up to half a day EARLY. vault-snapshot.mjs:22-24
+  // names the westward direction as the one that loses data, and only the
+  // eastward case was covered.
+  const probe = (isoInstant) => `
     process.env.TZ;
     const { monthStr } = await import('${retrievalUrl}');
     const { retentionCutoffMonth } = await import('${snapshotUrl}');
-    // an instant that is a different calendar month in UTC than it is locally
-    const boundary = new Date(Date.UTC(2026, 8, 30, 12, 0));
+    const boundary = new Date('${isoInstant}');
     console.log(JSON.stringify({
       writer: monthStr(boundary),
       cutoff1: retentionCutoffMonth(1, boundary),
     }));
   `;
-  for (const tz of ['Pacific/Auckland', 'America/Los_Angeles', 'UTC']) {
-    const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
-      env: { ...process.env, TZ: tz },
-      encoding: 'utf-8',
-    });
-    assert.equal(r.status, 0, `probe failed in ${tz}: ${r.stderr}`);
-    const { writer, cutoff1 } = JSON.parse(r.stdout.trim());
-    assert.equal(
-      cutoff1,
-      writer,
-      `in ${tz} the keepMonths=1 cutoff must equal the month the writer names`,
+  const instants = [
+    // Sep 30 12:00Z: Oct 1 in Auckland, still Sep 30 in Los Angeles.
+    ['eastward', new Date(Date.UTC(2026, 8, 30, 12, 0)).toISOString()],
+    // Oct 1 03:00Z: Sep 30 20:00 in Los Angeles, already Oct in UTC.
+    ['westward', new Date(Date.UTC(2026, 9, 1, 3, 0)).toISOString()],
+  ];
+  for (const [direction, instant] of instants) {
+    for (const tz of ['Pacific/Auckland', 'America/Los_Angeles', 'UTC']) {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', probe(instant)], {
+        env: { ...process.env, TZ: tz },
+        encoding: 'utf-8',
+      });
+      assert.equal(r.status, 0, `probe failed in ${tz} (${direction}): ${r.stderr}`);
+      const { writer, cutoff1 } = JSON.parse(r.stdout.trim());
+      assert.equal(
+        cutoff1,
+        writer,
+        `in ${tz} (${direction}) the keepMonths=1 cutoff must equal the month the writer names`,
+      );
+    }
+  }
+});
+
+test('retentionCutoffMonth clamps a keepMonths that would sweep everything', () => {
+  // The floor stops keepMonths=0 putting the cutoff a month in the future. The
+  // ceiling closes the same door from the other side, and it is the one a
+  // reader walks into: Infinity is the intuitive way to write "keep forever",
+  // and it was the fail-dangerous input. At or above 3,286,170 the month
+  // arithmetic leaves range, monthStr returns 'NaN-NaN', and every comparison
+  // against it is false -- so every log is swept, including the live bucket.
+  const now = new Date(2026, 8, 18);
+  const current = monthStr(now);
+  for (const keepMonths of [Infinity, 3286170, 1e9, Number.MAX_SAFE_INTEGER]) {
+    const cutoff = retentionCutoffMonth(keepMonths, now);
+    assert.doesNotMatch(cutoff, /NaN/, `keepMonths=${keepMonths} produced ${cutoff}`);
+    assert.ok(
+      current >= cutoff,
+      `keepMonths=${keepMonths} must keep the live bucket (${current} vs cutoff ${cutoff})`,
     );
   }
 });

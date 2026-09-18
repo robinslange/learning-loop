@@ -33,7 +33,15 @@ export function retentionCutoffMonth(keepMonths, now = new Date()) {
   // the bucket the writer is appending to right now, eligible for deletion.
   // A delete path should not be one character in hook-config away from
   // deleting everything.
-  const months = Math.max(1, Math.floor(Number(keepMonths) || 1));
+  //
+  // The ceiling closes the same door from the other side, and it is the one a
+  // reader is likelier to walk into: `Infinity` is the intuitive way to write
+  // "keep everything", and it was the fail-dangerous input. Any value at or
+  // above 3,286,170 (Infinity included) pushes the month arithmetic out of
+  // range, `monthStr` returns 'NaN-NaN', and `'2026-09' >= 'NaN-NaN'` is
+  // false, so EVERY log is swept including the bucket being written. 1200 is
+  // a century of months: past any real retention, short of the break.
+  const months = Math.min(1200, Math.max(1, Math.floor(Number(keepMonths) || 1)));
   return monthStr(new Date(now.getFullYear(), now.getMonth() - (months - 1), 1));
 }
 
@@ -133,8 +141,10 @@ export async function run(ctx) {
   //       marker names that nothing reads anymore. NEVER the live
   //       learning-loop-session-id fallback;
   //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
-  //   (e) retrieval/<prefix>-YYYY-MM.jsonl logs beyond the newest
-  //       RETRIEVAL_LOG_KEEP_MONTHS per prefix (current month always kept).
+  //   (e) retrieval/<prefix>-YYYY-MM.jsonl logs older than the cutoff month,
+  //       measured by age across all prefixes rather than counted per prefix,
+  //       so a prefix nobody writes any more is not pinned forever. The
+  //       current month is always inside the cutoff.
   //       provenance/ is untouched — its consumers read full history.
   function sweepDir(dir, match, cutoffMs) {
     let names;
