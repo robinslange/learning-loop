@@ -421,16 +421,18 @@ function printReport(report) {
   for (const l of report.per_level) {
     console.log(`    ${l.level.padEnd(8)} ${fmtPct(l.precision)}  (${l.hit}/${l.total})`);
   }
-  // This table has been misread once already, as evidence that the body FORMAT
-  // converts ~3.75x better than the pointer format. It cannot show that: the
-  // two rows are different notes, and the ranker hands its best candidate to a
-  // body slot, so bodies would outperform pointers here even if format did
-  // nothing at all.
+  // This table is NOT an effect size for the format, and has been misread once
+  // already as evidence that a body converts ~3.75x better than a pointer. Its
+  // two rows are different notes: the ranker hands its best candidate to a body
+  // slot, so bodies outscore pointers here even where format contributes
+  // nothing. The comparison that isolates format is within-note — the notes that
+  // appeared at BOTH levels on different turns, each compared against itself.
+  // That measurement lives with the change it justified, in the BODY_SLOTS
+  // comment in `hooks/lib/inject.mjs`, rather than being restated here as frozen
+  // prose beside a table this script recomputes every run.
   console.log();
-  console.log('  Not a format effect: these rows are different notes, and the ranker');
-  console.log('  gives its best candidate a body slot, so bodies win here regardless.');
-  console.log('  The within-note control is the honest number — 74 notes seen at both');
-  console.log('  levels converted 30.7% as a body against 12.2% as a pointer, ~2.5x.');
+  console.log('  Note: by-level is confounded by rank. See the comment above');
+  console.log('  this line before quoting it as a format effect.');
 }
 
 // CLI entry — thin: resolve plugin-data, compute, print.

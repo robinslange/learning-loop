@@ -997,6 +997,23 @@ describe('enrichVaultHits', () => {
     assert.equal(out.length, 1, 'a known future expiry is still current today');
   });
 
+  it('keeps a note whose invalidated value is a bare year', () => {
+    // Date.parse('2020') is a valid instant, so a half-typed date silently
+    // dropped the note while the comment promised the opposite. An ISO-shaped
+    // date is the only thing specific enough to act on.
+    writeFileSync(join(vault, 'bareyear.md'), '---\ntitle: B\ninvalidated: 2020\n---\n\nbody\n');
+    const out = enrichVaultHits([{ path: 'bareyear.md', title: 'B', score: 0.9 }], vault);
+    assert.equal(out.length, 1, 'a bare year is a typo, not an invalidation');
+  });
+
+  it('keeps a note whose invalidated value is an ambiguous slash date', () => {
+    // V8 reads 05/01/2026 as May 1 whatever the author meant. Acting on a date
+    // whose meaning depends on the reader's locale is worse than ignoring it.
+    writeFileSync(join(vault, 'slash.md'), '---\ntitle: S\ninvalidated: 05/01/2026\n---\n\nbody\n');
+    const out = enrichVaultHits([{ path: 'slash.md', title: 'S', score: 0.9 }], vault);
+    assert.equal(out.length, 1, 'an ambiguous date must not drop the note');
+  });
+
   it('keeps a note with an unparseable invalidated value rather than dropping it', () => {
     // Silently dropping on a typo would remove a good note with no signal
     // anywhere. Failing open keeps the note and the error visible.
