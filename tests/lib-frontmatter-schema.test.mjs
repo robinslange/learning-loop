@@ -108,15 +108,25 @@ describe('frontmatter-schema grounding signals', () => {
   });
 
   it('finishes on a long separator-heavy digit run that matches nothing', () => {
-    // A pasted id list or a long decimal is ordinary vault content. The old
-    // quantity pattern let `[\d,.]*` re-enter the digit `\d` already consumed,
-    // so a non-matching run of this shape backtracked quadratically: measured
-    // 20s at this length, which stalls the whole normalise-frontmatter pass on
-    // one note.
+    // A pasted id list or a long decimal is ordinary vault content. The
+    // quantity pattern can start at every digit of a run and walks the rest
+    // from each start, so this shape cost 20s at this length and stalled the
+    // whole normalise-frontmatter pass on one note.
     const body = '1' + ',1'.repeat(100_000);
     const start = Date.now();
     assert.equal(hasUngroundedFactualSignal(body), false);
     const elapsed = Date.now() - start;
     assert.ok(elapsed < 500, `expected a linear scan, took ${elapsed}ms`);
+  });
+
+  it('still reads a real figure in a paragraph that also holds a long run', () => {
+    // Clipping bounds the run, it does not skip the paragraph: a note pasting
+    // an id list beside a claim still owes that claim a source.
+    const body = `Recall improved by 23% in the trial. ids: ${'9'.repeat(5000)}`;
+    assert.equal(hasUngroundedFactualSignal(body), true);
+  });
+
+  it('reads a figure written without a leading zero', () => {
+    assert.equal(hasUngroundedFactualSignal('The error rate dropped to .5% after the fix.'), true);
   });
 });

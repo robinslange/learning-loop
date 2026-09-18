@@ -44,15 +44,12 @@ const FACTUAL_SIGNAL_RES = [
   // space that follows is non-word too). Word-shaped units keep their boundary;
   // the percent sign must not have one.
   //
-  // The lookbehind is load-bearing, not tidiness. With `\b\d` the engine may
-  // start a match at every digit in a run, and from each one it walks the rest
-  // of the run before the unit fails, so a long separator-heavy number costs
-  // O(n^2) in start positions alone: a pasted id list measured 20s at 100k
-  // characters, and `hasUngroundedFactualSignal` runs this once per paragraph.
-  // Refusing a start that is preceded by a digit or separator leaves exactly
-  // one viable start per run, which is the same set of matches (a quantity
-  // begins at the front of its number) for 1ms instead.
-  /(?<![\d,.])\d[\d,.]*\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b)/i,
+  // This pattern is quadratic in the length of a single digit/separator run:
+  // `\b\d` can start a match at every digit in the run, and each start walks
+  // the remainder before the unit fails to follow. See `clipLongRuns` for what
+  // bounds it; the pattern itself is deliberately left alone, because every
+  // rewrite that removed the restarts also changed which strings match.
+  /\b\d[\d,.]*\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b)/i,
   /\b(n\s?=\s?\d|p\s?[<>=]\s?0?\.\d)/i,
   /[<>]\s?\d/,
   /\b[A-Z][a-z]+(?:\s(?:&|and)\s[A-Z][a-z]+)?,?\s\(?(?:19|20)\d{2}\)?/,
@@ -64,6 +61,20 @@ function stripFences(body) {
   return body.replace(/^```[\s\S]*?^```/gm, '');
 }
 
+// The quantity pattern above is quadratic in the length of an unbroken
+// digit/separator run, and `hasUngroundedFactualSignal` runs it once per
+// paragraph: a pasted id list, a long decimal, a phone list, measured 20s at
+// 100k characters and stalled the whole `normalise-frontmatter.mjs` batch pass
+// on one note. No quantity is 40 characters long, so a run past that bound
+// cannot be the thing the pattern is looking for; replacing it with a space
+// removes the cost without touching the pattern, which is what keeps the set
+// of matched strings exactly as it was.
+const LONG_DIGIT_RUN = /[\d,.]{40,}/g;
+
+function clipLongRuns(text) {
+  return text.replace(LONG_DIGIT_RUN, ' ');
+}
+
 /**
  * True when the body asserts something checkable that no wikilink backs.
  * A figure carried in via `[[some-grounded-note]]` is legitimate synthesis.
@@ -72,7 +83,7 @@ function stripFences(body) {
  * @returns {boolean}
  */
 export function hasUngroundedFactualSignal(body) {
-  const text = stripFences(typeof body === 'string' ? body : '');
+  const text = clipLongRuns(stripFences(typeof body === 'string' ? body : ''));
   return text
     .split(/\n\s*\n/)
     .some((para) => !para.includes('[[') && FACTUAL_SIGNAL_RES.some((re) => re.test(para)));

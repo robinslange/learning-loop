@@ -96,7 +96,7 @@ function sweepStaleSessions(keepSid) {
 }
 
 function dedupePath(sid) {
-  return join(SESSION_DIR, `omc-cache-health-last-${sid}.json`);
+  return join(SESSION_DIR, `${DEDUPE_PREFIX}${sid}.json`);
 }
 
 function resolveLogPath(configPath) {
