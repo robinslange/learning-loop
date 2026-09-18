@@ -159,3 +159,30 @@ test('2-cycle with NO contradiction edge is excluded', () => {
   const cycles = findContradictionCycles(edges, { maxDepth: 4 });
   assert.equal(cycles.length, 0);
 });
+
+test('parallel contradiction edges on one hop both appear in contradictions', () => {
+  // Node-level dedup keeps this at one cycle (pinned above), but the report
+  // must not hide the second contradiction relationship between the same
+  // pair: both challenges_* edges belong to the cycle's contradiction set.
+  const edges = [
+    { id: 1, fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_undermining' },
+    { id: 2, fromPath: 'a.md', toPath: 'b.md', edgeType: 'challenges_rebuttal' },
+    { id: 3, fromPath: 'b.md', toPath: 'a.md', edgeType: 'supports' },
+  ];
+  const cycles = findContradictionCycles(edges, { maxDepth: 4 });
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].contradictions.length, 2);
+  assert.deepEqual(cycles[0].contradictions.map((e) => e.id).sort(), [1, 2]);
+});
+
+test('contradictions lists each contradiction edge once for a simple cycle', () => {
+  const edges = [
+    { fromPath: 'a.md', toPath: 'b.md', edgeType: 'supports' },
+    { fromPath: 'b.md', toPath: 'c.md', edgeType: 'supports' },
+    { fromPath: 'c.md', toPath: 'a.md', edgeType: 'challenges_rebuttal' },
+  ];
+  const cycles = findContradictionCycles(edges, { maxDepth: 4 });
+  assert.equal(cycles.length, 1);
+  assert.equal(cycles[0].contradictions.length, 1);
+  assert.equal(cycles[0].contradictions[0].edgeType, 'challenges_rebuttal');
+});
