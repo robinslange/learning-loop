@@ -88,3 +88,39 @@ test('leaves a note without NLI keys untouched', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('removes a block-form NLI value whole, without orphaning its items', () => {
+  const root = setupVault();
+  try {
+    const note = join(root, '0-inbox', 'blocklist.md');
+    writeFileSync(
+      note,
+      '---\n' +
+        'name: blocklist\n' +
+        'nli_tension_partners:\n' +
+        '  - 3-permanent/foo.md\n' +
+        '  - 3-permanent/bar.md\n' +
+        'date: 2026-01-01\n' +
+        '---\n\nBody.\n',
+    );
+    runCleanup(root, ['--execute']);
+    assert.equal(
+      readFileSync(note, 'utf-8'),
+      '---\nname: blocklist\ndate: 2026-01-01\n---\n\nBody.\n',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('keeps a retained key block-form value intact', () => {
+  const root = setupVault();
+  try {
+    const note = join(root, '0-inbox', 'keepblock.md');
+    writeFileSync(note, '---\ntags:\n  - alpha\n  - beta\nnli_tension: 0.9\n---\n\nBody.\n');
+    runCleanup(root, ['--execute']);
+    assert.equal(readFileSync(note, 'utf-8'), '---\ntags:\n  - alpha\n  - beta\n---\n\nBody.\n');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
