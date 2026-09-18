@@ -189,9 +189,21 @@ fn score_pair_typed(st: &RerankState, query: &str, document: &str) -> Result<f64
             .run(inputs)
             .map_err(|e| format!("inference failed: {e}"))?
     };
-    let (_, data) = outputs[0]
+    // Same class as the embed path, smaller blast radius: an output list or a
+    // tensor that is empty indexes out of bounds and panics. Nothing here is
+    // recoverable from a panic either -- the session sits behind a mutex whose
+    // poisoning this function already declines to panic on, three lines up.
+    let output = outputs
+        .iter()
+        .next()
+        .map(|(_, v)| v)
+        .ok_or_else(|| "the reranker session returned no outputs".to_string())?;
+    let (_, data) = output
         .try_extract_tensor::<f32>()
         .map_err(|e| format!("output extract failed: {e}"))?;
 
-    Ok(data[0] as f64)
+    let score = data
+        .first()
+        .ok_or_else(|| "the reranker returned an empty score tensor".to_string())?;
+    Ok(*score as f64)
 }
