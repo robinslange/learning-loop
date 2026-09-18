@@ -132,6 +132,15 @@ Grep all `\[\[...\]\]` wikilink references across all vault notes. For each uniq
 **Light:** List each broken link with the source note that contains it.
 **Deep:** For each broken link, find the closest matching vault filename using fuzzy/substring match and suggest it as a correction.
 
+### Step 7.4: Check: Contradiction Cycles
+
+Run `ll-run edges-cli.mjs cycles`. The output lists cycles of notes whose typed edges dispute each other in a loop (at least one `challenges_*` edge per cycle), with every parallel contradiction edge under `contradictions`.
+
+**Light:** Report the count and each cycle as `a -> b -> a`.
+**Deep:** For each cycle, read the notes on it and say which claim the contradiction turns on; suggest `/learning-loop:gaps "<topic>"` for the ones worth resolving.
+
+Skip silently when edges.db does not exist yet.
+
 ### Step 7.5: Check: Librarian Queue
 
 Read `PLUGIN_DATA/librarian/queue.jsonl` (where PLUGIN_DATA = `CLAUDE_PLUGIN_DATA` env; if absent, resolve via `ll-run resolve-paths.mjs PLUGIN_DATA`; never hardcode a fallback path). Parse each line as JSON. Filter to items where `status === 'pending'`. Also read `PLUGIN_DATA/librarian/state.json` for visited count.
@@ -233,13 +242,14 @@ Vault Health: YYYY-MM-DD
   Stale inbox:     N notes older than 14 days
   Embeddings:      N notes not indexed
   Broken links:    N dead [[wikilinks]]
+  Contradictions:  N cycles of mutually disputing notes
   Retrieval usage: N surfaced-then-ignored, U unevaluated, M never retrieved by search in Kd of logs
   Federation:      <one line per profile with a verdict, omitted entirely when healthy or unconfigured>
 
   Status: [total] issues [run /health --deep for full analysis]
 ```
 
-Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
+Omit the contradictions line when Step 7.4 was skipped or found none. Omit the federation line when Step 7.7 was skipped or every profile is healthy. Omit the retrieval-usage line when Step 7.6 was skipped for lack of telemetry. "Surfaced-then-ignored" means `/reflect` explicitly judged the note unused; "unevaluated" means no session ever judged it — see the Step 7.6 caveats.
 
 The "run --deep" hint only appears in light mode. In deep mode, replace with a summary of findings.
 
