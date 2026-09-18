@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { renderShim } from '../plugin/scripts/lib/shims.mjs';
 import { INSTALL_KEY } from '../plugin/scripts/lib/plugin-meta.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
+import { checkShimsExist } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
 
 const REPO_PLUGIN = realpathSync(fileURLToPath(new URL('../plugin', import.meta.url)));
@@ -230,6 +231,37 @@ test('with no install anywhere the shim says so and exits 1', posixOnly, () => {
     const r = s.run('ll-run', ['health-check.mjs']);
     assert.equal(r.status, 1);
     assert.match(r.stderr, /learning-loop is not installed/);
+  } finally {
+    s.cleanup();
+  }
+});
+
+// checkShimsExist mirrors LOCATE's candidate walk in real JS, so the copy and
+// the original can drift apart silently. This runs the rendered shim and the
+// health check against ONE sandbox and requires them to agree in BOTH
+// directions: a check that agreed only when things already work is exactly what
+// reported four dead 2.0.7 shims as ready.
+test('the health check and the shim agree on whether an install resolves', posixOnly, () => {
+  const s = sandbox();
+  try {
+    // Nothing resolvable: the shim exits 1, so the check must not say ready.
+    assert.equal(s.run('ll-paths', ['PLUGIN']).status, 1);
+    assert.equal(checkShimsExist({ home: s.home }).status, 'fail');
+
+    // A root that resolves: the shim answers, so the check must say ready.
+    const cache = join(
+      s.home,
+      '.claude',
+      'plugins',
+      'cache',
+      'learning-loop-marketplace',
+      'learning-loop',
+    );
+    mkdirSync(cache, { recursive: true });
+    symlinkSync(REPO_PLUGIN, join(cache, '9.9.9'));
+
+    assert.equal(s.run('ll-paths', ['PLUGIN']).status, 0);
+    assert.equal(checkShimsExist({ home: s.home }).status, 'ok');
   } finally {
     s.cleanup();
   }

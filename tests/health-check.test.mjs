@@ -44,6 +44,17 @@ import {
 } from '../plugin/scripts/lib/health-checks/cache.mjs';
 import { INJECTION_CALIBRATION_EPOCH } from '../plugin/scripts/lib/hook-config.mjs';
 
+// A sandbox home whose shims can actually resolve an install. checkShimsExist
+// asserts resolvability, not just that four files exist, so a home staging only
+// ~/.local/bin describes the state 2.0.7 shipped — four correct shims, every one
+// of them exiting 1 — and is not what "a healthy install" looks like.
+function stageResolvableRoot(home, version = '9.9.9') {
+  const root = join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop', version);
+  mkdirSync(join(root, 'scripts'), { recursive: true });
+  writeFileSync(join(root, 'scripts', 'shim.mjs'), '// stub\n');
+  return root;
+}
+
 test('CHECK_IDS exports the documented quick + full check IDs', () => {
   const quick = [
     'vault-path',
@@ -273,6 +284,7 @@ test('checkShimsExist: a correct Windows install is not four missing shims', () 
   for (const s of SHIM_NAMES) {
     writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
   }
+  stageResolvableRoot(home);
 
   const result = checkShimsExist({ home, platform: 'win32' });
 
@@ -343,6 +355,7 @@ test(
       writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
       chmodSync(join(home, '.local/bin', s), 0o755);
     }
+    stageResolvableRoot(home);
     const result = checkShimsExist({ home });
     assert.equal(result.status, 'ok');
     rmSync(home, { recursive: true, force: true });
@@ -382,6 +395,40 @@ test(
     const result = checkShimsExist({ home });
     assert.equal(result.status, 'fail');
     assert.match(result.detail, /ll-paths/);
+    rmSync(home, { recursive: true, force: true });
+  },
+);
+
+test(
+  'checkShimsExist: present, executable shims that cannot resolve an install are not ready',
+  { skip: skipOnWindows('chmod semantics: stat.mode & 0o111 always 0 on win32') },
+  () => {
+    // 2.0.7 shipped without scripts/shim.mjs, which is the file every shim
+    // looks for to locate the active install. All four were present,
+    // executable and byte-correct, and all four exited 1 on every invocation
+    // for a whole session while this check reported them ready. This is the
+    // check consulted when the shims are the broken thing, so a false ok here
+    // sends the reader somewhere else entirely.
+    const home = mkdtempSync(join(tmpdir(), 'health-shims-unresolvable-'));
+    mkdirSync(join(home, '.local/bin'), { recursive: true });
+    for (const s of SHIM_NAMES) {
+      writeFileSync(join(home, '.local/bin', s), '#!/usr/bin/env bash\n');
+      chmodSync(join(home, '.local/bin', s), 0o755);
+    }
+    // A cache root that exists but ships no scripts/shim.mjs: exactly 2.0.7.
+    mkdirSync(join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop/2.0.7'), {
+      recursive: true,
+    });
+
+    const result = checkShimsExist({ home });
+
+    assert.equal(result.status, 'fail', `detail: ${result.detail}`);
+    assert.match(result.detail, /shim\.mjs/, 'and it names the file that is missing');
+    assert.doesNotMatch(
+      result.fix,
+      /install-shims/,
+      'rewriting shims that resolve to a tree with no shim.mjs reproduces the same failure',
+    );
     rmSync(home, { recursive: true, force: true });
   },
 );
@@ -761,7 +808,12 @@ test('checkFederationSyncHealth: every profile healthy is ok across the registry
   const b = fedDir('health-fed-multi-b-', state);
   writeFileSync(
     join(root, 'vaults.json'),
-    JSON.stringify({ vaults: [{ id: 'work', config_dir: a }, { id: 'personal', config_dir: b }] }),
+    JSON.stringify({
+      vaults: [
+        { id: 'work', config_dir: a },
+        { id: 'personal', config_dir: b },
+      ],
+    }),
   );
 
   const r = checkFederationSyncHealth({ pluginData: root, now: NOW });
@@ -990,9 +1042,11 @@ test('checkDuplicateGateHealth: hard failures still name the budget override', (
   const now = new Date('2026-06-12T00:00:00Z');
   const month = now.toISOString().slice(0, 7);
   const lines = [
-    ...Array(4).fill(null).map(() =>
-      JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
-    ),
+    ...Array(4)
+      .fill(null)
+      .map(() =>
+        JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
+      ),
     JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'subprocess' }),
   ];
   writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
@@ -1007,9 +1061,11 @@ test('checkDuplicateGateHealth: reports unchecked writes only when the fallback 
   const now = new Date('2026-06-12T00:00:00Z');
   const month = now.toISOString().slice(0, 7);
   const lines = [
-    ...Array(4).fill(null).map(() =>
-      JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
-    ),
+    ...Array(4)
+      .fill(null)
+      .map(() =>
+        JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'daemon' }),
+      ),
     JSON.stringify({ ts: now.toISOString(), code: 'duplicate-gate-timeout', source: 'subprocess' }),
   ];
   writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
@@ -1321,7 +1377,10 @@ test('checkInjectionShadowGate: stays ok below the healthy-entry minimum', () =>
 test('checkInjectionShadowGate: stays ok below the pass minimum', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-fewpass-'));
   const now = POST_EPOCH_NOW;
-  writeShadowLog(dir, POST_EPOCH_MONTH, [...Array(10).fill(shadowPass), ...Array(150).fill(shadowFail)]);
+  writeShadowLog(dir, POST_EPOCH_MONTH, [
+    ...Array(10).fill(shadowPass),
+    ...Array(150).fill(shadowFail),
+  ]);
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
@@ -1371,8 +1430,14 @@ test('checkInjectionShadowGate: fast-path skips and corrupt lines are excluded f
 test('checkInjectionShadowGate: combines current and previous month logs', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-shadowgate-months-'));
   const now = POST_EPOCH_NOW;
-  writeShadowLog(dir, POST_EPOCH_MONTH, [...Array(15).fill(shadowPass), ...Array(40).fill(shadowFail)]);
-  writeShadowLog(dir, POST_EPOCH_PREV_MONTH, [...Array(10).fill(shadowPass), ...Array(40).fill(shadowFail)]);
+  writeShadowLog(dir, POST_EPOCH_MONTH, [
+    ...Array(15).fill(shadowPass),
+    ...Array(40).fill(shadowFail),
+  ]);
+  writeShadowLog(dir, POST_EPOCH_PREV_MONTH, [
+    ...Array(10).fill(shadowPass),
+    ...Array(40).fill(shadowFail),
+  ]);
   // 25 passes over 105 healthy entries across the two months.
   const result = checkInjectionShadowGate({ pluginData: dir, injectionMode: 'shadow', now });
   assert.equal(result.status, 'fail');
@@ -1668,6 +1733,7 @@ test('runQuickChecks threads platform to the win32 binary and shim spellings', a
   // would accept: .cmd shims and an .exe binary.
   for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', `${s}.cmd`), '@echo off\r\n');
   writeFileSync(join(pluginData, 'bin', 'll-search.exe'), 'MZ');
+  stageResolvableRoot(home);
 
   const result = await runQuickChecks({ home, pluginData, platform: 'win32' });
   const byId = (id) => result.checks.find((c) => c.id === id);
@@ -1685,7 +1751,9 @@ test('runQuickChecks without a platform still resolves the running one', async (
   const pluginData = join(home, 'plugin-data');
   mkdirSync(join(home, '.local/bin'), { recursive: true });
   mkdirSync(join(pluginData, 'bin'), { recursive: true });
-  for (const s of SHIM_NAMES) writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n', { mode: 0o755 });
+  for (const s of SHIM_NAMES)
+    writeFileSync(join(home, '.local/bin', s), '#!/bin/sh\n', { mode: 0o755 });
+  stageResolvableRoot(home);
 
   const result = await runQuickChecks({ home, pluginData });
   const shims = result.checks.find((c) => c.id === 'shims-exist');

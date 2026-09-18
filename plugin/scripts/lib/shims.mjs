@@ -26,6 +26,9 @@
 // at a directory that no longer exists (or a different marketplace key) no
 // longer hard-fails when a good version still sits in a cache.
 
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { safeLoad } from './safe-load.mjs';
 import { INSTALL_KEY } from './plugin-meta.mjs';
 
 const LOCATE = [
@@ -41,6 +44,62 @@ const LOCATE = [
   'process.argv.splice(1,0,shim);',
   "import(require('node:url').pathToFileURL(shim).href);",
 ].join('');
+
+// The candidate walk LOCATE performs, in real JS, for callers that need to know
+// whether the installed shims can actually resolve an install.
+//
+// It exists because file existence is not the contract a shim has to meet.
+// 2.0.7 shipped without scripts/shim.mjs, so all four shims — present,
+// executable, byte-correct — exited 1 on every invocation for a whole session
+// while the health check reported them ready. Resolvability is the contract,
+// and this is the smallest thing that can assert it without a subprocess.
+//
+// Kept adjacent to LOCATE because the two must agree; the health-check test
+// runs a rendered shim against the same sandbox to prove they still do.
+function newestVersionDir(base) {
+  try {
+    const v = readdirSync(base)
+      .filter((d) => /^\d+\.\d+\.\d+$/.test(d))
+      .sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
+      .pop();
+    return v ? join(base, v) : null;
+  } catch {
+    return null;
+  }
+}
+
+const cacheRoot = (home, dot) =>
+  join(home, dot, 'plugins', 'cache', 'learning-loop-marketplace', 'learning-loop');
+
+/**
+ * The roots a shim tries, in order: the installed_plugins.json record, the
+ * newest version under the Claude Code cache, then the newest under Codex.
+ *
+ * @param {string} home
+ * @returns {Array<string|null|undefined>}
+ */
+export function shimRootCandidates(home) {
+  const { value } = safeLoad(join(home, '.claude', 'plugins', 'installed_plugins.json'));
+  const installed = (value?.plugins ?? value)?.[INSTALL_KEY]?.[0]?.installPath;
+  return [
+    installed,
+    newestVersionDir(cacheRoot(home, '.claude')),
+    newestVersionDir(cacheRoot(home, '.codex')),
+  ];
+}
+
+/**
+ * The root a shim would hand off to, or null when no candidate ships
+ * scripts/shim.mjs — the state in which every shim exits 1.
+ *
+ * @param {string} home
+ * @returns {string|null}
+ */
+export function resolveShimRoot(home) {
+  return (
+    shimRootCandidates(home).find((r) => r && existsSync(join(r, 'scripts', 'shim.mjs'))) ?? null
+  );
+}
 
 // ll-search is the exception, because skills call it in loops. Its binary lives
 // in plugin-data, which no plugin version owns, so it has nothing to locate and
