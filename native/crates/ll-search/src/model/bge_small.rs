@@ -111,14 +111,34 @@ impl EmbeddingProvider for BgeSmallProvider {
             "token_type_ids" => token_type_ids_tensor,
         };
 
-        let mut session = self.session.lock().expect("session lock poisoned");
+        // Return the error rather than panicking, in both directions. The
+        // provider is a process-wide OnceLock shared by search, reindex and the
+        // UDS duplicate scanner, so a panic taken while this lock is held
+        // poisons it for the daemon's remaining life and every later embed call
+        // panics at the same line, with nothing that can recover it. One
+        // malformed output shape -- a 2-D pooled tensor from an execution
+        // provider change, a model swap, a file that was corrupted but still
+        // matched its hash -- was enough to do that. rerank.rs already takes
+        // this shape.
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| anyhow::anyhow!("embedding session mutex poisoned"))?;
         let outputs = session.run(inputs)?;
 
-        let output = &outputs[0];
+        let output = outputs
+            .iter()
+            .next()
+            .map(|(_, v)| v)
+            .ok_or_else(|| anyhow::anyhow!("the embedding session returned no outputs"))?;
         let (out_shape, out_data) = output.try_extract_tensor::<f32>()?;
 
         let out_dims: Vec<usize> = out_shape.iter().map(|&d| d as usize).collect();
-        let hidden_dim = out_dims[2];
+        let hidden_dim = *out_dims.get(2).ok_or_else(|| {
+            anyhow::anyhow!(
+                "expected a 3-D [batch, tokens, hidden] embedding output, got shape {out_dims:?}"
+            )
+        })?;
 
         let mut results = Vec::with_capacity(batch_size);
 
