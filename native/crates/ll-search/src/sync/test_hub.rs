@@ -551,6 +551,11 @@ pub enum FetchAnswer {
     /// the root check does not subsume -- the root is computed over the hashes,
     /// so a body swapped underneath an unchanged hash leaves it intact.
     ChunkedCorruptFrame(Vec<u8>, usize),
+    /// A descriptor claiming more frames than `MAX_CHUNKS` allows, with no
+    /// frames behind it. The client must refuse on the descriptor alone: the
+    /// count sizes an allocation before the first frame is read, so a hub that
+    /// never sends a byte can still make the client allocate against it.
+    ChunkedOverCap(u32),
     /// `IndexHeader { holds: None }` and no frame: the hub has nothing for
     /// this vault yet.
     Nothing,
@@ -710,6 +715,25 @@ pub async fn spawn_fetch_hub(
                         if ws.send(Message::binary(frame)).await.is_err() {
                             return;
                         }
+                    }
+                    continue;
+                }
+                FetchAnswer::ChunkedOverCap(chunks) => {
+                    let header = HubMsg::IndexHeader {
+                        vault_id: vault_id.clone(),
+                        holds: Some(HeldIndex {
+                            sha256: "0".repeat(64),
+                            note_count: FETCH_NOTE_COUNT,
+                            uploaded_at: 1,
+                        }),
+                        chunked: Some(ChunkedBody {
+                            chunks,
+                            chunk_size_max: 1,
+                            manifest_root: "0".repeat(64),
+                        }),
+                    };
+                    if !send_hub_msg(&mut ws, &header).await {
+                        return;
                     }
                     continue;
                 }
