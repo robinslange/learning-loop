@@ -15,7 +15,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   mkdtempSync,
   mkdirSync,
@@ -448,10 +448,18 @@ test('retentionCutoffMonth agrees with monthStr at a local month boundary', () =
 // agree everywhere, and the test would pass against the defect. Each zone runs
 // in its own process because TZ is read once, at first Date use.
 test('retentionCutoffMonth follows the writer in both hemispheres', () => {
+  // pathToFileURL, not a bare path: on Windows `process.cwd()` is `D:\\a\\...`,
+  // and a dynamic import of that throws ERR_UNSUPPORTED_ESM_URL_SCHEME because
+  // `d:` reads as the URL scheme. The .href is forward-slashed, so it also
+  // survives being interpolated into this template.
+  const retrievalUrl = pathToFileURL(join(process.cwd(), 'plugin/scripts/lib/retrieval.mjs')).href;
+  const snapshotUrl = pathToFileURL(
+    join(process.cwd(), 'plugin/hooks/session-start/vault-snapshot.mjs'),
+  ).href;
   const probe = `
     process.env.TZ;
-    const { monthStr } = await import('${process.cwd()}/plugin/scripts/lib/retrieval.mjs');
-    const { retentionCutoffMonth } = await import('${process.cwd()}/plugin/hooks/session-start/vault-snapshot.mjs');
+    const { monthStr } = await import('${retrievalUrl}');
+    const { retentionCutoffMonth } = await import('${snapshotUrl}');
     // an instant that is a different calendar month in UTC than it is locally
     const boundary = new Date(Date.UTC(2026, 8, 30, 12, 0));
     console.log(JSON.stringify({
