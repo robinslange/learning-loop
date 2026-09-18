@@ -15,6 +15,31 @@ function canonicalCycleKey(nodes) {
   return rotated.join('->');
 }
 
+function edgeIdentity(e) {
+  return e.id ?? `${e.fromPath}>${e.toPath}:${e.edgeType}`;
+}
+
+// Cycles are deduplicated at the node level (one cycle per node sequence, see
+// the multi-edge test), so the traversed edge list can hide a parallel
+// contradiction edge on the same hop. `contradictions` closes that gap: every
+// contradiction edge between consecutive nodes of the cycle, whichever
+// parallel edge the DFS happened to walk.
+function collectContradictions(adj, nodes, start) {
+  const seenIds = new Set();
+  const contradictions = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const to = i + 1 < nodes.length ? nodes[i + 1] : start;
+    for (const { to: t, edge } of adj.get(nodes[i]) || []) {
+      if (t !== to || !isContradictionEdge(edge)) continue;
+      const id = edgeIdentity(edge);
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
+      contradictions.push(edge);
+    }
+  }
+  return contradictions;
+}
+
 export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
   const adj = new Map();
   for (const e of edges) {
@@ -53,7 +78,11 @@ export function findContradictionCycles(edges, { maxDepth = 4 } = {}) {
           const key = canonicalCycleKey(path);
           if (seen.has(key)) continue;
           seen.add(key);
-          cycles.push({ nodes: [...path], edges: fullEdges });
+          cycles.push({
+            nodes: [...path],
+            edges: fullEdges,
+            contradictions: collectContradictions(adj, path, start),
+          });
           continue;
         }
         if (pathSet.has(to)) continue;
