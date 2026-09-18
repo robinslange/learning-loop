@@ -94,3 +94,56 @@ test('the intentions block emits a session-start-pack record of what it shipped'
     rmSync(sb, { recursive: true, force: true });
   }
 });
+
+test('the record carries the canonical session id, not the env/marker resolution', async () => {
+  // writeRetrieval stamps getSessionId(). vault-snapshot runs first and resolves
+  // the canonical id (stdin payload preferred) onto ctx.sessionId, and the
+  // used-side events key on that. When the two resolutions disagree the row is
+  // unjoinable, which costs the whole row its purpose — so make them disagree.
+  const sb = mkdtempSync(join(realpathSync(tmpdir()), 'll-pack-sid-'));
+  const pluginData = join(sb, 'plugin-data');
+  const vaultRoot = join(sb, 'vault');
+  mkdirSync(join(pluginData, 'session-start-cache'), { recursive: true });
+  mkdirSync(join(vaultRoot, '0-inbox'), { recursive: true });
+  writeFileSync(
+    join(pluginData, 'session-start-cache', 'intentions.json'),
+    JSON.stringify([
+      { context: 'web development', count: 141 },
+      { context: 'learning-loop', count: 91 },
+    ]),
+  );
+
+  const prevData = process.env.CLAUDE_PLUGIN_DATA;
+  const prevSid = process.env.CLAUDE_CODE_SESSION_ID;
+  process.env.CLAUDE_PLUGIN_DATA = pluginData;
+  process.env.CLAUDE_CODE_SESSION_ID = 'env-side-id';
+  try {
+    await run({
+      pluginDir: join(process.cwd(), 'plugin'),
+      pluginData,
+      vaultRoot,
+      projectDir: null,
+      memoryDir: join(sb, 'memdir'),
+      updateCacheFile: null,
+      depsAllSatisfied: true,
+      depsMissing: '',
+      context: '',
+      sessionId: 'payload-canonical-id',
+    });
+    const dir = join(pluginData, 'retrieval');
+    const file = readdirSync(dir).find((f) => f.startsWith('session-start-pack-'));
+    const rec = readFileSync(join(dir, file), 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .find((r) => r.command === 'intentions');
+    assert.equal(rec.session_id, 'payload-canonical-id');
+    assert.notEqual(rec.session_id, 'env-side-id');
+  } finally {
+    if (prevData === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = prevData;
+    if (prevSid === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = prevSid;
+    rmSync(sb, { recursive: true, force: true });
+  }
+});

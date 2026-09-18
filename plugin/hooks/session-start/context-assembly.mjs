@@ -404,6 +404,12 @@ export async function run(ctx) {
           query: '',
           results: null,
           meta: {
+            // writeRetrieval stamps getSessionId(), which is the env/marker
+            // resolution. vault-snapshot already resolved the canonical id —
+            // the stdin payload first (M4) — into ctx.sessionId, and the
+            // used-side events key on that one. A row stamped with the other
+            // resolution joins against nothing, which is the row's only job.
+            session_id: ctx.sessionId,
             contexts: shippedIntentionContexts(capped),
             assembled_count: grouped.length,
           },
