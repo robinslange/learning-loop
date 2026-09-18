@@ -1,4 +1,4 @@
-// tests/cache-health-statusline.test.mjs
+// tests/cache-health-sweep.test.mjs
 // The cache-health statusline plugin keeps per-session state in tmpdir and
 // dedupes repeated statusline renders of the same turn. Two defects it had:
 // session files accumulated there forever, and the dedupe marker was a single
@@ -7,7 +7,15 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  existsSync,
+  utimesSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -40,26 +48,32 @@ async function freshModule(stateDir) {
   return import(pathToFileURL(PLUGIN).href + `?t=${stateDir}`);
 }
 
-test('two concurrent sessions do not consume each others turn markers', async (t) => {
+// Lives in its own file on purpose. The plugin fixes its state directory at
+// import (`const SESSION_DIR = process.env... || tmpdir()`), and the sweep
+// deletes stale files across that whole directory on every new turn. Two
+// tests in one process therefore share one directory whatever setup they do,
+// and one test's renders reap the other's fixtures: this pair flaked exactly
+// that way, passing alone and failing under the full suite. node --test gives
+// each FILE its own process, which is the isolation this needs.
+
+test('stale session state files are swept, the live one is kept', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'll-cachehealth-'));
   t.after(() => {
     delete process.env.LL_CACHE_HEALTH_STATE_DIR;
     rmSync(dir, { recursive: true, force: true });
   });
+
+  const stale = join(dir, 'omc-cache-health-session-ancient.json');
+  writeFileSync(stale, JSON.stringify({ turns: 3, window: [] }), 'utf8');
+  const old = Date.now() / 1000 - 30 * 86400;
+  utimesSync(stale, old, old);
+
   const { render } = await freshModule(dir);
+  render(payload('sess-new', { read: 100, create: 10, uncached: 5 }), {});
 
-  const a = payload('sess-a', { read: 100, create: 10, uncached: 5 });
-  const b = payload('sess-b', { read: 200, create: 20, uncached: 5 });
-
-  // Each session renders its own turn once, then the statusline re-fires for
-  // both (permission prompt, vim mode) with identical usage. Only the first
-  // render of each turn may advance that session's turn counter.
-  render(a, {});
-  render(b, {});
-  render(a, {});
-  render(b, {});
-
-  const stateFile = readdirSync(dir).find((f) => f.startsWith('omc-cache-health-session-sess-a'));
-  const stateA = JSON.parse(readFileSync(join(dir, stateFile), 'utf8'));
-  assert.equal(stateA.turns, 1, 'session a saw one real turn, not one per render');
+  assert.ok(!existsSync(stale), 'a month-old session file should be swept');
+  assert.ok(
+    readdirSync(dir).some((f) => f.includes('sess-new')),
+    'the live session file stays',
+  );
 });

@@ -47,6 +47,27 @@ if (sessionId === 'unknown') sessionId = '';
 // markers diverge across the boundary (the M1/M2 split-brain). Without
 // plugin-data nothing can have written markers either — skip cooldowns.
 
+// Usage probe: record what this session actually did with the notes it was
+// shown, before any of the nudge gates below can exit. Without this, usage
+// evidence exists only for sessions that ran /reflect, and every
+// retrieval-quality number in this repo is measured against that
+// self-selected slice.
+//
+// Runs on its own budget and swallows its own failures: telemetry must never
+// be the reason a session's Stop hook fails.
+if (pluginData && sessionId && hookData.transcript_path) {
+  try {
+    const { runUsageProbe } = await import('../scripts/lib/usage-probe-run.mjs');
+    runUsageProbe({
+      pluginData,
+      sessionId,
+      transcriptPath: hookData.transcript_path,
+    });
+  } catch (err) {
+    logError('stop-nudge.usageProbe', err);
+  }
+}
+
 // Skip if /reflect was run recently (within last REFLECT_COOLDOWN_SECS).
 if (pluginData) {
   const lastReflect = readMarker(MARKER_PATHS.lastReflect(pluginData), { ttlMs: Infinity });

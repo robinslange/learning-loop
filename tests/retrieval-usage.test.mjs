@@ -584,3 +584,143 @@ test('memoryReadStats scopes by project and keeps legacy unstamped records', asy
     rmSync(pd, { recursive: true, force: true });
   }
 });
+
+test('two verdicts for one session and note count once, richer evidence winning', async () => {
+  // The automatic probe and /reflect can both judge the same session: the
+  // probe writes at Stop, /reflect writes when the user runs it afterwards.
+  // Counting both inflates used_events, and the probe's mechanical `engaged`
+  // must not displace /reflect's `informed`, which is the richer verdict and
+  // the one no mechanical check can produce.
+  const { loadNoteUsageEvents } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const pd = makePluginData({
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['read'],
+        source: 'probe',
+      },
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['informed'],
+        evidence: 'used its figure in the answer',
+      },
+      // a different session judging the same note is a separate verdict
+      {
+        ts: daysAgo(1),
+        session_id: 's2',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['read'],
+      },
+    ],
+  });
+  try {
+    const events = loadNoteUsageEvents(pd);
+    const forS1 = events.filter((e) => e.session_id === 's1' && e.path === '3-permanent/a.md');
+    assert.equal(forS1.length, 1, 'one verdict per session and note');
+    assert.equal(forS1[0].engagement, 'informed', 'the richer verdict leads');
+    assert.deepEqual(
+      forS1[0].engagements.slice().sort(),
+      ['engaged', 'informed'],
+      'both kinds are kept: a session can read a note AND draw a claim from it',
+    );
+    assert.equal(events.length, 2, 'a different session is a separate verdict');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('dedupe collapses one session twice, never two sessions once', async () => {
+  // Archive candidacy counts ignored verdicts per note, so collapsing
+  // different sessions would make a note look less rejected than it is and
+  // shield it from the deepen/archive list. The dedupe key is session+path
+  // precisely to keep those apart.
+  const { loadNoteUsageEvents } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const ignored = (sid, path, age) => ({
+    ts: daysAgo(age),
+    session_id: sid,
+    action: 'note-usage',
+    target: path,
+    status: 'ignored',
+  });
+  const pd = makePluginData({
+    provenance: [
+      ignored('s1', '3-permanent/x.md', 1),
+      ignored('s2', '3-permanent/x.md', 2),
+      ignored('s3', '3-permanent/x.md', 3),
+      ignored('s4', '3-permanent/y.md', 4),
+      ignored('s4', '3-permanent/y.md', 4),
+    ],
+  });
+  try {
+    const events = loadNoteUsageEvents(pd);
+    assert.equal(
+      events.filter((e) => e.path === '3-permanent/x.md').length,
+      3,
+      'three sessions rejecting a note is three verdicts',
+    );
+    assert.equal(
+      events.filter((e) => e.path === '3-permanent/y.md').length,
+      1,
+      'one session writing twice is one verdict',
+    );
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('engagement counts credit every kind a verdict carries', async () => {
+  // usageReport's engaged/informed counters read the kinds observed, not just
+  // the headline, so a verdict that is both does not silently understate
+  // engaged. The totals can exceed used_events: they count evidence, not
+  // verdicts.
+  const { usageReport } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const pd = makePluginData({
+    queries: [
+      { ts: daysAgo(1), session_id: 's1', command: 'query', top_paths: ['3-permanent/a.md'] },
+    ],
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['read'],
+        source: 'probe',
+      },
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['informed'],
+        evidence: 'quoted its figure in the answer',
+      },
+    ],
+  });
+  try {
+    const r = usageReport(pd);
+    assert.equal(r.used_events, 1, 'one verdict');
+    assert.equal(r.used_engaged_events, 1, 'the read is still counted');
+    assert.equal(r.used_informed_events, 1, 'and so is the informed claim');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
