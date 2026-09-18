@@ -11,9 +11,12 @@
 /// rather than relying on this constant.
 pub const TOP_K: usize = 30;
 
-/// Number of power-iteration steps in `personalized_pagerank`.
+/// Upper bound on power-iteration steps in `personalized_pagerank`.
 ///
-/// Twenty iterations converges to within floating-point noise for graphs up to
-/// ~100k nodes with damping 0.85. Increase for very dense graphs; decrease for
-/// latency-sensitive paths where approximate rank order is acceptable.
+/// A cap, not a count: the walk stops early once the score vector settles, so
+/// this only bounds the worst case. The previous note here claimed twenty
+/// steps converge "for graphs up to ~100k nodes with damping 0.85", which
+/// described a damping factor no caller uses (ll-search runs 0.5, deliberately
+/// and for a documented reason) and asserted a convergence nothing measured.
+/// Lower damping settles faster, so the bound is generous for this caller.
 pub const PAGERANK_ITERS: usize = 20;

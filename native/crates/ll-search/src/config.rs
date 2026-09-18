@@ -58,8 +58,10 @@ pub const PAGERANK_DAMPING: f32 = 0.5;
 
 /// Maximum number of power-iteration steps for personalized PageRank.
 ///
-/// Empirically sufficient for convergence on graphs up to ~50 k notes.
-/// Increase if large vaults show ranking instability across queries.
+/// A ceiling rather than a fixed cost: the walk exits once the score vector
+/// stops moving, which at damping 0.5 on a sparse graph is typically well
+/// before this. Raise it only if a large vault shows ranking instability
+/// across queries, which would mean the walk is hitting the cap.
 pub const PAGERANK_ITERS: usize = 20;
 
 /// Alpha (query weight) for Rocchio pseudo-relevance feedback.

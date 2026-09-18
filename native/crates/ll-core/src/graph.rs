@@ -12,10 +12,33 @@ use std::collections::{HashMap, HashSet};
 /// keys are sink nodes with no outgoing edges.
 pub type GraphEdges = HashMap<String, Vec<String>>;
 
+/// Stop iterating once the whole score vector moves less than this in one
+/// step. Two orders of magnitude below the `1e-6` floor the results are
+/// filtered by, so a step too small to trip this cannot change which nodes
+/// survive that filter, nor their order beyond the same margin.
+const CONVERGENCE_EPSILON: f64 = 1e-8;
+
+/// Total absolute change across every node between two iterations. Nodes
+/// present in one map and not the other count their full value: an entry
+/// appearing for the first time has moved from zero.
+fn l1_delta(prev: &HashMap<String, f64>, next: &HashMap<String, f64>) -> f64 {
+    let mut delta = 0.0;
+    for (node, score) in next {
+        delta += (score - prev.get(node).copied().unwrap_or(0.0)).abs();
+    }
+    for (node, score) in prev {
+        if !next.contains_key(node) {
+            delta += score.abs();
+        }
+    }
+    delta
+}
+
 /// Rank notes reachable from `seeds` using personalized PageRank.
 ///
 /// Seeds are the starting set (e.g. vector + FTS top results). The algorithm
-/// runs `iterations` power-iteration steps with damping factor `damping`.
+/// runs power iteration with damping factor `damping`, stopping when the score
+/// vector settles or after `iterations` steps, whichever comes first.
 /// Seed nodes are excluded from the output -- only related notes are returned.
 ///
 /// Returns at most [`crate::TOP_K`] results as `(path, score)` pairs sorted
@@ -103,7 +126,11 @@ pub fn personalized_pagerank_holdout(
             }
         }
 
+        let converged = l1_delta(&scores, &new_scores) < CONVERGENCE_EPSILON;
         scores = new_scores;
+        if converged {
+            break;
+        }
     }
 
     let mut results: Vec<(String, f64)> = scores
@@ -159,6 +186,97 @@ mod tests {
         assert!(!held_paths.contains(&"s"), "held-out node must not be returned: {held_paths:?}");
         assert!(!held_paths.contains(&"g"), "held-out node's edges must not propagate: {held_paths:?}");
         assert!(held_paths.contains(&"x"), "unrelated structure must survive the holdout: {held_paths:?}");
+    }
+
+    // Convergence: the early stop must not change what the walk produces, only
+    // how long it takes to get there. Comparing against a high iteration cap is
+    // the check that matters -- if stopping early changed the ranking, the
+    // whole change would be a silent quality regression.
+    fn dense_graph(n: usize) -> GraphEdges {
+        let mut graph: GraphEdges = HashMap::new();
+        for i in 0..n {
+            let targets: Vec<String> = (0..n).filter(|j| *j != i).map(|j| format!("n{j}")).collect();
+            graph.insert(format!("n{i}"), targets);
+        }
+        graph
+    }
+
+    #[test]
+    fn test_ppr_early_stop_matches_full_iteration() {
+        // Same call twice, once with room to converge and once with far more
+        // than it needs. Identical output means the stop fires only after the
+        // vector has settled.
+        for graph in [dense_graph(12), {
+            let mut chain: GraphEdges = HashMap::new();
+            for i in 0..30 {
+                chain.insert(format!("n{i}"), vec![format!("n{}", (i + 1) % 30)]);
+            }
+            chain
+        }] {
+            let seeds = vec!["n0".to_string()];
+            let capped = personalized_pagerank(&graph, &seeds, 0.5, 20);
+            let uncapped = personalized_pagerank(&graph, &seeds, 0.5, 400);
+            assert_eq!(
+                capped.len(),
+                uncapped.len(),
+                "early stop changed how many nodes survive the score floor"
+            );
+            for (a, b) in capped.iter().zip(uncapped.iter()) {
+                assert_eq!(a.0, b.0, "early stop changed rank order");
+                assert!(
+                    (a.1 - b.1).abs() < 1e-6,
+                    "early stop changed {} score: {} vs {}",
+                    a.0,
+                    a.1,
+                    b.1
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ppr_holdout_early_stop_matches_full_iteration() {
+        // The holdout path shares the loop, so it shares the stop.
+        let graph = dense_graph(10);
+        let seeds = vec!["n0".to_string()];
+        let capped = personalized_pagerank_holdout(&graph, &seeds, 0.5, 20, Some("n3"));
+        let uncapped = personalized_pagerank_holdout(&graph, &seeds, 0.5, 400, Some("n3"));
+        assert_eq!(capped.len(), uncapped.len());
+        for (a, b) in capped.iter().zip(uncapped.iter()) {
+            assert_eq!(a.0, b.0);
+            assert!((a.1 - b.1).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn test_ppr_iteration_cap_is_still_honoured() {
+        // A single step cannot have converged on this graph, so the cap must
+        // still bound the walk: one iteration reaches only the seed's direct
+        // neighbours, not the node two hops out.
+        let mut graph: GraphEdges = HashMap::new();
+        graph.insert("a".into(), vec!["b".into()]);
+        graph.insert("b".into(), vec!["c".into()]);
+        graph.insert("c".into(), vec!["d".into()]);
+
+        let one = personalized_pagerank(&graph, &["a".to_string()], 0.5, 1);
+        let paths: Vec<&str> = one.iter().map(|r| r.0.as_str()).collect();
+        assert!(paths.contains(&"b"), "one step must reach the direct neighbour: {paths:?}");
+        assert!(!paths.contains(&"c"), "one step must not reach two hops out: {paths:?}");
+    }
+
+    #[test]
+    fn test_l1_delta_counts_appearing_and_vanishing_nodes() {
+        // A node present on one side only has moved by its whole value. Missing
+        // that would let the walk stop while score was still arriving.
+        let mut prev: HashMap<String, f64> = HashMap::new();
+        prev.insert("a".into(), 0.5);
+        prev.insert("gone".into(), 0.25);
+        let mut next: HashMap<String, f64> = HashMap::new();
+        next.insert("a".into(), 0.5);
+        next.insert("new".into(), 0.125);
+
+        assert!((l1_delta(&prev, &next) - 0.375).abs() < 1e-12);
+        assert_eq!(l1_delta(&prev, &prev), 0.0);
     }
 
     #[test]

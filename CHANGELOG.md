@@ -4,6 +4,14 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **PageRank stops when the scores settle, instead of always taking twenty steps.** The walk ran a fixed `for _ in 0..iterations` with no convergence check, so every query paid the full count whatever the graph looked like. It exits now when the L1 delta across the whole score vector falls below `1e-8`, two orders of magnitude under the `1e-6` floor the results are already filtered by, so a step too small to trip the check cannot change which nodes survive that filter. The cap is still a cap: a long cycle genuinely needs all twenty and still gets them. On dense graphs the walk settles in seven or eight.
+
+  The iteration constants' documentation was wrong in a way worth naming. ll-core's said twenty steps converge "for graphs up to ~100k nodes with damping 0.85", describing a damping factor no caller uses: ll-search runs 0.5, deliberately and with its own documented reason, and lower damping settles faster, so the claim was both unmeasured and about the wrong configuration. Both constants now say what they are, a ceiling rather than a cost.
+
+  Verified by equivalence rather than by timing: the new tests assert that a capped run and a 400-iteration run return the same nodes in the same order with scores within `1e-6`, on a dense graph and on a long cycle, for the holdout path as well. A change to how long the walk runs that altered the ranking would be a silent quality regression, so that is the property the tests pin. The `+ppr` funnel stages gated in the last release are the other half of that check.
+
 ### Fixed
 
 - **A pasted id list no longer stalls the frontmatter repairer.** `hasUngroundedFactualSignal` runs the quantity pattern once per paragraph, and `\b\d` can begin a match at every digit that follows a separator: from each start the engine walks the rest of the run before the unit fails to follow, so cost is quadratic in the length of a single number, not the note. The shape that pays is a run alternating digits and separators, which is what a pasted id list, a phone list or a comma-grouped figure looks like: 5.2s at 100k characters and 84s at 400k, against `normalise-frontmatter.mjs`, a full-vault batch pass with no size guard anywhere in the call chain. A run of plain digits is not affected, since it offers only one word boundary to start from.
