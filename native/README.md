@@ -77,6 +77,10 @@ no `osx-x64` binary for the pinned version; set `ORT_DYLIB_PATH` on such a host.
 src/
   main.rs           CLI entry point (clap)
   lib.rs            module exports
+  app/
+    state.rs        AppState, AppConfig, PeerCache (parking_lot::RwLock)
+    storage.rs      Storage trait + SqliteStorage
+    io.rs           emit: JSON response to stdout
   db/
     schema.rs       schema creation, migrations, open_db
     index.rs        reindex, vault walking
@@ -84,17 +88,25 @@ src/
   search/
     scoring.rs      cosine, RRF, BM25, Rocchio PRF
     query.rs        hybrid_query, temporal boosting
+    context.rs      SearchContext cache, StageFlags, decay LUT
     federation.rs   peer discovery, federated queries
     graph.rs        link graph, PageRank, tag expansion
     cluster.rs      similar, cluster, discriminate (rayon)
     reflect.rs      reflect-scan orchestration
     store.rs        EmbeddingStore cache (Arc<RwLock>)
+    eval.rs         eval-funnel, eval-prf, tune-weights, lane diagnostics
+    tune.rs         tune-prf strategy sweep
   embed.rs          embedding provider interface
   rerank.rs         cross-encoder reranking (ONNX)
   preprocess.rs     markdown parsing, frontmatter
+  preprocess/
+    intentions.rs   frontmatter intentions parsing
+  nli_server.rs     UDS duplicate-scan server
   model/            embedding model implementations
   sync/             federation sync, watch mode
 ```
+
+Test-only modules (`search/test_helpers.rs`) are `#[cfg(test)]` and omitted.
 
 ## Adding Commands
 
