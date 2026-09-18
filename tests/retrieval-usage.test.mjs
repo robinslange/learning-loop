@@ -584,3 +584,54 @@ test('memoryReadStats scopes by project and keeps legacy unstamped records', asy
     rmSync(pd, { recursive: true, force: true });
   }
 });
+
+test('two verdicts for one session and note count once, richer evidence winning', async () => {
+  // The automatic probe and /reflect can both judge the same session: the
+  // probe writes at Stop, /reflect writes when the user runs it afterwards.
+  // Counting both inflates used_events, and the probe's mechanical `engaged`
+  // must not displace /reflect's `informed`, which is the richer verdict and
+  // the one no mechanical check can produce.
+  const { loadNoteUsageEvents } = await import(
+    pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
+  );
+  const pd = makePluginData({
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['read'],
+        source: 'probe',
+      },
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['informed'],
+        evidence: 'used its figure in the answer',
+      },
+      // a different session judging the same note is a separate verdict
+      {
+        ts: daysAgo(1),
+        session_id: 's2',
+        action: 'note-usage',
+        target: '3-permanent/a.md',
+        status: 'used',
+        signals: ['read'],
+      },
+    ],
+  });
+  try {
+    const events = loadNoteUsageEvents(pd);
+    const forS1 = events.filter((e) => e.session_id === 's1' && e.path === '3-permanent/a.md');
+    assert.equal(forS1.length, 1, 'one verdict per session and note');
+    assert.equal(forS1[0].engagement, 'informed', 'the richer verdict survives');
+    assert.equal(events.length, 2, 'a different session is a separate verdict');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});

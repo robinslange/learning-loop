@@ -87,9 +87,10 @@ test('a note the session never touched produces no event at all', () => {
   assert.ok(!found.some((f) => f.path === '0-inbox/gamma.md'));
 });
 
-test('the pipeline reading a note for its own duplicate scan is not engagement', () => {
-  // Hook-chain reads fire without model involvement. /reflect's own Step 4.7
-  // excludes them by hand; a mechanical probe has to as well.
+test('a tool call the model did not issue is not engagement', () => {
+  // Real transcripts stamp caller.type on every tool_use. An earlier version
+  // of this guard keyed on `_meta.hook`, which nothing sets, so it could never
+  // fire and this test passed only by inventing the field.
   const transcript = line({
     type: 'assistant',
     message: {
@@ -98,13 +99,64 @@ test('the pipeline reading a note for its own duplicate scan is not engagement',
           type: 'tool_use',
           name: 'Read',
           input: { file_path: '/v/3-permanent/alpha.md' },
-          _meta: { hook: true },
+          caller: { type: 'subagent' },
         },
       ],
     },
   });
-  const found = probeTranscriptUsage(transcript, surfaced, { skipHookReads: true });
-  assert.deepEqual(found, []);
+  assert.deepEqual(probeTranscriptUsage(transcript, surfaced, { directOnly: true }), []);
+});
+
+test('a direct call counts, and so does a transcript too old to say', () => {
+  const withCaller = line({
+    type: 'assistant',
+    message: {
+      content: [
+        {
+          type: 'tool_use',
+          name: 'Read',
+          input: { file_path: '/v/3-permanent/alpha.md' },
+          caller: { type: 'direct' },
+        },
+      ],
+    },
+  });
+  assert.deepEqual(probeTranscriptUsage(withCaller, surfaced, { directOnly: true }), [
+    { path: '3-permanent/alpha.md', signals: ['read'] },
+  ]);
+  // No caller field at all: older transcripts predate it, and scoring their
+  // engagement as zero would silently rewrite history as unused.
+  const legacy = line({
+    type: 'assistant',
+    message: {
+      content: [
+        { type: 'tool_use', name: 'Read', input: { file_path: '/v/3-permanent/alpha.md' } },
+      ],
+    },
+  });
+  assert.deepEqual(probeTranscriptUsage(legacy, surfaced, { directOnly: true }), [
+    { path: '3-permanent/alpha.md', signals: ['read'] },
+  ]);
+});
+
+test('an absolute path credits the longest matching surfaced note', () => {
+  // One surfaced path can be a suffix of another, and an absolute path ending
+  // in the longer one suffix-matches both. Taking the first array hit credits
+  // a note the session never touched.
+  const nested = [{ path: 'notes/a.md' }, { path: 'sub/notes/a.md' }];
+  const transcript = line({
+    type: 'assistant',
+    message: {
+      content: [{ type: 'tool_use', name: 'Read', input: { file_path: '/vault/sub/notes/a.md' } }],
+    },
+  });
+  assert.deepEqual(probeTranscriptUsage(transcript, nested), [
+    { path: 'sub/notes/a.md', signals: ['read'] },
+  ]);
+  // Order in the surfaced array must not change the answer.
+  assert.deepEqual(probeTranscriptUsage(transcript, nested.slice().reverse()), [
+    { path: 'sub/notes/a.md', signals: ['read'] },
+  ]);
 });
 
 test('several signals on one note collapse to one event', () => {

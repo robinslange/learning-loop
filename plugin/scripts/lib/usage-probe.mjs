@@ -75,9 +75,10 @@ function stemOf(path) {
  *   would be cheaper and wrong: see the note in usage-probe-run.mjs.
  * @param {{path: string}[]} surfaced Notes retrieval put in front of the session.
  * @param {object} [opts]
- * @param {boolean} [opts.skipHookReads] Ignore tool calls the hook chain made
- *   on the session's behalf. A duplicate-gate scan is not engagement: it fires
- *   without the model ever considering the note.
+ * @param {boolean} [opts.directOnly] Count only tool calls the model issued
+ *   itself. Real transcripts stamp each `tool_use` with `caller.type`, which
+ *   is `'direct'` for a call the model made; anything else came from somewhere
+ *   the model was not choosing, and choosing is what engagement means here.
  * @returns {{path: string, signals: string[]}[]} One entry per note with
  *   evidence, signals sorted. Notes without evidence are absent, deliberately:
  *   see the note on `classifyUsage` above.
@@ -103,16 +104,34 @@ export function probeTranscriptUsage(transcript, surfaced, opts = {}) {
 
   // A surfaced path is matched as a suffix: the transcript carries absolute
   // paths and the surfacing ledger carries vault-relative ones.
+  //
+  // Longest match wins. When one surfaced path is a suffix of another
+  // (`notes/a.md` and `sub/notes/a.md`), an absolute path ending in the longer
+  // one legitimately suffix-matches both, and taking the first hit credits
+  // whichever happened to come first in the array: engagement recorded against
+  // a note the session never touched.
   const matchPath = (filePath) => {
     if (typeof filePath !== 'string') return null;
     const normalised = filePath.replace(/\\/g, '/');
-    return notes.find((n) => normalised === n.path || normalised.endsWith(`/${n.path}`))?.path;
+    let best = null;
+    for (const n of notes) {
+      if (normalised !== n.path && !normalised.endsWith(`/${n.path}`)) continue;
+      if (best === null || n.path.length > best.length) best = n.path;
+    }
+    return best;
   };
 
   for (const rec of parseLines(transcript)) {
     for (const block of assistantBlocks(rec)) {
       if (block?.type === 'tool_use') {
-        if (opts.skipHookReads && block._meta?.hook) continue;
+        // A tool call the model did not issue is not engagement. An earlier
+        // version guarded on `block._meta.hook`, a field nothing in Claude
+        // Code or this plugin ever sets: the guard could not fire, and its
+        // test passed only by fabricating the field. `caller.type` is what
+        // real transcripts actually carry. Absent (older transcripts) is
+        // treated as direct, so the probe keeps working on history rather
+        // than silently scoring it as zero.
+        if (opts.directOnly && (block.caller?.type ?? 'direct') !== 'direct') continue;
         const target = matchPath(block.input?.file_path ?? block.input?.notebook_path);
         if (!target) continue;
         if (READ_TOOLS.has(block.name)) add(target, ENGAGED.read);
