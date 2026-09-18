@@ -24,11 +24,17 @@ export function capLogFile(path, maxBytes) {
     readSync(fd, buf, 0, keep, size - keep);
     closeSync(fd);
     fd = undefined;
-    // The read starts mid-line. Drop that fragment so the file never opens on
-    // half a record.
+    // The read starts mid-line, so drop that fragment and open on a whole
+    // record. If the retained tail has no newline in it at all -- one very
+    // long line, or a daemon killed mid-write -- there is no whole record to
+    // find, and dropping to the first newline would write an empty file. That
+    // destroys exactly the output the caller reads after a failed start, so
+    // the fragment is kept instead: opening mid-line is the smaller loss.
+    // A multibyte character split by the byte-offset read decodes to one
+    // replacement char at the head, which is likewise better than no log.
     const text = buf.toString('utf-8');
     const nl = text.indexOf('\n');
-    writeFileSync(path, nl === -1 ? '' : text.slice(nl + 1));
+    writeFileSync(path, nl === -1 ? text : text.slice(nl + 1));
   } catch (err) {
     logError('lib.log-rotate.capLogFile', err);
   } finally {
