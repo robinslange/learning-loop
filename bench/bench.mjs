@@ -293,8 +293,16 @@ function runPluginBenches() {
 const QUALITY_FIXTURE = { count: 500, seed: 20260612 };
 const QUALITY_EVAL_LIMIT = 200;
 const QUALITY_MIN_LINKS = 2;
-// Production pipeline shape: all four signals + PRF, rerank off.
-const QUALITY_GATE_LABELS = ['+prf [title]', '+prf [long]'];
+// Production pipeline shape: all four signals + PRF, rerank off. The ppr
+// stages are gated too: they sit two stages upstream of +prf, and a graph-lane
+// regression that PRF washes out at the fused stage was invisible to a gate
+// that only watched the end of the funnel.
+const QUALITY_GATE_LABELS = [
+  '+prf [title]',
+  '+prf [long]',
+  'vec+bm25+ppr [title]',
+  'vec+bm25+ppr [long]',
+];
 // hits_at_1 is the metric the product acts on. The injection gives exactly one
 // note a body and the rest a title line, and a body-slot note is used ~6x more
 // often, so recall_at_10 scores nine slots the model barely reads.
