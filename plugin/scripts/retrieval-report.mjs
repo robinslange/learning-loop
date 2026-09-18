@@ -5,7 +5,8 @@
 //   (default)                    full surfacing report + note-usage section
 //   --usage [--json]             note-usage section only (consumed by /health)
 //   --session-surfaced <sid>     JSON list of notes surfaced to one session
-//   --memory-reads [--days N]    JSON per-memory-file read counts (consumed by /dream)
+//   --memory-reads [--days N]    per-memory-file read counts, scoped to the current
+//                                project, JSON-only output (consumed by /dream)
 //                                (consumed by /reflect Step 4.7)
 
 import { readFileSync, readdirSync } from 'fs';
@@ -19,6 +20,7 @@ import {
   memoryReadStats,
 } from './lib/retrieval-usage.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
+import { encodeProjectDir } from './lib/paths.mjs';
 
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
@@ -36,7 +38,11 @@ const args = process.argv.slice(2);
 if (args[0] === '--memory-reads') {
   const daysIdx = args.indexOf('--days');
   const days = daysIdx >= 0 ? parseInt(args[daysIdx + 1], 10) || 90 : 90;
-  const stats = memoryReadStats(PD, { days });
+  // Scope to the invoking project: telemetry is machine-global, memory dirs
+  // are not. CLAUDE_PROJECT_DIR is how the hooks name the project; cwd is the
+  // same thing for a skill running inside it.
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const stats = memoryReadStats(PD, { days, project: encodeProjectDir(projectDir) });
   const reads = [...stats.entries()]
     .map(([file, s]) => ({ file, reads: s.reads, last_read: s.last_read }))
     .sort((a, b) => b.reads - a.reads || a.file.localeCompare(b.file));

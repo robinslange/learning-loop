@@ -3,7 +3,7 @@
 
 import { runHook, emitRetrieval } from './lib/common.mjs';
 
-const MEMORY_RE = /[/\\]\.claude[/\\]projects[/\\][^/\\]+[/\\]memory[/\\](.+\.md)$/;
+const MEMORY_RE = /[/\\]\.claude[/\\]projects[/\\]([^/\\]+)[/\\]memory[/\\](.+\.md)$/;
 const MARKDOWN_ARG = /[^\s'"`;|&<>()]+\.md/g;
 
 // Claude Code names the file in tool_input.file_path. Codex has no Read
@@ -20,8 +20,11 @@ runHook(({ tool, input }) => {
   const seen = new Set();
   for (const path of candidatePaths(tool, input)) {
     const match = path.match(MEMORY_RE);
-    if (!match || seen.has(match[1])) continue;
-    seen.add(match[1]);
-    emitRetrieval('reads', { type: 'memory-read', file: match[1] });
+    if (!match || seen.has(match[2])) continue;
+    seen.add(match[2]);
+    // project (the encoded project-dir segment) disambiguates same-named
+    // memory files across projects: PLUGIN_DATA is machine-global, so a
+    // filename alone merges every project's telemetry into one stream.
+    emitRetrieval('reads', { type: 'memory-read', file: match[2], project: match[1] });
   }
 });
