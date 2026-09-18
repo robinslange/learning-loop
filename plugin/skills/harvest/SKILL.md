@@ -52,7 +52,7 @@ For each note in `clean`, read it and judge: is this genuinely generic + safe to
 The mechanical gate catches deny terms verbatim (in body or filename, including `-`/`_` compounds like `acme-registry`). Your job in review is the leakage it CANNOT catch: **paraphrased or conceptual IP** — a company's approach, architecture, or named-but-not-listed person described in your own words without ever using a deny term. Drop anything that conveys work-specific knowledge even when no listed term appears.
 
 ### 6. Emit the lift-bundle
-Create `<out>/harvest-bundle-<date>/`:
+Create `<out>/harvest-bundle-<date>/` (default `<out>` = cwd, or the path passed via `--out`):
 - `memory/` — confirmed portable memory files.
 - `notes/` — confirmed portable vault notes.
 - `HARVEST-MANIFEST.md` — carried files; dropped files with reason (blocked/tripwire-dropped/review-dropped); which checks each carried file passed; source instance label.
