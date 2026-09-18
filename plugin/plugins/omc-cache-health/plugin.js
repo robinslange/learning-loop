@@ -24,14 +24,28 @@
 // (reset each turn), verified against live transcript data.
 //
 // Session state: running window for the current session lives at
-// /tmp/omc-cache-health-session-{sid}.json so the aggregate survives across
-// statusline invocations without re-reading the JSONL.
+// {stateDir}/omc-cache-health-session-{sid}.json so the aggregate survives
+// across statusline invocations without re-reading the JSONL. Those files are
+// swept once they go a month untouched: they are per-session by construction,
+// so without a sweep tmpdir collects one forever.
 //
 // Deduplication: Claude Code fires the statusline multiple times per turn
 // (permission changes, vim mode) with identical current_usage. We dedupe by
-// matching session_id + token counts so the window only advances once per real turn.
+// matching session_id + token counts so the window only advances once per real
+// turn. The marker is per-session: a single global file meant two live
+// sessions alternating renders each found the other's marker, matched nothing,
+// and counted every render as a new turn.
 
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import {
+  appendFileSync,
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
@@ -51,11 +65,38 @@ export const meta = {
   },
 };
 
-const SESSION_DIR = tmpdir();
-const DEDUPE_FILE = join(SESSION_DIR, 'omc-cache-health-last.json');
+// LL_CACHE_HEALTH_STATE_DIR exists so the tests can point this at a scratch
+// directory; the plugin runs standalone outside the plugin runtime, so tmpdir
+// stays the default rather than resolving plugin-data.
+const SESSION_DIR = process.env.LL_CACHE_HEALTH_STATE_DIR || tmpdir();
+const SESSION_PREFIX = 'omc-cache-health-session-';
+const DEDUPE_PREFIX = 'omc-cache-health-last-';
+const STALE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 function sessionStatePath(sid) {
-  return join(SESSION_DIR, `omc-cache-health-session-${sid}.json`);
+  return join(SESSION_DIR, `${SESSION_PREFIX}${sid}.json`);
+}
+
+// A session id is only ever written by its own session, so anything untouched
+// for a month belongs to a session that ended. Best-effort: a sweep failure
+// must never cost the statusline its render.
+function sweepStaleSessions(keepSid) {
+  const keep = new Set([sessionStatePath(keepSid), dedupePath(keepSid)]);
+  try {
+    const cutoff = Date.now() - STALE_AFTER_MS;
+    for (const name of readdirSync(SESSION_DIR)) {
+      if (!name.startsWith(SESSION_PREFIX) && !name.startsWith(DEDUPE_PREFIX)) continue;
+      const p = join(SESSION_DIR, name);
+      if (keep.has(p)) continue;
+      try {
+        if (statSync(p).mtimeMs < cutoff) unlinkSync(p);
+      } catch {}
+    }
+  } catch {}
+}
+
+function dedupePath(sid) {
+  return join(SESSION_DIR, `omc-cache-health-last-${sid}.json`);
 }
 
 function resolveLogPath(configPath) {
@@ -74,30 +115,40 @@ function resolveLogPath(configPath) {
   }
   if (!pluginData) return null;
   const dir = join(pluginData, 'retrieval');
-  try { mkdirSync(dir, { recursive: true }); } catch {}
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch {}
   const month = new Date().toISOString().slice(0, 7);
   return join(dir, `cache-health-${month}.jsonl`);
 }
 
 function isDuplicate(sessionId, read, create, uncached) {
   try {
-    if (!existsSync(DEDUPE_FILE)) return false;
-    const last = JSON.parse(readFileSync(DEDUPE_FILE, 'utf8'));
+    const file = dedupePath(sessionId);
+    if (!existsSync(file)) return false;
+    const last = JSON.parse(readFileSync(file, 'utf8'));
     return (
       last.session_id === sessionId &&
       last.cache_read === read &&
       last.cache_creation === create &&
       last.input === uncached
     );
-  } catch { return false; }
+  } catch {
+    return false;
+  }
 }
 
 function writeDedupe(sessionId, read, create, uncached) {
   try {
     writeFileSync(
-      DEDUPE_FILE,
-      JSON.stringify({ session_id: sessionId, cache_read: read, cache_creation: create, input: uncached }),
-      'utf8'
+      dedupePath(sessionId),
+      JSON.stringify({
+        session_id: sessionId,
+        cache_read: read,
+        cache_creation: create,
+        input: uncached,
+      }),
+      'utf8',
     );
   } catch {}
 }
@@ -107,12 +158,15 @@ function loadSessionState(sid) {
     const p = sessionStatePath(sid);
     if (!existsSync(p)) return null;
     return JSON.parse(readFileSync(p, 'utf8'));
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function saveSessionState(sid, state) {
-  try { writeFileSync(sessionStatePath(sid), JSON.stringify(state), 'utf8'); }
-  catch {}
+  try {
+    writeFileSync(sessionStatePath(sid), JSON.stringify(state), 'utf8');
+  } catch {}
 }
 
 function appendTurn(state, read, create, uncached, windowSize, warmupTurns) {
@@ -143,7 +197,8 @@ function appendTurn(state, read, create, uncached, windowSize, warmupTurns) {
 }
 
 function windowHitRate(state) {
-  let r = 0, t = 0;
+  let r = 0,
+    t = 0;
   for (const turn of state.window) {
     r += turn.r;
     t += turn.r + turn.c + turn.u;
@@ -175,34 +230,36 @@ export function render(data, config) {
 
   let state = loadSessionState(sessionId);
   if (isNewTurn) {
+    sweepStaleSessions(sessionId);
     state = appendTurn(state, read, create, uncached, cfg.windowSize, cfg.warmupTurns);
     saveSessionState(sessionId, state);
     writeDedupe(sessionId, read, create, uncached);
 
     const logPath = resolveLogPath(cfg.logPath);
-    if (logPath) try {
-      const lifetimeTotal = state.lifetime_read + state.lifetime_create + state.lifetime_uncached;
-      const lifetimeRate = lifetimeTotal > 0 ? state.lifetime_read / lifetimeTotal : 0;
-      const record = {
-        ts: new Date().toISOString(),
-        session_id: sessionId,
-        model: data.model?.id,
-        version: data.version,
-        turn: state.turns,
-        cache_read: read,
-        cache_creation: create,
-        uncached_input: uncached,
-        output_tokens: cu.output_tokens || 0,
-        total_input: total,
-        turn_hit_rate: Math.round((read / total) * 10000) / 10000,
-        window_hit_rate: Math.round(windowHitRate(state) * 10000) / 10000,
-        lifetime_hit_rate: Math.round(lifetimeRate * 10000) / 10000,
-        session_busts: state.lifetime_busts,
-        used_percentage: data.context_window?.used_percentage,
-        total_cost_usd: data.cost?.total_cost_usd,
-      };
-      appendFileSync(logPath, JSON.stringify(record) + '\n');
-    } catch {}
+    if (logPath)
+      try {
+        const lifetimeTotal = state.lifetime_read + state.lifetime_create + state.lifetime_uncached;
+        const lifetimeRate = lifetimeTotal > 0 ? state.lifetime_read / lifetimeTotal : 0;
+        const record = {
+          ts: new Date().toISOString(),
+          session_id: sessionId,
+          model: data.model?.id,
+          version: data.version,
+          turn: state.turns,
+          cache_read: read,
+          cache_creation: create,
+          uncached_input: uncached,
+          output_tokens: cu.output_tokens || 0,
+          total_input: total,
+          turn_hit_rate: Math.round((read / total) * 10000) / 10000,
+          window_hit_rate: Math.round(windowHitRate(state) * 10000) / 10000,
+          lifetime_hit_rate: Math.round(lifetimeRate * 10000) / 10000,
+          session_busts: state.lifetime_busts,
+          used_percentage: data.context_window?.used_percentage,
+          total_cost_usd: data.cost?.total_cost_usd,
+        };
+        appendFileSync(logPath, JSON.stringify(record) + '\n');
+      } catch {}
   } else if (!state) {
     return null;
   }
