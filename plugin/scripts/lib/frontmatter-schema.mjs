@@ -43,7 +43,16 @@ const FACTUAL_SIGNAL_RES = [
   // `%` is a non-word character, so a trailing \b after it never matches (the
   // space that follows is non-word too). Word-shaped units keep their boundary;
   // the percent sign must not have one.
-  /\b\d[\d,.]*\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b)/i,
+  //
+  // The lookbehind is load-bearing, not tidiness. With `\b\d` the engine may
+  // start a match at every digit in a run, and from each one it walks the rest
+  // of the run before the unit fails, so a long separator-heavy number costs
+  // O(n^2) in start positions alone: a pasted id list measured 20s at 100k
+  // characters, and `hasUngroundedFactualSignal` runs this once per paragraph.
+  // Refusing a start that is preceded by a digit or separator leaves exactly
+  // one viable start per run, which is the same set of matches (a quantity
+  // begins at the front of its number) for 1ms instead.
+  /(?<![\d,.])\d[\d,.]*\s?(?:%|(?:mg|kg|ms|hz|kb|mb|gb|x)\b|-fold\b)/i,
   /\b(n\s?=\s?\d|p\s?[<>=]\s?0?\.\d)/i,
   /[<>]\s?\d/,
   /\b[A-Z][a-z]+(?:\s(?:&|and)\s[A-Z][a-z]+)?,?\s\(?(?:19|20)\d{2}\)?/,
