@@ -90,3 +90,48 @@ test('capLogFile does not wipe a tail made of multibyte characters', () => {
     assert.ok(readFileSync(p, 'utf-8').length > 0, 'emoji tail must not wipe the log');
   });
 });
+
+// The three cases below all end with capLogFile destroying or overrunning the
+// thing it exists to bound. The reader tails this file after a failed daemon
+// start, so an empty log is worse than an uncapped one: it removes the only
+// evidence of the failure the caller came for.
+
+test('capLogFile keeps the tail when its only newline is the final byte', () => {
+  withDir((dir) => {
+    const p = join(dir, 'watch.log');
+    // One very long line with a trailing newline. The retained window holds
+    // exactly one newline, at its end, so slicing past it leaves nothing.
+    writeFileSync(p, 'x'.repeat(400) + '\n');
+    capLogFile(p, 100);
+    const after = readFileSync(p);
+    assert.ok(after.length > 0, 'the log the caller reads after a failed start survives');
+    assert.ok(after.length <= 100, 'and stays within the cap');
+  });
+});
+
+test('capLogFile respects the cap when the tail holds undecodable bytes', () => {
+  withDir((dir) => {
+    const p = join(dir, 'watch.log');
+    // watch.log is raw daemon stdout/stderr. Decoding to a string first turns
+    // each invalid byte into a 3-byte U+FFFD, so the write can exceed the cap
+    // the caller asked for: 5000 x 0xFF at cap 1024 wrote 1536.
+    writeFileSync(p, Buffer.alloc(5000, 0xff));
+    capLogFile(p, 1024);
+    assert.ok(statSync(p).size <= 1024, `file is within the cap, got ${statSync(p).size}`);
+    assert.ok(statSync(p).size > 0, 'and is not empty');
+  });
+});
+
+test('capLogFile leaves the file alone rather than emptying it at a tiny cap', () => {
+  withDir((dir) => {
+    const p = join(dir, 'watch.log');
+    const original = 'hello world this is a log\n';
+    // keep = floor(maxBytes / 2) reaches 0 at maxBytes <= 1, and a zero-byte
+    // read writes an empty file: the cap would delete the log, not bound it.
+    for (const maxBytes of [0, 1]) {
+      writeFileSync(p, original);
+      capLogFile(p, maxBytes);
+      assert.equal(readFileSync(p, 'utf-8'), original, `maxBytes=${maxBytes} left the log intact`);
+    }
+  });
+});
