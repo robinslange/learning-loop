@@ -115,6 +115,27 @@ test('every emitted metric validates and builds into an OTLP payload', () => {
   );
 });
 
+test('pre-upgrade records with no commits_source still count, under since', () => {
+  const events = [
+    (() => {
+      const { commits_source, ...rest } = summary({ session_id: 's1' });
+      return rest;
+    })(),
+    summary({ session_id: 's2', commits_source: 'range' }),
+  ];
+  withCorpus(events, (pluginData) => {
+    const metrics = reduceSession({ pluginData, timeUnixMs: Date.now() });
+    const counts = metrics.filter((m) => m.name === 'll.session_count');
+    assert.equal(
+      counts.reduce((a, m) => a + m.value, 0),
+      2,
+    );
+    const since = counts.find((m) => m.attributes.commits_source === 'since');
+    assert.ok(since, 'old-shaped record should land under commits_source=since');
+    assert.equal(since.value, 1);
+  });
+});
+
 test('an empty corpus reduces to nothing', () => {
   withCorpus([], (pluginData) => {
     assert.deepEqual(reduceSession({ pluginData, timeUnixMs: 1 }), []);
