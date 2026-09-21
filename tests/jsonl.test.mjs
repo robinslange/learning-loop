@@ -218,3 +218,21 @@ for (const action of ['agent-spawn', 'skill-invoke']) {
     });
   });
 }
+
+test('session-summary records are never deduplicated', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'll-jsonl-ledger-'));
+  try {
+    const file = join(dir, 'events.jsonl');
+    const rec = {
+      ts: '2026-09-21T00:00:00Z',
+      action: 'session-summary',
+      session_id: 's',
+      prompts: 3,
+    };
+    assert.equal(appendJsonlLineDeduped(file, rec), true);
+    assert.equal(appendJsonlLineDeduped(file, { ...rec, ts: '2026-09-21T00:00:01Z' }), true);
+    assert.equal(readFileSync(file, 'utf8').trim().split('\n').length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

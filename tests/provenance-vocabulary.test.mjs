@@ -170,3 +170,7 @@ test('INTENT_KINDS is small and closed', () => {
   assert.ok(INTENT_KINDS.has('scope'));
   assert.ok(INTENT_KINDS.has('topic'));
 });
+
+test('session-summary is an emittable action', () => {
+  assert.ok(VALID_ACTIONS.has('session-summary'));
+});
