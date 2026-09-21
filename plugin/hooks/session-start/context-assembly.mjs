@@ -11,10 +11,10 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
-import { recordDetachedChild, emitProvenance, home, resolveConfig } from '../lib/common.mjs';
+import { recordDetachedChild, emitProvenance, home } from '../lib/common.mjs';
 import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
-import { execGit, resolveProject, latestLedger } from '../../scripts/lib/session-ledger.mjs';
+import { latestLedger } from '../../scripts/lib/session-ledger.mjs';
 
 const MEMORY_RECENCY_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -416,18 +416,19 @@ export async function run(ctx) {
   operatorTail += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
 
   // 8b. Newest session ledger for this repo: the "what did I do here last time"
-  // answer in one line. Path only; the note itself is one Read away.
-  if (projectDir && existsSync(join(vaultRoot, '4-projects'))) {
+  // answer in one line. Path only; the note itself is one Read away. Reads the
+  // project the ledger hook already resolved (marker), rather than resolving it
+  // again here. SessionStart must never spawn git.
+  if (projectDir && pluginData && existsSync(join(vaultRoot, '4-projects'))) {
     try {
-      const { project } = resolveProject(
-        projectDir,
-        resolveConfig() || {},
-        execGit,
-        HookConfig.LEDGER_GIT_TIMEOUT_MS,
-      );
-      const ledger = latestLedger(vaultRoot, project);
-      if (ledger) {
-        operatorTail += `Last session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
+      const cached = readMarker(MARKER_PATHS.ledgerProject(pluginData, projectDir), {
+        ttlMs: Infinity,
+      });
+      if (typeof cached?.project === 'string') {
+        const ledger = latestLedger(vaultRoot, cached.project);
+        if (ledger) {
+          operatorTail += `Last session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
+        }
       }
     } catch (err) {
       logError('session-start.context-assembly.ledger', err);

@@ -10,7 +10,7 @@ import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { logError } from './log.mjs';
 import { pluginDataExists } from './config.mjs';
-import { DATA_PATHS } from './paths.mjs';
+import { DATA_PATHS, encodeProjectDir } from './paths.mjs';
 import { HookConfig } from './hook-config.mjs';
 import { isProcessAlive, withLock } from './file-lock.mjs';
 
@@ -54,6 +54,10 @@ export const MARKER_PATHS = {
   // session-summary emit time (the throttle clock).
   ledger: (pluginData, sessionId) =>
     join(DATA_PATHS.markers(pluginData), `ledger-${sessionId}.json`),
+  // Maps a project directory to the resolved ledger project, so SessionStart
+  // can read the "last session here" pointer without ever spawning git.
+  ledgerProject: (pluginData, projectDir) =>
+    join(DATA_PATHS.markers(pluginData), `ledger-project-${encodeProjectDir(projectDir)}.json`),
   // Timestamp of the last stale-marker TTL sweep. Gates the sweep to once a
   // day: the read side already filters stale entries by mtime, so deferring
   // the rm pass is behavior-preserving and saves a per-session stat-walk.
