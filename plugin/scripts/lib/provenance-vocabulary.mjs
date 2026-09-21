@@ -78,4 +78,9 @@ export const INTENT_KINDS = new Set(['research', 'scope', 'topic', 'triage', 'de
 // Skill-specific counters (e.g. verify's findings_total, inbox's promoted)
 // remain allowed as ADDITIONAL numeric fields alongside these; this set is a
 // floor, not a ceiling.
-export const SESSION_END_FIELDS = new Set(['items_in', 'items_out', 'items_flagged', 'duration_ms']);
+export const SESSION_END_FIELDS = new Set([
+  'items_in',
+  'items_out',
+  'items_flagged',
+  'duration_ms',
+]);

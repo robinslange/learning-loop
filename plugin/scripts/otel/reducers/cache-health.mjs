@@ -10,7 +10,13 @@
 // runs over the same files produce byte-identical output.
 
 import { DATA_PATHS } from '../../lib/paths.mjs';
-import { readRecords, monthlyFiles, histogramFrom, METRIC_PREFIX, RATIO_BOUNDS } from '../reduce.mjs';
+import {
+  readRecords,
+  monthlyFiles,
+  histogramFrom,
+  METRIC_PREFIX,
+  RATIO_BOUNDS,
+} from '../reduce.mjs';
 
 const STREAM = 'cache-health';
 
@@ -55,7 +61,13 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
   // the plan's "Idempotency and the window".
   const startTimeUnixMs = Math.min(...records.map((r) => Date.parse(r.ts)).filter(Number.isFinite));
 
-  const sums = { cache_read: 0, cache_creation: 0, uncached_input: 0, output_tokens: 0, session_busts: 0 };
+  const sums = {
+    cache_read: 0,
+    cache_creation: 0,
+    uncached_input: 0,
+    output_tokens: 0,
+    session_busts: 0,
+  };
   const turnHitRates = [];
   const windowHitRates = [];
   const lifetimeHitRates = [];
@@ -71,7 +83,8 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
     // A running total is more useful as the latest cumulative figure than a
     // per-turn value would be, so the gauge tracks the corpus's last record
     // in file order (readRecords preserves monthlyFiles' sorted order).
-    if (typeof r.total_cost_usd === 'number' && Number.isFinite(r.total_cost_usd)) lastCost = r.total_cost_usd;
+    if (typeof r.total_cost_usd === 'number' && Number.isFinite(r.total_cost_usd))
+      lastCost = r.total_cost_usd;
   }
 
   // Token totals and session_busts aggregate the whole corpus into one
@@ -90,7 +103,12 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
     counter('uncached_input', sums.uncached_input, shared),
     counter('output_tokens', sums.output_tokens, shared),
     counter('session_busts', sums.session_busts, shared),
-    ...histogramFrom(turnHitRates, { name: 'cache_health.turn_hit_rate', stream: STREAM, bounds: RATIO_BOUNDS, timeUnixMs }),
+    ...histogramFrom(turnHitRates, {
+      name: 'cache_health.turn_hit_rate',
+      stream: STREAM,
+      bounds: RATIO_BOUNDS,
+      timeUnixMs,
+    }),
     ...histogramFrom(windowHitRates, {
       name: 'cache_health.window_hit_rate',
       stream: STREAM,

@@ -19,13 +19,22 @@
 //   }
 
 import { validateExportRecord } from './schema.mjs';
-import { buildAttributes, buildSumMetric, buildGaugeMetric, buildHistogramMetric } from './otlp-metrics.mjs';
+import {
+  buildAttributes,
+  buildSumMetric,
+  buildGaugeMetric,
+  buildHistogramMetric,
+} from './otlp-metrics.mjs';
 
 const SERVICE_NAME = 'learning-loop';
 const SCOPE_NAME = 'learning-loop-otel';
 const SCOPE_VERSION = '1.0.0';
 
-const BUILDERS = { counter: buildSumMetric, gauge: buildGaugeMetric, histogram: buildHistogramMetric };
+const BUILDERS = {
+  counter: buildSumMetric,
+  gauge: buildGaugeMetric,
+  histogram: buildHistogramMetric,
+};
 
 // OTEL_RESOURCE_ATTRIBUTES is the standard env var for operator-supplied
 // resource attributes: comma-separated key=value pairs. Read directly (not
@@ -70,7 +79,8 @@ export function buildOtlpPayload(metrics) {
   const built = metrics.map((m) => {
     validateMetric(m);
     const builder = BUILDERS[m.type];
-    if (!builder) throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
+    if (!builder)
+      throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
     return builder(m);
   });
 

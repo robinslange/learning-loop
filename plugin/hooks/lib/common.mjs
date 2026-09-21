@@ -225,7 +225,10 @@ export function emitProvenance(event) {
     delete record.intent;
   }
   if ('intent_kind' in record && !INTENT_KINDS.has(record.intent_kind)) {
-    logError('provenance.freeTextIntent', new Error(`dropping unbounded intent_kind: ${record.intent_kind}`));
+    logError(
+      'provenance.freeTextIntent',
+      new Error(`dropping unbounded intent_kind: ${record.intent_kind}`),
+    );
     delete record.intent_kind;
   }
   appendJsonlLineDeduped(join(dir, `events-${monthStr()}.jsonl`), record);

@@ -26,7 +26,14 @@ const STREAM = 'librarian';
 // old, so hour buckets alone would blow past useful resolution; these bounds
 // span an hour to two weeks, hour-scale at the front (where review usually
 // happens) and day-scale past the first day.
-const LAG_BOUNDS_MS = [3600_000, 21600_000, 86400_000, 3 * 86400_000, 7 * 86400_000, 14 * 86400_000];
+const LAG_BOUNDS_MS = [
+  3600_000,
+  21600_000,
+  86400_000,
+  3 * 86400_000,
+  7 * 86400_000,
+  14 * 86400_000,
+];
 
 const SCORE_FIELDS = ['confidence', 'cosine_score', 'model_prob', 'similarity'];
 
@@ -42,13 +49,33 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
   if (records.length === 0) return [];
 
   const metrics = [
-    ...countBy(records, { name: 'librarian.queue_by_task', stream: STREAM, by: ['task'], timeUnixMs }),
-    ...countBy(records, { name: 'librarian.queue_by_status', stream: STREAM, by: ['status'], timeUnixMs }),
-    ...countBy(records, { name: 'librarian.queue_by_expired_reason', stream: STREAM, by: ['expired_reason'], timeUnixMs }),
+    ...countBy(records, {
+      name: 'librarian.queue_by_task',
+      stream: STREAM,
+      by: ['task'],
+      timeUnixMs,
+    }),
+    ...countBy(records, {
+      name: 'librarian.queue_by_status',
+      stream: STREAM,
+      by: ['status'],
+      timeUnixMs,
+    }),
+    ...countBy(records, {
+      name: 'librarian.queue_by_expired_reason',
+      stream: STREAM,
+      by: ['expired_reason'],
+      timeUnixMs,
+    }),
     // The cross-product is what reveals a task type that never converts: a
     // consumer can filter task=voice_flag and see every status bucket it
     // has ever landed in, or notice the approved bucket is simply absent.
-    ...countBy(records, { name: 'librarian.queue_by_task_status', stream: STREAM, by: ['task', 'status'], timeUnixMs }),
+    ...countBy(records, {
+      name: 'librarian.queue_by_task_status',
+      stream: STREAM,
+      by: ['task', 'status'],
+      timeUnixMs,
+    }),
   ];
 
   const pending = records.filter((r) => r.status === 'pending');
@@ -65,12 +92,24 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
     .map((r) => timeUnixMs - Date.parse(r.created_at))
     .filter((ms) => Number.isFinite(ms) && ms >= 0);
   metrics.push(
-    ...histogramFrom(lagSamples, { name: 'librarian.pending_lag_ms', stream: STREAM, bounds: LAG_BOUNDS_MS, timeUnixMs }),
+    ...histogramFrom(lagSamples, {
+      name: 'librarian.pending_lag_ms',
+      stream: STREAM,
+      bounds: LAG_BOUNDS_MS,
+      timeUnixMs,
+    }),
   );
 
   for (const field of SCORE_FIELDS) {
     const samples = records.map((r) => r[field]).filter((v) => typeof v === 'number');
-    metrics.push(...histogramFrom(samples, { name: `librarian.${field}`, stream: STREAM, bounds: RATIO_BOUNDS, timeUnixMs }));
+    metrics.push(
+      ...histogramFrom(samples, {
+        name: `librarian.${field}`,
+        stream: STREAM,
+        bounds: RATIO_BOUNDS,
+        timeUnixMs,
+      }),
+    );
   }
 
   return metrics;
