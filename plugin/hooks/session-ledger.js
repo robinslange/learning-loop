@@ -23,6 +23,7 @@ import {
   getSessionId,
   emitProvenance,
 } from './lib/common.mjs';
+import { env } from '../scripts/lib/env.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
@@ -163,7 +164,7 @@ const summary = summarise({
 });
 if (!shouldWrite(summary, HookConfig.LEDGER_MIN_PROMPTS)) process.exit(0);
 
-// 5. Note.
+// 5. Label + date: independent of the marker, always the current transcript.
 let label = null;
 try {
   label =
@@ -172,15 +173,56 @@ try {
   if (err?.code !== 'ENOENT') logError('session-ledger.label', err);
 }
 const date = localDateStr(startedTs);
-const relPath = marker?.path || ledgerPath(project.project, date, label, sessionId);
-// Pinned at first flush, same as relPath: the range anchor must not move
-// under a session that keeps committing across multiple Stop/SessionEnd
-// flushes, or every later flush would re-anchor to its own HEAD and credit
-// nothing.
-const startedHead = marker?.started_head || git.head || null;
+
+// 6. Pin the marker under the lock, first-writer-wins: the second of two
+// racing flushes must adopt whatever the first one already committed
+// (path, started_ts, started_head), not clobber it with its own
+// independently-computed values. The note is written AFTER the lock
+// resolves the pin, at pin.path, so a losing flush's note lands where the
+// winner's marker says it should.
+//
+// mkdir happens before the lock: withLock's O_EXCL lockfile create fails if
+// markers/ doesn't exist yet, which it may not on a fresh install.
+mkdirSync(dirname(markerPath), { recursive: true });
+
+// Own computation, used only if no marker has claimed the pin yet.
+const computed = {
+  path: ledgerPath(project.project, date, label, sessionId),
+  started_ts: startedTs,
+  started_head: git.head || null,
+};
+
+let pin;
+let latest;
+try {
+  withLock(markerPath, { retries: 10, retryDelayMs: 40 }, () => {
+    latest = readMarker(markerPath, { ttlMs: Infinity });
+    pin = latest?.path
+      ? {
+          path: latest.path,
+          started_ts: latest.started_ts,
+          started_head: latest.started_head ?? computed.started_head,
+        }
+      : computed;
+  });
+} catch (err) {
+  logError('session-ledger.lock', err);
+  // Lost the lock: fall back to the unlocked read so a busy marker never
+  // costs the session its pin, only (at worst) a race with the true winner.
+  latest = marker;
+  pin = latest?.path
+    ? {
+        path: latest.path,
+        started_ts: latest.started_ts,
+        started_head: latest.started_head ?? computed.started_head,
+      }
+    : computed;
+}
+
+// 7. Note, written at the pinned path.
 let wrote = false;
 try {
-  const abs = join(vaultRoot, relPath);
+  const abs = join(vaultRoot, pin.path);
   mkdirSync(dirname(abs), { recursive: true });
   sweepStaleTmp(dirname(abs));
   const tmp = `${abs}.${process.pid}.tmp`;
@@ -198,7 +240,11 @@ try {
       reason: hookData.reason,
       summary,
       harness: summary.harness,
-      rangeFellBack: Boolean(marker?.started_head) && git.commitsSource === 'since',
+      // Only "fell back" if a PRIOR flush already had a started_head to
+      // range from and git still landed on --since; pin.started_head alone
+      // is always truthy on this session's first flush (computed just now
+      // from git.head) and would wrongly read as a fallback.
+      rangeFellBack: Boolean(latest?.started_head) && git.commitsSource === 'since',
     }),
   );
   renameSync(tmp, abs);
@@ -207,7 +253,7 @@ try {
   logError('session-ledger.write', err);
 }
 
-// 6. Summary event, throttled. A note that failed to write still gets its
+// 7. Summary event, throttled. A note that failed to write still gets its
 // numbers recorded; that failure is already counted in the error log.
 //
 // Stop and SessionEnd for one session can fire close together and interleave
@@ -219,19 +265,19 @@ try {
 let emitNow;
 try {
   withLock(markerPath, { retries: 10, retryDelayMs: 40 }, () => {
-    const latest = readMarker(markerPath, { ttlMs: Infinity });
+    const fresh = readMarker(markerPath, { ttlMs: Infinity });
     emitNow = shouldEmitSummary(
-      latest,
+      fresh,
       Date.now(),
       isSessionEnd,
       HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
     );
     if (wrote || emitNow) {
       writeMarker(markerPath, {
-        path: relPath,
-        started_ts: startedTs,
-        started_head: startedHead,
-        last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
+        path: pin.path,
+        started_ts: pin.started_ts,
+        started_head: pin.started_head,
+        last_summary_ts: emitNow ? new Date().toISOString() : (fresh?.last_summary_ts ?? null),
       });
     }
   });
@@ -240,17 +286,17 @@ try {
   // Lost the lock: fall back to the unlocked decision so a busy marker never
   // costs the session its ledger, only (at worst) a duplicate throttle tick.
   emitNow = shouldEmitSummary(
-    marker,
+    latest,
     Date.now(),
     isSessionEnd,
     HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
   );
   if (wrote || emitNow) {
     writeMarker(markerPath, {
-      path: relPath,
-      started_ts: startedTs,
-      started_head: startedHead,
-      last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
+      path: pin.path,
+      started_ts: pin.started_ts,
+      started_head: pin.started_head,
+      last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
     });
   }
 }
@@ -262,6 +308,8 @@ if (emitNow) {
   }
 }
 if (wrote) {
-  writeMarker(MARKER_PATHS.ledgerProject(pluginData, cwd), { project: project.project });
+  writeMarker(MARKER_PATHS.ledgerProject(pluginData, env.CLAUDE_PROJECT_DIR || cwd), {
+    project: project.project,
+  });
 }
 process.exit(0);
