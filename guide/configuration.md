@@ -136,6 +136,16 @@ The `session-label.js` hook runs a vault search (`ll-search query`) on every `Us
 - dedupe: the session-start hook sweeps a 7-day session-dedupe directory and fires a detached episodic pre-warm to populate the OS page cache before the first query
 - continuous reindex: `hooks/session-start/watch-daemon.mjs` spawns `ll-search watch` at SessionStart; it reindexes notes incrementally as they change (fs-watch-driven), so the vector index is always current without any Stop-hook involvement. See [ARCHITECTURE.md](../ARCHITECTURE.md) for the full watch-daemon lifecycle.
 
+## OTEL export
+
+Export is off unless BOTH `OTEL_EXPORTER_OTLP_ENDPOINT` is set AND `otel.export_enabled` is `true` in `config.json`. That two-knob gate is a cooperative signal for a LAN, single-operator deployment, not a technical control: anything that can set config.json can set the env var too.
+
+The endpoint is used verbatim, including plain `http://`, since it is meant for a LAN receiver (Grafana Alloy) rather than a public one. `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, if set, overrides the base endpoint for metrics specifically, per the OTLP spec.
+
+Seven reducers re-derive the whole corpus per run and export counts, durations, and closed enum labels: `session_id` travels as an attribute, but paths, prompts, note titles, and any other free text never do. Every field is checked against an inclusion allowlist (`otel/schema.mjs`) that fails closed: a field absent from a stream's schema throws rather than shipping.
+
+`OTEL_RESOURCE_ATTRIBUTES` (comma-separated `key=value` pairs) is filtered through the same kind of allowlist: only `service.name`, `service.version`, `service.namespace`, and `deployment.environment` pass through, and every other key is dropped and logged once per process.
+
 ## Operator tools
 
 - edge backfill: `node scripts/backfill-edges.mjs` — walks the vault and bulk-classifies every note's wikilink edges into `edges.db`. Re-runnable (each pass is idempotent) and never mutates note content — only the post-write hook touches frontmatter.
@@ -152,6 +162,9 @@ The `session-label.js` hook runs a vault search (`ll-search query`) on every `Us
 | `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (weighted-RRF fusion-sum scale, max `0.4333`, e.g. `0.35`)       |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
 | `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |
+| `OTEL_EXPORTER_OTLP_ENDPOINT`         | OTLP/HTTP+JSON metrics receiver base URL. See [OTEL export](#otel-export) below.                               |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metrics-specific endpoint override, takes precedence over the base URL above                                   |
+| `OTEL_RESOURCE_ATTRIBUTES`            | Comma-separated `key=value` resource attributes; filtered through the allowlist in [OTEL export](#otel-export) |
 
 ## Vault librarian
 
