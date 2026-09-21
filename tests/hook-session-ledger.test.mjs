@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { initRepo } from './helpers/git-fixture.mjs';
+import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 
 // realpathSync: on macOS tmpdir() sits behind a symlink (/tmp -> /private/tmp,
 // or a /var/folders/... alias), and `git rev-parse --show-toplevel` always
@@ -312,5 +313,12 @@ test('the projects map renames the folder', () => {
   assert.equal(readdirSync(join(r.vault, '4-projects', 'curated-name', 'ledger')).length, 1);
   const ev = provenance(r.pluginDataDir).find((e) => e.action === 'session-summary');
   assert.equal(ev.project_source, 'mapped');
+  const marker = JSON.parse(
+    readFileSync(
+      join(r.pluginDataDir, 'markers', `ledger-project-${encodeProjectDir(r.repo)}.json`),
+      'utf8',
+    ),
+  );
+  assert.deepEqual(marker, { project: 'curated-name' });
   r.cleanup();
 });

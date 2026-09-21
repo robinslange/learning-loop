@@ -173,4 +173,7 @@ if (wrote || emitNow) {
     last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
   });
 }
+if (wrote) {
+  writeMarker(MARKER_PATHS.ledgerProject(pluginData, cwd), { project: project.project });
+}
 process.exit(0);

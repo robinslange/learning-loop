@@ -1085,8 +1085,17 @@ test(
 // ---------------------------------------------------------------------------
 // 8b: newest session ledger for this repo.
 // ---------------------------------------------------------------------------
+function seedLedgerProjectMarker(pluginDataDir, projectDir, project) {
+  const dir = join(pluginDataDir, 'markers');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `ledger-project-${encodeProjectDir(projectDir)}.json`),
+    JSON.stringify({ project }),
+  );
+}
+
 test(
-  'session-start emits the last-session-here line for a ledger matching the project basename',
+  'session-start emits the last-session-here line for a ledger matching the marked project',
   { timeout: 12000 },
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-ledger-proj-'));
@@ -1096,6 +1105,7 @@ test(
       env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
       seed: (pd) => {
         seedUpdateCheck(pd);
+        seedLedgerProjectMarker(pd, projectDir, project);
         const ledgerDir = join(VAULT, '4-projects', project, 'ledger');
         mkdirSync(ledgerDir, { recursive: true });
         writeFileSync(
@@ -1122,7 +1132,7 @@ test(
 );
 
 test(
-  'session-start emits no last-session-here line when the project has no ledger directory',
+  'session-start emits no last-session-here line when there is no ledger-project marker',
   { timeout: 12000 },
   () => {
     const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-noledger-proj-'));
@@ -1136,11 +1146,41 @@ test(
       const ctx = parseOutput(r.stdout, 'no-ledger').additionalContext;
       assert.ok(
         !ctx.includes('Last session here:'),
-        'no ledger directory for this project must produce no last-session-here line',
+        'no marker for this project must produce no last-session-here line',
       );
     } finally {
       r.cleanup();
       rmSync(projectDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'session-start emits no last-session-here line when the vault has no 4-projects directory',
+  { timeout: 12000 },
+  () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-novault-proj-'));
+    const project = basename(projectDir);
+    const bareVault = mkdtempSync(join(tmpdir(), 'll-ss-bare-vault-'));
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'no-vault-projects-session' },
+      env: { VAULT_PATH: bareVault, CLAUDE_PROJECT_DIR: projectDir },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        seedLedgerProjectMarker(pd, projectDir, project);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'no-vault-projects').additionalContext;
+      assert.ok(
+        !ctx.includes('Last session here:'),
+        'a marker present but no 4-projects/ dir must produce no last-session-here line',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(projectDir, { recursive: true, force: true });
+      rmSync(bareVault, { recursive: true, force: true });
     }
   },
 );
