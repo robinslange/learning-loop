@@ -138,7 +138,7 @@ for (const pass of passes) {
         mod.name,
       );
     } catch (err) {
-      logError(`post-tool.${mod.name}`, err);
+      logError(`post-tool.${mod.name}`, err, { code: 'module_failed' });
       if (env.LL_HOOK_DEBUG) {
         process.stderr.write(`[post-tool] ${mod.name} failed: ${err.message}\n`);
       }
