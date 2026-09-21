@@ -272,3 +272,41 @@ test('post-tool Write with no file_path: exits 0, does not crash', () => {
     r.cleanup();
   }
 });
+
+// runReflectTrack's marker handshake (see hooks/modules/reflect-track.mjs) ends
+// with an unguarded appendFileSync(marker, ...): if the marker path names a
+// directory instead of a file, that append throws EISDIR, propagating out of
+// the module into post-tool's per-module try/catch. That's the module-failure
+// path /doctor's checkHookErrors depends on, so it must land in
+// hook-errors-YYYY-MM.jsonl with module 'post-tool.runReflectTrack' and
+// code 'module_failed'.
+test('post-tool module failure: reaches hook-errors with module_failed', () => {
+  const sessionId = 'reflect-track-fail';
+  const notePath = join(VAULT, '0-inbox', 'new-note.md');
+  const r = runHook(HOOK, {
+    stdin: {
+      tool_name: 'Write',
+      tool_input: { file_path: notePath, content: '---\ntags: [test]\n---\nTest body.' },
+      tool_response: { success: true },
+    },
+    env: { VAULT_PATH: VAULT, CLAUDE_CODE_SESSION_ID: sessionId },
+    seed: (pluginDataDir) => {
+      const markerDir = join(pluginDataDir, 'reflect-scratch');
+      mkdirSync(markerDir, { recursive: true });
+      mkdirSync(join(markerDir, `ll-${sessionId}-reflect-new-notes.txt`));
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, `post-tool must stay fail-open\nstderr: ${r.stderr}`);
+    const errors = readHookErrors(r.pluginDataDir);
+    const moduleErrors = errors.filter((e) => e.module === 'post-tool.runReflectTrack');
+    assert.equal(
+      moduleErrors.length,
+      1,
+      `expected exactly one runReflectTrack error, got: ${JSON.stringify(errors)}`,
+    );
+    assert.equal(moduleErrors[0].code, 'module_failed');
+  } finally {
+    r.cleanup();
+  }
+});
