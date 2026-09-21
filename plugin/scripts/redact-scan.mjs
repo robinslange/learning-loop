@@ -35,6 +35,12 @@ const PATTERNS = [
     kind: 'pem-key',
     re: /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g,
   },
+  { kind: 'url-credentials', re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s/:@]+:[^\s/@]+@/gi },
+  {
+    kind: 'assignment-secret',
+    re: /\b(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\b\s*[=:]\s*["']?[^\s"']{6,}["']?/gi,
+  },
+  { kind: 'basic-auth', re: /\bAuthorization:\s*Basic\s+[A-Za-z0-9+\/=]{8,}\b/gi },
 ];
 const SCANNER_KINDS = new Set(PATTERNS.map((p) => p.kind));
 for (const { kind } of PATTERNS) {

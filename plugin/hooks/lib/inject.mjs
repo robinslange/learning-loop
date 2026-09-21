@@ -22,8 +22,8 @@ import { logError } from '../../scripts/lib/log.mjs';
 
 export function scrubSecrets(text) {
   let result = text;
-  for (const { re } of SECRET_PATTERNS) {
-    result = result.replace(re, '[REDACTED]');
+  for (const { re, replace } of SECRET_PATTERNS) {
+    result = result.replace(re, replace ?? '[REDACTED]');
   }
   return result;
 }

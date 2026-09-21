@@ -101,6 +101,34 @@ describe('scrubSecrets', () => {
     assert.ok(!scrubSecrets(rsaPem).includes('FAKERSAKEY'));
     assert.ok(scrubSecrets(rsaPem).includes('[REDACTED]'));
   });
+
+  it('masks URL credentials but keeps the scheme', () => {
+    assert.equal(
+      scrubSecrets('DATABASE_URL=postgres://user:pass@host/db'),
+      'DATABASE_URL=postgres://***:***@host/db',
+    );
+    assert.equal(scrubSecrets('mongodb+srv://u:p@cluster/x'), 'mongodb+srv://***:***@cluster/x');
+  });
+
+  it('masks an assignment secret but keeps the key', () => {
+    assert.equal(scrubSecrets('API_KEY=abcdef123456'), 'API_KEY=[REDACTED]');
+    assert.equal(scrubSecrets('password: hunter2!'), 'password: [REDACTED]');
+  });
+
+  it('masks a PEM block from the six-sample set', () => {
+    const pem = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----';
+    assert.equal(scrubSecrets(pem), '[REDACTED]');
+  });
+
+  it('masks Authorization: Basic', () => {
+    assert.equal(scrubSecrets('Authorization: Basic dXNlcjpwYXNz'), '[REDACTED]');
+  });
+
+  it('leaves ordinary prose that merely resembles these shapes alone', () => {
+    assert.equal(scrubSecrets('the token bucket algorithm'), 'the token bucket algorithm');
+    assert.equal(scrubSecrets('key=value pairs in general'), 'key=value pairs in general');
+    assert.equal(scrubSecrets('http://example.com/path'), 'http://example.com/path');
+  });
 });
 
 describe('buildInjection', () => {
