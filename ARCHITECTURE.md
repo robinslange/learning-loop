@@ -38,6 +38,15 @@ learning-loop/
 
     scripts/            -- CLI utilities and long-running daemons
       lib/              -- shared primitives (env, config, file-lock, log, model-client, etc.)
+      otel/             -- OTLP export: schema allowlist, serializer, reducers, runner
+        schema.mjs      -- the inclusion allowlist; validateExportRecord fails closed
+        enumerate-keys.mjs -- key discovery across every stream, re-run before editing schema
+        reduce.mjs      -- shared reducer scaffolding (whole-corpus re-derive, no watermark)
+        otlp.mjs        -- OTLP/HTTP+JSON serializer (+ otlp-metrics.mjs builders)
+        export.mjs      -- the POST path, off unless endpoint AND opt-in are both set
+        run-export.mjs  -- entry point the detached worker invokes; --dry-run audits
+        reducers/       -- one per stream: provenance, cache-health, retrieval,
+                           errors (hook-errors + logs), librarian, dream-eval
       librarian.mjs     -- ~66 LOC CLI entry; delegates to librarian/daemon.mjs
       librarian/        -- librarian daemon + local research engine
         daemon.mjs      -- main loop + investigateNote (voice_gate, tag_suggest,
@@ -157,6 +166,64 @@ Sync runs in the `sync/client.rs` async task on the tokio runtime (migrated from
 
 **What a cached peer index is served on, and what it is not.** `search/federation.rs` serves a directory under `federation/data/peers/` only while the hub's last `vault_state` list still names that `vault_id` and a live local grant covers it. **That pair narrows what is read; it is not an authorization boundary, and the code says so.** An unscoped grant means "every vault this issuer owns", a `link` is unscoped, and one is stored for every machine that has ever linked to this one -- so on a linked machine, which is the normal case, one row covers every directory there and nothing is filtered out. The predicate that would close it is the hub's list; `grants.rs::ReadAuthority` carries the argument.
 
+### export path (OTEL)
+
+Ten measurement surfaces reduce to counts and durations and leave the machine
+as OTLP/HTTP+JSON. Hooks are not involved in the export: they keep appending
+local JSONL exactly as before, because a hook is a fresh process on a 60ms
+budget and the OTEL SDK's batching assumes a long-lived one.
+
+```mermaid
+flowchart LR
+  A[hooks append JSONL] --> B[raw streams under PLUGIN_DATA]
+  B --> C[six reducers re-derive whole corpus]
+  C --> D[phase 0 allowlist, fail closed]
+  D --> E[OTLP/HTTP+JSON serializer]
+  E --> F[fetch POST to Grafana Alloy on the LAN]
+  F --> G[Prometheus/Mimir, read by Grafana]
+```
+
+**Re-derivation, not incremental reads, is what makes this idempotent.** Each
+reducer reads every file for its stream and recomputes totals from scratch, so
+running one twice produces identical output. There is no watermark and no
+cursor. That is affordable because the whole corpus across every stream and
+month is roughly 15MB and 32k lines, read in about 51ms, and it is the same
+property that makes `provenance-consolidate.mjs` safe to re-run. An
+incremental design would need persisted per-series state and would reintroduce
+double-counting on any overlapping run.
+
+**The allowlist is an inclusion list and fails closed.** `otel/schema.mjs`
+names every exportable field per stream; a field absent from it throws rather
+than shipping. That is deliberate: two earlier attempts at an exclusion list
+were both incomplete, and an exclusion list fails silently when a new field
+appears. Free text never leaves: query text, prompt slices, note titles, vault
+paths, tags, agent task descriptions and error messages are all rejected at the
+boundary, and `transcript_path` is the sharpest case, since it carries an
+absolute path including the OS username on every `agent-result` record. What
+does leave is counts, durations and bounded enum labels, plus `session_id`,
+which is a content-free UUID and is exported deliberately so a private
+dashboard can correlate across streams.
+
+**The trigger is a marker-gated detached worker.** There is no scheduler in
+this plugin, so `session-start` reads the `otelExport` marker with an explicit
+one-hour TTL and, when stale, spawns `session-start/otel-export-worker.mjs`
+detached and returns. The hook's own cost is a marker stat plus a spawn, about
+0.3us when export is disabled, against a 10 second hook timeout that already
+carries a deps check and a vault snapshot. The worker holds a lock and
+re-checks the marker after acquiring it, so two sessions opening back to back
+produce one export rather than two, and it stamps the marker only on a
+successful POST, so a failure retries at the next session start instead of
+being skipped for a whole TTL.
+
+**Export is off by default and needs two signals**, an
+`OTEL_EXPORTER_OTLP_ENDPOINT` and an explicit `otel.export_enabled` in
+`config.json`. Neither alone is enough. This is a cooperative signal rather
+than a technical control, since both are settable by whoever provisions the
+machine; the stronger precedent for genuinely local consent is federation's
+locally generated `identity.pubkey`. `--dry-run` prints the payload instead of
+POSTing, which is how a human audits what would leave before enabling
+anything.
+
 ### research-offload path
 
 `/learning-loop:research` keeps the token-heavy middle of deep research off Claude's context. Claude does the cheap ends (**Scope** -- decompose the question into search angles -- and the adversarial **Verify + Synthesize**) while the local librarian model (Ollama, 12b+) does the expensive middle: **Search -> dedup -> Fetch -> Extract**. Roughly 15 source documents are distilled to one-line claims locally before anything reaches Claude.
@@ -243,6 +310,8 @@ Turning any of these on is a cleanup task in its own right, because each current
 9. The daemon emits compact JSON by default; `--pretty` is an opt-in flag. (Pending: track 2L.) See `docs/baseline/cross-cutting.md`.
 
 10. The ll-core version in `Cargo.toml` is `0.1.x` until phase 2 publishes `0.2.0`. It does not track the plugin version. See `docs/baseline/cross-cutting.md`.
+
+11. Every telemetry append goes through `scripts/lib/jsonl.mjs`, and every exported field is named in `scripts/otel/schema.mjs`. The first is enforced by the `no-raw-telemetry-append` ESLint rule at "error" (a source-file allowlist, since a path argument is not checkable at the AST level); the second by `validateExportRecord`, which throws on an unlisted field. Both fail closed on purpose: a new telemetry writer or a new field is meant to break the build rather than ship unnoticed.
 
 ---
 
@@ -536,6 +605,32 @@ Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-
 ```
 
 The `action` / `target` / `folder` / `tags` fields are per-action shape from `hooks/modules/provenance.mjs:18-29`. Lines are newline-terminated. Corruption recovery (track 2N) will add per-line checksums.
+
+### export records (OTEL)
+
+Reducers emit metric records in the serializer's input shape, never raw
+telemetry rows:
+
+```
+counter:   {name, type:'counter', value, timeUnixMs, stream, attributes?, startTimeUnixMs?}
+gauge:     {name, type:'gauge', value, timeUnixMs, stream, attributes?}
+histogram: {name, type:'histogram', count, sum, bucketCounts, explicitBounds,
+            timeUnixMs, stream, attributes?}
+```
+
+`stream` is mandatory: it is what makes the serializer run the phase 0
+allowlist over `attributes`, so a reducer that stamps a free-text attribute
+fails closed instead of shipping it. Metric names share an `ll.` prefix so a
+dashboard can select the whole plugin.
+
+Two histogram invariants are asserted at serialization rather than trusted:
+`bucketCounts.length === explicitBounds.length + 1`, and `count` equal to the
+sum of `bucketCounts`. A receiver that gets either wrong does not error, it
+drops the point, which is the worst failure mode for a metric. On the wire,
+`timeUnixNano` and `startTimeUnixNano` are strings of nanoseconds, since int64
+exceeds JS number precision; counters carry
+`aggregationTemporality: 2` (cumulative) and `isMonotonic: true`, and gauges
+carry neither.
 
 ### vault snapshot
 

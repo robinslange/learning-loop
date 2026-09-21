@@ -89,7 +89,7 @@ at `${CLAUDE_PLUGIN_ROOT}/README.md` so it is readable without network access.
 
 ## Capture surface & trust model
 
-learning-loop persists derived indexes locally. What it reads and writes:
+learning-loop persists derived indexes locally, and sends nothing off the machine unless you explicitly enable the OTEL export (see below). What it reads and writes:
 
 | Location                                                                     | Content                                                                                                                                      |
 | ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -102,6 +102,35 @@ The edges database (`edges.db`) stores note-to-note relationships (backlinks, in
 **Trust posture.** Captured artefacts inherit the trust of their source tools. If a secret is pasted into chat or returned by a misbehaving tool, it can land in plugin data or auto-memory. Run `/learning-loop:doctor --redact` to scan for likely secrets. Do not paste credentials into chat.
 
 **Vault as trust boundary.** Retrieved note content is re-emitted into agent context wrapped as untrusted data (Domain 06), so a prompt-injection attempt in a note cannot silently execute. However, operators who let third parties write to their vault inherit prompt-injection risk at the source — the wrapping only contains the blast radius.
+
+**Network egress: off by default.** Everything above is local. The optional
+OTEL export is the one path that sends anything off the machine, and it stays
+off unless you set BOTH `OTEL_EXPORTER_OTLP_ENDPOINT` and
+`otel.export_enabled: true` in the plugin's `config.json`. Neither alone
+enables it.
+
+What it sends is counts, durations and bounded labels: how many events of each
+action, per agent, per skill, per folder; token totals and cache hit rates;
+hook latencies; queue depth; error counts by scope. It sends `session_id`, a
+content-free UUID, so a dashboard can correlate across streams.
+
+What it never sends is free text. Query text, prompt slices, note titles, vault
+paths, tags, agent task descriptions, research topics and error messages are
+all rejected at the export boundary by an inclusion allowlist that throws on
+any unlisted field. Note that `agent` and `skill` labels are tool identifiers
+and may encode a project name, which is worth weighing if your endpoint is not
+somewhere you control.
+
+Audit exactly what would leave before enabling anything:
+
+```bash
+CLAUDE_PLUGIN_DATA=~/.claude/plugins/data/learning-loop-learning-loop-marketplace \
+  node "$CLAUDE_PLUGIN_ROOT/scripts/otel/run-export.mjs" --dry-run
+```
+
+`--dry-run` prints the payload and sends nothing, even with an endpoint
+configured. `/learning-loop:doctor` reports whether export is active and how
+long ago the last one succeeded.
 
 ### Air-gapped / update-controlled deployment
 
