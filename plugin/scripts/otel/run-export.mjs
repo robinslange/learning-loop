@@ -21,7 +21,15 @@ import { exportMetrics } from './export.mjs';
 const REDUCER_DIR = join(import.meta.dirname, 'reducers');
 
 // name -> exported reduce function, e.g. 'provenance' -> reduceProvenance.
-const REDUCERS = ['provenance', 'cache-health', 'retrieval', 'errors', 'librarian', 'dream-eval'];
+export const REDUCERS = [
+  'provenance',
+  'cache-health',
+  'retrieval',
+  'errors',
+  'librarian',
+  'dream-eval',
+  'session',
+];
 
 function exportNameFor(reducerName) {
   const pascal = reducerName.replace(/(^|-)([a-z])/g, (_, __, c) => c.toUpperCase());
@@ -30,12 +38,13 @@ function exportNameFor(reducerName) {
 
 /**
  * Load every reducer that exists, tolerating a missing or broken sibling.
+ * @param {string[]} reducers  names to load, defaults to REDUCERS
  * @returns {Promise<{loaded: object[], skipped: string[]}>}
  */
-async function loadReducers() {
+async function loadReducers(reducers) {
   const loaded = [];
   const skipped = [];
-  for (const name of REDUCERS) {
+  for (const name of reducers) {
     const file = join(REDUCER_DIR, `${name}.mjs`);
     if (!existsSync(file)) {
       skipped.push(name);
@@ -63,6 +72,7 @@ async function loadReducers() {
  * @param {boolean} [opts.dryRun]     print the payload instead of POSTing
  * @param {boolean} [opts.enabled]    test seam, passed through to exportMetrics
  * @param {string} [opts.endpoint]    test seam, passed through to exportMetrics
+ * @param {string[]} [opts.reducers]  test seam, defaults to REDUCERS
  * @returns {Promise<object>} structured result: {ok, sent, reducersLoaded, reducersSkipped, payload?, error?}
  */
 export async function runExport(opts = {}) {
@@ -70,7 +80,7 @@ export async function runExport(opts = {}) {
   const dryRun = Boolean(opts.dryRun);
   const timeUnixMs = Date.now();
 
-  const { loaded, skipped } = await loadReducers();
+  const { loaded, skipped } = await loadReducers(opts.reducers ?? REDUCERS);
   const metrics = [];
   for (const { name, fn } of loaded) {
     try {
