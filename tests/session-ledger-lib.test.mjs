@@ -9,6 +9,7 @@ import {
   gitFacts,
   execGit,
   gitEnv,
+  budgetedGit,
 } from '../plugin/scripts/lib/session-ledger.mjs';
 import { initRepo, git } from './helpers/git-fixture.mjs';
 
@@ -210,6 +211,30 @@ test('gitFacts falls back to --since when startedHead is not an ancestor of HEAD
     assert.equal(f.commitsSource, 'since');
     assert.ok(f.commits.map((c) => c.subject).includes('E after rewind'));
   });
+});
+
+test('budgetedGit caps total wall time across calls instead of a per-call timeout', () => {
+  let calls = 0;
+  const slow = () => {
+    calls++;
+    const start = Date.now();
+    while (Date.now() - start < 200) {
+      /* busy-wait: this fake spawn "takes" 200ms per call */
+    }
+    return { ok: true, out: 'x' };
+  };
+  const budget = { remaining: 500 };
+  const wrapped = budgetedGit(slow, budget);
+  wrapped(['a'], '/x', 1000);
+  wrapped(['b'], '/x', 1000);
+  const third = wrapped(['c'], '/x', 1000);
+  const fourth = wrapped(['d'], '/x', 1000);
+  assert.ok(calls <= 3, `expected at most 3 real calls, got ${calls}`);
+  assert.equal(fourth.ok, false);
+  assert.equal(fourth.timeout, true);
+  // The call that exhausts the budget still ran (calls counts it); once
+  // remaining has dropped to the floor, later calls refuse to spawn at all.
+  if (calls === 3) assert.equal(third.ok, true);
 });
 
 import {

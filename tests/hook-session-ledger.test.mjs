@@ -2,12 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   realpathSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -24,7 +26,6 @@ import { gitEnv } from '../plugin/scripts/lib/session-ledger.mjs';
 const TMP = realpathSync(tmpdir());
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/session-ledger.js', import.meta.url));
-const SID = '60e4c15a-487a-4e85-a18a-a989d8c00de7';
 let r2ctx;
 
 function makeRepo(root) {
@@ -108,6 +109,7 @@ function run({
   label = 'Plugin Hooks',
   transcriptMissing = false,
 }) {
+  const sid = randomUUID();
   let vault, repo;
   const result = runHook(HOOK, {
     // Match TMPDIR to this process's resolved tmpdir so the hook's tmpdir()
@@ -117,10 +119,10 @@ function run({
       vault = makeVault(sandboxRoot);
       repo = makeRepo(sandboxRoot);
       seedConfig(pluginDataDir, vault, extraConfig);
-      if (label) writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), label);
+      if (label) writeFileSync(join(TMP, `claude-session-label-${sid}.txt`), label);
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: event,
       cwd: repo,
       transcript_path: transcriptMissing
@@ -131,7 +133,7 @@ function run({
         : { reason }),
     }),
   });
-  return { ...result, vault, repo };
+  return { ...result, vault, repo, sid };
 }
 
 test('Stop writes a ledger note and one session-summary event', () => {
@@ -140,7 +142,10 @@ test('Stop writes a ledger note and one session-summary event', () => {
   assert.equal(r.stdout.trim(), '', 'the hook must not print');
   const files = ledgerFiles(r.vault);
   assert.equal(files.length, 1);
-  assert.match(files[0], /^\d{4}-\d{2}-\d{2}-plugin-hooks-60e4c15a\.md$/);
+  assert.match(
+    files[0],
+    new RegExp(`^\\d{4}-\\d{2}-\\d{2}-plugin-hooks-${r.sid.slice(0, 8)}\\.md$`),
+  );
   const md = readFileSync(join(r.vault, '4-projects', 'my-repo', 'ledger', files[0]), 'utf8');
   assert.match(md, /status: open/);
   assert.match(md, /## Where it stopped\nLedger written, tests green\./);
@@ -159,13 +164,49 @@ test('Stop writes a ledger note and one session-summary event', () => {
   for (const k of ['path', 'project', 'repo', 'branch', 'prompt'])
     assert.ok(!(k in events[0]), `${k} leaked`);
   const marker = JSON.parse(
-    readFileSync(join(r.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+    readFileSync(join(r.pluginDataDir, 'markers', `ledger-${r.sid}.json`), 'utf8'),
   );
   assert.match(marker.started_head, /^[0-9a-f]{40}$/);
   r.cleanup();
 });
 
+test('Stop reaps a stale .tmp in the ledger dir but leaves a fresh one', () => {
+  const sid = randomUUID();
+  let ctx;
+  const r = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      writeFileSync(join(TMP, `claude-session-label-${sid}.txt`), 'Plugin Hooks');
+      const ledgerDir = join(vault, '4-projects', 'my-repo', 'ledger');
+      mkdirSync(ledgerDir, { recursive: true });
+      const stale = join(ledgerDir, 'orphan.md.12345.tmp');
+      const fresh = join(ledgerDir, 'orphan.md.67890.tmp');
+      writeFileSync(stale, 'stale');
+      writeFileSync(fresh, 'fresh');
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      utimesSync(stale, twoHoursAgo, twoHoursAgo);
+      ctx = { vault, repo, stale, fresh };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: sid,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
+      last_assistant_message: 'swept',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.ok(!existsSync(ctx.stale), 'stale .tmp must be reaped');
+  assert.ok(existsSync(ctx.fresh), 'fresh .tmp must survive the sweep');
+  r.cleanup();
+});
+
 test('a later Stop credits only commits made since the recorded HEAD, not the whole --since window', () => {
+  const sid = randomUUID();
   let ctx;
   const r1 = runHook(HOOK, {
     env: { TMPDIR: TMP },
@@ -173,11 +214,11 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
       seedConfig(pluginDataDir, vault);
-      writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), 'Range Session');
+      writeFileSync(join(TMP, `claude-session-label-${sid}.txt`), 'Range Session');
       ctx = { vault, repo };
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: 'Stop',
       cwd: ctx.repo,
       transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
@@ -187,7 +228,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
   });
   assert.equal(r1.exitCode, 0, r1.stderr);
   const r1Marker = JSON.parse(
-    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${sid}.json`), 'utf8'),
   );
   const { started_head: startedHead, path: ledgerRelPath } = r1Marker;
 
@@ -205,7 +246,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
       seedConfig(pluginDataDir, ctx.vault);
       mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
       writeFileSync(
-        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        join(pluginDataDir, 'markers', `ledger-${sid}.json`),
         JSON.stringify({
           path: ledgerRelPath,
           started_ts: '2020-01-01T00:00:00.000Z',
@@ -215,7 +256,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
       );
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: 'SessionEnd',
       cwd: ctx.repo,
       transcript_path: transcript(sandboxRoot, { prompts: 2 }),
@@ -238,6 +279,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
 });
 
 test('a marker with a started_head that is no longer an ancestor falls back to --since and the note says so', () => {
+  const sid = randomUUID();
   let ctx;
   const r = runHook(HOOK, {
     env: { TMPDIR: TMP },
@@ -247,9 +289,9 @@ test('a marker with a started_head that is no longer an ancestor falls back to -
       seedConfig(pluginDataDir, vault);
       mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
       writeFileSync(
-        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        join(pluginDataDir, 'markers', `ledger-${sid}.json`),
         JSON.stringify({
-          path: '4-projects/my-repo/ledger/existing-60e4c15a.md',
+          path: 'existing-note.md',
           started_ts: new Date(Date.now() - 3_600_000).toISOString(),
           // Not an ancestor of anything in this fresh repo.
           started_head: 'f'.repeat(40),
@@ -259,7 +301,7 @@ test('a marker with a started_head that is no longer an ancestor falls back to -
       ctx = { vault, repo };
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: 'Stop',
       cwd: ctx.repo,
       transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
@@ -270,10 +312,7 @@ test('a marker with a started_head that is no longer an ancestor falls back to -
   assert.equal(r.exitCode, 0, r.stderr);
   const events = provenance(r.pluginDataDir).filter((e) => e.action === 'session-summary');
   assert.equal(events[0].commits_source, 'since');
-  const md = readFileSync(
-    join(ctx.vault, '4-projects', 'my-repo', 'ledger', 'existing-60e4c15a.md'),
-    'utf8',
-  );
+  const md = readFileSync(join(ctx.vault, 'existing-note.md'), 'utf8');
   assert.match(md, /## Commits this session \(range unavailable, listed by time\)/);
   r.cleanup();
 });
@@ -283,8 +322,9 @@ test('a second Stop overwrites the same note and does not re-emit inside the int
   // running twice against one sandbox via the seeded marker.
   let firstPath;
   const r1 = run({});
+  const sid = r1.sid;
   const marker = JSON.parse(
-    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${sid}.json`), 'utf8'),
   );
   firstPath = marker.path;
   assert.ok(firstPath.startsWith('4-projects/my-repo/ledger/'));
@@ -299,18 +339,18 @@ test('a second Stop overwrites the same note and does not re-emit inside the int
       seedConfig(pluginDataDir, vault);
       mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
       writeFileSync(
-        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        join(pluginDataDir, 'markers', `ledger-${sid}.json`),
         JSON.stringify({
           path: firstPath,
           started_ts: '2020-01-01T00:00:00.000Z',
           last_summary_ts: new Date().toISOString(),
         }),
       );
-      writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), 'Some Other Label');
+      writeFileSync(join(TMP, `claude-session-label-${sid}.txt`), 'Some Other Label');
       r2ctx = { vault, repo, sandboxRoot };
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: 'Stop',
       cwd: r2ctx.repo,
       transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(r2ctx.repo, 'a.txt') }),
@@ -347,6 +387,7 @@ test('SessionEnd stamps status ended, the reason, and emits final:true', () => {
 });
 
 test('a trivial session (no edits, no commits since start, few prompts) writes nothing', () => {
+  const sid = randomUUID();
   let ctx;
   const r = runHook(HOOK, {
     seed: (pluginDataDir, sandboxRoot) => {
@@ -367,7 +408,7 @@ test('a trivial session (no edits, no commits since start, few prompts) writes n
       const p = join(sandboxRoot, 't.jsonl');
       writeFileSync(p, lines.join('\n'));
       return {
-        session_id: SID,
+        session_id: sid,
         hook_event_name: 'Stop',
         cwd: ctx.repo,
         transcript_path: p,
@@ -379,7 +420,7 @@ test('a trivial session (no edits, no commits since start, few prompts) writes n
   assert.equal(r.exitCode, 0, r.stderr);
   assert.deepEqual(ledgerFiles(ctx.vault), []);
   assert.equal(provenance(r.pluginDataDir).length, 0);
-  assert.ok(!existsSync(join(r.pluginDataDir, 'markers', `ledger-${SID}.json`)));
+  assert.ok(!existsSync(join(r.pluginDataDir, 'markers', `ledger-${sid}.json`)));
   r.cleanup();
 });
 
@@ -392,6 +433,7 @@ test('hooks.disabled silences the hook entirely', () => {
 });
 
 test('stop_hook_active exits without writing', () => {
+  const sid = randomUUID();
   let ctx;
   const r = runHook(HOOK, {
     seed: (pluginDataDir, sandboxRoot) => {
@@ -399,7 +441,7 @@ test('stop_hook_active exits without writing', () => {
       seedConfig(pluginDataDir, ctx.vault);
     },
     stdin: (sandboxRoot) => ({
-      session_id: SID,
+      session_id: sid,
       hook_event_name: 'Stop',
       cwd: ctx.repo,
       transcript_path: transcript(sandboxRoot, { prompts: 6 }),

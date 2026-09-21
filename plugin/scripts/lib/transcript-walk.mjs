@@ -2,7 +2,17 @@
 // probe both need the same walk; parsing twice per Stop would cost the budget
 // twice.
 
-const WRAPPER_PREFIX = '<';
+// Known wrapper tags the harness prepends to injected/synthetic content, not
+// real user text. A bare '<' prefix used to drop these AND a pasted
+// XML/HTML snippet as the first prompt, which then left the ledger's Goal
+// section empty for that session.
+const WRAPPER_TAGS = [
+  '<local-command-caveat>',
+  '<command-name>',
+  '<system-reminder>',
+  '<task-notification>',
+  '<local-command-stdout>',
+];
 
 export function parseTranscript(text) {
   if (typeof text !== 'string' || !text) return [];
@@ -36,7 +46,7 @@ function promptText(rec) {
     .map((b) => b.text)
     .join('\n')
     .trim();
-  if (!text || text.startsWith(WRAPPER_PREFIX)) return null;
+  if (!text || WRAPPER_TAGS.some((tag) => text.startsWith(tag))) return null;
   return text;
 }
 

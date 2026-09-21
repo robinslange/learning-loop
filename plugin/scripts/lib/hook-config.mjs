@@ -175,6 +175,10 @@ export const HookConfig = Object.freeze({
   // least this many prompts. Below that, nothing is written or emitted.
   LEDGER_MIN_PROMPTS: 5,
   LEDGER_GIT_TIMEOUT_MS: 300,
+  // Total wall time every git spawn in one hook run may share (resolveProject
+  // plus gitFacts' up to five calls). Caps the sum below the SessionEnd
+  // shared budget instead of letting five independent 300ms timeouts stack.
+  LEDGER_GIT_BUDGET_MS: 900,
   // Transcripts above this are not walked (the ledger still renders from git
   // facts). 16MB is ~4x the largest session seen locally.
   LEDGER_TRANSCRIPT_MAX_BYTES: 16 * 1024 * 1024,

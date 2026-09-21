@@ -3,7 +3,16 @@
 // Writes the session ledger: one 4-projects note per session, overwritten on
 // every flush, and a throttled session-summary provenance record. Never prints.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
@@ -23,6 +32,7 @@ import { pluginVersion } from '../scripts/lib/plugin-meta.mjs';
 import { parseTranscript, walkTranscript } from '../scripts/lib/transcript-walk.mjs';
 import {
   execGit,
+  budgetedGit,
   resolveProject,
   gitFacts,
   collectFacts,
@@ -33,6 +43,33 @@ import {
   shouldEmitSummary,
   localDateStr,
 } from '../scripts/lib/session-ledger.mjs';
+
+const STALE_TMP_MS = 60 * 60 * 1000;
+
+// If Claude Code kills the hook between writeFileSync(tmp) and renameSync,
+// the temp file is orphaned: indexers skip it (not .md) and nothing else
+// reaps it. Sweep it out at the next flush instead, one dir at a time so a
+// single unreadable/unremovable entry costs one logged failure, not the rest
+// of the sweep.
+function sweepStaleTmp(dir, now = Date.now()) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch (err) {
+    if (err?.code !== 'ENOENT') logError('session-ledger.sweepTmp.readdir', err, { dir });
+    return;
+  }
+  for (const name of names) {
+    if (!name.endsWith('.tmp')) continue;
+    const path = join(dir, name);
+    try {
+      if (now - statSync(path).mtimeMs <= STALE_TMP_MS) continue;
+      unlinkSync(path);
+    } catch (err) {
+      logError('session-ledger.sweepTmp', err, { path });
+    }
+  }
+}
 
 const t0 = Date.now();
 const input = await readStdin();
@@ -95,8 +132,10 @@ let git = {
   commitsSource: 'since',
 };
 try {
-  project = resolveProject(cwd, config, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS);
-  git = gitFacts(project.worktreeRoot, startedTs, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS, {
+  const gitBudget = { remaining: HookConfig.LEDGER_GIT_BUDGET_MS };
+  const budgeted = budgetedGit(execGit, gitBudget);
+  project = resolveProject(cwd, config, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS);
+  git = gitFacts(project.worktreeRoot, startedTs, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS, {
     startedHead: marker?.started_head,
   });
 } catch (err) {
@@ -143,6 +182,7 @@ let wrote = false;
 try {
   const abs = join(vaultRoot, relPath);
   mkdirSync(dirname(abs), { recursive: true });
+  sweepStaleTmp(dirname(abs));
   const tmp = `${abs}.${process.pid}.tmp`;
   writeFileSync(
     tmp,

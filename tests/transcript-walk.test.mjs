@@ -82,6 +82,25 @@ test('walkTranscript yields assistant text and first/last timestamps', () => {
   assert.equal(w.lastTs, '2026-09-21T01:00:13.000Z');
 });
 
+test('a first prompt that is a pasted XML/HTML snippet survives (not a wrapper tag)', () => {
+  const fixture = [user('2026-09-21T02:00:00.000Z', '<div>hello</div>')].join('\n');
+  const w = walkTranscript(parseTranscript(fixture));
+  assert.deepEqual(
+    w.prompts.map((p) => p.text),
+    ['<div>hello</div>'],
+  );
+});
+
+test('a known wrapper tag is dropped even when other tags are not', () => {
+  const fixture = [
+    user('2026-09-21T02:00:00.000Z', '<system-reminder>x</system-reminder>'),
+    user('2026-09-21T02:00:01.000Z', '<local-command-stdout>y</local-command-stdout>'),
+    user('2026-09-21T02:00:02.000Z', '<task-notification>z</task-notification>'),
+  ].join('\n');
+  const w = walkTranscript(parseTranscript(fixture));
+  assert.deepEqual(w.prompts, []);
+});
+
 test('empty and non-string input walk to an empty result', () => {
   for (const input of ['', null, undefined]) {
     const w = walkTranscript(parseTranscript(input));
