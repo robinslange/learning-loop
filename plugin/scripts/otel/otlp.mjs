@@ -19,7 +19,7 @@
 //   }
 
 import { logError } from '../lib/log.mjs';
-import { validateExportRecord } from './schema.mjs';
+import { validateExportRecord, RESOURCE_ATTRIBUTE_ALLOWLIST } from './schema.mjs';
 import {
   buildAttributes,
   buildSumMetric,
@@ -54,8 +54,26 @@ function parseResourceAttributesEnv() {
   return out;
 }
 
+// Keys already logged as dropped, so a long-lived process (the export
+// worker) does not re-log the same operator misconfiguration every run.
+const loggedDroppedKeys = new Set();
+
 function buildResource() {
-  const attrs = { 'service.name': SERVICE_NAME, ...parseResourceAttributesEnv() };
+  const envAttrs = parseResourceAttributesEnv();
+  const allowed = {};
+  for (const [key, value] of Object.entries(envAttrs)) {
+    if (RESOURCE_ATTRIBUTE_ALLOWLIST.has(key)) {
+      allowed[key] = value;
+      continue;
+    }
+    if (!loggedDroppedKeys.has(key)) {
+      loggedDroppedKeys.add(key);
+      logError('otel.resourceAttributeDropped', new Error('resource attribute not allowlisted'), {
+        key,
+      });
+    }
+  }
+  const attrs = { 'service.name': SERVICE_NAME, ...allowed };
   return { attributes: buildAttributes(attrs) };
 }
 

@@ -196,7 +196,7 @@ test('resource attributes carry service identity', () => {
 
 test('OTEL_RESOURCE_ATTRIBUTES env var is merged into resource attributes', async (t) => {
   const prev = process.env.OTEL_RESOURCE_ATTRIBUTES;
-  process.env.OTEL_RESOURCE_ATTRIBUTES = 'deployment.environment=lan,host.name=pi';
+  process.env.OTEL_RESOURCE_ATTRIBUTES = 'deployment.environment=lan';
   t.after(() => {
     if (prev === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES;
     else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
@@ -210,7 +210,29 @@ test('OTEL_RESOURCE_ATTRIBUTES env var is merged into resource attributes', asyn
     resourceAttrs.find((a) => a.key === 'deployment.environment').value.stringValue,
     'lan',
   );
-  assert.strictEqual(resourceAttrs.find((a) => a.key === 'host.name').value.stringValue, 'pi');
+});
+
+test('OTEL_RESOURCE_ATTRIBUTES is filtered through the same allowlist as metric attributes', async (t) => {
+  const prev = process.env.OTEL_RESOURCE_ATTRIBUTES;
+  process.env.OTEL_RESOURCE_ATTRIBUTES =
+    'user.name=robin,host.path=/Users/x,deployment.environment=lab';
+  t.after(() => {
+    if (prev === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES;
+    else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
+  });
+  const { buildOtlpPayload: build } = await import(
+    `../plugin/scripts/otel/otlp.mjs?t=${Date.now()}`
+  );
+  const payload = build([counterMetric()]);
+  const resourceAttrs = payload.resourceMetrics[0].resource.attributes;
+  assert.deepStrictEqual(resourceAttrs.map((a) => a.key).sort(), [
+    'deployment.environment',
+    'service.name',
+  ]);
+  assert.strictEqual(
+    resourceAttrs.find((a) => a.key === 'deployment.environment').value.stringValue,
+    'lab',
+  );
 });
 
 test('a record with a NEVER_EXPORT field throws rather than serializing', () => {

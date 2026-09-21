@@ -49,6 +49,20 @@ export const NEVER_EXPORT = new Set([
   'msg',
 ]);
 
+// Resource attributes come from OTEL_RESOURCE_ATTRIBUTES, an operator-set env
+// var with no shape constraint of its own, unlike a metric's attributes,
+// which a reducer builds from known fields. Left unchecked, it is a free-text
+// escape hatch around phase 0's fail-closed allowlist (an operator could set
+// OTEL_RESOURCE_ATTRIBUTES=host.path=/Users/x,user.name=robin and ship it
+// verbatim). Only these standard OTEL resource keys pass through; every
+// other key an operator sets is dropped and logged once per process.
+export const RESOURCE_ATTRIBUTE_ALLOWLIST = new Set([
+  'service.name',
+  'service.version',
+  'service.namespace',
+  'deployment.environment',
+]);
+
 // Session identity is a deliberate exception to "never export identifying
 // fields": session_id is a content-free UUID, and cross-stream correlation by
 // session is the point of the export (decision 3 in the plan).
