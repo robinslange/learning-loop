@@ -162,6 +162,31 @@ export const EXPORT_SCHEMA = {
     model_prob: 'histogram',
     similarity: 'histogram',
   },
+  // session-summary records written by hooks/session-ledger.js. Numbers and
+  // closed enums only by construction (session-ledger.mjs SUMMARY_ENUMS); the
+  // project name, paths and prompt text live in the vault note, never here.
+  session: {
+    ...ENVELOPE,
+    ...IDENTITY,
+    action: ENUM_LABEL,
+    end_reason: ENUM_LABEL,
+    git_state: ENUM_LABEL,
+    project_source: ENUM_LABEL,
+    harness: ENUM_LABEL,
+    version: ENUM_LABEL,
+    final: ENUM_LABEL,
+    prompts: 'histogram',
+    tool_uses: 'histogram',
+    tool_uses_direct: 'histogram',
+    files_edited: 'histogram',
+    commits: 'histogram',
+    skills_invoked: 'histogram',
+    agents_spawned: 'histogram',
+    transcript_bytes: 'histogram',
+    duration_ms: 'histogram',
+    latency_ms: 'histogram',
+    git_ms: 'histogram',
+  },
 };
 
 // Fails closed: a key not in the named stream's schema throws rather than
