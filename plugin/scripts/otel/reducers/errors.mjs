@@ -22,6 +22,7 @@ import {
   countBy,
   histogramFrom,
   LATENCY_BOUNDS_MS,
+  earliestTimestamp,
 } from '../reduce.mjs';
 import { DATA_PATHS } from '../../lib/paths.mjs';
 
@@ -31,6 +32,7 @@ const LOGS_STREAM = 'logs';
 function reduceHookErrors(pluginData, timeUnixMs) {
   const files = monthlyFiles(pluginData, 'hook-errors-');
   const records = readRecords(files);
+  const startTimeUnixMs = earliestTimestamp(records, timeUnixMs);
 
   const latencies = records.map((r) => r.latency_ms).filter((v) => v !== undefined);
   const elapsed = records.map((r) => r.elapsed_ms).filter((v) => v !== undefined);
@@ -48,30 +50,35 @@ function reduceHookErrors(pluginData, timeUnixMs) {
       stream: HOOK_ERRORS_STREAM,
       by: ['module'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(records, {
       name: 'hook_error_code',
       stream: HOOK_ERRORS_STREAM,
       by: ['code'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(latencies, {
       name: 'hook_error_latency_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(elapsed, {
       name: 'hook_error_elapsed_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(budgets, {
       name: 'hook_error_budget_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
   ];
 }
@@ -80,6 +87,7 @@ function reduceLogs(pluginData, timeUnixMs) {
   const dir = DATA_PATHS.logs(pluginData);
   const files = monthlyFiles(dir, 'log-');
   const records = readRecords(files);
+  const startTimeUnixMs = earliestTimestamp(records, timeUnixMs);
 
   return [
     ...countBy(records, {
@@ -87,8 +95,15 @@ function reduceLogs(pluginData, timeUnixMs) {
       stream: LOGS_STREAM,
       by: ['scope'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
-    ...countBy(records, { name: 'log_level', stream: LOGS_STREAM, by: ['level'], timeUnixMs }),
+    ...countBy(records, {
+      name: 'log_level',
+      stream: LOGS_STREAM,
+      by: ['level'],
+      timeUnixMs,
+      startTimeUnixMs,
+    }),
   ];
 }
 

@@ -112,6 +112,21 @@ test('a schema violation voids the batch rather than dropping one point', () => 
   );
 });
 
+// An unknown metric type is a reducer bug, not a data defect, so it must fail
+// loudly rather than dropping one point. An earlier version of the per-point
+// catch swallowed this, making a typo in a reducer indistinguishable from a
+// malformed record.
+test('an unknown metric type voids the batch rather than dropping one point', () => {
+  assert.throws(
+    () =>
+      buildOtlpPayload([
+        counterMetric({ name: 'typo.counter', type: 'counnnter' }),
+        counterMetric({ name: 'healthy.sibling' }),
+      ]),
+    /unknown metric type/,
+  );
+});
+
 test('a metric with no stream is refused, so the allowlist cannot fail open', () => {
   assert.throws(
     () =>

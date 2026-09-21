@@ -93,9 +93,14 @@ export function monthlyFiles(dir, prefix) {
  * @param {string} opts.stream      phase 0 stream key
  * @param {string[]} opts.by        attribute field names to group by
  * @param {number} opts.timeUnixMs
+ * @param {number} opts.startTimeUnixMs  when the series began, from the corpus
+ *   itself (the earliest record's ts), NOT from this run. A cumulative counter
+ *   whose start moves every export looks like a brand-new counter each time,
+ *   which breaks rate() at every boundary and defeats the whole point of
+ *   re-deriving totals. Required for that reason.
  * @returns {object[]} counter records
  */
-export function countBy(records, { name, stream, by, timeUnixMs }) {
+export function countBy(records, { name, stream, by, timeUnixMs, startTimeUnixMs }) {
   const buckets = new Map();
   for (const r of records) {
     if (by.some((f) => r[f] === undefined || r[f] === null)) continue;
@@ -111,9 +116,30 @@ export function countBy(records, { name, stream, by, timeUnixMs }) {
     type: 'counter',
     value,
     timeUnixMs,
+    startTimeUnixMs: startTimeUnixMs ?? timeUnixMs,
     stream,
     attributes,
   }));
+}
+
+/**
+ * The earliest timestamp in a corpus, for use as a cumulative counter's stable
+ * start. Falls back to `fallbackMs` when no record carries a parseable time
+ * (dream-eval has no `ts` at all), so a series still gets a fixed start rather
+ * than one that moves per run.
+ *
+ * @param {object[]} records
+ * @param {number} fallbackMs
+ * @param {string} [field]  timestamp field name, default 'ts'
+ * @returns {number}
+ */
+export function earliestTimestamp(records, fallbackMs, field = 'ts') {
+  let min = Infinity;
+  for (const r of records) {
+    const t = Date.parse(r[field]);
+    if (Number.isFinite(t) && t < min) min = t;
+  }
+  return Number.isFinite(min) ? min : fallbackMs;
 }
 
 // Bucket bounds for millisecond latencies. Chosen to straddle the budgets the
@@ -139,7 +165,10 @@ export const RATIO_BOUNDS = [0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99];
  * @param {object} [opts.attributes]
  * @returns {object[]} zero or one histogram record
  */
-export function histogramFrom(samples, { name, stream, bounds, timeUnixMs, attributes }) {
+export function histogramFrom(
+  samples,
+  { name, stream, bounds, timeUnixMs, startTimeUnixMs, attributes },
+) {
   const values = samples.filter((v) => Number.isFinite(v));
   if (values.length === 0) return [];
   const bucketCounts = new Array(bounds.length + 1).fill(0);
@@ -157,6 +186,7 @@ export function histogramFrom(samples, { name, stream, bounds, timeUnixMs, attri
       bucketCounts,
       explicitBounds: bounds,
       timeUnixMs,
+      startTimeUnixMs: startTimeUnixMs ?? timeUnixMs,
       stream,
       ...(attributes ? { attributes } : {}),
     },

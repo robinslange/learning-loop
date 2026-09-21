@@ -94,6 +94,7 @@ export function buildHistogramMetric(m) {
     histogram: {
       dataPoints: [
         {
+          startTimeUnixNano: msToNanoString(m.startTimeUnixMs ?? m.timeUnixMs),
           timeUnixNano: msToNanoString(m.timeUnixMs),
           count: String(count),
           sum,

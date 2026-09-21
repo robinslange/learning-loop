@@ -13,7 +13,13 @@
 // Follows reduce.mjs's whole-corpus contract: read the whole file, recompute
 // from scratch, return metric records. No watermark, no cursor.
 
-import { readRecords, countBy, histogramFrom, RATIO_BOUNDS } from '../reduce.mjs';
+import {
+  readRecords,
+  countBy,
+  histogramFrom,
+  RATIO_BOUNDS,
+  earliestTimestamp,
+} from '../reduce.mjs';
 import { DATA_PATHS } from '../../lib/paths.mjs';
 
 const STREAM = 'dream-eval';
@@ -32,17 +38,26 @@ const STREAM = 'dream-eval';
 export function reduceDreamEval({ pluginData, timeUnixMs }) {
   const file = DATA_PATHS.dreamEvalProbes(pluginData);
   const records = readRecords([file]);
+  // This stream has no ts, so the run clock is the only stable anchor.
+  const startTimeUnixMs = timeUnixMs;
   if (records.length === 0) return [];
 
   const confidences = records.map((r) => r.confidence).filter((v) => typeof v === 'number');
 
   return [
-    ...countBy(records, { name: 'dream_eval_tier', stream: STREAM, by: ['tier'], timeUnixMs }),
+    ...countBy(records, {
+      name: 'dream_eval_tier',
+      stream: STREAM,
+      by: ['tier'],
+      timeUnixMs,
+      startTimeUnixMs,
+    }),
     ...histogramFrom(confidences, {
       name: 'dream_eval_confidence',
       stream: STREAM,
       bounds: RATIO_BOUNDS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
   ];
 }

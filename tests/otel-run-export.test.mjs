@@ -6,16 +6,38 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startOtlpSink } from './helpers/otlp-sink.mjs';
 import { runExport } from '../plugin/scripts/otel/run-export.mjs';
 
-function withPluginData(fn) {
+// An export with nothing to send is deliberately not a success (export.mjs
+// refuses an empty payload so it cannot stamp a last-success marker), so a
+// test that expects a real POST must seed at least one event to reduce.
+function seedTelemetry(pluginData) {
+  const dir = join(pluginData, 'provenance');
+  mkdirSync(dir, { recursive: true });
+  const month = new Date().toISOString().slice(0, 7);
+  writeFileSync(
+    join(dir, `events-${month}.jsonl`),
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      session_id: 'seed',
+      source: 'hook',
+      action: 'vault-write',
+      folder: 'inbox',
+    }) + '\n',
+  );
+}
+
+// Must be async and await fn: every caller passes an async callback, so a
+// synchronous `return fn(...)` let the finally block rmSync the directory out
+// from under the still-running test body.
+async function withPluginData(fn) {
   const pluginData = mkdtempSync(join(tmpdir(), 'll-otel-run-export-'));
   try {
-    return fn(pluginData);
+    return await fn(pluginData);
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
   }
@@ -61,6 +83,7 @@ test('with --dry-run, the payload is produced and not sent even when export is d
 
 test('with export enabled, the payload reaches the local sink', async () => {
   await withPluginData(async (pluginData) => {
+    seedTelemetry(pluginData);
     const sink = await startOtlpSink();
     try {
       const result = await runExport({
