@@ -15,7 +15,14 @@
 // runs over the same file produce byte-identical output.
 
 import { DATA_PATHS } from '../../lib/paths.mjs';
-import { readRecords, countBy, histogramFrom, METRIC_PREFIX, RATIO_BOUNDS } from '../reduce.mjs';
+import {
+  readRecords,
+  countBy,
+  histogramFrom,
+  METRIC_PREFIX,
+  RATIO_BOUNDS,
+  earliestTimestamp,
+} from '../reduce.mjs';
 
 const STREAM = 'librarian';
 
@@ -46,6 +53,7 @@ const SCORE_FIELDS = ['confidence', 'cosine_score', 'model_prob', 'similarity'];
  */
 export function reduceLibrarian({ pluginData, timeUnixMs }) {
   const records = readRecords([DATA_PATHS.librarianQueue(pluginData)]);
+  const startTimeUnixMs = earliestTimestamp(records, timeUnixMs, 'created_at');
   if (records.length === 0) return [];
 
   const metrics = [
@@ -54,18 +62,21 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
       stream: STREAM,
       by: ['task'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(records, {
       name: 'librarian.queue_by_status',
       stream: STREAM,
       by: ['status'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(records, {
       name: 'librarian.queue_by_expired_reason',
       stream: STREAM,
       by: ['expired_reason'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     // The cross-product is what reveals a task type that never converts: a
     // consumer can filter task=voice_flag and see every status bucket it
@@ -75,6 +86,7 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
       stream: STREAM,
       by: ['task', 'status'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
   ];
 
@@ -84,6 +96,7 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
     type: 'gauge',
     value: pending.length,
     timeUnixMs,
+    startTimeUnixMs,
     stream: STREAM,
     attributes: {},
   });
@@ -97,6 +110,7 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
       stream: STREAM,
       bounds: LAG_BOUNDS_MS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
   );
 
@@ -108,6 +122,7 @@ export function reduceLibrarian({ pluginData, timeUnixMs }) {
         stream: STREAM,
         bounds: RATIO_BOUNDS,
         timeUnixMs,
+        startTimeUnixMs,
       }),
     );
   }

@@ -19,6 +19,7 @@ import {
   histogramFrom,
   METRIC_PREFIX,
   LATENCY_BOUNDS_MS,
+  earliestTimestamp,
 } from '../reduce.mjs';
 
 const STREAM = 'retrieval';
@@ -64,6 +65,7 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
   const queries = readStream(pluginData, 'queries-');
   const commandRecords = STREAMS.flatMap(({ prefix }) => readStream(pluginData, prefix));
   const injections = readStream(pluginData, 'injections-');
+  const startTimeUnixMs = earliestTimestamp([...commandRecords, ...injections], timeUnixMs);
 
   const metrics = [
     ...countBy(commandRecords, {
@@ -71,36 +73,58 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
       stream: STREAM,
       by: ['command'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(injections, {
       name: 'retrieval_injection_via',
       stream: STREAM,
       by: ['via'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(injections, {
       name: 'retrieval_injection_level',
       stream: STREAM,
       by: ['level'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...countBy(queries, {
       name: 'retrieval_federated',
       stream: STREAM,
       by: ['federated'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(
       commandRecords.map((r) => r.result_count).filter((v) => typeof v === 'number'),
-      { name: 'retrieval_result_count', stream: STREAM, bounds: RESULT_COUNT_BOUNDS, timeUnixMs },
+      {
+        name: 'retrieval_result_count',
+        stream: STREAM,
+        bounds: RESULT_COUNT_BOUNDS,
+        timeUnixMs,
+        startTimeUnixMs,
+      },
     ),
     ...histogramFrom(
       commandRecords.map((r) => r.latency_ms).filter((v) => typeof v === 'number'),
-      { name: 'retrieval_latency_ms', stream: STREAM, bounds: LATENCY_BOUNDS_MS, timeUnixMs },
+      {
+        name: 'retrieval_latency_ms',
+        stream: STREAM,
+        bounds: LATENCY_BOUNDS_MS,
+        timeUnixMs,
+        startTimeUnixMs,
+      },
     ),
     ...histogramFrom(
       commandRecords.map((r) => r.prompt_length).filter((v) => typeof v === 'number'),
-      { name: 'retrieval_prompt_length', stream: STREAM, bounds: PROMPT_LENGTH_BOUNDS, timeUnixMs },
+      {
+        name: 'retrieval_prompt_length',
+        stream: STREAM,
+        bounds: PROMPT_LENGTH_BOUNDS,
+        timeUnixMs,
+        startTimeUnixMs,
+      },
     ),
   ];
 

@@ -59,6 +59,18 @@ export async function exportMetrics(metrics, opts = {}) {
     return { ok: false, sent: false, error: err.message };
   }
 
+  // An empty payload is not a successful export. Reaching here with nothing to
+  // send means either no telemetry exists yet, or every point was dropped as
+  // malformed (buildOtlpPayload skips those per-point so one bad record cannot
+  // void a whole run). POSTing an empty resourceMetrics would return 200 and
+  // let the caller stamp its "last successful export" marker, which would read
+  // as healthy delivery of nothing. Report it as not-sent instead, so the
+  // marker stays unstamped and /doctor keeps showing the export as overdue.
+  const pointCount = payload.resourceMetrics[0].scopeMetrics[0].metrics.length;
+  if (pointCount === 0) {
+    return { ok: false, sent: false, error: 'no metrics to export', payload };
+  }
+
   if (opts.dryRun) {
     // The human audit of the free-text rule (plan: "Verifying before the Pi
     // exists"): pretty-printed so a reviewer can actually read every field

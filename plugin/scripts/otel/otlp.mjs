@@ -93,12 +93,16 @@ export function buildOtlpPayload(metrics) {
   // when a receiver would have dropped just that point anyway.
   const built = [];
   for (const m of metrics) {
+    // Both of these are PROGRAMMER errors, not data defects, so they stay
+    // outside the try and void the batch: a reducer that stamps a disallowed
+    // attribute or names a type that does not exist is a bug to fix, not a
+    // point to skip. Only the data-shaped failures below get dropped.
     validateMetric(m);
+    const builder = BUILDERS[m.type];
+    if (!builder) {
+      throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
+    }
     try {
-      const builder = BUILDERS[m.type];
-      if (!builder) {
-        throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
-      }
       built.push(builder(m));
     } catch (err) {
       logError('otel.serialize.droppedPoint', err, { name: m.name, stream: m.stream });

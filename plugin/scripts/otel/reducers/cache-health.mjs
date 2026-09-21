@@ -108,18 +108,21 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
       stream: STREAM,
       bounds: RATIO_BOUNDS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(windowHitRates, {
       name: 'cache_health.window_hit_rate',
       stream: STREAM,
       bounds: RATIO_BOUNDS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...histogramFrom(lifetimeHitRates, {
       name: 'cache_health.lifetime_hit_rate',
       stream: STREAM,
       bounds: RATIO_BOUNDS,
       timeUnixMs,
+      startTimeUnixMs,
     }),
   ];
 

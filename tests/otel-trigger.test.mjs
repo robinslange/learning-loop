@@ -42,6 +42,26 @@ function armConfig(pluginData) {
   );
 }
 
+// An export with nothing to send is deliberately not a success (see
+// export.mjs: an empty payload would otherwise stamp the marker and read as
+// healthy delivery of nothing), so a fixture that expects a real export must
+// seed at least one event for the reducers to find.
+function seedTelemetry(pluginData) {
+  const dir = join(pluginData, 'provenance');
+  mkdirSync(dir, { recursive: true });
+  const month = new Date().toISOString().slice(0, 7);
+  writeFileSync(
+    join(dir, `events-${month}.jsonl`),
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      session_id: 'seed-session',
+      source: 'hook',
+      action: 'vault-write',
+      folder: 'inbox',
+    }) + '\n',
+  );
+}
+
 function markerPath(pluginData) {
   return join(pluginData, 'markers', 'otel-export');
 }
@@ -73,6 +93,7 @@ function runWorker(pluginData, endpoint) {
 test('worker writes the marker only after a successful export', async () => {
   await withPluginData(async (pluginData) => {
     armConfig(pluginData);
+    seedTelemetry(pluginData);
     const sink = await startOtlpSink();
     try {
       const r = await runWorker(pluginData, sink.url);
@@ -87,6 +108,7 @@ test('worker writes the marker only after a successful export', async () => {
 test('a failed export leaves the marker unwritten, so the next session-start retries', async () => {
   await withPluginData(async (pluginData) => {
     armConfig(pluginData);
+    seedTelemetry(pluginData);
     // Unroutable loopback port: connection refused, runExport/exportMetrics
     // returns {ok: false} without throwing.
     const r = await runWorker(pluginData, 'http://127.0.0.1:1');
@@ -98,6 +120,7 @@ test('a failed export leaves the marker unwritten, so the next session-start ret
 test('two concurrent worker runs produce one export (the lock holds)', async () => {
   await withPluginData(async (pluginData) => {
     armConfig(pluginData);
+    seedTelemetry(pluginData);
     const sink = await startOtlpSink();
     try {
       const spawnOne = () =>
@@ -133,6 +156,7 @@ function runMaybeSpawn(pluginData, { endpoint, enabled = true } = {}) {
   if (endpoint) env.OTEL_EXPORTER_OTLP_ENDPOINT = endpoint;
   else delete env.OTEL_EXPORTER_OTLP_ENDPOINT;
   if (enabled) armConfig(pluginData);
+  seedTelemetry(pluginData);
   return spawnSync(
     process.execPath,
     [

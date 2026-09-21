@@ -194,8 +194,12 @@ test('every action named in skill or agent prose is emittable', () => {
   for (const dir of SCAN_DIRS) {
     for (const file of walk(join(ROOT, dir))) {
       const text = readFileSync(file, 'utf-8');
-      // Both spellings: `action: "x"` in prose, and "action":"x" in a payload.
-      for (const m of text.matchAll(/action"?\s*:\s*"([a-z][a-z-]*)"/g)) {
+      // Covers both quote styles and digits/underscores, not just the two
+      // spellings seen today: `action: "x"` in prose, "action":"x" in a
+      // payload, and single-quoted variants. A leading `"` is required to be
+      // part of the key or absent entirely, so `"actions":{...}` (a different
+      // field) cannot match.
+      for (const m of text.matchAll(/\baction"?\s*:\s*['"]([a-z][a-z0-9_-]*)['"]/g)) {
         if (!named.has(m[1])) named.set(m[1], file);
       }
     }

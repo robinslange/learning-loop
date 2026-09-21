@@ -104,3 +104,46 @@ test('a malformed metric list produces {ok:false, error} instead of throwing int
     await sink.close();
   }
 });
+
+// An empty payload must not count as a successful export. If it did, a corrupt
+// corpus whose every point drops as malformed would POST an empty
+// resourceMetrics, get a 200, and let the worker stamp its last-success
+// marker: the operator would see a healthy export delivering nothing.
+test('an empty metric list is not sent and is not reported as success', async () => {
+  const sink = await startOtlpSink();
+  try {
+    const result = await exportMetrics([], { endpoint: sink.url, enabled: true });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.sent, false);
+    assert.match(result.error, /no metrics/);
+    assert.strictEqual(sink.received.length, 0, 'nothing should reach the endpoint');
+  } finally {
+    await sink.close();
+  }
+});
+
+test('a batch whose every point is malformed is not reported as success', async () => {
+  const sink = await startOtlpSink();
+  try {
+    const result = await exportMetrics(
+      [
+        {
+          name: 'bad.hist',
+          type: 'histogram',
+          stream: 'hook-errors',
+          timeUnixMs: 1_700_000_000_000,
+          count: 5,
+          sum: 1,
+          bucketCounts: [1, 2],
+          explicitBounds: [10, 50, 100],
+        },
+      ],
+      { endpoint: sink.url, enabled: true },
+    );
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.sent, false);
+    assert.strictEqual(sink.received.length, 0);
+  } finally {
+    await sink.close();
+  }
+});
