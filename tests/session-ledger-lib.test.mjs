@@ -538,6 +538,37 @@ test('latestLedger returns the newest ledger by mtime with its frontmatter statu
   });
 });
 
+test('latestLedger stats only the five newest-named ledgers, picking the mtime-newest among them', () => {
+  withTmp((root) => {
+    const dir = join(root, '4-projects', 'p', 'ledger');
+    mkdirSync(dir, { recursive: true });
+    // Seven names, days 20 through 14 descending: only the top five (20..16)
+    // are ever statted. Within that window the oldest NAME (16) gets the
+    // newest mtime, proving the winner is chosen by mtime, not name order.
+    // The two oldest names (15, 14) get the newest mtime of all seven; if the
+    // walk were not capped, one of them would win instead.
+    const days = [20, 19, 18, 17, 16, 15, 14];
+    const names = days.map((d) => `2026-09-${d}-x-11111111.md`);
+    days.forEach((d, i) => {
+      writeFileSync(join(dir, names[i]), `---\ndate: 2026-09-${d}\nstatus: open\n---\n`);
+    });
+    const now = Date.now();
+    names.forEach((name, i) => {
+      utimesSync(join(dir, name), new Date(now - i * 1000), new Date(now - i * 1000));
+    });
+    // Give the two out-of-window names (15, 14) the newest mtime of all seven.
+    utimesSync(join(dir, names[5]), new Date(now + 60_000), new Date(now + 60_000));
+    utimesSync(join(dir, names[6]), new Date(now + 120_000), new Date(now + 120_000));
+    // And make the oldest in-window name (16) the newest mtime among the five.
+    utimesSync(join(dir, names[4]), new Date(now + 30_000), new Date(now + 30_000));
+    assert.deepEqual(latestLedger(root, 'p'), {
+      relPath: `4-projects/p/ledger/${names[4]}`,
+      date: '2026-09-16',
+      status: 'open',
+    });
+  });
+});
+
 test('shouldEmitSummary fires on SessionEnd, on first flush, and after the interval', () => {
   const now = 1_000_000;
   assert.equal(shouldEmitSummary(null, now, false, 600_000), true);

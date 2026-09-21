@@ -327,7 +327,12 @@ export function latestLedger(vaultRoot, project) {
     if (err?.code === 'ENOENT') return null;
     throw err;
   }
-  for (const name of names) {
+  // Filenames start with YYYY-MM-DD, so a descending sort already puts the
+  // newest sessions first; statting only the top five bounds the walk on a
+  // project with thousands of ledgers while still picking the true
+  // newest-by-mtime among the names that could plausibly be it.
+  const candidates = names.sort().reverse().slice(0, 5);
+  for (const name of candidates) {
     const mtime = statSync(join(dir, name)).mtimeMs;
     if (!newest || mtime > newest.mtime) newest = { name, mtime };
   }
