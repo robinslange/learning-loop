@@ -372,6 +372,64 @@ test('a second Stop overwrites the same note and does not re-emit inside the int
   r2.cleanup();
 });
 
+test('the marker seeded before Stop wins the pin: both path and started_head survive, the note lands at the seeded path', () => {
+  const sid = randomUUID();
+  let ctx;
+  const seededPath = '4-projects/my-repo/ledger/2020-01-01-seeded-session-aaaaaaaa.md';
+  const seededHead = 'a'.repeat(40);
+  const r = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      // Seeded BEFORE this Stop runs, standing in for a first flush that
+      // already won the pin with a different path and started_head than
+      // this flush would independently compute (a different label, a
+      // different HEAD at process start).
+      writeFileSync(
+        join(pluginDataDir, 'markers', `ledger-${sid}.json`),
+        JSON.stringify({
+          path: seededPath,
+          started_ts: '2020-01-01T00:00:00.000Z',
+          started_head: seededHead,
+        }),
+      );
+      writeFileSync(join(TMP, `claude-session-label-${sid}.txt`), 'This Flush Own Label');
+      ctx = { vault, repo };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: sid,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
+      last_assistant_message: 'second writer, must not clobber the pin',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r.exitCode, 0, r.stderr);
+  const marker = JSON.parse(
+    readFileSync(join(r.pluginDataDir, 'markers', `ledger-${sid}.json`), 'utf8'),
+  );
+  assert.equal(marker.path, seededPath, 'first writer path must survive under the lock');
+  assert.equal(marker.started_head, seededHead, 'first writer started_head must survive too');
+  assert.ok(
+    existsSync(join(ctx.vault, seededPath)),
+    "the note must be written at the pinned path, not this flush's own computed path",
+  );
+  const files = ledgerFiles(ctx.vault);
+  assert.deepEqual(files, [seededPath.split('/').pop()]);
+  r.cleanup();
+});
+
+test('a fresh sandbox with no markers/ dir yet does not log a session-ledger.lock error', () => {
+  const r = run({});
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.doesNotMatch(r.stderr, /session-ledger\.lock/);
+  r.cleanup();
+});
+
 test('SessionEnd stamps status ended, the reason, and emits final:true', () => {
   const r = run({ event: 'SessionEnd', reason: 'clear' });
   assert.equal(r.exitCode, 0, r.stderr);
