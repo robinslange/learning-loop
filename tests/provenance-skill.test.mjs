@@ -3,8 +3,8 @@
 // and both emitProvenance call sites that use it: a caller that omits `skill`
 // gains it from the session's current-skill marker; session-summary and
 // session-start never gain one even when a marker is present. Also covers
-// the closed-set validation: any skill value (caller-supplied or derived)
-// that does not name an installed skill becomes 'unknown'.
+// shape-based validation: any skill value (caller-supplied or derived) that
+// is not a well-formed `name` or `plugin:name` identifier becomes 'unknown'.
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,16 +16,38 @@ import { deriveSkill, normaliseSkill } from '../plugin/scripts/lib/provenance-sk
 import { pluginRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 describe('normaliseSkill', () => {
-  it('normalises a prefixed skill to its bare name', () => {
+  it('normalises a learning-loop-prefixed skill to its bare name', () => {
     assert.equal(normaliseSkill('learning-loop:reflect', pluginRoot()), 'reflect');
   });
 
-  it('normalises a bare skill to itself', () => {
+  it('normalises a bare learning-loop skill to itself', () => {
     assert.equal(normaliseSkill('reflect', pluginRoot()), 'reflect');
   });
 
-  it('rejects free text that is not an installed skill', () => {
+  it("keeps another plugin's prefixed identifier as-is, lower-cased", () => {
+    assert.equal(
+      normaliseSkill('superpowers:brainstorming', pluginRoot()),
+      'superpowers:brainstorming',
+    );
+    assert.equal(
+      normaliseSkill('Episodic-Memory:Remembering-Conversations', pluginRoot()),
+      'episodic-memory:remembering-conversations',
+    );
+  });
+
+  it('keeps a bare non-learning-loop identifier as-is', () => {
+    assert.equal(normaliseSkill('update-config', pluginRoot()), 'update-config');
+  });
+
+  it('rejects free text that is not an identifier shape', () => {
     assert.equal(normaliseSkill('/anything free text', pluginRoot()), null);
+    assert.equal(normaliseSkill('a b', pluginRoot()), null);
+    assert.equal(normaliseSkill('x:y:z', pluginRoot()), null);
+    assert.equal(normaliseSkill('../etc', pluginRoot()), null);
+  });
+
+  it('rejects an identifier over 128 characters', () => {
+    assert.equal(normaliseSkill('a'.repeat(200), pluginRoot()), null);
   });
 });
 
@@ -93,12 +115,22 @@ describe('deriveSkill (unit)', () => {
     assert.equal(record.skill, 'unknown');
   });
 
-  it('rejects an unrecognised marker skill as unknown', () => {
+  it('passes through a marker skill that is not one of ours but is well-shaped', () => {
     writeMarker(MARKER_PATHS.currentSkill(dataDir, 's5'), {
-      skill: 'not-a-real-skill',
+      skill: 'superpowers:brainstorming',
       ts: Date.now(),
     });
     const record = { action: 'vault-write', session_id: 's5' };
+    deriveSkill(record, dataDir, pluginRoot());
+    assert.equal(record.skill, 'superpowers:brainstorming');
+  });
+
+  it('rejects a malformed marker skill as unknown', () => {
+    writeMarker(MARKER_PATHS.currentSkill(dataDir, 's6'), {
+      skill: '/anything free text',
+      ts: Date.now(),
+    });
+    const record = { action: 'vault-write', session_id: 's6' };
     deriveSkill(record, dataDir, pluginRoot());
     assert.equal(record.skill, 'unknown');
   });

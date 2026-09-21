@@ -26,6 +26,9 @@ let _knownSkillNames = null;
 
 // Directory names under plugin/skills/ that contain a SKILL.md. Memoised per
 // process: the skill directory is fixed for the life of a hook/worker run.
+// An empty read is never cached -- a transient miss (skills dir not yet
+// mounted, a race at process start) would otherwise poison every later call
+// in the same process.
 export function knownSkillNames(pluginRoot = defaultPluginRoot()) {
   if (_knownSkillNames) return _knownSkillNames;
   const skillsDir = join(pluginRoot, 'skills');
@@ -39,16 +42,33 @@ export function knownSkillNames(pluginRoot = defaultPluginRoot()) {
   } catch (err) {
     logError('provenance-skill.knownSkillNames', err);
   }
-  _knownSkillNames = names;
-  return _knownSkillNames;
+  if (names.size > 0) _knownSkillNames = names;
+  return names;
 }
 
-// Canonical bare skill name when `value` names an installed skill, bare
-// (`reflect`) or prefixed (`learning-loop:reflect`); null otherwise.
+// A skill identifier is `name` or `plugin:name`, each segment
+// [a-z0-9][a-z0-9._-]{0,63} (case-insensitive), at most two segments, total
+// length <= 128. Anything else -- spaces, slashes, a leading dot, more than
+// one colon -- is free text, not an identifier.
+const SKILL_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}(:[a-z0-9][a-z0-9._-]{0,63})?$/i;
+
+// Canonicalises a skill identifier by shape, not by directory lookup against
+// a fixed corpus: the Skill tool also invokes other plugins' skills
+// (`superpowers:brainstorming`, `ygrep:ygrep`), and coercing every one of
+// those to 'unknown' was wave 4's bug. A value that matches SKILL_ID_RE is
+// lower-cased and, when it names one of learning-loop's own skills (bare or
+// `learning-loop:`-prefixed), returned as the bare name -- the convention
+// tests and the marker already pin, so `reflect` and `learning-loop:reflect`
+// collapse to one label. Any other well-shaped identifier (another plugin's
+// `plugin:name`, or a bare name that isn't one of ours) passes through
+// as-is: those are legitimate values, not this module's business to rewrite.
+// Malformed shapes return null.
 export function normaliseSkill(value, pluginRoot = defaultPluginRoot()) {
-  if (typeof value !== 'string' || !value) return null;
-  const bare = value.startsWith('learning-loop:') ? value.slice('learning-loop:'.length) : value;
-  return knownSkillNames(pluginRoot).has(bare) ? bare : null;
+  if (typeof value !== 'string' || value.length > 128 || !SKILL_ID_RE.test(value)) return null;
+  const lower = value.toLowerCase();
+  const bare = lower.startsWith('learning-loop:') ? lower.slice('learning-loop:'.length) : lower;
+  if (knownSkillNames(pluginRoot).has(bare)) return bare;
+  return lower;
 }
 
 // Rejects a skill value that will not normalise: logs the length only (never
@@ -64,8 +84,8 @@ function validatedSkill(value, pluginRoot = defaultPluginRoot()) {
 
 // Sets record.skill from the session's current-skill marker when the caller
 // omitted (or emptied) it, and validates whatever skill ends up on the
-// record -- caller-supplied or derived -- against the installed skill set.
-// Mutates and returns record for chaining.
+// record -- caller-supplied or derived -- by identifier shape. Mutates and
+// returns record for chaining.
 export function deriveSkill(record, pluginData, pluginRoot = defaultPluginRoot()) {
   if (NO_DERIVE_ACTIONS.has(record.action)) return record;
   if (record.skill) {
