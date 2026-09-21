@@ -126,7 +126,7 @@ flowchart LR
 
 A vault note write triggers `pre-write-check.js` before the write and the `post-tool.js` dispatcher after. The `ll-search watch` daemon reindexes continuously as notes change; nothing waits for session end.
 
-The session ledger (`hooks/session-ledger.js`) is the one vault writer outside the tool path: it writes with `fs` directly, so `pre-write-check.js` does not gate it, and the watch daemon indexes it like any other note. This is a deliberate privacy choice: the note contains transcript text (the first prompt, up to 200 characters; the last assistant message, up to 600; skill args and agent descriptions, up to 80 each), passed through the credential scrubber before it is written, and pinned `visibility: private` so federation never sends it onward regardless of any visibility glob.
+The session ledger (`hooks/session-ledger.js`) is the one vault writer outside the tool path: it writes with `fs` directly, so `pre-write-check.js` does not gate it, and the watch daemon indexes it like any other note. This is a deliberate privacy choice: the note contains transcript text (the first prompt, up to 200 characters; the last assistant message, up to 600; skill args and agent descriptions, up to 80 each), passed through the credential scrubber before it is written, and pinned `visibility: private` so federation never sends it onward regardless of any visibility glob. That pin is a convention honoured by note tooling and federation's globs, not an access control: it does not restrict who can read the file on disk.
 
 ```mermaid
 flowchart LR
