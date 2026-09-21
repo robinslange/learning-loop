@@ -25,6 +25,8 @@ export const CHECK_IDS = Object.freeze({
   'hook-errors': 'hook-errors',
   'injection-shadow-gate': 'injection-shadow-gate',
   'abi-drift': 'abi-drift',
+  'otel-export-status': 'otel-export-status',
+  'otel-error-log': 'otel-error-log',
   // full-only checks
   'node-version': 'node-version',
   'claude-version': 'claude-version',

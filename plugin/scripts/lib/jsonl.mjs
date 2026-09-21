@@ -20,6 +20,7 @@ export function appendJsonlLine(path, obj) {
   const line = JSON.stringify(obj) + '\n';
   try {
     mkdirSync(dirname(path), { recursive: true });
+    // eslint-disable-next-line learning-loop/no-empty-catch -- dir already exists or is uncreatable; the openSync below surfaces the real failure.
   } catch {}
   let fd;
   try {
@@ -29,6 +30,7 @@ export function appendJsonlLine(path, obj) {
     if (fd !== undefined) {
       try {
         closeSync(fd);
+        // eslint-disable-next-line learning-loop/no-empty-catch -- fd already gone; nothing left to close.
       } catch {}
     }
   }
@@ -65,6 +67,7 @@ function lastLine(path) {
     if (fd !== undefined) {
       try {
         closeSync(fd);
+        // eslint-disable-next-line learning-loop/no-empty-catch -- fd already gone; nothing left to close.
       } catch {}
     }
   }
@@ -118,9 +121,8 @@ export function appendJsonlLineDeduped(path, record, now = Date.now()) {
       ) {
         return false;
       }
-    } catch {
-      // Malformed last line: fall through and append normally.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- malformed last line: fall through and append normally.
+    } catch {}
   }
   appendJsonlLine(path, record);
   return true;

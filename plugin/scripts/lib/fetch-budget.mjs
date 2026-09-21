@@ -33,7 +33,6 @@ export function bumpCount(sessionId, pluginData) {
     const file = budgetFile(sessionId, pluginData);
     const current = readCount(sessionId, pluginData);
     writeFileSync(file, String(current + 1), 'utf8');
-  } catch {
-    // never throw — a write failure must not break fetch
-  }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- never throw, a write failure must not break fetch.
+  } catch {}
 }

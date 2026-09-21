@@ -22,7 +22,7 @@ ll-run provenance-emit.js '{"agent":"dream","skill":"dream","action":"ACTION","t
 ```
 Where ACTION is one of: `merge`, `resolve`, `abstract`, `compress`, `prune`, `link`, `normalize`.
 
-At start: `{"action":"session-start"}`. At end: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N}` + run `ll-run provenance-consolidate.mjs`.
+At start: `{"action":"session-start"}`. At end, alongside the operator counters, include the common outcome shape: `items_in` (memory files considered), `items_out` (sum of the operator counters), `items_flagged` (0, dream has no flagging concept), `duration_ms`: `{"action":"session-end","merged":N,"resolved":N,"abstracted":N,"compressed":N,"pruned":N,"linked":N,"normalized":N,"items_in":N,"items_out":N,"items_flagged":0,"duration_ms":N}` + run `ll-run provenance-consolidate.mjs`.
 
 ## Phase 1: Orient
 

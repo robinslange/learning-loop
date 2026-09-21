@@ -5,16 +5,16 @@
 //   - withLock() for mutating writes (appendItem, expireStaleItems, saveState)
 //   - logError() instead of bare catch {}
 //
-// appendItem takes the queue lock too: appendFileSync is only atomic on POSIX
-// O_APPEND semantics, which Windows does not guarantee, so concurrent appends
-// can interleave without the lock. Full-file rewrites go through tmp+rename so
-// a crash mid-write never truncates the queue or state file.
+// appendItem takes the queue lock too: even appendJsonlLine's openSync('a')
+// + writeSync is only atomic on POSIX O_APPEND semantics, which Windows does
+// not guarantee, so concurrent appends can interleave without the lock.
+// Full-file rewrites go through tmp+rename so a crash mid-write never
+// truncates the queue or state file.
 // readQueue reads JSONL line-by-line without JSON.parse(readFileSync) monolith.
 
 import {
   readFileSync,
   writeFileSync,
-  appendFileSync,
   existsSync,
   mkdirSync,
   unlinkSync,
@@ -28,6 +28,7 @@ import { safeLoad } from '../lib/safe-load.mjs';
 import { withLock } from '../lib/file-lock.mjs';
 import { logError } from '../lib/log.mjs';
 import { DATA_PATHS } from '../lib/paths.mjs';
+import { appendJsonlLine } from '../lib/jsonl.mjs';
 
 function librarianDir() {
   const pd = getPluginData();
@@ -58,7 +59,7 @@ function writeFileAtomic(path, data) {
 export function appendItem(item) {
   withLock(queuePath(), {}, () => {
     ensureDir();
-    appendFileSync(queuePath(), JSON.stringify(item) + '\n', { encoding: 'utf-8' });
+    appendJsonlLine(queuePath(), item);
   });
 }
 

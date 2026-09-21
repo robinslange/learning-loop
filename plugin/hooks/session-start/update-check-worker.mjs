@@ -14,6 +14,7 @@
 import { writeFileSync, readFileSync } from 'node:fs';
 import https from 'node:https';
 import http from 'node:http';
+import { logError } from '../../scripts/lib/log.mjs';
 
 const [
   cacheFile,
@@ -46,7 +47,9 @@ function stampFailure() {
         error: true,
       }),
     );
-  } catch {}
+  } catch (err) {
+    logError('update-check-worker.stampFailure', err);
+  }
   process.exit(0);
 }
 
@@ -66,7 +69,9 @@ const req = mod.get(
       let latest = '';
       try {
         latest = (JSON.parse(data).tag_name || '').replace(/^v/, '');
-      } catch {}
+      } catch (err) {
+        logError('update-check-worker.parse', err);
+      }
       if (!latest) {
         stampFailure();
         return;
@@ -86,7 +91,9 @@ const req = mod.get(
             checked: Math.floor(Date.now() / 1000),
           }),
         );
-      } catch {}
+      } catch (err) {
+        logError('update-check-worker.write', err);
+      }
       // Explicit exit: the global keep-alive agent otherwise holds the
       // socket (and the process) open until the request timeout fires.
       process.exit(0);

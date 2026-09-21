@@ -28,7 +28,7 @@ This skill emits provenance events for pipeline observability.
 
 **At session start (after scope identified):**
 ```bash
-ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent":"SCOPE","config":{"note_count":N}}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-start","intent_kind":"scope","config":{"note_count":N}}'
 ```
 
 **After scoring and verification, emit each finding via provenance-emit.js:**
@@ -53,9 +53,9 @@ ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"score","
 
 A note with no finding events is a pass.
 
-**Then emit session-end:**
+**Then emit session-end.** Alongside the existing counters, include the common outcome shape: `items_in` (notes checked), `items_out` (notes checked minus notes flagged), `items_flagged` (notes flagged), `duration_ms`:
 ```bash
-ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N}'
+ll-run provenance-emit.js '{"agent":"verify","skill":"verify","action":"session-end","notes_checked":N,"notes_flagged":N,"findings_total":N,"fixes_applied":N,"items_in":N,"items_out":N,"items_flagged":N,"duration_ms":N}'
 ```
 
 A note with zero score records is a pass.

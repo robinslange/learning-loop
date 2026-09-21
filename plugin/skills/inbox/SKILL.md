@@ -24,9 +24,9 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 ll-run provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-start"}'
 ```
 
-**At session end:**
+**At session end.** Alongside the existing counters, include the common outcome shape: `items_in` (notes triaged), `items_out` (promoted plus merged), `items_flagged` (limbo), `duration_ms`:
 ```bash
-ll-run provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"limbo":N}'
+ll-run provenance-emit.js '{"agent":"inbox","skill":"inbox","action":"session-end","promoted":N,"deleted":N,"merged":N,"rewrites":N,"limbo":N,"items_in":N,"items_out":N,"items_flagged":N,"duration_ms":N}'
 ```
 
 Per-note tracking is automatic for main-thread writes via the PostToolUse hook; subagent writes and edits (note-writer files, the organiser's own Edits and mv-promotions) bypass it and are covered by the Step 2 hook replays (2a for note-writer output, 2c for the agent's touched-files inventory).

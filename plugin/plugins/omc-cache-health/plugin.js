@@ -37,7 +37,6 @@
 // and counted every render as a new turn.
 
 import {
-  appendFileSync,
   readFileSync,
   writeFileSync,
   mkdirSync,
@@ -48,6 +47,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
+import { appendJsonlLine } from '../../scripts/lib/jsonl.mjs';
+import { logError } from '../../scripts/lib/log.mjs';
 
 export const meta = {
   name: 'cache-health',
@@ -90,8 +91,10 @@ function sweepStaleSessions(keepSid) {
       if (keep.has(p)) continue;
       try {
         if (statSync(p).mtimeMs < cutoff) unlinkSync(p);
+        // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort sweep; a stale file left behind just waits for the next sweep.
       } catch {}
     }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort sweep must never cost the statusline its render.
   } catch {}
 }
 
@@ -111,12 +114,14 @@ function resolveLogPath(configPath) {
       const marker = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
       const saved = readFileSync(marker, 'utf8').trim();
       if (saved && existsSync(saved)) pluginData = saved;
+      // eslint-disable-next-line learning-loop/no-empty-catch -- no marker file means no plugin data dir; caller falls back to null.
     } catch {}
   }
   if (!pluginData) return null;
   const dir = join(pluginData, 'retrieval');
   try {
     mkdirSync(dir, { recursive: true });
+    // eslint-disable-next-line learning-loop/no-empty-catch -- dir already exists or is uncreatable; the append below surfaces the real failure.
   } catch {}
   const month = new Date().toISOString().slice(0, 7);
   return join(dir, `cache-health-${month}.jsonl`);
@@ -150,6 +155,7 @@ function writeDedupe(sessionId, read, create, uncached) {
       }),
       'utf8',
     );
+    // eslint-disable-next-line learning-loop/no-empty-catch -- a lost dedupe marker only means the next render re-counts this turn; the statusline must not throw.
   } catch {}
 }
 
@@ -166,6 +172,7 @@ function loadSessionState(sid) {
 function saveSessionState(sid, state) {
   try {
     writeFileSync(sessionStatePath(sid), JSON.stringify(state), 'utf8');
+    // eslint-disable-next-line learning-loop/no-empty-catch -- a lost session-state write only resets the rolling window next render; the statusline must not throw.
   } catch {}
 }
 
@@ -258,8 +265,12 @@ export function render(data, config) {
           used_percentage: data.context_window?.used_percentage,
           total_cost_usd: data.cost?.total_cost_usd,
         };
-        appendFileSync(logPath, JSON.stringify(record) + '\n');
-      } catch {}
+        appendJsonlLine(logPath, record);
+      } catch (err) {
+        // Now a counted write failure: log.mjs's error sink persists this
+        // scope durably, and the phase 2 reducer counts records by scope.
+        logError('cache-health.appendJsonlLine', err);
+      }
   } else if (!state) {
     return null;
   }

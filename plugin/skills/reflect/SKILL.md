@@ -238,10 +238,10 @@ Keep it to 2-4 lines. The user can see the diffs if they want details.
 
 ### Step 6: Mark Reflection Complete
 
-Emit the session-end provenance event and write the completion timestamp in one final block. Substitute the real counts for the `N`s (vault notes written, auto-memories written this session). Emit first, stamp last:
+Emit the session-end provenance event and write the completion timestamp in one final block. Substitute the real counts for the `N`s (vault notes written, auto-memories written this session). Alongside those, include the common outcome shape: `items_in` (vault notes surfaced this session), `items_out` (vault_notes plus auto_memories written), `items_flagged` (0, reflect has no flagging concept), `duration_ms`. Emit first, stamp last:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N}'
+ll-run provenance-emit.js '{"agent":"reflect","skill":"reflect","action":"session-end","vault_notes":N,"auto_memories":N,"items_in":N,"items_out":N,"items_flagged":0,"duration_ms":N}'
 ll-run marker.mjs stamp last-reflect
 ```
 

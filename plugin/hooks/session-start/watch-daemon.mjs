@@ -46,9 +46,8 @@ export async function run(ctx) {
         logError('session-start.watch-daemon.legacyReap', err);
       }
     }
-  } catch {
-    // No legacy pidfile, nothing to migrate.
-  }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- no legacy pidfile is the expected common case, nothing to migrate.
+  } catch {}
   try {
     rmSync(legacyPidPath, { force: true });
     rmSync(legacyVersionPath, { force: true });

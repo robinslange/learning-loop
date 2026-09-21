@@ -168,6 +168,13 @@ export const env = Object.freeze({
   OLLAMA_URL: pick('OLLAMA_URL', null),
   MODEL: pick('MODEL', null),
 
+  // --- OTEL export ---
+  // Standard OTLP env var: the Alloy/collector base URL, e.g.
+  // http://raspberrypi.local:4318. Export is off unless this is set AND the
+  // config.json otel.export_enabled opt-in is true; see scripts/otel/export.mjs
+  // and docs/plans/otel-consolidation.md, "Config and consent".
+  OTEL_EXPORTER_OTLP_ENDPOINT: pick('OTEL_EXPORTER_OTLP_ENDPOINT', null),
+
   // --- Cascade-detection sentinels ---
   // True only when the var was explicitly set in the environment (not defaulted).
   // Used by callers that need to distinguish "user set this" from "we defaulted it".

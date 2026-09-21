@@ -34,15 +34,87 @@ describe('provenance dedupe', () => {
 
   it('writes one provenance line per unique (session_id, agent_id, path)', async () => {
     const mod = await import('../plugin/hooks/lib/common.mjs?bust=1');
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'write' });
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/b.md', action: 'write' });
+    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'vault-write' });
+    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'vault-write' });
+    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/b.md', action: 'vault-write' });
     const files = readdirSync(join(dataDir, 'provenance')).filter((f) => f.startsWith('events-'));
     assert.equal(files.length, 1);
     const lines = readFileSync(join(dataDir, 'provenance', files[0]), 'utf8')
       .trim()
       .split('\n');
     assert.equal(lines.length, 2, 'expected 2 records (duplicate dropped)');
+  });
+});
+
+describe('emitProvenance intent hardening', () => {
+  let dataDir;
+  let fakeHome;
+  let savedHome;
+  before(() => {
+    fakeHome = mkdtempSync(join(tmpdir(), 'll-common-home-'));
+    savedHome = process.env.HOME;
+    process.env.HOME = fakeHome;
+
+    dataDir = mkdtempSync(join(tmpdir(), 'll-common-test-'));
+    process.env.CLAUDE_PLUGIN_DATA = dataDir;
+  });
+  after(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(fakeHome, { recursive: true, force: true });
+    delete process.env.CLAUDE_PLUGIN_DATA;
+    if (savedHome !== undefined) process.env.HOME = savedHome;
+    else delete process.env.HOME;
+  });
+
+  function readEvents() {
+    const dir = join(dataDir, 'provenance');
+    return readdirSync(dir)
+      .filter((f) => f.startsWith('events-'))
+      .flatMap((f) =>
+        readFileSync(join(dir, f), 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => JSON.parse(l)),
+      );
+  }
+
+  it('drops free-text intent but keeps the rest of the record', async () => {
+    const mod = await import('../plugin/hooks/lib/common.mjs?bust=2');
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: 'intent-test-1.md',
+      action: 'vault-write',
+      intent: 'OPA for schema-driven authorisation',
+    });
+    const [event] = readEvents();
+    assert.ok(event, 'expected an event to be written');
+    assert.equal(event.agent_id, 'a1');
+    assert.ok(!('intent' in event), 'free-text intent must not survive onto the record');
+  });
+
+  it('drops an unbounded intent_kind but keeps a bounded one', async () => {
+    const mod = await import('../plugin/hooks/lib/common.mjs?bust=2');
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: 'intent-test-2.md',
+      action: 'vault-write',
+      intent_kind: 'not-a-real-kind',
+    });
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: 'intent-test-3.md',
+      action: 'vault-write',
+      intent_kind: 'scope',
+    });
+    const events = readEvents().filter((e) => ['intent-test-2.md', 'intent-test-3.md'].includes(e.path));
+    const unbounded = events.find((e) => e.path === 'intent-test-2.md');
+    const bounded = events.find((e) => e.path === 'intent-test-3.md');
+    assert.ok(!('intent_kind' in unbounded));
+    assert.equal(bounded.intent_kind, 'scope');
   });
 });
 

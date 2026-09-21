@@ -38,12 +38,12 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 
 **At session start (after scope identified):**
 ```bash
-ll-run provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-start","intent":"TOPIC","config":{"depth":"DEPTH"}}'
+ll-run provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-start","intent_kind":"topic","config":{"depth":"DEPTH"}}'
 ```
 
-**At session end:**
+**At session end.** Alongside the existing counters, include the common outcome shape: `items_in` (notes analysed), `items_out` (notes analysed minus tensions plus counterpoints created), `items_flagged` (thin_ice), `duration_ms`:
 ```bash
-ll-run provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N}'
+ll-run provenance-emit.js '{"agent":"gaps","skill":"gaps","action":"session-end","notes_analysed":N,"counterpoints_created":N,"rewrites":N,"thin_ice":N,"tensions":N,"blindspots":N,"items_in":N,"items_out":N,"items_flagged":N,"duration_ms":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

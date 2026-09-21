@@ -118,6 +118,7 @@ function secondLevelForSubsystemDirs(repo) {
         .filter((e) => e.isDirectory())
         .map((e) => e.name)
         .slice(0, 20);
+      // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort profiling; an unreadable subsystem dir just leaves it out of the profile.
     } catch {}
   }
   return result;
@@ -145,6 +146,7 @@ function gitInfo(repo) {
       stdio: ['ignore', 'pipe', 'ignore'],
       env,
     }).trim();
+    // eslint-disable-next-line learning-loop/no-empty-catch -- no origin remote is ordinary (e.g. a fresh local repo); origin stays null.
   } catch {}
   try {
     head = execFileSync('git', ['-C', repo, 'rev-parse', 'HEAD'], {
@@ -152,6 +154,7 @@ function gitInfo(repo) {
       stdio: ['ignore', 'pipe', 'ignore'],
       env,
     }).trim();
+    // eslint-disable-next-line learning-loop/no-empty-catch -- no HEAD is ordinary (e.g. an empty repo); head stays null.
   } catch {}
   return { origin, head };
 }

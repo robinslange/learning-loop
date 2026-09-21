@@ -27,6 +27,8 @@ import {
   checkHookErrors,
   checkInjectionShadowGate,
   checkAbiDrift,
+  checkOtelExportStatus,
+  checkOtelErrorLog,
   recentMonths,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
@@ -75,6 +77,8 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'hook-errors',
     'injection-shadow-gate',
     'abi-drift',
+    'otel-export-status',
+    'otel-error-log',
   ];
   const full = [
     'node-version',
@@ -1274,6 +1278,99 @@ test('checkHookErrors: ts-less first line is displaced by later line with ts', (
   // The ts-bearing latest (i=5, ts 05:00) must appear in detail, not the ts-less first line
   assert.match(result.detail, /real-module-5/);
   assert.doesNotMatch(result.detail, /ts-less-module/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// --- checkOtelExportStatus (TD) ---
+
+test('checkOtelExportStatus: inactive when the opt-in flag is not set', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-status-'));
+  const result = checkOtelExportStatus({ pluginData: dir, isExportEnabled: () => false });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /inactive/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkOtelExportStatus: active but no export has ever succeeded yet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-status-'));
+  const result = checkOtelExportStatus({ pluginData: dir, isExportEnabled: () => true });
+  assert.equal(result.status, 'fail');
+  assert.equal(result.severity, 'warn');
+  assert.match(result.detail, /active/);
+  assert.match(result.detail, /no export has completed/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkOtelExportStatus: active, reports the age in seconds of the last successful export', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-status-'));
+  mkdirSync(join(dir, 'markers'), { recursive: true });
+  const markerFile = join(dir, 'markers', 'otel-export');
+  writeFileSync(markerFile, 'true');
+  const now = Date.now() + 30_000; // marker is 30s old relative to `now`
+  const result = checkOtelExportStatus({ pluginData: dir, isExportEnabled: () => true, now });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /active/);
+  assert.match(result.detail, /30s? ago|age.*30/i);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkOtelExportStatus: ok with no pluginData (skipped)', () => {
+  const result = checkOtelExportStatus({ isExportEnabled: () => true });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /skipped/);
+});
+
+// --- checkOtelErrorLog (TD) ---
+
+test('checkOtelErrorLog: ok when no log file present', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-errlog-'));
+  const result = checkOtelErrorLog({ pluginData: dir });
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /no errors logged/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkOtelErrorLog: ok with no pluginData (skipped)', () => {
+  const result = checkOtelErrorLog({});
+  assert.equal(result.status, 'ok');
+  assert.match(result.detail, /skipped/);
+});
+
+test('checkOtelErrorLog: counts current-month errors and names the top scope', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-errlog-count-'));
+  mkdirSync(join(dir, 'logs'), { recursive: true });
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    { level: 'error', scope: 'watch.stop.unlinkPid', msg: 'x' },
+    { level: 'error', scope: 'watch.stop.unlinkPid', msg: 'x' },
+    { level: 'error', scope: 'watch.stop.unlinkPid', msg: 'x' },
+    { level: 'error', scope: 'provenance.invalidAction', msg: 'x' },
+    // Non-error levels must not be counted.
+    { level: 'info', scope: 'watch.stop.unlinkPid', msg: 'x' },
+  ];
+  writeFileSync(
+    join(dir, 'logs', `log-${month}.jsonl`),
+    lines.map((l) => JSON.stringify(l)).join('\n') + '\n',
+  );
+  const result = checkOtelErrorLog({ pluginData: dir, now });
+  assert.match(result.detail, /4 error/);
+  assert.match(result.detail, /watch\.stop\.unlinkPid/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test('checkOtelErrorLog: tolerant of a corrupt line', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-errlog-corrupt-'));
+  mkdirSync(join(dir, 'logs'), { recursive: true });
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    JSON.stringify({ level: 'error', scope: 'a', msg: 'x' }),
+    'not-json{{{',
+  ];
+  writeFileSync(join(dir, 'logs', `log-${month}.jsonl`), lines.join('\n') + '\n');
+  const result = checkOtelErrorLog({ pluginData: dir, now });
+  assert.match(result.detail, /1 error/);
   rmSync(dir, { recursive: true, force: true });
 });
 

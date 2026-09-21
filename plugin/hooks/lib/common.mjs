@@ -25,6 +25,7 @@ import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { VALID_ACTIONS, INTENT_KINDS } from '../../scripts/lib/provenance-vocabulary.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
 import { DATA_PATHS, relativeToVault, home } from '../../scripts/lib/paths.mjs';
@@ -68,9 +69,8 @@ export function recordDetachedChild(pid) {
   if (!file || !pid) return;
   try {
     appendFileSync(file, `${pid}\n`);
-  } catch {
-    // Best-effort: a lost record only means the harness can't reap early.
-  }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort: a lost record only means the harness can't reap early.
+  } catch {}
 }
 
 // Vault-relative path, or null if the file is outside the vault.
@@ -192,6 +192,16 @@ export async function runHook(handler) {
 const provenanceDedupeKeys = new Set();
 
 export function emitProvenance(event) {
+  // Same boundary check as scripts/provenance.mjs: the unchecked spread below
+  // would otherwise let an unknown action shape the schema. This path carries
+  // most of the volume (vault-write, agent-spawn, agent-result, skill-invoke),
+  // so validating only the CLI path would leave the larger half open.
+  // Now a counted rejection: log.mjs's error sink persists this scope
+  // durably, and the phase 2 reducer counts records by scope.
+  if (!event || !VALID_ACTIONS.has(event.action)) {
+    logError('provenance.invalidAction', new Error(`unknown action: ${event && event.action}`));
+    return;
+  }
   const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
   if (key !== '||' && provenanceDedupeKeys.has(key)) return;
   provenanceDedupeKeys.add(key);
@@ -206,6 +216,18 @@ export function emitProvenance(event) {
     source: 'hook',
     ...event,
   };
+  // Same free-text-intent guard as scripts/provenance.mjs: drop the offending
+  // field, keep the rest of the record. Now a counted drop: log.mjs's error
+  // sink persists this scope durably, and the phase 2 reducer counts records
+  // by scope.
+  if ('intent' in record) {
+    logError('provenance.freeTextIntent', new Error(`dropping free-text intent: ${record.intent}`));
+    delete record.intent;
+  }
+  if ('intent_kind' in record && !INTENT_KINDS.has(record.intent_kind)) {
+    logError('provenance.freeTextIntent', new Error(`dropping unbounded intent_kind: ${record.intent_kind}`));
+    delete record.intent_kind;
+  }
   appendJsonlLineDeduped(join(dir, `events-${monthStr()}.jsonl`), record);
 }
 

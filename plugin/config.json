@@ -24,5 +24,8 @@
   },
   "hooks": {
     "pre_write_fail_mode": "open"
+  },
+  "otel": {
+    "export_enabled": false
   }
 }

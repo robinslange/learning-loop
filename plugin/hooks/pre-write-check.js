@@ -26,8 +26,6 @@ import { getConfig } from '../scripts/lib/config.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
 import { logError } from '../scripts/lib/log.mjs';
-import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
-import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { fileURLToPath } from 'node:url';
@@ -116,14 +114,12 @@ export const DUPLICATE_GATE_STALE_DAEMON_CODE = 'duplicate-gate-stale-daemon';
 // conflating a clean no-match with an infrastructure failure.
 export const SCAN_FAILED = Symbol('SCAN_FAILED');
 
-function logDuplicateGateIssue(pluginData, code, source, detail) {
+function logDuplicateGateIssue(pluginData, code, source, detail, durations = {}) {
   if (!pluginData) return;
-  appendJsonlLineSafe(join(pluginData, `hook-errors-${monthStr()}.jsonl`), {
-    ts: new Date().toISOString(),
-    module: 'pre-write-check.checkDuplicateNote',
+  logError('pre-write-check.checkDuplicateNote', String(detail).slice(0, HookConfig.ERROR_MSG_MAX_CHARS), {
     code,
     source,
-    message: String(detail).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
+    ...durations,
   });
 }
 
@@ -133,6 +129,7 @@ function logDuplicateGateIssue(pluginData, code, source, detail) {
 // The model stays warm in the daemon, so this avoids the ~800ms-2s ONNX cold
 // start the subprocess pays.
 function reflectScanViaDaemon(socketPath, queries, top, candidates) {
+  const t0 = Date.now();
   return new Promise((resolveResult) => {
     let settled = false;
     const settle = (value) => {
@@ -143,11 +140,10 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
       // the event loop alive. Hard teardown releases the socket immediately.
       try {
         socket.destroy();
-      } catch {
-        /* ignore */
-      }
+        // eslint-disable-next-line learning-loop/no-empty-catch -- teardown is already unconditional here; a destroy() failure has nothing left to report to.
+      } catch {}
       clearTimeout(timer);
-      resolveResult(value);
+      resolveResult({ ...value, latency_ms: Date.now() - t0 });
     };
 
     const socket = createConnection({ path: socketPath });
@@ -324,7 +320,9 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       // The gate timed out against the warm daemon — log it distinctly so
       // /doctor can flag a permanently-disabled gate, then fall through to the
       // subprocess as a slow-path safety net.
-      logDuplicateGateIssue(pluginData, DUPLICATE_GATE_TIMEOUT_CODE, 'daemon', daemonResult.reason);
+      logDuplicateGateIssue(pluginData, DUPLICATE_GATE_TIMEOUT_CODE, 'daemon', daemonResult.reason, {
+        latency_ms: daemonResult.latency_ms,
+      });
     } else if (
       daemonResult.reason !== 'socket-error' &&
       daemonResult.reason !== 'closed-before-response'
@@ -345,18 +343,21 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
     const binary = findBinaryShared();
     if (!binary) return SCAN_FAILED;
 
+    const budgetMs = preWriteBudgetMs();
     const elapsedMs = Date.now() - HOOK_START_MS;
-    const remainingMs = preWriteBudgetMs() - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    const remainingMs = budgetMs - elapsedMs - HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
     if (remainingMs < HookConfig.PRE_WRITE_SUBPROCESS_FLOOR_MS) {
       logDuplicateGateIssue(
         pluginData,
         DUPLICATE_GATE_TIMEOUT_CODE,
         'budget',
         `no budget for subprocess fallback (${elapsedMs}ms elapsed)`,
+        { budget_ms: budgetMs, elapsed_ms: elapsedMs },
       );
       return SCAN_FAILED;
     }
 
+    const subprocessT0 = Date.now();
     const out = execFileSync(
       binary.bin,
       ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
@@ -376,6 +377,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         DUPLICATE_GATE_TIMEOUT_CODE,
         'subprocess',
         err.code || err.signal,
+        { latency_ms: Date.now() - subprocessT0 },
       );
     }
     logError('pre-write-check.checkDuplicateNote', err);

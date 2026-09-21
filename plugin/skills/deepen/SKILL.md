@@ -25,9 +25,9 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 ll-run provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-start","target":"NOTE_FILENAME"}'
 ```
 
-**At session end:**
+**At session end.** `target` is a vault path and never exported, so it is dropped here (session-start still carries it, since correlating the run to its note by session_id happens locally, not on the export path). Include the common outcome shape: `items_in` (1, one note per deepen run), `items_out` (1 if promoted else 0), `items_flagged` (0), `duration_ms`:
 ```bash
-ll-run provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-end","target":"NOTE_FILENAME","promoted":true|false}'
+ll-run provenance-emit.js '{"agent":"deepen","skill":"deepen","action":"session-end","promoted":true|false,"items_in":1,"items_out":N,"items_flagged":0,"duration_ms":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

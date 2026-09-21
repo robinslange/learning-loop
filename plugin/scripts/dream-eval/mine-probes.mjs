@@ -90,9 +90,8 @@ export function writeProbes(pd, probes) {
       if (!line) continue;
       try {
         seen.add(probeHash(JSON.parse(line)));
-      } catch {
-        /* skip */
-      }
+        // eslint-disable-next-line learning-loop/no-empty-catch -- a malformed existing line is skipped, not fatal to the rest of the dedupe pass.
+      } catch {}
     }
   }
   let appended = 0;
