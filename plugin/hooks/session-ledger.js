@@ -17,6 +17,7 @@ import {
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
+import { withLock } from '../scripts/lib/file-lock.mjs';
 import { harness } from '../scripts/lib/harness.mjs';
 import { pluginVersion } from '../scripts/lib/plugin-meta.mjs';
 import { parseTranscript, walkTranscript } from '../scripts/lib/transcript-walk.mjs';
@@ -152,26 +153,55 @@ try {
 
 // 6. Summary event, throttled. A note that failed to write still gets its
 // numbers recorded; that failure is already counted in the error log.
-const emitNow = shouldEmitSummary(
-  marker,
-  Date.now(),
-  isSessionEnd,
-  HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
-);
+//
+// Stop and SessionEnd for one session can fire close together and interleave
+// their read-modify-write of the marker, so the throttle decision and the
+// write it produces run under one lock -- re-reading the marker fresh inside
+// it, the same shape appendMemoryWrite (marker-cache.mjs) uses. Retries/delay
+// keep the worst-case wait under 500ms: the note write already happened above
+// and is not part of this critical section, so contention here is brief.
+let emitNow;
+try {
+  withLock(markerPath, { retries: 10, retryDelayMs: 40 }, () => {
+    const latest = readMarker(markerPath, { ttlMs: Infinity });
+    emitNow = shouldEmitSummary(
+      latest,
+      Date.now(),
+      isSessionEnd,
+      HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
+    );
+    if (wrote || emitNow) {
+      writeMarker(markerPath, {
+        path: relPath,
+        started_ts: startedTs,
+        last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
+      });
+    }
+  });
+} catch (err) {
+  logError('session-ledger.lock', err);
+  // Lost the lock: fall back to the unlocked decision so a busy marker never
+  // costs the session its ledger, only (at worst) a duplicate throttle tick.
+  emitNow = shouldEmitSummary(
+    marker,
+    Date.now(),
+    isSessionEnd,
+    HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
+  );
+  if (wrote || emitNow) {
+    writeMarker(markerPath, {
+      path: relPath,
+      started_ts: startedTs,
+      last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
+    });
+  }
+}
 if (emitNow) {
   try {
     emitProvenance({ ...summary, latency_ms: Date.now() - t0, session_id: sessionId });
   } catch (err) {
     logError('session-ledger.emit', err);
   }
-}
-
-if (wrote || emitNow) {
-  writeMarker(markerPath, {
-    path: relPath,
-    started_ts: startedTs,
-    last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
-  });
 }
 if (wrote) {
   writeMarker(MARKER_PATHS.ledgerProject(pluginData, cwd), { project: project.project });
