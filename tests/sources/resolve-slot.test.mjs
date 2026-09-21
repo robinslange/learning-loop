@@ -14,6 +14,9 @@ describe('resolveSlot', () => {
     assert.equal(resolveSlot('fetch', { cfg: cfg() }).id, 'raw');
   });
   it('throws loud on an unknown configured id', () => {
-    assert.throws(() => resolveSlot('web_search', { cfg: cfg({ web_search: 'exaa' }) }), /unknown source id "exaa"/);
+    assert.throws(
+      () => resolveSlot('web_search', { cfg: cfg({ web_search: 'exaa' }) }),
+      /unknown source id "exaa"/,
+    );
   });
 });

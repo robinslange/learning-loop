@@ -13,10 +13,11 @@ test('detectAbiDrift returns ok when no error is supplied', () => {
 
 test('detectAbiDrift returns mismatch with extracted plugin directory in fix message', () => {
   const result = detectAbiDrift({
-    nativeModulePath: '/home/user/.claude/plugins/cache/superpowers-marketplace/episodic-memory/1.0.15/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
+    nativeModulePath:
+      '/home/user/.claude/plugins/cache/superpowers-marketplace/episodic-memory/1.0.15/node_modules/better-sqlite3/build/Release/better_sqlite3.node',
     currentAbi: process.versions.modules,
     fakeLoadError: new Error(
-      'The module was compiled against a different Node.js version using NODE_MODULE_VERSION 137. This version of Node.js requires NODE_MODULE_VERSION 141.'
+      'The module was compiled against a different Node.js version using NODE_MODULE_VERSION 137. This version of Node.js requires NODE_MODULE_VERSION 141.',
     ),
   });
   assert.equal(result.status, 'abi-mismatch');
@@ -33,7 +34,7 @@ test('detectAbiDrift prefers currentAbi over parsed actual when supplied', () =>
     nativeModulePath: '/x',
     currentAbi: '999',
     fakeLoadError: new Error(
-      'compiled against NODE_MODULE_VERSION 137. This version of Node.js requires NODE_MODULE_VERSION 141.'
+      'compiled against NODE_MODULE_VERSION 137. This version of Node.js requires NODE_MODULE_VERSION 141.',
     ),
   });
   assert.equal(result.actualAbi, '999');

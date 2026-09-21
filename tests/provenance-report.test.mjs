@@ -19,7 +19,10 @@ function withProvenance(events, fn) {
   try {
     const dir = join(root, 'provenance');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'events-2026-05.jsonl'), events.map((e) => JSON.stringify(e)).join('\n'));
+    writeFileSync(
+      join(dir, 'events-2026-05.jsonl'),
+      events.map((e) => JSON.stringify(e)).join('\n'),
+    );
     const result = spawnSync('node', [REPORT], {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
       encoding: 'utf-8',
@@ -32,13 +35,56 @@ function withProvenance(events, fn) {
 
 test('joins score.target (basename) to vault-write.target (path) — config correlation populates', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'discovery', config: { depth: 'default' } },
-    { ts: '2026-05-01T00:00:01Z', action: 'session-start', session_id: 's2', skill: 'reflect', config: { depth: 'default' } },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/note-a.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's2', target: '0-inbox/note-b.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:02Z', action: 'vault-write', session_id: 's2', target: '0-inbox/note-c.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'note-a.md', result: 'fail', finding_type: 'overclaim', trigger: 'verify-auto' },
-    { ts: '2026-05-01T00:02:01Z', action: 'score', target: 'note-b.md', result: 'pass', trigger: 'verify-auto' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'discovery',
+      config: { depth: 'default' },
+    },
+    {
+      ts: '2026-05-01T00:00:01Z',
+      action: 'session-start',
+      session_id: 's2',
+      skill: 'reflect',
+      config: { depth: 'default' },
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/note-a.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's2',
+      target: '0-inbox/note-b.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:02Z',
+      action: 'vault-write',
+      session_id: 's2',
+      target: '0-inbox/note-c.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'score',
+      target: 'note-a.md',
+      result: 'fail',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
+    {
+      ts: '2026-05-01T00:02:01Z',
+      action: 'score',
+      target: 'note-b.md',
+      result: 'pass',
+      trigger: 'verify-auto',
+    },
   ];
 
   withProvenance(events, ({ status, stdout, stderr }) => {
@@ -50,10 +96,34 @@ test('joins score.target (basename) to vault-write.target (path) — config corr
 
 test('unverified backlog excludes scored notes (regression: path-vs-basename mismatch)', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'discovery', config: {} },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/scored.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/unscored.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'scored.md', result: 'pass', trigger: 'verify-auto' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'discovery',
+      config: {},
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/scored.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/unscored.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'score',
+      target: 'scored.md',
+      result: 'pass',
+      trigger: 'verify-auto',
+    },
   ];
 
   withProvenance(events, ({ status, stdout }) => {
@@ -65,15 +135,62 @@ test('unverified backlog excludes scored notes (regression: path-vs-basename mis
 
 test('counts verify-skill gate-shape scores alongside note-verifier result-shape scores', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: { depth: 'default' } },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/note-verifier-pass.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/gate-pass.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:02Z', action: 'vault-write', session_id: 's1', target: '0-inbox/gate-fail.md', folder: 'inbox' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'verify',
+      config: { depth: 'default' },
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/note-verifier-pass.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/gate-pass.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:02Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/gate-fail.md',
+      folder: 'inbox',
+    },
     // note-verifier shape: {action:'score', result:'pass'|'fail', confidence:...}
-    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'note-verifier-pass.md', result: 'pass', confidence: 'clear', trigger: 'verify-auto' },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'score',
+      target: 'note-verifier-pass.md',
+      result: 'pass',
+      confidence: 'clear',
+      trigger: 'verify-auto',
+    },
     // verify-skill shape: {action:'score', gate:'N/6', tier:...} — no `result` field
-    { ts: '2026-05-01T00:02:01Z', action: 'score', target: 'gate-pass.md', tier: 'deep', gate: '5/6', claim_specificity: 2, source_grounded: 2 },
-    { ts: '2026-05-01T00:02:02Z', action: 'score', target: 'gate-fail.md', tier: 'shallow', gate: '2/6', claim_specificity: 0, source_grounded: 0 },
+    {
+      ts: '2026-05-01T00:02:01Z',
+      action: 'score',
+      target: 'gate-pass.md',
+      tier: 'deep',
+      gate: '5/6',
+      claim_specificity: 2,
+      source_grounded: 2,
+    },
+    {
+      ts: '2026-05-01T00:02:02Z',
+      action: 'score',
+      target: 'gate-fail.md',
+      tier: 'shallow',
+      gate: '2/6',
+      claim_specificity: 0,
+      source_grounded: 0,
+    },
   ];
 
   withProvenance(events, ({ status, stdout, stderr }) => {
@@ -88,11 +205,29 @@ test('counts verify-skill gate-shape scores alongside note-verifier result-shape
 
 test('an over-range gate (numerator > denominator) is flagged, not counted as a pass', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/over-range.md', folder: 'inbox' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'verify',
+      config: {},
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/over-range.md',
+      folder: 'inbox',
+    },
     // A corrupted gate string like '10/6' is unreadable, not evidence of a pass:
     // 10/6 >= 4/6 would wrongly read as pass. It must be flagged.
-    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'over-range.md', tier: 'deep', gate: '10/6' },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'score',
+      target: 'over-range.md',
+      tier: 'deep',
+      gate: '10/6',
+    },
   ];
 
   withProvenance(events, ({ status, stdout, stderr }) => {
@@ -103,9 +238,27 @@ test('an over-range gate (numerator > denominator) is flagged, not counted as a 
 
 test('dedupes a basename written across folders (inbox → permanent move)', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'reflect', config: {} },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/moved.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '3-permanent/moved.md', folder: 'permanent' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'reflect',
+      config: {},
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/moved.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '3-permanent/moved.md',
+      folder: 'permanent',
+    },
   ];
 
   withProvenance(events, ({ status, stdout }) => {
@@ -116,11 +269,39 @@ test('dedupes a basename written across folders (inbox → permanent move)', () 
 
 test('normalizes verify.status spelling variants (ISSUES FOUND / ISSUES_FOUND) into one flagged bucket', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/space-spelling.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/underscore-spelling.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:02:00Z', action: 'verify', target: 'space-spelling.md', status: 'ISSUES FOUND' },
-    { ts: '2026-05-01T00:02:01Z', action: 'verify', target: 'underscore-spelling.md', status: 'ISSUES_FOUND' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'verify',
+      config: {},
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/space-spelling.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/underscore-spelling.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'verify',
+      target: 'space-spelling.md',
+      status: 'ISSUES FOUND',
+    },
+    {
+      ts: '2026-05-01T00:02:01Z',
+      action: 'verify',
+      target: 'underscore-spelling.md',
+      status: 'ISSUES_FOUND',
+    },
   ];
 
   withProvenance(events, ({ status, stdout, stderr }) => {
@@ -132,23 +313,107 @@ test('normalizes verify.status spelling variants (ISSUES FOUND / ISSUES_FOUND) i
 
 test('normalizes score.result spelling variants to {pass, fail, warn}', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1', skill: 'verify', config: {} },
-    { ts: '2026-05-01T00:01:00Z', action: 'vault-write', session_id: 's1', target: '0-inbox/a.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:01Z', action: 'vault-write', session_id: 's1', target: '0-inbox/b.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:02Z', action: 'vault-write', session_id: 's1', target: '0-inbox/c.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:03Z', action: 'vault-write', session_id: 's1', target: '0-inbox/d.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:04Z', action: 'vault-write', session_id: 's1', target: '0-inbox/e.md', folder: 'inbox' },
-    { ts: '2026-05-01T00:01:05Z', action: 'vault-write', session_id: 's1', target: '0-inbox/f.md', folder: 'inbox' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'session-start',
+      session_id: 's1',
+      skill: 'verify',
+      config: {},
+    },
+    {
+      ts: '2026-05-01T00:01:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/a.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:01Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/b.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:02Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/c.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:03Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/d.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:04Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/e.md',
+      folder: 'inbox',
+    },
+    {
+      ts: '2026-05-01T00:01:05Z',
+      action: 'vault-write',
+      session_id: 's1',
+      target: '0-inbox/f.md',
+      folder: 'inbox',
+    },
     // fail-spellings: fail, issues, issues-found, minor-issues, minor -- all must land in
     // the same findings-by-type bucket ('overclaim'), none silently dropped as non-fail.
-    { ts: '2026-05-01T00:02:00Z', action: 'score', target: 'a.md', result: 'fail', finding_type: 'overclaim', trigger: 'verify-auto' },
-    { ts: '2026-05-01T00:02:01Z', action: 'score', target: 'b.md', result: 'issues', finding_type: 'overclaim', trigger: 'verify-auto' },
-    { ts: '2026-05-01T00:02:02Z', action: 'score', target: 'c.md', result: 'issues-found', finding_type: 'overclaim', trigger: 'verify-auto' },
-    { ts: '2026-05-01T00:02:03Z', action: 'score', target: 'd.md', result: 'minor-issues', finding_type: 'overclaim', trigger: 'verify-auto' },
-    { ts: '2026-05-01T00:02:04Z', action: 'score', target: 'e.md', result: 'minor', finding_type: 'overclaim', trigger: 'verify-auto' },
+    {
+      ts: '2026-05-01T00:02:00Z',
+      action: 'score',
+      target: 'a.md',
+      result: 'fail',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
+    {
+      ts: '2026-05-01T00:02:01Z',
+      action: 'score',
+      target: 'b.md',
+      result: 'issues',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
+    {
+      ts: '2026-05-01T00:02:02Z',
+      action: 'score',
+      target: 'c.md',
+      result: 'issues-found',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
+    {
+      ts: '2026-05-01T00:02:03Z',
+      action: 'score',
+      target: 'd.md',
+      result: 'minor-issues',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
+    {
+      ts: '2026-05-01T00:02:04Z',
+      action: 'score',
+      target: 'e.md',
+      result: 'minor',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
     // warn-spellings: warn, partial -- normalize to 'warn', distinct from the fail bucket,
     // and must not crash or silently vanish either.
-    { ts: '2026-05-01T00:02:05Z', action: 'score', target: 'f.md', result: 'partial', finding_type: 'overclaim', trigger: 'verify-auto' },
+    {
+      ts: '2026-05-01T00:02:05Z',
+      action: 'score',
+      target: 'f.md',
+      result: 'partial',
+      finding_type: 'overclaim',
+      trigger: 'verify-auto',
+    },
   ];
 
   withProvenance(events, ({ status, stdout, stderr }) => {

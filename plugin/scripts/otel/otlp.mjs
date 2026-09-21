@@ -18,6 +18,7 @@
 //              against phase 0's allowlist.
 //   }
 
+import { logError } from '../lib/log.mjs';
 import { validateExportRecord } from './schema.mjs';
 import {
   buildAttributes,
@@ -59,7 +60,15 @@ function buildResource() {
 }
 
 function validateMetric(m) {
-  if (!m.stream) return;
+  // `stream` is REQUIRED. An earlier version returned early when it was
+  // absent, which made the allowlist fail OPEN: a reducer that forgot the
+  // field skipped the attribute check entirely, inverting the property this
+  // schema exists for. All six reducers already set it; this guards the next.
+  if (!m.stream) {
+    throw new Error(
+      `otel serialize: metric "${m.name}" has no stream, so its attributes cannot be checked`,
+    );
+  }
   // Attributes go through the same phase 0 allowlist a raw JSONL record
   // would: a reducer that stamps a free-text attribute onto an otherwise
   // clean counter must fail exactly the same way.
@@ -76,13 +85,25 @@ function validateMetric(m) {
  * @returns {object} OTLP resourceMetrics payload
  */
 export function buildOtlpPayload(metrics) {
-  const built = metrics.map((m) => {
+  // Two failure classes, handled differently on purpose. A SCHEMA violation
+  // throws and voids the batch: that is a potential leak, and shipping the
+  // rest while quietly dropping the offender would hide it. A WIRE-FORMAT
+  // defect drops that point and logs it: an earlier version threw here too,
+  // so one malformed record in one stream voided the export for all six,
+  // when a receiver would have dropped just that point anyway.
+  const built = [];
+  for (const m of metrics) {
     validateMetric(m);
-    const builder = BUILDERS[m.type];
-    if (!builder)
-      throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
-    return builder(m);
-  });
+    try {
+      const builder = BUILDERS[m.type];
+      if (!builder) {
+        throw new Error(`otel serialize: unknown metric type "${m.type}" for "${m.name}"`);
+      }
+      built.push(builder(m));
+    } catch (err) {
+      logError('otel.serialize.droppedPoint', err, { name: m.name, stream: m.stream });
+    }
+  }
 
   return {
     resourceMetrics: [

@@ -10,8 +10,16 @@ test('parseArgs defaults to single mode, 10 passes, no mine', () => {
 });
 
 test('parseArgs reads mode, passes, and mine flags', () => {
-  assert.deepStrictEqual(parseArgs(['--mode=control', '--mine']), { mode: 'control', passes: 10, mine: true });
-  assert.deepStrictEqual(parseArgs(['--mode=repeated', '--passes=5']), { mode: 'repeated', passes: 5, mine: false });
+  assert.deepStrictEqual(parseArgs(['--mode=control', '--mine']), {
+    mode: 'control',
+    passes: 10,
+    mine: true,
+  });
+  assert.deepStrictEqual(parseArgs(['--mode=repeated', '--passes=5']), {
+    mode: 'repeated',
+    passes: 5,
+    mine: false,
+  });
 });
 
 test('parseArgs rejects an unknown mode', () => {

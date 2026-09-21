@@ -15,6 +15,9 @@ test(
   { skip: !existsSync(BINDING_PATH) && 'episodic-memory plugin not installed at expected version' },
   () => {
     const require = createRequire(import.meta.url);
-    assert.doesNotThrow(() => require(BINDING_PATH), 'better-sqlite3 binding should load without ABI error');
+    assert.doesNotThrow(
+      () => require(BINDING_PATH),
+      'better-sqlite3 binding should load without ABI error',
+    );
   },
 );

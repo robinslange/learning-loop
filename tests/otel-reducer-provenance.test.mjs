@@ -18,7 +18,10 @@ function withCorpus(events, fn) {
   try {
     const dir = join(pluginData, 'provenance');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'events-2026-05.jsonl'), events.map((e) => JSON.stringify(e)).join('\n'));
+    writeFileSync(
+      join(dir, 'events-2026-05.jsonl'),
+      events.map((e) => JSON.stringify(e)).join('\n'),
+    );
     return fn(pluginData);
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
@@ -48,7 +51,13 @@ test('a fixture corpus produces the expected counts per action', () => {
 
 test('running the reducer twice returns identical output', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'vault-write', session_id: 's1', folder: 'permanent', agent: 'note-writer' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      folder: 'permanent',
+      agent: 'note-writer',
+    },
     { ts: '2026-05-01T00:00:01Z', action: 'agent-result', session_id: 's1', agent: 'note-scorer' },
   ];
 
@@ -101,7 +110,14 @@ test('a legacy action still counts', () => {
 
 test('every returned record passes phase 0 attribute validation', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'vault-write', session_id: 's1', folder: 'permanent', agent: 'note-writer', skill: 'reflect' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      folder: 'permanent',
+      agent: 'note-writer',
+      skill: 'reflect',
+    },
     { ts: '2026-05-01T00:00:01Z', action: 'agent-result', session_id: 's1', agent: 'note-scorer' },
   ];
 
@@ -117,7 +133,14 @@ test('every returned record passes phase 0 attribute validation', () => {
 
 test('the output serializes through buildOtlpPayload without throwing', () => {
   const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'vault-write', session_id: 's1', folder: 'permanent', agent: 'note-writer', skill: 'reflect' },
+    {
+      ts: '2026-05-01T00:00:00Z',
+      action: 'vault-write',
+      session_id: 's1',
+      folder: 'permanent',
+      agent: 'note-writer',
+      skill: 'reflect',
+    },
     { ts: '2026-05-01T00:00:01Z', action: 'agent-result', session_id: 's1', agent: 'note-scorer' },
   ];
 

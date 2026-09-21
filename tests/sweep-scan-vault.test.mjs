@@ -209,7 +209,6 @@ test('--help lists the --scan-vault mode', () => {
   assert.match(stdout, /--scan-vault <root> --sid <sid>/, '--help must document --scan-vault');
 });
 
-
 // --- abandoned reflect_sid self-heal -----------------------------------------
 //
 // `reflect_sid` is transient: Step 4 stamps it, 4.4 reads it, 4.6.g strips it.
@@ -406,4 +405,3 @@ test('an empty session id abandons nothing rather than everything', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
-

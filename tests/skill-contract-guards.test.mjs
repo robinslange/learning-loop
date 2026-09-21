@@ -55,6 +55,12 @@ test('rewrite wires federation retraction notify', () => {
   // note they hold was retracted; rewrite executes retractions end-to-end and
   // must invoke it (gated on federation-active, fail-soft).
   const src = skillMd('rewrite');
-  assert.ok(src.includes('retraction-notify.mjs'), 'rewrite/SKILL.md must invoke retraction-notify.mjs');
-  assert.ok(src.includes('federation-active.mjs'), 'retraction notify must be gated on federation-active.mjs');
+  assert.ok(
+    src.includes('retraction-notify.mjs'),
+    'rewrite/SKILL.md must invoke retraction-notify.mjs',
+  );
+  assert.ok(
+    src.includes('federation-active.mjs'),
+    'retraction notify must be gated on federation-active.mjs',
+  );
 });

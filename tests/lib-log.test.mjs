@@ -238,8 +238,13 @@ test('logError with a meta.code also appends a compat hook-errors-YYYY-MM.jsonl 
     );
     assert.equal(status, 0);
     const compatFile = join(root, `hook-errors-${monthStr()}.jsonl`);
-    assert.ok(existsSync(compatFile), 'compat hook-errors file must be written when meta carries a code');
-    const parsed = JSON.parse(readFileSync(compatFile, 'utf-8').trim().split('\n').filter(Boolean)[0]);
+    assert.ok(
+      existsSync(compatFile),
+      'compat hook-errors file must be written when meta carries a code',
+    );
+    const parsed = JSON.parse(
+      readFileSync(compatFile, 'utf-8').trim().split('\n').filter(Boolean)[0],
+    );
     assert.equal(parsed.code, 'duplicate-gate-timeout');
     assert.equal(parsed.source, 'daemon');
     assert.equal(parsed.latency_ms, 42);

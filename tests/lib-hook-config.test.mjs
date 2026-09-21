@@ -235,7 +235,7 @@ test('outerDeadlineMs reads the deadline the harness actually enforces', () => {
 test('the pre-write deadline stays inside what a user will sit through', () => {
   assert.ok(
     outerDeadlineMs(HOOKS_JSON) <= 10_000,
-    'a PreToolUse hook blocks the user\'s own Write; past ~10s it reads as a hang, not a check',
+    "a PreToolUse hook blocks the user's own Write; past ~10s it reads as a hang, not a check",
   );
 });
 
@@ -258,26 +258,48 @@ const DEADLINE_CASES = [
   ['a regex matcher', oneGroup('Write.*', 8), 8000],
   ['a catch-all matcher', oneGroup('.*', 8), 8000],
   ['a spaced matcher', oneGroup('Write | Edit', 8), 8000],
-  ['no matcher at all', { hooks: { PreToolUse: [{ hooks: [{ command: PWC, timeout: 8 }] }] } }, 8000],
-  ['another hook\'s group first', {
-    hooks: {
-      PreToolUse: [
-        { matcher: 'WebSearch|WebFetch', hooks: [{ command: OTHER, timeout: 3 }] },
-        { matcher: 'Write|Edit', hooks: [{ command: PWC, timeout: 8 }] },
-      ],
+  [
+    'no matcher at all',
+    { hooks: { PreToolUse: [{ hooks: [{ command: PWC, timeout: 8 }] }] } },
+    8000,
+  ],
+  [
+    "another hook's group first",
+    {
+      hooks: {
+        PreToolUse: [
+          { matcher: 'WebSearch|WebFetch', hooks: [{ command: OTHER, timeout: 3 }] },
+          { matcher: 'Write|Edit', hooks: [{ command: PWC, timeout: 8 }] },
+        ],
+      },
     },
-  }, 8000],
-  ['our hook second within a group', {
-    hooks: {
-      PreToolUse: [
-        { matcher: 'Write|Edit', hooks: [{ command: OTHER, timeout: 3 }, { command: PWC, timeout: 8 }] },
-      ],
+    8000,
+  ],
+  [
+    'our hook second within a group',
+    {
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Write|Edit',
+            hooks: [
+              { command: OTHER, timeout: 3 },
+              { command: PWC, timeout: 8 },
+            ],
+          },
+        ],
+      },
     },
-  }, 8000],
+    8000,
+  ],
   ['PreToolUse is an object', { hooks: { PreToolUse: { matcher: 'Write|Edit' } } }, null],
   ['PreToolUse is a string', { hooks: { PreToolUse: 'nope' } }, null],
   ['hooks is an array', { hooks: [] }, null],
-  ['group.hooks is an object', { hooks: { PreToolUse: [{ matcher: 'Write|Edit', hooks: {} }] } }, null],
+  [
+    'group.hooks is an object',
+    { hooks: { PreToolUse: [{ matcher: 'Write|Edit', hooks: {} }] } },
+    null,
+  ],
   ['null', null, null],
   ['undefined', undefined, null],
   ['no entry for this hook', oneGroup('WebSearch', 3, OTHER), null],
@@ -330,5 +352,9 @@ test('stdin-reading hooks declare a hooks.json timeout longer than STDIN_TIMEOUT
       }
     }
   }
-  assert.equal(checked, stdinReadingHooks.length, 'every named stdin hook must be present in hooks.json');
+  assert.equal(
+    checked,
+    stdinReadingHooks.length,
+    'every named stdin hook must be present in hooks.json',
+  );
 });

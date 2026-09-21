@@ -221,14 +221,28 @@ test('no skill/agent hardcodes an unsuffixed plugin-data fallback (M18)', () => 
 });
 
 test('researcher agents do not list raw WebSearch/WebFetch (routed via source gateway)', () => {
-  const routed = ['discovery-researcher', 'literature-capturer', 'note-deepener', 'note-verifier', 'note-writer'];
+  const routed = [
+    'discovery-researcher',
+    'literature-capturer',
+    'note-deepener',
+    'note-verifier',
+    'note-writer',
+  ];
   for (const name of routed) {
     const src = readFileSync(join(ROOT, 'agents', `${name}.md`), 'utf8');
     const fm = src.match(/^---\n([\s\S]*?)\n---/);
     assert.ok(fm, `${name}.md has no frontmatter block`);
     const toolsLine = fm[1].split('\n').find((l) => l.startsWith('tools:'));
     assert.ok(toolsLine, `${name}.md has no tools: line`);
-    assert.doesNotMatch(toolsLine, /\bWebSearch\b/, `${name}.md still lists WebSearch — route it via source-gateway.mjs`);
-    assert.doesNotMatch(toolsLine, /\bWebFetch\b/, `${name}.md still lists WebFetch — route it via source-gateway.mjs`);
+    assert.doesNotMatch(
+      toolsLine,
+      /\bWebSearch\b/,
+      `${name}.md still lists WebSearch — route it via source-gateway.mjs`,
+    );
+    assert.doesNotMatch(
+      toolsLine,
+      /\bWebFetch\b/,
+      `${name}.md still lists WebFetch — route it via source-gateway.mjs`,
+    );
   }
 });

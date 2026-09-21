@@ -12,7 +12,7 @@
 // refinement-rejected).
 //
 // LEGACY_ACTIONS is the 5 one-off historical spellings (write, write-note,
-// demote, refine, refinement-skipped). They are not valid to emit again, but
+// demote, refine). They are not valid to emit again, but
 // historical event files on disk contain them, so readers must still
 // recognise them as known rather than treating them as garbage.
 
@@ -49,16 +49,17 @@ export const VALID_ACTIONS = new Set([
   'refinement-passed',
   'refinement',
   'counterpoint-linked',
+  // These two are instructed in PROSE at reflect/steps/refinement.md:150
+  // (`action: "..."`) rather than inside a JSON payload, so the derivation that
+  // grepped for "action":"..." literals never saw them. supersession-recorded
+  // has no corpus events because it is rarely triggered, not because it is
+  // dead, and refinement-skipped has one (July) which made it look legacy.
+  'supersession-recorded',
+  'refinement-skipped',
   'refinement-rejected',
 ]);
 
-export const LEGACY_ACTIONS = new Set([
-  'write',
-  'write-note',
-  'demote',
-  'refine',
-  'refinement-skipped',
-]);
+export const LEGACY_ACTIONS = new Set(['write', 'write-note', 'demote', 'refine']);
 
 export function isKnownAction(action) {
   return VALID_ACTIONS.has(action) || LEGACY_ACTIONS.has(action);

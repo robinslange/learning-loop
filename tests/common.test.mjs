@@ -34,9 +34,24 @@ describe('provenance dedupe', () => {
 
   it('writes one provenance line per unique (session_id, agent_id, path)', async () => {
     const mod = await import('../plugin/hooks/lib/common.mjs?bust=1');
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'vault-write' });
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/a.md', action: 'vault-write' });
-    mod.emitProvenance({ session_id: 's1', agent_id: 'a1', path: '0-inbox/b.md', action: 'vault-write' });
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: '0-inbox/a.md',
+      action: 'vault-write',
+    });
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: '0-inbox/a.md',
+      action: 'vault-write',
+    });
+    mod.emitProvenance({
+      session_id: 's1',
+      agent_id: 'a1',
+      path: '0-inbox/b.md',
+      action: 'vault-write',
+    });
     const files = readdirSync(join(dataDir, 'provenance')).filter((f) => f.startsWith('events-'));
     assert.equal(files.length, 1);
     const lines = readFileSync(join(dataDir, 'provenance', files[0]), 'utf8')
@@ -110,7 +125,9 @@ describe('emitProvenance intent hardening', () => {
       action: 'vault-write',
       intent_kind: 'scope',
     });
-    const events = readEvents().filter((e) => ['intent-test-2.md', 'intent-test-3.md'].includes(e.path));
+    const events = readEvents().filter((e) =>
+      ['intent-test-2.md', 'intent-test-3.md'].includes(e.path),
+    );
     const unbounded = events.find((e) => e.path === 'intent-test-2.md');
     const bounded = events.find((e) => e.path === 'intent-test-3.md');
     assert.ok(!('intent_kind' in unbounded));
@@ -261,9 +278,8 @@ describe('vault containment (isVaultNote / vaultRelPath)', () => {
   // to the real HOME first.
   let isVaultNote, vaultRelPath, classifyVaultPath;
   before(async () => {
-    ({ isVaultNote, vaultRelPath, classifyVaultPath } = await import(
-      '../plugin/hooks/lib/common.mjs'
-    ));
+    ({ isVaultNote, vaultRelPath, classifyVaultPath } =
+      await import('../plugin/hooks/lib/common.mjs'));
   });
 
   const V = '/vault/brain';

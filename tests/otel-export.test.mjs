@@ -7,6 +7,7 @@ function counterMetric() {
   return {
     name: 'll_cache_read_total',
     type: 'counter',
+    stream: 'cache-health',
     value: 1,
     timeUnixMs: Date.now(),
     attributes: {},
@@ -52,7 +53,11 @@ test('--dry-run prints the payload and does not POST', async () => {
     printed += msg;
   };
   try {
-    const result = await exportMetrics([counterMetric()], { endpoint: sink.url, enabled: true, dryRun: true });
+    const result = await exportMetrics([counterMetric()], {
+      endpoint: sink.url,
+      enabled: true,
+      dryRun: true,
+    });
     assert.strictEqual(result.sent, false);
     assert.strictEqual(sink.received.length, 0);
     assert.ok(printed.includes('resourceMetrics'));
@@ -89,7 +94,10 @@ test('an unreachable endpoint yields {ok:false} without hanging past the timeout
 test('a malformed metric list produces {ok:false, error} instead of throwing into the caller', async () => {
   const sink = await startOtlpSink();
   try {
-    const result = await exportMetrics([{ name: 'bad', type: 'nonsense' }], { endpoint: sink.url, enabled: true });
+    const result = await exportMetrics([{ name: 'bad', type: 'nonsense' }], {
+      endpoint: sink.url,
+      enabled: true,
+    });
     assert.strictEqual(result.ok, false);
     assert.ok(result.error);
   } finally {

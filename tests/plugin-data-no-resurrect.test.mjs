@@ -22,8 +22,9 @@ const CONFIG_URL = pathToFileURL(join(SCRIPTS, 'lib', 'config.mjs')).href;
 // migrateConfig only fires when the legacy repo-root config.json exists; it is
 // gitignored (real user config), so skip those tests on checkouts without it.
 const LEGACY_CONFIG = join(SCRIPTS, '..', 'config.json');
-const NO_LEGACY = !existsSync(LEGACY_CONFIG)
-  && 'repo-root config.json (gitignored) absent — legacy migration cannot fire';
+const NO_LEGACY =
+  !existsSync(LEGACY_CONFIG) &&
+  'repo-root config.json (gitignored) absent — legacy migration cannot fire';
 
 function runModule(code, pluginData) {
   return spawnSync(process.execPath, ['--input-type=module', '-e', code], {
@@ -41,10 +42,14 @@ function goneDir(prefix) {
 // --- provenance emitter (CLI spawned detached by context-assembly) ---
 
 function emit(pluginData) {
-  return spawnSync(process.execPath, [EMITTER, JSON.stringify({ agent: 'test', action: 'create' })], {
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
-    encoding: 'utf-8',
-  });
+  return spawnSync(
+    process.execPath,
+    [EMITTER, JSON.stringify({ agent: 'test', action: 'create' })],
+    {
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
+      encoding: 'utf-8',
+    },
+  );
 }
 
 test('emitProvenance does not re-create a deleted plugin-data dir', () => {
@@ -102,19 +107,26 @@ import { getConfig } from ${JSON.stringify(CONFIG_URL)};
 getConfig();
 `;
 
-test('getConfig legacy migration does not re-create a deleted plugin-data dir', { skip: NO_LEGACY }, () => {
-  const root = goneDir('ll-config-gone-');
-  const result = runModule(GET_CONFIG_CODE, root);
-  assert.equal(result.status, 0, `getConfig must no-op cleanly, stderr: ${result.stderr}`);
-  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
-});
+test(
+  'getConfig legacy migration does not re-create a deleted plugin-data dir',
+  { skip: NO_LEGACY },
+  () => {
+    const root = goneDir('ll-config-gone-');
+    const result = runModule(GET_CONFIG_CODE, root);
+    assert.equal(result.status, 0, `getConfig must no-op cleanly, stderr: ${result.stderr}`);
+    assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+  },
+);
 
 test('getConfig legacy migration still writes when plugin-data exists', { skip: NO_LEGACY }, () => {
   const root = mkdtempSync(join(tmpdir(), 'll-config-live-'));
   try {
     const result = runModule(GET_CONFIG_CODE, root);
     assert.equal(result.status, 0, `getConfig must succeed, stderr: ${result.stderr}`);
-    assert.ok(existsSync(join(root, 'config.json')), 'legacy config must migrate into an existing root');
+    assert.ok(
+      existsSync(join(root, 'config.json')),
+      'legacy config must migrate into an existing root',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -174,7 +186,11 @@ emitProvenance({ path: 'x.md', agent_id: 'no-resurrect', action: 'vault-write' }
 test('hooks/lib/common.mjs emitProvenance does not re-create a deleted plugin-data dir', () => {
   const root = goneDir('ll-hookprov-gone-');
   const result = runModule(HOOK_EMIT_CODE, root);
-  assert.equal(result.status, 0, `hook emitProvenance must no-op cleanly, stderr: ${result.stderr}`);
+  assert.equal(
+    result.status,
+    0,
+    `hook emitProvenance must no-op cleanly, stderr: ${result.stderr}`,
+  );
   assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
 });
 

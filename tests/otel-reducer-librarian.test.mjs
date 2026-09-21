@@ -30,7 +30,11 @@ function record(overrides) {
 
 function writeQueue(dir, records) {
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'queue.jsonl'), records.map((r) => JSON.stringify(r)).join('\n') + '\n', 'utf-8');
+  writeFileSync(
+    join(dir, 'queue.jsonl'),
+    records.map((r) => JSON.stringify(r)).join('\n') + '\n',
+    'utf-8',
+  );
 }
 
 function makePluginData() {
@@ -59,7 +63,9 @@ test('counts by task, status and expired_reason from a fixture', () => {
     assert.equal(byStatus.find((m) => m.attributes.status === 'expired').value, 2);
     assert.equal(byStatus.find((m) => m.attributes.status === 'approved').value, 1);
 
-    const byExpiredReason = metrics.filter((m) => m.name === 'll.librarian.queue_by_expired_reason');
+    const byExpiredReason = metrics.filter(
+      (m) => m.name === 'll.librarian.queue_by_expired_reason',
+    );
     assert.equal(byExpiredReason.length, 1);
     assert.equal(byExpiredReason[0].attributes.expired_reason, 'target_missing');
     assert.equal(byExpiredReason[0].value, 2);
@@ -81,11 +87,17 @@ test('the task x status cross-product counter produces the expected buckets', ()
     const metrics = reduceLibrarian({ pluginData, timeUnixMs: Date.now() });
     const cross = metrics.filter((m) => m.name === 'll.librarian.queue_by_task_status');
 
-    const voiceExpired = cross.find((m) => m.attributes.task === 'voice_flag' && m.attributes.status === 'expired');
+    const voiceExpired = cross.find(
+      (m) => m.attributes.task === 'voice_flag' && m.attributes.status === 'expired',
+    );
     assert.equal(voiceExpired.value, 2);
-    const voicePending = cross.find((m) => m.attributes.task === 'voice_flag' && m.attributes.status === 'pending');
+    const voicePending = cross.find(
+      (m) => m.attributes.task === 'voice_flag' && m.attributes.status === 'pending',
+    );
     assert.equal(voicePending.value, 1);
-    const tagApproved = cross.find((m) => m.attributes.task === 'tag_suggestion' && m.attributes.status === 'approved');
+    const tagApproved = cross.find(
+      (m) => m.attributes.task === 'tag_suggestion' && m.attributes.status === 'approved',
+    );
     assert.equal(tagApproved.value, 1);
     // The whole point of this cross-product: voice_flag never shows an approved bucket.
     assert.equal(
@@ -130,7 +142,10 @@ test('the lag histogram satisfies both bucket invariants', () => {
     const lag = metrics.find((m) => m.name === 'll.librarian.pending_lag_ms');
     assert.ok(lag, 'expected a pending_lag_ms histogram');
     assert.equal(lag.bucketCounts.length, lag.explicitBounds.length + 1);
-    assert.equal(lag.bucketCounts.reduce((a, b) => a + b, 0), lag.count);
+    assert.equal(
+      lag.bucketCounts.reduce((a, b) => a + b, 0),
+      lag.count,
+    );
     // Only the two pending records feed the lag histogram, not the expired one.
     assert.equal(lag.count, 2);
   } finally {
@@ -156,8 +171,14 @@ test('score histograms skip records missing that score, no NaN, no zero-stuffing
     assert.equal(cosineHist.count, 1);
 
     // No score present at all for model_prob/similarity in this fixture.
-    assert.equal(metrics.find((m) => m.name === 'll.librarian.model_prob'), undefined);
-    assert.equal(metrics.find((m) => m.name === 'll.librarian.similarity'), undefined);
+    assert.equal(
+      metrics.find((m) => m.name === 'll.librarian.model_prob'),
+      undefined,
+    );
+    assert.equal(
+      metrics.find((m) => m.name === 'll.librarian.similarity'),
+      undefined,
+    );
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
   }
@@ -184,7 +205,16 @@ test('free-text fields never appear in any attribute set', () => {
     ]);
 
     const metrics = reduceLibrarian({ pluginData, timeUnixMs: Date.now() });
-    const forbidden = ['target', 'reason', 'current_title', 'suggested_tags', 'existing_tags', 'duplicate_of', 'suggested_link', 'matched_patterns'];
+    const forbidden = [
+      'target',
+      'reason',
+      'current_title',
+      'suggested_tags',
+      'existing_tags',
+      'duplicate_of',
+      'suggested_link',
+      'matched_patterns',
+    ];
     for (const m of metrics) {
       if (!m.attributes) continue;
       for (const key of forbidden) {
@@ -202,7 +232,11 @@ test('running the reducer twice returns identical output', () => {
     writeQueue(librarianDir, [
       record({ task: 'voice_flag', status: 'expired', expired_reason: 'target_missing' }),
       record({ task: 'tag_suggestion', status: 'approved', confidence: 0.7 }),
-      record({ task: 'link_suggestion', status: 'pending', created_at: '2026-09-10T00:00:00.000Z' }),
+      record({
+        task: 'link_suggestion',
+        status: 'pending',
+        created_at: '2026-09-10T00:00:00.000Z',
+      }),
     ]);
     const timeUnixMs = Date.now();
 
@@ -221,7 +255,11 @@ test('every returned record validates against the librarian export schema', () =
     writeQueue(librarianDir, [
       record({ task: 'voice_flag', status: 'expired', expired_reason: 'target_missing' }),
       record({ task: 'tag_suggestion', status: 'approved', confidence: 0.7, cosine_score: 0.5 }),
-      record({ task: 'link_suggestion', status: 'pending', created_at: '2026-09-10T00:00:00.000Z' }),
+      record({
+        task: 'link_suggestion',
+        status: 'pending',
+        created_at: '2026-09-10T00:00:00.000Z',
+      }),
     ]);
 
     const metrics = reduceLibrarian({ pluginData, timeUnixMs: Date.now() });

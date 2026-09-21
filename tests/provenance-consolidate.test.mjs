@@ -26,7 +26,10 @@ function withEvents(events, fn) {
   try {
     const dir = join(root, 'provenance');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'events-2026-05.jsonl'), events.map((e) => JSON.stringify(e)).join('\n'));
+    writeFileSync(
+      join(dir, 'events-2026-05.jsonl'),
+      events.map((e) => JSON.stringify(e)).join('\n'),
+    );
     const result = spawnSync('node', [CONSOLIDATE], {
       env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
       encoding: 'utf-8',
@@ -109,15 +112,16 @@ test('an event with only skill lands in the skill bucket', () => {
 });
 
 test('an event with neither skill nor agent falls back to action, labelled honestly', () => {
-  const events = [
-    { ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1' },
-  ];
+  const events = [{ ts: '2026-05-01T00:00:00Z', action: 'session-start', session_id: 's1' }];
 
   withEvents(events, ({ status, stdout, stderr }) => {
     assert.strictEqual(status, 0, `unexpected exit: ${stderr}`);
     const output = JSON.parse(stdout);
     const day = output.summaries[0];
-    assert.ok(day.actions && day.actions['session-start'], 'expected actions["session-start"] bucket');
+    assert.ok(
+      day.actions && day.actions['session-start'],
+      'expected actions["session-start"] bucket',
+    );
   });
 });
 

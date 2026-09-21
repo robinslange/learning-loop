@@ -35,7 +35,9 @@ test('oversized additionalContext is trimmed inside the field — output stays v
 });
 
 test('small payloads pass through byte-identical', () => {
-  const { stdout } = runEmit(`{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'hello' } }`);
+  const { stdout } = runEmit(
+    `{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'hello' } }`,
+  );
   assert.deepEqual(JSON.parse(stdout), {
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'hello' },
   });
@@ -73,6 +75,8 @@ test('multibyte content never splits a code point', () => {
   const res = spawnSync(process.execPath, ['--input-type=module', '-e', src], { encoding: 'utf8' });
   const parsed = JSON.parse(res.stdout);
   assert.ok(parsed.hookSpecificOutput.additionalContext.includes('🧠'));
-  assert.ok(!/[\ud800-\udbff](?![\udc00-\udfff])/.test(parsed.hookSpecificOutput.additionalContext));
+  assert.ok(
+    !/[\ud800-\udbff](?![\udc00-\udfff])/.test(parsed.hookSpecificOutput.additionalContext),
+  );
   assert.ok(Buffer.byteLength(res.stdout, 'utf8') <= MAX);
 });

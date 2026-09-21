@@ -101,7 +101,8 @@ test('leaves a line that already carries an absolute date alone', () => {
 test('leaves conversion-log records alone', () => {
   // _dream_log.md records past conversions as `"x" -> "y"`. Re-matching them
   // every run is where most of the 44 no-op hits came from.
-  const s = '- `project_halter.md`: "this year" -> "in 2026"; "redundant last week" -> "2026-04-22"';
+  const s =
+    '- `project_halter.md`: "this year" -> "in 2026"; "redundant last week" -> "2026-04-22"';
   assert.equal(normalizeText(s, ANCHOR).text, s);
 });
 

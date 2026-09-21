@@ -217,7 +217,10 @@ describe('fetchGuarded — every hop, not just the origin', () => {
   });
 
   it('blocks a redirect into IMDS, including the mapped-IPv6 spelling', async () => {
-    for (const target of ['http://169.254.169.254/latest/meta-data/', 'http://[::ffff:a9fe:a9fe]/']) {
+    for (const target of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://[::ffff:a9fe:a9fe]/',
+    ]) {
       const out = await fetchGuarded('https://public.example.com/a', () =>
         Promise.resolve(res(302, target)),
       );
@@ -275,7 +278,12 @@ describe('fetchText (source-gateway fetch slot) validates hops', () => {
           text: async () => '',
         };
       }
-      return { ok: true, status: 200, headers: { get: () => null }, text: async () => '<p>SECRET</p>' };
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => '<p>SECRET</p>',
+      };
     };
     const out = await fetchText('https://public.example.com/a', { fetchOverride });
     assert.equal(out.ok, false);

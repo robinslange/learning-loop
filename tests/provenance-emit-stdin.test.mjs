@@ -6,7 +6,13 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const EMIT = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts', 'provenance-emit.js');
+const EMIT = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'plugin',
+  'scripts',
+  'provenance-emit.js',
+);
 
 function readEvents(root) {
   const dir = join(root, 'provenance');
@@ -34,7 +40,11 @@ test('provenance-emit.js - reads the JSON payload from stdin (prose-safe form)',
       env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
       encoding: 'utf-8',
     });
-    assert.strictEqual(result.status, 0, `provenance-emit.js exited ${result.status}: ${result.stderr}`);
+    assert.strictEqual(
+      result.status,
+      0,
+      `provenance-emit.js exited ${result.status}: ${result.stderr}`,
+    );
 
     const events = readEvents(root);
     assert.strictEqual(events.length, 1, 'expected exactly one event from stdin payload');
@@ -53,7 +63,11 @@ test('provenance-emit.js argv form still works', () => {
       [EMIT, JSON.stringify({ agent: 'test', action: 'create', target: 'x.md' })],
       { env: { ...process.env, CLAUDE_PLUGIN_DATA: root }, encoding: 'utf-8' },
     );
-    assert.strictEqual(result.status, 0, `provenance-emit.js exited ${result.status}: ${result.stderr}`);
+    assert.strictEqual(
+      result.status,
+      0,
+      `provenance-emit.js exited ${result.status}: ${result.stderr}`,
+    );
     const events = readEvents(root);
     assert.strictEqual(events.length, 1);
     assert.strictEqual(events[0].target, 'x.md');
@@ -96,7 +110,13 @@ test('stdin accepts several newline-separated events, the batching case', () => 
   try {
     const lines = [
       { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'a.md', status: 'used' },
-      { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'b.md', status: 'ignored' },
+      {
+        agent: 'reflect',
+        skill: 'reflect',
+        action: 'note-usage',
+        target: 'b.md',
+        status: 'ignored',
+      },
       { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'c.md', status: 'used' },
     ]
       .map((e) => JSON.stringify(e))

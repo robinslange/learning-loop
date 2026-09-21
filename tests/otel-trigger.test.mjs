@@ -36,7 +36,10 @@ async function withPluginData(fn) {
 }
 
 function armConfig(pluginData) {
-  writeFileSync(join(pluginData, 'config.json'), JSON.stringify({ otel: { export_enabled: true } }));
+  writeFileSync(
+    join(pluginData, 'config.json'),
+    JSON.stringify({ otel: { export_enabled: true } }),
+  );
 }
 
 function markerPath(pluginData) {
@@ -54,7 +57,11 @@ function runWorker(pluginData, endpoint) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(process.execPath, [WORKER, pluginData, markerPath(pluginData)], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData, OTEL_EXPORTER_OTLP_ENDPOINT: endpoint },
+      env: {
+        ...process.env,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
+      },
     });
     let stderr = '';
     child.stderr.on('data', (c) => (stderr += c));
@@ -200,7 +207,10 @@ test("the hook's call to maybeSpawnOtelExport is synchronous and never runs the 
       // The call itself must return in milliseconds: a marker stat plus a
       // spawn, well under session-start's 10s budget. No export has been
       // sent by the time control returns to the caller.
-      assert.ok(elapsed < 2000, `maybeSpawnOtelExport call took ${elapsed}ms, should be near-instant`);
+      assert.ok(
+        elapsed < 2000,
+        `maybeSpawnOtelExport call took ${elapsed}ms, should be near-instant`,
+      );
       assert.equal(sink.received.length, 0, 'no export must have happened synchronously');
     } finally {
       await sink.close();

@@ -3,7 +3,11 @@ import assert from 'node:assert';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendJsonlLine, appendJsonlLineSafe, appendJsonlLineDeduped } from '../plugin/scripts/lib/jsonl.mjs';
+import {
+  appendJsonlLine,
+  appendJsonlLineSafe,
+  appendJsonlLineDeduped,
+} from '../plugin/scripts/lib/jsonl.mjs';
 
 function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'll-jsonl-'));
@@ -102,7 +106,13 @@ const T0 = Date.parse('2026-05-01T00:00:00.000Z');
 test('appendJsonlLineDeduped: identical payload twice within 2s writes one line', () => {
   withTempDir((dir) => {
     const path = join(dir, 'dedup.jsonl');
-    const record = { ts: new Date(T0).toISOString(), agent: 'note-verifier', action: 'score', target: 'a.md', result: 'pass' };
+    const record = {
+      ts: new Date(T0).toISOString(),
+      agent: 'note-verifier',
+      action: 'score',
+      target: 'a.md',
+      result: 'pass',
+    };
     appendJsonlLineDeduped(path, record, T0);
     appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 500).toISOString() }, T0 + 500);
     const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
@@ -113,9 +123,19 @@ test('appendJsonlLineDeduped: identical payload twice within 2s writes one line'
 test('appendJsonlLineDeduped: different payload back-to-back writes two lines', () => {
   withTempDir((dir) => {
     const path = join(dir, 'dedup.jsonl');
-    const record = { ts: new Date(T0).toISOString(), agent: 'note-verifier', action: 'score', target: 'a.md', result: 'pass' };
+    const record = {
+      ts: new Date(T0).toISOString(),
+      agent: 'note-verifier',
+      action: 'score',
+      target: 'a.md',
+      result: 'pass',
+    };
     appendJsonlLineDeduped(path, record, T0);
-    appendJsonlLineDeduped(path, { ...record, target: 'b.md', ts: new Date(T0 + 500).toISOString() }, T0 + 500);
+    appendJsonlLineDeduped(
+      path,
+      { ...record, target: 'b.md', ts: new Date(T0 + 500).toISOString() },
+      T0 + 500,
+    );
     const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
     assert.strictEqual(lines.length, 2, 'a different payload must not be suppressed');
   });
@@ -124,11 +144,21 @@ test('appendJsonlLineDeduped: different payload back-to-back writes two lines', 
 test('appendJsonlLineDeduped: identical payload after >2s writes two lines', () => {
   withTempDir((dir) => {
     const path = join(dir, 'dedup.jsonl');
-    const record = { ts: new Date(T0).toISOString(), agent: 'note-verifier', action: 'score', target: 'a.md', result: 'pass' };
+    const record = {
+      ts: new Date(T0).toISOString(),
+      agent: 'note-verifier',
+      action: 'score',
+      target: 'a.md',
+      result: 'pass',
+    };
     appendJsonlLineDeduped(path, record, T0);
     appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 3500).toISOString() }, T0 + 3500);
     const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
-    assert.strictEqual(lines.length, 2, 'the 2s window must have elapsed, so this is not a duplicate');
+    assert.strictEqual(
+      lines.length,
+      2,
+      'the 2s window must have elapsed, so this is not a duplicate',
+    );
   });
 });
 
@@ -140,11 +170,20 @@ test('appendJsonlLineDeduped: identical payload after >2s writes two lines', () 
 test('appendJsonlLineDeduped: agent-result is exempt from dedup, even with identical payload within 2s', () => {
   withTempDir((dir) => {
     const path = join(dir, 'dedup.jsonl');
-    const record = { ts: new Date(T0).toISOString(), action: 'agent-result', session_id: 's', transcript_path: 't' };
+    const record = {
+      ts: new Date(T0).toISOString(),
+      action: 'agent-result',
+      session_id: 's',
+      transcript_path: 't',
+    };
     appendJsonlLineDeduped(path, record, T0);
     appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 500).toISOString() }, T0 + 500);
     const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
-    assert.strictEqual(lines.length, 2, 'agent-result must always be written, even if identical to the prior line');
+    assert.strictEqual(
+      lines.length,
+      2,
+      'agent-result must always be written, even if identical to the prior line',
+    );
   });
 });
 
@@ -160,12 +199,22 @@ for (const action of ['agent-spawn', 'skill-invoke']) {
       const path = join(dir, 'dedup.jsonl');
       const record =
         action === 'agent-spawn'
-          ? { ts: new Date(T0).toISOString(), action, agent: 'Explore', description: 'search the codebase', background: true }
+          ? {
+              ts: new Date(T0).toISOString(),
+              action,
+              agent: 'Explore',
+              description: 'search the codebase',
+              background: true,
+            }
           : { ts: new Date(T0).toISOString(), action, skill: 'verify', args: 'inbox' };
       appendJsonlLineDeduped(path, record, T0);
       appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 500).toISOString() }, T0 + 500);
       const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
-      assert.strictEqual(lines.length, 2, `${action} must always be written, even if identical to the prior line`);
+      assert.strictEqual(
+        lines.length,
+        2,
+        `${action} must always be written, even if identical to the prior line`,
+      );
     });
   });
 }

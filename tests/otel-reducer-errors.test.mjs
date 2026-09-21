@@ -19,7 +19,10 @@ function withCorpus({ hookErrors, logs }, fn) {
   const pluginData = mkdtempSync(join(tmpdir(), 'll-otel-errors-'));
   try {
     if (hookErrors) {
-      writeFileSync(join(pluginData, 'hook-errors-2026-05.jsonl'), hookErrors.map((e) => JSON.stringify(e)).join('\n'));
+      writeFileSync(
+        join(pluginData, 'hook-errors-2026-05.jsonl'),
+        hookErrors.map((e) => JSON.stringify(e)).join('\n'),
+      );
     }
     if (logs) {
       const dir = join(pluginData, 'logs');
@@ -37,15 +40,63 @@ function named(metrics, name) {
 }
 
 const hookErrorFixture = [
-  { ts: '2026-05-01T00:00:00Z', module: 'pre-write-check', code: 'DAEMON_TIMEOUT', source: 'daemon-socket', message: 'timed out', latency_ms: 430, budget_ms: 500, elapsed_ms: 431 },
-  { ts: '2026-05-01T00:00:01Z', module: 'pre-write-check', code: 'DAEMON_TIMEOUT', source: 'subprocess-fallback', message: 'timed out', latency_ms: 900, budget_ms: 500, elapsed_ms: 901 },
-  { ts: '2026-05-01T00:00:02Z', module: 'post-tool', code: 'PROVENANCE_FAIL', source: 'daemon-socket', message: 'boom', latency_ms: 20, budget_ms: 60, elapsed_ms: 22 },
+  {
+    ts: '2026-05-01T00:00:00Z',
+    module: 'pre-write-check',
+    code: 'DAEMON_TIMEOUT',
+    source: 'daemon-socket',
+    message: 'timed out',
+    latency_ms: 430,
+    budget_ms: 500,
+    elapsed_ms: 431,
+  },
+  {
+    ts: '2026-05-01T00:00:01Z',
+    module: 'pre-write-check',
+    code: 'DAEMON_TIMEOUT',
+    source: 'subprocess-fallback',
+    message: 'timed out',
+    latency_ms: 900,
+    budget_ms: 500,
+    elapsed_ms: 901,
+  },
+  {
+    ts: '2026-05-01T00:00:02Z',
+    module: 'post-tool',
+    code: 'PROVENANCE_FAIL',
+    source: 'daemon-socket',
+    message: 'boom',
+    latency_ms: 20,
+    budget_ms: 60,
+    elapsed_ms: 22,
+  },
 ];
 
 const logsFixture = [
-  { ts: '2026-05-01T00:00:00Z', level: 'error', plugin: 'learning-loop', scope: 'watch.stop.unlinkPid', msg: 'failed to unlink', meta: { err: { message: 'ENOENT', stack: 'at x' } } },
-  { ts: '2026-05-01T00:00:01Z', level: 'error', plugin: 'learning-loop', scope: 'watch.stop.unlinkPid', msg: 'failed to unlink', meta: {} },
-  { ts: '2026-05-01T00:00:02Z', level: 'error', plugin: 'learning-loop', scope: 'provenance.invalidAction', msg: 'unknown action', meta: {} },
+  {
+    ts: '2026-05-01T00:00:00Z',
+    level: 'error',
+    plugin: 'learning-loop',
+    scope: 'watch.stop.unlinkPid',
+    msg: 'failed to unlink',
+    meta: { err: { message: 'ENOENT', stack: 'at x' } },
+  },
+  {
+    ts: '2026-05-01T00:00:01Z',
+    level: 'error',
+    plugin: 'learning-loop',
+    scope: 'watch.stop.unlinkPid',
+    msg: 'failed to unlink',
+    meta: {},
+  },
+  {
+    ts: '2026-05-01T00:00:02Z',
+    level: 'error',
+    plugin: 'learning-loop',
+    scope: 'provenance.invalidAction',
+    msg: 'unknown action',
+    meta: {},
+  },
 ];
 
 test('counts hook-errors by module and code', () => {
@@ -93,7 +144,10 @@ test('latency_ms histogram satisfies bucket invariants', () => {
     const [hist] = named(metrics, 'hook_error_latency_ms');
     assert.ok(hist, 'expected a latency_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
-    assert.strictEqual(hist.count, hist.bucketCounts.reduce((a, b) => a + b, 0));
+    assert.strictEqual(
+      hist.count,
+      hist.bucketCounts.reduce((a, b) => a + b, 0),
+    );
   });
 });
 
@@ -103,7 +157,10 @@ test('elapsed_ms histogram satisfies bucket invariants', () => {
     const [hist] = named(metrics, 'hook_error_elapsed_ms');
     assert.ok(hist, 'expected an elapsed_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
-    assert.strictEqual(hist.count, hist.bucketCounts.reduce((a, b) => a + b, 0));
+    assert.strictEqual(
+      hist.count,
+      hist.bucketCounts.reduce((a, b) => a + b, 0),
+    );
   });
 });
 

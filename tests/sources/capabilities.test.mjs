@@ -12,6 +12,8 @@ describe('capability contract', () => {
     assert.deepEqual(capabilityMethods.verify, ['matches', 'verify']);
   });
   it('is frozen', () => {
-    assert.throws(() => { CAPABILITIES.push('x'); });
+    assert.throws(() => {
+      CAPABILITIES.push('x');
+    });
   });
 });

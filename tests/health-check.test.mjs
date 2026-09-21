@@ -1364,10 +1364,7 @@ test('checkOtelErrorLog: tolerant of a corrupt line', () => {
   mkdirSync(join(dir, 'logs'), { recursive: true });
   const now = new Date('2026-06-12T00:00:00Z');
   const month = now.toISOString().slice(0, 7);
-  const lines = [
-    JSON.stringify({ level: 'error', scope: 'a', msg: 'x' }),
-    'not-json{{{',
-  ];
+  const lines = [JSON.stringify({ level: 'error', scope: 'a', msg: 'x' }), 'not-json{{{'];
   writeFileSync(join(dir, 'logs', `log-${month}.jsonl`), lines.join('\n') + '\n');
   const result = checkOtelErrorLog({ pluginData: dir, now });
   assert.match(result.detail, /1 error/);

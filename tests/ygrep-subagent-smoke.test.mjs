@@ -36,9 +36,13 @@ test('ygrep index + search round-trip works on a tiny repo', { skip: SKIP }, () 
     const indexRun = spawnSync('ygrep', ['index', dir], { encoding: 'utf-8' });
     assert.equal(indexRun.status, 0, indexRun.stderr);
     indexHash =
-      `${indexRun.stdout}\n${indexRun.stderr}`.match(/Index stored at:.*[/\\]([0-9a-f]{16})\s*$/m)?.[1] ?? null;
+      `${indexRun.stdout}\n${indexRun.stderr}`.match(
+        /Index stored at:.*[/\\]([0-9a-f]{16})\s*$/m,
+      )?.[1] ?? null;
     assert.ok(indexHash, 'index hash must be parseable for cleanup');
-    const out = execFileSync('ygrep', ['send', '-C', dir, '--json', '--limit', '5'], { encoding: 'utf-8' });
+    const out = execFileSync('ygrep', ['send', '-C', dir, '--json', '--limit', '5'], {
+      encoding: 'utf-8',
+    });
     assert.match(out, /sendCampaign|a\.ts/);
   } finally {
     // ygrep has no index-store override, so drop the index it created for the
@@ -47,7 +51,10 @@ test('ygrep index + search round-trip works on a tiny repo', { skip: SKIP }, () 
     // remove-by-path leaves the index dir behind on this ygrep build.
     if (indexHash) {
       try {
-        execFileSync('ygrep', ['indexes', 'remove', indexHash], { encoding: 'utf-8', timeout: 5000 });
+        execFileSync('ygrep', ['indexes', 'remove', indexHash], {
+          encoding: 'utf-8',
+          timeout: 5000,
+        });
       } catch {
         // Best-effort: an orphaned index is exactly what `ygrep indexes clean` exists for.
       }

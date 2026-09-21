@@ -36,13 +36,32 @@ function metricsNamed(metrics, name) {
 test('counts by command across a multi-stream, multi-month fixture', () => {
   const files = {
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x', result_count: 3 },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 3,
+      },
     ],
     'queries-2026-06.jsonl': [
-      { ts: '2026-06-01T00:00:00Z', session_id: 's1', command: 'search', query: 'y', result_count: 5 },
+      {
+        ts: '2026-06-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'y',
+        result_count: 5,
+      },
     ],
     'reads-2026-05.jsonl': [
-      { ts: '2026-05-02T00:00:00Z', session_id: 's1', command: 'read', query: 'z', result_count: 1, type: 'note' },
+      {
+        ts: '2026-05-02T00:00:00Z',
+        session_id: 's1',
+        command: 'read',
+        query: 'z',
+        result_count: 1,
+        type: 'note',
+      },
     ],
     'shadow-injection-2026-05.jsonl': [
       {
@@ -81,17 +100,33 @@ test('the latency_ms histogram satisfies both invariants', () => {
     const [hist] = metricsNamed(metrics, 'retrieval_latency_ms');
     assert.ok(hist, 'expected a latency_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
-    assert.strictEqual(hist.count, hist.bucketCounts.reduce((a, b) => a + b, 0));
+    assert.strictEqual(
+      hist.count,
+      hist.bucketCounts.reduce((a, b) => a + b, 0),
+    );
   });
 });
 
 test('running the reducer twice returns identical output', () => {
   const files = {
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x', result_count: 3, federated: true },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 3,
+        federated: true,
+      },
     ],
     'injections-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/vault/note.md', via: 'auto', level: 'permanent' },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        path: '/vault/note.md',
+        via: 'auto',
+        level: 'permanent',
+      },
     ],
   };
 
@@ -121,32 +156,52 @@ test('cache-health files in the same directory are not read', () => {
       { ts: '2026-05-01T00:00:00Z', session_id: 's1', turn: 1, cache_read: 999, model: 'claude' },
     ],
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', command: 'search', query: 'x', result_count: 1 },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 1,
+      },
     ],
   };
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
     for (const m of metrics) {
-      assert.ok(!('cache_read' in (m.attributes || {})), 'cache-health fields must not leak into retrieval metrics');
+      assert.ok(
+        !('cache_read' in (m.attributes || {})),
+        'cache-health fields must not leak into retrieval metrics',
+      );
       assert.ok(!('turn' in (m.attributes || {})));
       const values = Object.values(m.attributes || {});
-      assert.ok(!values.includes('claude'), 'cache-health model value must not appear as a retrieval label');
+      assert.ok(
+        !values.includes('claude'),
+        'cache-health model value must not appear as a retrieval label',
+      );
     }
   });
 });
 
 test('records missing optional fields do not produce undefined labels or NaN', () => {
   const files = {
-    'queries-2026-05.jsonl': [{ ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x' }],
-    'injections-2026-05.jsonl': [{ ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/vault/note.md' }],
+    'queries-2026-05.jsonl': [
+      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x' },
+    ],
+    'injections-2026-05.jsonl': [
+      { ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/vault/note.md' },
+    ],
   };
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
     for (const m of metrics) {
       for (const [key, value] of Object.entries(m.attributes || {})) {
-        assert.notStrictEqual(value, 'undefined', `attribute ${key} must not stringify a missing field`);
+        assert.notStrictEqual(
+          value,
+          'undefined',
+          `attribute ${key} must not stringify a missing field`,
+        );
         assert.notStrictEqual(value, 'null', `attribute ${key} must not stringify a missing field`);
       }
       if (m.type === 'histogram') {
@@ -159,13 +214,33 @@ test('records missing optional fields do not produce undefined labels or NaN', (
 test('every returned record passes phase 0 attribute validation', () => {
   const files = {
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x', result_count: 3, federated: true },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 3,
+        federated: true,
+      },
     ],
     'reads-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', command: 'read', query: 'y', result_count: 2, type: 'note' },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        command: 'read',
+        query: 'y',
+        result_count: 2,
+        type: 'note',
+      },
     ],
     'injections-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:02Z', session_id: 's1', path: '/vault/note.md', via: 'auto', level: 'permanent' },
+      {
+        ts: '2026-05-01T00:00:02Z',
+        session_id: 's1',
+        path: '/vault/note.md',
+        via: 'auto',
+        level: 'permanent',
+      },
     ],
     'shadow-injection-2026-05.jsonl': [
       {
@@ -193,10 +268,22 @@ test('every returned record passes phase 0 attribute validation', () => {
 test('the output serializes through buildOtlpPayload without throwing', () => {
   const files = {
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x', result_count: 3 },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 3,
+      },
     ],
     'injections-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/vault/note.md', via: 'auto', level: 'permanent' },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        path: '/vault/note.md',
+        via: 'auto',
+        level: 'permanent',
+      },
     ],
   };
 
@@ -209,9 +296,30 @@ test('the output serializes through buildOtlpPayload without throwing', () => {
 test('counts queries by federated', () => {
   const files = {
     'queries-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', command: 'search', query: 'x', result_count: 1, federated: true },
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', command: 'search', query: 'y', result_count: 2, federated: false },
-      { ts: '2026-05-01T00:00:02Z', session_id: 's1', command: 'search', query: 'z', result_count: 3, federated: true },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'x',
+        result_count: 1,
+        federated: true,
+      },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'y',
+        result_count: 2,
+        federated: false,
+      },
+      {
+        ts: '2026-05-01T00:00:02Z',
+        session_id: 's1',
+        command: 'search',
+        query: 'z',
+        result_count: 3,
+        federated: true,
+      },
     ],
   };
 
@@ -228,9 +336,27 @@ test('counts queries by federated', () => {
 test('counts injections by via and level', () => {
   const files = {
     'injections-2026-05.jsonl': [
-      { ts: '2026-05-01T00:00:00Z', session_id: 's1', path: '/a.md', via: 'auto', level: 'permanent' },
-      { ts: '2026-05-01T00:00:01Z', session_id: 's1', path: '/b.md', via: 'manual', level: 'inbox' },
-      { ts: '2026-05-01T00:00:02Z', session_id: 's1', path: '/c.md', via: 'auto', level: 'permanent' },
+      {
+        ts: '2026-05-01T00:00:00Z',
+        session_id: 's1',
+        path: '/a.md',
+        via: 'auto',
+        level: 'permanent',
+      },
+      {
+        ts: '2026-05-01T00:00:01Z',
+        session_id: 's1',
+        path: '/b.md',
+        via: 'manual',
+        level: 'inbox',
+      },
+      {
+        ts: '2026-05-01T00:00:02Z',
+        session_id: 's1',
+        path: '/c.md',
+        via: 'auto',
+        level: 'permanent',
+      },
     ],
   };
 

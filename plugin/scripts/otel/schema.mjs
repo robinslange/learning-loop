@@ -11,6 +11,14 @@
 // NEVER_EXPORT names them explicitly so the exclusion is testable rather than
 // implicit in omission.
 
+// NEVER_EXPORT is DOCUMENTATION OF INTENT, not the enforcement mechanism.
+// Enforcement is validateExportRecord below: a key absent from a stream's
+// schema throws, so every field in the corpus is refused by default whether or
+// not it is named here. Enumerating a real corpus finds 203 distinct keys
+// against 67 classified; the other 136 (per-skill outcome counters like
+// notes_checked, sources_passed, promoted_fleeting) are already refused
+// unlisted. This set names the exclusions that are a deliberate privacy
+// decision, so a future author does not helpfully add one to a stream.
 export const NEVER_EXPORT = new Set([
   'query',
   'prompt',

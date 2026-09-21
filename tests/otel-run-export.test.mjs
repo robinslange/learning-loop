@@ -25,7 +25,12 @@ test('with export disabled and no --dry-run, nothing is sent', async () => {
   await withPluginData(async (pluginData) => {
     const sink = await startOtlpSink();
     try {
-      const result = await runExport({ pluginData, enabled: false, dryRun: false, endpoint: sink.url });
+      const result = await runExport({
+        pluginData,
+        enabled: false,
+        dryRun: false,
+        endpoint: sink.url,
+      });
       assert.strictEqual(result.sent, false);
       assert.strictEqual(sink.received.length, 0);
     } finally {
@@ -38,7 +43,12 @@ test('with --dry-run, the payload is produced and not sent even when export is d
   await withPluginData(async (pluginData) => {
     const sink = await startOtlpSink();
     try {
-      const result = await runExport({ pluginData, enabled: false, dryRun: true, endpoint: sink.url });
+      const result = await runExport({
+        pluginData,
+        enabled: false,
+        dryRun: true,
+        endpoint: sink.url,
+      });
       assert.strictEqual(result.sent, false);
       assert.strictEqual(sink.received.length, 0);
       assert.ok(result.payload);
@@ -53,7 +63,12 @@ test('with export enabled, the payload reaches the local sink', async () => {
   await withPluginData(async (pluginData) => {
     const sink = await startOtlpSink();
     try {
-      const result = await runExport({ pluginData, enabled: true, dryRun: false, endpoint: sink.url });
+      const result = await runExport({
+        pluginData,
+        enabled: true,
+        dryRun: false,
+        endpoint: sink.url,
+      });
       assert.strictEqual(result.sent, true);
       assert.strictEqual(sink.received.length, 1);
     } finally {
@@ -68,7 +83,12 @@ test('a missing sibling reducer module does not crash the run', async () => {
   // is covered by the runner's own dynamic-import guard, which this test
   // proves does not throw by running the whole thing end to end.
   await withPluginData(async (pluginData) => {
-    const result = await runExport({ pluginData, enabled: false, dryRun: true, endpoint: 'http://127.0.0.1:1' });
+    const result = await runExport({
+      pluginData,
+      enabled: false,
+      dryRun: true,
+      endpoint: 'http://127.0.0.1:1',
+    });
     assert.ok(result);
     assert.ok(Array.isArray(result.reducersLoaded));
     assert.ok(Array.isArray(result.reducersSkipped));
@@ -77,11 +97,18 @@ test('a missing sibling reducer module does not crash the run', async () => {
 
 test('the runner passes one shared timestamp to all reducers', async () => {
   await withPluginData(async (pluginData) => {
-    const result = await runExport({ pluginData, enabled: false, dryRun: true, endpoint: 'http://127.0.0.1:1' });
-    const times = new Set((result.payload?.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics || []).flatMap((m) => {
-      const dps = m.sum?.dataPoints || m.gauge?.dataPoints || m.histogram?.dataPoints || [];
-      return dps.map((dp) => dp.timeUnixNano);
-    }));
+    const result = await runExport({
+      pluginData,
+      enabled: false,
+      dryRun: true,
+      endpoint: 'http://127.0.0.1:1',
+    });
+    const times = new Set(
+      (result.payload?.resourceMetrics?.[0]?.scopeMetrics?.[0]?.metrics || []).flatMap((m) => {
+        const dps = m.sum?.dataPoints || m.gauge?.dataPoints || m.histogram?.dataPoints || [];
+        return dps.map((dp) => dp.timeUnixNano);
+      }),
+    );
     // With no fixture corpus most reducers return [], so this mainly asserts
     // the runner never crashes wiring the shared time through; when metrics
     // are present, they must all share one timestamp.
