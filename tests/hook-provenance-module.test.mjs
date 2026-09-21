@@ -69,7 +69,7 @@ test('post-tool Skill tool: writes the current-skill marker for this session', (
     const markerPath = join(r.pluginDataDir, 'markers', `current-skill-${sid}`);
     assert.ok(existsSync(markerPath), 'expected the current-skill marker to be written');
     const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
-    assert.equal(marker.skill, 'learning-loop:reflect');
+    assert.equal(marker.skill, 'reflect');
     assert.ok(typeof marker.ts === 'number');
   } finally {
     r.cleanup();

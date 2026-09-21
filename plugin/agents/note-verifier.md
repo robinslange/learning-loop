@@ -188,7 +188,7 @@ Before returning the verification report to the caller, emit one summary event p
 ### Per-note summary (always emit)
 
 ```bash
-ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
+ll-run provenance-emit.js '{"agent":"note-verifier","action":"verify","target":"NOTE_FILENAME","status":"PASS|PARTIAL|ISSUES_FOUND","sources_checked":N,"sources_ok":N,"sources_dead":N,"sources_mismatched":N,"claims_checked":N,"claims_strong":N,"claims_partial":N,"claims_no_source":N,"claims_contradicted":N}'
 ```
 
 ### Per-finding score event (emit one per issue)
@@ -196,7 +196,7 @@ ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"v
 For each finding identified during verification, also emit. Pass the finding prose with `--text` rather than escaping it into the JSON: quotes, backticks and `$` are safe as-is.
 
 ```bash
-ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}' \
+ll-run provenance-emit.js '{"agent":"note-verifier","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}' \
   --text finding_detail '<one-line finding>'
 ```
 

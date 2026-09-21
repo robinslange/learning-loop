@@ -16,9 +16,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { join, extname, sep } from 'node:path';
 import { VALID_ACTIONS, INTENT_KINDS } from '../plugin/scripts/lib/provenance-vocabulary.mjs';
 import { NEVER_EXPORT } from '../plugin/scripts/otel/schema.mjs';
+import { normaliseSkill } from '../plugin/scripts/lib/provenance-skill.mjs';
+import { pluginRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 const ROOT = join(import.meta.dirname, '..', 'plugin');
 const SCAN_DIRS = ['skills', 'agents'];
@@ -186,17 +188,27 @@ test('no payload emits free-text intent', () => {
 // 1e-bis point 1 (#73): guarantees a `skill` dimension on provenance events.
 // Hook-emitted events derive it at runtime from the session's current-skill
 // marker (scripts/lib/provenance-skill.mjs), but a markdown call site is
-// static text the derivation never touches, so it must carry `skill` itself
-// unless its action is hook-owned and never skill-caused.
-const SKILL_EXEMPT_ACTIONS = new Set(['session-summary', 'session-start', 'agent-result']);
-
-test('every call-site payload carries skill or has an exempt action', () => {
+// static text the derivation never touches. A skills/**.md call site runs
+// inside a known skill, so it must name it. An agents/**.md call site runs
+// as a dispatched subagent -- runtime derivation attributes the real caller
+// from the marker (see plugin/scripts/lib/provenance-skill.mjs's
+// NO_DERIVE_ACTIONS), so the file must NOT hardcode one.
+test('skills/**.md payloads name a skill that normalises', () => {
   for (const { file, raw } of callSites) {
+    if (!file.includes(`${join('plugin', 'skills')}${sep}`)) continue;
     const payload = JSON.parse(normalisePlaceholders(raw));
     assert.ok(
-      Boolean(payload.skill) || SKILL_EXEMPT_ACTIONS.has(payload.action),
-      `${file}: action "${payload.action}" has no "skill" and is not in the exempt set`,
+      normaliseSkill(payload.skill, pluginRoot()),
+      `${file}: skill "${payload.skill}" does not normalise to an installed skill`,
     );
+  }
+});
+
+test('agents/**.md payloads never hardcode a skill', () => {
+  for (const { file, raw } of callSites) {
+    if (!file.includes(`${join('plugin', 'agents')}${sep}`)) continue;
+    const payload = JSON.parse(normalisePlaceholders(raw));
+    assert.ok(!('skill' in payload), `${file}: agent call sites must not hardcode "skill"`);
   }
 });
 

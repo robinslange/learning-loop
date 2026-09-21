@@ -13,6 +13,8 @@ import {
 import { parseFrontmatter, parseTags } from '../../scripts/lib/markdown-parse.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
+import { normaliseSkill } from '../../scripts/lib/provenance-skill.mjs';
+import { pluginRoot } from '../../scripts/lib/plugin-meta.mjs';
 
 export async function runProvenance(ctx) {
   try {
@@ -62,10 +64,17 @@ export async function runProvenance(ctx) {
       const pluginData = resolvePluginData();
       const sid = getSessionId();
       if (pluginData && sid && sid !== 'unknown') {
-        writeMarker(MARKER_PATHS.currentSkill(pluginData, sid), {
-          skill: input.skill || '',
-          ts: Date.now(),
-        });
+        const normalised = normaliseSkill(input.skill, pluginRoot());
+        if (normalised) {
+          writeMarker(MARKER_PATHS.currentSkill(pluginData, sid), {
+            skill: normalised,
+            ts: Date.now(),
+          });
+        } else {
+          logError('provenance.unknownSkill', new Error('rejected skill value'), {
+            length: String(input.skill || '').length,
+          });
+        }
       }
     }
   } catch (err) {
