@@ -207,10 +207,28 @@ const LABEL_MAX = 40;
 const GOAL_CHARS = 200;
 const STOP_CHARS = 600;
 
+// Local calendar date, matching the local-getter convention log.mjs and
+// retrieval.mjs use for their own month buckets: a session that runs past
+// midnight UTC must still file under the operator's own day.
+export function localDateStr(iso) {
+  const d = new Date(iso);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 export function ledgerPath(project, dateStr, label, sessionId) {
   const slug =
     (toKebab(label || '') || 'session').slice(0, LABEL_MAX).replace(/-+$/, '') || 'session';
   return `4-projects/${project}/ledger/${dateStr}-${slug}-${String(sessionId).slice(0, 8)}.md`;
+}
+
+// Quotes a frontmatter scalar so YAML-significant characters in a project
+// name, branch name, or session label (`"`, `\`, `:`, `#`, ...) can't break
+// the parse. Escape order matters: backslash first, or escaping the quote
+// would double-escape the backslash just inserted.
+function yamlStr(s) {
+  return `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
 export function renderLedger({
@@ -229,13 +247,13 @@ export function renderLedger({
   const title = `Session ledger: ${label || 'session'} (${date})`;
   const fm = [
     '---',
-    `title: "${title.replace(/"/g, '\\"')}"`,
-    `tags: [ledger, ${project}]`,
+    `title: ${yamlStr(title)}`,
+    `tags: [ledger, ${yamlStr(project)}]`,
     `date: ${date}`,
     'source: session',
     `session_id: ${sessionId}`,
-    `repo: ${repoRoot ? basename(repoRoot) : 'null'}`,
-    `branch: ${git.branch ?? 'null'}`,
+    `repo: ${repoRoot ? yamlStr(basename(repoRoot)) : 'null'}`,
+    `branch: ${git.branch !== null ? yamlStr(git.branch) : 'null'}`,
     `status: ${isSessionEnd ? 'ended' : 'open'}`,
   ];
   if (isSessionEnd) fm.push(`ended_reason: ${summary.end_reason}`);

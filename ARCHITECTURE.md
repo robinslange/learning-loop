@@ -125,7 +125,7 @@ flowchart LR
 
 A vault note write triggers `pre-write-check.js` before the write and the `post-tool.js` dispatcher after. The `ll-search watch` daemon reindexes continuously as notes change; nothing waits for session end.
 
-The session ledger (`hooks/session-ledger.js`) is the one vault writer outside the tool path: it writes with `fs` directly, so `pre-write-check.js` does not gate it, and the watch daemon indexes it like any other note.
+The session ledger (`hooks/session-ledger.js`) is the one vault writer outside the tool path: it writes with `fs` directly, so `pre-write-check.js` does not gate it, and the watch daemon indexes it like any other note. This is a deliberate privacy choice: the note contains transcript text (the first prompt, up to 200 characters; the last assistant message, up to 600; skill args and agent descriptions, up to 80 each), and federation only sends it onward if a visibility glob covers `4-projects/**`.
 
 ```mermaid
 flowchart LR
@@ -412,7 +412,7 @@ A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note c
 
 **Why ten hook handlers across seven event types?**
 
-Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), post-read and post-episodic-search (retrieval telemetry), subagent stop (agent-result provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
+Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), post-read and post-episodic-search (retrieval telemetry), subagent stop (agent-result provenance), and session close (reflection nudge, background reindex, the session ledger write, and the session-summary record). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
 **Why file-lock.mjs rather than SQLite for JS concurrency?**
 

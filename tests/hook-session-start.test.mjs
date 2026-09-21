@@ -18,7 +18,7 @@ import {
   utimesSync,
   realpathSync,
 } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
@@ -1078,6 +1078,69 @@ test(
       );
     } finally {
       r.cleanup();
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// 8b: newest session ledger for this repo.
+// ---------------------------------------------------------------------------
+test(
+  'session-start emits the last-session-here line for a ledger matching the project basename',
+  { timeout: 12000 },
+  () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-ledger-proj-'));
+    const project = basename(projectDir);
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'ledger-line-session' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
+      seed: (pd) => {
+        seedUpdateCheck(pd);
+        const ledgerDir = join(VAULT, '4-projects', project, 'ledger');
+        mkdirSync(ledgerDir, { recursive: true });
+        writeFileSync(
+          join(ledgerDir, '2026-09-20-x-11111111.md'),
+          '---\ntitle: "x"\ndate: 2026-09-20\nstatus: ended\n---\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'ledger-line').additionalContext;
+      assert.ok(
+        ctx.includes(
+          `Last session here: 4-projects/${project}/ledger/2026-09-20-x-11111111.md (2026-09-20, ended)`,
+        ),
+        `expected the last-session-here line, got:\n${ctx}`,
+      );
+    } finally {
+      r.cleanup();
+      rmSync(join(VAULT, '4-projects', project), { recursive: true, force: true });
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  'session-start emits no last-session-here line when the project has no ledger directory',
+  { timeout: 12000 },
+  () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'll-ss-noledger-proj-'));
+    const r = runHook(HOOK, {
+      stdin: { session_id: 'no-ledger-session' },
+      env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: projectDir },
+      seed: (pd) => seedUpdateCheck(pd),
+    });
+    try {
+      assert.equal(r.exitCode, 0, `unexpected exit: ${r.exitCode}\nstderr: ${r.stderr}`);
+      const ctx = parseOutput(r.stdout, 'no-ledger').additionalContext;
+      assert.ok(
+        !ctx.includes('Last session here:'),
+        'no ledger directory for this project must produce no last-session-here line',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(projectDir, { recursive: true, force: true });
     }
   },
 );
