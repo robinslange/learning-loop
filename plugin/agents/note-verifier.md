@@ -193,12 +193,11 @@ ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"v
 
 ### Per-finding score event (emit one per issue)
 
-For each finding identified during verification, also emit. `finding_detail` carries free text — pass the payload on stdin (`-` + quoted heredoc) so quotes, backticks, and `$` in the prose cannot break shell quoting; escape only JSON's own `"` and `\`:
+For each finding identified during verification, also emit. Pass the finding prose with `--text` rather than escaping it into the JSON: quotes, backticks and `$` are safe as-is.
 
 ```bash
-ll-run provenance-emit.js - <<'JSON'
-{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","finding_detail":"<one-line>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}
-JSON
+ll-run provenance-emit.js '{"agent":"note-verifier","skill":"verify","action":"score","target":"NOTE_FILENAME","result":"fail","finding_type":"<type>","trigger":"verify-auto","confidence":"clear","ambiguous_alt":""}' \
+  --text finding_detail '<one-line finding>'
 ```
 
 Where:
