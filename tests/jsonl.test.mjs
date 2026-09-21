@@ -7,6 +7,8 @@ import {
   appendJsonlLine,
   appendJsonlLineSafe,
   appendJsonlLineDeduped,
+  _dedupeStats,
+  _resetDedupeCache,
 } from '../plugin/scripts/lib/jsonl.mjs';
 
 function withTempDir(fn) {
@@ -235,4 +237,35 @@ test('session-summary records are never deduplicated', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The in-process fingerprint cache (plan 1d) exists so a long-lived process
+// never tails the same file twice: the first deduped append for a path seeds
+// the cache from disk (one lastLine call), and every later call against that
+// path answers from memory. This is the property that distinguishes "an
+// in-memory cache" from "reading the disk tail on every emit" -- assert the
+// call count, not just the resulting content.
+test('appendJsonlLineDeduped: two deduped appends of identical content read the disk tail at most once', () => {
+  withTempDir((dir) => {
+    _resetDedupeCache();
+    const path = join(dir, 'dedup.jsonl');
+    const record = {
+      ts: new Date(T0).toISOString(),
+      agent: 'note-verifier',
+      action: 'score',
+      target: 'a.md',
+      result: 'pass',
+    };
+    appendJsonlLineDeduped(path, record, T0);
+    appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 500).toISOString() }, T0 + 500);
+    appendJsonlLineDeduped(path, { ...record, ts: new Date(T0 + 900).toISOString() }, T0 + 900);
+    const lines = readFileSync(path, 'utf-8').split('\n').filter(Boolean);
+    assert.strictEqual(lines.length, 1, 'three identical appends within the window write once');
+    assert.strictEqual(
+      _dedupeStats().lastLineCalls,
+      1,
+      'the first call misses the in-memory cache and tails the (nonexistent) file once; every ' +
+        'later call for the same path must answer from the in-memory fingerprint, not disk',
+    );
+  });
 });
