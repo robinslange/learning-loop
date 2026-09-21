@@ -47,7 +47,8 @@ learning-loop/
         export.mjs      -- the POST path, off unless endpoint AND opt-in are both set
         run-export.mjs  -- entry point the detached worker invokes; --dry-run audits
         reducers/       -- one per stream: provenance, cache-health, retrieval,
-                           errors (hook-errors + logs), librarian, dream-eval
+                           errors (hook-errors + logs), librarian, dream-eval,
+                           session
       librarian.mjs     -- ~66 LOC CLI entry; delegates to librarian/daemon.mjs
       librarian/        -- librarian daemon + local research engine
         daemon.mjs      -- main loop + investigateNote (voice_gate, tag_suggest,
@@ -179,7 +180,7 @@ budget and the OTEL SDK's batching assumes a long-lived one.
 ```mermaid
 flowchart LR
   A[hooks append JSONL] --> B[raw streams under PLUGIN_DATA]
-  B --> C[six reducers re-derive whole corpus]
+  B --> C[seven reducers re-derive whole corpus]
   C --> D[phase 0 allowlist, fail closed]
   D --> E[OTLP/HTTP+JSON serializer]
   E --> F[fetch POST to Grafana Alloy on the LAN]
