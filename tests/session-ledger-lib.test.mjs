@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -146,6 +146,7 @@ import {
   ledgerPath,
   shouldWrite,
   shouldEmitSummary,
+  latestLedger,
 } from '../plugin/scripts/lib/session-ledger.mjs';
 
 const WALK = {
@@ -472,6 +473,24 @@ test('shouldWrite requires an edit, a commit, or enough prompts', () => {
   assert.equal(shouldWrite({ ...base, commits: 1 }, 5), true);
   assert.equal(shouldWrite({ ...base, prompts: 4 }, 5), false);
   assert.equal(shouldWrite({ ...base, prompts: 5 }, 5), true);
+});
+
+test('latestLedger returns the newest ledger by mtime with its frontmatter status', () => {
+  withTmp((root) => {
+    const dir = join(root, '4-projects', 'p', 'ledger');
+    mkdirSync(dir, { recursive: true });
+    const a = join(dir, '2026-09-20-a-11111111.md');
+    const b = join(dir, '2026-09-21-b-22222222.md');
+    writeFileSync(a, '---\ndate: 2026-09-20\nstatus: ended\n---\n');
+    writeFileSync(b, '---\ndate: 2026-09-21\nstatus: open\n---\n');
+    utimesSync(a, new Date(Date.now() - 20_000), new Date(Date.now() - 20_000));
+    assert.deepEqual(latestLedger(root, 'p'), {
+      relPath: '4-projects/p/ledger/2026-09-21-b-22222222.md',
+      date: '2026-09-21',
+      status: 'open',
+    });
+    assert.equal(latestLedger(root, 'nope'), null);
+  });
 });
 
 test('shouldEmitSummary fires on SessionEnd, on first flush, and after the interval', () => {

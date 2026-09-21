@@ -2,7 +2,8 @@
 // here takes its inputs as arguments so tests can inject git and clocks.
 
 import { execFileSync } from 'node:child_process';
-import { basename, dirname, resolve, relative, isAbsolute, sep } from 'node:path';
+import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { basename, dirname, resolve, relative, isAbsolute, sep, join } from 'node:path';
 import { toKebab } from '../../hooks/lib/filename-style.mjs';
 
 export { toKebab };
@@ -291,4 +292,26 @@ export function shouldEmitSummary(marker, nowMs, isSessionEnd, intervalMs) {
   const last = marker?.last_summary_ts ? Date.parse(marker.last_summary_ts) : NaN;
   if (!Number.isFinite(last)) return true;
   return nowMs - last >= intervalMs;
+}
+
+export function latestLedger(vaultRoot, project) {
+  const rel = `4-projects/${project}/ledger`;
+  const dir = join(vaultRoot, rel);
+  let newest = null;
+  let names;
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith('.md'));
+  } catch (err) {
+    if (err?.code === 'ENOENT') return null;
+    throw err;
+  }
+  for (const name of names) {
+    const mtime = statSync(join(dir, name)).mtimeMs;
+    if (!newest || mtime > newest.mtime) newest = { name, mtime };
+  }
+  if (!newest) return null;
+  const head = readFileSync(join(dir, newest.name), 'utf8').slice(0, 2048);
+  const date = head.match(/^date:\s*(\S+)/m)?.[1] ?? newest.name.slice(0, 10);
+  const status = head.match(/^status:\s*(\S+)/m)?.[1] ?? 'open';
+  return { relPath: `${rel}/${newest.name}`, date, status };
 }
