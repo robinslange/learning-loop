@@ -15,7 +15,9 @@ describe('loadSourcesConfig', () => {
     assert.equal(c.fetch, 'raw'); // untouched slot still default
   });
   it('exposes providers passthrough', () => {
-    const c = loadSourcesConfig({ getConfigFn: () => ({ sources: { providers: { brave: { api_key_ref: 'x' } } } }) });
+    const c = loadSourcesConfig({
+      getConfigFn: () => ({ sources: { providers: { brave: { api_key_ref: 'x' } } } }),
+    });
     assert.deepEqual(c.providers, { brave: { api_key_ref: 'x' } });
   });
 });

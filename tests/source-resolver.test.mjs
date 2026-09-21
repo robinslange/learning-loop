@@ -79,7 +79,7 @@ describe('source-resolver check-claims', () => {
     assert.ok(Array.isArray(results));
     assert.ok(results.length >= 1, 'should have at least one claim row');
 
-    const eighty = results.find(r => r.claim === '80');
+    const eighty = results.find((r) => r.claim === '80');
     assert.ok(eighty, 'expected a result for the 80% claim');
     assert.equal(eighty.source_kind, 'page');
     assert.equal(eighty.url, 'https://example.com/article');

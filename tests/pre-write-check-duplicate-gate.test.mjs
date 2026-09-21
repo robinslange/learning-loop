@@ -384,8 +384,11 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     // wall clock, and well inside the budget these tests raise. That cap lived
     // in HookConfig.QUERY_TIMEOUT_MS, a constant no production code ever read;
     // it is deleted now, so the number lives here beside the reason for it.
-    const slowStub = envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note')
-      .replace('#!/bin/sh\n', '#!/bin/sh\nsleep 2.5\n');
+    const slowStub = envelopeStub(
+      0.92,
+      '3-permanent/sleep-existing.md',
+      'Existing sleep note',
+    ).replace('#!/bin/sh\n', '#!/bin/sh\nsleep 2.5\n');
     const { result } = runWithStub(slowStub, join(VAULT, '0-inbox', 'new-note.md'));
     assert.ok(result, 'a stub slower than the old 2s cap must still be awaited within the budget');
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);

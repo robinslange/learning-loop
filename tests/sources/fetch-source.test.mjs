@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import rawFetch from '../../plugin/scripts/lib/sources/fetch-source.mjs';
 
 const fetchOverride = async () => ({
-  ok: true, status: 200,
+  ok: true,
+  status: 200,
   headers: { get: (h) => (h === 'content-type' ? 'text/html' : null) },
   text: async () => '<p>hi</p>',
 });

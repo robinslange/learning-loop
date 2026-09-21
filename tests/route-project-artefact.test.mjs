@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { routeArtefact, extractProjectSlug, readVaultProjectIndexSync, listProjectSlugs } from '../plugin/scripts/route-project-artefact.mjs';
+import {
+  routeArtefact,
+  extractProjectSlug,
+  readVaultProjectIndexSync,
+  listProjectSlugs,
+} from '../plugin/scripts/route-project-artefact.mjs';
 
 const vault = {
   projectFiles: ['acme.md', 'omit.md', 'umbrella.md', 'fabrikam.md', 'widget-co.md'],
@@ -67,6 +72,9 @@ test('readVaultProjectIndexSync returns empty index when 4-projects/ is absent',
 });
 
 test('listProjectSlugs dedupes files and dirs, longest first', () => {
-  const slugs = listProjectSlugs({ projectFiles: ['acme.md', 'acme-legal.md'], projectDirs: ['widget-co'] });
+  const slugs = listProjectSlugs({
+    projectFiles: ['acme.md', 'acme-legal.md'],
+    projectDirs: ['widget-co'],
+  });
   assert.deepEqual(slugs, ['acme-legal', 'widget-co', 'acme']);
 });

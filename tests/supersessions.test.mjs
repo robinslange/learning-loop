@@ -6,8 +6,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import {
-  openEdgeDb, addSupersession, removeSupersession,
-  listSupersessions, findMatchingSupersessions, saveDb,
+  openEdgeDb,
+  addSupersession,
+  removeSupersession,
+  listSupersessions,
+  findMatchingSupersessions,
+  saveDb,
   loadSupersessionsCached,
 } from '../plugin/scripts/lib/edges.mjs';
 
@@ -178,7 +182,10 @@ describe('post-search-tracking supersession annotation', () => {
     assert.ok(result);
     assert.equal(result.hookSpecificOutput.hookEventName, 'PostToolUse');
     assert.match(result.hookSpecificOutput.additionalContext, /superseded/);
-    assert.match(result.hookSpecificOutput.additionalContext, /integration-tests-must-hit-real-database/);
+    assert.match(
+      result.hookSpecificOutput.additionalContext,
+      /integration-tests-must-hit-real-database/,
+    );
   });
 
   it('emits nothing for unrelated queries', async () => {

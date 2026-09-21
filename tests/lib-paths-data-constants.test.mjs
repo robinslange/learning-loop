@@ -25,10 +25,7 @@ test('FEDERATION_PATHS resolves federation subtree', () => {
   assert.equal(FEDERATION_PATHS.root(pd), join(pd, 'federation'));
   assert.equal(FEDERATION_PATHS.config(pd), join(pd, 'federation', 'config.json'));
   assert.equal(FEDERATION_PATHS.seedMeta(pd), join(pd, 'federation', '.seed-meta.json'));
-  assert.equal(
-    FEDERATION_PATHS.seedNoticeShown(pd),
-    join(pd, 'federation', '.seed-notice-shown'),
-  );
+  assert.equal(FEDERATION_PATHS.seedNoticeShown(pd), join(pd, 'federation', '.seed-notice-shown'));
   assert.equal(FEDERATION_PATHS.outbox(pd), join(pd, 'federation', 'outbox'));
   assert.equal(FEDERATION_PATHS.peersDir(pd), join(pd, 'federation', 'data', 'peers'));
   assert.equal(

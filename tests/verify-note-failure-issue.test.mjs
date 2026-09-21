@@ -14,9 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const RESOLVER = fileURLToPath(
-  new URL('../plugin/scripts/source-resolver.mjs', import.meta.url),
-);
+const RESOLVER = fileURLToPath(new URL('../plugin/scripts/source-resolver.mjs', import.meta.url));
 
 // The severity filter the shipped inbox-organiser gate snippet applies.
 function highSeverityIssues(parsed) {
@@ -41,7 +39,16 @@ function verifyNoteOffline(body) {
 
 test('an unreachable citation is a high-severity issue, not a silent pass', () => {
   const parsed = verifyNoteOffline(
-    ['---', 'tags: [x]', 'date: 2026-08-04', 'source: literature', '---', '# A claim', '', 'Smith et al. 2019 found the thing (PMID 12345678).'].join('\n'),
+    [
+      '---',
+      'tags: [x]',
+      'date: 2026-08-04',
+      'source: literature',
+      '---',
+      '# A claim',
+      '',
+      'Smith et al. 2019 found the thing (PMID 12345678).',
+    ].join('\n'),
   );
   const src = parsed.sources[0];
   assert.equal(src.verified, false);
@@ -53,7 +60,16 @@ test('an unreachable citation is a high-severity issue, not a silent pass', () =
 
 test('a bare link carries no citation claim, so it stays low and does not demote', () => {
   const parsed = verifyNoteOffline(
-    ['---', 'tags: [x]', 'date: 2026-08-04', 'source: session', '---', '# A note', '', 'See [the docs](https://example.com/x) for detail.'].join('\n'),
+    [
+      '---',
+      'tags: [x]',
+      'date: 2026-08-04',
+      'source: session',
+      '---',
+      '# A note',
+      '',
+      'See [the docs](https://example.com/x) for detail.',
+    ].join('\n'),
   );
   const src = parsed.sources[0];
   assert.equal(src.verified, false);

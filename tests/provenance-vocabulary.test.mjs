@@ -120,10 +120,7 @@ test('VALID_ACTIONS and LEGACY_ACTIONS are disjoint', () => {
 test('a bounded intent_kind emits and is kept on the record', () => {
   const root = mkdtempSync(join(tmpdir(), 'll-prov-vocab-'));
   try {
-    const result = emit(
-      { agent: 'test', action: 'session-start', intent_kind: 'scope' },
-      root,
-    );
+    const result = emit({ agent: 'test', action: 'session-start', intent_kind: 'scope' }, root);
     assert.strictEqual(result.status, 0, `unexpected exit: ${result.stderr}`);
     const events = readEvents(root);
     assert.strictEqual(events.length, 1);

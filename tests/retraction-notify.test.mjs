@@ -8,7 +8,10 @@ import { randomBytes } from 'node:crypto';
 import { initSQL } from '../plugin/scripts/lib/sqljs.mjs';
 
 const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'retraction-notify.mjs');
-const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-retraction-${randomBytes(8).toString('hex')}`);
+const PLUGIN_DATA = join(
+  tmpdir(),
+  `ll-test-plugin-data-retraction-${randomBytes(8).toString('hex')}`,
+);
 const FEDERATION_DIR = join(PLUGIN_DATA, 'federation');
 const PEERS_DIR = join(FEDERATION_DIR, 'data', 'peers');
 const OUTBOX_DIR = join(FEDERATION_DIR, 'outbox');
@@ -30,7 +33,12 @@ async function makePeerIndex(peerId, notePaths) {
     )
   `);
   for (const p of notePaths) {
-    db.run('INSERT INTO notes (path, title, tier, updated_at) VALUES (?, ?, ?, ?)', [p, p, 'public', 0]);
+    db.run('INSERT INTO notes (path, title, tier, updated_at) VALUES (?, ?, ?, ?)', [
+      p,
+      p,
+      'public',
+      0,
+    ]);
   }
   const data = db.export();
   writeFileSync(join(PEERS_DIR, peerId, 'index.db'), Buffer.from(data));
@@ -62,13 +70,16 @@ function readOutbox() {
 describe('retraction-notify', () => {
   before(() => {
     mkdirSync(PEERS_DIR, { recursive: true });
-    writeFileSync(CONFIG_PATH, JSON.stringify({
-      identity: { displayName: 'test', pubkey: 'ed25519:fake' },
-      peers: [
-        { id: 'alice', pubkey: 'ed25519:alice' },
-        { id: 'bob', pubkey: 'ed25519:bob' },
-      ],
-    }));
+    writeFileSync(
+      CONFIG_PATH,
+      JSON.stringify({
+        identity: { displayName: 'test', pubkey: 'ed25519:fake' },
+        peers: [
+          { id: 'alice', pubkey: 'ed25519:alice' },
+          { id: 'bob', pubkey: 'ed25519:bob' },
+        ],
+      }),
+    );
   });
 
   beforeEach(() => {
@@ -121,9 +132,12 @@ describe('retraction-notify', () => {
     listReadable(['alice']);
     const result = runScript([
       '3-permanent/old.md',
-      '--reason', 'corrected',
-      '--replacement', '3-permanent/new.md',
-      '--source-graph', 'robin',
+      '--reason',
+      'corrected',
+      '--replacement',
+      '3-permanent/new.md',
+      '--source-graph',
+      'robin',
     ]);
     assert.equal(result.event.replacement_note_path, '3-permanent/new.md');
     assert.equal(result.event.source_graph, 'robin');

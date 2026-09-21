@@ -20,11 +20,7 @@ const mdNames = (dir) =>
 const hooksJson = JSON.parse(read('plugin', 'hooks', 'hooks.json'));
 
 const EVENT_TYPES = Object.keys(hooksJson.hooks);
-const HANDLERS = [
-  ...new Set(
-    JSON.stringify(hooksJson).match(/hooks\/[a-z-]+\.js/g) ?? [],
-  ),
-];
+const HANDLERS = [...new Set(JSON.stringify(hooksJson).match(/hooks\/[a-z-]+\.js/g) ?? [])];
 const AGENTS = mdNames('agents');
 const SHARED = mdNames('agents-shared');
 const SKILLS = readdirSync(join(PLUGIN, 'skills'), { withFileTypes: true })
@@ -98,7 +94,9 @@ test('prose hook counts match hooks.json', () => {
     // Any "<word> ... hook handlers ... <word> ... event types" sentence must
     // use the real numbers. Matching the shape rather than exact prose keeps
     // the assertion from breaking on a rewording.
-    const sentences = text.match(/\b\w+ (?:lifecycle )?hook handlers across \w+ (?:Claude Code )?event types/g) ?? [];
+    const sentences =
+      text.match(/\b\w+ (?:lifecycle )?hook handlers across \w+ (?:Claude Code )?event types/g) ??
+      [];
     assert.ok(
       sentences.length > 0,
       `${name} no longer states a hook-handler count — update this test if that is deliberate`,

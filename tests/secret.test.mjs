@@ -10,12 +10,21 @@ describe('resolveSecret', () => {
   });
   it('returns null on a falsy ref without calling the resolver', () => {
     let called = false;
-    const r = resolveSecret('', { keyResolver: () => { called = true; return 'x'; } });
+    const r = resolveSecret('', {
+      keyResolver: () => {
+        called = true;
+        return 'x';
+      },
+    });
     assert.equal(r, null);
     assert.equal(called, false);
   });
   it('returns null when the resolver throws', () => {
-    const r = resolveSecret('missing', { keyResolver: () => { throw new Error('not found'); } });
+    const r = resolveSecret('missing', {
+      keyResolver: () => {
+        throw new Error('not found');
+      },
+    });
     assert.equal(r, null);
   });
 });

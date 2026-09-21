@@ -101,17 +101,14 @@ test('parseTags filters empty strings from array', () => {
 });
 
 test('extractWikilinks returns targets and deduplicates', () => {
-  assert.deepEqual(
-    extractWikilinks('see [[alpha]] and [[beta]] and [[alpha]] again'),
-    ['alpha', 'beta'],
-  );
+  assert.deepEqual(extractWikilinks('see [[alpha]] and [[beta]] and [[alpha]] again'), [
+    'alpha',
+    'beta',
+  ]);
 });
 
 test('extractWikilinks strips aliases', () => {
-  assert.deepEqual(
-    extractWikilinks('[[target|alias]] and [[other]]'),
-    ['target', 'other'],
-  );
+  assert.deepEqual(extractWikilinks('[[target|alias]] and [[other]]'), ['target', 'other']);
 });
 
 test('extractWikilinks handles empty/edge cases', () => {
@@ -123,10 +120,11 @@ test('extractWikilinks handles empty/edge cases', () => {
 });
 
 test('extractWikilinks preserves first-occurrence order', () => {
-  assert.deepEqual(
-    extractWikilinks('[[c]] then [[a]] then [[b]] then [[c]] again'),
-    ['c', 'a', 'b'],
-  );
+  assert.deepEqual(extractWikilinks('[[c]] then [[a]] then [[b]] then [[c]] again'), [
+    'c',
+    'a',
+    'b',
+  ]);
 });
 
 test('extractWikilinks handles alias with spaces', () => {

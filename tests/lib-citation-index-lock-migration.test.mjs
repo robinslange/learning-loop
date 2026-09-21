@@ -35,7 +35,11 @@ test('updateCitationIndex: round-trip — write under withLock then read back', 
       `../plugin/scripts/lib/sources/citation-index.mjs?cachebust=${sb}`
     );
 
-    await updateCitationIndex('12345', { authors: ['Doe J'], title: 'Test', year: 2024 }, 'note-a.md');
+    await updateCitationIndex(
+      '12345',
+      { authors: ['Doe J'], title: 'Test', year: 2024 },
+      'note-a.md',
+    );
     await updateCitationIndex('12345', null, 'note-b.md');
 
     const index = loadCitationIndex();
@@ -101,11 +105,7 @@ test('updateCitationIndex: ELOCK_TIMEOUT is surfaced via logError, not silently 
       /ELOCK_TIMEOUT/,
       `expected error code on stderr; got: ${stderr.slice(0, 300)}`,
     );
-    assert.match(
-      stderr,
-      /99999/,
-      `expected pmid in meta; got: ${stderr.slice(0, 300)}`,
-    );
+    assert.match(stderr, /99999/, `expected pmid in meta; got: ${stderr.slice(0, 300)}`);
   } finally {
     delete process.env.CLAUDE_PLUGIN_DATA;
     rmSync(sb, { recursive: true, force: true });

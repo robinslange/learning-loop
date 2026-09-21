@@ -38,7 +38,12 @@ test('retrieveTwoHop keeps a directly-picked memory file (User-tier, one hop)', 
   const readIndexFile = () => {
     throw new Error('should not read an index for a direct pick');
   };
-  const r = await retrieveTwoHop({ question: 'where does Robin live?', indexText: 'i', pick, readIndexFile });
+  const r = await retrieveTwoHop({
+    question: 'where does Robin live?',
+    indexText: 'i',
+    pick,
+    readIndexFile,
+  });
   assert.deepStrictEqual(r, ['user_location_nz.md']);
 });
 
@@ -55,7 +60,12 @@ test('retrieveTwoHop resolves an index pick through a second pick over its entri
     assert.strictEqual(path, '_index_feedback.md');
     return ['feedback_branch_over_worktree.md', 'feedback_other.md'];
   };
-  const r = await retrieveTwoHop({ question: 'worktree preference?', indexText: 'i', pick, readIndexFile });
+  const r = await retrieveTwoHop({
+    question: 'worktree preference?',
+    indexText: 'i',
+    pick,
+    readIndexFile,
+  });
   assert.deepStrictEqual(r, ['feedback_branch_over_worktree.md']);
 });
 

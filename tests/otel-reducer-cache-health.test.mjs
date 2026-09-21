@@ -45,21 +45,41 @@ test('sums token counters across a multi-record, multi-month fixture', () => {
   const { pluginData, retrievalDir } = makePluginData();
   try {
     writeMonth(retrievalDir, 'cache-health-2026-08.jsonl', [
-      record({ ts: '2026-08-01T00:00:00.000Z', cache_read: 100, cache_creation: 10, uncached_input: 5, output_tokens: 1 }),
+      record({
+        ts: '2026-08-01T00:00:00.000Z',
+        cache_read: 100,
+        cache_creation: 10,
+        uncached_input: 5,
+        output_tokens: 1,
+      }),
     ]);
     writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [
-      record({ ts: '2026-09-01T00:00:00.000Z', cache_read: 200, cache_creation: 20, uncached_input: 15, output_tokens: 2 }),
+      record({
+        ts: '2026-09-01T00:00:00.000Z',
+        cache_read: 200,
+        cache_creation: 20,
+        uncached_input: 15,
+        output_tokens: 2,
+      }),
     ]);
 
     const metrics = reduceCacheHealth({ pluginData, timeUnixMs: Date.now() });
 
-    const cacheRead = metrics.find((m) => m.name === 'll.cache_health.cache_read' && m.type === 'counter');
+    const cacheRead = metrics.find(
+      (m) => m.name === 'll.cache_health.cache_read' && m.type === 'counter',
+    );
     assert.equal(cacheRead.value, 300);
-    const cacheCreation = metrics.find((m) => m.name === 'll.cache_health.cache_creation' && m.type === 'counter');
+    const cacheCreation = metrics.find(
+      (m) => m.name === 'll.cache_health.cache_creation' && m.type === 'counter',
+    );
     assert.equal(cacheCreation.value, 30);
-    const uncached = metrics.find((m) => m.name === 'll.cache_health.uncached_input' && m.type === 'counter');
+    const uncached = metrics.find(
+      (m) => m.name === 'll.cache_health.uncached_input' && m.type === 'counter',
+    );
     assert.equal(uncached.value, 20);
-    const output = metrics.find((m) => m.name === 'll.cache_health.output_tokens' && m.type === 'counter');
+    const output = metrics.find(
+      (m) => m.name === 'll.cache_health.output_tokens' && m.type === 'counter',
+    );
     assert.equal(output.value, 3);
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
@@ -76,10 +96,15 @@ test('hit-rate histograms satisfy the bucket invariants', () => {
 
     const metrics = reduceCacheHealth({ pluginData, timeUnixMs: Date.now() });
     for (const name of ['turn_hit_rate', 'window_hit_rate', 'lifetime_hit_rate']) {
-      const hist = metrics.find((m) => m.name === `ll.cache_health.${name}` && m.type === 'histogram');
+      const hist = metrics.find(
+        (m) => m.name === `ll.cache_health.${name}` && m.type === 'histogram',
+      );
       assert.ok(hist, `expected a histogram for ${name}`);
       assert.equal(hist.bucketCounts.length, hist.explicitBounds.length + 1);
-      assert.equal(hist.bucketCounts.reduce((a, b) => a + b, 0), hist.count);
+      assert.equal(
+        hist.bucketCounts.reduce((a, b) => a + b, 0),
+        hist.count,
+      );
     }
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
@@ -89,7 +114,10 @@ test('hit-rate histograms satisfy the bucket invariants', () => {
 test('running the reducer twice returns identical output', () => {
   const { pluginData, retrievalDir } = makePluginData();
   try {
-    writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [record({}), record({ session_id: 'sess-b', cache_read: 50 })]);
+    writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [
+      record({}),
+      record({ session_id: 'sess-b', cache_read: 50 }),
+    ]);
     const timeUnixMs = Date.now();
 
     const first = reduceCacheHealth({ pluginData, timeUnixMs });
@@ -123,10 +151,14 @@ test('records missing model, version and total_cost_usd produce no undefined lab
           assert.notEqual(v, 'undefined', `attribute ${k} on ${m.name} stringified to "undefined"`);
         }
       }
-      if (typeof m.value === 'number') assert.ok(Number.isFinite(m.value), `${m.name} value is not finite`);
+      if (typeof m.value === 'number')
+        assert.ok(Number.isFinite(m.value), `${m.name} value is not finite`);
     }
     // No total_cost_usd on any record in this fixture: the gauge must not appear.
-    assert.equal(metrics.find((m) => m.name === 'll.cache_health.total_cost_usd'), undefined);
+    assert.equal(
+      metrics.find((m) => m.name === 'll.cache_health.total_cost_usd'),
+      undefined,
+    );
   } finally {
     rmSync(pluginData, { recursive: true, force: true });
   }
@@ -135,8 +167,12 @@ test('records missing model, version and total_cost_usd produce no undefined lab
 test('startTimeUnixMs on counters comes from the earliest record, not from now', () => {
   const { pluginData, retrievalDir } = makePluginData();
   try {
-    writeMonth(retrievalDir, 'cache-health-2026-08.jsonl', [record({ ts: '2026-08-05T12:00:00.000Z' })]);
-    writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [record({ ts: '2026-09-18T05:02:06.578Z' })]);
+    writeMonth(retrievalDir, 'cache-health-2026-08.jsonl', [
+      record({ ts: '2026-08-05T12:00:00.000Z' }),
+    ]);
+    writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [
+      record({ ts: '2026-09-18T05:02:06.578Z' }),
+    ]);
 
     const metrics = reduceCacheHealth({ pluginData, timeUnixMs: Date.now() });
     const earliest = Date.parse('2026-08-05T12:00:00.000Z');

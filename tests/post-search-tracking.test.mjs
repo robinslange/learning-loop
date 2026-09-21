@@ -23,10 +23,14 @@ function run(payload) {
 
 function readRetrieval(prefix) {
   if (!existsSync(RETRIEVAL_DIR)) return [];
-  const files = readdirSync(RETRIEVAL_DIR).filter(f => f.startsWith(`${prefix}-`) && f.endsWith('.jsonl'));
+  const files = readdirSync(RETRIEVAL_DIR).filter(
+    (f) => f.startsWith(`${prefix}-`) && f.endsWith('.jsonl'),
+  );
   const events = [];
   for (const f of files) {
-    const lines = readFileSync(join(RETRIEVAL_DIR, f), 'utf-8').split('\n').filter(l => l.trim());
+    const lines = readFileSync(join(RETRIEVAL_DIR, f), 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim());
     for (const line of lines) events.push(JSON.parse(line));
   }
   return events;

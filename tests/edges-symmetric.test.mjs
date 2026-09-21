@@ -5,16 +5,24 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import {
-  openEdgeDb, addEdge, saveDb,
-  getDownstreamSymmetric, getSoleJustificationDependentsSymmetric,
+  openEdgeDb,
+  addEdge,
+  saveDb,
+  getDownstreamSymmetric,
+  getSoleJustificationDependentsSymmetric,
 } from '../plugin/scripts/lib/edges.mjs';
 
-const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-symmetric-${randomBytes(8).toString('hex')}`);
+const PLUGIN_DATA = join(
+  tmpdir(),
+  `ll-test-plugin-data-symmetric-${randomBytes(8).toString('hex')}`,
+);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
 
 describe('symmetric edge queries', () => {
   before(() => mkdirSync(PLUGIN_DATA, { recursive: true }));
-  beforeEach(() => { if (existsSync(DB_PATH)) rmSync(DB_PATH); });
+  beforeEach(() => {
+    if (existsSync(DB_PATH)) rmSync(DB_PATH);
+  });
   after(() => rmSync(PLUGIN_DATA, { recursive: true, force: true }));
 
   it('getDownstreamSymmetric finds nodes via outgoing AND incoming edges', async () => {
@@ -27,7 +35,7 @@ describe('symmetric edge queries', () => {
     const reachable = getDownstreamSymmetric(db, 'a.md', 5);
     db.close();
 
-    const nodes = new Set(reachable.map(r => r.node));
+    const nodes = new Set(reachable.map((r) => r.node));
     assert.ok(nodes.has('b.md'), 'should reach b via outgoing a→b');
     assert.ok(nodes.has('c.md'), 'should reach c via incoming c→a');
     assert.ok(nodes.has('d.md'), 'should reach d via b→d after a→b');
@@ -69,7 +77,7 @@ describe('symmetric edge queries', () => {
 
     // a->d is sole (d has only one evidence source)
     // a->b is NOT sole (b has two evidence sources: a and c)
-    const soleToPaths = dependents.map(d => d.to_path).sort();
+    const soleToPaths = dependents.map((d) => d.to_path).sort();
     assert.deepEqual(soleToPaths, ['d.md']);
   });
 

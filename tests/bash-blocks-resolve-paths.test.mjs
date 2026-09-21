@@ -207,5 +207,9 @@ test('no plugin doc runs a script through ${CLAUDE_PLUGIN_ROOT}', () => {
         if (RUNS.test(line)) offenders.push(`${rel}:${i + 1}`);
       });
   }
-  assert.deepEqual(offenders, [], `use \`ll-run <script>\` or \`ll-paths PLUGIN\`:\n${offenders.join('\n')}`);
+  assert.deepEqual(
+    offenders,
+    [],
+    `use \`ll-run <script>\` or \`ll-paths PLUGIN\`:\n${offenders.join('\n')}`,
+  );
 });

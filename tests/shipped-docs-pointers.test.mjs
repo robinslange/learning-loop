@@ -28,7 +28,11 @@ test('the operator README ships with the plugin', () => {
 
 test('the shipped README documents the sections skills send operators to', () => {
   const readme = readFileSync(join(PLUGIN, 'README.md'), 'utf8');
-  for (const heading of ['Disabling parts without uninstalling', 'hooks.disabled', 'disableAllHooks']) {
+  for (const heading of [
+    'Disabling parts without uninstalling',
+    'hooks.disabled',
+    'disableAllHooks',
+  ]) {
     assert.ok(readme.includes(heading), `shipped README must document "${heading}"`);
   }
 });

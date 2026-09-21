@@ -11,10 +11,14 @@ test('generates profile for a tiny TS repo', () => {
   try {
     mkdirSync(join(dir, 'src'));
     writeFileSync(join(dir, 'src/index.ts'), 'export const x = 1;\n');
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({
-      name: 'tiny', version: '0.1.0',
-      dependencies: { next: '15.0.0', react: '19.0.0' },
-    }));
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'tiny',
+        version: '0.1.0',
+        dependencies: { next: '15.0.0', react: '19.0.0' },
+      }),
+    );
 
     const profile = generateProfile(dir);
 
@@ -31,9 +35,13 @@ test('generates profile for a tiny TS repo', () => {
 test('detects monorepo signal via workspaces field', () => {
   const dir = mkdtempSync(join(tmpdir(), 'profile-mono-'));
   try {
-    writeFileSync(join(dir, 'package.json'), JSON.stringify({
-      name: 'mono', workspaces: ['packages/*'],
-    }));
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({
+        name: 'mono',
+        workspaces: ['packages/*'],
+      }),
+    );
     mkdirSync(join(dir, 'packages'));
 
     const profile = generateProfile(dir);

@@ -43,7 +43,14 @@ test('audit reports unexpected files', () => {
   try {
     const dir = join(vault, '_ingested-repos/baz-abcdef');
     mkdirSync(dir, { recursive: true });
-    for (const f of ['STACK.md', 'ARCH.md', 'CONVENTIONS.md', 'DOMAIN.md', 'METADATA.json', 'ROGUE.md']) {
+    for (const f of [
+      'STACK.md',
+      'ARCH.md',
+      'CONVENTIONS.md',
+      'DOMAIN.md',
+      'METADATA.json',
+      'ROGUE.md',
+    ]) {
       writeFileSync(join(dir, f), 'x');
     }
     const result = auditPostFanout(vault, 'baz-abcdef', ['stack', 'arch', 'conventions', 'domain']);

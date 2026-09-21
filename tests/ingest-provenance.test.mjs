@@ -11,7 +11,9 @@ test('appends one JSONL line per call', () => {
     appendIngestEvent(dataDir, { slug: 'foo-abcdef', tier: 'parallel', duration_seconds: 100 });
     appendIngestEvent(dataDir, { slug: 'foo-abcdef', tier: 'single', duration_seconds: 5 });
 
-    const lines = readFileSync(join(dataDir, 'ingest-provenance.jsonl'), 'utf-8').trim().split('\n');
+    const lines = readFileSync(join(dataDir, 'ingest-provenance.jsonl'), 'utf-8')
+      .trim()
+      .split('\n');
     assert.equal(lines.length, 2);
     const e1 = JSON.parse(lines[0]);
     assert.equal(e1.slug, 'foo-abcdef');
@@ -29,7 +31,9 @@ test('creates the data dir if absent', () => {
   const dataDir = join(parent, 'nested', 'plugin-data');
   try {
     appendIngestEvent(dataDir, { slug: 'x', tier: 'single' });
-    const lines = readFileSync(join(dataDir, 'ingest-provenance.jsonl'), 'utf-8').trim().split('\n');
+    const lines = readFileSync(join(dataDir, 'ingest-provenance.jsonl'), 'utf-8')
+      .trim()
+      .split('\n');
     assert.equal(lines.length, 1);
   } finally {
     rmSync(parent, { recursive: true, force: true });

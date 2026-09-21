@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyLink, classifyNoteEdges } from '../plugin/scripts/lib/edge-classifier.mjs';
 
-const fakeResolver = name => `3-permanent/${name}.md`;
+const fakeResolver = (name) => `3-permanent/${name}.md`;
 
 describe('edge-classifier verb-position direction', () => {
   it('keeps direction when verb appears before link (source proves [[X]])', () => {

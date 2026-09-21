@@ -3,18 +3,29 @@ import assert from 'node:assert';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { EXPORT_SCHEMA, NEVER_EXPORT, validateExportRecord } from '../plugin/scripts/otel/schema.mjs';
+import {
+  EXPORT_SCHEMA,
+  NEVER_EXPORT,
+  validateExportRecord,
+} from '../plugin/scripts/otel/schema.mjs';
 import { enumerateTelemetryKeys } from '../plugin/scripts/otel/enumerate-keys.mjs';
 
 test('a record with only allowlisted fields passes', () => {
   assert.doesNotThrow(() => {
-    validateExportRecord('provenance', { action: 'vault-write', session_id: 'abc-123', folder: 'permanent' });
+    validateExportRecord('provenance', {
+      action: 'vault-write',
+      session_id: 'abc-123',
+      folder: 'permanent',
+    });
   });
 });
 
 test('a record carrying an unlisted field throws', () => {
   assert.throws(() => {
-    validateExportRecord('provenance', { action: 'vault-write', target: '/Users/robin/vault/note.md' });
+    validateExportRecord('provenance', {
+      action: 'vault-write',
+      target: '/Users/robin/vault/note.md',
+    });
   }, /target/);
 });
 
@@ -24,7 +35,7 @@ test('every field in NEVER_EXPORT is rejected if present, in every stream', () =
       assert.throws(
         () => validateExportRecord(stream, { [field]: 'anything' }),
         new RegExp(field),
-        `expected ${stream} to reject ${field}`
+        `expected ${stream} to reject ${field}`,
       );
     }
   }
@@ -47,6 +58,31 @@ test('EXPORT_SCHEMA contains no field that is also in NEVER_EXPORT', () => {
   for (const [stream, fields] of Object.entries(EXPORT_SCHEMA)) {
     for (const field of Object.keys(fields)) {
       assert.ok(!NEVER_EXPORT.has(field), `${stream}.${field} is also in NEVER_EXPORT`);
+    }
+  }
+});
+
+// An adversarial review asked whether the ~136 keys in neither EXPORT_SCHEMA
+// nor NEVER_EXPORT could leak. They cannot: absence from a stream's schema is
+// itself a refusal. Asserted with fields sampled from the real unclassified
+// set, so the guarantee does not rest on NEVER_EXPORT being exhaustive.
+test('a field in neither EXPORT_SCHEMA nor NEVER_EXPORT is still refused', () => {
+  const unclassified = [
+    'notes_checked',
+    'sources_passed',
+    'promoted_fleeting',
+    'note_path',
+    'payload',
+    'how',
+  ];
+  for (const field of unclassified) {
+    assert.ok(!NEVER_EXPORT.has(field), `${field} must be unlisted for this test to mean anything`);
+    for (const stream of Object.keys(EXPORT_SCHEMA)) {
+      assert.throws(
+        () => validateExportRecord(stream, { [field]: 'whatever' }),
+        /is not in the export schema/,
+        `${field} must be refused on ${stream} despite being unlisted`,
+      );
     }
   }
 });

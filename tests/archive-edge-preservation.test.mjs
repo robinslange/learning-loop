@@ -4,20 +4,39 @@ import { mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
-import { openEdgeDb, addEdge, removeOutgoingEdges, getEdgesFrom, getDownstream, saveDb } from '../plugin/scripts/lib/edges.mjs';
+import {
+  openEdgeDb,
+  addEdge,
+  removeOutgoingEdges,
+  getEdgesFrom,
+  getDownstream,
+  saveDb,
+} from '../plugin/scripts/lib/edges.mjs';
 
 const PLUGIN_DATA = join(tmpdir(), `ll-test-plugin-data-archive-${randomBytes(8).toString('hex')}`);
 const DB_PATH = join(PLUGIN_DATA, 'edges.db');
 
 describe('archive edge preservation', () => {
   before(() => mkdirSync(PLUGIN_DATA, { recursive: true }));
-  beforeEach(() => { if (existsSync(DB_PATH)) rmSync(DB_PATH); });
+  beforeEach(() => {
+    if (existsSync(DB_PATH)) rmSync(DB_PATH);
+  });
   after(() => rmSync(PLUGIN_DATA, { recursive: true, force: true }));
 
   it('removeOutgoingEdges skips rows where source_graph = archived', async () => {
     const db = await openEdgeDb(DB_PATH);
-    addEdge(db, { fromPath: '3-permanent/note-x.md', toPath: '3-permanent/note-y.md', edgeType: 'evidence_for', sourceGraph: 'local' });
-    addEdge(db, { fromPath: '3-permanent/note-x.md', toPath: '3-permanent/note-z.md', edgeType: 'derived_from', sourceGraph: 'archived' });
+    addEdge(db, {
+      fromPath: '3-permanent/note-x.md',
+      toPath: '3-permanent/note-y.md',
+      edgeType: 'evidence_for',
+      sourceGraph: 'local',
+    });
+    addEdge(db, {
+      fromPath: '3-permanent/note-x.md',
+      toPath: '3-permanent/note-z.md',
+      edgeType: 'derived_from',
+      sourceGraph: 'archived',
+    });
     saveDb(db, DB_PATH);
     db.close();
 
@@ -35,8 +54,10 @@ describe('archive edge preservation', () => {
   it('addEdge accepts source_graph=archived', async () => {
     const db = await openEdgeDb(DB_PATH);
     const id = addEdge(db, {
-      fromPath: '3-permanent/a.md', toPath: '3-permanent/b.md',
-      edgeType: 'supports', sourceGraph: 'archived',
+      fromPath: '3-permanent/a.md',
+      toPath: '3-permanent/b.md',
+      edgeType: 'supports',
+      sourceGraph: 'archived',
     });
     saveDb(db, DB_PATH);
     db.close();
@@ -45,15 +66,34 @@ describe('archive edge preservation', () => {
 
   it('getDownstream excludes archived edges from traversal', async () => {
     const db = await openEdgeDb(DB_PATH);
-    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for', sourceGraph: 'local' });
-    addEdge(db, { fromPath: 'a.md', toPath: 'c.md', edgeType: 'derived_from', sourceGraph: 'archived' });
-    addEdge(db, { fromPath: 'b.md', toPath: 'd.md', edgeType: 'evidence_for', sourceGraph: 'local' });
+    addEdge(db, {
+      fromPath: 'a.md',
+      toPath: 'b.md',
+      edgeType: 'evidence_for',
+      sourceGraph: 'local',
+    });
+    addEdge(db, {
+      fromPath: 'a.md',
+      toPath: 'c.md',
+      edgeType: 'derived_from',
+      sourceGraph: 'archived',
+    });
+    addEdge(db, {
+      fromPath: 'b.md',
+      toPath: 'd.md',
+      edgeType: 'evidence_for',
+      sourceGraph: 'local',
+    });
     saveDb(db, DB_PATH);
 
     const downstream = getDownstream(db, 'a.md', 5);
     db.close();
 
-    const toPaths = downstream.map(e => e.to_path).sort();
-    assert.deepEqual(toPaths, ['b.md', 'd.md'], 'archived edge to c.md must be excluded; b→d chain still reached');
+    const toPaths = downstream.map((e) => e.to_path).sort();
+    assert.deepEqual(
+      toPaths,
+      ['b.md', 'd.md'],
+      'archived edge to c.md must be excluded; b→d chain still reached',
+    );
   });
 });

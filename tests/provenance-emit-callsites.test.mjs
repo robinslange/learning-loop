@@ -86,7 +86,11 @@ test('the scanner finds every provenance-emit.js call site, both shapes', () => 
   // Ground truth: 35 inline + 3 heredoc = 38, minus dream/SKILL.md's one
   // ACTION-placeholder template line that documents the pattern rather than
   // emitting.
-  assert.strictEqual(callSites.length, 37, `expected 37 real call sites, found ${callSites.length}`);
+  assert.strictEqual(
+    callSites.length,
+    37,
+    `expected 37 real call sites, found ${callSites.length}`,
+  );
 
   const heredocSites = callSites.filter((c) => !c.raw.startsWith("'"));
   const fromHeredocFiles = callSites.filter((c) =>
@@ -134,14 +138,25 @@ test('every payload has an action in VALID_ACTIONS', () => {
 // what /verify actually found and exists nowhere else. NEVER_EXPORT governs the
 // export boundary; phase 0 already stops all of these at the wire. See
 // "The bulk call-site migration: investigated, then declined" in the plan.
-const EMIT_LAYER_EXEMPT = new Set(['target', 'evidence', 'finding_detail', 'prompt', 'question', 'reason', 'topic']);
+const EMIT_LAYER_EXEMPT = new Set([
+  'target',
+  'evidence',
+  'finding_detail',
+  'prompt',
+  'question',
+  'reason',
+  'topic',
+]);
 
 test('no payload contains a NEVER_EXPORT field, aside from the emit-layer exemption', () => {
   for (const { file, raw } of callSites) {
     const payload = JSON.parse(normalisePlaceholders(raw));
     for (const key of Object.keys(payload)) {
       if (EMIT_LAYER_EXEMPT.has(key)) continue;
-      assert.ok(!NEVER_EXPORT.has(key), `${file}: field "${key}" is in NEVER_EXPORT and must not be emitted`);
+      assert.ok(
+        !NEVER_EXPORT.has(key),
+        `${file}: field "${key}" is in NEVER_EXPORT and must not be emitted`,
+      );
     }
   }
 });
@@ -161,6 +176,33 @@ test('any intent_kind is a bounded value from INTENT_KINDS', () => {
 test('no payload emits free-text intent', () => {
   for (const { file, raw } of callSites) {
     const payload = JSON.parse(normalisePlaceholders(raw));
-    assert.ok(!('intent' in payload), `${file}: emits free-text "intent"; use "intent_kind" instead`);
+    assert.ok(
+      !('intent' in payload),
+      `${file}: emits free-text "intent"; use "intent_kind" instead`,
+    );
   }
+});
+
+// An adversarial review found two live actions the vocabulary missed:
+// supersession-recorded and refinement-skipped, both instructed in prose at
+// reflect/steps/refinement.md:150 as `action: "..."` rather than inside a JSON
+// payload, so the scanner above (which reads provenance-emit.js invocations)
+// could not see them. This closes the class: every action named anywhere in
+// skill or agent markdown must be emittable.
+test('every action named in skill or agent prose is emittable', () => {
+  const named = new Map();
+  for (const dir of SCAN_DIRS) {
+    for (const file of walk(join(ROOT, dir))) {
+      const text = readFileSync(file, 'utf-8');
+      // Both spellings: `action: "x"` in prose, and "action":"x" in a payload.
+      for (const m of text.matchAll(/action"?\s*:\s*"([a-z][a-z-]*)"/g)) {
+        if (!named.has(m[1])) named.set(m[1], file);
+      }
+    }
+  }
+  assert.ok(named.size > 10, `expected many actions, found ${named.size}`);
+  const missing = [...named.entries()]
+    .filter(([a]) => !VALID_ACTIONS.has(a))
+    .map(([a, f]) => `${a} (${f.replace(ROOT, 'plugin')})`);
+  assert.deepEqual(missing, [], 'instructed in markdown but would be dropped at emit');
 });

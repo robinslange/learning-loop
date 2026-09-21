@@ -175,7 +175,7 @@ describe('librarian-daemon', () => {
 
     const log = captured.join('');
     assert.ok(
-      !log.includes("Cannot read properties of undefined"),
+      !log.includes('Cannot read properties of undefined'),
       'must not surface a TypeError from destructuring an error body:\n' + log,
     );
     assert.match(log, /ollama HTTP 400/, 'must name the HTTP status that actually failed');
@@ -218,7 +218,7 @@ describe('librarian-daemon', () => {
 
     const log = captured.join('');
     assert.ok(
-      !log.includes("Cannot read properties of undefined"),
+      !log.includes('Cannot read properties of undefined'),
       'a 200 with no message must not become a TypeError:\n' + log,
     );
     assert.match(log, /ollama returned no message: model not found/);

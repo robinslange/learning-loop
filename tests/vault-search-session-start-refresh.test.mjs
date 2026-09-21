@@ -32,7 +32,10 @@ const VAULT_SEARCH = fileURLToPath(new URL('../plugin/scripts/vault-search.mjs',
 // was empty on every real run. A stub that ignores argv cannot see that.
 function createStubBinary(binDir, argvLog) {
   const stub = join(binDir, 'll-search');
-  writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "$@" >> ${argvLog}\necho '[{"context":"x","count":1}]'\n`);
+  writeFileSync(
+    stub,
+    `#!/bin/sh\nprintf '%s\\n' "$@" >> ${argvLog}\necho '[{"context":"x","count":1}]'\n`,
+  );
   chmodSync(stub, 0o755);
   return stub;
 }

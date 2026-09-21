@@ -25,7 +25,11 @@ describe('extractSourcesFromNote author-year attribution', () => {
       'PMC 1234567 reports the replication.',
     ].join('\n');
     const pmc = extractSourcesFromNote(note).find((s) => s.pmc);
-    assert.equal(pmc.claimedAuthor, null, 'a citation on its own line must not claim the line above');
+    assert.equal(
+      pmc.claimedAuthor,
+      null,
+      'a citation on its own line must not claim the line above',
+    );
   });
 
   it('leaves author-year unset when no citation precedes the identifier', () => {
@@ -37,7 +41,10 @@ describe('extractSourcesFromNote author-year attribution', () => {
 });
 
 describe('inline PMID extraction', () => {
-  const pmids = (s) => extractSourcesFromNote(s).map((x) => x.pmid).filter(Boolean);
+  const pmids = (s) =>
+    extractSourcesFromNote(s)
+      .map((x) => x.pmid)
+      .filter(Boolean);
 
   it('accepts the colon form, which is at least as common as the bare space', () => {
     assert.deepEqual(pmids('Jones 2020 (PMID: 12345678).'), ['12345678']);

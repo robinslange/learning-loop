@@ -33,9 +33,30 @@ function countersNamed(metrics, name) {
 
 test('counts probes by tier', () => {
   const probes = [
-    { tier: 'quick', question: 'q1', expected_files: ['a.md'], source_session: 's1', confidence: 0.4, probe_id: 'p1' },
-    { tier: 'quick', question: 'q2', expected_files: ['b.md'], source_session: 's1', confidence: 0.6, probe_id: 'p2' },
-    { tier: 'deep', question: 'q3', expected_files: ['c.md'], source_session: 's2', confidence: 0.9, probe_id: 'p3' },
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: ['a.md'],
+      source_session: 's1',
+      confidence: 0.4,
+      probe_id: 'p1',
+    },
+    {
+      tier: 'quick',
+      question: 'q2',
+      expected_files: ['b.md'],
+      source_session: 's1',
+      confidence: 0.6,
+      probe_id: 'p2',
+    },
+    {
+      tier: 'deep',
+      question: 'q3',
+      expected_files: ['c.md'],
+      source_session: 's2',
+      confidence: 0.9,
+      probe_id: 'p3',
+    },
   ];
 
   withProbes(probes, (pluginData) => {
@@ -50,9 +71,30 @@ test('counts probes by tier', () => {
 
 test('confidence histogram satisfies both invariants', () => {
   const probes = [
-    { tier: 'quick', question: 'q1', expected_files: [], source_session: 's1', confidence: 0.1, probe_id: 'p1' },
-    { tier: 'quick', question: 'q2', expected_files: [], source_session: 's1', confidence: 0.5, probe_id: 'p2' },
-    { tier: 'deep', question: 'q3', expected_files: [], source_session: 's2', confidence: 0.95, probe_id: 'p3' },
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.1,
+      probe_id: 'p1',
+    },
+    {
+      tier: 'quick',
+      question: 'q2',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.5,
+      probe_id: 'p2',
+    },
+    {
+      tier: 'deep',
+      question: 'q3',
+      expected_files: [],
+      source_session: 's2',
+      confidence: 0.95,
+      probe_id: 'p3',
+    },
   ];
 
   withProbes(probes, (pluginData) => {
@@ -107,8 +149,22 @@ test('question and expected_files never appear in attributes', () => {
 
 test('does not group by probe_id (cardinality)', () => {
   const probes = [
-    { tier: 'quick', question: 'q1', expected_files: [], source_session: 's1', confidence: 0.5, probe_id: 'p1' },
-    { tier: 'quick', question: 'q2', expected_files: [], source_session: 's1', confidence: 0.6, probe_id: 'p2' },
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.5,
+      probe_id: 'p1',
+    },
+    {
+      tier: 'quick',
+      question: 'q2',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.6,
+      probe_id: 'p2',
+    },
   ];
 
   withProbes(probes, (pluginData) => {
@@ -121,8 +177,22 @@ test('does not group by probe_id (cardinality)', () => {
 
 test('running the reducer twice returns identical output', () => {
   const probes = [
-    { tier: 'quick', question: 'q1', expected_files: [], source_session: 's1', confidence: 0.5, probe_id: 'p1' },
-    { tier: 'deep', question: 'q2', expected_files: [], source_session: 's2', confidence: 0.9, probe_id: 'p2' },
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.5,
+      probe_id: 'p1',
+    },
+    {
+      tier: 'deep',
+      question: 'q2',
+      expected_files: [],
+      source_session: 's2',
+      confidence: 0.9,
+      probe_id: 'p2',
+    },
   ];
 
   withProbes(probes, (pluginData) => {
@@ -134,7 +204,16 @@ test('running the reducer twice returns identical output', () => {
 });
 
 test('every returned record passes phase 0 attribute validation and stream is dream-eval', () => {
-  const probes = [{ tier: 'quick', question: 'q1', expected_files: [], source_session: 's1', confidence: 0.5, probe_id: 'p1' }];
+  const probes = [
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.5,
+      probe_id: 'p1',
+    },
+  ];
 
   withProbes(probes, (pluginData) => {
     const metrics = reduceDreamEval({ pluginData, timeUnixMs: Date.now() });
@@ -148,8 +227,22 @@ test('every returned record passes phase 0 attribute validation and stream is dr
 
 test('the output serializes through buildOtlpPayload without throwing', () => {
   const probes = [
-    { tier: 'quick', question: 'q1', expected_files: [], source_session: 's1', confidence: 0.5, probe_id: 'p1' },
-    { tier: 'deep', question: 'q2', expected_files: [], source_session: 's2', confidence: 0.9, probe_id: 'p2' },
+    {
+      tier: 'quick',
+      question: 'q1',
+      expected_files: [],
+      source_session: 's1',
+      confidence: 0.5,
+      probe_id: 'p1',
+    },
+    {
+      tier: 'deep',
+      question: 'q2',
+      expected_files: [],
+      source_session: 's2',
+      confidence: 0.9,
+      probe_id: 'p2',
+    },
   ];
 
   withProbes(probes, (pluginData) => {

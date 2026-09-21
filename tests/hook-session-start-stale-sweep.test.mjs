@@ -306,7 +306,11 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
         if (keep.has(month)) {
           assert.ok(existsSync(p), `${prefix}-${month}.jsonl (at or after ${cutoff}) must survive`);
         } else {
-          assert.equal(existsSync(p), false, `${prefix}-${month}.jsonl (beyond the window) must be pruned`);
+          assert.equal(
+            existsSync(p),
+            false,
+            `${prefix}-${month}.jsonl (beyond the window) must be pruned`,
+          );
         }
       }
     }
@@ -353,7 +357,11 @@ test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backup
   await withSandbox(fx, async () => {
     await run({ ...baseCtx });
 
-    assert.equal(existsSync(staleBak), false, 'queue.jsonl.bak.* older than 7 days must be removed');
+    assert.equal(
+      existsSync(staleBak),
+      false,
+      'queue.jsonl.bak.* older than 7 days must be removed',
+    );
     assert.ok(existsSync(freshBak), 'queue.jsonl.bak.* within 7 days must survive');
     assert.ok(existsSync(liveQueue), 'the live queue.jsonl must never be swept');
   });
@@ -440,7 +448,11 @@ test('retentionCutoffMonth agrees with monthStr at a local month boundary', () =
   // PREVIOUS month in UTC, which is where a UTC cutoff goes wrong.
   const boundary = new Date(2026, 9, 1, 0, 30);
   assert.equal(monthStr(boundary), '2026-10');
-  assert.equal(retentionCutoffMonth(1, boundary), '2026-10', 'keepMonths=1 keeps only the current local month');
+  assert.equal(
+    retentionCutoffMonth(1, boundary),
+    '2026-10',
+    'keepMonths=1 keeps only the current local month',
+  );
   assert.equal(retentionCutoffMonth(3, boundary), '2026-08');
 });
 
@@ -524,7 +536,11 @@ test('retentionCutoffMonth never sweeps past the current month', () => {
   // path delete everything, so the floor belongs in the function.
   const now = new Date(2026, 8, 18, 12, 0);
   assert.equal(retentionCutoffMonth(0, now), '2026-09', 'keep=0 must not reach into the future');
-  assert.equal(retentionCutoffMonth(-5, now), '2026-09', 'a negative window cannot widen the sweep');
+  assert.equal(
+    retentionCutoffMonth(-5, now),
+    '2026-09',
+    'a negative window cannot widen the sweep',
+  );
   assert.equal(retentionCutoffMonth(1, now), '2026-09');
   assert.equal(retentionCutoffMonth(3, now), '2026-07');
 });

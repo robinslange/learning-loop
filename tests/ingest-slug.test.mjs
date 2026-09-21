@@ -3,13 +3,22 @@ import assert from 'node:assert/strict';
 import { computeSlug } from '../plugin/scripts/ingest-slug.mjs';
 
 test('uses origin url hash when origin available', () => {
-  const slug = computeSlug('/path/to/learning-loop', 'git@github.com:robinslange/learning-loop.git');
+  const slug = computeSlug(
+    '/path/to/learning-loop',
+    'git@github.com:robinslange/learning-loop.git',
+  );
   assert.match(slug, /^learning-loop-[0-9a-f]{6}$/);
 });
 
 test('moved repo with same origin produces same slug', () => {
-  const slug1 = computeSlug('/path/A/learning-loop', 'git@github.com:robinslange/learning-loop.git');
-  const slug2 = computeSlug('/path/B/learning-loop', 'git@github.com:robinslange/learning-loop.git');
+  const slug1 = computeSlug(
+    '/path/A/learning-loop',
+    'git@github.com:robinslange/learning-loop.git',
+  );
+  const slug2 = computeSlug(
+    '/path/B/learning-loop',
+    'git@github.com:robinslange/learning-loop.git',
+  );
   assert.equal(slug1, slug2);
 });
 

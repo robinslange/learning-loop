@@ -104,7 +104,7 @@ test('a hub reason is bounded before it reaches the session context', () => {
   const line = federationLine({ outcome: 'error', detail: 'A'.repeat(5000) }, NOW);
 
   assert.ok(line.length < 600, `unbounded: ${line.length} chars`);
-  assert.match(line, /truncated/, 'a silent cut reads as the hub\'s own words');
+  assert.match(line, /truncated/, "a silent cut reads as the hub's own words");
 });
 
 test('an ordinary reason is passed through unchanged', () => {
