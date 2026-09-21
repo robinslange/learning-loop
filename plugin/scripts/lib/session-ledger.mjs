@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { readdirSync, statSync, readFileSync } from 'node:fs';
 import { basename, dirname, resolve, relative, isAbsolute, sep, join } from 'node:path';
 import { toKebab } from '../../hooks/lib/filename-style.mjs';
+import { scrubSecrets } from '../../hooks/lib/inject.mjs';
 
 export { toKebab };
 
@@ -122,13 +123,15 @@ export function collectFacts(walk, { worktreeRoot, cwd, vaultRoot, lastAssistant
       const rel = under(fp, scope);
       if (rel) edits.set(rel, (edits.get(rel) || 0) + 1);
     } else if (t.name === 'Skill') {
-      const args = typeof t.input.args === 'string' ? t.input.args : '';
+      const args = scrubSecrets(typeof t.input.args === 'string' ? t.input.args : '');
       skills.push({ skill: t.input.skill || '', args });
       skillArgs.push(args);
     } else if (AGENT_TOOLS.has(t.name)) {
       agents.push({
         type: t.input.subagent_type || t.input.agent_type || 'general-purpose',
-        description: typeof t.input.description === 'string' ? t.input.description : '',
+        description: scrubSecrets(
+          typeof t.input.description === 'string' ? t.input.description : '',
+        ),
       });
     }
   }
@@ -150,10 +153,10 @@ export function collectFacts(walk, { worktreeRoot, cwd, vaultRoot, lastAssistant
     skills,
     agents,
     prs,
-    goal: walk.prompts[0]?.text ?? null,
+    goal: walk.prompts[0]?.text ? scrubSecrets(walk.prompts[0].text) : null,
     stoppedAt:
       typeof lastAssistantMessage === 'string' && lastAssistantMessage.trim()
-        ? lastAssistantMessage
+        ? scrubSecrets(lastAssistantMessage)
         : null,
   };
 }
@@ -251,6 +254,7 @@ export function renderLedger({
     `tags: [ledger, ${yamlStr(project)}]`,
     `date: ${date}`,
     'source: session',
+    'visibility: private',
     `session_id: ${sessionId}`,
     `repo: ${repoRoot ? yamlStr(basename(repoRoot)) : 'null'}`,
     `branch: ${git.branch !== null ? yamlStr(git.branch) : 'null'}`,
