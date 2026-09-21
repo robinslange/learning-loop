@@ -50,7 +50,13 @@ export function appendJsonlLineSafe(path, obj) {
 // most TAIL_BYTES from the end, which comfortably covers one JSON line.
 const TAIL_BYTES = 8192;
 
+// Test seam only: counts calls to lastLine, so a test can assert the disk
+// tail-read happens at most once per path per process rather than on every
+// deduped append. See _dedupeStats/_resetDedupeCache below.
+let lastLineCalls = 0;
+
 function lastLine(path) {
+  lastLineCalls++;
   let fd;
   try {
     fd = openSync(path, 'r');
@@ -80,11 +86,12 @@ function lastLine(path) {
 // caller payload never produce byte-identical JSON; comparison excludes `ts`
 // and compares the rest of the record.
 //
-// Compares against the LAST LINE ALREADY ON DISK (not in-memory state):
-// provenance-emit.js runs as a fresh subprocess per call, so an in-memory
-// cache would never see across calls. Reading the file tail is the only
-// dedup check that works for both the in-process hook path and the
-// per-invocation CLI path.
+// Compares against the last record THIS PROCESS wrote (see lastWritten
+// below), falling back to a disk read only when this process has not
+// written to `path` yet: the hook path is one long-lived node process across
+// many calls, so its own last write already is the tail. provenance-emit.js
+// runs as a fresh subprocess per call and reads disk exactly once, then
+// dedupes in-memory for any later call in that same process.
 const DUP_WINDOW_MS = 2000;
 
 // Provenance fan-out actions are exempt from dedup. A uniform parallel
@@ -106,6 +113,28 @@ const DEDUP_EXEMPT_ACTIONS = new Set([
   'session-summary',
 ]);
 
+// path -> { fingerprint, at } of the last record this process wrote via
+// appendJsonlLineDeduped. Seeded from disk on first use per path (see
+// lastRecord), then kept current in-process so later calls never tail the
+// file again.
+const lastWritten = new Map();
+
+function lastRecord(path) {
+  const cached = lastWritten.get(path);
+  if (cached !== undefined) return cached;
+  const prev = lastLine(path);
+  if (prev === null) return null;
+  try {
+    const parsed = JSON.parse(prev);
+    const { ts: prevTs, ...prevRest } = parsed;
+    const seeded = { fingerprint: JSON.stringify(prevRest), at: Date.parse(prevTs) };
+    lastWritten.set(path, seeded);
+    return seeded;
+  } catch {
+    return null;
+  }
+}
+
 export function appendJsonlLineDeduped(path, record, now = Date.now()) {
   if (DEDUP_EXEMPT_ACTIONS.has(record.action)) {
     appendJsonlLine(path, record);
@@ -113,22 +142,31 @@ export function appendJsonlLineDeduped(path, record, now = Date.now()) {
   }
   const { ts: _ts, ...rest } = record;
   const fingerprint = JSON.stringify(rest);
-  const prev = lastLine(path);
-  if (prev !== null) {
-    try {
-      const parsed = JSON.parse(prev);
-      const { ts: prevTs, ...prevRest } = parsed;
-      const prevAt = Date.parse(prevTs);
-      if (
-        JSON.stringify(prevRest) === fingerprint &&
-        Number.isFinite(prevAt) &&
-        now - prevAt < DUP_WINDOW_MS
-      ) {
-        return false;
-      }
-      // eslint-disable-next-line learning-loop/no-empty-catch -- malformed last line: fall through and append normally.
-    } catch {}
+  const prev = lastRecord(path);
+  if (
+    prev !== null &&
+    prev.fingerprint === fingerprint &&
+    Number.isFinite(prev.at) &&
+    now - prev.at < DUP_WINDOW_MS
+  ) {
+    return false;
   }
   appendJsonlLine(path, record);
+  lastWritten.set(path, { fingerprint, at: now });
   return true;
+}
+
+// Test seam only: clears the in-memory dedup cache and lastLine call count,
+// so a test can start each case from a clean slate without the module being
+// reloaded per-file (dedup.mjs is a singleton within a process by design).
+export function _resetDedupeCache() {
+  lastWritten.clear();
+  lastLineCalls = 0;
+}
+
+// Test seam only: how many times lastLine has actually tailed the file since
+// the last _resetDedupeCache(), proving the in-memory fingerprint is what
+// answers repeat calls, not a fresh disk read every time.
+export function _dedupeStats() {
+  return { lastLineCalls };
 }
