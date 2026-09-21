@@ -279,9 +279,8 @@ export async function run(ctx) {
     staticProtocolPresent = readFileSync(join(home(), '.claude', 'CLAUDE.md'), 'utf8').includes(
       '<!-- learning-loop v',
     );
-  } catch {
-    // No readable CLAUDE.md: inject the full protocol.
-  }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- no readable CLAUDE.md: staticProtocolPresent stays false, injecting the full protocol.
+  } catch {}
 
   if (staticProtocolPresent && depsAllSatisfied) {
     ctx.context += '\n## Learning Loop — Retrieval Protocol\n';

@@ -59,19 +59,25 @@ function stubBinary(
   writeFileSync(join(binDir, 'll-search'), lines.join('\n') + '\n', { mode: 0o755 });
 }
 
+// post-tool.js's per-module failures route through log.mjs's logError, which
+// persists error records to PLUGIN_DATA/logs/log-YYYY-MM.jsonl (not the
+// legacy hook-errors-*.jsonl, reserved for pre-write-check's duplicate-gate
+// codes that quick.mjs still reads by `code`). scope replaces the old
+// `module` field: post-tool.js logs each module's failure as
+// `post-tool.<moduleName>`.
 function readAutolinkErrors(pluginDataDir) {
   const lines = [];
-  if (!existsSync(pluginDataDir)) return lines;
-  for (const f of ['hook-errors-' + new Date().toISOString().slice(0, 7) + '.jsonl']) {
-    const p = join(pluginDataDir, f);
-    if (!existsSync(p)) continue;
-    for (const line of readFileSync(p, 'utf8')
-      .split('\n')
-      .filter((l) => l.trim())) {
-      lines.push(JSON.parse(line));
-    }
+  const dir = join(pluginDataDir, 'logs');
+  if (!existsSync(dir)) return lines;
+  const f = 'log-' + new Date().toISOString().slice(0, 7) + '.jsonl';
+  const p = join(dir, f);
+  if (!existsSync(p)) return lines;
+  for (const line of readFileSync(p, 'utf8')
+    .split('\n')
+    .filter((l) => l.trim())) {
+    lines.push(JSON.parse(line));
   }
-  return lines.filter((e) => e.module === 'runAutolink');
+  return lines.filter((e) => e.scope === 'post-tool.runAutolink');
 }
 
 function writeStdin(vault, relPath, content) {
@@ -238,7 +244,7 @@ test(
 );
 
 test(
-  'autolink: unwritable target — hook exits 0, error isolated to hook-errors log, target uncorrupted',
+  'autolink: unwritable target, hook exits 0, error isolated to the log sink, target uncorrupted',
   { skip: SKIP },
   () => {
     const vault = makeVault();

@@ -19,10 +19,10 @@ test('uninstall is operator-only (disable-model-invocation: true)', () => {
 });
 
 test('dream operators emit provenance in the canonical ll-run form with the bucket field', () => {
-  // provenance-consolidate.mjs buckets on event.skill first (skill || agent ||
-  // action). Operators that omit "skill" and the ll-run prefix rely on the
-  // file being executable and fall through to the agent field, diverging from
-  // dream/SKILL.md's canonical emit form.
+  // provenance-consolidate.mjs buckets on event.agent first, then event.skill,
+  // then event.action (T1g/T1h). Operators that omit "skill" and the ll-run
+  // prefix rely on the file being executable and fall through to the agent
+  // field, diverging from dream/SKILL.md's canonical emit form.
   const dir = join(ROOT, 'skills', 'dream', 'operators');
   const files = readdirSync(dir).filter((f) => f.endsWith('.md'));
   assert.equal(files.length, 7, 'expected exactly seven dream operator files');

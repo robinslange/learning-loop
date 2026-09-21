@@ -50,9 +50,8 @@ export function capLogFile(path, maxBytes) {
     if (fd !== undefined) {
       try {
         closeSync(fd);
-      } catch {
-        /* already closed */
-      }
+        // eslint-disable-next-line learning-loop/no-empty-catch -- already closed; nothing left to do.
+      } catch {}
     }
   }
 }

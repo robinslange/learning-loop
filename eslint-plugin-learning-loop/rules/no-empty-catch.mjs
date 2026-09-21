@@ -1,10 +1,17 @@
 // rules/no-empty-catch.mjs
 // Forbids bare empty catch blocks that silently swallow errors.
-// Phase 0: configured "off". Phase 1I: flipped to "error".
 //
-// Note: scripts/lib/log.mjs, scripts/lib/safe-load.mjs, and scripts/lib/file-lock.mjs
-// intentionally use bare catch blocks as error-absorbing boundaries -- those files
-// are in the exclusion list for this rule when 1I enables it.
+// scripts/lib/log.mjs, scripts/lib/safe-load.mjs, and scripts/lib/file-lock.mjs
+// intentionally use bare catch blocks as error-absorbing boundaries: log.mjs's
+// own fallback path must never throw, and safe-load/file-lock are documented
+// best-effort cleanup. Those files are excluded here, the same
+// source-file-allowlist shape no-raw-telemetry-append.mjs uses.
+
+const EXCLUDED = new Set([
+  'scripts/lib/log.mjs',
+  'scripts/lib/safe-load.mjs',
+  'scripts/lib/file-lock.mjs',
+]);
 
 export default {
   meta: {
@@ -18,6 +25,9 @@ export default {
     },
   },
   create(context) {
+    const filename = (context.filename || context.getFilename?.() || '').replace(/\\/g, '/');
+    if ([...EXCLUDED].some((e) => filename.endsWith(e))) return {};
+
     return {
       CatchClause(node) {
         const body = node.body?.body ?? [];

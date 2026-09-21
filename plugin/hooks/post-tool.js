@@ -7,7 +7,6 @@
 
 import { basename, join } from 'node:path';
 import { home, readStdin, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
-import { monthStr } from '../scripts/lib/retrieval.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 import { runAutolink } from './modules/autolink.mjs';
@@ -16,7 +15,6 @@ import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { encodeProjectDir } from '../scripts/lib/paths.mjs';
-import { appendJsonlLineSafe } from '../scripts/lib/jsonl.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -54,19 +52,6 @@ function recordMemoryWriteIfApplicable(filePath, tool) {
   } catch (err) {
     logError('post-tool.recordMemoryWrite', err);
   }
-}
-
-function logHookError(moduleName, err) {
-  const pluginData = getPluginData();
-  if (!pluginData) return;
-  appendJsonlLineSafe(join(pluginData, `hook-errors-${monthStr()}.jsonl`), {
-    ts: new Date().toISOString(),
-    module: moduleName,
-    message:
-      err && err.message
-        ? String(err.message).slice(0, HookConfig.ERROR_MSG_MAX_CHARS)
-        : String(err).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
-  });
 }
 
 function withTimeout(p, ms, label) {
@@ -153,7 +138,7 @@ for (const pass of passes) {
         mod.name,
       );
     } catch (err) {
-      logHookError(mod.name, err);
+      logError(`post-tool.${mod.name}`, err);
       if (env.LL_HOOK_DEBUG) {
         process.stderr.write(`[post-tool] ${mod.name} failed: ${err.message}\n`);
       }

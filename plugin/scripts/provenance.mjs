@@ -10,6 +10,8 @@ import { isMainModule } from './lib/is-main.mjs';
 import { getPluginData, pluginDataExists } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { VALID_ACTIONS, INTENT_KINDS } from './lib/provenance-vocabulary.mjs';
+import { logError } from './lib/log.mjs';
 
 // Resolved lazily, not at module load: getPluginData() can be null, and an
 // eager join would throw before emitProvenance's guard ever runs.
@@ -39,7 +41,15 @@ function seedTemplates() {
 }
 
 export function emitProvenance(event) {
-  // Guards the detached-child resurrection class — see pluginDataExists().
+  // Reject unknown actions at the boundary instead of letting the unchecked
+  // spread below shape the schema. Legacy spellings are readable but not
+  // emittable. Now a counted rejection: log.mjs's error sink persists this
+  // scope durably, and the phase 2 reducer counts records by scope.
+  if (!event || !VALID_ACTIONS.has(event.action)) {
+    logError('provenance.invalidAction', new Error(`unknown action: ${event && event.action}`));
+    return;
+  }
+  // Guards the detached-child resurrection class, see pluginDataExists().
   if (!pluginDataExists()) return;
   mkdirSync(provenanceDir(), { recursive: true });
   seedTemplates();
@@ -49,6 +59,19 @@ export function emitProvenance(event) {
     source: 'skill',
     ...event,
   };
+  // Free-text intent (or an unbounded intent_kind) is dropped, not the whole
+  // event: the rest of the record is still useful, and rejecting outright
+  // would throw away real skill/action/target data over one bad field. Now a
+  // counted drop: log.mjs's error sink persists this scope durably, and the
+  // phase 2 reducer counts records by scope.
+  if ('intent' in record) {
+    logError('provenance.freeTextIntent', new Error(`dropping free-text intent: ${record.intent}`));
+    delete record.intent;
+  }
+  if ('intent_kind' in record && !INTENT_KINDS.has(record.intent_kind)) {
+    logError('provenance.freeTextIntent', new Error(`dropping unbounded intent_kind: ${record.intent_kind}`));
+    delete record.intent_kind;
+  }
   appendJsonlLineDeduped(getCurrentMonthFile(), record);
 }
 

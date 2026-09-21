@@ -49,9 +49,8 @@ function detectVaultStyle(vaultRoot) {
         stems.push(e.slice(0, -3));
         if (stems.length >= SAMPLE_CAP) break;
       }
-    } catch {
-      // Dir absent or unreadable — skip silently.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- dir absent or unreadable, skip silently and try the next sample dir.
+    } catch {}
   }
   if (stems.length === 0) return null;
   const withSpaces = stems.filter(hasSpaces).length;

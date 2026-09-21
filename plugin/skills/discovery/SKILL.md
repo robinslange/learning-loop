@@ -55,13 +55,13 @@ This skill emits provenance events for pipeline observability. Run each Bash com
 **At session start (after scope identified):**
 
 ```bash
-ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-start","intent":"TOPIC","config":{"style":"STYLE","capture":"MODE"}}'
+ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-start","intent_kind":"topic","config":{"style":"STYLE","capture":"MODE"}}'
 ```
 
-**At session end (after all rounds complete):**
+**At session end (after all rounds complete).** Alongside the existing counters, include the common outcome shape: `items_in` (rounds run), `items_out` (notes created), `items_flagged` (0, discovery has no flagging concept), `duration_ms`:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-end","notes_created":N,"rounds":R}'
+ll-run provenance-emit.js '{"agent":"discovery","skill":"discovery","action":"session-end","notes_created":N,"rounds":R,"items_in":N,"items_out":N,"items_flagged":0,"duration_ms":N}'
 ```
 
 Per-note tracking is handled automatically by the PostToolUse hook.

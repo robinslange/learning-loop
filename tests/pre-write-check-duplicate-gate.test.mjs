@@ -25,6 +25,7 @@ import { skipOnWindows } from './helpers/platform.mjs';
 import { VAULT_DIRS, TITLE_INDEX_EXTRA_DIRS } from '../plugin/hooks/lib/snapshot.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { DUPLICATE_GATE_STALE_DAEMON_CODE } from '../plugin/hooks/pre-write-check.js';
+import { checkDuplicateGateHealth } from '../plugin/scripts/lib/health-checks/quick.mjs';
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/pre-write-check.js', import.meta.url));
 const UDS_SERVER = fileURLToPath(new URL('./helpers/uds-reflect-server.mjs', import.meta.url));
@@ -122,6 +123,37 @@ function readHookErrorTimeouts(pluginDataDir) {
   return readHookErrorsByCode(pluginDataDir, 'duplicate-gate-timeout');
 }
 
+// Returns every parsed hook-errors record for the given code, across every
+// monthly file in the sandbox (there is normally exactly one).
+function readHookErrorRecords(pluginDataDir, code) {
+  const records = [];
+  let names = [];
+  try {
+    names = readdirSync(pluginDataDir);
+  } catch {
+    return records;
+  }
+  for (const n of names) {
+    if (!n.startsWith('hook-errors-') || !n.endsWith('.jsonl')) continue;
+    let raw = '';
+    try {
+      raw = readFileSync(join(pluginDataDir, n), 'utf-8');
+    } catch {
+      continue;
+    }
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.code === code) records.push(rec);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  return records;
+}
+
 // Note content with a # title (triggers the gate) and no wikilinks (no
 // broken-link noise in additionalContext).
 const NOTE =
@@ -214,8 +246,12 @@ function runWithSocket(serverMode, filePath, { stubScript, allowStderrError = fa
       assert.ok(!r.stderr.includes('"level":"error"'), `hook logged an error: ${r.stderr}`);
     }
     const timeoutCount = readHookErrorTimeouts(r.pluginDataDir);
+    // Read before cleanup's rmSync tears the sandbox down: proves quick.mjs's
+    // duplicate-gate check still fires against whatever the collapsed
+    // logError path actually wrote, not a hand-shaped fixture.
+    const gateHealth = checkDuplicateGateHealth({ pluginData: r.pluginDataDir });
     const out = r.stdout.trim();
-    return { result: out ? JSON.parse(out) : null, stderr: r.stderr, timeoutCount };
+    return { result: out ? JSON.parse(out) : null, stderr: r.stderr, timeoutCount, gateHealth };
   } finally {
     stopUdsServer(server);
     r.cleanup();
@@ -399,14 +435,30 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
   });
 
   it('socket timeout: logs the distinct duplicate-gate-timeout code, then falls back to subprocess', () => {
-    const { result, timeoutCount } = runWithSocket('hang', join(VAULT, '0-inbox', 'new-note.md'), {
-      // Working subprocess stub so the gate still produces a warning after the
-      // socket times out (proves the fallback fires).
-      stubScript: envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
-    });
+    const { result, timeoutCount, gateHealth } = runWithSocket(
+      'hang',
+      join(VAULT, '0-inbox', 'new-note.md'),
+      {
+        // Working subprocess stub so the gate still produces a warning after the
+        // socket times out (proves the fallback fires).
+        stubScript: envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        // The timeout now routes through logError, which also writes stderr (the
+        // point of collapsing onto one error path): this is an expected, logged
+        // condition, not a hook crash.
+        allowStderrError: true,
+      },
+    );
     assert.ok(timeoutCount >= 1, 'a socket timeout must log the duplicate-gate-timeout code');
     assert.ok(result, 'subprocess fallback must still produce the duplicate warning');
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
+    // quick.mjs's duplicate-gate check must still detect the condition after
+    // the collapse onto logError: it reads the same hook-errors-*.jsonl file,
+    // now written by log.mjs's compat sink instead of a hand-rolled append.
+    assert.match(
+      gateHealth.detail,
+      /recent timeout/,
+      `checkDuplicateGateHealth must still see the timeout: ${gateHealth.detail}`,
+    );
   });
 
   it('stale daemon: logs distinct stale-daemon code and falls back to subprocess', () => {
@@ -449,6 +501,90 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
       assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
     } finally {
       stopUdsServer(server);
+      r.cleanup();
+    }
+  });
+
+  it('socket timeout: records latency_ms bounded by PRE_WRITE_DAEMON_TIMEOUT_MS', () => {
+    let server = null;
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        server = startUdsServer(join(pluginDataDir, 'nli.sock'), 'hang');
+      },
+    });
+    try {
+      assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+      assert.equal(r.exitCode, 0, r.stderr);
+      const records = readHookErrorRecords(r.pluginDataDir, 'duplicate-gate-timeout').filter(
+        (rec) => rec.source === 'daemon',
+      );
+      assert.ok(records.length >= 1, 'expected at least one daemon timeout record');
+      for (const rec of records) {
+        assert.equal(typeof rec.latency_ms, 'number', 'latency_ms must be numeric');
+        assert.ok(Number.isFinite(rec.latency_ms), 'latency_ms must be finite');
+        assert.ok(rec.latency_ms > 0, 'latency_ms must be positive');
+        // Generous bound: the timeout fires at PRE_WRITE_DAEMON_TIMEOUT_MS
+        // (2500ms), so a well-behaved measurement stays well under double that
+        // even on a contended CI box.
+        assert.ok(
+          rec.latency_ms < HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS * 4,
+          `latency_ms (${rec.latency_ms}) should be bounded by the configured daemon timeout`,
+        );
+      }
+    } finally {
+      stopUdsServer(server);
+      r.cleanup();
+    }
+  });
+
+  it('records budget_ms and elapsed_ms as numbers alongside a duplicate-gate-timeout', () => {
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
+      },
+      // Budget too small to reach the subprocess floor after any daemon
+      // attempt: the gate must log a timeout with budget_ms/elapsed_ms.
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '400' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const records = readHookErrorRecords(r.pluginDataDir, 'duplicate-gate-timeout').filter(
+        (rec) => rec.source === 'budget',
+      );
+      assert.ok(records.length >= 1, 'expected a budget-exhaustion timeout record');
+      for (const rec of records) {
+        assert.equal(typeof rec.budget_ms, 'number', 'budget_ms must be numeric');
+        assert.equal(typeof rec.elapsed_ms, 'number', 'elapsed_ms must be numeric');
+        assert.equal(rec.budget_ms, 400, 'budget_ms should reflect the configured budget');
+        assert.ok(rec.elapsed_ms >= 0, 'elapsed_ms must be non-negative');
+      }
+    } finally {
       r.cleanup();
     }
   });

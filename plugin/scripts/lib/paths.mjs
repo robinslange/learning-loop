@@ -115,6 +115,7 @@ export const DATA_PATHS = {
   convergence: (pd) => join(pd, 'convergence'),
   librarian: (pd) => join(pd, 'librarian'),
   librarianQueue: (pd) => join(pd, 'librarian', 'queue.jsonl'),
+  logs: (pd) => join(pd, 'logs'),
   retrieval: (pd) => join(pd, 'retrieval'),
   retrievalSessionDedupe: (pd) => join(pd, 'retrieval', 'session-dedupe'),
   // /reflect Step 4 session-keyed scratch markers (new-notes list, refinement

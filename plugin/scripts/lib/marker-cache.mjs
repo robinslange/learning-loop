@@ -31,6 +31,11 @@ export const MARKER_PATHS = {
   // backfill every 7 days.
   edgesBackfilled: (pluginData) => join(DATA_PATHS.retrieval(pluginData), 'edges-backfilled'),
   lastReflect: (pluginData) => join(DATA_PATHS.markers(pluginData), 'last-reflect'),
+  // Stamped by the otel export worker (T2h), only after a successful run.
+  // session-start reads this with an explicit one-hour TTL override, NOT
+  // MARKER_TTL_MS -- see the call site for why the shared 25h default must
+  // stay untouched.
+  otelExport: (pluginData) => join(DATA_PATHS.markers(pluginData), 'otel-export'),
   dreamLock: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-lock'),
   dreamNudged: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-nudged'),
   // Session-scoped log of memory files THIS session wrote (post-tool appends
@@ -122,9 +127,8 @@ export function dreamLockHeld(path, { staleMs = HookConfig.DREAM_LOCK_STALE_SECS
   try {
     const parsed = JSON.parse(readFileSync(path, 'utf8'));
     pid = typeof parsed === 'number' ? parsed : (parsed?.pid ?? null);
-  } catch {
-    // Content unreadable — the age check below decides.
-  }
+    // eslint-disable-next-line learning-loop/no-empty-catch -- content unreadable; the age check below decides.
+  } catch {}
   if (pid != null && isProcessAlive(pid)) return true;
   return Date.now() - stat.mtimeMs < staleMs;
 }

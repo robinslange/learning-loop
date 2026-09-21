@@ -15,6 +15,7 @@ import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import {
   DATA_FILES,
+  DATA_PATHS,
   FEDERATION_PATHS,
   SHIM_NAMES,
   binaryFileName,
@@ -25,7 +26,9 @@ import { safeLoad } from '../safe-load.mjs';
 import { resolveShimRoot } from '../shims.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
-import { recentMonths } from '../retrieval.mjs';
+import { recentMonths, monthStr } from '../retrieval.mjs';
+import { MARKER_PATHS } from '../marker-cache.mjs';
+import { isExportEnabled as defaultIsExportEnabled } from '../../otel/export.mjs';
 import {
   isVaultOk,
   isEpisodicOk,
@@ -720,9 +723,8 @@ function countDuplicateGateIssues(path) {
         // subprocess or budget failure means the write itself skipped the gate.
         if (obj?.source === 'subprocess' || obj?.source === 'budget') hardFailures++;
       } else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
-    } catch {
-      // Skip a corrupt line — keep counting the rest.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- skip a corrupt line, keep counting the rest.
+    } catch {}
   }
   return { timeouts, daemonTimeouts, staleDaemon, hardFailures };
 }
@@ -931,9 +933,8 @@ function readHookErrorLines(path) {
     if (!line.trim()) continue;
     try {
       result.push(JSON.parse(line));
-    } catch {
-      // Skip corrupt line — keep counting the rest.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- skip a corrupt line, keep counting the rest.
+    } catch {}
   }
   return result;
 }
@@ -1181,5 +1182,129 @@ export function checkAbiDrift({ abiDriftResult } = {}) {
     severity: SEVERITIES.fail,
     detail: abiDriftResult.message || 'unknown error',
     fix: 'Inspect native plugin modules; consider reinstall',
+  });
+}
+
+// --- Otel export status (TD, T2h exit criteria) ---
+// Reports whether otel export is active (endpoint configured AND the
+// config.json opt-in is set) or inactive, and when active, the age in
+// seconds of the last successful export, read from the otelExport marker's
+// mtime (T2h's worker stamps it only on a successful run). See
+// docs/plans/otel-consolidation.md, "Config and consent" and phase 2's exit
+// criteria: health-check.mjs --full --json reports export active/inactive
+// and the age of the last successful export in seconds.
+export function checkOtelExportStatus({
+  pluginData,
+  isExportEnabled = defaultIsExportEnabled,
+  now = Date.now(),
+} = {}) {
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['otel-export-status'],
+      name: 'Otel export',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available, skipped',
+      fix: null,
+    });
+  }
+  if (!isExportEnabled()) {
+    return makeCheck({
+      id: CHECK_IDS['otel-export-status'],
+      name: 'Otel export',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'inactive (no endpoint configured or opt-in not set)',
+      fix: null,
+    });
+  }
+  let stat;
+  try {
+    stat = statSync(MARKER_PATHS.otelExport(pluginData));
+  } catch {
+    stat = null;
+  }
+  if (!stat) {
+    return makeCheck({
+      id: CHECK_IDS['otel-export-status'],
+      name: 'Otel export',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: 'active, but no export has completed yet',
+      fix: 'Open a session; the export worker runs detached from session-start',
+    });
+  }
+  const ageSecs = Math.max(0, Math.round((now - stat.mtimeMs) / 1000));
+  return makeCheck({
+    id: CHECK_IDS['otel-export-status'],
+    name: 'Otel export',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.warn,
+    detail: `active, last successful export ${ageSecs}s ago`,
+    fix: null,
+  });
+}
+
+// --- Otel error log (TD, T1i coverage) ---
+// Counts error records in the current month's log-YYYY-MM.jsonl (T1i's
+// durable sink for log.mjs's logError()) and names the top scope, so the
+// previously-invisible failure modes T1i started persisting are surfaced in
+// /doctor. Uses the tail-read idiom already established by
+// collectShadowGateStats/readTailLines rather than loading the whole file:
+// the log can grow, and only a bounded recent window is needed for a count.
+const OTEL_ERROR_LOG_TAIL_BYTES = 2 * 1024 * 1024;
+
+export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
+  if (!pluginData) {
+    return makeCheck({
+      id: CHECK_IDS['otel-error-log'],
+      name: 'Error log',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'plugin-data not available, skipped',
+      fix: null,
+    });
+  }
+  const path = join(DATA_PATHS.logs(pluginData), `log-${monthStr(now)}.jsonl`);
+  const scopeCounts = new Map();
+  let total = 0;
+  for (const line of readTailLines(path, OTEL_ERROR_LOG_TAIL_BYTES)) {
+    if (!line.trim()) continue;
+    let obj;
+    try {
+      obj = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (obj?.level !== 'error') continue;
+    total++;
+    const scope = obj.scope || 'unknown';
+    scopeCounts.set(scope, (scopeCounts.get(scope) || 0) + 1);
+  }
+  if (total === 0) {
+    return makeCheck({
+      id: CHECK_IDS['otel-error-log'],
+      name: 'Error log',
+      status: SEVERITIES.ok,
+      severity: SEVERITIES.warn,
+      detail: 'no errors logged this month',
+      fix: null,
+    });
+  }
+  let topScope = null;
+  let topCount = 0;
+  for (const [scope, count] of scopeCounts) {
+    if (count > topCount) {
+      topScope = scope;
+      topCount = count;
+    }
+  }
+  return makeCheck({
+    id: CHECK_IDS['otel-error-log'],
+    name: 'Error log',
+    status: SEVERITIES.fail,
+    severity: SEVERITIES.warn,
+    detail: `${total} error(s) logged this month, top scope: ${topScope} (${topCount})`,
+    fix: `Check ${path} for details on the ${topScope} scope`,
   });
 }

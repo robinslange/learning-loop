@@ -157,7 +157,7 @@ Flag any sources found during research that aren't already in `2-literature/` as
 After completing the deepen cycle, emit a result event:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"note-deepener","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
+ll-run provenance-emit.js '{"agent":"note-deepener","skill":"deepen","action":"deepen","target":"NOTE_FILENAME","from_tier":"shallow|medium|deep","to_tier":"shallow|medium|deep","destination":"FOLDER","sources_added":N,"links_added":N,"split":false,"overlap":"novel|partial|redundant"}'
 ```
 
 ## Rules

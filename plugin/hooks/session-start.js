@@ -30,6 +30,7 @@ import {
   recordIntentionsShipped,
 } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
+import { maybeSpawnOtelExport } from './session-start/otel-export.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
@@ -91,6 +92,7 @@ await runHealthDetector(ctx);
 await runVaultSnapshot(ctx);
 await runWatchDaemon(ctx);
 await runContextAssembly(ctx);
+maybeSpawnOtelExport(ctx);
 
 // Episodic pre-warm — kept inline: three lines, no cross-submodule dep.
 try {

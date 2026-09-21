@@ -41,7 +41,7 @@ function goneDir(prefix) {
 // --- provenance emitter (CLI spawned detached by context-assembly) ---
 
 function emit(pluginData) {
-  return spawnSync(process.execPath, [EMITTER, JSON.stringify({ agent: 'test', action: 'no-resurrect' })], {
+  return spawnSync(process.execPath, [EMITTER, JSON.stringify({ agent: 'test', action: 'create' })], {
     env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
     encoding: 'utf-8',
   });
@@ -62,7 +62,7 @@ test('emitProvenance still appends when plugin-data exists', () => {
     const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
     const eventsFile = join(root, 'provenance', `events-${month}.jsonl`);
     assert.ok(existsSync(eventsFile), 'events file must be written');
-    assert.match(readFileSync(eventsFile, 'utf-8'), /"action":"no-resurrect"/);
+    assert.match(readFileSync(eventsFile, 'utf-8'), /"action":"create"/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -168,7 +168,7 @@ const COMMON_URL = pathToFileURL(join(SCRIPTS, '..', 'hooks', 'lib', 'common.mjs
 
 const HOOK_EMIT_CODE = `
 import { emitProvenance } from ${JSON.stringify(COMMON_URL)};
-emitProvenance({ path: 'x.md', agent_id: 'no-resurrect' });
+emitProvenance({ path: 'x.md', agent_id: 'no-resurrect', action: 'vault-write' });
 `;
 
 test('hooks/lib/common.mjs emitProvenance does not re-create a deleted plugin-data dir', () => {
@@ -185,6 +185,34 @@ test('hooks/lib/common.mjs emitProvenance still appends when plugin-data exists'
     assert.equal(result.status, 0, result.stderr);
     const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
     assert.ok(existsSync(join(root, 'provenance', `events-${month}.jsonl`)));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// --- log.mjs error sink (detached workers all import log.mjs for logError) ---
+
+const LOG_URL = pathToFileURL(join(SCRIPTS, 'lib', 'log.mjs')).href;
+
+const LOG_ERROR_CODE = `
+import { logError } from ${JSON.stringify(LOG_URL)};
+logError('no-resurrect-scope', new Error('boom'));
+`;
+
+test('log.mjs error sink does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-log-sink-gone-');
+  const result = runModule(LOG_ERROR_CODE, root);
+  assert.equal(result.status, 0, `logError must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});
+
+test('log.mjs error sink still writes when plugin-data exists', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-log-sink-live-'));
+  try {
+    const result = runModule(LOG_ERROR_CODE, root);
+    assert.equal(result.status, 0, `logError must succeed, stderr: ${result.stderr}`);
+    const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+    assert.ok(existsSync(join(root, 'logs', `log-${month}.jsonl`)), 'sink file must be written');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

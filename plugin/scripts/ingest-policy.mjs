@@ -44,6 +44,7 @@ export function clearPolicy(pluginData, sessionId) {
   if (existsSync(p))
     try {
       unlinkSync(p);
+      // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort cleanup; a file removed between existsSync and unlink is already gone.
     } catch {}
 }
 

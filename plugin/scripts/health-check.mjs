@@ -117,6 +117,8 @@ export async function runQuickChecks(ctx = {}) {
       injectionNudge: c.injectionNudge,
     }),
     quick.checkAbiDrift({ abiDriftResult: c.abiDriftResult }),
+    quick.checkOtelExportStatus({ pluginData: c.pluginData }),
+    quick.checkOtelErrorLog({ pluginData: c.pluginData }),
   ];
   return {
     ts: new Date().toISOString(),
@@ -307,11 +309,8 @@ export async function runFullChecks(ctx = {}) {
     try {
       pid = parseInt(readFileSync(pidfilePath, 'utf-8').trim(), 10);
       if (Number.isFinite(pid)) pidIsAlive = isProcessAlive(pid);
-    } catch {
-      // Documented fallback: readFileSync may throw if the pidfile vanishes
-      // between existsSync and read; treat as "no daemon" (pidIsAlive stays
-      // false). Empty catch on purpose.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- readFileSync may throw if the pidfile vanishes between existsSync and read; treat as "no daemon" (pidIsAlive stays false).
+    } catch {}
   }
 
   const edgesInputs = await collectEdgesBackfillInputs({
