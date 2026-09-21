@@ -61,3 +61,59 @@ test('provenance-emit.js argv form still works', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('--text attaches a free-text field without the caller escaping it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-prov-text-'));
+  try {
+    // Every character the old heredoc instructions warned about, passed raw.
+    const prose = `Claim 3 says "UCAST" is \`enterprise-only\`, cost $500\\1000, per O'Brien`;
+    const result = spawnSync(
+      'node',
+      [
+        EMIT,
+        JSON.stringify({ agent: 'verify', skill: 'verify', action: 'score', target: 'n.md' }),
+        '--text',
+        'finding_detail',
+        prose,
+      ],
+      { env: { ...process.env, CLAUDE_PLUGIN_DATA: root }, encoding: 'utf-8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const events = readEvents(root);
+    assert.equal(events.length, 1);
+    assert.equal(events[0].finding_detail, prose, 'prose must round-trip byte for byte');
+    assert.equal(events[0].action, 'score');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stdin accepts several newline-separated events, the batching case', () => {
+  // usage-provenance.md emits one line per note in a single call. The single
+  // JSON.parse this file used to do threw on the second line and dropped the
+  // whole batch, so this asserts the batch survives.
+  const root = mkdtempSync(join(tmpdir(), 'll-prov-batch-'));
+  try {
+    const lines = [
+      { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'a.md', status: 'used' },
+      { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'b.md', status: 'ignored' },
+      { agent: 'reflect', skill: 'reflect', action: 'note-usage', target: 'c.md', status: 'used' },
+    ]
+      .map((e) => JSON.stringify(e))
+      .join('\n');
+    const result = spawnSync('node', [EMIT, '-'], {
+      input: lines,
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const events = readEvents(root);
+    assert.equal(events.length, 3, 'every batched line must be emitted, not just the first');
+    assert.deepEqual(
+      events.map((e) => e.target),
+      ['a.md', 'b.md', 'c.md'],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

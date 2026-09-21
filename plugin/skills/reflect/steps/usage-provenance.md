@@ -117,8 +117,10 @@ ll-run provenance-emit.js - <<'JSON'
 JSON
 ```
 
-Batch the emissions in a single Bash call (one `provenance-emit.js` line per
-note) to avoid N round-trips.
+Batch the emissions in a single Bash call, one JSON line per note on stdin, to
+avoid N round-trips. The stdin form is the right shape here precisely because it
+batches; for a single event carrying prose, `--text <field> '<prose>'` avoids
+escaping the prose into the JSON at all.
 
 ## 4.7.d: Fold into the Step 5 report
 
