@@ -21,6 +21,7 @@
 import { execFileSync } from 'node:child_process';
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { gitEnv } from '../../plugin/scripts/lib/session-ledger.mjs';
 
 export const ROOT = join(import.meta.dirname, '..', '..');
 
@@ -66,6 +67,7 @@ export function publishedFiles(...globs) {
     cwd: ROOT,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    env: gitEnv(),
   });
   return out
     .split('\0')

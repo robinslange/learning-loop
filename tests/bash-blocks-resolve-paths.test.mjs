@@ -32,6 +32,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { gitEnv } from '../plugin/scripts/lib/session-ledger.mjs';
 
 const ROOT = join(import.meta.dirname, '..');
 
@@ -44,7 +45,10 @@ const RECOVERY = new Set(['plugin/skills/doctor/SKILL.md']);
 
 /** Every tracked markdown file under `plugin/`, repo-relative. */
 function pluginDocs() {
-  return execFileSync('git', ['-C', ROOT, 'ls-files', 'plugin/**/*.md'], { encoding: 'utf8' })
+  return execFileSync('git', ['-C', ROOT, 'ls-files', 'plugin/**/*.md'], {
+    encoding: 'utf8',
+    env: gitEnv(),
+  })
     .trim()
     .split('\n')
     .filter(Boolean);
