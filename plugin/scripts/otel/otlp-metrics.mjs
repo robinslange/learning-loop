@@ -21,7 +21,10 @@ function attributeValue(v) {
 }
 
 export function buildAttributes(attributes) {
-  return Object.entries(attributes || {}).map(([key, value]) => ({ key, value: attributeValue(value) }));
+  return Object.entries(attributes || {}).map(([key, value]) => ({
+    key,
+    value: attributeValue(value),
+  }));
 }
 
 // AGGREGATION_TEMPORALITY_CUMULATIVE. The other OTLP value, DELTA (1), would

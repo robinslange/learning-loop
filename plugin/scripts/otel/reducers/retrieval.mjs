@@ -12,7 +12,14 @@
 // runs over the same files produce byte-identical output.
 
 import { DATA_PATHS } from '../../lib/paths.mjs';
-import { readRecords, monthlyFiles, countBy, histogramFrom, METRIC_PREFIX, LATENCY_BOUNDS_MS } from '../reduce.mjs';
+import {
+  readRecords,
+  monthlyFiles,
+  countBy,
+  histogramFrom,
+  METRIC_PREFIX,
+  LATENCY_BOUNDS_MS,
+} from '../reduce.mjs';
 
 const STREAM = 'retrieval';
 
@@ -30,11 +37,7 @@ const PROMPT_LENGTH_BOUNDS = [50, 200, 500, 1000, 2000, 5000];
 // One reducer, four streams, each contributing a `command` counted by the
 // same metric. Data-driven so four copy-pasted blocks are not needed (plan's
 // invariant 7 note: reducers stay under the 150 LOC script cap).
-const STREAMS = [
-  { prefix: 'queries-' },
-  { prefix: 'reads-' },
-  { prefix: 'shadow-injection-' },
-];
+const STREAMS = [{ prefix: 'queries-' }, { prefix: 'reads-' }, { prefix: 'shadow-injection-' }];
 
 function readStream(pluginData, prefix) {
   const dir = DATA_PATHS.retrieval(pluginData);
@@ -63,10 +66,30 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
   const injections = readStream(pluginData, 'injections-');
 
   const metrics = [
-    ...countBy(commandRecords, { name: 'retrieval_command', stream: STREAM, by: ['command'], timeUnixMs }),
-    ...countBy(injections, { name: 'retrieval_injection_via', stream: STREAM, by: ['via'], timeUnixMs }),
-    ...countBy(injections, { name: 'retrieval_injection_level', stream: STREAM, by: ['level'], timeUnixMs }),
-    ...countBy(queries, { name: 'retrieval_federated', stream: STREAM, by: ['federated'], timeUnixMs }),
+    ...countBy(commandRecords, {
+      name: 'retrieval_command',
+      stream: STREAM,
+      by: ['command'],
+      timeUnixMs,
+    }),
+    ...countBy(injections, {
+      name: 'retrieval_injection_via',
+      stream: STREAM,
+      by: ['via'],
+      timeUnixMs,
+    }),
+    ...countBy(injections, {
+      name: 'retrieval_injection_level',
+      stream: STREAM,
+      by: ['level'],
+      timeUnixMs,
+    }),
+    ...countBy(queries, {
+      name: 'retrieval_federated',
+      stream: STREAM,
+      by: ['federated'],
+      timeUnixMs,
+    }),
     ...histogramFrom(
       commandRecords.map((r) => r.result_count).filter((v) => typeof v === 'number'),
       { name: 'retrieval_result_count', stream: STREAM, bounds: RESULT_COUNT_BOUNDS, timeUnixMs },

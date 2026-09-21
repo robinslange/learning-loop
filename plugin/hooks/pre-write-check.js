@@ -116,11 +116,15 @@ export const SCAN_FAILED = Symbol('SCAN_FAILED');
 
 function logDuplicateGateIssue(pluginData, code, source, detail, durations = {}) {
   if (!pluginData) return;
-  logError('pre-write-check.checkDuplicateNote', String(detail).slice(0, HookConfig.ERROR_MSG_MAX_CHARS), {
-    code,
-    source,
-    ...durations,
-  });
+  logError(
+    'pre-write-check.checkDuplicateNote',
+    String(detail).slice(0, HookConfig.ERROR_MSG_MAX_CHARS),
+    {
+      code,
+      source,
+      ...durations,
+    },
+  );
 }
 
 // Try the long-running ll-search watch daemon's UDS socket for the duplicate
@@ -320,9 +324,15 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       // The gate timed out against the warm daemon — log it distinctly so
       // /doctor can flag a permanently-disabled gate, then fall through to the
       // subprocess as a slow-path safety net.
-      logDuplicateGateIssue(pluginData, DUPLICATE_GATE_TIMEOUT_CODE, 'daemon', daemonResult.reason, {
-        latency_ms: daemonResult.latency_ms,
-      });
+      logDuplicateGateIssue(
+        pluginData,
+        DUPLICATE_GATE_TIMEOUT_CODE,
+        'daemon',
+        daemonResult.reason,
+        {
+          latency_ms: daemonResult.latency_ms,
+        },
+      );
     } else if (
       daemonResult.reason !== 'socket-error' &&
       daemonResult.reason !== 'closed-before-response'

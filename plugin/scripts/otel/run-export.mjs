@@ -100,6 +100,7 @@ export async function runExport(opts = {}) {
 if (isMainModule(import.meta.url)) {
   const dryRun = process.argv.includes('--dry-run');
   runExport({ dryRun }).then((result) => {
-    if (!result.ok) logError('otel.runExport.failed', new Error(result.error || 'export failed'), { result });
+    if (!result.ok)
+      logError('otel.runExport.failed', new Error(result.error || 'export failed'), { result });
   });
 }

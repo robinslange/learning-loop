@@ -38,6 +38,11 @@ export function reduceDreamEval({ pluginData, timeUnixMs }) {
 
   return [
     ...countBy(records, { name: 'dream_eval_tier', stream: STREAM, by: ['tier'], timeUnixMs }),
-    ...histogramFrom(confidences, { name: 'dream_eval_confidence', stream: STREAM, bounds: RATIO_BOUNDS, timeUnixMs }),
+    ...histogramFrom(confidences, {
+      name: 'dream_eval_confidence',
+      stream: STREAM,
+      bounds: RATIO_BOUNDS,
+      timeUnixMs,
+    }),
   ];
 }

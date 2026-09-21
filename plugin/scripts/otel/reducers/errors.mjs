@@ -16,7 +16,13 @@
 // cursor. Either stream's files may be entirely absent (a fresh install with
 // no errors yet), and that yields [] for that stream rather than throwing.
 
-import { readRecords, monthlyFiles, countBy, histogramFrom, LATENCY_BOUNDS_MS } from '../reduce.mjs';
+import {
+  readRecords,
+  monthlyFiles,
+  countBy,
+  histogramFrom,
+  LATENCY_BOUNDS_MS,
+} from '../reduce.mjs';
 import { DATA_PATHS } from '../../lib/paths.mjs';
 
 const HOOK_ERRORS_STREAM = 'hook-errors';
@@ -37,11 +43,36 @@ function reduceHookErrors(pluginData, timeUnixMs) {
   const budgets = records.map((r) => r.budget_ms).filter((v) => v !== undefined);
 
   return [
-    ...countBy(records, { name: 'hook_error_module', stream: HOOK_ERRORS_STREAM, by: ['module'], timeUnixMs }),
-    ...countBy(records, { name: 'hook_error_code', stream: HOOK_ERRORS_STREAM, by: ['code'], timeUnixMs }),
-    ...histogramFrom(latencies, { name: 'hook_error_latency_ms', stream: HOOK_ERRORS_STREAM, bounds: LATENCY_BOUNDS_MS, timeUnixMs }),
-    ...histogramFrom(elapsed, { name: 'hook_error_elapsed_ms', stream: HOOK_ERRORS_STREAM, bounds: LATENCY_BOUNDS_MS, timeUnixMs }),
-    ...histogramFrom(budgets, { name: 'hook_error_budget_ms', stream: HOOK_ERRORS_STREAM, bounds: LATENCY_BOUNDS_MS, timeUnixMs }),
+    ...countBy(records, {
+      name: 'hook_error_module',
+      stream: HOOK_ERRORS_STREAM,
+      by: ['module'],
+      timeUnixMs,
+    }),
+    ...countBy(records, {
+      name: 'hook_error_code',
+      stream: HOOK_ERRORS_STREAM,
+      by: ['code'],
+      timeUnixMs,
+    }),
+    ...histogramFrom(latencies, {
+      name: 'hook_error_latency_ms',
+      stream: HOOK_ERRORS_STREAM,
+      bounds: LATENCY_BOUNDS_MS,
+      timeUnixMs,
+    }),
+    ...histogramFrom(elapsed, {
+      name: 'hook_error_elapsed_ms',
+      stream: HOOK_ERRORS_STREAM,
+      bounds: LATENCY_BOUNDS_MS,
+      timeUnixMs,
+    }),
+    ...histogramFrom(budgets, {
+      name: 'hook_error_budget_ms',
+      stream: HOOK_ERRORS_STREAM,
+      bounds: LATENCY_BOUNDS_MS,
+      timeUnixMs,
+    }),
   ];
 }
 
@@ -51,7 +82,12 @@ function reduceLogs(pluginData, timeUnixMs) {
   const records = readRecords(files);
 
   return [
-    ...countBy(records, { name: 'log_error_scope', stream: LOGS_STREAM, by: ['scope'], timeUnixMs }),
+    ...countBy(records, {
+      name: 'log_error_scope',
+      stream: LOGS_STREAM,
+      by: ['scope'],
+      timeUnixMs,
+    }),
     ...countBy(records, { name: 'log_level', stream: LOGS_STREAM, by: ['level'], timeUnixMs }),
   ];
 }

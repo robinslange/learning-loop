@@ -166,7 +166,9 @@ export function validateExportRecord(stream, record) {
   }
   for (const key of Object.keys(record)) {
     if (!(key in schema)) {
-      throw new Error(`otel export: field "${key}" is not in the export schema for stream "${stream}"`);
+      throw new Error(
+        `otel export: field "${key}" is not in the export schema for stream "${stream}"`,
+      );
     }
   }
 }

@@ -31,12 +31,19 @@ function jsonlFiles(dir, predicate) {
 // the librarian's dream mode has fired).
 function telemetryFiles(pluginData) {
   return [
-    ...jsonlFiles(DATA_PATHS.provenance(pluginData), (f) => f.startsWith('events-') && f.endsWith('.jsonl')),
+    ...jsonlFiles(
+      DATA_PATHS.provenance(pluginData),
+      (f) => f.startsWith('events-') && f.endsWith('.jsonl'),
+    ),
     ...jsonlFiles(DATA_PATHS.retrieval(pluginData), (f) => f.endsWith('.jsonl')),
     ...jsonlFiles(pluginData, (f) => f.startsWith('hook-errors-') && f.endsWith('.jsonl')),
     ...jsonlFiles(DATA_PATHS.logs(pluginData), (f) => f.startsWith('log-') && f.endsWith('.jsonl')),
-    ...(existsSync(DATA_PATHS.dreamEvalProbes(pluginData)) ? [DATA_PATHS.dreamEvalProbes(pluginData)] : []),
-    ...(existsSync(DATA_PATHS.librarianQueue(pluginData)) ? [DATA_PATHS.librarianQueue(pluginData)] : []),
+    ...(existsSync(DATA_PATHS.dreamEvalProbes(pluginData))
+      ? [DATA_PATHS.dreamEvalProbes(pluginData)]
+      : []),
+    ...(existsSync(DATA_PATHS.librarianQueue(pluginData))
+      ? [DATA_PATHS.librarianQueue(pluginData)]
+      : []),
   ];
 }
 
