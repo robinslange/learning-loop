@@ -8,7 +8,7 @@ Episodic memory gives Claude recall. Learning-loop gives Claude judgment. It ver
 
 Most note-taking systems decay. The vault grows, but old notes go unread, contradictions accumulate, and new sessions repeat work the last session already did. Learning-loop closes that loop. Every session starts by recalling what you already know. Every capture earns its place against quality gates. Every belief that changes gets traced through everything that depends on it.
 
-The outcome is a vault that gets sharper, not heavier. Two layers wire the discipline into the runtime. Nine lifecycle hook handlers across six Claude Code event types fire regardless of what the model decides: retrieval before you ask, a duplicate-and-frontmatter gate before every vault write, and web research routed through a config-selected gateway. The capture agents enforce the rest, verifying citations against academic APIs before a note is written, gating promotion on quality scores, and propagating corrections when a belief changes. The full hook roster lives in [guide/configuration.md](guide/configuration.md).
+The outcome is a vault that gets sharper, not heavier. Two layers wire the discipline into the runtime. Ten lifecycle hook handlers across seven Claude Code event types fire regardless of what the model decides: retrieval before you ask, a duplicate-and-frontmatter gate before every vault write, and web research routed through a config-selected gateway. The capture agents enforce the rest, verifying citations against academic APIs before a note is written, gating promotion on quality scores, and propagating corrections when a belief changes. The full hook roster lives in [guide/configuration.md](guide/configuration.md).
 
 ## Install
 
@@ -153,7 +153,7 @@ Set `LL_OFFLINE=1` to suppress every network call the plugin initiates on its ow
 
 Localhost is never gated — the Ollama daemon I use for local offload still works, so an air-gapped box keeps its local model. `/doctor` reports an **Offline mode: ON** line so I can confirm the suppression is actually engaged rather than silently skipped.
 
-`LL_OFFLINE` is orthogonal to `LL_REPO` (which only repoints the binary download mirror and matters when *not* offline). One caveat: if I deliberately configure the librarian to use a remote OpenAI-compatible provider (`provider.kind: "openai"` with a `base_url`), that is an explicit opt-in egress and is not gated by `LL_OFFLINE` — the default librarian provider is localhost Ollama, which stays local.
+`LL_OFFLINE` is orthogonal to `LL_REPO` (which only repoints the binary download mirror and matters when _not_ offline). One caveat: if I deliberately configure the librarian to use a remote OpenAI-compatible provider (`provider.kind: "openai"` with a `base_url`), that is an explicit opt-in egress and is not gated by `LL_OFFLINE` — the default librarian provider is localhost Ollama, which stays local.
 
 ### Hook scope
 

@@ -244,7 +244,7 @@ flowchart LR
 
 `scripts/librarian/research.mjs` (`runResearch`) drives Search -> dedup -> Fetch -> Extract and emits a claims bundle (`{question, angles, sources, claims, skipped}`). Collaborators (`searchFn`/`fetchTextFn`/`extractFn`) are injected with live defaults from `research/{brave,fetch,extract,source-id}.mjs`, so orchestration is testable without the network. The model-size tier gate lives at the CLI edge (`resolveModel` + `researchModelOk`): research **refuses on the e2b tier (exit 3)** rather than producing thin claims, and the `/research` skill falls back to Claude-native WebSearch when the librarian is unavailable or sub-tier.
 
-The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier *failure* (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
+The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier _failure_ (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
 
 ### web access path (source gateway)
 
@@ -262,20 +262,20 @@ All model calls go through `scripts/lib/model-client.mjs` (`chatJSON`), a provid
 
 ## module ownership
 
-| Subsystem                  | Primary files                                            | Convention doc                   | Inventory artefact                          |
-| -------------------------- | -------------------------------------------------------- | -------------------------------- | ------------------------------------------- |
-| ll-core scoring            | `native/crates/ll-core/src/scoring.rs`                   | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
-| ll-core embeddings         | `native/crates/ll-core/src/embed.rs`, `store.rs`         | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
-| ll-core graph              | `native/crates/ll-core/src/graph.rs`                     | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`        |
-| ll-search query pipeline   | `native/crates/ll-search/src/search/`                    | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
-| ll-search database         | `native/crates/ll-search/src/db/`                        | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
-| ll-search daemon lifecycle | `native/crates/ll-search/src/main.rs`, `app/`            | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`         |
-| ll-search sync             | `native/crates/ll-search/src/sync/`                      | `docs/baseline/cross-cutting.md` | `.planning/inventory/rust-audit.md`         |
-| Plugin shared primitives   | `scripts/lib/`                                           | `docs/baseline/plugin.md`        | `.planning/inventory/plugin-patterns.md`    |
-| Hooks                      | `hooks/`                                                 | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md` |
-| Provenance                 | `provenance/`, `scripts/provenance*.mjs`                 | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md`    |
-| Librarian + research offload | `scripts/librarian/`, `scripts/lib/model-client.mjs`   | `docs/baseline/plugin.md`        | `scripts/librarian/research/README.md`      |
-| Source gateway (web access) | `bin/source-gateway.mjs`, `scripts/lib/sources/`, `hooks/web-guard.js` | `docs/baseline/plugin.md` | `guide/configuration.md` (Web access gateway) |
+| Subsystem                    | Primary files                                                          | Convention doc                   | Inventory artefact                            |
+| ---------------------------- | ---------------------------------------------------------------------- | -------------------------------- | --------------------------------------------- |
+| ll-core scoring              | `native/crates/ll-core/src/scoring.rs`                                 | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-core embeddings           | `native/crates/ll-core/src/embed.rs`, `store.rs`                       | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-core graph                | `native/crates/ll-core/src/graph.rs`                                   | `docs/baseline/rust.md`          | `.planning/inventory/ll-core-api.md`          |
+| ll-search query pipeline     | `native/crates/ll-search/src/search/`                                  | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
+| ll-search database           | `native/crates/ll-search/src/db/`                                      | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
+| ll-search daemon lifecycle   | `native/crates/ll-search/src/main.rs`, `app/`                          | `docs/baseline/rust.md`          | `.planning/inventory/rust-audit.md`           |
+| ll-search sync               | `native/crates/ll-search/src/sync/`                                    | `docs/baseline/cross-cutting.md` | `.planning/inventory/rust-audit.md`           |
+| Plugin shared primitives     | `scripts/lib/`                                                         | `docs/baseline/plugin.md`        | `.planning/inventory/plugin-patterns.md`      |
+| Hooks                        | `hooks/`                                                               | `docs/baseline/plugin.md`        | `.planning/inventory/coverage-and-magic.md`   |
+| Provenance                   | `provenance/`, `scripts/provenance*.mjs`                               | `docs/baseline/cross-cutting.md` | `.planning/inventory/plugin-patterns.md`      |
+| Librarian + research offload | `scripts/librarian/`, `scripts/lib/model-client.mjs`                   | `docs/baseline/plugin.md`        | `scripts/librarian/research/README.md`        |
+| Source gateway (web access)  | `bin/source-gateway.mjs`, `scripts/lib/sources/`, `hooks/web-guard.js` | `docs/baseline/plugin.md`        | `guide/configuration.md` (Web access gateway) |
 
 ---
 
@@ -287,7 +287,7 @@ What CI actually fails on today: the `no-raw-lockfile` and `no-url-pathname` ESL
 
 Invariant 5 comes closest and still is not: `#![warn(missing_docs)]` in `ll-core/src/lib.rs` is a warning, and the cargo job runs `cargo test --workspace --locked` with no `-D warnings`, no `RUSTFLAGS`, and no clippy step, so an undocumented public item ships green.
 
-The custom rules that *would* enforce invariants 1 and 2 — `learning-loop/no-process-env-outside-env-module` and `learning-loop/no-direct-jsonparse` — ship set to `'off'` in `eslint.config.mjs`, and both are violated in shipped code. Note the first cannot see the whole plugin even at `'error'`: its `files` globs cover `plugin/hooks/**` and `plugin/scripts/**`, so `plugin/bin/` and `plugin/plugins/` are outside its reach. Invariants 3, 4, 6, 7, 8, 9 and 10 have no automated check at all; 6 and 9 record their own pending work inline.
+The custom rules that _would_ enforce invariants 1 and 2 — `learning-loop/no-process-env-outside-env-module` and `learning-loop/no-direct-jsonparse` — ship set to `'off'` in `eslint.config.mjs`, and both are violated in shipped code. Note the first cannot see the whole plugin even at `'error'`: its `files` globs cover `plugin/hooks/**` and `plugin/scripts/**`, so `plugin/bin/` and `plugin/plugins/` are outside its reach. Invariants 3, 4, 6, 7, 8, 9 and 10 have no automated check at all; 6 and 9 record their own pending work inline.
 
 Turning any of these on is a cleanup task in its own right, because each currently fails.
 
@@ -319,7 +319,7 @@ Turning any of these on is a cleanup task in its own right, because each current
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The nine hook handlers across six Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
+**Hook surface.** The ten hook handlers across seven Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
 
 `session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
@@ -339,12 +339,12 @@ No public enums exist in ll-core at baseline -- only structs, a trait, type alia
 
 A running learning-loop deployment has three long-lived processes and several transient ones:
 
-| Process          | Binary / script                                                        | Lifecycle                                                                                                                                                                                                                        |
-| ---------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ll-search daemon | `native/crates/ll-search`                                              | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                     |
-| librarian daemon | `scripts/librarian.mjs` -> `scripts/librarian/daemon.mjs`               | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); investigates notes needing attention via the local Ollama model (`voice_gate`, `tag_suggest`, `duplicate_check`, and an agentic `link_check` loop); exits with the watcher. The on-demand `/research` engine is separate (CLI shell-out, not a daemon task). |
-| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only. |
-| Claude Code host | (Claude Code itself)                                                   | Manages hook invocations                                                                                                                                                                                                         |
+| Process                     | Binary / script                                                                                                           | Lifecycle                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ll-search daemon            | `native/crates/ll-search`                                                                                                 | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                                                                                                                                                              |
+| librarian daemon            | `scripts/librarian.mjs` -> `scripts/librarian/daemon.mjs`                                                                 | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); investigates notes needing attention via the local Ollama model (`voice_gate`, `tag_suggest`, `duplicate_check`, and an agentic `link_check` loop); exits with the watcher. The on-demand `/research` engine is separate (CLI shell-out, not a daemon task). |
+| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only.                                                                                                                                                                                  |
+| Claude Code host            | (Claude Code itself)                                                                                                      | Manages hook invocations                                                                                                                                                                                                                                                                                                                                                  |
 
 Transient:
 
@@ -407,7 +407,7 @@ This replaced static linking via `ort`'s `download-binaries` build feature (work
 
 A BGE-small embedding is 384 f32 values (1536 bytes). Cloning it in a 10k-note candidate loop costs 15 MB of allocation per query. `Arc<[f32]>` is a reference-counted slice: sharing is a pointer copy. The hot-path clone inventory (`.planning/inventory/rust-audit.md:251-324`) shows ~15-20 clone sites in the search pipeline; track 1E eliminates them.
 
-**Why nine hook handlers across six event types?**
+**Why ten hook handlers across seven event types?**
 
 Each handler corresponds to a distinct Claude Code lifecycle event or tool matcher. Learning-loop needs to act at: session open (context injection), prompt submission (just-in-time injection), pre-write (duplicate gate), web-tool use (raw WebSearch/WebFetch deny, routed to the source gateway), post-write (backlinks, edges, provenance), post-read and post-episodic-search (retrieval telemetry), subagent stop (agent-result provenance), and session close (reflection nudge, background reindex). Fewer handlers would require combining unrelated logic; more would fragment the lifecycle unnecessarily.
 
@@ -456,6 +456,7 @@ Both `watch.mjs` and `watch-daemon.mjs` check for an existing live watcher befor
 The subcommand surface (from `native/crates/ll-search/src/main.rs`):
 
 **Query/search**
+
 ```
 ll-search query   <db> <text> [--top N] [--recency DAYS] [--threshold F] [--project TAG]
 ll-search similar <db> <note_path> [--top N]
@@ -466,6 +467,7 @@ ll-search reflect-scan <db> <queries...> [--top N] [--candidates N] [--threshold
 ```
 
 **Index management**
+
 ```
 ll-search index  <vault> <db> [--force] [--sync]
 ll-search index-status <db> <vault>
@@ -474,6 +476,7 @@ ll-search link-stats <db> [--folder DIR] [--orphans]
 ```
 
 **Introspection**
+
 ```
 ll-search tags       <db> [--min-count N]
 ll-search intentions <db> [context]
@@ -482,12 +485,14 @@ ll-search export     <db> <output> <vault>
 ```
 
 **Embedding model migration and benchmarking**
+
 ```
 ll-search migrate   <db> --model MODEL [--drop-old]
 ll-search benchmark <db> --model-a A --model-b B <queries...>
 ```
 
 **Evaluation and tuning**
+
 ```
 ll-search tune-prf     <db> <queries...>
 ll-search eval-prf     <db> [--min-links N]
@@ -497,6 +502,7 @@ ll-search lane-diag    <db> <probes.json>                 # per-query, per-lane 
 ```
 
 **Federation**
+
 ```
 ll-search sync          <db> <vault> [--hub-endpoint URL] [--config-dir DIR]
 ll-search status        [--config-dir DIR]              # federation status, plain text, local files only
@@ -509,6 +515,7 @@ ll-search version
 ```
 
 **Vaults and machines**
+
 ```
 ll-search vault add    <vault> <id> [--config-dir DIR]  # register a second vault under its own config dir
 ll-search vault list   [--config-dir DIR]
@@ -522,6 +529,7 @@ ll-search link revoke  <key_id> [--config-dir DIR]      # withdraw a link this m
 ```
 
 **Long-running (spawned once at SessionStart)**
+
 ```
 ll-search watch <vault> <db> [--sync-interval SECS] [--config-dir DIR] [--pid-file PATH] [--librarian-script PATH]
 ```
@@ -642,9 +650,7 @@ carry neither.
   "vault_root": "/path/to/vault",
   "built_at": "2026-05-18T04:00:00.000Z",
   "expires_at": "2026-05-18T04:00:30.000Z",
-  "notes": [
-    { "folder": "0-inbox", "basename": "note-title", "rel_path": "0-inbox/note-title.md" }
-  ]
+  "notes": [{ "folder": "0-inbox", "basename": "note-title", "rel_path": "0-inbox/note-title.md" }]
 }
 ```
 
