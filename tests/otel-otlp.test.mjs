@@ -235,6 +235,60 @@ test('OTEL_RESOURCE_ATTRIBUTES is filtered through the same allowlist as metric 
   );
 });
 
+test('service.name in OTEL_RESOURCE_ATTRIBUTES cannot override the constant', async (t) => {
+  const prev = process.env.OTEL_RESOURCE_ATTRIBUTES;
+  process.env.OTEL_RESOURCE_ATTRIBUTES = 'service.name=/Users/x';
+  t.after(() => {
+    if (prev === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES;
+    else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
+  });
+  const { buildOtlpPayload: build } = await import(
+    `../plugin/scripts/otel/otlp.mjs?t=${Date.now()}`
+  );
+  const payload = build([counterMetric()]);
+  const resourceAttrs = payload.resourceMetrics[0].resource.attributes;
+  assert.strictEqual(
+    resourceAttrs.find((a) => a.key === 'service.name').value.stringValue,
+    'learning-loop',
+  );
+});
+
+test('a resource attribute value containing whitespace is dropped', async (t) => {
+  const prev = process.env.OTEL_RESOURCE_ATTRIBUTES;
+  process.env.OTEL_RESOURCE_ATTRIBUTES = 'deployment.environment=lab prod';
+  t.after(() => {
+    if (prev === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES;
+    else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
+  });
+  const { buildOtlpPayload: build } = await import(
+    `../plugin/scripts/otel/otlp.mjs?t=${Date.now()}`
+  );
+  const payload = build([counterMetric()]);
+  const resourceAttrs = payload.resourceMetrics[0].resource.attributes;
+  assert.strictEqual(
+    resourceAttrs.find((a) => a.key === 'deployment.environment'),
+    undefined,
+  );
+});
+
+test('a resource attribute value without whitespace or path separators is kept', async (t) => {
+  const prev = process.env.OTEL_RESOURCE_ATTRIBUTES;
+  process.env.OTEL_RESOURCE_ATTRIBUTES = 'deployment.environment=lab';
+  t.after(() => {
+    if (prev === undefined) delete process.env.OTEL_RESOURCE_ATTRIBUTES;
+    else process.env.OTEL_RESOURCE_ATTRIBUTES = prev;
+  });
+  const { buildOtlpPayload: build } = await import(
+    `../plugin/scripts/otel/otlp.mjs?t=${Date.now()}`
+  );
+  const payload = build([counterMetric()]);
+  const resourceAttrs = payload.resourceMetrics[0].resource.attributes;
+  assert.strictEqual(
+    resourceAttrs.find((a) => a.key === 'deployment.environment').value.stringValue,
+    'lab',
+  );
+});
+
 test('a record with a NEVER_EXPORT field throws rather than serializing', () => {
   assert.throws(() => {
     buildOtlpPayload([

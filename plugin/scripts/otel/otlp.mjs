@@ -58,11 +58,23 @@ function parseResourceAttributesEnv() {
 // worker) does not re-log the same operator misconfiguration every run.
 const loggedDroppedKeys = new Set();
 
+// A path, an escaped shell arg, or a sentence has no business in a resource
+// attribute value: OTEL resource attributes are short enum-ish labels
+// (versions, namespaces, environment names), and letting through anything
+// containing '/', '\', whitespace, or over 64 chars is the same
+// path-injection shape service.name's removal from the allowlist closes.
+const BAD_VALUE = /[/\\\s]/;
+const MAX_VALUE_LEN = 64;
+
 function buildResource() {
   const envAttrs = parseResourceAttributesEnv();
   const allowed = {};
   for (const [key, value] of Object.entries(envAttrs)) {
-    if (RESOURCE_ATTRIBUTE_ALLOWLIST.has(key)) {
+    const ok =
+      RESOURCE_ATTRIBUTE_ALLOWLIST.has(key) &&
+      !BAD_VALUE.test(value) &&
+      value.length <= MAX_VALUE_LEN;
+    if (ok) {
       allowed[key] = value;
       continue;
     }
@@ -73,7 +85,9 @@ function buildResource() {
       });
     }
   }
-  const attrs = { 'service.name': SERVICE_NAME, ...allowed };
+  // service.name is spread LAST: no allowed env attribute (service.name
+  // itself is not in the allowlist) can ever win over the constant.
+  const attrs = { ...allowed, 'service.name': SERVICE_NAME };
   return { attributes: buildAttributes(attrs) };
 }
 
