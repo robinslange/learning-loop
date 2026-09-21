@@ -56,8 +56,11 @@ export const NEVER_EXPORT = new Set([
 // OTEL_RESOURCE_ATTRIBUTES=host.path=/Users/x,user.name=robin and ship it
 // verbatim). Only these standard OTEL resource keys pass through; every
 // other key an operator sets is dropped and logged once per process.
+// service.name is deliberately absent: it identifies learning-loop itself,
+// and letting an operator override it from the environment is exactly the
+// path-injection risk this allowlist exists to close (otlp.mjs's
+// buildResource sets it last, from a constant, so nothing can win over it).
 export const RESOURCE_ATTRIBUTE_ALLOWLIST = new Set([
-  'service.name',
   'service.version',
   'service.namespace',
   'deployment.environment',
