@@ -53,10 +53,20 @@ describe('normaliseSkill', () => {
 
 describe('deriveSkill (unit)', () => {
   let dataDir;
+  let savedEnv;
   before(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'll-derive-skill-'));
+    // writeMarker no-ops unless plugin-data resolves to an existing dir (it
+    // must never resurrect a deleted install), and it resolves that from the
+    // env, not from the path being written. Without this the markers below
+    // are silently never written: green locally only because a persisted
+    // .ll-data-path under HOME points at a real install, red on any CI box.
+    savedEnv = process.env.CLAUDE_PLUGIN_DATA;
+    process.env.CLAUDE_PLUGIN_DATA = dataDir;
   });
   after(() => {
+    if (savedEnv === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = savedEnv;
     rmSync(dataDir, { recursive: true, force: true });
   });
 
@@ -139,12 +149,17 @@ describe('deriveSkill (unit)', () => {
 describe('current-skill marker writer stores the normalised name', () => {
   it('normalises before writing', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'll-marker-writer-'));
+    // Same plugin-data gate as above: writeMarker must see an existing dir.
+    const savedEnv = process.env.CLAUDE_PLUGIN_DATA;
+    process.env.CLAUDE_PLUGIN_DATA = dataDir;
     try {
       const normalised = normaliseSkill('learning-loop:reflect', pluginRoot());
       writeMarker(MARKER_PATHS.currentSkill(dataDir, 's1'), { skill: normalised, ts: Date.now() });
       const marker = readMarker(MARKER_PATHS.currentSkill(dataDir, 's1'));
       assert.equal(marker.skill, 'reflect');
     } finally {
+      if (savedEnv === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+      else process.env.CLAUDE_PLUGIN_DATA = savedEnv;
       rmSync(dataDir, { recursive: true, force: true });
     }
   });

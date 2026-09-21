@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, utimesSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, utimesSync, symlinkSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   resolveProject,
@@ -739,7 +739,14 @@ test('renderLedger quotes tags, repo, and branch values, escaping quotes and bac
     harness: 'claude-code',
   });
   assert.match(md, /tags: \[ledger, "client \\"sample\\" app"\]/);
-  assert.match(md, /repo: "weird\\\\repo"/);
+  // repo is basename(repoRoot), and on win32 the backslash in this fixture is
+  // a separator, so basename yields `repo` there rather than `weird\repo`.
+  // Derive the expectation from basename instead of pinning the POSIX reading:
+  // what this asserts is the YAML quoting of whatever basename returns. The
+  // backslash escape itself is covered by `branch` below, which is not
+  // basename'd, and by the dedicated title test.
+  const repoName = basename('/repos/weird\\repo').replace(/\\/g, '\\\\');
+  assert.ok(md.includes(`repo: "${repoName}"`), `repo line missing in:\n${md}`);
   assert.match(md, /branch: "feature\/\\"weird\\"\\\\branch"/);
 });
 
@@ -776,4 +783,37 @@ test('renderLedger escapes a backslash in the title', () => {
     harness: 'claude-code',
   });
   assert.match(md, /title: "Session ledger: weird\\\\label \(2026-09-21\)"/);
+});
+
+// The worktree root arrives from git as a resolved path while tool file paths
+// arrive from the harness unresolved: through a symlinked tmpdir on macOS, or
+// an 8.3 short name on a Windows runner. relative() between the two spellings
+// walked out of the root and dropped every edit from "Files changed". This is
+// the POSIX analogue of the Windows failure, via an explicit symlink.
+test('collectFacts counts an edit when root and file spell the same dir differently', () => {
+  const real = mkdtempSync(join(tmpdir(), 'll-ledger-real-'));
+  const link = join(tmpdir(), `ll-ledger-link-${process.pid}-${Date.now()}`);
+  symlinkSync(real, link);
+  try {
+    writeFileSync(join(real, 'a.txt'), 'x');
+    const walk = {
+      toolUses: [
+        { direct: true, name: 'Edit', input: { file_path: join(real, 'a.txt') } },
+        // Deleted since editing: still attributable via its existing parent.
+        { direct: true, name: 'Edit', input: { file_path: join(real, 'gone.txt') } },
+      ],
+      assistantTexts: [],
+      prompts: [],
+    };
+    const facts = collectFacts(walk, {
+      worktreeRoot: link,
+      cwd: link,
+      vaultRoot: null,
+      lastAssistantMessage: null,
+    });
+    assert.deepEqual(facts.files.map((f) => f.path).sort(), ['a.txt', 'gone.txt']);
+  } finally {
+    rmSync(link, { force: true });
+    rmSync(real, { recursive: true, force: true });
+  }
 });

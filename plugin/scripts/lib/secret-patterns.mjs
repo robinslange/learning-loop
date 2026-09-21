@@ -37,8 +37,17 @@ export const SECRET_PATTERNS = [
   },
   {
     kind: 'assignment-secret',
-    re: /\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[=:]\s*)(["']?)[^\s"']{6,}\3/gi,
-    replace: '$1$2$3[REDACTED]$3',
+    // The value is one group that carries its own quotes as an alternation,
+    // not an optional opening quote closed by a backreference: export.rs must
+    // hold this exact pattern for the federated export, and Rust's regex crate
+    // has no backreferences. Match set is identical either way, since a value
+    // may not contain quotes, so an unterminated quote fails both spellings.
+    re: /\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[=:]\s*)("[^\s"']{6,}"|'[^\s"']{6,}'|[^\s"']{6,})/gi,
+    // Keeps the key, the separator and any quote legible; blanks the value.
+    replace: (_m, key, sep, value) => {
+      const q = value[0] === '"' || value[0] === "'" ? value[0] : '';
+      return `${key}${sep}${q}[REDACTED]${q}`;
+    },
   },
   { kind: 'basic-auth', re: /\bAuthorization:\s*Basic\s+[A-Za-z0-9+/=]{8,}/gi },
 ];
