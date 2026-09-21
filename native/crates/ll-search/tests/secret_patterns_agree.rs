@@ -2,7 +2,7 @@
 //! makes that true.
 //!
 //! `plugin/scripts/lib/secret-patterns.mjs` is the canonical source: three JS
-//! scrubbers read it, and `export.rs` holds a hand-port of the same ten
+//! scrubbers read it, and `export.rs` holds a hand-port of the same
 //! patterns for the `listed`-tier summary path. What kept them equal was a
 //! comment asking the next editor to keep them equal. A pattern added on the
 //! JS side is a credential shape the federated export would publish; a pattern
@@ -30,7 +30,7 @@ fn mjs_path() -> PathBuf {
         .join("../../../plugin/scripts/lib/secret-patterns.mjs")
 }
 
-/// The two legitimate spelling differences between a JS literal and a Rust
+/// The legitimate spelling differences between a JS literal and a Rust
 /// `regex` source, and nothing else.
 ///
 /// 1. `\/` — JS must escape the `/` that would otherwise close the literal.
@@ -38,6 +38,10 @@ fn mjs_path() -> PathBuf {
 /// 2. `[\s\S]` — JS's idiom for "any character including newline", because it
 ///    has no inline dotall. Rust spells it `(?s:...)` around the alternation
 ///    and a plain `.` inside.
+/// 3. The `i` flag — JS puts case-insensitivity after the closing `/`, Rust
+///    has no flags and spells it as a leading `(?i)`. `js_patterns` folds the
+///    flag into the body so a Rust port that forgot `(?i)` fails the
+///    comparison, rather than the flag being dropped and the two looking equal.
 ///
 /// Anything else survives normalisation and fails the comparison, which is the
 /// point: a third difference should be looked at, not absorbed.
@@ -66,10 +70,18 @@ fn js_patterns(text: &str) -> Vec<(String, String)> {
         }
         if let Some(rest) = code.split("re: /").nth(1) {
             // Back off the trailing flags and the closing delimiter: the body
-            // is everything up to the last `/` on the line.
+            // is everything up to the last `/` on the line, the flags are the
+            // letters right after it.
             if let Some(end) = rest.rfind('/') {
+                let flags: String =
+                    rest[end + 1..].chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+                let body = if flags.contains('i') {
+                    format!("(?i){}", &rest[..end])
+                } else {
+                    rest[..end].to_string()
+                };
                 if let Some(k) = kind.take() {
-                    out.push((k, rest[..end].to_string()));
+                    out.push((k, body));
                 }
             }
         }
@@ -89,7 +101,15 @@ fn the_scan_finds_every_pattern_in_the_file() {
         text.matches("re: /").count(),
         "the scan dropped a pattern the file declares"
     );
-    assert_eq!(found.len(), 10, "found {} patterns: {found:#?}", found.len());
+    assert_eq!(found.len(), 13, "found {} patterns: {found:#?}", found.len());
+
+    // The `i` flag is folded into the body, so a case-insensitive JS pattern
+    // is only equal to a Rust port that says `(?i)`.
+    let url: &(String, String) = found
+        .iter()
+        .find(|(k, _)| k == "url-credentials")
+        .expect("url-credentials is in the file");
+    assert!(url.1.starts_with("(?i)"), "i flag not folded: {}", url.1);
 
     // And it reads the bodies, not just the kinds.
     let aws: &(String, String) =

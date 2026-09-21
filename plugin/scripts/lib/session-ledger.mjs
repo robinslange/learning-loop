@@ -2,7 +2,7 @@
 // here takes its inputs as arguments so tests can inject git and clocks.
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync, realpathSync } from 'node:fs';
 import { basename, dirname, resolve, relative, isAbsolute, sep, join } from 'node:path';
 import { toKebab } from '../../hooks/lib/filename-style.mjs';
 import { scrubSecrets } from '../../hooks/lib/inject.mjs';
@@ -161,9 +161,33 @@ export function truncate(text, n) {
   return one.length <= n ? one : `${one.slice(0, n - 1)}…`;
 }
 
+// One spelling for a path, so two names for the same place compare equal.
+// The worktree root comes from `git rev-parse --show-toplevel`, which returns
+// the resolved long form; tool file paths come from the harness, which on a
+// Windows runner spells the temp dir with an 8.3 short name (RUNNER~1) and on
+// macOS through the /tmp and /var/folders symlinks. relative() between the two
+// spellings starts with `..`, and every edit silently vanished from the
+// ledger. realpathSync.native is the only call that expands short names. A
+// file that has since been deleted cannot be resolved directly, so resolve its
+// deepest existing ancestor and reattach the rest.
+function canonical(p) {
+  let head = resolve(p);
+  const tail = [];
+  for (;;) {
+    try {
+      return join(realpathSync.native(head), ...tail);
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return resolve(p);
+      tail.unshift(basename(head));
+      head = parent;
+    }
+  }
+}
+
 function under(filePath, root) {
   if (!root || typeof filePath !== 'string' || !isAbsolute(filePath)) return null;
-  const rel = relative(root, filePath);
+  const rel = relative(canonical(root), canonical(filePath));
   if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
   return rel.split(sep).join('/');
 }

@@ -350,7 +350,7 @@ pub fn export_index(
 /// `the_rust_and_js_secret_patterns_are_the_same_set` reads that file and
 /// asserts the two agree in both directions. The `kind` names are carried
 /// here for the same reason: they are what makes a divergence name itself.
-pub const SECRET_PATTERN_SOURCES: [(&str, &str); 10] = [
+pub const SECRET_PATTERN_SOURCES: [(&str, &str); 13] = [
     ("aws-key", r"AKIA[0-9A-Z]{16}"),
     ("github-pat", r"gh[po]_[A-Za-z0-9]{36,}"),
     ("anthropic-key", r"sk-ant-api[A-Za-z0-9_-]{20,}"),
@@ -365,6 +365,17 @@ pub const SECRET_PATTERN_SOURCES: [(&str, &str); 10] = [
     // one translation and about `\/`; it knows about no others, so a third
     // spelling difference fails rather than passing quietly.
     ("pem-key", r"(?s:-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----)"),
+    // The next three carry the JS `i` flag, which Rust spells as a leading
+    // `(?i)`. The sync test maps one onto the other so the comparison stays
+    // honest about case-insensitivity instead of dropping the flag.
+    ("url-credentials", r"(?i)([a-z][a-z0-9+.-]*://)[^\s/:@]+:[^\s/@]+@"),
+    // The value alternation carries its own quotes: `regex` has no
+    // backreferences, so the JS side was written this way to match.
+    (
+        "assignment-secret",
+        r#"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|client[_-]?secret)\b(\s*[=:]\s*)("[^\s"']{6,}"|'[^\s"']{6,}'|[^\s"']{6,})"#,
+    ),
+    ("basic-auth", r"(?i)\bAuthorization:\s*Basic\s+[A-Za-z0-9+/=]{8,}"),
 ];
 
 static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
