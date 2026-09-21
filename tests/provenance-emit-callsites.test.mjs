@@ -125,6 +125,15 @@ test('every payload has an action in VALID_ACTIONS', () => {
 // ~38 call sites). `intent` is the one exception: replacing it with
 // `intent_kind` on the 3 named skills IS this task's job, checked separately
 // below, so it is deliberately absent from this exemption list.
+//
+// This exemption is now a DELIBERATE BOUNDARY, not deferred work. Migrating
+// these fields out of local emits was investigated and declined: `target` is
+// read in five places by provenance-report.mjs plus injection-precision.mjs,
+// `finding_type`/`ambiguous_alt` feed its taxonomy-health metric, and
+// `finding_detail`, though unread by any tool, holds 101 historical records of
+// what /verify actually found and exists nowhere else. NEVER_EXPORT governs the
+// export boundary; phase 0 already stops all of these at the wire. See
+// "The bulk call-site migration: investigated, then declined" in the plan.
 const EMIT_LAYER_EXEMPT = new Set(['target', 'evidence', 'finding_detail', 'prompt', 'question', 'reason', 'topic']);
 
 test('no payload contains a NEVER_EXPORT field, aside from the emit-layer exemption', () => {
