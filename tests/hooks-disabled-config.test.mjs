@@ -25,6 +25,7 @@ import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { runHook } from './helpers/hook-runner.mjs';
+import { initRepo } from './helpers/git-fixture.mjs';
 
 const HOOKS_DIR = fileURLToPath(new URL('../plugin/hooks', import.meta.url));
 const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
@@ -118,12 +119,7 @@ const SWEEP = [
     seedExtra: (pd, sb) => {
       const repo = join(realpathSync(sb), 'ledger-repo');
       mkdirSync(repo);
-      execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'main']);
-      execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t.local']);
-      execFileSync('git', ['-C', repo, 'config', 'user.name', 't']);
-      writeFileSync(join(repo, 'a.txt'), 'a\n');
-      execFileSync('git', ['-C', repo, 'add', 'a.txt']);
-      execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'ledger sweep commit']);
+      initRepo(repo);
       const vault = join(sb, 'ledger-vault');
       mkdirSync(join(vault, '4-projects'), { recursive: true });
       const config = JSON.parse(readFileSync(join(pd, 'config.json'), 'utf8'));

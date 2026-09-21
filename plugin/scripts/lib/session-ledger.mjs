@@ -7,6 +7,22 @@ import { toKebab } from '../../hooks/lib/filename-style.mjs';
 
 export { toKebab };
 
+// Strips every GIT_* key from the given environment (default process.env).
+// This is not the process.env read env.mjs centralises: that module exists so
+// production code reads named vars through one seam, but this function's
+// whole job is filtering the inherited environment, so it must see the real
+// thing. A git-hook parent (GIT_INDEX_FILE, GIT_DIR, GIT_WORK_TREE,
+// GIT_COMMON_DIR) redirects a plain `git -C <dir>` call away from <dir> and
+// onto whatever repo the hook is running inside; every `git` child this
+// module or its tests spawn must run with those stripped.
+export function gitEnv(base = process.env) {
+  const env = { ...base };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_')) delete env[key];
+  }
+  return env;
+}
+
 export function execGit(args, cwd, timeoutMs) {
   try {
     const out = execFileSync('git', args, {
@@ -14,6 +30,7 @@ export function execGit(args, cwd, timeoutMs) {
       encoding: 'utf8',
       timeout: timeoutMs,
       stdio: ['ignore', 'pipe', 'ignore'],
+      env: gitEnv(),
     });
     return { ok: true, out };
   } catch (err) {

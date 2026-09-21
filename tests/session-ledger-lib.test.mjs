@@ -4,23 +4,15 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveProject, gitFacts, execGit } from '../plugin/scripts/lib/session-ledger.mjs';
+import {
+  resolveProject,
+  gitFacts,
+  execGit,
+  gitEnv,
+} from '../plugin/scripts/lib/session-ledger.mjs';
+import { initRepo, git } from './helpers/git-fixture.mjs';
 
-const gitOpts = { stdio: 'ignore' };
-function git(dir, ...args) {
-  return execFileSync('git', ['-C', dir, ...args], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  }).trim();
-}
-function initRepo(dir) {
-  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'main'], gitOpts);
-  execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t.local'], gitOpts);
-  execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], gitOpts);
-  writeFileSync(join(dir, 'a.txt'), 'a\n');
-  execFileSync('git', ['-C', dir, 'add', 'a.txt'], gitOpts);
-  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'first'], gitOpts);
-}
+const gitOpts = { stdio: 'ignore', env: gitEnv() };
 function withTmp(fn) {
   const root = mkdtempSync(join(tmpdir(), 'll-ledger-'));
   try {
@@ -104,6 +96,29 @@ test('gitFacts reports branch, commits since a timestamp, and dirty state', () =
     assert.equal(f.dirtyCount, 1);
     assert.equal(f.state, 'dirty');
     assert.ok(f.gitMs >= 0);
+  });
+});
+
+test('gitFacts ignores an inherited GIT_INDEX_FILE / GIT_DIR from a parent git-hook process', () => {
+  withTmp((root) => {
+    const repo = join(root, 'r');
+    mkdirSync(repo);
+    initRepo(repo);
+    const savedIndex = process.env.GIT_INDEX_FILE;
+    const savedDir = process.env.GIT_DIR;
+    process.env.GIT_INDEX_FILE = '/nonsense/index';
+    process.env.GIT_DIR = '/nonsense/dir';
+    try {
+      const since = new Date(Date.now() - 60_000).toISOString();
+      const f = gitFacts(repo, since, execGit, 2000);
+      assert.equal(f.branch, 'main');
+      assert.equal(f.state, 'clean');
+    } finally {
+      if (savedIndex === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = savedIndex;
+      if (savedDir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = savedDir;
+    }
   });
 });
 
