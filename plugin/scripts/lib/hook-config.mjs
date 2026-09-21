@@ -182,6 +182,10 @@ export const HookConfig = Object.freeze({
   // often, so a killed terminal still leaves one record without a per-turn
   // firehose.
   SESSION_SUMMARY_MIN_INTERVAL_MS: 10 * 60 * 1000,
+  // With no marker and no transcript timestamp, the ledger anchors `git log
+  // --since` this far before process start rather than "now" (see
+  // hooks/session-ledger.js step 2).
+  LEDGER_SINCE_FALLBACK_MS: 10 * 60 * 1000,
 
   // --- ML thresholds / weights ---
   // INJECTION_THRESHOLD gates the JIT injection pipeline (session-label.js).

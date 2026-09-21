@@ -81,7 +81,7 @@ const marker = readMarker(markerPath, { ttlMs: Infinity });
 const startedTs =
   marker?.started_ts ||
   walk.firstTs ||
-  new Date(t0 - HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS).toISOString();
+  new Date(t0 - HookConfig.LEDGER_SINCE_FALLBACK_MS).toISOString();
 
 // 3. Project + git.
 let project = { project: 'unknown', source: 'cwd', repoRoot: null, worktreeRoot: null };
