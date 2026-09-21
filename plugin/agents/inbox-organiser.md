@@ -134,7 +134,7 @@ The wrapper short-circuits when promote-gate already routes to fleeting/inbox, a
 Then emit a `verify` provenance event so the same flow appears in /health --provenance:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"inbox-organiser","skill":"inbox","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
+ll-run provenance-emit.js '{"agent":"inbox-organiser","action":"verify","target":"<note-filename>","status":"PASS|ISSUES_FOUND","trigger":"verify-auto"}'
 ```
 
 Counter-arguments get promoted like any other note (quality determines folder) but also get bidirectional links added per the counter-argument-linking skill.
@@ -296,7 +296,7 @@ Fleeting: [A] archival candidates returned, [D] need /deepen, [F] active notes r
 After completing inbox processing, emit a triage summary:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"inbox-organiser","skill":"inbox","action":"triage","notes_processed":N,"resolved_skipped":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"inbox_archival_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"fleeting_needs_deepen":N}'
+ll-run provenance-emit.js '{"agent":"inbox-organiser","action":"triage","notes_processed":N,"resolved_skipped":N,"clusters":N,"promoted_permanent":N,"promoted_fleeting":N,"rewrite_worklist":N,"merge_candidates":N,"counter_arguments":N,"deletes_pending":N,"inbox_archival_pending":N,"remaining":N,"limbo_surfaced":N,"fleeting_candidates":N,"fleeting_needs_deepen":N}'
 ```
 
 Count mapping from the section 7 report: `rewrite_worklist` = [Wr] (all `type: rewrite` rows), `merge_candidates` = [Wm]. Executed-counts (rewrites done, merges done) belong to the skill's session-end event, not this payload.

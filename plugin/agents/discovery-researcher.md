@@ -179,7 +179,7 @@ Reference findings by ID: "Microglia prune synapses via complement [S1]"
 After compiling the research brief, emit a summary event:
 
 ```bash
-ll-run provenance-emit.js '{"agent":"discovery-researcher","skill":"discovery","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
+ll-run provenance-emit.js '{"agent":"discovery-researcher","action":"research","topic":"TOPIC","angle":"ANGLE","queries_run":N,"stop_reason":"REASON","sources_found":N,"has_diagram":false}'
 ```
 
 ## Fetch Discipline

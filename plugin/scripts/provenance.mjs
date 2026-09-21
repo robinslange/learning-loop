@@ -12,6 +12,7 @@ import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
 import { VALID_ACTIONS, INTENT_KINDS } from './lib/provenance-vocabulary.mjs';
 import { deriveSkill } from './lib/provenance-skill.mjs';
+import { pluginRoot } from './lib/plugin-meta.mjs';
 import { logError } from './lib/log.mjs';
 
 // Resolved lazily, not at module load: getPluginData() can be null, and an
@@ -60,7 +61,7 @@ export function emitProvenance(event) {
     source: 'skill',
     ...event,
   };
-  deriveSkill(record, getPluginData());
+  deriveSkill(record, getPluginData(), pluginRoot());
   // Free-text intent (or an unbounded intent_kind) is dropped, not the whole
   // event: the rest of the record is still useful, and rejecting outright
   // would throw away real skill/action/target data over one bad field. Now a
