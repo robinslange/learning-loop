@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Added
+
+- **Every substantial session now leaves a ledger.** A new `session-ledger.js` hook runs on Stop and SessionEnd and writes one note per session to `4-projects/<project>/ledger/`: goal (first prompt), where it stopped (last assistant message), commits made this session, files changed, skills and agents run, PR URLs, uncommitted state. The project comes from the git common directory, so worktrees collapse onto their repo; a `projects` map in `config.json` renames a repo to a curated folder. Sessions that edited nothing, committed nothing, and ran fewer than five prompts leave nothing. The founding itch this plugin exists for is not having to remind Claude what you did before; until now the "what I did" half was written only when someone remembered to run `/reflect`. Closes #65.
+
+  The same hook emits a `session-summary` provenance record, numbers and closed enums only, throttled to once per ten minutes and once at SessionEnd. It is the first hook-side duration in the corpus (`latency_ms`, `git_ms`) and the per-session outcome shape the OTEL plan (#71) asked for. A new `session` export stream and `reduceSession` reducer carry it to Grafana with no free-text row to scrub.
+
+  SessionStart gains one line, `Last session here: <path> (<date>, <status>)`, when a ledger exists for the current repo.
+
+  Flushing at Stop rather than only SessionEnd is deliberate: SessionEnd's budget is 1.5s shared across every SessionEnd hook and a plugin hook cannot raise it, its output is discarded, and the transcript can lag the final turn. A ledger rewritten every turn is at most one turn stale when a terminal dies.
+
 ### Changed
 
 - **PageRank stops when the scores settle, instead of always taking twenty steps.** The walk ran a fixed `for _ in 0..iterations` with no convergence check, so every query paid the full count whatever the graph looked like. It exits now when the L1 delta across the whole score vector falls below `1e-8`, two orders of magnitude under the `1e-6` floor the results are already filtered by, so a step too small to trip the check cannot change which nodes survive that filter. The cap is still a cap: a long cycle genuinely needs all twenty and still gets them. On dense graphs the walk settles in seven or eight.

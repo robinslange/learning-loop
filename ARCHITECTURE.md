@@ -30,6 +30,7 @@ learning-loop/
                              before vault writes and edits
       web-guard.js      -- global WebSearch/WebFetch deny; routes web access to the source gateway
       stop-nudge.js     -- /reflect nudge when the agent stops (fires at each turn end)
+      session-ledger.js -- session ledger note + session-summary event (Stop, SessionEnd)
       post-read-retrieval.js  -- passive read telemetry
       post-search-tracking.js -- episodic-memory search query tracking
       subagent-stop.js  -- agent-result provenance when a subagent stops
@@ -123,6 +124,8 @@ flowchart LR
 ### write path
 
 A vault note write triggers `pre-write-check.js` before the write and the `post-tool.js` dispatcher after. The `ll-search watch` daemon reindexes continuously as notes change; nothing waits for session end.
+
+The session ledger (`hooks/session-ledger.js`) is the one vault writer outside the tool path: it writes with `fs` directly, so `pre-write-check.js` does not gate it, and the watch daemon indexes it like any other note.
 
 ```mermaid
 flowchart LR

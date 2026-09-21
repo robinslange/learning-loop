@@ -6,6 +6,8 @@ This plugin is heavy. It runs local model inference and injects vault context in
 
 Every session gets a context injection with your memory index, active intentions, learned patterns, and a two-line pointer telling Claude how to list or search recent captures on demand. A fresh vault adds almost nothing. A mature vault adds thousands of tokens per session, and grows. Skills like `/discovery` and `/gaps` spawn multiple parallel agents, each with its own context window.
 
+The session ledger adds one note per substantial session to `4-projects/`. It costs nothing at injection time unless retrieval ranks it, and SessionStart adds a single line pointing at the newest one for the current repo.
+
 ## Local compute
 
 The `ll-search` binary (~31MB) runs inference on your machine using two quantized models (BGE-small-en-v1.5 for embeddings, ms-marco-MiniLM for reranking) and the ONNX Runtime (~34MB), both fetched and SHA-256-verified on first run rather than bundled into the binary. On an M4 Max, reranked search takes ~0.6s and indexing ~1.8s. An Apple Silicon Mac with 8GB+ RAM is sufficient. Linux x64 and Windows x64 binaries are CI-built; see [cross-platform.md](cross-platform.md) for per-platform status.
