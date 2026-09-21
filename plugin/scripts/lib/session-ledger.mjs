@@ -50,13 +50,13 @@ const GIT_BUDGET_FLOOR_MS = 50;
 // whole SessionEnd budget. budgetedGit decrements `budget.remaining` by the
 // elapsed time of each call and, once it hits the floor, stops spawning
 // entirely rather than shrinking the per-call timeout toward zero.
-export function budgetedGit(git, budget) {
+export function budgetedGit(git, budget, now = Date.now) {
   return (args, cwd, timeoutMs) => {
     if (budget.remaining <= GIT_BUDGET_FLOOR_MS) return { ok: false, timeout: true };
     const capped = Math.max(GIT_BUDGET_FLOOR_MS, Math.min(timeoutMs, budget.remaining));
-    const t0 = Date.now();
+    const t0 = now();
     const result = git(args, cwd, capped);
-    budget.remaining -= Date.now() - t0;
+    budget.remaining -= now() - t0;
     return result;
   };
 }

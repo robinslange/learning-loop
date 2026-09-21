@@ -214,27 +214,30 @@ test('gitFacts falls back to --since when startedHead is not an ancestor of HEAD
 });
 
 test('budgetedGit caps total wall time across calls instead of a per-call timeout', () => {
+  // Fake clock advanced by the fake spawn itself: each call "takes" 200ms,
+  // deterministically, instead of a real busy-wait racing wall-clock slack
+  // on a loaded CI runner.
+  let clock = 0;
+  const now = () => clock;
   let calls = 0;
   const slow = () => {
     calls++;
-    const start = Date.now();
-    while (Date.now() - start < 200) {
-      /* busy-wait: this fake spawn "takes" 200ms per call */
-    }
+    clock += 200;
     return { ok: true, out: 'x' };
   };
   const budget = { remaining: 500 };
-  const wrapped = budgetedGit(slow, budget);
+  const wrapped = budgetedGit(slow, budget, now);
   wrapped(['a'], '/x', 1000);
   wrapped(['b'], '/x', 1000);
   const third = wrapped(['c'], '/x', 1000);
   const fourth = wrapped(['d'], '/x', 1000);
-  assert.ok(calls <= 3, `expected at most 3 real calls, got ${calls}`);
+  // Three 200ms calls exhaust a 500ms budget (300 remaining after two, then
+  // the third call itself is the one that crosses the floor); the fourth
+  // never spawns.
+  assert.equal(calls, 3, `expected exactly 3 real calls, got ${calls}`);
+  assert.equal(third.ok, true);
   assert.equal(fourth.ok, false);
   assert.equal(fourth.timeout, true);
-  // The call that exhausts the budget still ran (calls counts it); once
-  // remaining has dropped to the floor, later calls refuse to spawn at all.
-  if (calls === 3) assert.equal(third.ok, true);
 });
 
 import {
