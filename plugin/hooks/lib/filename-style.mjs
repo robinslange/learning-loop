@@ -19,7 +19,7 @@ function hasSpaces(stem) {
 }
 
 /** Convert a stem to kebab-case (lowercase, spaces → hyphens, collapse runs). */
-function toKebab(stem) {
+export function toKebab(stem) {
   return stem.toLowerCase().replace(/\s+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
