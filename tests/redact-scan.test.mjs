@@ -69,6 +69,24 @@ test('does not flag sk- prefixed hyphenated prose (false-positive guard)', () =>
   );
 });
 
+test('flags URL credentials, an assignment secret, and Basic auth', () => {
+  assert.ok(
+    scanForSecrets('DATABASE_URL=postgres://user:pass@host/db').some(
+      (h) => h.kind === 'url-credentials',
+    ),
+  );
+  assert.ok(scanForSecrets('API_KEY=abcdef123456').some((h) => h.kind === 'assignment-secret'));
+  assert.ok(
+    scanForSecrets('Authorization: Basic dXNlcjpwYXNz').some((h) => h.kind === 'basic-auth'),
+  );
+});
+
+test('does not flag prose that merely resembles a credential shape', () => {
+  assert.equal(scanForSecrets('the token bucket algorithm').length, 0);
+  assert.equal(scanForSecrets('key=value pairs in general').length, 0);
+  assert.equal(scanForSecrets('http://example.com/path').length, 0);
+});
+
 test('CLI: skips binary .db files and scans .jsonl files in the same invocation', () => {
   const secret = 'ghp_' + randomBytes(20).toString('hex').slice(0, 30);
   const prefix = randomBytes(4).toString('hex');
