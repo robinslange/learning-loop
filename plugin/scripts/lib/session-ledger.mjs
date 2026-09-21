@@ -40,6 +40,27 @@ export function execGit(args, cwd, timeoutMs) {
   }
 }
 
+// Floor below which a call is refused rather than spawned with an
+// unreasonably short timeout that would only ever time out.
+const GIT_BUDGET_FLOOR_MS = 50;
+
+// Wraps a git-calling function with a shared wall-clock budget: resolveProject
+// and gitFacts each take a `git` callable and call it several times, and
+// without a shared cap five independent per-call timeouts can sum to the
+// whole SessionEnd budget. budgetedGit decrements `budget.remaining` by the
+// elapsed time of each call and, once it hits the floor, stops spawning
+// entirely rather than shrinking the per-call timeout toward zero.
+export function budgetedGit(git, budget) {
+  return (args, cwd, timeoutMs) => {
+    if (budget.remaining <= GIT_BUDGET_FLOOR_MS) return { ok: false, timeout: true };
+    const capped = Math.max(GIT_BUDGET_FLOOR_MS, Math.min(timeoutMs, budget.remaining));
+    const t0 = Date.now();
+    const result = git(args, cwd, capped);
+    budget.remaining -= Date.now() - t0;
+    return result;
+  };
+}
+
 export function resolveProject(cwd, config, git, timeoutMs) {
   const map = config?.projects && typeof config.projects === 'object' ? config.projects : {};
   const top = git(['rev-parse', '--show-toplevel'], cwd, timeoutMs);
