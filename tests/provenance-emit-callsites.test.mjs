@@ -183,6 +183,23 @@ test('no payload emits free-text intent', () => {
   }
 });
 
+// 1e-bis point 1 (#73): guarantees a `skill` dimension on provenance events.
+// Hook-emitted events derive it at runtime from the session's current-skill
+// marker (scripts/lib/provenance-skill.mjs), but a markdown call site is
+// static text the derivation never touches, so it must carry `skill` itself
+// unless its action is hook-owned and never skill-caused.
+const SKILL_EXEMPT_ACTIONS = new Set(['session-summary', 'session-start', 'agent-result']);
+
+test('every call-site payload carries skill or has an exempt action', () => {
+  for (const { file, raw } of callSites) {
+    const payload = JSON.parse(normalisePlaceholders(raw));
+    assert.ok(
+      Boolean(payload.skill) || SKILL_EXEMPT_ACTIONS.has(payload.action),
+      `${file}: action "${payload.action}" has no "skill" and is not in the exempt set`,
+    );
+  }
+});
+
 // An adversarial review found two live actions the vocabulary missed:
 // supersession-recorded and refinement-skipped, both instructed in prose at
 // reflect/steps/refinement.md:150 as `action: "..."` rather than inside a JSON

@@ -53,3 +53,25 @@ test('post-tool Task tool: emits agent-spawn provenance event', () => {
     r.cleanup();
   }
 });
+
+test('post-tool Skill tool: writes the current-skill marker for this session', () => {
+  const sid = 'skill-marker-session';
+  const r = runHook(HOOK, {
+    env: { CLAUDE_CODE_SESSION_ID: sid },
+    stdin: {
+      tool_name: 'Skill',
+      tool_input: { skill: 'learning-loop:reflect', args: '' },
+      tool_response: { success: true },
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, `unexpected exit code: ${r.exitCode}\nstderr: ${r.stderr}`);
+    const markerPath = join(r.pluginDataDir, 'markers', `current-skill-${sid}`);
+    assert.ok(existsSync(markerPath), 'expected the current-skill marker to be written');
+    const marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    assert.equal(marker.skill, 'learning-loop:reflect');
+    assert.ok(typeof marker.ts === 'number');
+  } finally {
+    r.cleanup();
+  }
+});
