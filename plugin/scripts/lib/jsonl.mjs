@@ -99,7 +99,12 @@ const DUP_WINDOW_MS = 2000;
 // verify, vault-write, ...), where a repeated identical payload is a genuine
 // consecutive double-emit, not distinct concurrent work — the live log shows
 // thousands of those against a handful of exempt-action pairs.
-const DEDUP_EXEMPT_ACTIONS = new Set(['agent-result', 'agent-spawn', 'skill-invoke']);
+const DEDUP_EXEMPT_ACTIONS = new Set([
+  'agent-result',
+  'agent-spawn',
+  'skill-invoke',
+  'session-summary',
+]);
 
 export function appendJsonlLineDeduped(path, record, now = Date.now()) {
   if (DEDUP_EXEMPT_ACTIONS.has(record.action)) {

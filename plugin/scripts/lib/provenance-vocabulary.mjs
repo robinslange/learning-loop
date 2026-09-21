@@ -37,6 +37,7 @@ export const VALID_ACTIONS = new Set([
   'score',
   'session-end',
   'session-start',
+  'session-summary',
   'source-check',
   'triage',
   'verify',

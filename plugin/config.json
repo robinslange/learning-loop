@@ -1,5 +1,6 @@
 {
   "injection_mode": "live",
+  "projects": {},
   "dependencies": [
     {
       "name": "episodic-memory",

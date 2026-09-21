@@ -40,7 +40,7 @@ export const MARKER_PATHS = {
   dreamNudged: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-nudged'),
   // Session-scoped log of memory files THIS session wrote (post-tool appends
   // on each Write/Edit into the auto-memory dir). stop-nudge counts this,
-  // intersected with files still on disk — never a diff of the shared dir,
+  // intersected with files still on disk, never a diff of the shared dir,
   // which conflated concurrent sessions' writes and blamed one session for
   // another's files.
   memoryWrites: (pluginData, sessionId) =>
@@ -48,6 +48,12 @@ export const MARKER_PATHS = {
       DATA_PATHS.markers(pluginData),
       sessionId ? `memory-writes-${sessionId}` : 'memory-writes',
     ),
+  // Session-scoped ledger state: the note path chosen at first flush (the
+  // session label drifts between prompts, so the filename has to be pinned),
+  // the transcript's first timestamp (the git --since anchor), and the last
+  // session-summary emit time (the throttle clock).
+  ledger: (pluginData, sessionId) =>
+    join(DATA_PATHS.markers(pluginData), `ledger-${sessionId}.json`),
   // Timestamp of the last stale-marker TTL sweep. Gates the sweep to once a
   // day: the read side already filters stale entries by mtime, so deferring
   // the rm pass is behavior-preserving and saves a per-session stat-walk.

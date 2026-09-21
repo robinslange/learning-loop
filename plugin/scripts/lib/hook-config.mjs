@@ -170,6 +170,19 @@ export const HookConfig = Object.freeze({
   // --- Stop-nudge message count threshold (JSONL transcript lines) ---
   STOP_NUDGE_MESSAGE_COUNT: 200,
 
+  // --- Session ledger (hooks/session-ledger.js) ---
+  // A session earns a ledger when it edited a file, made a commit, or ran at
+  // least this many prompts. Below that, nothing is written or emitted.
+  LEDGER_MIN_PROMPTS: 5,
+  LEDGER_GIT_TIMEOUT_MS: 300,
+  // Transcripts above this are not walked (the ledger still renders from git
+  // facts). 16MB is ~4x the largest session seen locally.
+  LEDGER_TRANSCRIPT_MAX_BYTES: 16 * 1024 * 1024,
+  // session-summary is emitted on SessionEnd always, and on Stop at most this
+  // often, so a killed terminal still leaves one record without a per-turn
+  // firehose.
+  SESSION_SUMMARY_MIN_INTERVAL_MS: 10 * 60 * 1000,
+
   // --- ML thresholds / weights ---
   // INJECTION_THRESHOLD gates the JIT injection pipeline (session-label.js).
   // UNIT: raw WEIGHTED RRF fusion sum as returned by `ll-search query` — NOT a
