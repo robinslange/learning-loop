@@ -26,6 +26,7 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { VALID_ACTIONS, INTENT_KINDS } from '../../scripts/lib/provenance-vocabulary.mjs';
+import { deriveSkill } from '../../scripts/lib/provenance-skill.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
 import { DATA_PATHS, relativeToVault, home } from '../../scripts/lib/paths.mjs';
@@ -216,6 +217,7 @@ export function emitProvenance(event) {
     source: 'hook',
     ...event,
   };
+  deriveSkill(record, pd);
   // Same free-text-intent guard as scripts/provenance.mjs: drop the offending
   // field, keep the rest of the record. Now a counted drop: log.mjs's error
   // sink persists this scope durably, and the phase 2 reducer counts records

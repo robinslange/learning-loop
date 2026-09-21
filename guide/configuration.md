@@ -251,6 +251,8 @@ node scripts/install-cache-health.mjs
 
 Every vault write, edit, agent spawn and skill invocation logs to `provenance/events-YYYY-MM.jsonl`. Reads are not recorded here — the provenance module has no `Read` branch. The `/health` command reads these logs to show session activity patterns.
 
+Most events do not name the skill that caused them directly (a hook writing a note has no notion of "skill"), so `emitProvenance` derives `skill` when a caller omits it: the PostToolUse hook records the most recently invoked `Skill` tool for the session in a marker, and any later event from that session picks it up if it does not already carry one. The marker survives for 8 hours, so a session's last skill remains the best attribution until the next `Skill` call. `session-summary` and `session-start` are hook-owned rather than skill-caused, so they never gain a derived `skill`.
+
 ```bash
 # Generate provenance report
 node scripts/provenance-report.mjs

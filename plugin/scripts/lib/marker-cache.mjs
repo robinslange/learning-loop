@@ -62,6 +62,10 @@ export const MARKER_PATHS = {
   // day: the read side already filters stale entries by mtime, so deferring
   // the rm pass is behavior-preserving and saves a per-session stat-walk.
   lastSweep: (pluginData) => join(DATA_PATHS.markers(pluginData), 'last-sweep'),
+  // The skill most recently invoked in this session, read by emitProvenance
+  // to fill `skill` when a caller omits it; reaped by the weekly marker sweep.
+  currentSkill: (pluginData, sessionId) =>
+    join(DATA_PATHS.markers(pluginData), `current-skill-${sessionId}`),
 };
 
 // Append a basename to the session-scoped memory-writes log, de-duplicated.
