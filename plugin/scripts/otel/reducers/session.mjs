@@ -66,7 +66,7 @@ export function reduceSession({ pluginData, timeUnixMs }) {
     ...countBy(sessions, {
       name: 'session_count',
       stream: STREAM,
-      by: ['end_reason', 'git_state', 'project_source', 'harness', 'final'],
+      by: ['end_reason', 'git_state', 'commits_source', 'project_source', 'harness', 'final'],
       timeUnixMs,
       startTimeUnixMs,
     }),

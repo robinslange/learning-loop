@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -14,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 import { initRepo } from './helpers/git-fixture.mjs';
 import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
+import { gitEnv } from '../plugin/scripts/lib/session-ledger.mjs';
 
 // realpathSync: on macOS tmpdir() sits behind a symlink (/tmp -> /private/tmp,
 // or a /var/folders/... alias), and `git rev-parse --show-toplevel` always
@@ -150,8 +152,129 @@ test('Stop writes a ledger note and one session-summary event', () => {
   assert.equal(events[0].end_reason, 'open');
   assert.equal(events[0].files_edited, 1);
   assert.equal(events[0].source, 'hook');
+  // First flush of the session: no started_head yet, so the range can't be
+  // used and this must not read as a fallback.
+  assert.equal(events[0].commits_source, 'since');
+  assert.doesNotMatch(md, /range unavailable/);
   for (const k of ['path', 'project', 'repo', 'branch', 'prompt'])
     assert.ok(!(k in events[0]), `${k} leaked`);
+  const marker = JSON.parse(
+    readFileSync(join(r.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+  );
+  assert.match(marker.started_head, /^[0-9a-f]{40}$/);
+  r.cleanup();
+});
+
+test('a later Stop credits only commits made since the recorded HEAD, not the whole --since window', () => {
+  let ctx;
+  const r1 = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), 'Range Session');
+      ctx = { vault, repo };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
+      last_assistant_message: 'first flush',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r1.exitCode, 0, r1.stderr);
+  const r1Marker = JSON.parse(
+    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+  );
+  const { started_head: startedHead, path: ledgerRelPath } = r1Marker;
+
+  // A commit made after the recorded HEAD, by this session. ctx.repo lives
+  // in r1's sandbox, so r1 is cleaned up only after r2 (which reuses it via
+  // ctx) has finished with it.
+  execFileSync('git', ['-C', ctx.repo, 'commit', '--allow-empty', '-q', '-m', 'session commit'], {
+    stdio: 'ignore',
+    env: gitEnv(),
+  });
+
+  const r2 = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir) => {
+      seedConfig(pluginDataDir, ctx.vault);
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      writeFileSync(
+        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        JSON.stringify({
+          path: ledgerRelPath,
+          started_ts: '2020-01-01T00:00:00.000Z',
+          started_head: startedHead,
+          last_summary_ts: '2020-01-01T00:00:00.000Z',
+        }),
+      );
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: 'SessionEnd',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2 }),
+      reason: 'other',
+    }),
+  });
+  assert.equal(r2.exitCode, 0, r2.stderr);
+  const events = provenance(r2.pluginDataDir).filter((e) => e.action === 'session-summary');
+  assert.equal(events[0].commits_source, 'range');
+  const files = ledgerFiles(ctx.vault);
+  const md = readFileSync(join(ctx.vault, '4-projects', 'my-repo', 'ledger', files[0]), 'utf8');
+  assert.match(md, /## Commits this session\n- [0-9a-f]+ session commit/);
+  assert.doesNotMatch(
+    md,
+    /ledger commit/,
+    'the setup commit predates the session and must not be listed',
+  );
+  r2.cleanup();
+  r1.cleanup();
+});
+
+test('a marker with a started_head that is no longer an ancestor falls back to --since and the note says so', () => {
+  let ctx;
+  const r = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      writeFileSync(
+        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        JSON.stringify({
+          path: '4-projects/my-repo/ledger/existing-60e4c15a.md',
+          started_ts: new Date(Date.now() - 3_600_000).toISOString(),
+          // Not an ancestor of anything in this fresh repo.
+          started_head: 'f'.repeat(40),
+          last_summary_ts: new Date(Date.now() - 3_600_000).toISOString(),
+        }),
+      );
+      ctx = { vault, repo };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(ctx.repo, 'a.txt') }),
+      last_assistant_message: 'fell back',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r.exitCode, 0, r.stderr);
+  const events = provenance(r.pluginDataDir).filter((e) => e.action === 'session-summary');
+  assert.equal(events[0].commits_source, 'since');
+  const md = readFileSync(
+    join(ctx.vault, '4-projects', 'my-repo', 'ledger', 'existing-60e4c15a.md'),
+    'utf8',
+  );
+  assert.match(md, /## Commits this session \(range unavailable, listed by time\)/);
   r.cleanup();
 });
 

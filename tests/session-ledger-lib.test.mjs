@@ -124,7 +124,15 @@ test('gitFacts ignores an inherited GIT_INDEX_FILE / GIT_DIR from a parent git-h
 
 test('gitFacts reports not_repo when there is no worktree root', () => {
   const f = gitFacts(null, '2026-01-01T00:00:00Z', execGit, 2000);
-  assert.deepEqual(f, { branch: null, commits: [], dirtyCount: 0, state: 'not_repo', gitMs: 0 });
+  assert.deepEqual(f, {
+    branch: null,
+    commits: [],
+    dirtyCount: 0,
+    state: 'not_repo',
+    gitMs: 0,
+    head: null,
+    commitsSource: 'since',
+  });
 });
 
 test('gitFacts reports timeout when a git call times out and keeps what it gathered', () => {
@@ -136,6 +144,72 @@ test('gitFacts reports timeout when a git call times out and keeps what it gathe
   assert.equal(f.branch, 'main');
   assert.equal(f.state, 'timeout');
   assert.deepEqual(f.commits, []);
+});
+
+function commit(repo, file, message, opts = {}) {
+  writeFileSync(join(repo, file), `${message}\n`);
+  execFileSync('git', ['-C', repo, 'add', file], gitOpts);
+  const env = opts.authorDate
+    ? { ...gitOpts.env, GIT_AUTHOR_DATE: opts.authorDate, GIT_COMMITTER_DATE: opts.authorDate }
+    : gitOpts.env;
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', message], { ...gitOpts, env });
+}
+
+test('gitFacts credits by HEAD range, excluding a commit reachable before the session started even with a later author date', () => {
+  withTmp((root) => {
+    const repo = join(root, 'r');
+    mkdirSync(repo);
+    initRepo(repo);
+
+    // D is authored far in the future but made BEFORE startedHead is
+    // recorded: --since would credit it to the session; the range must not.
+    commit(repo, 'd.txt', 'D future-dated commit', {
+      authorDate: '2099-01-01T00:00:00',
+    });
+    const startedHead = git(repo, 'rev-parse', 'HEAD');
+
+    commit(repo, 'b.txt', 'B session commit');
+
+    execFileSync('git', ['-C', repo, 'checkout', '-q', '-b', 'side'], gitOpts);
+    commit(repo, 'c.txt', 'C side commit', { authorDate: '2020-01-01T00:00:00' });
+    execFileSync('git', ['-C', repo, 'checkout', '-q', 'main'], gitOpts);
+    execFileSync(
+      'git',
+      ['-C', repo, 'merge', '-q', '--no-ff', '-m', 'merge side', 'side'],
+      gitOpts,
+    );
+
+    const since = new Date(Date.now() - 60_000).toISOString();
+    const f = gitFacts(repo, since, execGit, 2000, { startedHead });
+    assert.equal(f.commitsSource, 'range');
+    const subjects = f.commits.map((c) => c.subject);
+    assert.ok(subjects.includes('B session commit'));
+    assert.ok(subjects.includes('C side commit'));
+    assert.ok(subjects.includes('merge side'));
+    assert.ok(
+      !subjects.includes('D future-dated commit'),
+      'range must exclude a pre-session commit',
+    );
+  });
+});
+
+test('gitFacts falls back to --since when startedHead is not an ancestor of HEAD', () => {
+  withTmp((root) => {
+    const repo = join(root, 'r');
+    mkdirSync(repo);
+    initRepo(repo);
+    commit(repo, 'b.txt', 'B session commit');
+    const notAnAncestor = git(repo, 'rev-parse', 'HEAD');
+
+    // Rewind so notAnAncestor is no longer reachable from the new HEAD.
+    execFileSync('git', ['-C', repo, 'reset', '-q', '--hard', 'HEAD~1'], gitOpts);
+    commit(repo, 'e.txt', 'E after rewind');
+
+    const since = new Date(Date.now() - 60_000).toISOString();
+    const f = gitFacts(repo, since, execGit, 2000, { startedHead: notAnAncestor });
+    assert.equal(f.commitsSource, 'since');
+    assert.ok(f.commits.map((c) => c.subject).includes('E after rewind'));
+  });
 });
 
 import {
