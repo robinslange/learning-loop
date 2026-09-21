@@ -34,7 +34,7 @@ Maps a repository directory name to a folder under `4-projects/` when the two di
 { "projects": { "registry-frontend-client-sample-app": "registry-frontend-sample-app" } }
 ```
 
-Related constants in `scripts/lib/hook-config.mjs`: `LEDGER_MIN_PROMPTS` (5), `LEDGER_GIT_TIMEOUT_MS` (300), `SESSION_SUMMARY_MIN_INTERVAL_MS` (600000), `LEDGER_TRANSCRIPT_MAX_BYTES` (16MB). Disable with `hooks.disabled: ["session-ledger"]`.
+Related constants in `scripts/lib/hook-config.mjs`: `LEDGER_MIN_PROMPTS` (5), `LEDGER_GIT_TIMEOUT_MS` (300), `SESSION_SUMMARY_MIN_INTERVAL_MS` (600000), `LEDGER_TRANSCRIPT_MAX_BYTES` (16MB), `LEDGER_SINCE_FALLBACK_MS` (600000). Disable with `hooks.disabled: ["session-ledger"]`.
 
 `label_topics` extends the session labels written for episodic-memory retrieval with your own topics. The built-in patterns cover generic engineering vocabulary; add domain terms as `{match, label}` pairs, where `match` is a case-insensitive regex source string:
 
