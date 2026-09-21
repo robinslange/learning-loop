@@ -85,10 +85,20 @@ const startedTs =
 
 // 3. Project + git.
 let project = { project: 'unknown', source: 'cwd', repoRoot: null, worktreeRoot: null };
-let git = { branch: null, commits: [], dirtyCount: 0, state: 'not_repo', gitMs: 0 };
+let git = {
+  branch: null,
+  commits: [],
+  dirtyCount: 0,
+  state: 'not_repo',
+  gitMs: 0,
+  head: null,
+  commitsSource: 'since',
+};
 try {
   project = resolveProject(cwd, config, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS);
-  git = gitFacts(project.worktreeRoot, startedTs, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS);
+  git = gitFacts(project.worktreeRoot, startedTs, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS, {
+    startedHead: marker?.started_head,
+  });
 } catch (err) {
   logError('session-ledger.git', err);
 }
@@ -124,6 +134,11 @@ try {
 }
 const date = localDateStr(startedTs);
 const relPath = marker?.path || ledgerPath(project.project, date, label, sessionId);
+// Pinned at first flush, same as relPath: the range anchor must not move
+// under a session that keeps committing across multiple Stop/SessionEnd
+// flushes, or every later flush would re-anchor to its own HEAD and credit
+// nothing.
+const startedHead = marker?.started_head || git.head || null;
 let wrote = false;
 try {
   const abs = join(vaultRoot, relPath);
@@ -143,6 +158,7 @@ try {
       reason: hookData.reason,
       summary,
       harness: summary.harness,
+      rangeFellBack: Boolean(marker?.started_head) && git.commitsSource === 'since',
     }),
   );
   renameSync(tmp, abs);
@@ -174,6 +190,7 @@ try {
       writeMarker(markerPath, {
         path: relPath,
         started_ts: startedTs,
+        started_head: startedHead,
         last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
       });
     }
@@ -192,6 +209,7 @@ try {
     writeMarker(markerPath, {
       path: relPath,
       started_ts: startedTs,
+      started_head: startedHead,
       last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
     });
   }

@@ -56,8 +56,28 @@ export function resolveProject(cwd, config, git, timeoutMs) {
   return { project: repo, source: 'derived', repoRoot, worktreeRoot };
 }
 
-export function gitFacts(worktreeRoot, sinceIso, git, timeoutMs) {
-  const facts = { branch: null, commits: [], dirtyCount: 0, state: 'not_repo', gitMs: 0 };
+const HEAD_RE = /^[0-9a-f]{40}$/;
+
+function parseLog(log) {
+  return log
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [hash, ...rest] = line.split('\t');
+      return { hash, subject: rest.join('\t') };
+    });
+}
+
+export function gitFacts(worktreeRoot, sinceIso, git, timeoutMs, { startedHead } = {}) {
+  const facts = {
+    branch: null,
+    commits: [],
+    dirtyCount: 0,
+    state: 'not_repo',
+    gitMs: 0,
+    head: null,
+    commitsSource: 'since',
+  };
   if (!worktreeRoot) return facts;
   const t0 = Date.now();
   let timedOut = false;
@@ -68,16 +88,34 @@ export function gitFacts(worktreeRoot, sinceIso, git, timeoutMs) {
   };
   const branch = run(['rev-parse', '--abbrev-ref', 'HEAD']);
   if (branch) facts.branch = branch.trim();
-  const log = run(['log', `--since=${sinceIso}`, '--format=%h%x09%s', '-n', '15']);
-  if (log) {
-    facts.commits = log
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => {
-        const [hash, ...rest] = line.split('\t');
-        return { hash, subject: rest.join('\t') };
-      });
+  const head = run(['rev-parse', 'HEAD']);
+  if (head) facts.head = head.trim();
+
+  // A range against the HEAD recorded at first flush credits only commits
+  // made since the session started, not every commit reachable from HEAD
+  // whose author date happens to be later (pulls, merges by other people,
+  // or a commit authored earlier but merged in after). Fall back to
+  // --since when there is no recorded HEAD, or it is not an ancestor of the
+  // current one (a rewind or a branch switch mid-session).
+  let log = null;
+  if (HEAD_RE.test(startedHead || '')) {
+    const ancestor = git(
+      ['merge-base', '--is-ancestor', startedHead, 'HEAD'],
+      worktreeRoot,
+      timeoutMs,
+    );
+    if (!ancestor.ok && ancestor.timeout) timedOut = true;
+    if (ancestor.ok) {
+      log = run(['log', `${startedHead}..HEAD`, '--format=%h%x09%s', '-n', '15']);
+      if (log !== null) facts.commitsSource = 'range';
+    }
   }
+  if (log === null) {
+    log = run(['log', `--since=${sinceIso}`, '--format=%h%x09%s', '-n', '15']);
+    facts.commitsSource = 'since';
+  }
+  if (log) facts.commits = parseLog(log);
+
   const status = run(['status', '--porcelain']);
   if (status !== null) facts.dirtyCount = status.split('\n').filter(Boolean).length;
   facts.gitMs = Date.now() - t0;
@@ -94,6 +132,7 @@ export const SUMMARY_ENUMS = Object.freeze({
   end_reason: new Set(['open', 'clear', 'resume', 'logout', 'prompt_input_exit', 'other']),
   project_source: new Set(['mapped', 'derived', 'cwd']),
   harness: new Set(['claude-code', 'codex']),
+  commits_source: new Set(['range', 'since']),
 });
 
 export function truncate(text, n) {
@@ -193,6 +232,7 @@ export function summarise({
     latency_ms: latencyMs,
     git_ms: git.gitMs,
     git_state: enumOr(SUMMARY_ENUMS.git_state, git.state, 'not_repo'),
+    commits_source: enumOr(SUMMARY_ENUMS.commits_source, git.commitsSource, 'since'),
     end_reason: isSessionEnd ? enumOr(SUMMARY_ENUMS.end_reason, reason, 'other') : 'open',
     project_source: enumOr(SUMMARY_ENUMS.project_source, projectSource, 'cwd'),
     harness: enumOr(SUMMARY_ENUMS.harness, harness, 'claude-code'),
@@ -246,6 +286,7 @@ export function renderLedger({
   reason,
   summary,
   harness,
+  rangeFellBack = false,
 }) {
   const title = `Session ledger: ${label || 'session'} (${date})`;
   const fm = [
@@ -270,7 +311,9 @@ export function renderLedger({
   section('Goal', facts.goal ? [truncate(facts.goal, GOAL_CHARS)] : []);
   section('Where it stopped', facts.stoppedAt ? [truncate(facts.stoppedAt, STOP_CHARS)] : []);
   section(
-    'Commits this session',
+    rangeFellBack
+      ? 'Commits this session (range unavailable, listed by time)'
+      : 'Commits this session',
     git.commits.slice(0, 15).map((c) => `- ${c.hash} ${c.subject}`),
   );
   section(

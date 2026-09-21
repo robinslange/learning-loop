@@ -185,6 +185,7 @@ export const EXPORT_SCHEMA = {
     action: ENUM_LABEL,
     end_reason: ENUM_LABEL,
     git_state: ENUM_LABEL,
+    commits_source: ENUM_LABEL,
     project_source: ENUM_LABEL,
     harness: ENUM_LABEL,
     version: ENUM_LABEL,

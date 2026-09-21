@@ -39,6 +39,7 @@ const summary = (over) => ({
   latency_ms: 90,
   git_ms: 30,
   git_state: 'dirty',
+  commits_source: 'range',
   end_reason: 'open',
   project_source: 'derived',
   harness: 'claude-code',
@@ -88,6 +89,7 @@ test('counter attributes carry only the enum labels', () => {
       (m) => m.name === 'll.session_count',
     );
     assert.deepEqual(Object.keys(c.attributes).sort(), [
+      'commits_source',
       'end_reason',
       'final',
       'git_state',
