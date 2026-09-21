@@ -147,6 +147,7 @@ import {
   shouldWrite,
   shouldEmitSummary,
   latestLedger,
+  localDateStr,
 } from '../plugin/scripts/lib/session-ledger.mjs';
 
 const WALK = {
@@ -350,7 +351,7 @@ test('renderLedger writes frontmatter and omits empty sections', () => {
   });
   assert.match(
     md,
-    /^---\ntitle: "Session ledger: ledger flake \(2026-09-21\)"\ntags: \[ledger, my-repo\]\ndate: 2026-09-21\nsource: session\nsession_id: 60e4c15a-487a-4e85-a18a-a989d8c00de7\nrepo: my-repo\nbranch: main\nstatus: ended\nended_reason: other\n---\n/,
+    /^---\ntitle: "Session ledger: ledger flake \(2026-09-21\)"\ntags: \[ledger, "my-repo"\]\ndate: 2026-09-21\nsource: session\nsession_id: 60e4c15a-487a-4e85-a18a-a989d8c00de7\nrepo: "my-repo"\nbranch: "main"\nstatus: ended\nended_reason: other\n---\n/,
   );
   assert.match(md, /## Goal\nfix the flaky test/);
   assert.match(md, /## Where it stopped\nTests green, PR open\./);
@@ -514,4 +515,88 @@ test('shouldEmitSummary fires on SessionEnd, on first flush, and after the inter
     shouldEmitSummary({ last_summary_ts: new Date(now - 1000).toISOString() }, now, true, 600_000),
     true,
   );
+});
+
+test('localDateStr formats the local calendar date, not UTC', () => {
+  const iso = '2026-09-20T23:30:00.000Z';
+  const d = new Date(iso);
+  const expected = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate(),
+  ).padStart(2, '0')}`;
+  const actual = localDateStr(iso);
+  assert.equal(actual, expected);
+  assert.match(actual, /^\d{4}-\d{2}-\d{2}$/);
+});
+
+test('renderLedger quotes tags, repo, and branch values, escaping quotes and backslashes', () => {
+  const git = { ...GIT, branch: 'feature/"weird"\\branch' };
+  const facts = collectFacts(WALK, {
+    worktreeRoot: '/wt',
+    cwd: '/wt',
+    vaultRoot: '/vault',
+    lastAssistantMessage: null,
+  });
+  const summary = summarise({
+    walk: WALK,
+    git,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    projectSource: 'derived',
+    harness: 'claude-code',
+    version: 'v',
+    latencyMs: 1,
+    transcriptBytes: 1,
+  });
+  const md = renderLedger({
+    project: 'client "sample" app',
+    label: 'l',
+    date: '2026-09-21',
+    sessionId: 'abcdefgh-1',
+    repoRoot: '/repos/weird\\repo',
+    git,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    summary,
+    harness: 'claude-code',
+  });
+  assert.match(md, /tags: \[ledger, "client \\"sample\\" app"\]/);
+  assert.match(md, /repo: "weird\\\\repo"/);
+  assert.match(md, /branch: "feature\/\\"weird\\"\\\\branch"/);
+});
+
+test('renderLedger escapes a backslash in the title', () => {
+  const facts = collectFacts(WALK, {
+    worktreeRoot: '/wt',
+    cwd: '/wt',
+    vaultRoot: '/vault',
+    lastAssistantMessage: null,
+  });
+  const summary = summarise({
+    walk: WALK,
+    git: GIT,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    projectSource: 'derived',
+    harness: 'claude-code',
+    version: 'v',
+    latencyMs: 1,
+    transcriptBytes: 1,
+  });
+  const md = renderLedger({
+    project: 'p',
+    label: 'weird\\label',
+    date: '2026-09-21',
+    sessionId: 'abcdefgh-1',
+    repoRoot: null,
+    git: GIT,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    summary,
+    harness: 'claude-code',
+  });
+  assert.match(md, /title: "Session ledger: weird\\\\label \(2026-09-21\)"/);
 });

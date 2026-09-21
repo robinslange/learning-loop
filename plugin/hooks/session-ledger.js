@@ -30,6 +30,7 @@ import {
   ledgerPath,
   shouldWrite,
   shouldEmitSummary,
+  localDateStr,
 } from '../scripts/lib/session-ledger.mjs';
 
 const t0 = Date.now();
@@ -120,7 +121,7 @@ try {
 } catch (err) {
   if (err?.code !== 'ENOENT') logError('session-ledger.label', err);
 }
-const date = startedTs.slice(0, 10);
+const date = localDateStr(startedTs);
 const relPath = marker?.path || ledgerPath(project.project, date, label, sessionId);
 let wrote = false;
 try {

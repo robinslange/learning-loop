@@ -417,7 +417,7 @@ export async function run(ctx) {
 
   // 8b. Newest session ledger for this repo: the "what did I do here last time"
   // answer in one line. Path only; the note itself is one Read away.
-  if (projectDir) {
+  if (projectDir && existsSync(join(vaultRoot, '4-projects'))) {
     try {
       const { project } = resolveProject(
         projectDir,
