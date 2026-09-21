@@ -11,7 +11,15 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync, readdirSync, rmSync, existsSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  existsSync,
+  realpathSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
@@ -99,6 +107,38 @@ const SWEEP = [
     stdin: (sb) => ({ session_id: 's', transcript_path: join(sb, 't.jsonl') }),
     file: 'provenance/events',
   },
+  {
+    name: 'session-ledger',
+    // Its own repo + vault, not the shared fixtures: it needs a real git
+    // commit to write from, and a vault with a 4-projects/ dir to write into.
+    // vault_path goes into this sandbox's own config.json (seedSandbox wrote
+    // the disabled-hooks key already) since VAULT_PATH can't be set via env
+    // before the sandbox exists.
+    env: {},
+    seedExtra: (pd, sb) => {
+      const repo = join(realpathSync(sb), 'ledger-repo');
+      mkdirSync(repo);
+      execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'main']);
+      execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t.local']);
+      execFileSync('git', ['-C', repo, 'config', 'user.name', 't']);
+      writeFileSync(join(repo, 'a.txt'), 'a\n');
+      execFileSync('git', ['-C', repo, 'add', 'a.txt']);
+      execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'ledger sweep commit']);
+      const vault = join(sb, 'ledger-vault');
+      mkdirSync(join(vault, '4-projects'), { recursive: true });
+      const config = JSON.parse(readFileSync(join(pd, 'config.json'), 'utf8'));
+      writeFileSync(join(pd, 'config.json'), JSON.stringify({ ...config, vault_path: vault }));
+    },
+    stdin: (sb) => ({
+      session_id: 's',
+      hook_event_name: 'Stop',
+      cwd: join(sb, 'ledger-repo'),
+      transcript_path: join(sb, 't.jsonl'),
+      last_assistant_message: 'done',
+      stop_hook_active: false,
+    }),
+    file: 'provenance/events',
+  },
 ];
 
 function seedSandbox(disabledNames) {
@@ -124,8 +164,11 @@ function seedSandbox(disabledNames) {
 function traceOf(spec, disabledNames) {
   const r = runHook(join(HOOKS_DIR, `${spec.name}.js`), {
     stdin: (sb) => spec.stdin(sb),
-    env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/ll-sweep-proj' },
-    seed: seedSandbox(disabledNames),
+    env: spec.env || { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/ll-sweep-proj' },
+    seed: (pd, sb) => {
+      seedSandbox(disabledNames)(pd, sb);
+      if (spec.seedExtra) spec.seedExtra(pd, sb);
+    },
   });
   try {
     assert.equal(r.exitCode, 0, `${spec.name} exited ${r.exitCode}: ${r.stderr}`);
@@ -210,7 +253,7 @@ describe('hooks.disabled', () => {
   });
 
   describe('covers every shipped hook, not just the ones behind runHook()', () => {
-    it('drives all nine, and the roster matches what ships', () => {
+    it('drives every shipped hook, and the roster matches what ships', () => {
       const shipped = readdirSync(HOOKS_DIR)
         .filter((f) => f.endsWith('.js'))
         .map((f) => f.replace(/\.js$/, ''))

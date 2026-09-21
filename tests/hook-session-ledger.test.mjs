@@ -1,0 +1,323 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { runHook } from './helpers/hook-runner.mjs';
+
+// realpathSync: on macOS tmpdir() sits behind a symlink (/tmp -> /private/tmp,
+// or a /var/folders/... alias), and `git rev-parse --show-toplevel` always
+// resolves it. Building repo/vault paths under the unresolved tmpdir() makes
+// collectFacts' relative() walk out of the worktree on every edit path.
+const TMP = realpathSync(tmpdir());
+
+const HOOK = fileURLToPath(new URL('../plugin/hooks/session-ledger.js', import.meta.url));
+const SID = '60e4c15a-487a-4e85-a18a-a989d8c00de7';
+let r2ctx;
+
+const gitOpts = { stdio: 'ignore' };
+function makeRepo(root) {
+  // realpath root: git rev-parse --show-toplevel resolves symlinks (macOS
+  // tmpdir()), so building the repo path on the unresolved sandboxRoot makes
+  // resolveProject's worktreeRoot diverge from this path by prefix.
+  const repo = join(realpathSync(root), 'my-repo');
+  mkdirSync(repo);
+  execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'main'], gitOpts);
+  execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t.local'], gitOpts);
+  execFileSync('git', ['-C', repo, 'config', 'user.name', 't'], gitOpts);
+  writeFileSync(join(repo, 'a.txt'), 'a\n');
+  execFileSync('git', ['-C', repo, 'add', 'a.txt'], gitOpts);
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'ledger commit'], gitOpts);
+  return repo;
+}
+function makeVault(root) {
+  const vault = join(root, 'vault');
+  mkdirSync(join(vault, '4-projects'), { recursive: true });
+  return vault;
+}
+const rec = (o) => JSON.stringify(o);
+function transcript(root, { prompts = 2, editPath = null } = {}) {
+  const lines = [];
+  const t0 = Date.parse('2020-01-01T00:00:00.000Z'); // long before any commit, so --since catches it
+  for (let i = 0; i < prompts; i++) {
+    lines.push(
+      rec({
+        type: 'user',
+        timestamp: new Date(t0 + i * 60000).toISOString(),
+        message: { role: 'user', content: `prompt ${i}: build the ledger` },
+      }),
+    );
+  }
+  if (editPath) {
+    lines.push(
+      rec({
+        type: 'assistant',
+        timestamp: new Date(t0 + 1000).toISOString(),
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Edit',
+              input: { file_path: editPath },
+              caller: { type: 'direct' },
+            },
+          ],
+        },
+      }),
+    );
+  }
+  const p = join(root, 'transcript.jsonl');
+  writeFileSync(p, lines.join('\n') + '\n');
+  return p;
+}
+function seedConfig(pluginDataDir, vault, extra = {}) {
+  writeFileSync(
+    join(pluginDataDir, 'config.json'),
+    JSON.stringify({ vault_path: vault, ...extra }),
+  );
+}
+function provenance(pluginDataDir) {
+  const dir = join(pluginDataDir, 'provenance');
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((f) => f.endsWith('.jsonl'))
+    .flatMap((f) =>
+      readFileSync(join(dir, f), 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((l) => JSON.parse(l)),
+    );
+}
+function ledgerFiles(vault) {
+  const dir = join(vault, '4-projects', 'my-repo', 'ledger');
+  return existsSync(dir) ? readdirSync(dir) : [];
+}
+
+function run({
+  event = 'Stop',
+  reason,
+  extraConfig = {},
+  prompts = 2,
+  edit = true,
+  label = 'Plugin Hooks',
+  transcriptMissing = false,
+}) {
+  let vault, repo;
+  const result = runHook(HOOK, {
+    // Match TMPDIR to this process's resolved tmpdir so the hook's tmpdir()
+    // finds the label file the seed callback writes.
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      vault = makeVault(sandboxRoot);
+      repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault, extraConfig);
+      if (label) writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), label);
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: event,
+      cwd: repo,
+      transcript_path: transcriptMissing
+        ? join(sandboxRoot, 'nope.jsonl')
+        : transcript(sandboxRoot, { prompts, editPath: edit ? join(repo, 'a.txt') : null }),
+      ...(event === 'Stop'
+        ? { last_assistant_message: 'Ledger written, tests green.', stop_hook_active: false }
+        : { reason }),
+    }),
+  });
+  return { ...result, vault, repo };
+}
+
+test('Stop writes a ledger note and one session-summary event', () => {
+  const r = run({});
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '', 'the hook must not print');
+  const files = ledgerFiles(r.vault);
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^\d{4}-\d{2}-\d{2}-plugin-hooks-60e4c15a\.md$/);
+  const md = readFileSync(join(r.vault, '4-projects', 'my-repo', 'ledger', files[0]), 'utf8');
+  assert.match(md, /status: open/);
+  assert.match(md, /## Where it stopped\nLedger written, tests green\./);
+  assert.match(md, /## Commits this session\n- [0-9a-f]+ ledger commit/);
+  assert.match(md, /## Files changed\n- a\.txt \(1 edit\)/);
+  const events = provenance(r.pluginDataDir).filter((e) => e.action === 'session-summary');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].final, false);
+  assert.equal(events[0].end_reason, 'open');
+  assert.equal(events[0].files_edited, 1);
+  assert.equal(events[0].source, 'hook');
+  for (const k of ['path', 'project', 'repo', 'branch', 'prompt'])
+    assert.ok(!(k in events[0]), `${k} leaked`);
+  r.cleanup();
+});
+
+test('a second Stop overwrites the same note and does not re-emit inside the interval', () => {
+  // Two runs share nothing (fresh sandbox each), so simulate the marker by
+  // running twice against one sandbox via the seeded marker.
+  let firstPath;
+  const r1 = run({});
+  const marker = JSON.parse(
+    readFileSync(join(r1.pluginDataDir, 'markers', `ledger-${SID}.json`), 'utf8'),
+  );
+  firstPath = marker.path;
+  assert.ok(firstPath.startsWith('4-projects/my-repo/ledger/'));
+  assert.ok(marker.last_summary_ts);
+  r1.cleanup();
+
+  const r2 = runHook(HOOK, {
+    env: { TMPDIR: TMP },
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
+      writeFileSync(
+        join(pluginDataDir, 'markers', `ledger-${SID}.json`),
+        JSON.stringify({
+          path: firstPath,
+          started_ts: '2020-01-01T00:00:00.000Z',
+          last_summary_ts: new Date().toISOString(),
+        }),
+      );
+      writeFileSync(join(TMP, `claude-session-label-${SID}.txt`), 'Some Other Label');
+      r2ctx = { vault, repo, sandboxRoot };
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: 'Stop',
+      cwd: r2ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 2, editPath: join(r2ctx.repo, 'a.txt') }),
+      last_assistant_message: 'again',
+      stop_hook_active: false,
+    }),
+  });
+  assert.equal(r2.exitCode, 0, r2.stderr);
+  const files = ledgerFiles(r2ctx.vault);
+  assert.deepEqual(
+    files,
+    [firstPath.split('/').pop()],
+    'filename pinned by the marker, not the new label',
+  );
+  assert.equal(
+    provenance(r2.pluginDataDir).filter((e) => e.action === 'session-summary').length,
+    0,
+  );
+  r2.cleanup();
+});
+
+test('SessionEnd stamps status ended, the reason, and emits final:true', () => {
+  const r = run({ event: 'SessionEnd', reason: 'clear' });
+  assert.equal(r.exitCode, 0, r.stderr);
+  const files = ledgerFiles(r.vault);
+  const md = readFileSync(join(r.vault, '4-projects', 'my-repo', 'ledger', files[0]), 'utf8');
+  assert.match(md, /status: ended\nended_reason: clear\n---/);
+  assert.doesNotMatch(md, /## Where it stopped/);
+  const events = provenance(r.pluginDataDir).filter((e) => e.action === 'session-summary');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].final, true);
+  assert.equal(events[0].end_reason, 'clear');
+  r.cleanup();
+});
+
+test('a trivial session (no edits, no commits since start, few prompts) writes nothing', () => {
+  let ctx;
+  const r = runHook(HOOK, {
+    seed: (pluginDataDir, sandboxRoot) => {
+      const vault = makeVault(sandboxRoot);
+      const repo = makeRepo(sandboxRoot);
+      seedConfig(pluginDataDir, vault);
+      ctx = { vault, repo };
+    },
+    stdin: (sandboxRoot) => {
+      const now = Date.now() + 60_000; // transcript starts after the setup commit
+      const lines = [0, 1].map((i) =>
+        rec({
+          type: 'user',
+          timestamp: new Date(now + i * 1000).toISOString(),
+          message: { role: 'user', content: `hi ${i}` },
+        }),
+      );
+      const p = join(sandboxRoot, 't.jsonl');
+      writeFileSync(p, lines.join('\n'));
+      return {
+        session_id: SID,
+        hook_event_name: 'Stop',
+        cwd: ctx.repo,
+        transcript_path: p,
+        last_assistant_message: 'hello',
+        stop_hook_active: false,
+      };
+    },
+  });
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.deepEqual(ledgerFiles(ctx.vault), []);
+  assert.equal(provenance(r.pluginDataDir).length, 0);
+  assert.ok(!existsSync(join(r.pluginDataDir, 'markers', `ledger-${SID}.json`)));
+  r.cleanup();
+});
+
+test('hooks.disabled silences the hook entirely', () => {
+  const r = run({ extraConfig: { hooks: { disabled: ['session-ledger'] } } });
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.deepEqual(ledgerFiles(r.vault), []);
+  assert.equal(provenance(r.pluginDataDir).length, 0);
+  r.cleanup();
+});
+
+test('stop_hook_active exits without writing', () => {
+  let ctx;
+  const r = runHook(HOOK, {
+    seed: (pluginDataDir, sandboxRoot) => {
+      ctx = { vault: makeVault(sandboxRoot), repo: makeRepo(sandboxRoot) };
+      seedConfig(pluginDataDir, ctx.vault);
+    },
+    stdin: (sandboxRoot) => ({
+      session_id: SID,
+      hook_event_name: 'Stop',
+      cwd: ctx.repo,
+      transcript_path: transcript(sandboxRoot, { prompts: 6 }),
+      stop_hook_active: true,
+    }),
+  });
+  assert.equal(r.exitCode, 0);
+  assert.deepEqual(ledgerFiles(ctx.vault), []);
+  r.cleanup();
+});
+
+test('an unreadable transcript still yields a ledger from git facts and logs the error', () => {
+  const r = run({ transcriptMissing: true });
+  assert.equal(r.exitCode, 0, r.stderr);
+  const files = ledgerFiles(r.vault);
+  assert.equal(files.length, 1, 'the setup commit alone makes the session non-trivial');
+  const md = readFileSync(join(r.vault, '4-projects', 'my-repo', 'ledger', files[0]), 'utf8');
+  assert.match(md, /## Commits this session/);
+  assert.doesNotMatch(md, /## Goal/);
+  const logs = join(r.pluginDataDir, 'logs');
+  const logged =
+    existsSync(logs) &&
+    readdirSync(logs).some((f) =>
+      readFileSync(join(logs, f), 'utf8').includes('session-ledger.transcript'),
+    );
+  assert.ok(logged, 'transcript read failure must be logged, not swallowed');
+  r.cleanup();
+});
+
+test('the projects map renames the folder', () => {
+  const r = run({ extraConfig: { projects: { 'my-repo': 'curated-name' } } });
+  assert.equal(r.exitCode, 0, r.stderr);
+  assert.deepEqual(ledgerFiles(r.vault), []);
+  assert.equal(readdirSync(join(r.vault, '4-projects', 'curated-name', 'ledger')).length, 1);
+  const ev = provenance(r.pluginDataDir).find((e) => e.action === 'session-summary');
+  assert.equal(ev.project_source, 'mapped');
+  r.cleanup();
+});

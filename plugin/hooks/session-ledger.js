@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+// Learning Loop: Stop + SessionEnd hook.
+// Writes the session ledger: one 4-projects note per session, overwritten on
+// every flush, and a throttled session-summary provenance record. Never prints.
+
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
+import {
+  readStdin,
+  resolveVaultPath,
+  resolveConfig,
+  resolvePluginData,
+  getSessionId,
+  emitProvenance,
+} from './lib/common.mjs';
+import { HookConfig } from '../scripts/lib/hook-config.mjs';
+import { logError } from '../scripts/lib/log.mjs';
+import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
+import { harness } from '../scripts/lib/harness.mjs';
+import { pluginVersion } from '../scripts/lib/plugin-meta.mjs';
+import { parseTranscript, walkTranscript } from '../scripts/lib/transcript-walk.mjs';
+import {
+  execGit,
+  resolveProject,
+  gitFacts,
+  collectFacts,
+  summarise,
+  renderLedger,
+  ledgerPath,
+  shouldWrite,
+  shouldEmitSummary,
+} from '../scripts/lib/session-ledger.mjs';
+
+const t0 = Date.now();
+const input = await readStdin();
+if (!input.trim()) process.exit(0);
+
+let hookData;
+try {
+  hookData = JSON.parse(input);
+} catch (err) {
+  logError('session-ledger.parseStdin', err);
+  process.exit(0);
+}
+if (hookData.stop_hook_active) process.exit(0);
+
+const isSessionEnd = hookData.hook_event_name === 'SessionEnd';
+let sessionId = hookData.session_id || getSessionId();
+if (!sessionId || sessionId === 'unknown') process.exit(0);
+
+const vaultRoot = resolveVaultPath();
+const pluginData = resolvePluginData();
+if (!vaultRoot || !pluginData || !existsSync(join(vaultRoot, '4-projects'))) process.exit(0);
+const config = resolveConfig() || {};
+const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : null;
+if (!cwd) process.exit(0);
+
+// 1. Transcript. A failure here still leaves git facts to write from.
+let walk = walkTranscript([]);
+let transcriptBytes = 0;
+if (hookData.transcript_path) {
+  try {
+    transcriptBytes = statSync(hookData.transcript_path).size;
+    if (transcriptBytes <= HookConfig.LEDGER_TRANSCRIPT_MAX_BYTES) {
+      walk = walkTranscript(parseTranscript(readFileSync(hookData.transcript_path, 'utf8')));
+    }
+  } catch (err) {
+    logError('session-ledger.transcript', err);
+  }
+}
+
+// 2. Marker: pins the filename and the --since anchor across flushes.
+const markerPath = MARKER_PATHS.ledger(pluginData, sessionId);
+const marker = readMarker(markerPath, { ttlMs: Infinity });
+// No marker and no transcript timestamp: anchor ten minutes before process
+// start rather than "now". An unreadable transcript must not make every
+// session look brand new to `git log --since`, or it would always be trivial.
+const startedTs =
+  marker?.started_ts ||
+  walk.firstTs ||
+  new Date(t0 - HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS).toISOString();
+
+// 3. Project + git.
+let project = { project: 'unknown', source: 'cwd', repoRoot: null, worktreeRoot: null };
+let git = { branch: null, commits: [], dirtyCount: 0, state: 'not_repo', gitMs: 0 };
+try {
+  project = resolveProject(cwd, config, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS);
+  git = gitFacts(project.worktreeRoot, startedTs, execGit, HookConfig.LEDGER_GIT_TIMEOUT_MS);
+} catch (err) {
+  logError('session-ledger.git', err);
+}
+
+// 4. Facts + summary.
+const facts = collectFacts(walk, {
+  worktreeRoot: project.worktreeRoot,
+  cwd,
+  vaultRoot,
+  lastAssistantMessage: isSessionEnd ? null : hookData.last_assistant_message,
+});
+const summary = summarise({
+  walk,
+  git,
+  facts,
+  isSessionEnd,
+  reason: hookData.reason,
+  projectSource: project.source,
+  harness: harness(),
+  version: pluginVersion(),
+  latencyMs: Date.now() - t0,
+  transcriptBytes,
+});
+if (!shouldWrite(summary, HookConfig.LEDGER_MIN_PROMPTS)) process.exit(0);
+
+// 5. Note.
+let label = null;
+try {
+  label =
+    readFileSync(join(tmpdir(), `claude-session-label-${sessionId}.txt`), 'utf8').trim() || null;
+} catch (err) {
+  if (err?.code !== 'ENOENT') logError('session-ledger.label', err);
+}
+const date = startedTs.slice(0, 10);
+const relPath = marker?.path || ledgerPath(project.project, date, label, sessionId);
+let wrote = false;
+try {
+  const abs = join(vaultRoot, relPath);
+  mkdirSync(dirname(abs), { recursive: true });
+  const tmp = `${abs}.${process.pid}.tmp`;
+  writeFileSync(
+    tmp,
+    renderLedger({
+      project: project.project,
+      label,
+      date,
+      sessionId,
+      repoRoot: project.repoRoot,
+      git,
+      facts,
+      isSessionEnd,
+      reason: hookData.reason,
+      summary,
+      harness: summary.harness,
+    }),
+  );
+  renameSync(tmp, abs);
+  wrote = true;
+} catch (err) {
+  logError('session-ledger.write', err);
+}
+
+// 6. Summary event, throttled. A note that failed to write still gets its
+// numbers recorded; that failure is already counted in the error log.
+const emitNow = shouldEmitSummary(
+  marker,
+  Date.now(),
+  isSessionEnd,
+  HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
+);
+if (emitNow) {
+  try {
+    emitProvenance({ ...summary, latency_ms: Date.now() - t0, session_id: sessionId });
+  } catch (err) {
+    logError('session-ledger.emit', err);
+  }
+}
+
+if (wrote || emitNow) {
+  writeMarker(markerPath, {
+    path: relPath,
+    started_ts: startedTs,
+    last_summary_ts: emitNow ? new Date().toISOString() : (marker?.last_summary_ts ?? null),
+  });
+}
+process.exit(0);
