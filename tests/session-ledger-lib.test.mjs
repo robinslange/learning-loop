@@ -351,7 +351,7 @@ test('renderLedger writes frontmatter and omits empty sections', () => {
   });
   assert.match(
     md,
-    /^---\ntitle: "Session ledger: ledger flake \(2026-09-21\)"\ntags: \[ledger, "my-repo"\]\ndate: 2026-09-21\nsource: session\nsession_id: 60e4c15a-487a-4e85-a18a-a989d8c00de7\nrepo: "my-repo"\nbranch: "main"\nstatus: ended\nended_reason: other\n---\n/,
+    /^---\ntitle: "Session ledger: ledger flake \(2026-09-21\)"\ntags: \[ledger, "my-repo"\]\ndate: 2026-09-21\nsource: session\nvisibility: private\nsession_id: 60e4c15a-487a-4e85-a18a-a989d8c00de7\nrepo: "my-repo"\nbranch: "main"\nstatus: ended\nended_reason: other\n---\n/,
   );
   assert.match(md, /## Goal\nfix the flaky test/);
   assert.match(md, /## Where it stopped\nTests green, PR open\./);
@@ -447,6 +447,50 @@ test('renderLedger truncates the goal and the stop message', () => {
   assert.equal(goal.length, 200);
   assert.equal(stop.length, 600);
   assert.ok(goal.endsWith('…'));
+});
+
+test('collectFacts scrubs credential-shaped text out of the goal before it reaches the Goal section', () => {
+  const awsKey = 'AKIA' + 'A'.repeat(16);
+  const ghToken = 'ghp_' + '1'.repeat(36);
+  const walk = {
+    ...WALK,
+    prompts: [{ ts: 't', text: `rotate ${awsKey} and revoke ${ghToken} please` }],
+  };
+  const facts = collectFacts(walk, {
+    worktreeRoot: '/wt',
+    cwd: '/wt',
+    vaultRoot: '/vault',
+    lastAssistantMessage: null,
+  });
+  const summary = summarise({
+    walk,
+    git: GIT,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    projectSource: 'derived',
+    harness: 'claude-code',
+    version: 'v',
+    latencyMs: 1,
+    transcriptBytes: 1,
+  });
+  const md = renderLedger({
+    project: 'p',
+    label: 'l',
+    date: '2026-09-21',
+    sessionId: 'abcdefgh-1',
+    repoRoot: null,
+    git: GIT,
+    facts,
+    isSessionEnd: false,
+    reason: undefined,
+    summary,
+    harness: 'claude-code',
+  });
+  const goal = md.match(/## Goal\n(.*)\n/)[1];
+  assert.ok(!goal.includes(awsKey), 'AWS key literal must not reach the Goal section');
+  assert.ok(!goal.includes(ghToken), 'GitHub PAT literal must not reach the Goal section');
+  assert.match(goal, /\[REDACTED\]/);
 });
 
 test('ledgerPath is vault-relative, kebab, capped, and pinned by the sid prefix', () => {
