@@ -5,11 +5,11 @@
 //   2. convergence/*.json older than CONVERGENCE_TTL_MS — regenerable telemetry.
 //
 // vault-snapshot.mjs runs the TTL sweep: retrieval/session-dedupe + markers/
-// (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d)
-// — never the live learning-loop-session-id fallback — plus retrieval log
-// month-pruning (drop months older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff,
-// by age rather than per-prefix count) and librarian queue.jsonl.bak.* reaping
-// (7d TTL).
+// (7d), edges.db.<pid>.tmp orphans (1h), tmp per-session/legacy markers (7d,
+// never the live learning-loop-session-id fallback), plus retrieval log AND
+// logs/log-YYYY-MM.jsonl month-pruning (drop months older than the
+// RETRIEVAL_LOG_KEEP_MONTHS cutoff, by age rather than per-prefix count) and
+// librarian queue.jsonl.bak.* reaping (7d TTL).
 //
 // Fixtures use matching installed/running versions so the binary-update block
 // early-returns and never spawns a downloader — isolating the sweep behaviour.
@@ -321,6 +321,42 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
     assert.ok(
       existsSync(join(provenanceDir, `history-${months[0]}.jsonl`)),
       'provenance/ is never touched by the retrieval-log retention sweep',
+    );
+  });
+
+  rmSync(isolatedTmp, { recursive: true, force: true });
+});
+
+test('sweep: logs/log-YYYY-MM.jsonl is pruned with the same RETRIEVAL_LOG_KEEP_MONTHS policy as retrieval logs', async () => {
+  const fx = makeFixture();
+  const logsDir = join(fx.ctx.pluginData, 'logs');
+  mkdirSync(logsDir, { recursive: true });
+
+  const currentMonth = monthOffset(0);
+  const oldMonth = monthOffset(2 * HookConfig.RETRIEVAL_LOG_KEEP_MONTHS + 2);
+  writeFileSync(join(logsDir, `log-${oldMonth}.jsonl`), '{}\n');
+  writeFileSync(join(logsDir, `log-${currentMonth}.jsonl`), '{}\n');
+
+  const isolatedTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-logs-retention-tmp-'));
+  const baseCtx = {
+    ...fx.ctx,
+    tmp: isolatedTmp,
+    projectDir: null,
+    memoryDir: join(fx.sandbox, 'memdir'),
+    payloadSessionId: 'logs-retention-test-sid',
+  };
+
+  await withSandbox(fx, async () => {
+    await run({ ...baseCtx });
+
+    assert.equal(
+      existsSync(join(logsDir, `log-${oldMonth}.jsonl`)),
+      false,
+      'a log month beyond the retention window must be pruned',
+    );
+    assert.ok(
+      existsSync(join(logsDir, `log-${currentMonth}.jsonl`)),
+      'the current month is never below the cutoff',
     );
   });
 

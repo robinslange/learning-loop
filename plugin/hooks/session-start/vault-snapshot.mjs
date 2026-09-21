@@ -141,11 +141,11 @@ export async function run(ctx) {
   //       marker names that nothing reads anymore. NEVER the live
   //       learning-loop-session-id fallback;
   //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
-  //   (e) retrieval/<prefix>-YYYY-MM.jsonl logs older than the cutoff month,
-  //       measured by age across all prefixes rather than counted per prefix,
-  //       so a prefix nobody writes any more is not pinned forever. The
-  //       current month is always inside the cutoff.
-  //       provenance/ is untouched — its consumers read full history.
+  //   (e) retrieval/<prefix>-YYYY-MM.jsonl AND logs/log-YYYY-MM.jsonl logs
+  //       older than the cutoff month, measured by age across all prefixes
+  //       rather than counted per prefix, so a prefix nobody writes any more
+  //       is not pinned forever. The current month is always inside the
+  //       cutoff. provenance/ is untouched: its consumers read full history.
   function sweepDir(dir, match, cutoffMs) {
     let names;
     try {
@@ -165,12 +165,13 @@ export async function run(ctx) {
     }
   }
 
-  // retrieval/<prefix>-YYYY-MM.jsonl retention: drop anything older than a
-  // single cutoff month, shared by every prefix. The cutoff is derived from
-  // the filename's YYYY-MM suffix, never from mtime or file content, because
-  // a month bucket is written to (and its mtime bumped) all month long and
-  // mtime cannot tell a live current-month file from a stale one. YYYY-MM
-  // sorts lexically = chronologically, so string comparison is enough.
+  // <prefix>-YYYY-MM.jsonl retention, shared by retrieval/ and logs/: drop
+  // anything older than a single cutoff month, shared by every prefix. The
+  // cutoff is derived from the filename's YYYY-MM suffix, never from mtime or
+  // file content, because a month bucket is written to (and its mtime bumped)
+  // all month long and mtime cannot tell a live current-month file from a
+  // stale one. YYYY-MM sorts lexically = chronologically, so string
+  // comparison is enough.
   //
   // This was previously keep-the-newest-N-per-prefix, which is a count rather
   // than an age. A prefix that stops being written never grows past its own
@@ -239,6 +240,7 @@ export async function run(ctx) {
         DATA_PATHS.retrieval(ctx.pluginData),
         HookConfig.RETRIEVAL_LOG_KEEP_MONTHS,
       );
+      sweepRetrievalLogs(DATA_PATHS.logs(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
     }
     const TMP_SWEEP_PATTERNS = [
       /^learning-loop-stop-nudged-/,
