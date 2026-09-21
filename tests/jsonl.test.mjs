@@ -9,6 +9,7 @@ import {
   appendJsonlLineDeduped,
   _dedupeStats,
   _resetDedupeCache,
+  _lastWrittenSize,
 } from '../plugin/scripts/lib/jsonl.mjs';
 
 function withTempDir(fn) {
@@ -267,5 +268,33 @@ test('appendJsonlLineDeduped: two deduped appends of identical content read the 
       'the first call misses the in-memory cache and tails the (nonexistent) file once; every ' +
         'later call for the same path must answer from the in-memory fingerprint, not disk',
     );
+  });
+});
+
+// Paths are monthly stream files in practice, so this map stays tiny -- but
+// nothing enforced that, so a caller that churned through many distinct
+// paths would have grown it without bound.
+test('appendJsonlLineDeduped: the lastWritten cache is bounded, evicting the oldest path', () => {
+  withTempDir((dir) => {
+    _resetDedupeCache();
+    const record = { agent: 'x', action: 'score', target: 'a.md', result: 'pass' };
+    const pathFor = (i) => join(dir, `stream-${i}.jsonl`);
+    for (let i = 0; i < 40; i++) {
+      appendJsonlLineDeduped(pathFor(i), { ...record, ts: new Date(T0 + i).toISOString() }, T0 + i);
+    }
+    assert.ok(
+      _lastWrittenSize() <= 32,
+      `expected the cache capped at 32, got ${_lastWrittenSize()}`,
+    );
+    // The oldest path (stream-0) was evicted, so a repeat call for it misses
+    // the in-memory cache and tails the (empty) file again rather than
+    // dedupe-suppressing off a fingerprint that should have aged out.
+    const before = _dedupeStats().lastLineCalls;
+    appendJsonlLineDeduped(
+      pathFor(0),
+      { ...record, ts: new Date(T0 + 1000).toISOString() },
+      T0 + 1000,
+    );
+    assert.strictEqual(_dedupeStats().lastLineCalls, before + 1, 'evicted path must re-read disk');
   });
 });

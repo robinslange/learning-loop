@@ -117,7 +117,21 @@ const DEDUP_EXEMPT_ACTIONS = new Set([
 // appendJsonlLineDeduped. Seeded from disk on first use per path (see
 // lastRecord), then kept current in-process so later calls never tail the
 // file again.
+//
+// Paths are monthly stream files, so in practice this holds a handful of
+// entries -- capped anyway, evicting the oldest inserted key (Map preserves
+// insertion order), so a process that somehow churns through many distinct
+// paths cannot grow this without bound.
+const LAST_WRITTEN_MAX = 32;
 const lastWritten = new Map();
+
+function rememberLastWritten(path, value) {
+  lastWritten.delete(path); // re-insert at the end, marking it most-recent
+  lastWritten.set(path, value);
+  if (lastWritten.size > LAST_WRITTEN_MAX) {
+    lastWritten.delete(lastWritten.keys().next().value);
+  }
+}
 
 function lastRecord(path) {
   const cached = lastWritten.get(path);
@@ -128,7 +142,7 @@ function lastRecord(path) {
     const parsed = JSON.parse(prev);
     const { ts: prevTs, ...prevRest } = parsed;
     const seeded = { fingerprint: JSON.stringify(prevRest), at: Date.parse(prevTs) };
-    lastWritten.set(path, seeded);
+    rememberLastWritten(path, seeded);
     return seeded;
   } catch {
     return null;
@@ -152,7 +166,7 @@ export function appendJsonlLineDeduped(path, record, now = Date.now()) {
     return false;
   }
   appendJsonlLine(path, record);
-  lastWritten.set(path, { fingerprint, at: now });
+  rememberLastWritten(path, { fingerprint, at: now });
   return true;
 }
 
@@ -169,4 +183,9 @@ export function _resetDedupeCache() {
 // answers repeat calls, not a fresh disk read every time.
 export function _dedupeStats() {
   return { lastLineCalls };
+}
+
+// Test seam only: current size of the bounded lastWritten cache.
+export function _lastWrittenSize() {
+  return lastWritten.size;
 }
