@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -13,6 +12,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
+import { initRepo } from './helpers/git-fixture.mjs';
 
 // realpathSync: on macOS tmpdir() sits behind a symlink (/tmp -> /private/tmp,
 // or a /var/folders/... alias), and `git rev-parse --show-toplevel` always
@@ -24,20 +24,13 @@ const HOOK = fileURLToPath(new URL('../plugin/hooks/session-ledger.js', import.m
 const SID = '60e4c15a-487a-4e85-a18a-a989d8c00de7';
 let r2ctx;
 
-const gitOpts = { stdio: 'ignore' };
 function makeRepo(root) {
   // realpath root: git rev-parse --show-toplevel resolves symlinks (macOS
   // tmpdir()), so building the repo path on the unresolved sandboxRoot makes
   // resolveProject's worktreeRoot diverge from this path by prefix.
   const repo = join(realpathSync(root), 'my-repo');
   mkdirSync(repo);
-  execFileSync('git', ['-C', repo, 'init', '-q', '-b', 'main'], gitOpts);
-  execFileSync('git', ['-C', repo, 'config', 'user.email', 't@t.local'], gitOpts);
-  execFileSync('git', ['-C', repo, 'config', 'user.name', 't'], gitOpts);
-  writeFileSync(join(repo, 'a.txt'), 'a\n');
-  execFileSync('git', ['-C', repo, 'add', 'a.txt'], gitOpts);
-  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'ledger commit'], gitOpts);
-  return repo;
+  return initRepo(repo);
 }
 function makeVault(root) {
   const vault = join(root, 'vault');
