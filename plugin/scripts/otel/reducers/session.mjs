@@ -1,7 +1,7 @@
 // scripts/otel/reducers/session.mjs : the session-summary reducer.
 //
 // Reads session-summary records off the provenance stream (they are provenance
-// actions; the provenance reducer also counts them under provenance_actions),
+// actions; the provenance reducer also counts them under provenance.actions),
 // collapses to one record per session, and emits a session counter plus one
 // histogram per numeric field. Whole-corpus re-derivation like its siblings.
 
@@ -65,12 +65,12 @@ export function reduceSession({ pluginData, timeUnixMs }) {
   const countedSessions = sessions.map((s) => ({
     ...s,
     // Records written before commits_source existed used --since; countBy
-    // drops records with a null field, so they'd vanish from session_count.
+    // drops records with a null field, so they'd vanish from session.count.
     commits_source: s.commits_source ?? 'since',
   }));
   return [
     ...countBy(countedSessions, {
-      name: 'session_count',
+      name: 'session.count',
       stream: STREAM,
       by: ['end_reason', 'git_state', 'commits_source', 'project_source', 'harness', 'final'],
       timeUnixMs,
@@ -79,7 +79,7 @@ export function reduceSession({ pluginData, timeUnixMs }) {
     ...HISTOGRAMS.flatMap(([field, bounds]) =>
       histogramFrom(
         sessions.map((s) => s[field]),
-        { name: `session_${field}`, stream: STREAM, bounds, timeUnixMs, startTimeUnixMs },
+        { name: `session.${field}`, stream: STREAM, bounds, timeUnixMs, startTimeUnixMs },
       ),
     ),
   ];

@@ -38,28 +38,28 @@ export function reduceProvenance({ pluginData, timeUnixMs }) {
 
   return [
     ...countBy(known, {
-      name: 'provenance_actions',
+      name: 'provenance.actions',
       stream: STREAM,
       by: ['action'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(known, {
-      name: 'provenance_agent',
+      name: 'provenance.agent',
       stream: STREAM,
       by: ['agent'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(known, {
-      name: 'provenance_skill',
+      name: 'provenance.skill',
       stream: STREAM,
       by: ['skill'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(known, {
-      name: 'provenance_folder',
+      name: 'provenance.folder',
       stream: STREAM,
       by: ['folder'],
       timeUnixMs,

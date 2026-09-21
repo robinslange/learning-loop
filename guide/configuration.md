@@ -142,7 +142,7 @@ Export is off unless BOTH `OTEL_EXPORTER_OTLP_ENDPOINT` is set AND `otel.export_
 
 The endpoint is used verbatim, including plain `http://`, since it is meant for a LAN receiver (Grafana Alloy) rather than a public one. `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`, if set, overrides the base endpoint for metrics specifically, per the OTLP spec.
 
-Seven reducers re-derive the whole corpus per run and export counts, durations, and closed enum labels: `session_id` travels as an attribute, but paths, prompts, note titles, and any other free text never do. Every field is checked against an inclusion allowlist (`otel/schema.mjs`) that fails closed: a field absent from a stream's schema throws rather than shipping.
+Seven reducers re-derive the whole corpus per run and export counts, durations, and closed enum labels: `session_id` is allowlisted as an attribute (only the `cache-health` reducer stamps it today), but paths, prompts, note titles, and any other free text never do. Every field is checked against an inclusion allowlist (`otel/schema.mjs`) that fails closed: a field absent from a stream's schema throws rather than shipping.
 
 `OTEL_RESOURCE_ATTRIBUTES` (comma-separated `key=value` pairs) is filtered through the same kind of allowlist: only `service.version`, `service.namespace`, and `deployment.environment` pass through, each value rejected if it contains a `/`, a `\`, whitespace, or exceeds 64 characters. `service.name` is not in the allowlist at all: it always identifies learning-loop itself and cannot be overridden from the environment. Every dropped key is logged once per process.
 

@@ -18,7 +18,7 @@ import { dirname } from 'node:path';
 import { acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 import { readMarker, writeMarker } from '../../scripts/lib/marker-cache.mjs';
 import { runExport } from '../../scripts/otel/run-export.mjs';
-import { logError } from '../../scripts/lib/log.mjs';
+import { logError, info } from '../../scripts/lib/log.mjs';
 
 // Two sessions opening within this window of each other are treated as "the
 // same trigger": whichever worker acquires the lock second sees the first's
@@ -58,6 +58,12 @@ try {
     // next session-start rather than being skipped for the whole TTL.
     if (result.ok) {
       writeMarker(markerPath, true);
+    } else if (result.error === 'no metrics to export') {
+      // A fresh install has nothing to send yet. That is not a failure and
+      // must not be logged as one: under the exportFailed scope /doctor showed
+      // an empty install exactly like a dead endpoint. The marker stays
+      // unstamped so the next session-start tries again.
+      info('otel-export-worker.nothingToExport', 'no telemetry accumulated yet');
     } else {
       // runExport is documented never to throw, so without this the catch
       // below never fires and a dead endpoint, a 404 from a bad URL path, or

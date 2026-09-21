@@ -36,6 +36,12 @@ function payload(sessionId, { read, create, uncached }) {
 
 async function freshModule(stateDir) {
   process.env.LL_CACHE_HEALTH_STATE_DIR = stateDir;
+  // The plugin resolves its cache-health JSONL sink from CLAUDE_PLUGIN_DATA
+  // (falling back to the real install named in ~/.claude/plugins/data/
+  // .ll-data-path), independently of the state dir. Without this every local
+  // test run appended fixture records to the real corpus, which the OTEL
+  // export then shipped.
+  process.env.CLAUDE_PLUGIN_DATA = stateDir;
   // cache-busted import so module-level state dir resolution re-runs
   return import(pathToFileURL(PLUGIN).href + `?t=${stateDir}`);
 }
@@ -44,6 +50,7 @@ test('two concurrent sessions do not consume each others turn markers', async (t
   const dir = mkdtempSync(join(tmpdir(), 'll-cachehealth-'));
   t.after(() => {
     delete process.env.LL_CACHE_HEALTH_STATE_DIR;
+    delete process.env.CLAUDE_PLUGIN_DATA;
     rmSync(dir, { recursive: true, force: true });
   });
   const { render } = await freshModule(dir);

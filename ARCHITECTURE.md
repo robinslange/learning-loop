@@ -204,9 +204,12 @@ appears. Free text never leaves: query text, prompt slices, note titles, vault
 paths, tags, agent task descriptions and error messages are all rejected at the
 boundary, and `transcript_path` is the sharpest case, since it carries an
 absolute path including the OS username on every `agent-result` record. What
-does leave is counts, durations and bounded enum labels, plus `session_id`,
-which is a content-free UUID and is exported deliberately so a private
-dashboard can correlate across streams.
+does leave is counts, durations and identifier-shaped labels (a value that is
+not identifier shaped is replaced with `invalid` by `reduce.mjs`'s `labelOf`,
+and `validateExportRecord` asserts the shape), plus `session_id`, which is a
+content-free UUID and is allowlisted deliberately; only the `cache-health`
+reducer currently stamps it, on corpus aggregates, so per-session correlation
+across streams is not yet something the exported data supports.
 
 **The trigger is a marker-gated detached worker.** There is no scheduler in
 this plugin, so `session-start` reads the `otelExport` marker with an explicit

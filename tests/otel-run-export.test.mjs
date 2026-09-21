@@ -101,7 +101,7 @@ test('with export enabled, the payload reaches the local sink', async () => {
 });
 
 // A corpus with real signal in it: two collapsed session-summary records
-// (provenance reducer counts these as provenance_actions too) plus one plain
+// (provenance reducer counts these as provenance.actions too) plus one plain
 // provenance action and one cache-health record, so both the provenance and
 // session reducers have something to emit.
 function seedCorpus(pluginData) {
@@ -199,7 +199,7 @@ test('every configured reducer loads, session included, and shares one timestamp
 
     const metrics = result.payload.resourceMetrics[0].scopeMetrics[0].metrics;
     assert.ok(
-      metrics.some((m) => m.name === 'll.session_count'),
+      metrics.some((m) => m.name === 'll.session.count'),
       'session reducer produced no metrics',
     );
     const times = new Set(
@@ -227,8 +227,38 @@ test('an unknown reducer name is skipped without blocking the rest of the run', 
 
     const metrics = result.payload.resourceMetrics[0].scopeMetrics[0].metrics;
     assert.ok(
-      metrics.some((m) => m.name === 'll.provenance_actions'),
+      metrics.some((m) => m.name === 'll.provenance.actions'),
       'provenance reducer should still have exported',
     );
+  });
+});
+
+test('a reducer that throws voids the run: the rest still ships, but ok is false and the failure is named', async () => {
+  await withPluginData(async (pluginData) => {
+    seedTelemetry(pluginData);
+    const sink = await startOtlpSink();
+    try {
+      const result = await runExport({
+        pluginData,
+        enabled: true,
+        endpoint: sink.url,
+        reducers: [
+          'provenance',
+          {
+            name: 'broken',
+            fn: () => {
+              throw new Error('boom');
+            },
+          },
+        ],
+      });
+      assert.strictEqual(result.sent, true, 'healthy streams still ship');
+      assert.strictEqual(result.ok, false, 'but the run is not a success');
+      assert.match(result.error, /reducer\(s\) failed: broken/);
+      assert.deepStrictEqual(result.reducersFailed, ['broken']);
+      assert.strictEqual(sink.received.length, 1);
+    } finally {
+      await sink.close();
+    }
   });
 });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import {
   EXPORT_SCHEMA,
   NEVER_EXPORT,
+  LABEL_VALUE_RE,
   validateExportRecord,
 } from '../plugin/scripts/otel/schema.mjs';
 import { enumerateTelemetryKeys } from '../plugin/scripts/otel/enumerate-keys.mjs';
@@ -84,5 +85,31 @@ test('a field in neither EXPORT_SCHEMA nor NEVER_EXPORT is still refused', () =>
         `${field} must be refused on ${stream} despite being unlisted`,
       );
     }
+  }
+});
+
+test('a label value that is not identifier shaped throws even when its key is allowlisted', () => {
+  for (const value of [
+    'refactor the billing module for acme corp',
+    '/Users/robin/vault/note.md',
+    'https://example.com/x',
+    'a'.repeat(129),
+    '',
+  ]) {
+    assert.throws(() => validateExportRecord('provenance', { agent: value }), /identifier shaped/);
+  }
+});
+
+test('LABEL_VALUE_RE admits every label shape the corpus actually produces', () => {
+  for (const value of [
+    'general-purpose',
+    'learning-loop:_skills:extract-insights',
+    'pre-write-check.checkDuplicateNote',
+    '174bc571-aa4b-4a52-936e-d34bb634da73',
+    'gate-fail-below-threshold',
+    '2.1.0',
+    'false',
+  ]) {
+    assert.ok(LABEL_VALUE_RE.test(value), value);
   }
 });

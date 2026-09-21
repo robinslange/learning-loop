@@ -76,7 +76,7 @@ test('counts by command across a multi-stream, multi-month fixture', () => {
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
-    const byCommand = metricsNamed(metrics, 'retrieval_command');
+    const byCommand = metricsNamed(metrics, 'retrieval.command');
     const search = byCommand.find((m) => m.attributes.command === 'search');
     const read = byCommand.find((m) => m.attributes.command === 'read');
     const shadow = byCommand.find((m) => m.attributes.command === 'shadow');
@@ -97,7 +97,7 @@ test('the latency_ms histogram satisfies both invariants', () => {
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
-    const [hist] = metricsNamed(metrics, 'retrieval_latency_ms');
+    const [hist] = metricsNamed(metrics, 'retrieval.latency_ms');
     assert.ok(hist, 'expected a latency_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
     assert.strictEqual(
@@ -325,7 +325,7 @@ test('counts queries by federated', () => {
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
-    const byFederated = metricsNamed(metrics, 'retrieval_federated');
+    const byFederated = metricsNamed(metrics, 'retrieval.federated');
     const yes = byFederated.find((m) => m.attributes.federated === 'true');
     const no = byFederated.find((m) => m.attributes.federated === 'false');
     assert.strictEqual(yes.value, 2);
@@ -362,8 +362,8 @@ test('counts injections by via and level', () => {
 
   withCorpus(files, (pluginData) => {
     const metrics = reduceRetrieval({ pluginData, timeUnixMs: Date.now() });
-    const byVia = metricsNamed(metrics, 'retrieval_injection_via');
-    const byLevel = metricsNamed(metrics, 'retrieval_injection_level');
+    const byVia = metricsNamed(metrics, 'retrieval.injection_via');
+    const byLevel = metricsNamed(metrics, 'retrieval.injection_level');
     const auto = byVia.find((m) => m.attributes.via === 'auto');
     const permanent = byLevel.find((m) => m.attributes.level === 'permanent');
     assert.strictEqual(auto.value, 2);

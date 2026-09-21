@@ -111,15 +111,21 @@ enables it.
 
 What it sends is counts, durations and bounded labels: how many events of each
 action, per agent, per skill, per folder; token totals and cache hit rates;
-hook latencies; queue depth; error counts by scope. It sends `session_id`, a
-content-free UUID, so a dashboard can correlate across streams.
+hook latencies; queue depth; error counts by scope. Metrics are named
+`ll.<stream>.<field>`. `session_id` is allowlisted as a label, but the export
+is whole-corpus aggregates, and today only the `cache-health` reducer stamps
+it, with the most recent record's id on the corpus totals: the exported data
+does not currently support per-session correlation across streams.
 
 What it never sends is free text. Query text, prompt slices, note titles, vault
 paths, tags, agent task descriptions, research topics and error messages are
 all rejected at the export boundary by an inclusion allowlist that throws on
-any unlisted field. Note that `agent` and `skill` labels are tool identifiers
-and may encode a project name, which is worth weighing if your endpoint is not
-somewhere you control.
+any unlisted field, and every label value must be identifier shaped (no
+whitespace, no slashes, at most 128 characters) or it is replaced with
+`invalid` before it leaves. Note that `agent` and `skill` labels are tool
+identifiers: a project-local skill or agent name, which can encode a project or
+client name, does leave the machine, and each distinct name is one time series.
+Worth weighing if your endpoint is not somewhere you control.
 
 Audit exactly what would leave before enabling anything:
 

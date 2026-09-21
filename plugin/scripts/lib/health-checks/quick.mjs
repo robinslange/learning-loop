@@ -10,8 +10,9 @@ import {
   readSync,
   readdirSync,
   statSync,
+  mkdirSync,
 } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, dirname } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import {
   DATA_FILES,
@@ -1236,8 +1237,9 @@ export function checkOtelExportStatus({
       name: 'Otel export',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,
-      detail: 'active, but no export has completed yet',
-      fix: 'Open a session; the export worker runs detached from session-start',
+      detail:
+        'active, but no export has succeeded yet: either no telemetry has accumulated or the export is failing',
+      fix: 'Open a session (the worker runs detached from session-start), then see the otel-error-log check',
     });
   }
   const ageSecs = Math.max(0, Math.round((now - stat.mtimeMs) / 1000));
@@ -1289,6 +1291,22 @@ export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
     });
   }
   const path = join(DATA_PATHS.logs(pluginData), `log-${monthStr(now)}.jsonl`);
+  // log.mjs's sink swallows its own write failures by design (an error
+  // boundary cannot throw), so an unwritable log dir left this check saying
+  // "no errors" while the export-status check said the export was failing:
+  // a contradictory pair that sent the operator to an empty file. Probe the
+  // sink here, where the finding can be shown.
+  const sinkError = probeAppendable(path);
+  if (sinkError) {
+    return makeCheck({
+      id: CHECK_IDS['otel-error-log'],
+      name: 'Error log',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `error log sink is not writable (${sinkError}): failures are not being recorded`,
+      fix: `Make ${path} appendable; until then, failures reach stderr only`,
+    });
+  }
   const scopeCounts = new Map();
   let total = 0;
   for (const line of readTailLines(path, OTEL_ERROR_LOG_TAIL_BYTES)) {
@@ -1314,20 +1332,29 @@ export function checkOtelErrorLog({ pluginData, now = new Date() } = {}) {
       fix: null,
     });
   }
-  let topScope = null;
-  let topCount = 0;
-  for (const [scope, count] of scopeCounts) {
-    if (count > topCount) {
-      topScope = scope;
-      topCount = count;
-    }
-  }
+  // Every error scope shares this log, so name the top few rather than one:
+  // a single otel failure behind a noisier unrelated scope was invisible.
+  const top = [...scopeCounts].sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const topScope = top[0][0];
   return makeCheck({
     id: CHECK_IDS['otel-error-log'],
     name: 'Error log',
     status: SEVERITIES.fail,
     severity: SEVERITIES.warn,
-    detail: `${total} error(s) logged this month, top scope: ${topScope} (${topCount})`,
+    detail: `${total} error(s) logged this month, top scopes: ${top.map(([s, c]) => `${s} (${c})`).join(', ')}`,
     fix: `Check ${path} for details on the ${topScope} scope`,
   });
+}
+
+// The error string when `path` cannot be appended to (its directory created
+// if absent), or null when it can. Opens for append and closes without
+// writing, so the probe leaves an empty file at most.
+function probeAppendable(path) {
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    closeSync(openSync(path, 'a'));
+    return null;
+  } catch (err) {
+    return err.code || err.message;
+  }
 }

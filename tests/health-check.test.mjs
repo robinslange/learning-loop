@@ -1297,7 +1297,7 @@ test('checkOtelExportStatus: active but no export has ever succeeded yet', () =>
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
   assert.match(result.detail, /active/);
-  assert.match(result.detail, /no export has completed/);
+  assert.match(result.detail, /no export has succeeded/);
   rmSync(dir, { recursive: true, force: true });
 });
 
@@ -1894,4 +1894,41 @@ test('isCacheStale: true when the cache was written by another plugin version', 
 test('isCacheStale: true when the cache predates version stamping', () => {
   const recent = new Date().toISOString();
   assert.equal(isCacheStale({ ts: recent }, '2.1.0'), true);
+});
+
+test(
+  'checkOtelErrorLog: an unwritable sink is reported as a failure, not as "no errors"',
+  { skip: process.platform === 'win32' || (process.getuid && process.getuid() === 0) },
+  () => {
+    const dir = mkdtempSync(join(tmpdir(), 'health-otel-errlog-ro-'));
+    mkdirSync(join(dir, 'logs'), { recursive: true });
+    chmodSync(join(dir, 'logs'), 0o555);
+    try {
+      const result = checkOtelErrorLog({ pluginData: dir });
+      assert.equal(result.status, 'fail');
+      assert.match(result.detail, /not writable/);
+    } finally {
+      chmodSync(join(dir, 'logs'), 0o755);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test('checkOtelErrorLog: names more than one scope so an otel failure behind a noisier one is visible', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-otel-errlog-scopes-'));
+  mkdirSync(join(dir, 'logs'), { recursive: true });
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = [
+    { level: 'error', scope: 'watch.stop.unlinkPid', msg: 'x' },
+    { level: 'error', scope: 'watch.stop.unlinkPid', msg: 'x' },
+    { level: 'error', scope: 'otel-export-worker.exportFailed', msg: 'x' },
+  ];
+  writeFileSync(
+    join(dir, 'logs', `log-${month}.jsonl`),
+    lines.map((l) => JSON.stringify(l)).join('\n') + '\n',
+  );
+  const result = checkOtelErrorLog({ pluginData: dir, now });
+  assert.match(result.detail, /otel-export-worker\.exportFailed \(1\)/);
+  rmSync(dir, { recursive: true, force: true });
 });
