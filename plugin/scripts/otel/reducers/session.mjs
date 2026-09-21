@@ -62,8 +62,14 @@ export function reduceSession({ pluginData, timeUnixMs }) {
   );
   if (sessions.length === 0) return [];
   const startTimeUnixMs = earliestTimestamp(sessions, timeUnixMs);
+  const countedSessions = sessions.map((s) => ({
+    ...s,
+    // Records written before commits_source existed used --since; countBy
+    // drops records with a null field, so they'd vanish from session_count.
+    commits_source: s.commits_source ?? 'since',
+  }));
   return [
-    ...countBy(sessions, {
+    ...countBy(countedSessions, {
       name: 'session_count',
       stream: STREAM,
       by: ['end_reason', 'git_state', 'commits_source', 'project_source', 'harness', 'final'],
