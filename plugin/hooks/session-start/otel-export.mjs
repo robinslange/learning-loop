@@ -16,7 +16,10 @@ import { logError } from '../../scripts/lib/log.mjs';
 // mutate MARKER_TTL_MS: intentions, dreamGate and lastDream all default
 // through that shared 25h constant and changing it would silently alter
 // their cadence too.
-const OTEL_EXPORT_TTL_MS = 60 * 60 * 1000;
+// Exported so /doctor's staleness check thresholds against the SAME interval
+// the trigger uses. Two copies of this number would drift, and a check that
+// disagrees with the trigger is worse than no check.
+export const OTEL_EXPORT_TTL_MS = 60 * 60 * 1000;
 
 export function maybeSpawnOtelExport(ctx) {
   if (!ctx.pluginData) return;

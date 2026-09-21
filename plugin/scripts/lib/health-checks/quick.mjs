@@ -28,6 +28,12 @@ import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths, monthStr } from '../retrieval.mjs';
 import { MARKER_PATHS } from '../marker-cache.mjs';
+import { OTEL_EXPORT_TTL_MS } from '../../../hooks/session-start/otel-export.mjs';
+
+// How many trigger intervals may pass before a stamped marker counts as stale.
+// Three hours rather than one: the trigger fires from session-start, so a
+// machine left unused overnight is normal and must not read as broken.
+const STALE_EXPORT_TTL_MULTIPLE = 3;
 import { isExportEnabled as defaultIsExportEnabled } from '../../otel/export.mjs';
 import {
   isVaultOk,
@@ -1235,6 +1241,23 @@ export function checkOtelExportStatus({
     });
   }
   const ageSecs = Math.max(0, Math.round((now - stat.mtimeMs) / 1000));
+  // A marker that exists is not the same as an export that is working. The
+  // worker stamps it only on success, so once the endpoint dies the marker
+  // simply stops moving: reporting ok on any age meant a dead Pi looked
+  // healthy indefinitely, with the operator expected to do the arithmetic on
+  // "last export 691207s ago" themselves. Threshold against the trigger's own
+  // interval, with slack for a machine that was asleep or simply unused.
+  const staleAfterMs = OTEL_EXPORT_TTL_MS * STALE_EXPORT_TTL_MULTIPLE;
+  if (now - stat.mtimeMs > staleAfterMs) {
+    return makeCheck({
+      id: CHECK_IDS['otel-export-status'],
+      name: 'Otel export',
+      status: SEVERITIES.fail,
+      severity: SEVERITIES.warn,
+      detail: `active, but the last successful export was ${ageSecs}s ago (over ${Math.round(staleAfterMs / 1000)}s): exports are failing or no session has opened`,
+      fix: 'Check the endpoint is reachable and see the otel-error-log check; a failing POST leaves this marker unstamped',
+    });
+  }
   return makeCheck({
     id: CHECK_IDS['otel-export-status'],
     name: 'Otel export',

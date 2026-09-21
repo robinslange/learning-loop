@@ -174,6 +174,9 @@ export const env = Object.freeze({
   // config.json otel.export_enabled opt-in is true; see scripts/otel/export.mjs
   // and docs/plans/otel-consolidation.md, "Config and consent".
   OTEL_EXPORTER_OTLP_ENDPOINT: pick('OTEL_EXPORTER_OTLP_ENDPOINT', null),
+  // Spec-standard per-signal override. Used verbatim when set, for a receiver
+  // not mounted where appending /v1/metrics to the base would reach it.
+  OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: pick('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT', null),
 
   // --- Cascade-detection sentinels ---
   // True only when the var was explicitly set in the environment (not defaulted).
