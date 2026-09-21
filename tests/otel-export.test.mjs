@@ -147,3 +147,36 @@ test('a batch whose every point is malformed is not reported as success', async 
     await sink.close();
   }
 });
+
+// A non-2xx used to return no error string, so the worker that logs
+// result.error could only say "export failed". A 404 in particular means the
+// receiver is not where the endpoint says, which is worth naming.
+test('a 404 carries an actionable error naming the url and the override', async () => {
+  const sink = await startOtlpSink({ status: 404 });
+  try {
+    const result = await exportMetrics([counterMetric()], {
+      endpoint: sink.url,
+      enabled: true,
+    });
+    assert.strictEqual(result.ok, false);
+    assert.strictEqual(result.status, 404);
+    assert.match(result.error, /HTTP 404/);
+    assert.match(result.error, /OTEL_EXPORTER_OTLP_METRICS_ENDPOINT/);
+  } finally {
+    await sink.close();
+  }
+});
+
+test('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT is used verbatim, no path appended', async () => {
+  const sink = await startOtlpSink();
+  try {
+    const result = await exportMetrics([counterMetric()], {
+      metricsEndpoint: `${sink.url}/v1/metrics`,
+      enabled: true,
+    });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(sink.received.length, 1);
+  } finally {
+    await sink.close();
+  }
+});

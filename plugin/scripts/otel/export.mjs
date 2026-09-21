@@ -45,10 +45,13 @@ export function isExportEnabled() {
  */
 export async function exportMetrics(metrics, opts = {}) {
   const endpoint = 'endpoint' in opts ? opts.endpoint : env.OTEL_EXPORTER_OTLP_ENDPOINT;
+  // Spec-standard per-signal override: used verbatim, no path appended.
+  const metricsEndpoint =
+    'metricsEndpoint' in opts ? opts.metricsEndpoint : env.OTEL_EXPORTER_OTLP_METRICS_ENDPOINT;
   const enabled = 'enabled' in opts ? opts.enabled : isExportEnabled();
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  if (!endpoint || !enabled) {
+  if (!(endpoint || metricsEndpoint) || !enabled) {
     return { ok: true, sent: false };
   }
 
@@ -79,7 +82,12 @@ export async function exportMetrics(metrics, opts = {}) {
     return { ok: true, sent: false, payload };
   }
 
-  const url = `${endpoint.replace(/\/$/, '')}/v1/metrics`;
+  // Per the OTLP spec, OTEL_EXPORTER_OTLP_ENDPOINT is a BASE url and the
+  // signal path is appended, so an endpoint carrying a path prefix
+  // (http://pi:4318/otlp) correctly becomes /otlp/v1/metrics. That is a common
+  // shape behind a reverse proxy. For a receiver mounted somewhere the suffix
+  // does not fit, the spec's per-signal override takes the full url as-is.
+  const url = metricsEndpoint ? metricsEndpoint : `${endpoint.replace(/\/$/, '')}/v1/metrics`;
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -88,7 +96,21 @@ export async function exportMetrics(metrics, opts = {}) {
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (!res.ok) {
-      return { ok: false, sent: true, status: res.status, payload };
+      // Carry an error string, not just a status: the worker logs
+      // result.error, and "export failed" with no detail was indistinguishable
+      // from a network failure. A 404 here almost always means the receiver is
+      // not mounted where the endpoint says, which is worth saying out loud.
+      const hint =
+        res.status === 404
+          ? `; no OTLP receiver at ${url} (set OTEL_EXPORTER_OTLP_METRICS_ENDPOINT to the full path if your receiver is mounted elsewhere)`
+          : '';
+      return {
+        ok: false,
+        sent: true,
+        status: res.status,
+        error: `endpoint returned HTTP ${res.status}${hint}`,
+        payload,
+      };
     }
     return { ok: true, sent: true, status: res.status, payload };
   } catch (err) {

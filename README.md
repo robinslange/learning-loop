@@ -129,8 +129,19 @@ CLAUDE_PLUGIN_DATA=~/.claude/plugins/data/learning-loop-learning-loop-marketplac
 ```
 
 `--dry-run` prints the payload and sends nothing, even with an endpoint
-configured. `/learning-loop:doctor` reports whether export is active and how
-long ago the last one succeeded.
+configured.
+
+`/learning-loop:doctor` reports whether export is active, how long ago the last
+one succeeded, and flags it as failing once that age passes three trigger
+intervals, so a dead endpoint does not sit unnoticed. A failed POST is also
+written to the durable error log, where the same report counts it by scope, so
+a wrong endpoint or an unreachable host names itself rather than going quiet.
+
+The endpoint is a BASE url and `/v1/metrics` is appended, per the OTLP spec, so
+a path prefix such as `http://raspberrypi.local:4318/otlp` becomes
+`/otlp/v1/metrics`. If your receiver is mounted somewhere that suffix does not
+reach, set `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` to the full url instead and it
+is used verbatim.
 
 ### Air-gapped / update-controlled deployment
 

@@ -13,7 +13,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -239,5 +247,27 @@ test("the hook's call to maybeSpawnOtelExport is synchronous and never runs the 
     } finally {
       await sink.close();
     }
+  });
+});
+
+// runExport is documented never to throw, so without an explicit else the
+// worker's catch never fired and a dead endpoint produced no record anywhere:
+// nothing in /doctor, nothing in the logs. The operator would not notice a
+// week of silent non-delivery.
+test('a failed export is logged durably, not just skipped', async () => {
+  await withPluginData(async (pluginData) => {
+    armConfig(pluginData);
+    seedTelemetry(pluginData);
+    const r = await runWorker(pluginData, 'http://127.0.0.1:1');
+    assert.equal(r.status, 0, r.stderr);
+    const logDir = join(pluginData, 'logs');
+    const files = existsSync(logDir) ? readdirSync(logDir) : [];
+    assert.ok(files.length > 0, 'a failed export must leave a durable log record');
+    const lines = readFileSync(join(logDir, files[0]), 'utf-8').trim().split('\n');
+    const scopes = lines.map((l) => JSON.parse(l).scope);
+    assert.ok(
+      scopes.includes('otel-export-worker.exportFailed'),
+      `expected exportFailed, got ${scopes.join(',')}`,
+    );
   });
 });

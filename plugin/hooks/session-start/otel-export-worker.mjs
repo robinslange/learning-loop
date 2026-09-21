@@ -56,7 +56,20 @@ try {
     const result = await runExport({ pluginData });
     // Marker is written only on a successful run so a failure retries at the
     // next session-start rather than being skipped for the whole TTL.
-    if (result.ok) writeMarker(markerPath, true);
+    if (result.ok) {
+      writeMarker(markerPath, true);
+    } else {
+      // runExport is documented never to throw, so without this the catch
+      // below never fires and a dead endpoint, a 404 from a bad URL path, or
+      // a timeout produced no record anywhere: the operator saw nothing in
+      // /doctor and nothing in the logs. Routing it through logError puts it
+      // in the durable sink, where /doctor's otel-error-log check counts it
+      // by scope.
+      logError('otel-export-worker.exportFailed', new Error(result.error || 'export failed'), {
+        status: result.status,
+        sent: result.sent,
+      });
+    }
   }
 } catch (err) {
   logError('otel-export-worker.run', err);
