@@ -73,6 +73,15 @@ const IDENTITY = { session_id: 'label' };
 
 const ENUM_LABEL = 'label';
 
+// The shape of a label VALUE. The schema above bounds which keys may be
+// labels; a key alone does not bound what a hook wrote into it (an agent name
+// is caller-supplied to the Task tool). Identifier characters only, no
+// whitespace, no slashes, at most 128 bytes: a sentence, a path or a URL does
+// not match. reduce.mjs's labelOf replaces a non-matching value before it
+// reaches a metric; validateExportRecord then asserts it, so a reducer that
+// bypasses labelOf fails closed rather than shipping free text.
+export const LABEL_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+
 // The envelope every stream carries. `ts` is the event time, which becomes the
 // OTLP timeUnixNano rather than an attribute, and `source` distinguishes the
 // hook emitter from the CLI one. Both are content-free and present on every
@@ -215,10 +224,15 @@ export function validateExportRecord(stream, record) {
   if (!schema) {
     throw new Error(`otel export: unknown stream "${stream}"`);
   }
-  for (const key of Object.keys(record)) {
+  for (const [key, value] of Object.entries(record)) {
     if (!(key in schema)) {
       throw new Error(
         `otel export: field "${key}" is not in the export schema for stream "${stream}"`,
+      );
+    }
+    if (schema[key] === ENUM_LABEL && !LABEL_VALUE_RE.test(String(value))) {
+      throw new Error(
+        `otel export: label "${key}" on stream "${stream}" is not identifier shaped (${String(value).length} chars)`,
       );
     }
   }

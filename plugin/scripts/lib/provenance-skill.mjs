@@ -71,6 +71,23 @@ export function normaliseSkill(value, pluginRoot = defaultPluginRoot()) {
   return lower;
 }
 
+// An agent identifier is caller-supplied to the Task tool (`subagent_type`),
+// so it is bounded here the way a skill is, before it is written and later
+// exported as a label. Same charset as a skill segment but up to three
+// colon-separated segments (`learning-loop:_skills:extract-insights` is a
+// real one). Absent means the default agent; malformed means 'unknown', with
+// only the length logged, never the value.
+const AGENT_ID_RE = /^[a-z0-9_][a-z0-9._-]{0,63}(:[a-z0-9_][a-z0-9._-]{0,63}){0,2}$/i;
+
+export function normaliseAgent(value) {
+  if (value === undefined || value === null || value === '') return 'general-purpose';
+  if (typeof value === 'string' && value.length <= 128 && AGENT_ID_RE.test(value)) return value;
+  logError('provenance.unknownAgent', new Error('rejected agent value'), {
+    length: String(value).length,
+  });
+  return 'unknown';
+}
+
 // Rejects a skill value that will not normalise: logs the length only (never
 // the value itself) and returns 'unknown'.
 function validatedSkill(value, pluginRoot = defaultPluginRoot()) {

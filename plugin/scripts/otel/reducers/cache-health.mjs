@@ -16,6 +16,8 @@ import {
   histogramFrom,
   METRIC_PREFIX,
   RATIO_BOUNDS,
+  earliestTimestamp,
+  labelOf,
 } from '../reduce.mjs';
 
 const STREAM = 'cache-health';
@@ -25,9 +27,9 @@ const STREAM = 'cache-health';
 // dropped from `attributes` rather than stamped as "undefined": schema.mjs's
 // validator would reject an attribute value that isn't a real string anyway.
 function labelsFor(r) {
-  const attributes = { session_id: String(r.session_id) };
-  if (r.model !== undefined && r.model !== null) attributes.model = String(r.model);
-  if (r.version !== undefined && r.version !== null) attributes.version = String(r.version);
+  const attributes = { session_id: labelOf(r.session_id) };
+  if (r.model !== undefined && r.model !== null) attributes.model = labelOf(r.model);
+  if (r.version !== undefined && r.version !== null) attributes.version = labelOf(r.version);
   return attributes;
 }
 
@@ -59,7 +61,7 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
   // itself (the earliest record's ts), not from "now": that is what lets a
   // replayed POST be absorbed by the backend instead of double-counted. See
   // the plan's "Idempotency and the window".
-  const startTimeUnixMs = Math.min(...records.map((r) => Date.parse(r.ts)).filter(Number.isFinite));
+  const startTimeUnixMs = earliestTimestamp(records, timeUnixMs);
 
   const sums = {
     cache_read: 0,

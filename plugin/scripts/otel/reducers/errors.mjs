@@ -46,35 +46,35 @@ function reduceHookErrors(pluginData, timeUnixMs) {
 
   return [
     ...countBy(records, {
-      name: 'hook_error_module',
+      name: 'hook_errors.module',
       stream: HOOK_ERRORS_STREAM,
       by: ['module'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(records, {
-      name: 'hook_error_code',
+      name: 'hook_errors.code',
       stream: HOOK_ERRORS_STREAM,
       by: ['code'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...histogramFrom(latencies, {
-      name: 'hook_error_latency_ms',
+      name: 'hook_errors.latency_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...histogramFrom(elapsed, {
-      name: 'hook_error_elapsed_ms',
+      name: 'hook_errors.elapsed_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...histogramFrom(budgets, {
-      name: 'hook_error_budget_ms',
+      name: 'hook_errors.budget_ms',
       stream: HOOK_ERRORS_STREAM,
       bounds: LATENCY_BOUNDS_MS,
       timeUnixMs,
@@ -91,14 +91,14 @@ function reduceLogs(pluginData, timeUnixMs) {
 
   return [
     ...countBy(records, {
-      name: 'log_error_scope',
+      name: 'logs.error_scope',
       stream: LOGS_STREAM,
       by: ['scope'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(records, {
-      name: 'log_level',
+      name: 'logs.level',
       stream: LOGS_STREAM,
       by: ['level'],
       timeUnixMs,

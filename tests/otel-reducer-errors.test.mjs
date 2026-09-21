@@ -102,8 +102,8 @@ const logsFixture = [
 test('counts hook-errors by module and code', () => {
   withCorpus({ hookErrors: hookErrorFixture }, (pluginData) => {
     const metrics = reduceErrors({ pluginData, timeUnixMs: Date.now() });
-    const byModule = named(metrics, 'hook_error_module');
-    const byCode = named(metrics, 'hook_error_code');
+    const byModule = named(metrics, 'hook_errors.module');
+    const byCode = named(metrics, 'hook_errors.code');
 
     const preWrite = byModule.find((m) => m.attributes.module === 'pre-write-check');
     const postTool = byModule.find((m) => m.attributes.module === 'post-tool');
@@ -120,7 +120,7 @@ test('counts hook-errors by module and code', () => {
 test('counts logs by scope', () => {
   withCorpus({ logs: logsFixture }, (pluginData) => {
     const metrics = reduceErrors({ pluginData, timeUnixMs: Date.now() });
-    const byScope = named(metrics, 'log_error_scope');
+    const byScope = named(metrics, 'logs.error_scope');
 
     const unlinkPid = byScope.find((m) => m.attributes.scope === 'watch.stop.unlinkPid');
     const invalidAction = byScope.find((m) => m.attributes.scope === 'provenance.invalidAction');
@@ -132,7 +132,7 @@ test('counts logs by scope', () => {
 test('counts logs by level', () => {
   withCorpus({ logs: logsFixture }, (pluginData) => {
     const metrics = reduceErrors({ pluginData, timeUnixMs: Date.now() });
-    const byLevel = named(metrics, 'log_level');
+    const byLevel = named(metrics, 'logs.level');
     const error = byLevel.find((m) => m.attributes.level === 'error');
     assert.strictEqual(error.value, 3);
   });
@@ -141,7 +141,7 @@ test('counts logs by level', () => {
 test('latency_ms histogram satisfies bucket invariants', () => {
   withCorpus({ hookErrors: hookErrorFixture }, (pluginData) => {
     const metrics = reduceErrors({ pluginData, timeUnixMs: Date.now() });
-    const [hist] = named(metrics, 'hook_error_latency_ms');
+    const [hist] = named(metrics, 'hook_errors.latency_ms');
     assert.ok(hist, 'expected a latency_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
     assert.strictEqual(
@@ -154,7 +154,7 @@ test('latency_ms histogram satisfies bucket invariants', () => {
 test('elapsed_ms histogram satisfies bucket invariants', () => {
   withCorpus({ hookErrors: hookErrorFixture }, (pluginData) => {
     const metrics = reduceErrors({ pluginData, timeUnixMs: Date.now() });
-    const [hist] = named(metrics, 'hook_error_elapsed_ms');
+    const [hist] = named(metrics, 'hook_errors.elapsed_ms');
     assert.ok(hist, 'expected an elapsed_ms histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
     assert.strictEqual(
@@ -176,10 +176,10 @@ test('message, msg and meta never leak into attributes', () => {
       assert.ok(!('plugin' in attrs));
     }
 
-    const byModule = named(metrics, 'hook_error_module');
+    const byModule = named(metrics, 'hook_errors.module');
     assert.deepStrictEqual(Object.keys(byModule[0].attributes).sort(), ['module']);
 
-    const byScope = named(metrics, 'log_error_scope');
+    const byScope = named(metrics, 'logs.error_scope');
     assert.deepStrictEqual(Object.keys(byScope[0].attributes).sort(), ['scope']);
   });
 });

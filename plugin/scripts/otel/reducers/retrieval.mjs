@@ -69,28 +69,28 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
 
   const metrics = [
     ...countBy(commandRecords, {
-      name: 'retrieval_command',
+      name: 'retrieval.command',
       stream: STREAM,
       by: ['command'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(injections, {
-      name: 'retrieval_injection_via',
+      name: 'retrieval.injection_via',
       stream: STREAM,
       by: ['via'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(injections, {
-      name: 'retrieval_injection_level',
+      name: 'retrieval.injection_level',
       stream: STREAM,
       by: ['level'],
       timeUnixMs,
       startTimeUnixMs,
     }),
     ...countBy(queries, {
-      name: 'retrieval_federated',
+      name: 'retrieval.federated',
       stream: STREAM,
       by: ['federated'],
       timeUnixMs,
@@ -99,7 +99,7 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
     ...histogramFrom(
       commandRecords.map((r) => r.result_count).filter((v) => typeof v === 'number'),
       {
-        name: 'retrieval_result_count',
+        name: 'retrieval.result_count',
         stream: STREAM,
         bounds: RESULT_COUNT_BOUNDS,
         timeUnixMs,
@@ -109,7 +109,7 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
     ...histogramFrom(
       commandRecords.map((r) => r.latency_ms).filter((v) => typeof v === 'number'),
       {
-        name: 'retrieval_latency_ms',
+        name: 'retrieval.latency_ms',
         stream: STREAM,
         bounds: LATENCY_BOUNDS_MS,
         timeUnixMs,
@@ -119,7 +119,7 @@ export function reduceRetrieval({ pluginData, timeUnixMs }) {
     ...histogramFrom(
       commandRecords.map((r) => r.prompt_length).filter((v) => typeof v === 'number'),
       {
-        name: 'retrieval_prompt_length',
+        name: 'retrieval.prompt_length',
         stream: STREAM,
         bounds: PROMPT_LENGTH_BOUNDS,
         timeUnixMs,

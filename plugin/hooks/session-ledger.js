@@ -272,14 +272,17 @@ try {
       isSessionEnd,
       HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
     );
-    if (wrote || emitNow) {
-      writeMarker(markerPath, {
-        path: pin.path,
-        started_ts: pin.started_ts,
-        started_head: pin.started_head,
-        last_summary_ts: emitNow ? new Date().toISOString() : (fresh?.last_summary_ts ?? null),
-      });
-    }
+    // The pin is persisted unconditionally: it was resolved first-writer-wins
+    // under the lock above, and a flush whose note write failed before the
+    // throttle was due used to leave it unwritten, so the next flush
+    // recomputed its own and the two could diverge. Only last_summary_ts is
+    // gated on the throttle decision.
+    writeMarker(markerPath, {
+      path: pin.path,
+      started_ts: pin.started_ts,
+      started_head: pin.started_head,
+      last_summary_ts: emitNow ? new Date().toISOString() : (fresh?.last_summary_ts ?? null),
+    });
   });
 } catch (err) {
   logError('session-ledger.lock', err);
@@ -291,14 +294,12 @@ try {
     isSessionEnd,
     HookConfig.SESSION_SUMMARY_MIN_INTERVAL_MS,
   );
-  if (wrote || emitNow) {
-    writeMarker(markerPath, {
-      path: pin.path,
-      started_ts: pin.started_ts,
-      started_head: pin.started_head,
-      last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
-    });
-  }
+  writeMarker(markerPath, {
+    path: pin.path,
+    started_ts: pin.started_ts,
+    started_head: pin.started_head,
+    last_summary_ts: emitNow ? new Date().toISOString() : (latest?.last_summary_ts ?? null),
+  });
 }
 if (emitNow) {
   try {

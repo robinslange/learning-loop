@@ -13,7 +13,7 @@ import {
 import { parseFrontmatter, parseTags } from '../../scripts/lib/markdown-parse.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
-import { normaliseSkill } from '../../scripts/lib/provenance-skill.mjs';
+import { normaliseSkill, normaliseAgent } from '../../scripts/lib/provenance-skill.mjs';
 import { pluginRoot } from '../../scripts/lib/plugin-meta.mjs';
 
 export async function runProvenance(ctx) {
@@ -46,7 +46,7 @@ export async function runProvenance(ctx) {
     if (tool === 'Task' || tool === 'Agent') {
       emitProvenance({
         action: 'agent-spawn',
-        agent: input.subagent_type || input.agent_type || input.agent || 'general-purpose',
+        agent: normaliseAgent(input.subagent_type || input.agent_type || input.agent),
         // Never fall back to the prompt: it is unbounded user text, and the
         // provenance log is not where it belongs.
         description: typeof input.description === 'string' ? input.description : '',

@@ -29,7 +29,7 @@ function withCorpus(events, fn) {
 }
 
 function countersNamed(metrics, name) {
-  return metrics.filter((m) => m.name === `ll.provenance_${name}`);
+  return metrics.filter((m) => m.name === `ll.provenance.${name}`);
 }
 
 test('a fixture corpus produces the expected counts per action', () => {

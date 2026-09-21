@@ -72,12 +72,12 @@ test('one record per session: final wins, else the latest ts', () => {
   ];
   withCorpus(events, (pluginData) => {
     const metrics = reduceSession({ pluginData, timeUnixMs: Date.now() });
-    const count = metrics.filter((m) => m.name === 'll.session_count');
+    const count = metrics.filter((m) => m.name === 'll.session.count');
     assert.equal(
       count.reduce((a, m) => a + m.value, 0),
       2,
     );
-    const prompts = metrics.find((m) => m.name === 'll.session_prompts');
+    const prompts = metrics.find((m) => m.name === 'll.session.prompts');
     assert.equal(prompts.count, 2);
     assert.equal(prompts.sum, 5 + 7);
   });
@@ -86,7 +86,7 @@ test('one record per session: final wins, else the latest ts', () => {
 test('counter attributes carry only the enum labels', () => {
   withCorpus([summary({})], (pluginData) => {
     const [c] = reduceSession({ pluginData, timeUnixMs: 1 }).filter(
-      (m) => m.name === 'll.session_count',
+      (m) => m.name === 'll.session.count',
     );
     assert.deepEqual(Object.keys(c.attributes).sort(), [
       'commits_source',
@@ -125,7 +125,7 @@ test('pre-upgrade records with no commits_source still count, under since', () =
   ];
   withCorpus(events, (pluginData) => {
     const metrics = reduceSession({ pluginData, timeUnixMs: Date.now() });
-    const counts = metrics.filter((m) => m.name === 'll.session_count');
+    const counts = metrics.filter((m) => m.name === 'll.session.count');
     assert.equal(
       counts.reduce((a, m) => a + m.value, 0),
       2,

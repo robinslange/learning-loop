@@ -23,9 +23,25 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from '../lib/log.mjs';
+import { LABEL_VALUE_RE } from './schema.mjs';
 
-// Metric names share one prefix so a dashboard can select the whole plugin.
+// Metric names are `ll.<stream>.<field>`: one prefix so a dashboard can select
+// the whole plugin, then the stream as a namespace so `ll.retrieval.*` selects
+// one reducer's output. Reducers pass `<stream>.<field>` as `name`.
 export const METRIC_PREFIX = 'll';
+
+// The label a record's value becomes on the wire. schema.mjs allowlists which
+// KEYS may be labels; this bounds the VALUE. A value that is not identifier
+// shaped (a sentence, a path, an over-long string) is a data defect in the
+// corpus, not a programmer error, so it is replaced rather than voiding the
+// batch: with whole-corpus re-derivation one poisoned historical record would
+// otherwise void every future export. The replacement is itself a label, so
+// the count survives and the offending bytes never leave the machine.
+export const INVALID_LABEL = 'invalid';
+export function labelOf(value) {
+  const str = String(value);
+  return LABEL_VALUE_RE.test(str) ? str : INVALID_LABEL;
+}
 
 /**
  * Read every JSONL record from the files a reducer names, skipping malformed
@@ -47,14 +63,29 @@ export function readRecords(files) {
       logError('otel.reduce.read', err, { file });
       continue;
     }
-    for (const line of text.split('\n')) {
+    const lines = text.split('\n');
+    // A malformed LAST line is a file being appended to while we read it:
+    // normal, and skipped silently. A malformed line anywhere else is
+    // corruption, which the operator must be able to see: counted per file
+    // and logged once, so /doctor's error-log check surfaces it.
+    let malformed = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
       if (!line) continue;
+      let parsed;
       try {
-        out.push(JSON.parse(line));
-        // eslint-disable-next-line learning-loop/no-empty-catch -- a truncated last line is normal for a file being appended to while we read it; skipping one record is correct and logging every one would be noise.
+        parsed = JSON.parse(line);
       } catch {
-        /* skip malformed line */
+        parsed = null;
       }
+      if (parsed !== null && typeof parsed === 'object') out.push(parsed);
+      else if (i !== lines.length - 1) malformed += 1;
+    }
+    if (malformed > 0) {
+      logError('otel.reduce.malformedLines', new Error(`${malformed} malformed line(s) skipped`), {
+        file,
+        malformed,
+      });
     }
   }
   return out;
@@ -105,7 +136,7 @@ export function countBy(records, { name, stream, by, timeUnixMs, startTimeUnixMs
   for (const r of records) {
     if (by.some((f) => r[f] === undefined || r[f] === null)) continue;
     const attributes = {};
-    for (const f of by) attributes[f] = String(r[f]);
+    for (const f of by) attributes[f] = labelOf(r[f]);
     const key = JSON.stringify(attributes);
     const prev = buckets.get(key);
     if (prev) prev.value += 1;
@@ -122,11 +153,21 @@ export function countBy(records, { name, stream, by, timeUnixMs, startTimeUnixMs
   }));
 }
 
+// No learning-loop telemetry predates this, so a record timestamped earlier is
+// a bogus clock (an epoch-zero default, a 1970 or 2099 date), not a real
+// start. Left in, one such record would pin a cumulative start at 1970 forever.
+export const EARLIEST_PLAUSIBLE_MS = Date.parse('2025-01-01T00:00:00Z');
+const FUTURE_SLACK_MS = 24 * 60 * 60 * 1000;
+
 /**
- * The earliest timestamp in a corpus, for use as a cumulative counter's stable
- * start. Falls back to `fallbackMs` when no record carries a parseable time
- * (dream-eval has no `ts` at all), so a series still gets a fixed start rather
- * than one that moves per run.
+ * The earliest plausible timestamp in a corpus, for use as a cumulative
+ * counter's stable start. Falls back to `fallbackMs` when no record carries a
+ * plausible time, so a series still gets a fixed start rather than one that
+ * moves per run. Plausible means between EARLIEST_PLAUSIBLE_MS and a day past
+ * `fallbackMs` (the run clock). A record appended later with an OLDER but
+ * plausible ts (ordinary clock skew) still moves the start backwards: a
+ * receiver treats a start change as one counter reset, which is accepted, the
+ * same as the documented forward move when retention sweeps a month.
  *
  * @param {object[]} records
  * @param {number} fallbackMs
@@ -134,10 +175,11 @@ export function countBy(records, { name, stream, by, timeUnixMs, startTimeUnixMs
  * @returns {number}
  */
 export function earliestTimestamp(records, fallbackMs, field = 'ts') {
+  const ceiling = fallbackMs + FUTURE_SLACK_MS;
   let min = Infinity;
   for (const r of records) {
     const t = Date.parse(r[field]);
-    if (Number.isFinite(t) && t < min) min = t;
+    if (t >= EARLIEST_PLAUSIBLE_MS && t <= ceiling && t < min) min = t;
   }
   return Number.isFinite(min) ? min : fallbackMs;
 }

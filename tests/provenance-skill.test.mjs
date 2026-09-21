@@ -12,7 +12,11 @@ import { mkdtempSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { writeMarker, MARKER_PATHS, readMarker } from '../plugin/scripts/lib/marker-cache.mjs';
-import { deriveSkill, normaliseSkill } from '../plugin/scripts/lib/provenance-skill.mjs';
+import {
+  deriveSkill,
+  normaliseSkill,
+  normaliseAgent,
+} from '../plugin/scripts/lib/provenance-skill.mjs';
 import { pluginRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 describe('normaliseSkill', () => {
@@ -48,6 +52,36 @@ describe('normaliseSkill', () => {
 
   it('rejects an identifier over 128 characters', () => {
     assert.equal(normaliseSkill('a'.repeat(200), pluginRoot()), null);
+  });
+});
+
+describe('normaliseAgent', () => {
+  it('defaults an absent agent to general-purpose', () => {
+    assert.equal(normaliseAgent(undefined), 'general-purpose');
+    assert.equal(normaliseAgent(''), 'general-purpose');
+  });
+
+  it('keeps identifier-shaped agent names, up to three colon segments', () => {
+    for (const v of [
+      'general-purpose',
+      'fm-adversarial-reviewer',
+      'learning-loop:ingest-mapper-conventions',
+      'learning-loop:_skills:extract-insights',
+    ]) {
+      assert.equal(normaliseAgent(v), v);
+    }
+  });
+
+  it('rejects free text, paths and over-long values to unknown', () => {
+    for (const v of [
+      'refactor the billing module for acme corp',
+      '/Users/robin/agents/x',
+      'a:b:c:d',
+      'x'.repeat(129),
+      42,
+    ]) {
+      assert.equal(normaliseAgent(v), 'unknown');
+    }
   });
 });
 

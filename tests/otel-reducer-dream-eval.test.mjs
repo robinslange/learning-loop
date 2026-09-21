@@ -61,7 +61,7 @@ test('counts probes by tier', () => {
 
   withProbes(probes, (pluginData) => {
     const metrics = reduceDreamEval({ pluginData, timeUnixMs: Date.now() });
-    const tierCounters = countersNamed(metrics, 'dream_eval_tier');
+    const tierCounters = countersNamed(metrics, 'dream_eval.tier');
     const quick = tierCounters.find((m) => m.attributes.tier === 'quick');
     const deep = tierCounters.find((m) => m.attributes.tier === 'deep');
     assert.strictEqual(quick.value, 2);
@@ -99,7 +99,7 @@ test('confidence histogram satisfies both invariants', () => {
 
   withProbes(probes, (pluginData) => {
     const metrics = reduceDreamEval({ pluginData, timeUnixMs: Date.now() });
-    const hist = metrics.find((m) => m.name === 'll.dream_eval_confidence');
+    const hist = metrics.find((m) => m.name === 'll.dream_eval.confidence');
     assert.ok(hist);
     assert.strictEqual(hist.type, 'histogram');
     assert.strictEqual(hist.bucketCounts.length, hist.explicitBounds.length + 1);
@@ -248,5 +248,32 @@ test('the output serializes through buildOtlpPayload without throwing', () => {
   withProbes(probes, (pluginData) => {
     const metrics = reduceDreamEval({ pluginData, timeUnixMs: Date.now() });
     assert.doesNotThrow(() => buildOtlpPayload(metrics));
+  });
+});
+
+test('the cumulative start is anchored to the file, not the run clock, so it is stable across runs', () => {
+  const probes = [
+    {
+      tier: 'quick',
+      question: 'q',
+      expected_files: [],
+      source_session: 's',
+      confidence: 0.5,
+      probe_id: 'p',
+    },
+  ];
+  withProbes(probes, (pluginData) => {
+    const t1 = Date.now() + 60_000;
+    const t2 = t1 + 3_600_000;
+    const [first] = countersNamed(
+      reduceDreamEval({ pluginData, timeUnixMs: t1 }),
+      'dream_eval.tier',
+    );
+    const [second] = countersNamed(
+      reduceDreamEval({ pluginData, timeUnixMs: t2 }),
+      'dream_eval.tier',
+    );
+    assert.equal(first.startTimeUnixMs, second.startTimeUnixMs);
+    assert.notEqual(second.startTimeUnixMs, t2);
   });
 });

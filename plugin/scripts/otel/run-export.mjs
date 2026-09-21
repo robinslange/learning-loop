@@ -44,7 +44,12 @@ function exportNameFor(reducerName) {
 async function loadReducers(reducers) {
   const loaded = [];
   const skipped = [];
-  for (const name of reducers) {
+  for (const entry of reducers) {
+    if (typeof entry === 'object') {
+      loaded.push(entry);
+      continue;
+    }
+    const name = entry;
     const file = join(REDUCER_DIR, `${name}.mjs`);
     if (!existsSync(file)) {
       skipped.push(name);
@@ -72,7 +77,7 @@ async function loadReducers(reducers) {
  * @param {boolean} [opts.dryRun]     print the payload instead of POSTing
  * @param {boolean} [opts.enabled]    test seam, passed through to exportMetrics
  * @param {string} [opts.endpoint]    test seam, passed through to exportMetrics
- * @param {string[]} [opts.reducers]  test seam, defaults to REDUCERS
+ * @param {(string|{name: string, fn: Function})[]} [opts.reducers]  test seam, defaults to REDUCERS
  * @returns {Promise<object>} structured result: {ok, sent, reducersLoaded, reducersSkipped, payload?, error?}
  */
 export async function runExport(opts = {}) {
@@ -82,11 +87,13 @@ export async function runExport(opts = {}) {
 
   const { loaded, skipped } = await loadReducers(opts.reducers ?? REDUCERS);
   const metrics = [];
+  const failed = [];
   for (const { name, fn } of loaded) {
     try {
       metrics.push(...fn({ pluginData, timeUnixMs }));
     } catch (err) {
       logError('otel.runExport.reducerFailed', err, { name });
+      failed.push(name);
     }
   }
 
@@ -104,7 +111,21 @@ export async function runExport(opts = {}) {
   }
   const result = await exportMetrics(metrics, exportOpts);
 
-  return { ...result, reducersLoaded: loaded.map((r) => r.name), reducersSkipped: skipped };
+  // The healthy streams still ship, but a run missing a reducer's output is
+  // not a success: reported ok, the worker would stamp the marker and /doctor
+  // would show healthy delivery while one signal was silently absent from
+  // every export until someone noticed.
+  if (failed.length > 0 && result.ok) {
+    result.ok = false;
+    result.error = `reducer(s) failed: ${failed.join(', ')}`;
+  }
+
+  return {
+    ...result,
+    reducersLoaded: loaded.map((r) => r.name),
+    reducersSkipped: skipped,
+    reducersFailed: failed,
+  };
 }
 
 if (isMainModule(import.meta.url)) {
