@@ -10,6 +10,7 @@ import {
   monthlyFiles,
   countBy,
   histogramFrom,
+  earliestTimestamp,
   LATENCY_BOUNDS_MS,
 } from '../reduce.mjs';
 import { DATA_PATHS } from '../../lib/paths.mjs';
@@ -60,17 +61,19 @@ export function reduceSession({ pluginData, timeUnixMs }) {
     readRecords(files).filter((r) => r.action === 'session-summary'),
   );
   if (sessions.length === 0) return [];
+  const startTimeUnixMs = earliestTimestamp(sessions, timeUnixMs);
   return [
     ...countBy(sessions, {
       name: 'session_count',
       stream: STREAM,
       by: ['end_reason', 'git_state', 'project_source', 'harness', 'final'],
       timeUnixMs,
+      startTimeUnixMs,
     }),
     ...HISTOGRAMS.flatMap(([field, bounds]) =>
       histogramFrom(
         sessions.map((s) => s[field]),
-        { name: `session_${field}`, stream: STREAM, bounds, timeUnixMs },
+        { name: `session_${field}`, stream: STREAM, bounds, timeUnixMs, startTimeUnixMs },
       ),
     ),
   ];

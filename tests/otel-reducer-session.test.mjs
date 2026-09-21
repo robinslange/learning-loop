@@ -118,3 +118,20 @@ test('an empty corpus reduces to nothing', () => {
     assert.deepEqual(reduceSession({ pluginData, timeUnixMs: 1 }), []);
   });
 });
+
+test('every metric carries the earliest session ts as its cumulative start, not this run', () => {
+  const events = [
+    summary({ session_id: 's1', ts: '2026-09-20T00:00:00Z' }),
+    summary({ session_id: 's2', ts: '2026-09-21T00:00:00Z', final: true, end_reason: 'clear' }),
+  ];
+  withCorpus(events, (pluginData) => {
+    const timeUnixMs = Date.now();
+    const metrics = reduceSession({ pluginData, timeUnixMs });
+    const earliest = Date.parse('2026-09-20T00:00:00Z');
+    assert.ok(metrics.length > 0);
+    for (const m of metrics) {
+      assert.equal(m.startTimeUnixMs, earliest);
+      assert.ok(m.startTimeUnixMs < timeUnixMs);
+    }
+  });
+});
