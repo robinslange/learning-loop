@@ -13,6 +13,7 @@ import {
 } from 'fs';
 import { join } from 'path';
 import { platform, arch } from 'os';
+import { setTimeout as delay } from 'timers/promises';
 import { execFileSync, spawn, spawnSync } from 'child_process';
 import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { env, isOffline } from './lib/env.mjs';
@@ -149,19 +150,50 @@ export async function download(url, dest, { _httpsModule, _httpModule } = {}) {
   });
 }
 
-// True when the watch daemon's own pidfile (<vault>/.vault-search/watch.pid,
-// the same one watch.mjs reads) names a pid that is currently alive. A stale
-// or absent pidfile means there is nothing running to restart.
-export function watchDaemonIsRunning(vault) {
-  if (!vault) return false;
+// The pid the watch daemon's own pidfile (<vault>/.vault-search/watch.pid,
+// the same one watch.mjs reads) names, if that pid is currently alive. A
+// stale or absent pidfile returns null: there is nothing running to restart.
+export function watchDaemonPid(vault) {
+  if (!vault) return null;
   let raw;
   try {
     raw = readFileSync(join(vault, '.vault-search', 'watch.pid'), 'utf8').trim();
   } catch {
-    return false;
+    return null;
   }
   const pid = parseInt(raw, 10);
-  return Number.isFinite(pid) && isProcessAlive(pid);
+  return Number.isFinite(pid) && isProcessAlive(pid) ? pid : null;
+}
+
+export function watchDaemonIsRunning(vault) {
+  return watchDaemonPid(vault) !== null;
+}
+
+// Polls isProcessAlive(pid) until it returns false or timeoutMs elapses.
+// `watch.mjs stop` sends SIGTERM and unlinks the pidfile but does not wait
+// for the process to actually exit, so a caller that spawns the replacement
+// daemon right after stop can race the old process for its UDS socket.
+export async function waitForPidExit(pid, timeoutMs, stepMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (isProcessAlive(pid)) {
+    if (Date.now() >= deadline) return false;
+    await delay(stepMs);
+  }
+  return true;
+}
+
+// Polls the pidfile until it names a live pid other than the one that just
+// exited, or timeoutMs elapses. The new daemon writes its own pidfile on
+// startup; until that write lands, the file still holds the old pid or is
+// briefly absent (watch.mjs stop unlinks it).
+async function waitForNewDaemonPid(vault, oldPid, timeoutMs, stepMs) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const pid = watchDaemonPid(vault);
+    if (pid !== null && pid !== oldPid) return pid;
+    if (Date.now() >= deadline) return null;
+    await delay(stepMs);
+  }
 }
 
 // Remove everything under binDir except the binary just installed and
@@ -363,14 +395,36 @@ async function main() {
   // has. Reuses watch.mjs's own stop/start dispatch rather than reimplementing
   // pidfile handling here.
   const vault = getVaultPath();
-  if (watchDaemonIsRunning(vault)) {
+  const oldPid = watchDaemonPid(vault);
+  if (oldPid !== null) {
     const watchScript = join(import.meta.dirname, 'watch.mjs');
     try {
       execFileSync(process.execPath, [watchScript, 'stop'], { stdio: 'ignore' });
-      spawn(process.execPath, [watchScript], { detached: true, stdio: 'ignore' }).unref();
-      console.error('  Restarted watch daemon on the new binary.');
+      const oldExited = await waitForPidExit(oldPid, 3000, 100);
+      if (!oldExited) {
+        logError(
+          'download-binary.restartWatch',
+          new Error(`old watch daemon (pid ${oldPid}) did not exit within 3s; not restarting`),
+        );
+        console.error('  Warning: old watch daemon did not stop in time. Run `ll-watch` yourself.');
+      } else {
+        spawn(process.execPath, [watchScript], { detached: true, stdio: 'ignore' }).unref();
+        const newPid = await waitForNewDaemonPid(vault, oldPid, 3000, 100);
+        if (newPid !== null) {
+          console.error('  Restarted watch daemon on the new binary.');
+        } else {
+          logError(
+            'download-binary.restartWatch',
+            new Error('new watch daemon did not report a live pid within 3s'),
+          );
+          console.error(
+            '  Warning: watch daemon restart did not confirm. Run `ll-watch` yourself.',
+          );
+        }
+      }
     } catch (err) {
       logError('download-binary.restartWatch', err);
+      console.error('  Warning: watch daemon restart failed. Run `ll-watch` yourself.');
     }
   }
 }

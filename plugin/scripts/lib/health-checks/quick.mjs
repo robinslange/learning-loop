@@ -1010,16 +1010,10 @@ const SHADOW_GATE_MIN_PASS_RATE = 0.05;
 const SHADOW_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
 function readTailLines(path, maxBytes) {
-  let size;
-  try {
-    size = statSync(path).size;
-  } catch {
-    return [];
-  }
-  const start = Math.max(0, size - maxBytes);
-  const lines = readTailBytes(path, maxBytes).split('\n');
+  const { text, truncated } = readTailBytes(path, maxBytes);
+  const lines = text.split('\n');
   // The read may start mid-line when truncated -- drop that partial first line.
-  if (start > 0) lines.shift();
+  if (truncated) lines.shift();
   return lines;
 }
 

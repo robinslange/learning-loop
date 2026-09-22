@@ -249,8 +249,10 @@ export function emitRetrieval(prefix, event) {
   // writer, so an event passing any of these would override the writer's
   // computed value silently: ts, session_id, command, query, result_count,
   // peer_results, top_paths. Audit before adding new keys to any hook
-  // caller. Today no caller passes any of these; if you need to, do it
-  // via the explicit slot (e.g. `query: ...`) rather than through event.
+  // caller. session-label.js's gate-pass-payload record passes `ts` on
+  // purpose, to line up with the sibling dedupe-state write the usage-report
+  // join keys off. Any other caller should use the explicit slot (e.g.
+  // `query: ...`) rather than through event.
   writeRetrieval({
     pluginData: resolvePluginData(),
     prefix,

@@ -7,6 +7,7 @@ import {
   appendJsonlLine,
   appendJsonlLineSafe,
   appendJsonlLineDeduped,
+  readTailBytes,
   _dedupeStats,
   _resetDedupeCache,
   _lastWrittenSize,
@@ -296,5 +297,25 @@ test('appendJsonlLineDeduped: the lastWritten cache is bounded, evicting the old
       T0 + 1000,
     );
     assert.strictEqual(_dedupeStats().lastLineCalls, before + 1, 'evicted path must re-read disk');
+  });
+});
+
+test('readTailBytes: truncated is false when the whole file fits in maxBytes', () => {
+  withTempDir((dir) => {
+    const path = join(dir, 'small.jsonl');
+    writeFileSync(path, '{"a":1}\n{"b":2}\n');
+    const { text, truncated } = readTailBytes(path, 4096);
+    assert.strictEqual(text, '{"a":1}\n{"b":2}\n');
+    assert.strictEqual(truncated, false);
+  });
+});
+
+test('readTailBytes: truncated is true when the read starts past byte 0', () => {
+  withTempDir((dir) => {
+    const path = join(dir, 'big.jsonl');
+    writeFileSync(path, '{"a":1}\n{"b":2}\n{"c":3}\n');
+    const { text, truncated } = readTailBytes(path, 8);
+    assert.strictEqual(truncated, true);
+    assert.ok(text.length <= 8);
   });
 });

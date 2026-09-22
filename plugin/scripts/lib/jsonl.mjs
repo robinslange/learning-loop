@@ -48,20 +48,27 @@ export function appendJsonlLineSafe(path, obj) {
 // Read at most maxBytes from the end of a file, opened/seeked/closed once.
 // Shared by every caller that needs a bounded tail of an append-only file
 // instead of loading the whole thing (provenance's lastLine below, and the
-// shadow-injection / otel-error-log health checks). Returns '' on an empty
-// or unreadable file (missing, permission denied, etc.).
+// shadow-injection / otel-error-log health checks). Returns { text: '',
+// truncated: false } on an empty or unreadable file (missing, permission
+// denied, etc.).
+//
+// size and the read both come from the same fd (one fstatSync, one readSync
+// between open and close), so `truncated` reflects the file's length at the
+// moment of this read. A caller that stats the file separately before
+// calling in can observe a size that has already grown by the time the read
+// happens, understating truncation and letting a partial first line through.
 export function readTailBytes(path, maxBytes) {
   let fd;
   try {
     fd = openSync(path, 'r');
     const size = fstatSync(fd).size;
-    if (size === 0) return '';
+    if (size === 0) return { text: '', truncated: false };
     const start = Math.max(0, size - maxBytes);
     const buf = Buffer.alloc(size - start);
     readSync(fd, buf, 0, buf.length, start);
-    return buf.toString('utf8');
+    return { text: buf.toString('utf8'), truncated: start > 0 };
   } catch {
-    return '';
+    return { text: '', truncated: false };
   } finally {
     if (fd !== undefined) {
       try {
@@ -83,7 +90,7 @@ let lastLineCalls = 0;
 
 function lastLine(path) {
   lastLineCalls++;
-  const lines = readTailBytes(path, TAIL_BYTES).split('\n').filter(Boolean);
+  const lines = readTailBytes(path, TAIL_BYTES).text.split('\n').filter(Boolean);
   return lines.length > 0 ? lines[lines.length - 1] : null;
 }
 

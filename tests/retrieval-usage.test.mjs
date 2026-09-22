@@ -156,6 +156,47 @@ test('sessionSurfaced and usageReport pick up a live injection recorded only on 
   }
 });
 
+// session-label.js writes the SAME live injection twice: once into the
+// ephemeral session-dedupe state (persistDedupeState) and once into
+// shadow-injection-*.jsonl (the gate-pass-payload record). Both writers
+// stamp their own `ts` from `new Date()` a few statements apart, so the join
+// key (session_id, path, ts) never matches and loadSurfacedEvents counts one
+// live injection as two surfaced events. A fixture with identical ts on both
+// records, the fix the writer must make, is the one that should collapse.
+test('loadSurfacedEvents collapses a live injection recorded on both dedupe state and shadow-injection when ts matches', () => {
+  const sharedTs = daysAgo(1);
+  const pd = makePluginData({
+    dedupe: {
+      s1: [{ path: '3-permanent/dup.md', level: 'body', ts: sharedTs }],
+    },
+    shadowInjections: [
+      {
+        ts: sharedTs,
+        session_id: 's1',
+        type: 'gate-pass-payload',
+        mode: 'live',
+        payload: {
+          injected_paths: [{ path: '3-permanent/dup.md', level: 'body' }],
+        },
+      },
+    ],
+  });
+  try {
+    const surfaced = sessionSurfaced(pd, 's1');
+    assert.deepStrictEqual(
+      surfaced.map((n) => n.path),
+      ['3-permanent/dup.md'],
+    );
+
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/dup.md');
+    assert.ok(entry, 'note must be surfaced at all');
+    assert.strictEqual(entry.surfaced, 1, 'one live injection is one surfaced event, not two');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
 test('usageReport: surfaced-never-used excludes used notes, counts explicit ignores', () => {
   const surfaceTimes = [daysAgo(1), daysAgo(2), daysAgo(3)];
   const pd = makePluginData({

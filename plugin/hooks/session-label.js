@@ -242,7 +242,7 @@ function loadDedupeState(sid) {
   return map;
 }
 
-function persistDedupeState(sid, newEntries) {
+function persistDedupeState(sid, newEntries, ts) {
   const p = dedupeStatePath(sid);
   if (!p) return;
   try {
@@ -250,7 +250,6 @@ function persistDedupeState(sid, newEntries) {
       const { value } = safeLoad(p, { fallback: [] });
       const existing = Array.isArray(value) ? value : [];
       const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
-      const ts = new Date().toISOString();
       // One row per path: loadDedupeState only ever reads the newest entry for
       // a path, so keeping every timestamped repeat grows the file with the
       // window (4h of a busy session is ~2.6k rows) for no lookup benefit.
@@ -421,6 +420,12 @@ try {
 
   const scrubbedContext = scrubSecrets(injection.additionalContext);
 
+  // Shared by both writes below: retrieval-usage.mjs joins the dedupe-state
+  // entry and this gate-pass-payload record on (session_id, path, ts), so
+  // two independent `new Date()` calls a few ms apart would read one live
+  // injection as two surfaced events.
+  const injectedAt = new Date().toISOString();
+
   // One record shape for both modes — live injections stay visible to
   // review-shadow.mjs, so gate recalibration keeps its data after go-live.
   if (mode === 'live') {
@@ -429,6 +434,7 @@ try {
   logShadow({
     type: 'gate-pass-payload',
     mode,
+    ts: injectedAt,
     gate: {
       passed: true,
       vault_top_score: vaultTop,
@@ -447,7 +453,7 @@ try {
     dedupe_filtered_count: dedupeFilteredCount,
     would_inject: scrubbedContext,
   });
-  persistDedupeState(session_id, injection.injectedVault);
+  persistDedupeState(session_id, injection.injectedVault, injectedAt);
 } catch (err) {
   process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);
 }
