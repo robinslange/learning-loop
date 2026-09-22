@@ -197,7 +197,7 @@ Prioritize notes by combined quality + source issues:
 2. Medium priority: shallow notes with potential, missing citations
 3. Low priority: minor voice issues, weak links
 
-A `stale` finding, or a confirmed contradiction where the newer note wins, resolves to an `invalidated:` date on the losing note (see `agents-shared/capture-rules.md → Invalidation`), not only to a line in this plan. Retrieval reads frontmatter and drops an invalidated note; it cannot read a fix plan. A staleness finding that ends as prose leaves the note being served as current for every session until someone acts on the report by hand. Propose the edit, name the superseding note in `superseded_by:` where there is one, and ask before writing: invalidation is a claim about the world, not a formatting fix.
+A `stale` finding, or a confirmed contradiction where the newer note wins, resolves to an `invalidated:` date on the losing note (see `agents-shared/capture-rules.md → Invalidation`), not only to a line in this plan. Retrieval reads frontmatter and drops an invalidated note; it cannot read a fix plan. A staleness finding that ends as prose leaves the note being served as current for every session until someone acts on the report by hand. Propose the edit, and ask before writing. On approval, run `ll-run supersede-note.mjs <losing-note> --replacement <superseding-note-path>` (omit `--replacement` when nothing supersedes it; the same writer /rewrite and /reflect refinement use) rather than hand-editing frontmatter: invalidation is a claim about the world, not a formatting fix, and the one script is what keeps the write in the exact form retrieval reads.
 
 ```
 ## Fix Plan (prioritized)

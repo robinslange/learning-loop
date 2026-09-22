@@ -17,6 +17,7 @@ import {
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { supersedeNoteFile } from '../plugin/scripts/supersede-note.mjs';
 
 const INJECT_SRC = fileURLToPath(new URL('../plugin/hooks/lib/inject.mjs', import.meta.url));
 const REDACT_SCAN_SRC = fileURLToPath(
@@ -1000,6 +1001,27 @@ describe('enrichVaultHits', () => {
     );
     const out = enrichVaultHits([{ path: 'stale.md', title: 'S', score: 0.9 }], vault);
     assert.equal(out.length, 0, 'an invalidated note is not served as current');
+  });
+
+  it('drops a note after supersede-note.mjs stamps it (the writer and the reader agree)', () => {
+    writeFileSync(
+      join(vault, 'superseded-live.md'),
+      '---\ntags: [a]\ndate: 2026-01-01\nsource: synthesis\n---\n\nOld claim, still readable.\n',
+    );
+    const { changed } = supersedeNoteFile(join(vault, 'superseded-live.md'), {
+      date: '2026-09-22',
+      replacementPath: 'new-note.md',
+    });
+    assert.equal(changed, true);
+    const out = enrichVaultHits(
+      [{ path: 'superseded-live.md', title: 'Old claim', score: 0.9 }],
+      vault,
+    );
+    assert.equal(
+      out.length,
+      0,
+      'a note stamped by supersede-note.mjs must not be served as current',
+    );
   });
 
   it('keeps a note whose invalidation date has not arrived yet', () => {
