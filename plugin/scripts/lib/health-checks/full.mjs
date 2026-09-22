@@ -226,7 +226,7 @@ export function checkInvalidatedAdoption({ total = 0, invalidated = 0 } = {}) {
     id: CHECK_IDS['invalidated-adoption'],
     name: 'Invalidated notes',
     status: SEVERITIES.ok,
-    severity: SEVERITIES.info,
+    severity: SEVERITIES.warn,
     detail: `${invalidated} of ${total} notes carry invalidated:`,
     fix: null,
   });
