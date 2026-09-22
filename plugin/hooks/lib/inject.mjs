@@ -231,12 +231,7 @@ export const BODY_SLOTS = 2;
 export const POINTER_SLOTS = 3;
 
 export function buildInjection({ vaultHits, query, alreadyInjected }) {
-  const levelOf = (path) =>
-    alreadyInjected instanceof Map
-      ? alreadyInjected.get(path)
-      : alreadyInjected.has(path)
-        ? 'body'
-        : undefined;
+  const levelOf = (path) => alreadyInjected.get(path);
   // A body-bearing hit fills a body slot and every other hit is a pointer. Peer
   // rows lose their body here, the same allowlist wrapRetrieval() applies on
   // the JSON path: a federated note is awareness, never content. Which hit

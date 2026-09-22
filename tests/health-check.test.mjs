@@ -875,6 +875,43 @@ test('checkDuplicateGateHealth: warns on repeated duplicate-gate timeouts', () =
   rmSync(dir, { recursive: true, force: true });
 });
 
+// With no daemon at all (every timeout sourced 'subprocess'), the gate is not
+// disabled: checkDuplicateNote still runs the cold subprocess fallback on every
+// write. It is slow, not silent, and a write only goes unchecked when that cold
+// path also times out (source 'subprocess' or 'budget' hitting SCAN_FAILED with
+// pre_write_fail_mode left at its 'open' default -- pre-write-check.js:39,131).
+test('checkDuplicateGateHealth: no daemon reports the gate as slow, not disabled', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-nodaemon-'));
+  const now = new Date('2026-06-12T00:00:00Z');
+  const month = now.toISOString().slice(0, 7);
+  const lines = Array(4)
+    .fill(null)
+    .map(() =>
+      JSON.stringify({
+        ts: now.toISOString(),
+        module: 'pre-write-check.checkDuplicateNote',
+        code: 'duplicate-gate-timeout',
+        source: 'subprocess',
+        message: 'ETIMEDOUT',
+      }),
+    );
+  writeFileSync(join(dir, `hook-errors-${month}.jsonl`), lines.join('\n') + '\n');
+
+  const result = checkDuplicateGateHealth({ pluginData: dir, now, platform: 'linux' });
+  assert.equal(result.status, 'fail');
+  assert.doesNotMatch(
+    result.detail,
+    /silently disabled|gate is disabled/i,
+    'no daemon means every write still pays a cold subprocess -- it is slow, not skipped',
+  );
+  assert.match(
+    result.detail,
+    /cold subprocess|cold start/i,
+    'the actual cost with no daemon is a cold subprocess on every write',
+  );
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test('checkDuplicateGateHealth: stays ok under the repeat threshold', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-dupgate-under-'));
   const now = new Date('2026-06-12T00:00:00Z');

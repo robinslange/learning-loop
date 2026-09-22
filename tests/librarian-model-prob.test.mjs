@@ -11,7 +11,7 @@ const TEMP_ROOT = join(tmpdir(), `ll-librarian-mp-${runId}`);
 // constants.mjs reads process.env.{VAULT_PATH, CLAUDE_PLUGIN_DATA} at first
 // evaluation and caches them. Sibling test files may have already pulled in
 // constants.mjs with their own env, so we set ours BEFORE any import touches
-// librarian-tools (which transitively loads constants). Sub-suites that need
+// librarian/tools/index.mjs (which transitively loads constants). Sub-suites that need
 // different paths must spawn child processes.
 const FILE_VAULT = join(TEMP_ROOT, 'vault');
 const FILE_DATA = join(TEMP_ROOT, 'plugin-data');
@@ -27,7 +27,7 @@ describe('extractModelProb', () => {
 
   before(async () => {
     const tools = await import(
-      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian/tools/index.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     extractModelProb = tools.extractModelProb;
   });
@@ -148,7 +148,7 @@ describe('submitLink model_prob + cosine_score plumbing', () => {
 
   before(async () => {
     const tools = await import(
-      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian/tools/index.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const queue = await import(
       `../plugin/scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`
@@ -274,7 +274,7 @@ describe('submitLink model_prob + cosine_score plumbing', () => {
 
   it('TOOL_DEFS submit_link schema does NOT expose model_prob or cosine_score to the model', async () => {
     const tools = await import(
-      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian/tools/index.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const def = tools.TOOL_DEFS.find((t) => t.function.name === 'submit_link');
     assert.ok(def);

@@ -34,6 +34,22 @@ describe('ll-watch dispatcher', () => {
     assert.match(r.stdout, /^Usage:/m);
   });
 
+  it('"start" is a synonym for the bare form', () => {
+    // Same env-forced failure the bare form hits (no vault_path resolvable),
+    // reached only past the unknown-command guard -- proves "start" dispatches
+    // like the bare form instead of being rejected as unknown.
+    const bare = runWatch();
+    const start = runWatch('start');
+    assert.equal(start.status, bare.status);
+    assert.equal(start.stderr, bare.stderr);
+    assert.doesNotMatch(start.stderr, /unknown command/);
+  });
+
+  it('--help lists "start" as a synonym for the bare form', () => {
+    const r = runWatch('--help');
+    assert.match(r.stdout, /ll-watch start/);
+  });
+
   it('unknown command exits 2 with "unknown command:" on stderr', () => {
     const r = runWatch('bogus');
     assert.equal(r.status, 2);

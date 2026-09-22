@@ -28,7 +28,7 @@ describe('submitLink defensive checks', () => {
     writeFileSync(join(TEMP_VAULT, '3-permanent', 'note-c.md'), '# C\n');
 
     const tools = await import(
-      `../plugin/scripts/lib/librarian-tools.mjs?bust=${randomBytes(4).toString('hex')}`
+      `../plugin/scripts/librarian/tools/index.mjs?bust=${randomBytes(4).toString('hex')}`
     );
     const queue = await import(
       `../plugin/scripts/librarian/queue.mjs?bust=${randomBytes(4).toString('hex')}`

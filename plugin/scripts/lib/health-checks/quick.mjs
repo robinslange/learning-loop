@@ -4,10 +4,8 @@
 import {
   closeSync,
   existsSync,
-  fstatSync,
   openSync,
   readFileSync,
-  readSync,
   readdirSync,
   statSync,
   mkdirSync,
@@ -25,6 +23,7 @@ import {
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { resolveShimRoot } from '../shims.mjs';
+import { readTailBytes } from '../jsonl.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths, monthStr } from '../retrieval.mjs';
@@ -900,7 +899,10 @@ export function checkDuplicateGateHealth({
           (totalHardFailures > 0
             ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
             : ' (the fallback caught every one, so no write went unchecked)')
-        : `${totalTimeouts} duplicate-gate timeouts in recent logs — the gate is silently disabled on writes`,
+        : `${totalTimeouts} duplicate-gate timeouts in recent logs — no daemon answered, so each of those writes fell back to a cold subprocess start` +
+          (totalHardFailures > 0
+            ? `; ${totalHardFailures} of them then failed there too, and those writes were saved without a duplicate check`
+            : ' (the fallback caught every one, so no write went unchecked)'),
       fix: daemonIsUp
         ? totalHardFailures > 0
           ? `The daemon answered outside its ${HookConfig.PRE_WRITE_DAEMON_TIMEOUT_MS}ms socket wait and the cold subprocess behind it ran out of room as well. That second window is what the outer hook deadline sizes, so raise LL_PRE_WRITE_BUDGET_MS to give a cold scan time to finish.`
@@ -1008,21 +1010,17 @@ const SHADOW_GATE_MIN_PASS_RATE = 0.05;
 const SHADOW_LOG_TAIL_BYTES = 2 * 1024 * 1024;
 
 function readTailLines(path, maxBytes) {
-  let fd;
+  let size;
   try {
-    fd = openSync(path, 'r');
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
-    const buf = Buffer.alloc(size - start);
-    readSync(fd, buf, 0, buf.length, start);
-    const lines = buf.toString('utf-8').split('\n');
-    if (start > 0) lines.shift();
-    return lines;
+    size = statSync(path).size;
   } catch {
     return [];
-  } finally {
-    if (fd !== undefined) closeSync(fd);
   }
+  const start = Math.max(0, size - maxBytes);
+  const lines = readTailBytes(path, maxBytes).split('\n');
+  // The read may start mid-line when truncated -- drop that partial first line.
+  if (start > 0) lines.shift();
+  return lines;
 }
 
 // Scan the current + previous local month shadow-injection logs (the same naming

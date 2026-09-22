@@ -163,10 +163,22 @@ Each reducer's cumulative start time is the earliest timestamp still on disk acr
 | `LEARNING_LOOP_INJECTION_MODE`        | Per-session override of `injection_mode` (`shadow`, `live`, `off`)                                             |
 | `LEARNING_LOOP_INJECTION_THRESHOLD`   | Per-session override of `injection_threshold` (weighted-RRF fusion-sum scale, max `0.4333`, e.g. `0.35`)       |
 | `LEARNING_LOOP_INJECTION_FORCE_ERROR` | Set to `1` to simulate a pipeline failure for testing the error path                                           |
+| `LEARNING_LOOP_INJECTION_MIN_SPECIFICITY` | Per-session override of the minimum prompt specificity (distinct content words) required for injection, default `8` |
+| `LEARNING_LOOP_INJECTION_RACE_CAP_MS` | Wall-clock cap in milliseconds on the padded-vs-bare-prompt retrieval race in `session-label.js`, default `1500` |
+| `LEARNING_LOOP_ALWAYS_INJECT_MEMORY`  | Set to `1` to force context injection every turn regardless of the specificity gate                            |
+| `LEARNING_LOOP_SYNTHETIC`             | Set to `1` to mark shadow-injection telemetry as synthetic (calibration runs), so review tooling can filter it out |
 | `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |
+| `LL_PRE_WRITE_BUDGET_MS`              | Overrides the pre-write duplicate-gate's cold-subprocess wall-clock budget. The supported lever when a host's cold model start exceeds the shipped `hooks.json` deadline; raise the `hooks.json` timeout to match, since it is replaced on every plugin update |
+| `LL_DISABLE_DETECTOR`                 | Set to `1` to turn off the session-start health detector line                                                  |
+| `LL_HOOK_DEBUG`                       | Set to `1` for verbose hook debug logging                                                                      |
+| `LL_HARNESS`                          | Explicit harness name (`codex` or `claude-code`), written by `install.sh` into Codex's shell environment policy; distinguishes the Codex plugin-hook path where `PLUGIN_ROOT`/`PLUGIN_DATA` are otherwise ambiguous |
+| `LL_REPO`                             | GitHub `owner/repo` the binary downloader and update checker fetch releases from, default `robinslange/learning-loop` |
+| `LL_BENCH_REAL_ONNX`                  | Set to `1` to run the ONNX-dependent bench variants (see `bench/README.md`)                                    |
 | `OTEL_EXPORTER_OTLP_ENDPOINT`         | OTLP/HTTP+JSON metrics receiver base URL. See [OTEL export](#otel-export) below.                               |
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | Metrics-specific endpoint override, takes precedence over the base URL above                                   |
 | `OTEL_RESOURCE_ATTRIBUTES`            | Comma-separated `key=value` resource attributes; filtered through the allowlist in [OTEL export](#otel-export) |
+
+`LL_SID`, `LL_REFLECT_SID`, `LL_CHILD_PID_FILE`, `LL_SESSION_TMP_DIR` and `LL_AUTOLINK_ML_TIMEOUT_MS` are internal handshake and test seams between plugin-owned processes; none of them is meant to be set by hand.
 
 ## Vault librarian
 
@@ -312,7 +324,7 @@ node scripts/source-resolver.mjs search-pubmed "topic" --mesh
 
 Open sessions pick the update up without a restart: every hook enters through `hooks/run.mjs`, which runs the handler from the version Claude Code has installed, and skills call scripts through `ll-run`. Skill and agent text and the hook registrations themselves are read once per session, so run `/reload-plugins` when a release changes those. The previous version directory stays on disk for sessions still using it; Claude Code marks it `.orphaned_at` and removes it later. Your `config.json` lives in `PLUGIN_DATA` and is read as-is on the next run -- an update never rewrites it, so edits take effect immediately and nothing is migrated over them. (The one exception is a first-ever run with no `PLUGIN_DATA/config.json`, where the plugin's own `config.json` is copied in to seed it.) The session-start hook compares every shim in `~/.local/bin` against the text the running version renders and rewrites them when any is missing or different.
 
-Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed.
+Since v1.25.2, `hooks/session-start/cache-cleanup.mjs` compares the installed `ll-search` binary version against the running plugin version and spawns `download-binary.mjs` detached when they diverge. The current session keeps using whatever binary is on disk; the next session boots with the fresh one. One-session lag, no blocking — the gap where a plugin update bumped marketplace files but the native binary lagged is closed. If a watch daemon is already running when the download finishes, `download-binary.mjs` restarts it immediately (stop, then start, through `watch.mjs`'s own dispatch), so it does not keep running the old process image and old `--librarian-script` path for the rest of the session.
 
 ## CLI shims
 
