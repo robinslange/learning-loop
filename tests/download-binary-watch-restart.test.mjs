@@ -12,12 +12,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MOD_PATH = fileURLToPath(new URL('../plugin/scripts/download-binary.mjs', import.meta.url));
 
 test('watchDaemonIsRunning: false when no pidfile exists', async () => {
-  const { watchDaemonIsRunning } = await import(MOD_PATH);
+  const { watchDaemonIsRunning } = await import(pathToFileURL(MOD_PATH).href);
   const vault = mkdtempSync(join(tmpdir(), 'll-dlrestart-nopid-'));
   try {
     assert.equal(watchDaemonIsRunning(vault), false);
@@ -27,7 +27,7 @@ test('watchDaemonIsRunning: false when no pidfile exists', async () => {
 });
 
 test('watchDaemonIsRunning: false when the pidfile names a dead pid', async () => {
-  const { watchDaemonIsRunning } = await import(MOD_PATH);
+  const { watchDaemonIsRunning } = await import(pathToFileURL(MOD_PATH).href);
   const vault = mkdtempSync(join(tmpdir(), 'll-dlrestart-stale-'));
   try {
     mkdirSync(join(vault, '.vault-search'), { recursive: true });
@@ -40,7 +40,7 @@ test('watchDaemonIsRunning: false when the pidfile names a dead pid', async () =
 });
 
 test('watchDaemonIsRunning: true when the pidfile names the current live process', async () => {
-  const { watchDaemonIsRunning } = await import(MOD_PATH);
+  const { watchDaemonIsRunning } = await import(pathToFileURL(MOD_PATH).href);
   const vault = mkdtempSync(join(tmpdir(), 'll-dlrestart-live-'));
   try {
     mkdirSync(join(vault, '.vault-search'), { recursive: true });
