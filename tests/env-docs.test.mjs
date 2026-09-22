@@ -16,13 +16,12 @@ const CONFIG_DOC_PATH = fileURLToPath(new URL('../guide/configuration.md', impor
 
 // Cascade-detection sentinels (*_SET) are internal by construction: they exist
 // so one part of the code can tell "the operator set this" from "we defaulted
-// it", not to be set directly. LL_SID, LL_REFLECT_SID and LL_CHILD_PID_FILE
-// are session/test handshakes between plugin-owned processes, never something
-// an operator is meant to set by hand. LL_SESSION_TMP_DIR and
+// it", not to be set directly. LL_REFLECT_SID and LL_CHILD_PID_FILE are
+// session/test handshakes between plugin-owned processes, never something an
+// operator is meant to set by hand. LL_SESSION_TMP_DIR and
 // LL_AUTOLINK_ML_TIMEOUT_MS are marked "Test seam ... unset in production" in
 // env.mjs itself.
 const INTERNAL = new Set([
-  'LL_SID',
   'LL_REFLECT_SID',
   'LL_CHILD_PID_FILE',
   'LL_SESSION_TMP_DIR',
@@ -43,6 +42,17 @@ function envMjsVarNames() {
   // filter the sentinels out here rather than special-casing the regex.
   return [...names].filter((n) => !n.endsWith('_SET'));
 }
+
+// INTERNAL exists to excuse real env.mjs vars from the doc check, not to
+// carry its own list independent of what env.mjs actually reads. An entry
+// for a var env.mjs never reads (e.g. a stale LL_SID left behind when the
+// real handshake var was renamed to LL_REFLECT_SID) documents nothing and
+// excuses nothing -- it is just dead weight that the next reader trusts.
+test('every INTERNAL entry names a var env.mjs actually reads', () => {
+  const names = new Set(envMjsVarNames());
+  const dead = [...INTERNAL].filter((n) => !names.has(n));
+  assert.deepEqual(dead, [], `INTERNAL lists vars env.mjs never reads: ${dead.join(', ')}`);
+});
 
 test('every non-internal env.mjs var is documented in guide/configuration.md', () => {
   const doc = readFileSync(CONFIG_DOC_PATH, 'utf-8');

@@ -801,6 +801,78 @@ describe(
         rmSync(base, { recursive: true, force: true });
       }
     });
+
+    // retrieval-usage.mjs joins the dedupe-state entry and the
+    // gate-pass-payload record for the same live injection on (session_id,
+    // path, ts). Two independent `new Date()` calls a few statements apart
+    // give them different ts, so one live injection reads as two surfaced
+    // events. Both writes must share one ts.
+    it('the dedupe-state entry and the gate-pass-payload record share one ts for the same injection', () => {
+      const base = mkdtempSync(join(tmpdir(), 'll-live-ts-'));
+      try {
+        const vault = join(base, 'vault');
+        const pluginData = join(base, 'plugin-data');
+        const home = join(base, 'home');
+        const stubBin = join(pluginData, 'bin');
+        mkdirSync(join(vault, 'notes'), { recursive: true });
+        mkdirSync(home, { recursive: true });
+        mkdirSync(stubBin, { recursive: true });
+
+        writeFileSync(
+          join(vault, 'notes', 'delta.md'),
+          'Delta note body about shared timestamps and dedupe joins.\n',
+        );
+        const hit = JSON.stringify([{ path: 'notes/delta.md', title: 'delta', score: 0.99 }]);
+        writeFileSync(join(stubBin, 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+          mode: 0o755,
+        });
+
+        const sid = randomUUID();
+        execFileSync('node', [HOOK], {
+          input: JSON.stringify({
+            session_id: sid,
+            prompt: 'what do we know about shared timestamps and dedupe joins',
+            transcript_path: '',
+            cwd: '/tmp',
+          }),
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            HOME: home,
+            TMPDIR: base,
+            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+            CLAUDE_PLUGIN_DATA: pluginData,
+            VAULT_PATH: vault,
+            LEARNING_LOOP_INJECTION_MODE: 'live',
+            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+          },
+        });
+
+        const statePath = join(pluginData, 'retrieval', 'session-dedupe', `${sid}.json`);
+        const state = JSON.parse(readFileSync(statePath, 'utf-8'));
+        const dedupeEntry = state.find((e) => e.path === 'notes/delta.md');
+        assert.ok(dedupeEntry, 'dedupe state must record the injected note');
+
+        const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+        const logPath = join(pluginData, 'retrieval', `shadow-injection-${month}.jsonl`);
+        const records = readFileSync(logPath, 'utf8')
+          .trim()
+          .split('\n')
+          .map((l) => JSON.parse(l));
+        const pass = records.find((r) => r.gate?.passed === true);
+        assert.ok(pass, 'a gate-pass record must be logged in live mode');
+
+        assert.equal(
+          dedupeEntry.ts,
+          pass.ts,
+          'the dedupe-state entry and the shadow record must carry the same ts, or the usage-report join double-counts the injection',
+        );
+      } finally {
+        rmSync(base, { recursive: true, force: true });
+      }
+    });
   },
 );
 

@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Fixed
+
+- **Eleven small fixes from the post-v2.2.0 review.** The duplicate-gate health check no longer calls a slow gate "disabled" (#51). The usage report's injected channel reads live `shadow-injection` records, so it is complete for live sessions, and the hook now stamps one timestamp on both the shadow record and the dedupe state so the join does not double count (#64, partial). Stale committed SBOMs are gone; CI attaches fresh ones per release (#31). Every `LL_*`/`LEARNING_LOOP_*` variable read in code is documented, with a test that keeps it so (#68). `download-binary` prunes older binaries from `bin/` (#22, partial) and restarts a running watch daemon onto the new binary, waiting for the old process to exit and confirming the new pid. `ll-watch start` works. Three callerless exports, six unread constants and the deprecated `librarian-tools.mjs` shim are removed; one tail-read primitive serves both `jsonl.mjs` and the health checks.
+
 ## v2.2.0
 
 ### Added
