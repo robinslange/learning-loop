@@ -186,7 +186,7 @@ export async function waitForPidExit(pid, timeoutMs, stepMs) {
 // exited, or timeoutMs elapses. The new daemon writes its own pidfile on
 // startup; until that write lands, the file still holds the old pid or is
 // briefly absent (watch.mjs stop unlinks it).
-async function waitForNewDaemonPid(vault, oldPid, timeoutMs, stepMs) {
+export async function waitForNewDaemonPid(vault, oldPid, timeoutMs, stepMs) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const pid = watchDaemonPid(vault);
