@@ -48,10 +48,8 @@ function parseLines(transcript) {
     if (!trimmed) continue;
     try {
       out.push(JSON.parse(trimmed));
-    } catch {
-      // A live transcript can be truncated mid-write. Skipping a line costs
-      // one signal; throwing costs the whole session's evidence.
-    }
+      // eslint-disable-next-line learning-loop/no-empty-catch -- a live transcript can be truncated mid-write; skipping a line costs one signal, throwing costs the whole session's evidence.
+    } catch {}
   }
   return out;
 }
