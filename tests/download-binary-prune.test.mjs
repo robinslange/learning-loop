@@ -11,12 +11,12 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const MOD_PATH = fileURLToPath(new URL('../plugin/scripts/download-binary.mjs', import.meta.url));
 
 test('pruneOldBinaries: removes a stale binary of a different name, keeps the current one and .version', async () => {
-  const { pruneOldBinaries } = await import(MOD_PATH);
+  const { pruneOldBinaries } = await import(pathToFileURL(MOD_PATH).href);
   const binDir = mkdtempSync(join(tmpdir(), 'll-dlprune-'));
   try {
     writeFileSync(join(binDir, 'll-search'), 'current binary');
@@ -30,7 +30,7 @@ test('pruneOldBinaries: removes a stale binary of a different name, keeps the cu
 });
 
 test('pruneOldBinaries: removes a stale directory left by a partial extraction', async () => {
-  const { pruneOldBinaries } = await import(MOD_PATH);
+  const { pruneOldBinaries } = await import(pathToFileURL(MOD_PATH).href);
   const binDir = mkdtempSync(join(tmpdir(), 'll-dlprune-dir-'));
   try {
     writeFileSync(join(binDir, 'll-search.exe'), 'current binary');
@@ -44,7 +44,7 @@ test('pruneOldBinaries: removes a stale directory left by a partial extraction',
 });
 
 test('pruneOldBinaries: leaves unrelated files alone', async () => {
-  const { pruneOldBinaries } = await import(MOD_PATH);
+  const { pruneOldBinaries } = await import(pathToFileURL(MOD_PATH).href);
   const binDir = mkdtempSync(join(tmpdir(), 'll-dlprune-unrelated-'));
   try {
     writeFileSync(join(binDir, 'll-search'), 'current binary');
