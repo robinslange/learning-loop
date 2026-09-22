@@ -109,6 +109,7 @@ test('LABEL_VALUE_RE admits every label shape the corpus actually produces', () 
     'gate-fail-below-threshold',
     '2.1.0',
     'false',
+    'global.anthropic.claude-opus-5[1m]',
   ]) {
     assert.ok(LABEL_VALUE_RE.test(value), value);
   }

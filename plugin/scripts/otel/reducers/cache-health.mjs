@@ -23,15 +23,26 @@ import {
 const STREAM = 'cache-health';
 
 // Labels present on some records, absent on others (the statusline plugin
-// adds model/version/total_cost_usd conditionally). Missing labels are
-// dropped from `attributes` rather than stamped as "undefined": schema.mjs's
-// validator would reject an attribute value that isn't a real string anyway.
+// adds model/version conditionally). Missing labels are dropped from
+// `attributes` rather than stamped as "undefined": schema.mjs's validator
+// would reject an attribute value that isn't a real string anyway.
+// session_id is deliberately not a label here: these are whole-corpus
+// aggregates, and an earlier version stamped the LAST record's session id on
+// every total, which read as attribution and was not.
 function labelsFor(r) {
-  const attributes = { session_id: labelOf(r.session_id) };
+  const attributes = {};
   if (r.model !== undefined && r.model !== null) attributes.model = labelOf(r.model);
   if (r.version !== undefined && r.version !== null) attributes.version = labelOf(r.version);
   return attributes;
 }
+
+const SUM_FIELDS = [
+  'cache_read',
+  'cache_creation',
+  'uncached_input',
+  'output_tokens',
+  'session_busts',
+];
 
 function counter(name, value, { timeUnixMs, startTimeUnixMs, attributes }) {
   return {
@@ -63,21 +74,27 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
   // the plan's "Idempotency and the window".
   const startTimeUnixMs = earliestTimestamp(records, timeUnixMs);
 
-  const sums = {
-    cache_read: 0,
-    cache_creation: 0,
-    uncached_input: 0,
-    output_tokens: 0,
-    session_busts: 0,
-  };
+  // Token totals and session_busts sum per label set (model, version), one
+  // series each, so attribution is real: the tokens a model consumed are
+  // counted under that model, not under whichever model wrote the last line.
+  // The label sets are few (the models and plugin versions seen), so the
+  // cardinality is bounded.
+  const seriesByLabels = new Map();
   const turnHitRates = [];
   const windowHitRates = [];
   const lifetimeHitRates = [];
   let lastCost;
 
   for (const r of records) {
-    for (const key of Object.keys(sums)) {
-      if (typeof r[key] === 'number' && Number.isFinite(r[key])) sums[key] += r[key];
+    const attributes = labelsFor(r);
+    const key = JSON.stringify(attributes);
+    let series = seriesByLabels.get(key);
+    if (!series) {
+      series = { attributes, sums: Object.fromEntries(SUM_FIELDS.map((f) => [f, 0])) };
+      seriesByLabels.set(key, series);
+    }
+    for (const field of SUM_FIELDS) {
+      if (typeof r[field] === 'number' && Number.isFinite(r[field])) series.sums[field] += r[field];
     }
     if (typeof r.turn_hit_rate === 'number') turnHitRates.push(r.turn_hit_rate);
     if (typeof r.window_hit_rate === 'number') windowHitRates.push(r.window_hit_rate);
@@ -89,22 +106,12 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
       lastCost = r.total_cost_usd;
   }
 
-  // Token totals and session_busts aggregate the whole corpus into one
-  // series per label set. Attribution (model/version/session_id) is real but
-  // sparse, so a single global sum with no attributes would lose it; instead
-  // sum is taken across ALL records without per-record labels, since a
-  // counter cannot carry a per-record attribute set and remain one series.
-  // The last record's labels (freshest model/version/session) are stamped on
-  // each counter, consistent with the gauge's "latest wins" choice above.
-  const lastLabels = labelsFor(records[records.length - 1]);
-  const shared = { timeUnixMs, startTimeUnixMs, attributes: lastLabels };
-
   const metrics = [
-    counter('cache_read', sums.cache_read, shared),
-    counter('cache_creation', sums.cache_creation, shared),
-    counter('uncached_input', sums.uncached_input, shared),
-    counter('output_tokens', sums.output_tokens, shared),
-    counter('session_busts', sums.session_busts, shared),
+    ...[...seriesByLabels.values()].flatMap(({ attributes, sums }) =>
+      SUM_FIELDS.map((field) =>
+        counter(field, sums[field], { timeUnixMs, startTimeUnixMs, attributes }),
+      ),
+    ),
     ...histogramFrom(turnHitRates, {
       name: 'cache_health.turn_hit_rate',
       stream: STREAM,
@@ -129,13 +136,15 @@ export function reduceCacheHealth({ pluginData, timeUnixMs }) {
   ];
 
   if (lastCost !== undefined) {
+    // A running total: the latest cumulative figure, under the labels of the
+    // record that reported it.
     metrics.push({
       name: `${METRIC_PREFIX}.cache_health.total_cost_usd`,
       type: 'gauge',
       value: lastCost,
       timeUnixMs,
       stream: STREAM,
-      attributes: lastLabels,
+      attributes: labelsFor(records[records.length - 1]),
     });
   }
 
