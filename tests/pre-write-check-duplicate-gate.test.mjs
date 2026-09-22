@@ -373,6 +373,160 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     assert.match(result.hookSpecificOutput.additionalContext, /92% similar/);
   });
 
+  it('a fresh duplicate_flag queue entry short-circuits the scan entirely', () => {
+    // The stub fails LOUDLY if invoked (same pattern runWithSocket uses for its
+    // "subprocess never runs" proof), so a clean warning here can only have come
+    // from the queue entry, not from a scan that happened to agree with it.
+    const loudFailStub = '#!/bin/sh\necho "scan should not run" 1>&2\nexit 1\n';
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(join(binDir, 'll-search'), loudFailStub);
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        const libDir = join(pluginDataDir, 'librarian');
+        mkdirSync(libDir, { recursive: true });
+        writeFileSync(
+          join(libDir, 'queue.jsonl'),
+          JSON.stringify({
+            id: 'flagged1',
+            task: 'duplicate_flag',
+            target: '0-inbox/new-note.md',
+            duplicate_of: '3-permanent/sleep-existing.md',
+            similarity: 0.9,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+          }) + '\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.signal, null, `hook killed by ${r.signal}; stderr: ${r.stderr}`);
+      assert.equal(r.exitCode, 0, r.stderr);
+      assert.ok(
+        !r.stderr.includes('scan should not run'),
+        `the scan ran despite a fresh queue entry; stderr: ${r.stderr}`,
+      );
+      const out = r.stdout.trim();
+      const result = out ? JSON.parse(out) : null;
+      assert.ok(result, 'expected a warning payload from the queue entry');
+      assert.match(result.hookSpecificOutput.additionalContext, /Potential duplicate/);
+      assert.match(result.hookSpecificOutput.additionalContext, /sleep-existing\.md/);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("a stale duplicate_flag queue entry falls through to the gate's own scan", () => {
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const staleTs = new Date(Date.now() - HookConfig.DUPLICATE_FLAG_TTL_MS - 1000).toISOString();
+    const { result } = runWithStub(
+      envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+      target,
+      {
+        toolInput: { file_path: target, content: NOTE },
+      },
+    );
+    // Baseline call above did not seed a queue; re-run with a stale entry seeded
+    // to prove staleness is what's being tested, not queue absence.
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        const libDir = join(pluginDataDir, 'librarian');
+        mkdirSync(libDir, { recursive: true });
+        writeFileSync(
+          join(libDir, 'queue.jsonl'),
+          JSON.stringify({
+            id: 'flagged2',
+            task: 'duplicate_flag',
+            target: '0-inbox/new-note.md',
+            duplicate_of: '3-permanent/sleep-existing.md',
+            similarity: 0.9,
+            status: 'pending',
+            created_at: staleTs,
+          }) + '\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      const staleRunResult = out ? JSON.parse(out) : null;
+      assert.ok(staleRunResult, 'expected the gate to fall through to its own scan');
+      // Both the sanity-check run above (no queue) and this stale-queue run
+      // land on the SAME scan-derived warning, proving the stale entry was
+      // ignored rather than merely producing a coincidentally identical result.
+      assert.equal(
+        staleRunResult.hookSpecificOutput.additionalContext,
+        result.hookSpecificOutput.additionalContext,
+      );
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it("the gate's own scan hit enqueues a duplicate_flag for the librarian", () => {
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const queuePath = join(r.pluginDataDir, 'librarian', 'queue.jsonl');
+      assert.ok(existsSync(queuePath), 'expected the gate to write a librarian queue entry');
+      const lines = readFileSync(queuePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      const flagged = lines.find(
+        (item) => item.task === 'duplicate_flag' && item.target === '0-inbox/new-note.md',
+      );
+      assert.ok(
+        flagged,
+        `expected a duplicate_flag entry for the write; got: ${JSON.stringify(lines)}`,
+      );
+      assert.equal(flagged.duplicate_of, '3-permanent/sleep-existing.md');
+    } finally {
+      r.cleanup();
+    }
+  });
+
   it('the wall-clock budget governs the subprocess deadline (one clock, not two)', () => {
     // Regression: the gate used to cap the subprocess at HookConfig.QUERY_TIMEOUT_MS
     // (2s) as well as the remaining budget. LL_PRE_WRITE_BUDGET_MS raised only the

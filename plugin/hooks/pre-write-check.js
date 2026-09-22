@@ -23,6 +23,7 @@ import {
 } from '../scripts/lib/frontmatter-schema.mjs';
 import { HookConfig, preWriteFailMode } from '../scripts/lib/hook-config.mjs';
 import { getConfig } from '../scripts/lib/config.mjs';
+import { pendingItems, appendItem, newItemId } from '../scripts/librarian/queue.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
 import { logError } from '../scripts/lib/log.mjs';
@@ -280,8 +281,15 @@ function noteExistsInIndex(name, noteIndex) {
 
 // Interpret a reflect-scan result envelope (same shape from the daemon and the
 // subprocess) into a warning string, or null when there's no above-threshold
-// non-self duplicate.
-function interpretScanResult(result, filePath, vaultRoot) {
+// non-self duplicate. When relPath is known, also enqueues the hit as a
+// duplicate_flag so the librarian's async classifier gets to judge a pair the
+// gate found and it had not: this is what closes the loop the other direction
+// -- checkDuplicateFlagQueue reads that same queue before the NEXT write to
+// this path pays for a scan at all. Uses appendItem directly rather than
+// submitDuplicateFlag: that helper also loads/saves librarian state.json
+// (a second file) for a counter the gate has no use for, and the gate should
+// touch as little as it needs to stay cheap.
+function interpretScanResult(result, filePath, vaultRoot, relPath) {
   const q = result.queries && result.queries[0];
   if (!q || !q.top_match_similarity || q.top_match_similarity < HookConfig.SIMILARITY_THRESHOLD)
     return null;
@@ -291,14 +299,66 @@ function interpretScanResult(result, filePath, vaultRoot) {
   const topAbsolute = resolve(join(vaultRoot, topResult.path));
   if (topAbsolute === resolve(filePath)) return null;
 
+  if (relPath) {
+    try {
+      appendItem({
+        id: newItemId(),
+        task: 'duplicate_flag',
+        target: relPath,
+        duplicate_of: topResult.path,
+        similarity: q.top_match_similarity,
+        reason: 'pre-write gate scan',
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      logError('pre-write-check.interpretScanResult.enqueue', err);
+    }
+  }
+
   const pct = Math.round(q.top_match_similarity * 100);
   return `Potential duplicate: "${topResult.title || topResult.path}" at ${topResult.path} (${pct}% similar).`;
+}
+
+// Consult the librarian's duplicate_flag queue for a fresh verdict on THIS
+// note path before paying for a scan. pendingItems() is the same reader the
+// librarian daemon and /health/inbox use (one JSONL read, no network, no
+// subprocess); the only cost this adds to the hot path is that read. A queue
+// entry older than DUPLICATE_FLAG_TTL_MS is treated as if it were absent: the
+// librarian may have lagged the write, and a stale verdict about the note's
+// PREVIOUS content is worse than re-deriving.
+export function checkDuplicateFlagQueue(relPath) {
+  let items;
+  try {
+    items = pendingItems();
+  } catch (err) {
+    logError('pre-write-check.checkDuplicateFlagQueue', err);
+    return null;
+  }
+  const now = Date.now();
+  for (const item of items) {
+    if (item.task !== 'duplicate_flag' || item.target !== relPath) continue;
+    const ageMs = now - new Date(item.created_at).getTime();
+    if (!(ageMs >= 0) || ageMs > HookConfig.DUPLICATE_FLAG_TTL_MS) continue;
+    const pct = typeof item.similarity === 'number' ? Math.round(item.similarity * 100) : null;
+    return (
+      `Potential duplicate: "${item.duplicate_of}" flagged by the librarian` +
+      (pct !== null ? ` (${pct}% similar).` : '.')
+    );
+  }
+  return null;
 }
 
 async function checkDuplicateNote(filePath, title, vaultRoot) {
   const pluginData = resolvePluginData();
   const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
   if (!existsSync(dbPath)) return null;
+
+  const relPath = vaultRelPath(filePath, vaultRoot);
+  if (relPath) {
+    const flagged = checkDuplicateFlagQueue(relPath);
+    if (flagged) return flagged;
+  }
 
   // Daemon path: the warm watch process serves the same reflect scan over its
   // UDS socket. Try it first; fall through to the subprocess when the socket is
@@ -318,7 +378,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         }
         logError('pre-write-check.checkDuplicateNote.daemon', new Error(msg));
       } else {
-        return interpretScanResult(daemonResult.parsed, filePath, vaultRoot);
+        return interpretScanResult(daemonResult.parsed, filePath, vaultRoot, relPath);
       }
     } else if (daemonResult.reason === 'timeout' || daemonResult.reason === 'idle-timeout') {
       // The gate timed out against the warm daemon — log it distinctly so
@@ -377,7 +437,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         env: ortSpawnEnv(binary.binDir),
       },
     );
-    return interpretScanResult(JSON.parse(out), filePath, vaultRoot);
+    return interpretScanResult(JSON.parse(out), filePath, vaultRoot, relPath);
   } catch (err) {
     // ETIMEDOUT / SIGTERM from execFileSync's timeout is the silent-disable
     // failure mode — log it distinctly too, on top of the generic error log.

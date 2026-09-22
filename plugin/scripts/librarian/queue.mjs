@@ -57,8 +57,12 @@ function writeFileAtomic(path, data) {
 }
 
 export function appendItem(item) {
+  // ensureDir() BEFORE the lock, not inside it: withLock opens `<queuePath>.lock`
+  // in the same directory, so a caller writing the very first item (librarian
+  // dir does not exist yet) failed at lock acquisition before the callback
+  // -- the ensureDir() below it -- ever ran.
+  ensureDir();
   withLock(queuePath(), {}, () => {
-    ensureDir();
     appendJsonlLine(queuePath(), item);
   });
 }
