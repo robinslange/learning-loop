@@ -605,7 +605,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `scripts/provenance.mjs`, the one emitter for both the skill/CLI path and the hooks; `hooks/lib/common.mjs` wraps it with the hook's in-process dedupe and tags `source: hook`:
 
 ```json
 {
