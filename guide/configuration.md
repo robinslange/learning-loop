@@ -168,7 +168,7 @@ Each reducer's cumulative start time is the earliest timestamp still on disk acr
 | `LL_HUB_ENDPOINT`                     | Federation hub URL for `ll-search` sync, overriding the value in config; unset means the configured hub or none |
 | `LL_MODELS_DIR`                       | Directory `ll-search` loads its ONNX models from at runtime, for air-gapped or pre-staged installs (see `native/README.md`) |
 | `LL_MODEL_CACHE_DIR`                  | Build-time only: where `ll-core`'s build script caches downloaded model files |
-| `LL_RERANKER`, `LL_RERANKER_MODEL_PATH`, `LL_RERANKER_TOKENIZER_PATH` | Build-time only: point `ll-core`'s build script at a local reranker model and tokenizer instead of downloading them |
+| `LL_RERANKER_MODEL_PATH`, `LL_RERANKER_TOKENIZER_PATH` | Build-time only: point `ll-core`'s build script at a local reranker model and tokenizer instead of downloading them |
 | `LEARNING_LOOP_ALWAYS_INJECT_MEMORY`  | Set to `1` to force context injection every turn regardless of the specificity gate                            |
 | `LEARNING_LOOP_SYNTHETIC`             | Set to `1` to mark shadow-injection telemetry as synthetic (calibration runs), so review tooling can filter it out |
 | `LL_GATEWAY_FETCH_BUDGET`             | Per-session `source-gateway.mjs fetch` budget (default `10`)                                                   |

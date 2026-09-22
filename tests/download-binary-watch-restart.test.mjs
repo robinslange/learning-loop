@@ -79,3 +79,35 @@ test('waitForPidExit: resolves false when the process outlives the timeout', asy
     child.kill();
   }
 });
+
+// waitForNewDaemonPid is the other half of the restart wait: after the spawn
+// it must see a pidfile naming a LIVE pid that is not the old one.
+test('waitForNewDaemonPid: resolves the new pid once the pidfile names a different live process', async () => {
+  const { waitForNewDaemonPid } = await import(pathToFileURL(MOD_PATH).href);
+  const vault = mkdtempSync(join(tmpdir(), 'll-dl-newpid-'));
+  mkdirSync(join(vault, '.vault-search'), { recursive: true });
+  const pidfile = join(vault, '.vault-search', 'watch.pid');
+  const oldPid = 999999;
+  writeFileSync(pidfile, String(oldPid));
+  // Flip the pidfile to this test's own (live) pid part-way through the poll.
+  const timer = setTimeout(() => writeFileSync(pidfile, String(process.pid)), 60);
+  try {
+    assert.equal(await waitForNewDaemonPid(vault, oldPid, 3000, 20), process.pid);
+  } finally {
+    clearTimeout(timer);
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
+
+test('waitForNewDaemonPid: resolves null when the pidfile never changes from the old pid', async () => {
+  const { waitForNewDaemonPid } = await import(pathToFileURL(MOD_PATH).href);
+  const vault = mkdtempSync(join(tmpdir(), 'll-dl-newpid-stale-'));
+  mkdirSync(join(vault, '.vault-search'), { recursive: true });
+  // The old daemon is this process, still alive, still named in the pidfile.
+  writeFileSync(join(vault, '.vault-search', 'watch.pid'), String(process.pid));
+  try {
+    assert.equal(await waitForNewDaemonPid(vault, process.pid, 100, 20), null);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
+});
