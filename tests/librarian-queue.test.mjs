@@ -159,3 +159,48 @@ describe('librarian-queue', () => {
     assert.deepEqual(state.visited, []);
   });
 });
+
+describe('librarian-queue: appendItem on a fresh plugin-data dir', () => {
+  // Regression for the ensureDir()-before-lock ordering: withLock opens
+  // `<queuePath>.lock` in the librarian dir, so a caller writing the very
+  // first item to a plugin-data dir that has never seen a librarian
+  // directory must not fail lock acquisition before ensureDir() runs. Unlike
+  // the describe block above, this one does NOT pre-create the librarian dir.
+  const freshRunId = randomBytes(4).toString('hex');
+  const freshRoot = join(tmpdir(), 'll-queue-fresh-' + freshRunId);
+  const freshData = join(freshRoot, 'plugin-data');
+  let freshQueue;
+
+  before(async () => {
+    mkdirSync(freshData, { recursive: true });
+    process.env.CLAUDE_PLUGIN_DATA = freshData;
+    freshQueue = await import(
+      '../plugin/scripts/librarian/queue.mjs?bust=queue-fresh-' + freshRunId
+    );
+  });
+
+  after(() => {
+    rmSync(freshRoot, { recursive: true, force: true });
+    delete process.env.CLAUDE_PLUGIN_DATA;
+  });
+
+  it('succeeds and creates the queue file when the librarian dir does not exist yet', () => {
+    assert.equal(
+      existsSync(join(freshData, 'librarian')),
+      false,
+      'librarian dir must not pre-exist',
+    );
+    freshQueue.appendItem({
+      id: freshQueue.newItemId(),
+      task: 'link_suggestion',
+      target: 'foo.md',
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    const qPath = join(freshData, 'librarian', 'queue.jsonl');
+    assert.ok(existsSync(qPath), 'expected the queue file to be created');
+    const items = freshQueue.readQueue();
+    assert.equal(items.length, 1);
+    assert.equal(items[0].target, 'foo.md');
+  });
+});

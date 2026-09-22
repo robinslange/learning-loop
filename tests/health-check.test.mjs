@@ -5,6 +5,10 @@ import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
+import {
+  collectInvalidatedAdoption,
+  checkInvalidatedAdoption,
+} from '../plugin/scripts/lib/health-checks/full.mjs';
 import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 import { pluginVersion } from '../plugin/scripts/lib/plugin-meta.mjs';
@@ -1968,4 +1972,30 @@ test('checkOtelErrorLog: names more than one scope so an otel failure behind a n
   const result = checkOtelErrorLog({ pluginData: dir, now });
   assert.match(result.detail, /otel-export-worker\.exportFailed \(1\)/);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test('invalidated-adoption: counts notes whose frontmatter carries invalidated:, skipping _archive', () => {
+  const vault = mkdtempSync(join(tmpdir(), 'health-invalidated-'));
+  mkdirSync(join(vault, '3-permanent'), { recursive: true });
+  mkdirSync(join(vault, '_archive'), { recursive: true });
+  writeFileSync(join(vault, '3-permanent', 'live.md'), '---\ntitle: Live\n---\nbody\n');
+  writeFileSync(
+    join(vault, '3-permanent', 'old.md'),
+    '---\ntitle: Old\ninvalidated: 2026-09-22\nsuperseded_by: 3-permanent/live.md\n---\nbody\n',
+  );
+  writeFileSync(
+    join(vault, '3-permanent', 'body-only.md'),
+    'no frontmatter, invalidated: in body\n',
+  );
+  writeFileSync(join(vault, '_archive', 'gone.md'), '---\ninvalidated: 2026-01-01\n---\n');
+  try {
+    const counts = collectInvalidatedAdoption(vault);
+    assert.deepEqual(counts, { total: 3, invalidated: 1 });
+    const result = checkInvalidatedAdoption(counts);
+    assert.equal(result.id, CHECK_IDS['invalidated-adoption']);
+    assert.equal(result.status, SEVERITIES.ok);
+    assert.match(result.detail, /1 of 3 notes/);
+  } finally {
+    rmSync(vault, { recursive: true, force: true });
+  }
 });

@@ -337,6 +337,7 @@ export async function runFullChecks(ctx = {}) {
     full.checkBinaryRuns({ binaryVersionOutput, exitCode: binaryExitCode }),
     full.checkWatchDaemon({ pidfileExists, pidIsAlive, pid }),
     full.checkOfflineMode({ offline: isOffline() }),
+    full.checkInvalidatedAdoption(full.collectInvalidatedAdoption(c.vaultRoot)),
     checkEdgesBackfill(edgesInputs),
     checkContradictionCycles(edgesInputs),
   ];
