@@ -61,7 +61,6 @@ const HUB_TEXT_CAP = 500;
 
 function hubText(raw) {
   if (typeof raw !== 'string') return null;
-  // eslint-disable-next-line no-control-regex
   const clean = raw.replace(/[\u0000-\u001f\u007f-\u009f]/g, '');
   return clean.length > HUB_TEXT_CAP ? `${clean.slice(0, HUB_TEXT_CAP)}… (truncated)` : clean;
 }

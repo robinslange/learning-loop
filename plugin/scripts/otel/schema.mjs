@@ -77,10 +77,11 @@ const ENUM_LABEL = 'label';
 // labels; a key alone does not bound what a hook wrote into it (an agent name
 // is caller-supplied to the Task tool). Identifier characters only, no
 // whitespace, no slashes, at most 128 bytes: a sentence, a path or a URL does
-// not match. reduce.mjs's labelOf replaces a non-matching value before it
+// not match. Square brackets are admitted for model ids such as
+// `claude-opus-5[1m]`, the context-window suffix the harness reports. reduce.mjs's labelOf replaces a non-matching value before it
 // reaches a metric; validateExportRecord then asserts it, so a reducer that
 // bypasses labelOf fails closed rather than shipping free text.
-export const LABEL_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:@-]{0,127}$/;
+export const LABEL_VALUE_RE = /^[A-Za-z0-9][A-Za-z0-9._:@\[\]-]{0,127}$/;
 
 // The envelope every stream carries. `ts` is the event time, which becomes the
 // OTLP timeUnixNano rather than an attribute, and `source` distinguishes the

@@ -207,9 +207,9 @@ absolute path including the OS username on every `agent-result` record. What
 does leave is counts, durations and identifier-shaped labels (a value that is
 not identifier shaped is replaced with `invalid` by `reduce.mjs`'s `labelOf`,
 and `validateExportRecord` asserts the shape), plus `session_id`, which is a
-content-free UUID and is allowlisted deliberately; only the `cache-health`
-reducer currently stamps it, on corpus aggregates, so per-session correlation
-across streams is not yet something the exported data supports.
+content-free UUID and is allowlisted deliberately, though no reducer currently
+stamps it: the export is whole-corpus aggregates, so per-session correlation
+across streams is not something the exported data supports today.
 
 **The trigger is a marker-gated detached worker.** There is no scheduler in
 this plugin, so `session-start` reads the `otelExport` marker with an explicit

@@ -113,9 +113,9 @@ What it sends is counts, durations and bounded labels: how many events of each
 action, per agent, per skill, per folder; token totals and cache hit rates;
 hook latencies; queue depth; error counts by scope. Metrics are named
 `ll.<stream>.<field>`. `session_id` is allowlisted as a label, but the export
-is whole-corpus aggregates, and today only the `cache-health` reducer stamps
-it, with the most recent record's id on the corpus totals: the exported data
-does not currently support per-session correlation across streams.
+is whole-corpus aggregates and no reducer currently stamps it: the exported
+data does not support per-session correlation across streams. Token totals
+are attributed per model and plugin version, not per session.
 
 What it never sends is free text. Query text, prompt slices, note titles, vault
 paths, tags, agent task descriptions, research topics and error messages are

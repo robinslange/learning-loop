@@ -219,3 +219,22 @@ test('output serializes through buildOtlpPayload without throwing', () => {
     rmSync(pluginData, { recursive: true, force: true });
   }
 });
+
+test('token totals are one series per model/version label set, and session_id is never a label', () => {
+  const { pluginData, retrievalDir } = makePluginData();
+  try {
+    writeMonth(retrievalDir, 'cache-health-2026-09.jsonl', [
+      record({ session_id: 'sess-a', model: 'claude-x', version: '1.0.0', cache_read: 100 }),
+      record({ session_id: 'sess-b', model: 'claude-x', version: '1.0.0', cache_read: 50 }),
+      record({ session_id: 'sess-c', model: 'claude-y', version: '1.0.0', cache_read: 7 }),
+      record({ session_id: 'sess-d', cache_read: 1 }),
+    ]);
+    const metrics = reduceCacheHealth({ pluginData, timeUnixMs: Date.now() });
+    const reads = metrics.filter((m) => m.name === 'll.cache_health.cache_read');
+    const byModel = Object.fromEntries(reads.map((m) => [m.attributes.model ?? '(none)', m.value]));
+    assert.deepStrictEqual(byModel, { 'claude-x': 150, 'claude-y': 7, '(none)': 1 });
+    for (const m of metrics) assert.ok(!('session_id' in (m.attributes || {})), m.name);
+  } finally {
+    rmSync(pluginData, { recursive: true, force: true });
+  }
+});
