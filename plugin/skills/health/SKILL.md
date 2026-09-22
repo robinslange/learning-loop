@@ -200,6 +200,20 @@ If `coverage_days` is null (no surfacing telemetry yet), skip this step silently
 **Light:** counts + top 5 of each list.
 **Deep:** full `surfaced_never_used` list with surfaced counts and explicit-ignore counts; `surfaced_unevaluated` count + top 5; `never_surfaced` count + first 20 paths.
 
+### Step 7.65: Check: Invalidation Adoption
+
+Count the notes that carry the one supersession key retrieval reads:
+
+```bash
+grep -rl '^invalidated:' "$VAULT" --include='*.md' | grep -v '/_archive/' | wc -l
+```
+
+Report it as one line, `N notes carry invalidated:`, in both modes. This is
+adoption, not health: a low number means supersessions are still being
+recorded somewhere retrieval cannot see (a stub, a moved file, prose in a fix
+plan) rather than through `supersede-note.mjs`. `/doctor --full` reports the
+same count as the `invalidated-adoption` check.
+
 ### Step 7.7: Check: Federation
 
 Skip silently unless `PLUGIN_DATA/federation/config.json` or
