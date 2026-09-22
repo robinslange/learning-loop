@@ -205,6 +205,7 @@ If `coverage_days` is null (no surfacing telemetry yet), skip this step silently
 Count the notes that carry the one supersession key retrieval reads:
 
 ```bash
+VAULT="$(ll-paths VAULT)"
 grep -rl '^invalidated:' "$VAULT" --include='*.md' | grep -v '/_archive/' | wc -l
 ```
 
