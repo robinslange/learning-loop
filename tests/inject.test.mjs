@@ -1003,12 +1003,12 @@ describe('enrichVaultHits', () => {
     assert.equal(out.length, 0, 'an invalidated note is not served as current');
   });
 
-  it('drops a note after supersede-note.mjs stamps it (the writer and the reader agree)', () => {
+  it('drops a note after supersede-note.mjs stamps it (the writer and the reader agree)', async () => {
     writeFileSync(
       join(vault, 'superseded-live.md'),
       '---\ntags: [a]\ndate: 2026-01-01\nsource: synthesis\n---\n\nOld claim, still readable.\n',
     );
-    const { changed } = supersedeNoteFile(join(vault, 'superseded-live.md'), {
+    const { changed } = await supersedeNoteFile(join(vault, 'superseded-live.md'), {
       date: '2026-09-22',
       replacementPath: 'new-note.md',
     });

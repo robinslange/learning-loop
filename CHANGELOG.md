@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format is based on 
 ### Changed
 
 - **One provenance emitter.** The hook copy of `emitProvenance` in `hooks/lib/common.mjs` had drifted from the skill copy in `scripts/provenance.mjs` (only the latter seeded the learned-patterns templates into plugin data). The skill copy is now the single emitter with the source as a parameter; the hook keeps a thin wrapper for its in-process dedupe. SessionStart's `run()` in `context-assembly.mjs` is split from one 288-line function into one function per section, with no change to the emitted context.
+- **The pre-write duplicate gate and the librarian share verdicts.** When the librarian is enabled, the gate reads its `duplicate_flag` queue once per write and, for a note already queued for review, skips the embedding scan; a hit from the gate's own scan is queued for the librarian unless one is already pending. The first-ever queue write in a fresh install no longer fails on a missing directory.
+- **Superseding a note stamps `invalidated:` and `superseded_by:` for real.** `supersede-note.mjs` is the one writer, called by `/rewrite`, `/reflect` refinement and `/verify`; `/rewrite` no longer moves the note to `_archive/` or writes a stub retrieval cannot read, and the note's outgoing edges are demoted to the archived graph instead. A superseded note stays in the search index and is dropped post-hoc by retrieval, which costs it a candidate slot. `/doctor --full` reports how many notes carry `invalidated:`.
 
 ### Fixed
 

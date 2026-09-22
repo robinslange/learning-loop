@@ -11,6 +11,7 @@ import {
   addEdge,
   removeEdge,
   removeEdgesByNote,
+  archiveOutgoingEdges,
   getEdgesFrom,
   getEdgesTo,
   getDownstream,
@@ -39,6 +40,7 @@ const HELP_TEXT = `edges-cli.mjs <command> [args...]
 Commands:
   add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]
   remove <id>
+  archive-outgoing <note-path>    Mark a note's outgoing edges source_graph=archived
   list <note-path>
   downstream <note-path> [--max-depth 10] [--symmetric]
   sole-dependents <note-path> [--symmetric]
@@ -93,6 +95,7 @@ function usage() {
     commands: [
       'add <from> <to> <type> [--confidence high|medium|low] [--source-graph local] [--direction-flipped 0|1]',
       'remove <id>',
+      'archive-outgoing <note-path>',
       'list <note-path>',
       'downstream <note-path> [--max-depth 10] [--symmetric]',
       'sole-dependents <note-path> [--symmetric]',
@@ -111,7 +114,15 @@ function usage() {
   process.exit(1);
 }
 
-const WRITE_COMMANDS = ['add', 'remove', 'confirm', 'reject', 'super-add', 'super-remove'];
+const WRITE_COMMANDS = [
+  'add',
+  'remove',
+  'archive-outgoing',
+  'confirm',
+  'reject',
+  'super-add',
+  'super-remove',
+];
 
 async function main() {
   if (!cmd) usage();
@@ -160,6 +171,18 @@ async function main() {
         removeEdge(db, id);
         saveDb(db, DB_FILE);
         out({ ok: true, removed: id });
+        break;
+      }
+
+      case 'archive-outgoing': {
+        const notePath = args[1];
+        if (!notePath) {
+          out({ error: 'Usage: archive-outgoing <note-path>' });
+          process.exit(1);
+        }
+        archiveOutgoingEdges(db, notePath);
+        saveDb(db, DB_FILE);
+        out({ ok: true, archived: notePath });
         break;
       }
 

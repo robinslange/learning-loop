@@ -118,7 +118,9 @@ Run the approved actions. Use the right tool per store.
   ```bash
   ll-run supersede-note.mjs <archived-note> --replacement <replacement-path> [--date YYYY-MM-DD]
   ```
-  This adds `invalidated: <date>` and `superseded_by: <replacement-path>` to the note's frontmatter, in the exact form capture-rules.md defines and `enrichVaultHits` honours, and leaves the body untouched. The note stays at its original path: history is what "archive" means here, not deletion or relocation, so "what did I believe, and what changed it" stays answerable from the note itself. Because the file is not moved or overwritten, its outgoing edges are never touched by the post-write hook chain, so there is nothing to dump and re-insert.
+  This adds `invalidated: <date>` and `superseded_by: <replacement-path>` to the note's frontmatter, in the exact form capture-rules.md defines and `enrichVaultHits` honours, and leaves the body untouched. The note stays at its original path: history is what "archive" means here, not deletion or relocation, so "what did I believe, and what changed it" stays answerable from the note itself. A non-zero exit is a failure to report, not a skip: treat it as an error for this action rather than silently moving on. The script exits 0 and reports `stamped: false, reason: 'already-invalidated'` only when the note already carries `invalidated:` -- that is the one legitimate skip case. Because the file is not moved or overwritten, `supersedeNoteFile` itself archives the note's outgoing edges (marks them `source_graph='archived'`), so a retired note stops counting as live justification in downstream traversal rather than needing them dumped and re-inserted.
+
+  The retired note stays in retrieval's search index, though: the Rust indexer only skips `_`-prefixed directories, which is how the old `_archive/` move used to drop a note from search, and this flow leaves the note at its original path. It is dropped post-hoc by `enrichVaultHits` instead, so it still consumes a candidate slot in the ranked result set before that JS-side filter runs.
 
 **Vault transition note (mandatory if any vault notes were touched):**
 Write a new note to `0-inbox/` capturing the correction itself:
@@ -182,7 +184,7 @@ Future episodic searches matching "<old>" will be annotated automatically.
 - **Always ask before executing.** This skill is destructive; the triage step is non-negotiable.
 - **One supersession per rewrite.** Even if no notes were edited, record the supersession so future retrievals carry the annotation.
 - **Transition note is mandatory if vault was touched.** This is the "context gene editing" footprint: future you needs to find why a note changed.
-- **An ARCHIVE action never moves or overwrites the note.** `supersede-note.mjs` only edits frontmatter, so the note's outgoing edges are never touched by the post-write hook chain and stay in the graph as they were.
+- **An ARCHIVE action never moves or overwrites the note.** `supersede-note.mjs` only edits frontmatter and, best-effort, marks the note's outgoing edges `archived` so they drop out of downstream traversal; the note itself is untouched, and the post-write hook chain never fires for it.
 - **Be terse in reporting.** One framing line, one triage map, one approval prompt, one completion block. No filler.
 
 ## Failure Modes to Avoid
