@@ -2,9 +2,10 @@
 //
 // Covers checkDuplicateFlagQueue in hooks/pre-write-check.js: the cheap
 // pre-scan read that lets a fresh librarian duplicate_flag short-circuit the
-// gate's own reflect-scan for the same note path. One JSONL read via the
-// existing librarian queue reader (scripts/librarian/queue.mjs), no network,
-// no subprocess.
+// gate's own reflect-scan for the same note path. checkDuplicateFlagQueue
+// itself takes the already-read items array (checkDuplicateNote reads the
+// queue via pendingItems() ONCE per gate run and passes the result down, so
+// two call sites can't each pay for their own JSONL read).
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,6 +26,7 @@ function writeQueue(items) {
     join(LIB_DIR, 'queue.jsonl'),
     items.map((i) => JSON.stringify(i)).join('\n') + '\n',
   );
+  return items;
 }
 
 describe('pre-write-check: duplicate_flag queue consultation', () => {
@@ -42,7 +44,7 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
   });
 
   it('a fresh duplicate_flag entry for the same path returns its verdict', () => {
-    writeQueue([
+    const items = writeQueue([
       {
         id: 'abc123',
         task: 'duplicate_flag',
@@ -54,7 +56,7 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
         created_at: new Date().toISOString(),
       },
     ]);
-    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md');
+    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md', items);
     assert.ok(result, 'expected a verdict from the fresh queue entry');
     assert.match(result, /Potential duplicate/);
     assert.match(result, /sleep-existing\.md/);
@@ -62,7 +64,7 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
 
   it('a stale duplicate_flag entry, past the TTL, is ignored', () => {
     const staleTs = new Date(Date.now() - HookConfig.DUPLICATE_FLAG_TTL_MS - 1000).toISOString();
-    writeQueue([
+    const items = writeQueue([
       {
         id: 'def456',
         task: 'duplicate_flag',
@@ -74,12 +76,12 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
         created_at: staleTs,
       },
     ]);
-    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md');
+    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md', items);
     assert.equal(result, null, 'a stale entry must not short-circuit the scan');
   });
 
   it('no matching entry for the path falls through', () => {
-    writeQueue([
+    const items = writeQueue([
       {
         id: 'ghi789',
         task: 'duplicate_flag',
@@ -90,13 +92,13 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
         created_at: new Date().toISOString(),
       },
     ]);
-    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md');
+    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md', items);
     assert.equal(result, null);
   });
 
   it('an empty queue falls through', () => {
-    writeQueue([]);
-    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md');
+    const items = writeQueue([]);
+    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md', items);
     assert.equal(result, null);
   });
 });

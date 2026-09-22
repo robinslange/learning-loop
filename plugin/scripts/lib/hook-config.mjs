@@ -330,3 +330,15 @@ export const INJECTION_LAYOUT_EPOCH = '2026-09-17T06:30:07.278Z';
 export function preWriteFailMode(config) {
   return config?.hooks?.pre_write_fail_mode === 'closed' ? 'closed' : 'open';
 }
+
+/**
+ * Read the librarian.enabled setting from a loaded config object. Same rule
+ * loadLibrarianConfig() (scripts/librarian/config.mjs) applies: disabled by
+ * default, enabled only when explicitly set to `true`.
+ *
+ * @param {object|null|undefined} config
+ * @returns {boolean}
+ */
+export function librarianEnabled(config) {
+  return config?.librarian?.enabled === true;
+}

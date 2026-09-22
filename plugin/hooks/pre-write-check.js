@@ -21,7 +21,7 @@ import {
   checkFrontmatter,
   formatViolations,
 } from '../scripts/lib/frontmatter-schema.mjs';
-import { HookConfig, preWriteFailMode } from '../scripts/lib/hook-config.mjs';
+import { HookConfig, preWriteFailMode, librarianEnabled } from '../scripts/lib/hook-config.mjs';
 import { getConfig } from '../scripts/lib/config.mjs';
 import { pendingItems, appendItem, newItemId } from '../scripts/librarian/queue.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
@@ -279,17 +279,29 @@ function noteExistsInIndex(name, noteIndex) {
   return false;
 }
 
+// True when a pending duplicate_flag already exists for this target, at any
+// age -- the dedupe check for the enqueue side, deliberately not TTL-bounded
+// like checkDuplicateFlagQueue's consultation: an unreviewed suggestion does
+// not need re-flagging just because it has sat in the queue a while, it needs
+// the librarian to look at it.
+function hasPendingDuplicateFlag(items, relPath) {
+  return items.some((item) => item.task === 'duplicate_flag' && item.target === relPath);
+}
+
 // Interpret a reflect-scan result envelope (same shape from the daemon and the
 // subprocess) into a warning string, or null when there's no above-threshold
-// non-self duplicate. When relPath is known, also enqueues the hit as a
-// duplicate_flag so the librarian's async classifier gets to judge a pair the
-// gate found and it had not: this is what closes the loop the other direction
-// -- checkDuplicateFlagQueue reads that same queue before the NEXT write to
-// this path pays for a scan at all. Uses appendItem directly rather than
-// submitDuplicateFlag: that helper also loads/saves librarian state.json
-// (a second file) for a counter the gate has no use for, and the gate should
-// touch as little as it needs to stay cheap.
-function interpretScanResult(result, filePath, vaultRoot, relPath) {
+// non-self duplicate. When relPath is known and the librarian is enabled,
+// also enqueues the hit as a duplicate_flag so the librarian's async
+// classifier gets to judge a pair the gate found and it had not: this is what
+// closes the loop the other direction -- checkDuplicateFlagQueue reads that
+// same queue before the NEXT write to this path pays for a scan at all. Uses
+// appendItem directly rather than submitDuplicateFlag: that helper also
+// loads/saves librarian state.json (a second file) for a counter the gate has
+// no use for, and the gate should touch as little as it needs to stay cheap.
+// `pending` is the same pendingItems() read checkDuplicateNote already made
+// for the queue consultation -- passed down so the gate's one queue read
+// covers both the consult and the dedupe-before-enqueue check.
+function interpretScanResult(result, filePath, vaultRoot, relPath, pending) {
   const q = result.queries && result.queries[0];
   if (!q || !q.top_match_similarity || q.top_match_similarity < HookConfig.SIMILARITY_THRESHOLD)
     return null;
@@ -299,7 +311,7 @@ function interpretScanResult(result, filePath, vaultRoot, relPath) {
   const topAbsolute = resolve(join(vaultRoot, topResult.path));
   if (topAbsolute === resolve(filePath)) return null;
 
-  if (relPath) {
+  if (relPath && librarianEnabled(getConfig()) && !hasPendingDuplicateFlag(pending, relPath)) {
     try {
       appendItem({
         id: newItemId(),
@@ -321,20 +333,12 @@ function interpretScanResult(result, filePath, vaultRoot, relPath) {
 }
 
 // Consult the librarian's duplicate_flag queue for a fresh verdict on THIS
-// note path before paying for a scan. pendingItems() is the same reader the
-// librarian daemon and /health/inbox use (one JSONL read, no network, no
-// subprocess); the only cost this adds to the hot path is that read. A queue
-// entry older than DUPLICATE_FLAG_TTL_MS is treated as if it were absent: the
-// librarian may have lagged the write, and a stale verdict about the note's
-// PREVIOUS content is worse than re-deriving.
-export function checkDuplicateFlagQueue(relPath) {
-  let items;
-  try {
-    items = pendingItems();
-  } catch (err) {
-    logError('pre-write-check.checkDuplicateFlagQueue', err);
-    return null;
-  }
+// note path before paying for a scan. `items` is the caller's pendingItems()
+// read, made once per gate run and shared with interpretScanResult's dedupe
+// check. A queue entry older than DUPLICATE_FLAG_TTL_MS is treated as if it
+// were absent: the librarian may have lagged the write, and a stale verdict
+// about the note's PREVIOUS content is worse than re-deriving.
+export function checkDuplicateFlagQueue(relPath, items) {
   const now = Date.now();
   for (const item of items) {
     if (item.task !== 'duplicate_flag' || item.target !== relPath) continue;
@@ -342,7 +346,7 @@ export function checkDuplicateFlagQueue(relPath) {
     if (!(ageMs >= 0) || ageMs > HookConfig.DUPLICATE_FLAG_TTL_MS) continue;
     const pct = typeof item.similarity === 'number' ? Math.round(item.similarity * 100) : null;
     return (
-      `Potential duplicate: "${item.duplicate_of}" flagged by the librarian` +
+      `Potential duplicate: "${item.duplicate_of}" queued for librarian review` +
       (pct !== null ? ` (${pct}% similar).` : '.')
     );
   }
@@ -355,8 +359,17 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   if (!existsSync(dbPath)) return null;
 
   const relPath = vaultRelPath(filePath, vaultRoot);
-  if (relPath) {
-    const flagged = checkDuplicateFlagQueue(relPath);
+  const libEnabled = librarianEnabled(getConfig());
+  let pending = [];
+  if (libEnabled) {
+    try {
+      pending = pendingItems();
+    } catch (err) {
+      logError('pre-write-check.checkDuplicateNote.pendingItems', err);
+    }
+  }
+  if (relPath && libEnabled) {
+    const flagged = checkDuplicateFlagQueue(relPath, pending);
     if (flagged) return flagged;
   }
 
@@ -378,7 +391,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         }
         logError('pre-write-check.checkDuplicateNote.daemon', new Error(msg));
       } else {
-        return interpretScanResult(daemonResult.parsed, filePath, vaultRoot, relPath);
+        return interpretScanResult(daemonResult.parsed, filePath, vaultRoot, relPath, pending);
       }
     } else if (daemonResult.reason === 'timeout' || daemonResult.reason === 'idle-timeout') {
       // The gate timed out against the warm daemon — log it distinctly so
@@ -437,7 +450,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
         env: ortSpawnEnv(binary.binDir),
       },
     );
-    return interpretScanResult(JSON.parse(out), filePath, vaultRoot, relPath);
+    return interpretScanResult(JSON.parse(out), filePath, vaultRoot, relPath, pending);
   } catch (err) {
     // ETIMEDOUT / SIGTERM from execFileSync's timeout is the silent-disable
     // failure mode — log it distinctly too, on top of the generic error log.

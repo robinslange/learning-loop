@@ -388,6 +388,10 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
       },
       env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
       seed: (pluginDataDir) => {
+        writeFileSync(
+          join(pluginDataDir, 'config.json'),
+          JSON.stringify({ vault_path: VAULT, librarian: { enabled: true } }),
+        );
         const binDir = join(pluginDataDir, 'bin');
         mkdirSync(binDir, { recursive: true });
         writeFileSync(join(binDir, 'll-search'), loudFailStub);
@@ -420,6 +424,68 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
       assert.ok(result, 'expected a warning payload from the queue entry');
       assert.match(result.hookSpecificOutput.additionalContext, /Potential duplicate/);
       assert.match(result.hookSpecificOutput.additionalContext, /sleep-existing\.md/);
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it('librarian disabled: a pending duplicate_flag is never consulted, and the scan runs', () => {
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        // No config.json written: librarian.enabled defaults to false, same
+        // rule loadLibrarianConfig() applies.
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        const libDir = join(pluginDataDir, 'librarian');
+        mkdirSync(libDir, { recursive: true });
+        writeFileSync(
+          join(libDir, 'queue.jsonl'),
+          JSON.stringify({
+            id: 'flagged-disabled',
+            task: 'duplicate_flag',
+            target: '0-inbox/new-note.md',
+            duplicate_of: 'should-not-be-consulted.md',
+            similarity: 0.9,
+            status: 'pending',
+            created_at: new Date().toISOString(),
+          }) + '\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      const result = out ? JSON.parse(out) : null;
+      assert.ok(result, 'expected the gate to fall through to its own scan');
+      assert.doesNotMatch(
+        result.hookSpecificOutput.additionalContext,
+        /should-not-be-consulted/,
+        'a disabled librarian must never be consulted for a queue verdict',
+      );
+      assert.match(result.hookSpecificOutput.additionalContext, /sleep-existing\.md/);
+      const queuePath = join(r.pluginDataDir, 'librarian', 'queue.jsonl');
+      const lines = readFileSync(queuePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      assert.equal(
+        lines.length,
+        1,
+        'a disabled librarian must never receive a new enqueue from the gate scan',
+      );
     } finally {
       r.cleanup();
     }
@@ -497,6 +563,10 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
       },
       env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
       seed: (pluginDataDir) => {
+        writeFileSync(
+          join(pluginDataDir, 'config.json'),
+          JSON.stringify({ vault_path: VAULT, librarian: { enabled: true } }),
+        );
         const binDir = join(pluginDataDir, 'bin');
         mkdirSync(binDir, { recursive: true });
         writeFileSync(
@@ -522,6 +592,70 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
         `expected a duplicate_flag entry for the write; got: ${JSON.stringify(lines)}`,
       );
       assert.equal(flagged.duplicate_of, '3-permanent/sleep-existing.md');
+    } finally {
+      r.cleanup();
+    }
+  });
+
+  it('a second above-threshold hit on the same target does not append a second duplicate_flag', () => {
+    // The pre-existing pending duplicate_flag has EXPIRED past the queue-
+    // consultation TTL, so checkDuplicateFlagQueue does not short-circuit and
+    // the gate runs its own scan -- but the enqueue-side dedupe must still see
+    // the old (stale-for-consultation, but still pending) entry and skip a
+    // second append.
+    const target = join(VAULT, '0-inbox', 'new-note.md');
+    const staleTs = new Date(Date.now() - HookConfig.DUPLICATE_FLAG_TTL_MS - 1000).toISOString();
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: target, content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '30000' },
+      seed: (pluginDataDir) => {
+        writeFileSync(
+          join(pluginDataDir, 'config.json'),
+          JSON.stringify({ vault_path: VAULT, librarian: { enabled: true } }),
+        );
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(
+          join(binDir, 'll-search'),
+          envelopeStub(0.92, '3-permanent/sleep-existing.md', 'Existing sleep note'),
+        );
+        chmodSync(join(binDir, 'll-search'), 0o755);
+        const libDir = join(pluginDataDir, 'librarian');
+        mkdirSync(libDir, { recursive: true });
+        writeFileSync(
+          join(libDir, 'queue.jsonl'),
+          JSON.stringify({
+            id: 'flagged-first',
+            task: 'duplicate_flag',
+            target: '0-inbox/new-note.md',
+            duplicate_of: '3-permanent/sleep-existing.md',
+            similarity: 0.9,
+            status: 'pending',
+            created_at: staleTs,
+          }) + '\n',
+        );
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const queuePath = join(r.pluginDataDir, 'librarian', 'queue.jsonl');
+      const lines = readFileSync(queuePath, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      const flags = lines.filter(
+        (item) => item.task === 'duplicate_flag' && item.target === '0-inbox/new-note.md',
+      );
+      assert.equal(
+        flags.length,
+        1,
+        `expected exactly one duplicate_flag for the target; got: ${JSON.stringify(flags)}`,
+      );
     } finally {
       r.cleanup();
     }

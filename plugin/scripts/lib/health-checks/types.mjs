@@ -34,6 +34,7 @@ export const CHECK_IDS = Object.freeze({
   'learning-loop-installed': 'learning-loop-installed',
   'binary-runs': 'binary-runs',
   'watch-daemon-status': 'watch-daemon-status',
+  'invalidated-adoption': 'invalidated-adoption',
   'offline-mode': 'offline-mode',
   'edges-backfill': 'edges-backfill',
   'contradiction-cycles': 'contradiction-cycles',

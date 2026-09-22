@@ -162,6 +162,21 @@ export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
 }
 
+// Marks a note's outgoing edges source_graph='archived' rather than deleting
+// them: a supersedeNoteFile-driven retirement leaves the note in place, so
+// its edges should stop counting as live justification (getDownstream /
+// getSoleJustificationDependents exclude 'archived') without losing the
+// history getSoleJustificationDependentsSymmetric still traces. Mirrors
+// removeOutgoingEdges' don't-touch-already-special-rows filter, widened to
+// also skip nli/comention rows (an advisory or breadth-only edge should not
+// be relabelled archived just because its source note was retired).
+export function archiveOutgoingEdges(db, notePath) {
+  db.run(
+    "UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli', 'comention')",
+    [notePath],
+  );
+}
+
 function rowsToObjects(result) {
   if (!result || result.length === 0) return [];
   const { columns, values } = result[0];

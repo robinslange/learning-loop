@@ -3,7 +3,9 @@
 // and a runner-side I/O helper. This keeps the logic testable without
 // shelling out and lets the CLI entry-point batch all spawns up front.
 
+import { openSync, readSync, closeSync } from 'node:fs';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
+import { listVaultNotes } from '../vault-walk.mjs';
 
 function semverGe(a, b) {
   const pa = String(a)
@@ -185,6 +187,47 @@ export function checkOfflineMode({ offline } = {}) {
     detail: offline
       ? 'ON — update checks, binary auto-update, and web research suppressed'
       : 'off (LL_OFFLINE unset)',
+    fix: null,
+  });
+}
+
+// Frontmatter sits at the top of a note; 2KB covers every real one and keeps
+// this a bounded read per file rather than a full vault load.
+const FRONTMATTER_PROBE_BYTES = 2048;
+const INVALIDATED_RE = /^---\r?\n(?:[\s\S]*?\r?\n)?invalidated:/;
+
+// Runner-side collector for checkInvalidatedAdoption: how many notes outside
+// the excluded dirs carry `invalidated:` in their frontmatter.
+export function collectInvalidatedAdoption(vaultRoot) {
+  const notes = vaultRoot ? listVaultNotes(vaultRoot) : [];
+  let invalidated = 0;
+  const buf = Buffer.alloc(FRONTMATTER_PROBE_BYTES);
+  for (const { path } of notes) {
+    let fd;
+    try {
+      fd = openSync(path, 'r');
+      const n = readSync(fd, buf, 0, FRONTMATTER_PROBE_BYTES, 0);
+      if (INVALIDATED_RE.test(buf.toString('utf8', 0, n))) invalidated += 1;
+    } catch {
+      continue;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+  return { total: notes.length, invalidated };
+}
+
+// Adoption of the one supersession mechanism retrieval reads. Issue #66 found
+// the key defined, honoured by enrichVaultHits, and present on 0 of 1,041
+// notes because no writer produced it; this makes the count visible so a
+// regression to zero is noticed rather than discovered by audit.
+export function checkInvalidatedAdoption({ total = 0, invalidated = 0 } = {}) {
+  return makeCheck({
+    id: CHECK_IDS['invalidated-adoption'],
+    name: 'Invalidated notes',
+    status: SEVERITIES.ok,
+    severity: SEVERITIES.info,
+    detail: `${invalidated} of ${total} notes carry invalidated:`,
     fix: null,
   });
 }

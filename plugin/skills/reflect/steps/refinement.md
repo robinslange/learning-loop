@@ -129,12 +129,12 @@ For each decision in the approved set:
   3. **Write** the stamped body to `upstream_path` using the `Write` tool. The post-write hook chain re-fires (autolink, edge-infer, provenance).
 - **supersede**: four sub-steps, in order:
   1. **Stale-read guard.** Same check as the edit path: re-read `upstream_path`, compare against `validation.upstream_hash`, and on mismatch skip the decision, reporting it as `stale`. The proposal was judged against a version of the upstream that no longer exists.
-  2. **Frontmatter stamp.** Run `ll-run supersede-note.mjs <upstream_path> --replacement <new-note vault-relative path>` (same writer /rewrite's ARCHIVE action uses). It adds `invalidated: <today's date>` and `superseded_by: <new-note vault-relative path>` to the upstream frontmatter only, in the exact form capture-rules.md defines and `enrichVaultHits` honours, and leaves the body untouched: the claim stays readable as history, retrieval just stops serving it as current. The script itself skips the write and reports `stamped: false` when the upstream already carries `invalidated:`.
+  2. **Frontmatter stamp.** Run `ll-run supersede-note.mjs <upstream_path> --replacement <new-note vault-relative path>` (same writer /rewrite's ARCHIVE action uses). It adds `invalidated: <today's date>` and `superseded_by: <new-note vault-relative path>` to the upstream frontmatter only, in the exact form capture-rules.md defines and `enrichVaultHits` honours, and leaves the body untouched: the claim stays readable as history, retrieval just stops serving it as current. A non-zero exit is a failure to report, not a skip: treat it as an error for this decision and surface the script's stderr/JSON rather than silently moving on. The script exits 0 and reports `{ok:true, stamped:false, reason:'already-invalidated'}` only when the upstream already carries `invalidated:` -- that is the one legitimate skip case.
   3. **Supersessions row.** Record it for episodic annotation:
      ```bash
      ll-run edges-cli.mjs super-add "<old_pattern_query>" --replacement "<new-note vault-relative path>" --reason "<reason>"
      ```
-  4. When step 2's script reports `stamped: false`, skip the rest of this decision and report `already superseded`.
+  4. When step 2's script reports `reason: 'already-invalidated'`, skip the rest of this decision and report `already superseded`.
 - **counterpoint**: append `new_note_link_text` to the new note's body via `Edit`, and append `upstream_link_text` to the upstream's body via `Edit`. Do NOT modify the upstream's claim. Both edits should append to the body, not modify existing lines. Skip if a link with the same target already exists in either file.
 - **auto_rejected**: never apply. Log only.
 - **pass**: never apply. Log only.
