@@ -3,34 +3,19 @@
 // scripts/lib/config.mjs as the single source of truth; this module re-exports
 // `resolvePluginData` for backward compatibility with hook callers.
 
-import {
-  mkdirSync,
-  existsSync,
-  appendFileSync,
-  openSync,
-  readSync,
-  closeSync,
-  fstatSync,
-} from 'node:fs';
+import { existsSync, appendFileSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
-import {
-  resolvePluginData,
-  getVaultPath,
-  getConfig,
-  pluginDataExists,
-} from '../../scripts/lib/config.mjs';
+import { resolvePluginData, getVaultPath, getConfig } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
-import { appendJsonlLineDeduped } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { VALID_ACTIONS, INTENT_KINDS } from '../../scripts/lib/provenance-vocabulary.mjs';
-import { deriveSkill } from '../../scripts/lib/provenance-skill.mjs';
-import { pluginRoot } from '../../scripts/lib/plugin-meta.mjs';
+import { emitProvenance as emitProvenanceCanonical } from '../../scripts/provenance.mjs';
+import { VALID_ACTIONS } from '../../scripts/lib/provenance-vocabulary.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
-import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
-import { DATA_PATHS, relativeToVault, home } from '../../scripts/lib/paths.mjs';
+import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
+import { relativeToVault, home } from '../../scripts/lib/paths.mjs';
 
 export { resolvePluginData, getSessionId, home };
 export const resolveVaultPath = getVaultPath;
@@ -193,48 +178,25 @@ export async function runHook(handler) {
 
 const provenanceDedupeKeys = new Set();
 
+// Thin adapter: delegate the canonical record shape to scripts/provenance.mjs,
+// same pattern as emitRetrieval below. The in-process dedupe Set is specific
+// to this path: hooks fire once per tool call, so a duplicate within one
+// process is a genuine repeat, not a fresh session. An earlier copy of the
+// emitter lived here and never seeded the provenance templates, so whether
+// they existed depended on which path fired first; the canonical emitter
+// seeds on either.
 export function emitProvenance(event) {
-  // Same boundary check as scripts/provenance.mjs: the unchecked spread below
-  // would otherwise let an unknown action shape the schema. This path carries
-  // most of the volume (vault-write, agent-spawn, agent-result, skill-invoke),
-  // so validating only the CLI path would leave the larger half open.
-  // Now a counted rejection: log.mjs's error sink persists this scope
-  // durably, and the phase 2 reducer counts records by scope.
+  // Validate before touching the dedupe Set: an invalid action must not
+  // consume the (session_id, agent_id, path) key, or a rejected record would
+  // silently poison a later valid one with the same identity.
   if (!event || !VALID_ACTIONS.has(event.action)) {
-    logError('provenance.invalidAction', new Error(`unknown action: ${event && event.action}`));
+    emitProvenanceCanonical(event, { source: 'hook' });
     return;
   }
   const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
   if (key !== '||' && provenanceDedupeKeys.has(key)) return;
   provenanceDedupeKeys.add(key);
-  if (!pluginDataExists()) return;
-  const pd = resolvePluginData();
-  if (!pd) return;
-  const dir = DATA_PATHS.provenance(pd);
-  mkdirSync(dir, { recursive: true });
-  const record = {
-    ts: new Date().toISOString(),
-    session_id: getSessionId(),
-    source: 'hook',
-    ...event,
-  };
-  deriveSkill(record, pd, pluginRoot());
-  // Same free-text-intent guard as scripts/provenance.mjs: drop the offending
-  // field, keep the rest of the record. Now a counted drop: log.mjs's error
-  // sink persists this scope durably, and the phase 2 reducer counts records
-  // by scope.
-  if ('intent' in record) {
-    logError('provenance.freeTextIntent', new Error(`dropping free-text intent: ${record.intent}`));
-    delete record.intent;
-  }
-  if ('intent_kind' in record && !INTENT_KINDS.has(record.intent_kind)) {
-    logError(
-      'provenance.freeTextIntent',
-      new Error(`dropping unbounded intent_kind: ${record.intent_kind}`),
-    );
-    delete record.intent_kind;
-  }
-  appendJsonlLineDeduped(join(dir, `events-${monthStr()}.jsonl`), record);
+  emitProvenanceCanonical(event, { source: 'hook' });
 }
 
 export function emitRetrieval(prefix, event) {

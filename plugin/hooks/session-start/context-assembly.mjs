@@ -212,68 +212,60 @@ function readMemoryIndexCapped(path) {
   return `${cut.trim()}\n… ${entryCount - shown} more entries — read ${path}`;
 }
 
-export async function run(ctx) {
-  const {
-    pluginDir,
-    pluginData,
-    vaultRoot,
-    projectDir,
-    memoryDir,
-    updateCacheFile,
-    depsAllSatisfied,
-    depsMissing,
-  } = ctx;
-
-  const VAULT_INBOX = join(vaultRoot, '0-inbox');
-  const searchCmd = 'll-run vault-search.mjs';
-
-  // 0.5. Inject resolved paths for skill consumption.
+// 0.5. Inject resolved paths for skill consumption.
+function injectPaths(ctx) {
+  const { pluginDir, pluginData, vaultRoot } = ctx;
   ctx.context += `## Learning Loop Paths\n`;
   ctx.context += `PLUGIN=${pluginDir}\n`;
   ctx.context += `PLUGIN_DATA=${pluginData}\n`;
   ctx.context += `VAULT=${vaultRoot}\n`;
+}
 
-  // 0.6. Update notification from cached check.
-  if (updateCacheFile) {
-    try {
-      const { value: cached } = safeLoad(updateCacheFile, { fallback: null });
-      if (cached?.update_available) {
-        ctx.context += `\n## Plugin Update Available\n`;
-        ctx.context += `learning-loop ${cached.installed} → ${cached.latest}. Run \`/learning-loop:init\` to update.\n`;
-      }
-    } catch (err) {
-      logError('session-start.context-assembly.updateCache', err);
+// 0.6. Update notification from cached check.
+function injectUpdateNotice(ctx) {
+  if (!ctx.updateCacheFile) return;
+  try {
+    const { value: cached } = safeLoad(ctx.updateCacheFile, { fallback: null });
+    if (cached?.update_available) {
+      ctx.context += `\n## Plugin Update Available\n`;
+      ctx.context += `learning-loop ${cached.installed} → ${cached.latest}. Run \`/learning-loop:init\` to update.\n`;
     }
+  } catch (err) {
+    logError('session-start.context-assembly.updateCache', err);
   }
+}
 
-  // 1. Detect project from working directory.
-  if (projectDir) {
-    ctx.context += `Current project: ${basename(projectDir)}\n`;
+// 1. Detect project from working directory, and surface any missing deps.
+function injectProjectAndDeps(ctx) {
+  if (ctx.projectDir) {
+    ctx.context += `Current project: ${basename(ctx.projectDir)}\n`;
   }
-
-  if (depsMissing) {
-    ctx.context += depsMissing;
+  if (ctx.depsMissing) {
+    ctx.context += ctx.depsMissing;
   }
+}
 
-  // 2. Retrieval protocol. Emitted BEFORE the variable-size sections (memory
-  // indexes, learned patterns, intentions): emitJson trims oversized
-  // additionalContext from the TAIL, so behavior-defining instructions must
-  // sit ahead of the bulk that could push the payload past the stdout cap.
-  // Every variable-size section below is byte-capped via capSection, and the
-  // memory indexes are assembled first among them so a backstop trim evicts
-  // the lower-value tail (patterns, intentions) before the index lines.
-  //
-  // NOTE: this protocol mirrors the static "Learning Loop" section /init
-  // installs into the user's CLAUDE.md. The template in
-  // plugin/skills/init/phases/05-claudemd.md is the source of truth — keep
-  // command names and steps in sync with it (always the namespaced
-  // /learning-loop:* forms, never bare /init or /reflect).
-  // Skip the full protocol when the static section is installed (detected by
-  // its version marker) and deps are satisfied: re-injecting it costs ~250
-  // duplicated instruction tokens every session start. The compact pointer
-  // keeps the one dynamic piece the static section cannot carry (the resolved
-  // script path). A broken episodic install still gets the full protocol so
-  // the deps-skipped line is surfaced.
+// 2. Retrieval protocol. Emitted BEFORE the variable-size sections (memory
+// indexes, learned patterns, intentions): emitJson trims oversized
+// additionalContext from the TAIL, so behavior-defining instructions must
+// sit ahead of the bulk that could push the payload past the stdout cap.
+// Every variable-size section below is byte-capped via capSection, and the
+// memory indexes are assembled first among them so a backstop trim evicts
+// the lower-value tail (patterns, intentions) before the index lines.
+//
+// NOTE: this protocol mirrors the static "Learning Loop" section /init
+// installs into the user's CLAUDE.md. The template in
+// plugin/skills/init/phases/05-claudemd.md is the source of truth — keep
+// command names and steps in sync with it (always the namespaced
+// /learning-loop:* forms, never bare /init or /reflect).
+// Skip the full protocol when the static section is installed (detected by
+// its version marker) and deps are satisfied: re-injecting it costs ~250
+// duplicated instruction tokens every session start. The compact pointer
+// keeps the one dynamic piece the static section cannot carry (the resolved
+// script path). A broken episodic install still gets the full protocol so
+// the deps-skipped line is surfaced.
+function injectRetrievalProtocol(ctx, searchCmd) {
+  const { depsAllSatisfied } = ctx;
   let staticProtocolPresent = false;
   try {
     staticProtocolPresent = readFileSync(join(home(), '.claude', 'CLAUDE.md'), 'utf8').includes(
@@ -307,26 +299,207 @@ export async function run(ctx) {
       '7. After substantial work, suggest /learning-loop:reflect to consolidate learnings.\n';
     ctx.context += 'Keep retrieval lightweight — one line per insight, not a wall of text.\n';
   }
+}
 
-  // 3. Dream gate check — read cached marker; refresh in background.
-  if (pluginData) {
-    try {
-      const cached = readMarker(MARKER_PATHS.dreamGate(pluginData));
-      if (cached?.nudge) {
-        ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
-      }
-      const child = spawn(
-        'node',
-        [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
-        { detached: true, stdio: 'ignore' },
-      );
-      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-      child.unref();
-      recordDetachedChild(child.pid);
-    } catch (err) {
-      logError('session-start.context-assembly.dreamGate', err);
+// 3. Dream gate check — read cached marker; refresh in background.
+function injectDreamGate(ctx) {
+  if (!ctx.pluginData) return;
+  try {
+    const cached = readMarker(MARKER_PATHS.dreamGate(ctx.pluginData));
+    if (cached?.nudge) {
+      ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
     }
+    const child = spawn(
+      'node',
+      [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
+      { detached: true, stdio: 'ignore' },
+    );
+    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+    child.unref();
+    recordDetachedChild(child.pid);
+  } catch (err) {
+    logError('session-start.context-assembly.dreamGate', err);
   }
+}
+
+// 4. Project-specific auto-memory. Capped memory indexes come right after
+// the protocol so an oversized payload evicts later, lower-value sections
+// instead of the index lines. Stores the resolved path on state so section
+// 5 can skip re-injecting the same file when project and vault-parent match.
+function injectProjectMemory(ctx, state) {
+  const { projectDir, memoryDir } = ctx;
+  if (!projectDir) return;
+  const encodedPath = encodeProjectDir(projectDir);
+  state.projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
+  if (!existsSync(state.projectMemoryIndex) || !memoryIsFresh(state.projectMemoryIndex)) return;
+  try {
+    const index = readMemoryIndexCapped(state.projectMemoryIndex);
+    if (index) {
+      state.retrieved += `\n## Auto-memory index for this project:\n${index}\n`;
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.projectMemory', err);
+  }
+}
+
+// 5. Global memory (keyed to vault parent). When the project IS the vault
+// parent both keys resolve to the same MEMORY.md — skip the global section
+// rather than injecting the identical index twice.
+function injectGlobalMemory(ctx, state) {
+  const { vaultRoot, memoryDir } = ctx;
+  const vaultParent = resolve(vaultRoot, '..');
+  const encodedVaultParent = encodeProjectDir(vaultParent);
+  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
+  if (
+    globalMemory === state.projectMemoryIndex ||
+    !existsSync(globalMemory) ||
+    !memoryIsFresh(globalMemory)
+  ) {
+    return;
+  }
+  try {
+    const globalIndex = readMemoryIndexCapped(globalMemory);
+    if (globalIndex) {
+      state.retrieved += `\n## Global memory index:\n${globalIndex}\n`;
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.globalMemory', err);
+  }
+}
+
+// 6. Learned patterns — capped like the memory indexes.
+function injectLearnedPatterns(ctx, state) {
+  if (!ctx.pluginData) return;
+  const patternsFile = join(DATA_PATHS.provenance(ctx.pluginData), 'learned-patterns.md');
+  if (!existsSync(patternsFile)) return;
+  try {
+    const patternsContent = readFileSync(patternsFile, 'utf8');
+    const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
+    if (patternCount > 0) {
+      const patterns = capSection(patternsContent, `[truncated — full file at ${patternsFile}]`);
+      state.retrieved += `\n## Learned Patterns (from verification feedback)\n${patterns}\n`;
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.learnedPatterns', err);
+  }
+}
+
+// 7. Federation status — a line only when there is something wrong.
+function injectFederation(ctx, state) {
+  if (!ctx.pluginData) return;
+  try {
+    const lines = federationLines(ctx.pluginData, Math.floor(Date.now() / 1000));
+    if (lines.length > 0) {
+      state.retrieved += `\n## Federation\n${lines.join('\n')}\n`;
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.federation', err);
+  }
+}
+
+// 8. On-demand vault captures pointer.
+function injectCapturesPointer(ctx, state, searchCmd) {
+  const VAULT_INBOX = join(ctx.vaultRoot, '0-inbox');
+  state.operatorTail += '\n## Recent vault captures\n';
+  state.operatorTail += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
+}
+
+// 8b. Newest session ledger for this repo: the "what did I do here last time"
+// answer in one line. Path only; the note itself is one Read away. Reads the
+// project the ledger hook already resolved (marker), rather than resolving it
+// again here. SessionStart must never spawn git.
+function injectLedgerPointer(ctx, state) {
+  const { projectDir, pluginData, vaultRoot } = ctx;
+  if (!projectDir || !pluginData || !existsSync(join(vaultRoot, '4-projects'))) return;
+  try {
+    const cached = readMarker(MARKER_PATHS.ledgerProject(pluginData, projectDir), {
+      ttlMs: Infinity,
+    });
+    if (typeof cached?.project === 'string') {
+      const ledger = latestLedger(vaultRoot, cached.project);
+      if (ledger) {
+        state.operatorTail += `Last session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
+      }
+    }
+  } catch (err) {
+    logError('session-start.context-assembly.ledger', err);
+  }
+}
+
+// 9. Intention summary — read cached marker; refresh in background. The
+// rendered list is capped: the marker array is unbounded (one line per
+// intention context), and an oversized list must not evict earlier sections.
+// pluginData required: the worker resolves PLUGIN_DATA from the same source
+// (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
+// produce a different path than the worker writes to.
+function injectIntentions(ctx, state, searchCmd) {
+  const { pluginData, pluginDir } = ctx;
+  if (!pluginData) return;
+  try {
+    const cached = readMarker(MARKER_PATHS.intentions(pluginData));
+    // One marker entry per distinct `context` string, and most group a single
+    // note: cue-shaped sentences get written into the context slot, so each
+    // produces its own one-note "context". Rendering them all overruns
+    // MEMORY_INDEX_MAX_BYTES, so the list is cut mid-way and ships an
+    // arbitrary prefix while dropping the contexts that group real work.
+    const grouped = Array.isArray(cached) ? cached.filter((item) => item.count > 1) : [];
+    if (grouped.length > 0) {
+      let list = '';
+      for (const item of grouped) {
+        list += `- ${item.context} (${item.count} notes)\n`;
+      }
+      const capped = capSection(
+        list,
+        `[truncated — run \`${searchCmd} intentions\` for the full list]`,
+      );
+      state.retrieved += `\n${INTENTIONS_HEADING}\n`;
+      state.retrieved += `${capped}\n`;
+      state.operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
+      // The pack has never had a surfaced->used join, so the value of this
+      // block is unmeasured rather than low. The row that records it is NOT
+      // written here: capSection above is only the first of two truncations,
+      // and this block is deliberately positioned to be the first victim of
+      // the second one (emitJson's backstop trim, see the section order at
+      // :210). Reading back off `capped` therefore records impressions the
+      // model never received, which is the exact error this feature exists
+      // to prevent. session-start.js emits the row after emitJson, against
+      // the text emitJson says it actually wrote.
+      ctx.intentionsBlock = capped;
+      ctx.intentionsAssembledCount = grouped.length;
+    }
+    // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
+    const child = spawn(
+      'node',
+      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
+      { detached: true, stdio: 'ignore' },
+    );
+    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
+    child.unref();
+    recordDetachedChild(child.pid);
+  } catch (err) {
+    logError('session-start.context-assembly.intentions', err);
+  }
+}
+
+// 10. Emit session-start provenance event inline: one JSONL append is
+// cheaper than a detached node child (see modules/provenance.mjs, which
+// made the same call for the post-tool hot path).
+function emitSessionStartProvenance() {
+  try {
+    emitProvenance({ agent: 'session', action: 'session-start' });
+  } catch (err) {
+    logError('session-start.context-assembly.provenance', err);
+  }
+}
+
+export async function run(ctx) {
+  const searchCmd = 'll-run vault-search.mjs';
+
+  injectPaths(ctx);
+  injectUpdateNotice(ctx);
+  injectProjectAndDeps(ctx);
+  injectRetrievalProtocol(ctx, searchCmd);
+  injectDreamGate(ctx);
 
   // Sections 4-7 and the intention list are read off disk — memory indexes,
   // learned patterns, peer names, note frontmatter. All of it is third-party
@@ -337,166 +510,19 @@ export async function run(ctx) {
   // operatorTail so they stay outside the envelope, and the block is emitted
   // where section 4 began — keeping the capped indexes ahead of lower-value
   // sections for emitJson's tail trim.
-  let retrieved = '';
-  let operatorTail = '';
+  const state = { retrieved: '', operatorTail: '', projectMemoryIndex: null };
 
-  // 4. Project-specific auto-memory. Capped memory indexes come right after
-  // the protocol so an oversized payload evicts later, lower-value sections
-  // instead of the index lines.
-  let projectMemoryIndex = null;
-  if (projectDir) {
-    const encodedPath = encodeProjectDir(projectDir);
-    projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
-    if (existsSync(projectMemoryIndex) && memoryIsFresh(projectMemoryIndex)) {
-      try {
-        const index = readMemoryIndexCapped(projectMemoryIndex);
-        if (index) {
-          retrieved += `\n## Auto-memory index for this project:\n${index}\n`;
-        }
-      } catch (err) {
-        logError('session-start.context-assembly.projectMemory', err);
-      }
-    }
-  }
+  injectProjectMemory(ctx, state);
+  injectGlobalMemory(ctx, state);
+  injectLearnedPatterns(ctx, state);
+  injectFederation(ctx, state);
+  injectCapturesPointer(ctx, state, searchCmd);
+  injectLedgerPointer(ctx, state);
+  injectIntentions(ctx, state, searchCmd);
 
-  // 5. Global memory (keyed to vault parent). When the project IS the vault
-  // parent both keys resolve to the same MEMORY.md — skip the global section
-  // rather than injecting the identical index twice.
-  const vaultParent = resolve(vaultRoot, '..');
-  const encodedVaultParent = encodeProjectDir(vaultParent);
-  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
-  if (
-    globalMemory !== projectMemoryIndex &&
-    existsSync(globalMemory) &&
-    memoryIsFresh(globalMemory)
-  ) {
-    try {
-      const globalIndex = readMemoryIndexCapped(globalMemory);
-      if (globalIndex) {
-        retrieved += `\n## Global memory index:\n${globalIndex}\n`;
-      }
-    } catch (err) {
-      logError('session-start.context-assembly.globalMemory', err);
-    }
-  }
-
-  // 6. Learned patterns — capped like the memory indexes.
-  if (pluginData) {
-    const patternsFile = join(DATA_PATHS.provenance(pluginData), 'learned-patterns.md');
-    if (existsSync(patternsFile)) {
-      try {
-        const patternsContent = readFileSync(patternsFile, 'utf8');
-        const patternCount = (patternsContent.match(/^\d+\./gm) || []).length;
-        if (patternCount > 0) {
-          const patterns = capSection(
-            patternsContent,
-            `[truncated — full file at ${patternsFile}]`,
-          );
-          retrieved += `\n## Learned Patterns (from verification feedback)\n${patterns}\n`;
-        }
-      } catch (err) {
-        logError('session-start.context-assembly.learnedPatterns', err);
-      }
-    }
-
-    // 7. Federation status — a line only when there is something wrong.
-    try {
-      const lines = federationLines(pluginData, Math.floor(Date.now() / 1000));
-      if (lines.length > 0) {
-        retrieved += `\n## Federation\n${lines.join('\n')}\n`;
-      }
-    } catch (err) {
-      logError('session-start.context-assembly.federation', err);
-    }
-  }
-
-  // 8. On-demand vault captures pointer.
-  operatorTail += '\n## Recent vault captures\n';
-  operatorTail += `Run \`ls -t ${VAULT_INBOX} | head -5\` or \`${searchCmd} search "<topic>"\` for relevant notes.\n`;
-
-  // 8b. Newest session ledger for this repo: the "what did I do here last time"
-  // answer in one line. Path only; the note itself is one Read away. Reads the
-  // project the ledger hook already resolved (marker), rather than resolving it
-  // again here. SessionStart must never spawn git.
-  if (projectDir && pluginData && existsSync(join(vaultRoot, '4-projects'))) {
-    try {
-      const cached = readMarker(MARKER_PATHS.ledgerProject(pluginData, projectDir), {
-        ttlMs: Infinity,
-      });
-      if (typeof cached?.project === 'string') {
-        const ledger = latestLedger(vaultRoot, cached.project);
-        if (ledger) {
-          operatorTail += `Last session here: ${ledger.relPath} (${ledger.date}, ${ledger.status})\n`;
-        }
-      }
-    } catch (err) {
-      logError('session-start.context-assembly.ledger', err);
-    }
-  }
-
-  // 9. Intention summary — read cached marker; refresh in background. The
-  // rendered list is capped: the marker array is unbounded (one line per
-  // intention context), and an oversized list must not evict earlier sections.
-  // pluginData required: the worker resolves PLUGIN_DATA from the same source
-  // (config.mjs reads CLAUDE_PLUGIN_DATA). A fallback to pluginDir would
-  // produce a different path than the worker writes to.
-  if (pluginData) {
-    try {
-      const cached = readMarker(MARKER_PATHS.intentions(pluginData));
-      // One marker entry per distinct `context` string, and most group a single
-      // note: cue-shaped sentences get written into the context slot, so each
-      // produces its own one-note "context". Rendering them all overruns
-      // MEMORY_INDEX_MAX_BYTES, so the list is cut mid-way and ships an
-      // arbitrary prefix while dropping the contexts that group real work.
-      const grouped = Array.isArray(cached) ? cached.filter((item) => item.count > 1) : [];
-      if (grouped.length > 0) {
-        let list = '';
-        for (const item of grouped) {
-          list += `- ${item.context} (${item.count} notes)\n`;
-        }
-        const capped = capSection(
-          list,
-          `[truncated — run \`${searchCmd} intentions\` for the full list]`,
-        );
-        retrieved += `\n${INTENTIONS_HEADING}\n`;
-        retrieved += `${capped}\n`;
-        operatorTail += `\nTo see notes for a specific context: ${searchCmd} intentions "<context name>"\n`;
-        // The pack has never had a surfaced->used join, so the value of this
-        // block is unmeasured rather than low. The row that records it is NOT
-        // written here: capSection above is only the first of two truncations,
-        // and this block is deliberately positioned to be the first victim of
-        // the second one (emitJson's backstop trim, see the section order at
-        // :210). Reading back off `capped` therefore records impressions the
-        // model never received, which is the exact error this feature exists
-        // to prevent. session-start.js emits the row after emitJson, against
-        // the text emitJson says it actually wrote.
-        ctx.intentionsBlock = capped;
-        ctx.intentionsAssembledCount = grouped.length;
-      }
-      // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
-      const child = spawn(
-        'node',
-        [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
-        { detached: true, stdio: 'ignore' },
-      );
-      child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-      child.unref();
-      recordDetachedChild(child.pid);
-    } catch (err) {
-      logError('session-start.context-assembly.intentions', err);
-    }
-  }
-
-  const framed = wrapRetrievalText(retrieved, { origin: 'session-start' });
+  const framed = wrapRetrievalText(state.retrieved, { origin: 'session-start' });
   if (framed) ctx.context += `\n${framed}\n`;
-  ctx.context += operatorTail;
+  ctx.context += state.operatorTail;
 
-  // 10. Emit session-start provenance event inline: one JSONL append is
-  // cheaper than a detached node child (see modules/provenance.mjs, which
-  // made the same call for the post-tool hot path).
-  try {
-    emitProvenance({ agent: 'session', action: 'session-start' });
-  } catch (err) {
-    logError('session-start.context-assembly.provenance', err);
-  }
+  emitSessionStartProvenance();
 }

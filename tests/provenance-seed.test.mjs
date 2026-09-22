@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin');
 const PROVENANCE = join(PLUGIN, 'scripts', 'provenance.mjs');
+const COMMON = join(PLUGIN, 'hooks', 'lib', 'common.mjs');
 
 test('emitProvenance seeds both templates from inside plugin/ into PLUGIN_DATA/provenance', () => {
   const root = mkdtempSync(join(tmpdir(), 'll-prov-seed-'));
@@ -39,6 +40,32 @@ test('emitProvenance seeds both templates from inside plugin/ into PLUGIN_DATA/p
       assert.ok(existsSync(template), `template ${name} missing from plugin/provenance`);
       assert.ok(statSync(seeded).size > 0, `${name} seeded empty`);
       assert.strictEqual(readFileSync(seeded, 'utf-8'), readFileSync(template, 'utf-8'));
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('hook-path emitProvenance (hooks/lib/common.mjs) also seeds both templates', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-prov-seed-hook-'));
+  try {
+    const code = `
+import { emitProvenance } from ${JSON.stringify(COMMON)};
+emitProvenance({ agent: 'test', action: 'create', target: 'hook.md' });
+`;
+    const result = spawnSync('node', ['--input-type=module', '-e', code], {
+      env: { ...process.env, CLAUDE_PLUGIN_DATA: root },
+      encoding: 'utf-8',
+    });
+    assert.strictEqual(
+      result.status,
+      0,
+      `hook emitProvenance exited ${result.status}: ${result.stderr}`,
+    );
+
+    for (const name of ['learned-patterns.md', 'retired-patterns.md']) {
+      const seeded = join(root, 'provenance', name);
+      assert.ok(existsSync(seeded), `${name} not seeded into PLUGIN_DATA/provenance via hook path`);
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

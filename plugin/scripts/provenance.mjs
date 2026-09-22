@@ -42,7 +42,12 @@ function seedTemplates() {
   _seeded = true;
 }
 
-export function emitProvenance(event) {
+// Canonical emitter for both the skill/CLI path (source: 'skill') and the
+// hook path (source: 'hook', hooks/lib/common.mjs's thin wrapper). Whichever
+// path emits first seeds the provenance templates (seedTemplates copies
+// learned-patterns.md/retired-patterns.md into PLUGIN_DATA); seedTemplates'
+// _seeded guard makes that a once-per-process no-op on every call after.
+export function emitProvenance(event, { source = 'skill' } = {}) {
   // Reject unknown actions at the boundary instead of letting the unchecked
   // spread below shape the schema. Legacy spellings are readable but not
   // emittable. Now a counted rejection: log.mjs's error sink persists this
@@ -58,7 +63,7 @@ export function emitProvenance(event) {
   const record = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
-    source: 'skill',
+    source,
     ...event,
   };
   deriveSkill(record, getPluginData(), pluginRoot());
