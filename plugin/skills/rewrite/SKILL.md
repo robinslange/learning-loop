@@ -114,18 +114,11 @@ Run the approved actions. Use the right tool per store.
 **Vault rewrites/amends:**
 - Use `Edit` for surgical changes (preferred: preserves frontmatter, links)
 - **Always `Read` the file immediately before each `Edit`**, even if you read it during Phase 2. The triage map can grow stale between rendering and execution if other tools touched the file in the meantime. The fresh read also lets you verify the surrounding text still matches what you'll pass to `Edit`.
-- For an ARCHIVE action, follow this exact sequence:
-  1. **Dump outgoing edges first.** Run `ll-run edges-cli.mjs list <archived-note>` and capture the `outgoing` array from the JSON response. Each entry has `from_path`, `to_path`, `edge_type`, `confidence`, and `direction_flipped`.
-  2. **Move the file** to `_archive/` (create the dir if missing).
-  3. **Write the stub** at the original path with a single line: `Superseded: see [[<replacement>]]`. The stub Write fires the post-write hook chain, which calls `removeOutgoingEdges`. With the v1.14.1 fix, that query now skips `source_graph='archived'` rows: but we have not added any yet, so this pass correctly wipes the live edges as intended.
-  4. **Re-insert the dumped edges** with `source_graph='archived'`. For each edge in the dumped `outgoing` array, run:
-     ```bash
-     ll-run edges-cli.mjs add <from_path> <to_path> <edge_type> \
-       --confidence <high|medium> \
-       --source-graph archived \
-       --direction-flipped <0|1>
-     ```
-  After this sequence, the archived note's edges remain in the index marked as historical, downstream traversal still surfaces them, and any future Write to the stub path leaves them untouched.
+- For an ARCHIVE action, stamp the note in place rather than replacing it:
+  ```bash
+  ll-run supersede-note.mjs <archived-note> --replacement <replacement-path> [--date YYYY-MM-DD]
+  ```
+  This adds `invalidated: <date>` and `superseded_by: <replacement-path>` to the note's frontmatter, in the exact form capture-rules.md defines and `enrichVaultHits` honours, and leaves the body untouched. The note stays at its original path: history is what "archive" means here, not deletion or relocation, so "what did I believe, and what changed it" stays answerable from the note itself. Because the file is not moved or overwritten, its outgoing edges are never touched by the post-write hook chain, so there is nothing to dump and re-insert.
 
 **Vault transition note (mandatory if any vault notes were touched):**
 Write a new note to `0-inbox/` capturing the correction itself:
@@ -189,7 +182,7 @@ Future episodic searches matching "<old>" will be annotated automatically.
 - **Always ask before executing.** This skill is destructive; the triage step is non-negotiable.
 - **One supersession per rewrite.** Even if no notes were edited, record the supersession so future retrievals carry the annotation.
 - **Transition note is mandatory if vault was touched.** This is the "context gene editing" footprint: future you needs to find why a note changed.
-- **Preserve archived edges via `source_graph='archived'` marker.** The dump-and-re-insert sequence in Phase 5 keeps the historical justification graph intact. Downstream queries surface them; `removeOutgoingEdges` will not wipe them on subsequent stub writes.
+- **An ARCHIVE action never moves or overwrites the note.** `supersede-note.mjs` only edits frontmatter, so the note's outgoing edges are never touched by the post-write hook chain and stay in the graph as they were.
 - **Be terse in reporting.** One framing line, one triage map, one approval prompt, one completion block. No filler.
 
 ## Failure Modes to Avoid

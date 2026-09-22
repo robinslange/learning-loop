@@ -262,6 +262,13 @@ export const HookConfig = Object.freeze({
   SIMILARITY_THRESHOLD: 0.85,
   COSINE_MIN: 0.74,
   COSINE_MAX: 0.92,
+  // How long a librarian duplicate_flag verdict is trusted by the pre-write
+  // gate for the SAME note path before the gate re-derives it with its own
+  // scan. The librarian classifies on its own schedule (a child of the watch
+  // daemon, one investigation at a time), so a flag can lag the write that
+  // produced it; past this window the note may have moved on and the verdict
+  // is stale rather than authoritative.
+  DUPLICATE_FLAG_TTL_MS: 3_600_000, // 1 hour
   MSG_WEIGHT_CURRENT: 10,
   MSG_WEIGHT_RECENT: 3,
   MSG_WEIGHT_OLDER: 1,
