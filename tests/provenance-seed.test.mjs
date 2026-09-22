@@ -12,7 +12,7 @@ import {
 import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin');
@@ -50,7 +50,7 @@ test('hook-path emitProvenance (hooks/lib/common.mjs) also seeds both templates'
   const root = mkdtempSync(join(tmpdir(), 'll-prov-seed-hook-'));
   try {
     const code = `
-import { emitProvenance } from ${JSON.stringify(COMMON)};
+import { emitProvenance } from ${JSON.stringify(pathToFileURL(COMMON).href)};
 emitProvenance({ agent: 'test', action: 'create', target: 'hook.md' });
 `;
     const result = spawnSync('node', ['--input-type=module', '-e', code], {
