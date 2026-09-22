@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.2.0
+
 ### Added
 
 - **Provenance now exports to Grafana over OTLP, opt-in.** Seven reducers (`provenance`, `cache-health`, `retrieval`, `errors` (the `hook-errors` and `logs` streams), `librarian`, `dream-eval`, `session`) re-derive counts, durations and closed enum labels from the whole corpus on each run and ship them to a LAN OTLP receiver, gated behind BOTH `OTEL_EXPORTER_OTLP_ENDPOINT` and `otel.export_enabled` so nothing exports until both an operator and this config agree. A detached worker spawned from SessionStart runs the export outside the hot path, throttled by a marker so a session that starts within the hour does not re-spawn it. Every field a reducer emits is checked against an inclusion allowlist that fails closed: an attribute absent from a stream's schema throws rather than shipping, and the same allowlist governs `OTEL_RESOURCE_ATTRIBUTES`. Closes #71.
