@@ -1994,6 +1994,7 @@ test('invalidated-adoption: counts notes whose frontmatter carries invalidated:,
     const result = checkInvalidatedAdoption(counts);
     assert.equal(result.id, CHECK_IDS['invalidated-adoption']);
     assert.equal(result.status, SEVERITIES.ok);
+    assert.equal(result.severity, SEVERITIES.warn);
     assert.match(result.detail, /1 of 3 notes/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
