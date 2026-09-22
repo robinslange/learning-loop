@@ -25,12 +25,13 @@ import { encodeProjectDir } from './lib/paths.mjs';
 const PD = getPluginData();
 const dir = join(PD, 'retrieval');
 
-// Live-mode injections exist only in the ephemeral dedupe state, which is
-// pruned on every write. Nothing called this, so `injections-*.jsonl` was read
-// by every report and written by none: the `via: 'injected'` half of the
-// surfaced/used join was permanently empty, and a report over "retrieved only"
-// looks like complete coverage rather than half a dataset. Idempotent — it
-// dedupes on (session, path, ts) — so running it per invocation is safe.
+// Backfills injections-*.jsonl from whatever ephemeral dedupe state still
+// survives (entries older than ~3 minutes are pruned on every write). Live
+// injections are also read straight off shadow-injection-*.jsonl (never
+// pruned, see retrieval-usage.mjs), so the `via: 'injected'` join no longer
+// depends on this call alone -- it just recovers the dedupe-state bursts that
+// have not made it into the ledger yet. Idempotent: dedupes on
+// (session, path, ts), so running it per invocation is safe.
 syncInjectionLedger(PD);
 
 const args = process.argv.slice(2);

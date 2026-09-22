@@ -41,11 +41,17 @@ function writeMonthlyShards(dir, prefix, entries) {
   }
 }
 
-function makePluginData({ queries = [], dedupe = {}, provenance = [] } = {}) {
+function makePluginData({
+  queries = [],
+  dedupe = {},
+  provenance = [],
+  shadowInjections = [],
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'll-usage-'));
   mkdirSync(join(root, 'retrieval', 'session-dedupe'), { recursive: true });
   mkdirSync(join(root, 'provenance'), { recursive: true });
   writeMonthlyShards(join(root, 'retrieval'), 'queries', queries);
+  writeMonthlyShards(join(root, 'retrieval'), 'shadow-injection', shadowInjections);
   for (const [sid, entries] of Object.entries(dedupe)) {
     writeFileSync(
       join(root, 'retrieval', 'session-dedupe', `${sid}.json`),
@@ -84,6 +90,67 @@ test('sessionSurfaced merges injected + retrieved for one session, keeps level',
     assert.deepStrictEqual(a.via.sort(), ['injected', 'retrieved']);
     assert.strictEqual(a.level, 'pointer');
     assert.strictEqual(out.find((n) => n.path === '0-inbox/b.md').level, 'body');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+// GitHub issue #64: the injection ledger (injections-*.jsonl) only carries
+// whatever ephemeral dedupe state survived to the next sync, but every live
+// injection is also durably recorded on shadow-injection-*.jsonl (mode:
+// 'live', type: 'gate-pass-payload') the moment it happens -- no pruning, no
+// sync dependency. A note surfaced ONLY through that record (never synced
+// into the ledger, never in dedupe state) must still join to its usage event.
+test('sessionSurfaced and usageReport pick up a live injection recorded only on shadow-injection', () => {
+  const pd = makePluginData({
+    shadowInjections: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        type: 'gate-pass-payload',
+        mode: 'live',
+        payload: {
+          injected_paths: [{ path: '3-permanent/shadow-only.md', level: 'body' }],
+        },
+      },
+      // Shadow-mode traffic must not leak in as a surfaced note.
+      {
+        ts: daysAgo(1),
+        session_id: 's2',
+        type: 'gate-pass-payload',
+        mode: 'shadow',
+        payload: {
+          injected_paths: [{ path: '3-permanent/never-reached-model.md', level: 'body' }],
+        },
+      },
+    ],
+    provenance: [
+      {
+        ts: daysAgo(1),
+        session_id: 's1',
+        action: 'note-usage',
+        target: '3-permanent/shadow-only.md',
+        status: 'used',
+        signals: ['read'],
+      },
+    ],
+  });
+  try {
+    const surfaced = sessionSurfaced(pd, 's1');
+    assert.deepStrictEqual(
+      surfaced.map((n) => n.path),
+      ['3-permanent/shadow-only.md'],
+    );
+    assert.deepStrictEqual(surfaced[0].via, ['injected']);
+    assert.strictEqual(surfaced[0].level, 'body');
+
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    assert.strictEqual(r.used_events, 1);
+    assert.strictEqual(
+      r.surfaced_never_used.some((n) => n.path === '3-permanent/never-reached-model.md'),
+      false,
+      'a shadow-mode record never reached the model and must not count as surfaced',
+    );
   } finally {
     rmSync(pd, { recursive: true, force: true });
   }

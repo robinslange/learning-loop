@@ -57,24 +57,8 @@ export function binaryPath() {
   return _binaryPath;
 }
 
-// Test-only: clear the cached path so the next binaryPath() call re-runs
-// findBinary(). Lets tests swap in/out a stub binary without spawning fresh
-// node processes. Do not call from production code.
-export function __resetBinaryCacheForTesting() {
-  _binaryPath = null;
-}
-
 export function hasBinary() {
   return binaryPath() !== null;
-}
-
-export function binaryVersion() {
-  if (!hasBinary()) return null;
-  try {
-    return runRaw(['version']).trim();
-  } catch (_err) {
-    return null;
-  }
 }
 
 export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
@@ -93,21 +77,4 @@ export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
     env: ortSpawnEnv(dirname(bin)),
   });
   return JSON.parse(stdout);
-}
-
-export function runRaw(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
-  const bin = binaryPath();
-  if (!bin) {
-    warnOnce(
-      'll-search-missing',
-      'learning-loop: ll-search binary not found. Run /learning-loop:init to install.\n',
-    );
-    throw new Error('ll-search binary not found. Run /learning-loop:init to install.');
-  }
-
-  return execFileSync(bin, args, {
-    encoding: 'utf-8',
-    maxBuffer,
-    env: ortSpawnEnv(dirname(bin)),
-  });
 }

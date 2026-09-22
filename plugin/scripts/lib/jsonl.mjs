@@ -45,7 +45,33 @@ export function appendJsonlLineSafe(path, obj) {
   }
 }
 
-// Read the last complete line of a file without loading the whole thing.
+// Read at most maxBytes from the end of a file, opened/seeked/closed once.
+// Shared by every caller that needs a bounded tail of an append-only file
+// instead of loading the whole thing (provenance's lastLine below, and the
+// shadow-injection / otel-error-log health checks). Returns '' on an empty
+// or unreadable file (missing, permission denied, etc.).
+export function readTailBytes(path, maxBytes) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    if (size === 0) return '';
+    const start = Math.max(0, size - maxBytes);
+    const buf = Buffer.alloc(size - start);
+    readSync(fd, buf, 0, buf.length, start);
+    return buf.toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+        // eslint-disable-next-line learning-loop/no-empty-catch -- fd already gone; nothing left to close.
+      } catch {}
+    }
+  }
+}
+
 // Provenance files are append-only and can grow to multi-MB; this reads at
 // most TAIL_BYTES from the end, which comfortably covers one JSON line.
 const TAIL_BYTES = 8192;
@@ -57,26 +83,8 @@ let lastLineCalls = 0;
 
 function lastLine(path) {
   lastLineCalls++;
-  let fd;
-  try {
-    fd = openSync(path, 'r');
-    const size = fstatSync(fd).size;
-    if (size === 0) return null;
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buf = Buffer.alloc(size - start);
-    readSync(fd, buf, 0, buf.length, start);
-    const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    return lines.length > 0 ? lines[lines.length - 1] : null;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        closeSync(fd);
-        // eslint-disable-next-line learning-loop/no-empty-catch -- fd already gone; nothing left to close.
-      } catch {}
-    }
-  }
+  const lines = readTailBytes(path, TAIL_BYTES).split('\n').filter(Boolean);
+  return lines.length > 0 ? lines[lines.length - 1] : null;
 }
 
 // Consecutive-duplicate suppression for provenance emitters only (not a

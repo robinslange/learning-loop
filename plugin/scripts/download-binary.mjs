@@ -5,14 +5,16 @@ import {
   chmodSync,
   existsSync,
   readFileSync,
+  readdirSync,
+  rmSync,
   writeFileSync,
   createWriteStream,
   unlinkSync,
 } from 'fs';
 import { join } from 'path';
 import { platform, arch } from 'os';
-import { execFileSync, spawnSync } from 'child_process';
-import { getPluginData } from './lib/config.mjs';
+import { execFileSync, spawn, spawnSync } from 'child_process';
+import { getPluginData, getVaultPath } from './lib/config.mjs';
 import { env, isOffline } from './lib/env.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
@@ -20,6 +22,7 @@ import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
 import { verifyArtifact, isAllowedRedirect } from './lib/artifact-verify.mjs';
 import { semverCmp, isPlainSemver } from './lib/semver.mjs';
 import { isMainModule } from './lib/is-main.mjs';
+import { isProcessAlive } from './lib/file-lock.mjs';
 
 function detectArtifact() {
   const p = platform();
@@ -144,6 +147,41 @@ export async function download(url, dest, { _httpsModule, _httpModule } = {}) {
     };
     follow(url);
   });
+}
+
+// True when the watch daemon's own pidfile (<vault>/.vault-search/watch.pid,
+// the same one watch.mjs reads) names a pid that is currently alive. A stale
+// or absent pidfile means there is nothing running to restart.
+export function watchDaemonIsRunning(vault) {
+  if (!vault) return false;
+  let raw;
+  try {
+    raw = readFileSync(join(vault, '.vault-search', 'watch.pid'), 'utf8').trim();
+  } catch {
+    return false;
+  }
+  const pid = parseInt(raw, 10);
+  return Number.isFinite(pid) && isProcessAlive(pid);
+}
+
+// Remove everything under binDir except the binary just installed and
+// .version -- older ll-search binaries, extraction leftovers, and stale
+// per-version subdirectories that accumulated before this sweep existed.
+export function pruneOldBinaries(binDir, keepName) {
+  let entries;
+  try {
+    entries = readdirSync(binDir);
+  } catch {
+    return;
+  }
+  for (const name of entries) {
+    if (name === keepName || name === '.version' || !name.startsWith('ll-search')) continue;
+    try {
+      rmSync(join(binDir, name), { recursive: true, force: true });
+    } catch (err) {
+      logError('download-binary.pruneOldBinaries', err);
+    }
+  }
 }
 
 export function extractZip(zipPath, destDir, { _spawnFn = spawnSync } = {}) {
@@ -312,6 +350,29 @@ async function main() {
 
   // Write version file
   writeFileSync(versionFile, version + '\n');
+
+  // Only the binary just installed and .version are worth keeping in bin/ --
+  // older versions and extraction leftovers just accumulate (issue #22, 65M
+  // measured on one install).
+  pruneOldBinaries(binDir, binaryName);
+
+  // A watch daemon started before this download keeps running the OLD process
+  // image and OLD --librarian-script path (its cache/.../<oldversion>/... path)
+  // until something restarts it. Without this, the daemon lags the binary by
+  // however long the session runs, not the one-session lag the download itself
+  // has. Reuses watch.mjs's own stop/start dispatch rather than reimplementing
+  // pidfile handling here.
+  const vault = getVaultPath();
+  if (watchDaemonIsRunning(vault)) {
+    const watchScript = join(import.meta.dirname, 'watch.mjs');
+    try {
+      execFileSync(process.execPath, [watchScript, 'stop'], { stdio: 'ignore' });
+      spawn(process.execPath, [watchScript], { detached: true, stdio: 'ignore' }).unref();
+      console.error('  Restarted watch daemon on the new binary.');
+    } catch (err) {
+      logError('download-binary.restartWatch', err);
+    }
+  }
 }
 
 if (isMainModule(import.meta.url)) {

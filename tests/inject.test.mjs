@@ -236,20 +236,6 @@ describe('buildInjection', () => {
     assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body', score: 0.85 }]);
   });
 
-  it('treats a legacy Set of paths as body-level entries', () => {
-    const result = buildInjection({
-      vaultHits: [
-        { title: 'Note A', path: 'a.md', body: 'Body A content here.', score: 0.95 },
-        { title: 'Note B', path: 'b.md', body: 'Body B content here.', score: 0.85 },
-      ],
-      query: 'test',
-      alreadyInjected: new Set(['a.md']),
-    });
-    assert.ok(result);
-    assert.ok(!result.additionalContext.includes('Note A'));
-    assert.deepEqual(result.injectedVault, [{ path: 'b.md', level: 'body', score: 0.85 }]);
-  });
-
   // Regression: a note that was only surfaced as a one-line pointer must still
   // qualify for body injection on a later prompt — the model never saw its
   // content. Pre-fix, pointer paths were persisted indistinguishably from

@@ -3,6 +3,7 @@
 //
 // Usage:
 //   ll-watch                 — start watcher in background
+//   ll-watch start           — same as the bare form
 //   ll-watch --foreground    — start watcher in foreground (for tmux/launchd)
 //   ll-watch --install       — write stable shim to ~/.local/bin/ll-watch
 //   ll-watch stop            — stop a running watcher
@@ -23,6 +24,7 @@ import { isProcessAlive } from './lib/file-lock.mjs';
 
 const USAGE = `Usage:
   ll-watch                 — start watcher in background
+  ll-watch start           — same as the bare form
   ll-watch --foreground    — start watcher in foreground (for tmux/launchd)
   ll-watch stop            — stop a running watcher
   ll-watch status          — check watcher status
@@ -47,7 +49,7 @@ if (command === '--install' || command === 'install') {
 }
 
 // ── reject unknown commands before resolving anything heavy ──
-const isStart = command === undefined || command === '--foreground';
+const isStart = command === undefined || command === 'start' || command === '--foreground';
 if (!isStart && command !== 'stop' && command !== 'status') {
   console.error(`unknown command: ${command}`);
   console.error(USAGE);
