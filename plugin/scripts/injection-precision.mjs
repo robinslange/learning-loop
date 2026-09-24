@@ -86,6 +86,7 @@ import { BODY_SLOTS, POINTER_SLOTS } from '../hooks/lib/inject.mjs';
 import { loadNoteUsageEvents } from './lib/retrieval-usage.mjs';
 import { logError } from './lib/log.mjs';
 import { isMainModule } from './lib/is-main.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
 
 // Derived from the injector's own constants rather than restated as 5: the
 // total has survived the layout change (v2.1.0 traded a pointer for a body) but
@@ -453,19 +454,14 @@ if (isMainModule(import.meta.url)) {
     process.exit(1);
   }
   const argv = process.argv.slice(2);
-  const epochFlag = argv.indexOf('--epoch');
-  if (epochFlag !== -1 && !argv[epochFlag + 1]) {
-    console.error('injection-precision: --epoch needs an ISO timestamp');
-    process.exit(2);
-  }
   let report;
   try {
-    report = injectionPrecision(PD, epochFlag === -1 ? {} : { epoch: argv[epochFlag + 1] });
+    report = injectionPrecision(PD, { epoch: flagValue(argv, '--epoch') });
   } catch (err) {
     console.error(`injection-precision: ${err.message}`);
     process.exit(2);
   }
-  if (argv.includes('--json')) {
+  if (hasFlag(argv, '--json')) {
     console.log(JSON.stringify(report, null, 2));
   } else {
     printReport(report);

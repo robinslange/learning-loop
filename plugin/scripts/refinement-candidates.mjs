@@ -25,6 +25,7 @@ import { spawnSync } from 'node:child_process';
 import { ortSpawnEnv, binaryPath } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
 
 // Refinement band: empirically tuned. Existing-vs-existing claim-touching pairs
 // cluster around 0.80-0.92 (see spike 3). But fresh notes often land lower
@@ -158,15 +159,11 @@ async function buildCandidates(newNotePaths, opts = {}) {
 async function main() {
   const args = process.argv.slice(2);
 
-  let pairsOutPath = null;
-  const pairsOutIdx = args.indexOf('--pairs-out');
-  if (pairsOutIdx >= 0) {
-    pairsOutPath = args[pairsOutIdx + 1];
-    args.splice(pairsOutIdx, 2);
-  }
+  const pairsOutPath = flagValue(args, '--pairs-out');
+  if (pairsOutPath) args.splice(args.indexOf('--pairs-out'), 2);
 
   let paths;
-  if (args.includes('--stdin')) {
+  if (hasFlag(args, '--stdin')) {
     paths = readStdinPaths();
   } else {
     paths = args;

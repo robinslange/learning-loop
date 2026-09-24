@@ -34,6 +34,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, basename } from 'node:path';
 import { isMainModule } from './lib/is-main.mjs';
+import { hasFlag, flagValue } from './lib/cli-args.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { stripFrontmatter, splitRawFrontmatter } from './lib/markdown-parse.mjs';
@@ -296,14 +297,13 @@ function main() {
   let agentJson;
   let pairsPath;
 
-  if (args.includes('--stdin')) {
-    agentJson = readFileSync(0, 'utf-8');
-    const pairsIdx = args.indexOf('--pairs');
-    if (pairsIdx < 0) {
+  if (hasFlag(args, '--stdin')) {
+    pairsPath = flagValue(args, '--pairs');
+    if (!pairsPath) {
       process.stderr.write('--pairs <path> required with --stdin\n');
       process.exit(1);
     }
-    pairsPath = args[pairsIdx + 1];
+    agentJson = readFileSync(0, 'utf-8');
   } else {
     if (args.length < 2) {
       process.stderr.write('usage: refinement-validate.mjs <agent.json> <pairs.json>\n');
