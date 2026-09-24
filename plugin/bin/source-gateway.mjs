@@ -4,7 +4,7 @@ import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/regist
 import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
 import { getSessionId } from '../scripts/lib/session.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
-import { readCount, bumpCount } from '../scripts/lib/fetch-budget.mjs';
+import { tryBump } from '../scripts/lib/fetch-budget.mjs';
 import { checkFetchUrl } from '../scripts/lib/sources/url-guard.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
@@ -77,11 +77,8 @@ export async function runGateway(argv, deps = {}) {
   // Graceful degrade: when sessionId is empty or pluginData is null, store is absent and no
   // enforcement happens — fetch never throws from a missing data dir.
   const store = budgetStore ?? buildFileStore(sessionId, pluginData);
-  if (store) {
-    if (store.n >= budget) {
-      return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
-    }
-    store.bump();
+  if (store && !(await store.tryBump(budget))) {
+    return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
   }
   const doc = await source.fetch(args.url);
   return { doc, source_used: source.id };
@@ -92,14 +89,7 @@ function buildFileStore(sid, pd) {
   const resolvedSid = sid !== undefined ? sid : getSessionId();
   const resolvedPd = pd !== undefined ? pd : getPluginData();
   if (!resolvedPd || !resolvedSid || resolvedSid === 'unknown') return null;
-  return {
-    get n() {
-      return readCount(resolvedSid, resolvedPd);
-    },
-    bump() {
-      bumpCount(resolvedSid, resolvedPd);
-    },
-  };
+  return { tryBump: (budget) => tryBump(resolvedSid, resolvedPd, budget) };
 }
 
 export { UsageError };

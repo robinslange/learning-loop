@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { withLock } from './file-lock.mjs';
 
 // Per-session fetch budget counter backed by a single-integer file under
 // PLUGIN_DATA/fetch-budget/<sessionId>.count. Survives process boundaries
@@ -25,14 +26,29 @@ export function readCount(sessionId, pluginData) {
   }
 }
 
-export function bumpCount(sessionId, pluginData) {
-  if (!pluginData || !sessionId || sessionId === 'unknown') return;
-  const dir = join(pluginData, 'fetch-budget');
+// Reserve one fetch atomically across processes. Reading the count and writing
+// count + 1 separately let parallel research subagents fetch past the budget.
+export function tryBump(sessionId, pluginData, budget) {
+  if (!pluginData || !sessionId || sessionId === 'unknown') return true;
+  const file = budgetFile(sessionId, pluginData);
   try {
-    mkdirSync(dir, { recursive: true });
-    const file = budgetFile(sessionId, pluginData);
-    const current = readCount(sessionId, pluginData);
-    writeFileSync(file, String(current + 1), 'utf8');
-    // eslint-disable-next-line learning-loop/no-empty-catch -- never throw, a write failure must not break fetch.
-  } catch {}
+    mkdirSync(join(pluginData, 'fetch-budget'), { recursive: true });
+    return withLock(file, { retries: 400, retryDelayMs: 5 }, () => {
+      const n = readCount(sessionId, pluginData);
+      if (n >= budget) return false;
+      writeFileSync(file, String(n + 1), 'utf8');
+      return true;
+    });
+  } catch {
+    return true;
+  }
+}
+
+export function budgetScopeSegment(sessionId) {
+  if (!sessionId || sessionId === 'unknown') return null;
+  const seg = sessionId
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '-')
+    .slice(0, 64);
+  return seg === '' || /^[.]+$/.test(seg) ? null : seg;
 }

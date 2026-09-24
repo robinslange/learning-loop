@@ -177,7 +177,12 @@ describe('source-gateway fetch verb', () => {
 
   it('does not consume fetch budget on a blocked url', async () => {
     let bumped = 0;
-    const store = { n: 0, bump: () => bumped++ };
+    const store = {
+      tryBump: () => {
+        bumped++;
+        return true;
+      },
+    };
     await runGateway(['fetch', '--url', 'http://169.254.169.254/'], {
       ...deps,
       budgetStore: store,

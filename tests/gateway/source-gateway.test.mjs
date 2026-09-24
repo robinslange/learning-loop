@@ -94,11 +94,10 @@ describe('gateway research verb (full bundle)', () => {
 function makeBudgetStore() {
   let n = 0;
   return {
-    get n() {
-      return n;
-    },
-    bump() {
+    tryBump(budget) {
+      if (n >= budget) return false;
       n += 1;
+      return true;
     },
   };
 }
