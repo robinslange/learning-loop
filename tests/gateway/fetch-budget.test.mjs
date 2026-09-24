@@ -50,7 +50,8 @@ describe('tryBump', () => {
   it('lets exactly budget of N concurrent processes through', async () => {
     const sid = `race-${Date.now()}`;
     const mod = new URL('../../plugin/scripts/lib/fetch-budget.mjs', import.meta.url).href;
-    const script = `import { tryBump } from ${JSON.stringify(mod)}; process.stdout.write(tryBump(${JSON.stringify(sid)}, ${JSON.stringify(tmpPd)}, 10) ? '1' : '0');`;
+    const startAt = Date.now() + 1500;
+    const script = `import { tryBump } from ${JSON.stringify(mod)}; while (Date.now() < ${startAt}) {} process.stdout.write(tryBump(${JSON.stringify(sid)}, ${JSON.stringify(tmpPd)}, 10) ? '1' : '0');`;
     const outs = await Promise.all(
       Array.from(
         { length: 30 },
