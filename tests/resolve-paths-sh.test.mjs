@@ -30,14 +30,10 @@ test(
       assert.match(line, /^[A-Z_]+='.*'$/, `not eval-safe: ${line}`);
     }
     // round-trip: eval it in a real shell, echo SESSION_ID back
-    const back = execFileSync(
-      'sh',
-      ['-c', 'eval "$(cat)"; printf \'%s\' "$SESSION_ID"'],
-      {
-        input: shOut,
-        encoding: 'utf-8',
-      },
-    );
+    const back = execFileSync('sh', ['-c', 'eval "$(cat)"; printf \'%s\' "$SESSION_ID"'], {
+      input: shOut,
+      encoding: 'utf-8',
+    });
     const direct = execFileSync('node', [SCRIPT, 'SESSION_ID'], { encoding: 'utf-8' }).trim();
     assert.equal(back, direct, 'eval-set SESSION_ID matches the single-field resolve');
   },
@@ -63,13 +59,10 @@ test(
       encoding: 'utf-8',
       env: { ...process.env, VAULT_PATH: VALUE },
     });
-    const back = execFileSync(
-      'sh',
-      ['-c', `eval "${shOut.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"; printf '%s' "$VAULT"`],
-      {
-        encoding: 'utf-8',
-      },
-    );
+    const back = execFileSync('sh', ['-c', 'eval "$(cat)"; printf \'%s\' "$VAULT"'], {
+      input: shOut,
+      encoding: 'utf-8',
+    });
     assert.equal(
       back,
       VALUE,

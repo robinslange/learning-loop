@@ -19,7 +19,7 @@ after(() => {
 });
 
 function bumpInChild(sid, pd) {
-  const code = "import(process.argv[1]).then((m) => m.bumpCount(process.argv[2], process.argv[3]))";
+  const code = 'import(process.argv[1]).then((m) => m.bumpCount(process.argv[2], process.argv[3]))';
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['-e', code, MODULE_URL, sid, pd], { stdio: 'inherit' });
     child.on('error', reject);
