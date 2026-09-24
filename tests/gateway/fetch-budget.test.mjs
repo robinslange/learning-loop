@@ -19,9 +19,9 @@ after(() => {
 });
 
 function bumpInChild(sid, pd) {
-  const code = `import(${JSON.stringify(MODULE_URL)}).then((m) => m.bumpCount(${JSON.stringify(sid)}, ${JSON.stringify(pd)}))`;
+  const code = "import(process.argv[1]).then((m) => m.bumpCount(process.argv[2], process.argv[3]))";
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['-e', code], { stdio: 'inherit' });
+    const child = spawn(process.execPath, ['-e', code, MODULE_URL, sid, pd], { stdio: 'inherit' });
     child.on('error', reject);
     child.on('exit', (status) =>
       status === 0 ? resolve() : reject(new Error(`child exited ${status}`)),
