@@ -32,8 +32,9 @@ test(
     // round-trip: eval it in a real shell, echo SESSION_ID back
     const back = execFileSync(
       'sh',
-      ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$SESSION_ID"`],
+      ['-c', 'eval "$(cat)"; printf \'%s\' "$SESSION_ID"'],
       {
+        input: shOut,
         encoding: 'utf-8',
       },
     );
