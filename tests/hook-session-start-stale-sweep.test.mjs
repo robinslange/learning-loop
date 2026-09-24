@@ -140,7 +140,7 @@ test('sweep: deletes convergence files older than the TTL, keeps fresh ones', as
 });
 
 test(
-  'TTL sweep reaps markers/, tmp legacies, and edges tmp orphans — never the session-id file',
+  'TTL sweep reaps markers/, tmp session labels, and edges tmp orphans — never the session-id file',
   { timeout: 12000 },
   () => {
     const eightDaysAgo = (Date.now() - 8 * 24 * 60 * 60 * 1000) / 1000;
@@ -152,11 +152,7 @@ test(
     // assertion only stays load-bearing — if the rewrite lands elsewhere.
     const sessionTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-sid-'));
 
-    const oldTmpFiles = [
-      'claude-session-label-oldsid.txt',
-      'learning-loop-last-dream',
-      'learning-loop-memory-snapshot-oldsid',
-    ];
+    const oldTmpFiles = ['claude-session-label-oldsid.txt'];
 
     const r = runHook(HOOK, {
       env: { VAULT_PATH: VAULT, TMPDIR: isolatedTmp, LL_SESSION_TMP_DIR: sessionTmp },
@@ -200,7 +196,7 @@ test(
       assert.deepEqual(
         readdirSync(isolatedTmp).sort(),
         ['learning-loop-session-id'],
-        'all three legacies swept; the 8-day-old session-id file must NEVER be swept',
+        'the old session-label file swept; the 8-day-old session-id file must NEVER be swept',
       );
       assert.equal(
         readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8'),
@@ -228,7 +224,7 @@ test('TTL sweep is gated to once per 24h — a stale marker survives a same-day 
     ...fx.ctx,
     tmp: isolatedTmp,
     projectDir: null,
-    memoryDir: join(fx.sandbox, 'memdir'),
+    home: join(fx.sandbox, 'memdir'),
     payload: { session_id: 'gate-test-sid' },
   };
 
@@ -286,7 +282,7 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
     ...fx.ctx,
     tmp: isolatedTmp,
     projectDir: null,
-    memoryDir: join(fx.sandbox, 'memdir'),
+    home: join(fx.sandbox, 'memdir'),
     payload: { session_id: 'retention-test-sid' },
   };
 
@@ -341,7 +337,7 @@ test('sweep: logs/log-YYYY-MM.jsonl is pruned with the same RETRIEVAL_LOG_KEEP_M
     ...fx.ctx,
     tmp: isolatedTmp,
     projectDir: null,
-    memoryDir: join(fx.sandbox, 'memdir'),
+    home: join(fx.sandbox, 'memdir'),
     payload: { session_id: 'logs-retention-test-sid' },
   };
 
@@ -385,7 +381,7 @@ test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backup
     ...fx.ctx,
     tmp: isolatedTmp,
     projectDir: null,
-    memoryDir: join(fx.sandbox, 'memdir'),
+    home: join(fx.sandbox, 'memdir'),
     payload: { session_id: 'librarian-bak-test-sid' },
   };
 
@@ -443,7 +439,7 @@ test('sweep: a prefix that stopped being written drains instead of keeping its l
       ...fx.ctx,
       tmp: isolatedTmp,
       projectDir: null,
-      memoryDir: join(fx.sandbox, 'memdir'),
+      home: join(fx.sandbox, 'memdir'),
       payload: { session_id: 'dead-prefix-sid' },
     });
     for (const month of deadMonths) {

@@ -6,7 +6,7 @@
 // fixed module order, per-module failure isolation.
 
 import { basename, join } from 'node:path';
-import { home, readPayload, resolveVaultPath, isVaultNote } from './lib/common.mjs';
+import { readPayload, resolveVaultPath, isVaultNote } from './lib/common.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
@@ -15,7 +15,7 @@ import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
-import { encodeProjectDir } from '../scripts/lib/paths.mjs';
+import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
@@ -40,12 +40,10 @@ function recordMemoryWriteIfApplicable(filePath, tool, sessionId) {
     if (!sessionId) return;
     if (tool !== 'Write') return;
     if (!filePath || !filePath.endsWith('.md')) return;
-    const projectDir = env.CLAUDE_PROJECT_DIR;
-    if (!projectDir) return;
+    const memoryDir = resolveMemoryDir(env.CLAUDE_PROJECT_DIR);
+    if (!memoryDir) return;
     const pluginData = getPluginData();
     if (!pluginData) return;
-    const encodedPath = encodeProjectDir(projectDir);
-    const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     if (filePath !== join(memoryDir, basename(filePath))) return;
     appendMemoryWrite(pluginData, sessionId, basename(filePath));
   } catch (err) {

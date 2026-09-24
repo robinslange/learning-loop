@@ -7,8 +7,7 @@ import { home, encodeProjectDir } from './paths.mjs';
 const NON_MEMORY = new Set(['MEMORY.md', '_dream_log.md']);
 
 /**
- * Resolve the auto-memory dir for a project. Slug derivation matches
- * hooks/lib/dream-gate.js exactly so all consumers agree on the path.
+ * Resolve the auto-memory dir for a project.
  * @param {string | undefined} projectDir
  * @param {string} [homeDir]  defaults to home(); param for testability
  * @returns {string | null} the memory dir, or null when projectDir is absent

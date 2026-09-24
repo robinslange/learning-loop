@@ -9,7 +9,8 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
-import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
+import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
+import { resolveMemoryDir } from '../../scripts/lib/memory-paths.mjs';
 import { spawnDetached, emitProvenance, home } from '../lib/common.mjs';
 import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
@@ -310,7 +311,6 @@ function injectDreamGate(ctx) {
     }
     spawnDetached('session-start.context-assembly.dreamGate', process.execPath, [
       join(import.meta.dirname, '..', 'lib', 'dream-gate.js'),
-      '--session-start-refresh',
     ]);
   } catch (err) {
     logError('session-start.context-assembly.dreamGate', err);
@@ -322,10 +322,9 @@ function injectDreamGate(ctx) {
 // instead of the index lines. Stores the resolved path on state so section
 // 5 can skip re-injecting the same file when project and vault-parent match.
 function injectProjectMemory(ctx, state) {
-  const { projectDir, memoryDir } = ctx;
-  if (!projectDir) return;
-  const encodedPath = encodeProjectDir(projectDir);
-  state.projectMemoryIndex = join(memoryDir, encodedPath, 'memory', 'MEMORY.md');
+  const memoryDir = resolveMemoryDir(ctx.projectDir, ctx.home);
+  if (!memoryDir) return;
+  state.projectMemoryIndex = join(memoryDir, 'MEMORY.md');
   if (!existsSync(state.projectMemoryIndex) || !memoryIsFresh(state.projectMemoryIndex)) return;
   try {
     const index = readMemoryIndexCapped(state.projectMemoryIndex);
@@ -341,10 +340,8 @@ function injectProjectMemory(ctx, state) {
 // parent both keys resolve to the same MEMORY.md — skip the global section
 // rather than injecting the identical index twice.
 function injectGlobalMemory(ctx, state) {
-  const { vaultRoot, memoryDir } = ctx;
-  const vaultParent = resolve(vaultRoot, '..');
-  const encodedVaultParent = encodeProjectDir(vaultParent);
-  const globalMemory = join(memoryDir, encodedVaultParent, 'memory', 'MEMORY.md');
+  const vaultParent = resolve(ctx.vaultRoot, '..');
+  const globalMemory = join(resolveMemoryDir(vaultParent, ctx.home), 'MEMORY.md');
   if (
     globalMemory === state.projectMemoryIndex ||
     !existsSync(globalMemory) ||

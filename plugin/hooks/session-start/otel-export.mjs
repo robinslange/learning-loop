@@ -9,7 +9,6 @@ import { join } from 'node:path';
 import { MARKER_PATHS, readMarker } from '../../scripts/lib/marker-cache.mjs';
 import { isExportEnabled } from '../../scripts/otel/export.mjs';
 import { spawnDetached } from '../lib/common.mjs';
-import { logError } from '../../scripts/lib/log.mjs';
 
 // One hour, passed explicitly at the call site per the plan. Never reuse or
 // mutate MARKER_TTL_MS: intentions, dreamGate and lastDream all default

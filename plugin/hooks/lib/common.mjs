@@ -13,7 +13,6 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { emitProvenance as emitProvenanceCanonical } from '../../scripts/provenance.mjs';
-import { VALID_ACTIONS } from '../../scripts/lib/provenance-vocabulary.mjs';
 import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 import { relativeToVault, home } from '../../scripts/lib/paths.mjs';
@@ -205,26 +204,9 @@ export async function runHook(handler) {
 
 // --- Emission helpers ---
 
-const provenanceDedupeKeys = new Set();
-
 // Thin adapter: delegate the canonical record shape to scripts/provenance.mjs,
-// same pattern as emitRetrieval below. The in-process dedupe Set is specific
-// to this path: hooks fire once per tool call, so a duplicate within one
-// process is a genuine repeat, not a fresh session. An earlier copy of the
-// emitter lived here and never seeded the provenance templates, so whether
-// they existed depended on which path fired first; the canonical emitter
-// seeds on either.
+// same pattern as emitRetrieval below.
 export function emitProvenance(event) {
-  // Validate before touching the dedupe Set: an invalid action must not
-  // consume the (session_id, agent_id, path) key, or a rejected record would
-  // silently poison a later valid one with the same identity.
-  if (!event || !VALID_ACTIONS.has(event.action)) {
-    emitProvenanceCanonical(event, { source: 'hook' });
-    return;
-  }
-  const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
-  if (key !== '||' && provenanceDedupeKeys.has(key)) return;
-  provenanceDedupeKeys.add(key);
   emitProvenanceCanonical(event, { source: 'hook' });
 }
 
