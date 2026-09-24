@@ -205,8 +205,7 @@ If `coverage_days` is null (no surfacing telemetry yet), skip this step silently
 Count the notes that carry the one supersession key retrieval reads:
 
 ```bash
-VAULT="$(ll-paths VAULT)"
-grep -rl '^invalidated:' "$VAULT" --include='*.md' | grep -v '/_archive/' | wc -l
+node -e "import(process.argv[1]+'/scripts/lib/health-checks/full.mjs').then(m => console.log(m.collectInvalidatedAdoption(process.argv[2]).invalidated))" "$(ll-paths PLUGIN)" "$(ll-paths VAULT)"
 ```
 
 Report it as one line, `N notes carry invalidated:`, in both modes. This is

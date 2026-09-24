@@ -17,7 +17,13 @@ import { relative } from 'node:path';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { flagValue } from './lib/cli-args.mjs';
 import { isMainModule } from './lib/is-main.mjs';
-import { openEdgeDb, archiveOutgoingEdges, saveDb } from './lib/edges.mjs';
+import {
+  openEdgeDb,
+  archiveOutgoingEdges,
+  saveDb,
+  acquireLock,
+  releaseLock,
+} from './lib/edges.mjs';
 import { DATA_FILES } from './lib/paths.mjs';
 import { logError } from './lib/log.mjs';
 import { VAULT_PATH, PLUGIN_DATA } from './lib/constants.mjs';
@@ -31,7 +37,8 @@ const FM_SPLIT_RE = /^(---\r?\n)([\s\S]*?)(\r?\n---\r?\n?)/;
  * alone. Never overwrites an existing `invalidated:` -- a note already
  * superseded stays as first recorded. An existing `superseded_by:` with no
  * paired `invalidated:` is dropped and replaced: the new supersession wins,
- * because the old pointer was never paired with an invalidation.
+ * because the old pointer was never paired with an invalidation. An empty
+ * `invalidated:` is treated the same way.
  *
  * `changed: false` carries a `reason` distinguishing why nothing was
  * written: `'no-frontmatter'` (the note has no `---` block at all, so the
@@ -54,9 +61,17 @@ export function stampSupersession(raw, { date, replacementPath }) {
   // bare \n.
   const eol = split[1].endsWith('\r\n') ? '\r\n' : '\n';
 
-  const fmLines = split[2]
-    .split(/\r?\n/)
-    .filter((l) => l.length > 0 && !l.startsWith('superseded_by:'));
+  // Drop any empty `invalidated:` and any unpaired `superseded_by:`, including
+  // a block list under it, so the pair below is the only one. Every other line
+  // (blank lines in a `|` block included) is kept as written.
+  const fmLines = [];
+  let dropping = false;
+  for (const line of split[2].split(/\r?\n/)) {
+    if (/^(invalidated|superseded_by):/.test(line)) dropping = true;
+    else if (!dropping || !/^(\s|-(\s|$))/.test(line)) dropping = false;
+    if (!dropping) fmLines.push(line);
+  }
+  while (fmLines.at(-1) === '') fmLines.pop();
   fmLines.push(`invalidated: ${date}`);
   if (replacementPath) fmLines.push(`superseded_by: ${replacementPath}`);
 
@@ -82,16 +97,30 @@ async function archiveNoteEdges(filePath, vaultPath, pluginData) {
   const relPath = relative(vaultPath, filePath).split('\\').join('/');
   const dbPath = DATA_FILES.edgesDb(pluginData);
   if (!existsSync(dbPath)) return 0;
+  // saveDb writes the whole database back, so without the lock this races
+  // edge-infer, which fires on the replacement note's write just before a
+  // supersession, and whichever saves last erases the other's edges. Not a
+  // hook, so it can wait longer for the lock than edge-infer does.
+  if (!acquireLock(dbPath, 40, 50)) {
+    logError(
+      'supersede-note.archiveNoteEdges',
+      new Error(`failed to acquire ${dbPath}; edges of ${relPath} left live`),
+    );
+    return 0;
+  }
+  let db = null;
   try {
-    const db = await openEdgeDb(dbPath);
+    db = await openEdgeDb(dbPath);
     archiveOutgoingEdges(db, relPath);
     const archived = db.getRowsModified();
     saveDb(db, dbPath);
-    db.close();
     return archived;
   } catch (err) {
     logError('supersede-note.archiveNoteEdges', err);
     return 0;
+  } finally {
+    db?.close();
+    releaseLock(dbPath);
   }
 }
 

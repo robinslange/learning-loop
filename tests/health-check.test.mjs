@@ -1987,15 +1987,19 @@ test('invalidated-adoption: counts notes whose frontmatter carries invalidated:,
     join(vault, '3-permanent', 'body-only.md'),
     'no frontmatter, invalidated: in body\n',
   );
+  writeFileSync(
+    join(vault, '3-permanent', 'body-line.md'),
+    '---\ntitle: Quoting\n---\ninvalidated: 2026-09-22\n',
+  );
   writeFileSync(join(vault, '_archive', 'gone.md'), '---\ninvalidated: 2026-01-01\n---\n');
   try {
     const counts = collectInvalidatedAdoption(vault);
-    assert.deepEqual(counts, { total: 3, invalidated: 1 });
+    assert.deepEqual(counts, { total: 4, invalidated: 1 });
     const result = checkInvalidatedAdoption(counts);
     assert.equal(result.id, CHECK_IDS['invalidated-adoption']);
     assert.equal(result.status, SEVERITIES.ok);
     assert.equal(result.severity, SEVERITIES.warn);
-    assert.match(result.detail, /1 of 3 notes/);
+    assert.match(result.detail, /1 of 4 notes/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
   }

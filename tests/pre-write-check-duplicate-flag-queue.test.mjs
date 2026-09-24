@@ -80,6 +80,23 @@ describe('pre-write-check: duplicate_flag queue consultation', () => {
     assert.equal(result, null, 'a stale entry must not short-circuit the scan');
   });
 
+  it("the gate's own enqueued hit is not a verdict, so the next write still scans", () => {
+    const items = writeQueue([
+      {
+        id: 'gate01',
+        task: 'duplicate_flag',
+        target: '0-inbox/new-note.md',
+        duplicate_of: '3-permanent/sleep-existing.md',
+        similarity: 0.91,
+        reason: preWriteCheck.GATE_FLAG_REASON,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      },
+    ]);
+    const result = preWriteCheck.checkDuplicateFlagQueue('0-inbox/new-note.md', items);
+    assert.equal(result, null);
+  });
+
   it('no matching entry for the path falls through', () => {
     const items = writeQueue([
       {

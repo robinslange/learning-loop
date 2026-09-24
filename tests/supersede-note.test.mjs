@@ -137,6 +137,36 @@ describe('stampSupersession replaces an existing superseded_by: instead of appen
       `expected exactly one superseded_by: line; got ${JSON.stringify(supersededByLines)}`,
     );
   });
+
+  it('a block-list superseded_by: goes with its items, leaving no orphan under the key above', () => {
+    const raw = '---\ntags: [a]\nsuperseded_by:\n  - 3-permanent/a.md\n- 3-permanent/b.md\n---\nBody.\n';
+    const { next } = stampSupersession(raw, {
+      date: '2026-09-22',
+      replacementPath: '3-permanent/new.md',
+    });
+    assert.equal(
+      next,
+      '---\ntags: [a]\ninvalidated: 2026-09-22\nsuperseded_by: 3-permanent/new.md\n---\nBody.\n',
+    );
+  });
+});
+
+describe('stampSupersession keeps the rest of the frontmatter as written', () => {
+  it('a blank line inside a | block survives', () => {
+    const raw = '---\ndescription: |\n  one\n\n  two\ntags: [a]\n---\nBody.\n';
+    const { next } = stampSupersession(raw, { date: '2026-09-22' });
+    assert.equal(
+      next,
+      '---\ndescription: |\n  one\n\n  two\ntags: [a]\ninvalidated: 2026-09-22\n---\nBody.\n',
+    );
+  });
+
+  it('an empty invalidated: is replaced, not duplicated', () => {
+    const raw = '---\ntags: [a]\ninvalidated:\n---\nBody.\n';
+    const { next, changed } = stampSupersession(raw, { date: '2026-09-22' });
+    assert.equal(changed, true);
+    assert.equal(next, '---\ntags: [a]\ninvalidated: 2026-09-22\n---\nBody.\n');
+  });
 });
 
 describe('supersede-note.mjs CLI: exit code and JSON per reason', () => {
