@@ -164,9 +164,6 @@ export const HookConfig = Object.freeze({
   HOOK_STDOUT_MAX_BYTES: 8192,
   MEMORY_INDEX_MAX_BYTES: 3072,
 
-  // --- Per-module post-tool timeout (ms) ---
-  POST_TOOL_MODULE_TIMEOUT_MS: 2000,
-
   // --- Stop-nudge message count threshold (JSONL transcript lines) ---
   STOP_NUDGE_MESSAGE_COUNT: 200,
 

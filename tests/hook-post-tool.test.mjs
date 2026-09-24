@@ -17,6 +17,7 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
+import { openEdgeDb, getEdgesFrom } from '../plugin/scripts/lib/edges.mjs';
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/post-tool.js', import.meta.url));
 const STOP_NUDGE = fileURLToPath(new URL('../plugin/hooks/stop-nudge.js', import.meta.url));
@@ -354,5 +355,67 @@ test('post-tool module failure: reaches hook-errors with module_failed', () => {
     assert.equal(moduleErrors[0].code, 'module_failed');
   } finally {
     r.cleanup();
+  }
+});
+
+// Codex delivers one apply_patch touching several notes, and post-tool runs
+// the module chain once per file. Each file's edge-infer must finish, lock
+// released, before the next begins: an abandoned run still holding the
+// in-process edges.db lock makes the next file's acquireLock fail at once.
+test('post-tool Codex patch over two vault notes infers edges for both', async () => {
+  const vault = mkdtempSync(join(tmpdir(), 'll-pt-patch-vault-'));
+  for (const dir of ['0-inbox', '3-permanent']) mkdirSync(join(vault, dir));
+  writeFileSync(join(vault, '3-permanent', 'sleep.md'), '---\ntags: [x]\n---\nSleep.\n');
+  writeFileSync(join(vault, '3-permanent', 'circadian.md'), '---\ntags: [x]\n---\nRhythm.\n');
+  const notes = {
+    '0-inbox/a.md': 'This supports [[sleep]] as the lever.',
+    '0-inbox/b.md': 'This contradicts [[circadian]] timing claims.',
+  };
+  const patch = ['*** Begin Patch'];
+  for (const [rel, body] of Object.entries(notes)) {
+    const content = `---\ntags: [x]\n---\n${body}\n`;
+    writeFileSync(join(vault, rel), content);
+    patch.push(
+      `*** Add File: ${rel}`,
+      ...content
+        .trimEnd()
+        .split('\n')
+        .map((l) => `+${l}`),
+    );
+  }
+  patch.push('*** End Patch');
+
+  const r = runHook(HOOK, {
+    env: { VAULT_PATH: vault },
+    stdin: {
+      tool_name: 'apply_patch',
+      tool_input: { command: patch.join('\n') },
+      tool_response: { success: true },
+      cwd: vault,
+    },
+  });
+  try {
+    assert.equal(r.exitCode, 0, r.stderr);
+    const db = await openEdgeDb(join(r.pluginDataDir, 'edges.db'));
+    try {
+      for (const rel of Object.keys(notes)) {
+        assert.ok(getEdgesFrom(db, rel).length > 0, `no outgoing edges for ${rel}`);
+      }
+    } finally {
+      db.close();
+    }
+    const logs = join(r.pluginDataDir, 'logs');
+    const scopes = existsSync(logs)
+      ? readdirSync(logs).flatMap((f) =>
+          readFileSync(join(logs, f), 'utf8')
+            .trim()
+            .split('\n')
+            .map((l) => JSON.parse(l).scope),
+        )
+      : [];
+    assert.ok(!scopes.includes('edge-infer.acquireLock'), JSON.stringify(scopes));
+  } finally {
+    r.cleanup();
+    rmSync(vault, { recursive: true, force: true });
   }
 });

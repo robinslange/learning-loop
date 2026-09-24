@@ -3,7 +3,7 @@
 //
 // Single Node entry replacing the four PostToolUse hooks
 // (provenance, reflect-track, autolink, edge-infer). One stdin read, one snapshot load,
-// fixed module order, per-module timeout isolation.
+// fixed module order, per-module failure isolation.
 
 import { basename, join } from 'node:path';
 import { home, readPayload, resolveVaultPath, isVaultNote } from './lib/common.mjs';
@@ -17,7 +17,6 @@ import { runReflectTrack } from './modules/reflect-track.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
 import { encodeProjectDir } from '../scripts/lib/paths.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 
@@ -52,14 +51,6 @@ function recordMemoryWriteIfApplicable(filePath, tool, sessionId) {
   } catch (err) {
     logError('post-tool.recordMemoryWrite', err);
   }
-}
-
-function withTimeout(p, ms, label) {
-  let t;
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(`${label} timeout after ${ms}ms`)), ms);
-  });
-  return Promise.race([p.finally(() => clearTimeout(t)), timeout]);
 }
 
 const raw = await readPayload('post-tool');
@@ -128,11 +119,7 @@ for (const pass of passes) {
 
   for (const mod of modules) {
     try {
-      await withTimeout(
-        Promise.resolve(mod(pass)),
-        HookConfig.POST_TOOL_MODULE_TIMEOUT_MS,
-        mod.name,
-      );
+      await mod(pass);
     } catch (err) {
       logError(`post-tool.${mod.name}`, err, { code: 'module_failed' });
       if (env.LL_HOOK_DEBUG) {
