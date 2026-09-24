@@ -3,62 +3,39 @@
 // Solenoid SDK calls), never runGateway's own deps — this exercises the real
 // solenoid()/spend() code path, not a fake of it.
 
-import { describe, it, beforeEach, afterEach, after, mock } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { runGateway } from '../../plugin/bin/source-gateway.mjs';
 import { budgetScopeSegment } from '../../plugin/scripts/lib/fetch-budget.mjs';
 
 let origFetch;
 let origKey;
+let pluginData;
 
 beforeEach(() => {
   origFetch = globalThis.fetch;
   origKey = process.env.SOLENOID_KEY;
   process.env.SOLENOID_KEY = 'sk.spend.test-tenant.abc123';
+  // Isolated per-test plugin data dir, so the SDK's outage-mode cache
+  // (fileStore(join(pluginData, 'solenoid'))) never reads or writes the
+  // developer's real ~/.cache/solenoid/outage.json.
+  pluginData = mkdtempSync(join(tmpdir(), 'll-solenoid-budget-'));
 });
 
 afterEach(() => {
   globalThis.fetch = origFetch;
   if (origKey === undefined) delete process.env.SOLENOID_KEY;
   else process.env.SOLENOID_KEY = origKey;
+  rmSync(pluginData, { recursive: true, force: true });
 });
-
-// The vendored SDK's fileStore() (used for the outage-mode cache, same as
-// production) writes to the real ~/.cache/solenoid/outage.json — there's no
-// dir override in this integration, matching the docs' "use fileStore() for
-// CLIs" guidance exactly. Every test uses a fresh random session id so it
-// never reads a stale entry, and this sweeps those test-only keys back out
-// so repeated runs don't leave garbage in the developer's real cache file.
-const OUTAGE_CACHE = join(homedir(), '.cache', 'solenoid', 'outage.json');
-const usedSessionIds = [];
 
 function uniqueSessionId() {
-  const id = `solenoid-test-${randomUUID()}`;
-  usedSessionIds.push(id);
-  return id;
+  return `solenoid-test-${randomUUID()}`;
 }
-
-after(() => {
-  if (!existsSync(OUTAGE_CACHE)) return;
-  try {
-    const data = JSON.parse(readFileSync(OUTAGE_CACHE, 'utf8'));
-    let changed = false;
-    for (const id of usedSessionIds) {
-      const key = `learning-loop/research/${budgetScopeSegment(id)}`;
-      if (key in data) {
-        delete data[key];
-        changed = true;
-      }
-    }
-    if (changed) writeFileSync(OUTAGE_CACHE, JSON.stringify(data));
-  } catch {
-    // best-effort cleanup only
-  }
-});
 
 function fakeFetchSource() {
   return {
@@ -84,7 +61,7 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
     const out = await runGateway(['fetch', '--url', 'https://example.com'], {
       resolveSlot: () => source,
       sessionId,
-      pluginData: null,
+      pluginData,
     });
 
     assert.equal(out.doc.ok, true);
@@ -118,7 +95,7 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
     const out = await runGateway(['fetch', '--url', 'https://example.com'], {
       resolveSlot: () => source,
       sessionId,
-      pluginData: null,
+      pluginData,
     });
 
     assert.equal(out.doc.ok, false);
@@ -138,7 +115,7 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
     const out = await runGateway(['fetch', '--url', 'https://example.com'], {
       resolveSlot: () => source,
       sessionId,
-      pluginData: null,
+      pluginData,
     });
 
     assert.equal(out.doc.ok, false);
@@ -153,7 +130,12 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
     globalThis.fetch = async () => ({
       ok: false,
       status: 402,
-      json: async () => ({ error: 'limit_exceeded', scope: 'learning-loop', unit: 'spends', resets: null }),
+      json: async () => ({
+        error: 'limit_exceeded',
+        scope: 'learning-loop',
+        unit: 'spends',
+        resets: null,
+      }),
     });
     const source = fakeFetchSource();
     await assert.rejects(
@@ -161,7 +143,7 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
         runGateway(['fetch', '--url', 'https://example.com'], {
           resolveSlot: () => source,
           sessionId,
-          pluginData: null,
+          pluginData,
         }),
       (e) => e.constructor.name === 'LimitExceeded' && e.unit === 'spends',
     );
@@ -177,7 +159,7 @@ describe('gateway fetch budget backed by Solenoid (SOLENOID_KEY set)', () => {
     const out = await runGateway(['fetch', '--url', 'https://example.com'], {
       resolveSlot: () => source,
       sessionId: 'unknown',
-      pluginData: null,
+      pluginData,
     });
 
     assert.equal(out.doc.ok, true);

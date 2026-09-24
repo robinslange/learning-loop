@@ -64,13 +64,18 @@ export function budgetScopeSegment(sessionId) {
 //
 // fileStore() persists the outage mode across processes on this machine, the
 // same one-process-per-fetch pattern readCount/tryBump above are built for.
+// With a known pluginData, the cache lives under it rather than the shared
+// machine-wide ~/.cache/solenoid — keeps one caller's outage state (tests,
+// another plugin data dir) from leaking into another's.
 const SOLENOID_SCOPE_ROOT = 'learning-loop/research';
 
-export function buildSolenoidStore(sessionId) {
+export function buildSolenoidStore(sessionId, pluginData) {
   const seg = budgetScopeSegment(sessionId);
   if (!seg) return null;
   const scope = `${SOLENOID_SCOPE_ROOT}/${seg}`;
-  const sol = solenoid({ store: fileStore() });
+  const sol = solenoid({
+    store: pluginData ? fileStore(join(pluginData, 'solenoid')) : fileStore(),
+  });
   return {
     async tryBump() {
       try {

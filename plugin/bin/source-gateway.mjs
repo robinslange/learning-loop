@@ -88,17 +88,16 @@ export async function runGateway(argv, deps = {}) {
 }
 
 function buildBudgetStore(sid, pd) {
-  if (process.env.SOLENOID_KEY) {
-    const resolvedSid = sid !== undefined ? sid : getSessionId();
-    return buildSolenoidStore(resolvedSid);
-  }
-  return buildFileStore(sid, pd);
-}
-
-function buildFileStore(sid, pd) {
   // Resolve production session/pluginData when not injected by tests.
   const resolvedSid = sid !== undefined ? sid : getSessionId();
   const resolvedPd = pd !== undefined ? pd : getPluginData();
+  if (process.env.SOLENOID_KEY) {
+    return buildSolenoidStore(resolvedSid, resolvedPd);
+  }
+  return buildFileStore(resolvedSid, resolvedPd);
+}
+
+function buildFileStore(resolvedSid, resolvedPd) {
   if (!resolvedPd || !resolvedSid || resolvedSid === 'unknown') return null;
   return { tryBump: (budget) => tryBump(resolvedSid, resolvedPd, budget) };
 }
