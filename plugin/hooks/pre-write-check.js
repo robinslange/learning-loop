@@ -380,7 +380,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   // Daemon path: the warm watch process serves the same reflect scan over its
   // UDS socket. Try it first; fall through to the subprocess when the socket is
   // absent (no daemon) or errors. Windows has no socket and always falls back.
-  const socketPath = pluginData ? DATA_FILES.nliSocket(pluginData) : null;
+  const socketPath = pluginData ? DATA_FILES.dupScanSocket(pluginData) : null;
   if (socketPath && existsSync(socketPath)) {
     const daemonResult = await reflectScanViaDaemon(socketPath, [title], 1, 5);
     if (daemonResult.ok) {

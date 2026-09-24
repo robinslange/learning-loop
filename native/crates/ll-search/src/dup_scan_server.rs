@@ -81,7 +81,7 @@ struct ProtocolError {
 /// requests open a fresh read connection against it per request (SQLite is
 /// thread-safe in this mode and the embedding model is shared via the global
 /// provider).
-pub async fn run_nli_server(
+pub async fn run_dup_scan_server(
     socket_path: PathBuf,
     db_path: PathBuf,
     mut shutdown_rx: watch_chan::Receiver<bool>,

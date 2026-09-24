@@ -177,7 +177,7 @@ export const FEDERATION_PATHS = {
 };
 
 // Whether the warm duplicate-scan daemon can serve this platform at all.
-// The server is a Unix domain socket -- native/crates/ll-search/src/nli_server.rs
+// The server is a Unix domain socket -- native/crates/ll-search/src/dup_scan_server.rs
 // is `#![cfg(unix)]` and sync/watch.rs spawns it under `#[cfg(unix)]` -- so on
 // Windows there is no socket and no named pipe, and every duplicate-gate call
 // takes the cold subprocess path. Callers use this to avoid prescribing a
@@ -189,7 +189,7 @@ export function daemonSocketSupported(platform = process.platform) {
 
 export const DATA_FILES = {
   edgesDb: (pd) => join(pd, 'edges.db'),
-  nliSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only
+  dupScanSocket: (pd) => join(pd, 'nli.sock'), // legacy filename — now serves duplicate-scan only
   binVersion: (pd) => join(pd, 'bin', '.version'),
   harvestDenylist: (pd) => join(pd, '.harvest-denylist'),
   harvestedLog: (pd) => join(pd, '.harvested-log'),

@@ -25,7 +25,7 @@ import {
   checkInstalledPluginsReadable,
   checkPluginCacheVersionPresent,
   checkSearchIndexExists,
-  checkNliSocketFresh,
+  checkDupScanSocketFresh,
   checkDuplicateGateHealth,
   checkFederationSyncHealth,
   checkHookErrors,
@@ -76,7 +76,7 @@ test('CHECK_IDS exports the documented quick + full check IDs', () => {
     'installed-plugins-readable',
     'plugin-cache-version-present',
     'search-index-exists',
-    'nli-socket-fresh',
+    'dup-scan-socket-fresh',
     'duplicate-gate-health',
     'hook-errors',
     'injection-shadow-gate',
@@ -613,17 +613,17 @@ test('checkSearchIndexExists: ok when index non-empty', () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkNliSocketFresh: ok when socket missing (NLI just not running)', () => {
+test('checkDupScanSocketFresh: ok when socket missing (daemon not running)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-nli-'));
-  const result = checkNliSocketFresh({ pluginData: dir });
+  const result = checkDupScanSocketFresh({ pluginData: dir });
   assert.equal(result.status, 'ok');
   rmSync(dir, { recursive: true, force: true });
 });
 
-test('checkNliSocketFresh: warn when path exists but is not a socket', () => {
+test('checkDupScanSocketFresh: warn when path exists but is not a socket', () => {
   const dir = mkdtempSync(join(tmpdir(), 'health-nli-stale-'));
   writeFileSync(join(dir, 'nli.sock'), 'not a socket');
-  const result = checkNliSocketFresh({ pluginData: dir });
+  const result = checkDupScanSocketFresh({ pluginData: dir });
   assert.equal(result.status, 'fail');
   assert.equal(result.severity, 'warn');
   rmSync(dir, { recursive: true, force: true });
@@ -967,7 +967,7 @@ test('checkDuplicateGateHealth: daemon-sourced timeouts do not advise starting l
 });
 
 test('checkDuplicateGateHealth: does not advise ll-watch on a platform with no socket', () => {
-  // The daemon serves the gate over a UDS socket, and nli_server.rs is
+  // The daemon serves the gate over a UDS socket, and dup_scan_server.rs is
   // `#![cfg(unix)]` -- there is no socket and no named pipe on Windows, so the
   // warm path does not exist there at all. Every timeout is therefore
   // subprocess- or budget-sourced, which the daemonIsUp heuristic reads as

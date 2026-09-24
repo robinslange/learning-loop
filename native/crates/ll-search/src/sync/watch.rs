@@ -123,7 +123,7 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
     do_reindex_blocking(&cfg.db_path, &cfg.vault_path).await;
 
     // Spawn the UDS duplicate-scan server alongside the fs-watcher.
-    // The socket path matches DATA_FILES.nliSocket in pre-write-check.js
+    // The socket path matches DATA_FILES.dupScanSocket in pre-write-check.js
     // (legacy name kept for JS/Rust protocol compatibility).
     #[cfg(unix)]
     let _dup_server_task = {
@@ -132,7 +132,7 @@ pub async fn run_watch_async(cfg: WatchConfig) -> anyhow::Result<()> {
         let shutdown_rx_dup = shutdown_rx.clone();
         tokio::spawn(async move {
             if let Err(e) =
-                crate::nli_server::run_nli_server(socket_path, db_path, shutdown_rx_dup).await
+                crate::dup_scan_server::run_dup_scan_server(socket_path, db_path, shutdown_rx_dup).await
             {
                 eprintln!("UDS server task exited with error: {e}");
             }
