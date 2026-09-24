@@ -6,10 +6,9 @@
 // inside the detached worker.
 
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
 import { MARKER_PATHS, readMarker } from '../../scripts/lib/marker-cache.mjs';
 import { isExportEnabled } from '../../scripts/otel/export.mjs';
-import { recordDetachedChild } from '../lib/common.mjs';
+import { spawnDetached } from '../lib/common.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 
 // One hour, passed explicitly at the call site per the plan. Never reuse or
@@ -30,15 +29,9 @@ export function maybeSpawnOtelExport(ctx) {
   const markerPath = MARKER_PATHS.otelExport(ctx.pluginData);
   if (readMarker(markerPath, { ttlMs: OTEL_EXPORT_TTL_MS }) !== null) return;
 
-  try {
-    const child = spawn(
-      process.execPath,
-      [join(import.meta.dirname, 'otel-export-worker.mjs'), ctx.pluginData, markerPath],
-      { stdio: 'ignore', detached: true },
-    );
-    child.unref();
-    recordDetachedChild(child.pid);
-  } catch (err) {
-    logError('session-start.otel-export.spawn', err);
-  }
+  spawnDetached('session-start.otel-export.spawn', process.execPath, [
+    join(import.meta.dirname, 'otel-export-worker.mjs'),
+    ctx.pluginData,
+    markerPath,
+  ]);
 }

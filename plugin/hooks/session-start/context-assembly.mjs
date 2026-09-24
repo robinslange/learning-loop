@@ -3,7 +3,6 @@
 // learned patterns, and federation status. Mutates ctx.context.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { spawn } from 'node:child_process';
 import { join, basename, resolve } from 'node:path';
 import { readMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
@@ -11,7 +10,7 @@ import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { DATA_PATHS, FEDERATION_PATHS, encodeProjectDir } from '../../scripts/lib/paths.mjs';
-import { recordDetachedChild, emitProvenance, home } from '../lib/common.mjs';
+import { spawnDetached, emitProvenance, home } from '../lib/common.mjs';
 import { wrapRetrievalText } from '../../scripts/lib/origin-envelope.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 import { latestLedger } from '../../scripts/lib/session-ledger.mjs';
@@ -309,14 +308,10 @@ function injectDreamGate(ctx) {
     if (cached?.nudge) {
       ctx.context += `\n## Dream Consolidation Due\n${cached.nudge}\n`;
     }
-    const child = spawn(
-      'node',
-      [join(import.meta.dirname, '..', 'lib', 'dream-gate.js'), '--session-start-refresh'],
-      { detached: true, stdio: 'ignore' },
-    );
-    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-    child.unref();
-    recordDetachedChild(child.pid);
+    spawnDetached('session-start.context-assembly.dreamGate', process.execPath, [
+      join(import.meta.dirname, '..', 'lib', 'dream-gate.js'),
+      '--session-start-refresh',
+    ]);
   } catch (err) {
     logError('session-start.context-assembly.dreamGate', err);
   }
@@ -468,14 +463,11 @@ function injectIntentions(ctx, state, searchCmd) {
       ctx.intentionsAssembledCount = grouped.length;
     }
     // Kick off detached refresh; the worker derives the marker path from PLUGIN_DATA itself.
-    const child = spawn(
-      'node',
-      [join(pluginDir, 'scripts', 'vault-search.mjs'), 'intentions', '--session-start-refresh'],
-      { detached: true, stdio: 'ignore' },
-    );
-    child.on('error', () => {}); // detached fire-and-forget; error is expected-silent
-    child.unref();
-    recordDetachedChild(child.pid);
+    spawnDetached('session-start.context-assembly.intentions', process.execPath, [
+      join(pluginDir, 'scripts', 'vault-search.mjs'),
+      'intentions',
+      '--session-start-refresh',
+    ]);
   } catch (err) {
     logError('session-start.context-assembly.intentions', err);
   }

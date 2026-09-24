@@ -4,6 +4,7 @@
 // `resolvePluginData` for backward compatibility with hook callers.
 
 import { existsSync, appendFileSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
 import { resolvePluginData, getVaultPath, getConfig } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
@@ -51,13 +52,27 @@ export function findEpisodicBinary() {
 // every detached child pid so the harness can reap them before it removes
 // the sandbox — a child mkdir-ing mid-rmSync-walk resurrects just-deleted
 // dirs and fails cleanup with ENOTEMPTY. No-op in production (var unset).
-export function recordDetachedChild(pid) {
+function recordDetachedChild(pid) {
   const file = env.LL_CHILD_PID_FILE;
   if (!file || !pid) return;
   try {
     appendFileSync(file, `${pid}\n`);
     // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort: a lost record only means the harness can't reap early.
   } catch {}
+}
+
+// Fire-and-forget child. A spawn failure (ENOENT, EACCES) arrives as an async
+// 'error' event, not a throw, and an unlistened 'error' event kills the hook
+// on the next tick, after it has already written its stdout.
+export function spawnDetached(label, cmd, args, opts) {
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, ...opts });
+    child.on('error', (err) => logError(label, err));
+    child.unref();
+    recordDetachedChild(child.pid);
+  } catch (err) {
+    logError(label, err);
+  }
 }
 
 // Vault-relative path, or null if the file is outside the vault.
