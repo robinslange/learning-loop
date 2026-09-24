@@ -4,7 +4,7 @@ import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/regist
 import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
 import { getSessionId } from '../scripts/lib/session.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
-import { tryBump } from '../scripts/lib/fetch-budget.mjs';
+import { tryBump, buildSolenoidStore } from '../scripts/lib/fetch-budget.mjs';
 import { checkFetchUrl } from '../scripts/lib/sources/url-guard.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
@@ -73,15 +73,26 @@ export async function runGateway(argv, deps = {}) {
   }
   const budget = fetchBudget ?? DEFAULT_FETCH_BUDGET;
   const source = resolveSlot('fetch');
-  // Budget enforcement via injected store (tests) or file-backed per-session counter (production).
-  // Graceful degrade: when sessionId is empty or pluginData is null, store is absent and no
-  // enforcement happens — fetch never throws from a missing data dir.
-  const store = budgetStore ?? buildFileStore(sessionId, pluginData);
+  // Budget enforcement via injected store (tests), Solenoid (when SOLENOID_KEY is set —
+  // the cap then lives at the developer's Solenoid scope, not in this budget number), or
+  // the file-backed per-session counter (production default). Graceful degrade: when
+  // sessionId is empty or pluginData is null (file path) or the session id can't form a
+  // Solenoid scope segment, store is absent and no enforcement happens — fetch never
+  // throws from a missing data dir or an unusable session id.
+  const store = budgetStore ?? buildBudgetStore(sessionId, pluginData);
   if (store && !(await store.tryBump(budget))) {
     return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
   }
   const doc = await source.fetch(args.url);
   return { doc, source_used: source.id };
+}
+
+function buildBudgetStore(sid, pd) {
+  if (process.env.SOLENOID_KEY) {
+    const resolvedSid = sid !== undefined ? sid : getSessionId();
+    return buildSolenoidStore(resolvedSid);
+  }
+  return buildFileStore(sid, pd);
 }
 
 function buildFileStore(sid, pd) {

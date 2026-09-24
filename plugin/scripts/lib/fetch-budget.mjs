@@ -1,6 +1,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { withLock } from './file-lock.mjs';
+import { solenoid, LimitExceeded, SolenoidUnavailable } from '../../vendor/solenoid/solenoid.mjs';
+import { fileStore } from '../../vendor/solenoid/node.mjs';
 
 // Per-session fetch budget counter backed by a single-integer file under
 // PLUGIN_DATA/fetch-budget/<sessionId>.count. Survives process boundaries
@@ -51,4 +53,34 @@ export function budgetScopeSegment(sessionId) {
     .replace(/[^a-z0-9._-]/g, '-')
     .slice(0, 64);
   return seg === '' || /^[.]+$/.test(seg) ? null : seg;
+}
+
+// Solenoid-backed budget: the developer sets the cap once, outside the agent
+//   solenoid limit learning-loop/research fetches=10 --per child --on-outage open
+// and every session spends at learning-loop/research/<session>, a child scope
+// under that limit. This is a yes/no gate (per the SDK's documented pattern):
+// it refuses on LimitExceeded for the fetches unit and on SolenoidUnavailable,
+// and rethrows anything else (an unrelated limit, a bad key, ...).
+//
+// fileStore() persists the outage mode across processes on this machine, the
+// same one-process-per-fetch pattern readCount/tryBump above are built for.
+const SOLENOID_SCOPE_ROOT = 'learning-loop/research';
+
+export function buildSolenoidStore(sessionId) {
+  const seg = budgetScopeSegment(sessionId);
+  if (!seg) return null;
+  const scope = `${SOLENOID_SCOPE_ROOT}/${seg}`;
+  const sol = solenoid({ store: fileStore() });
+  return {
+    async tryBump() {
+      try {
+        await sol.spend(scope, { fetches: 1 });
+        return true;
+      } catch (e) {
+        if (e instanceof LimitExceeded && e.unit === 'fetches') return false;
+        if (e instanceof SolenoidUnavailable) return false;
+        throw e;
+      }
+    },
+  };
 }
