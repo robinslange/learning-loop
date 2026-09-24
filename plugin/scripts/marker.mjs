@@ -26,7 +26,6 @@ const KEY_MAP = {
   'last-dream': 'lastDream',
   'last-reflect': 'lastReflect',
   'dream-lock': 'dreamLock',
-  'dream-nudged': 'dreamNudged',
 };
 
 function usage() {

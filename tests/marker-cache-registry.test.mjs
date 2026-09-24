@@ -42,12 +42,11 @@ test('MARKER_PATHS resolves all five W2 markers under plugin-data', () => {
   assert.equal(MARKER_PATHS.lastDream(PD), join(PD, 'retrieval', 'last-dream'));
   assert.equal(MARKER_PATHS.lastReflect(PD), join(PD, 'markers', 'last-reflect'));
   assert.equal(MARKER_PATHS.dreamLock(PD), join(PD, 'markers', 'dream-lock'));
-  assert.equal(MARKER_PATHS.dreamNudged(PD), join(PD, 'markers', 'dream-nudged'));
+  assert.equal(MARKER_PATHS.stopNudged(PD, 'abc123'), join(PD, 'markers', 'stop-nudged-abc123'));
   assert.equal(
     MARKER_PATHS.memoryWrites(PD, 'abc123'),
     join(PD, 'markers', 'memory-writes-abc123'),
   );
-  assert.equal(MARKER_PATHS.memoryWrites(PD, ''), join(PD, 'markers', 'memory-writes'));
   assert.equal(MARKER_PATHS.lastSweep(PD), join(PD, 'markers', 'last-sweep'));
 });
 

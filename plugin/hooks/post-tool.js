@@ -6,7 +6,8 @@
 // fixed module order, per-module timeout isolation.
 
 import { basename, join } from 'node:path';
-import { home, readPayload, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
+import { home, readPayload, resolveVaultPath, isVaultNote } from './lib/common.mjs';
+import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 import { runAutolink } from './modules/autolink.mjs';
@@ -35,8 +36,9 @@ import { logError } from '../scripts/lib/log.mjs';
 // creation. PostToolUse fires after the write, so existsSync cannot tell the
 // two apart, and the session-start memory snapshot that could have was removed
 // when the concurrent-session conflation was fixed.
-function recordMemoryWriteIfApplicable(filePath, tool) {
+function recordMemoryWriteIfApplicable(filePath, tool, sessionId) {
   try {
+    if (!sessionId) return;
     if (tool !== 'Write') return;
     if (!filePath || !filePath.endsWith('.md')) return;
     const projectDir = env.CLAUDE_PROJECT_DIR;
@@ -46,9 +48,7 @@ function recordMemoryWriteIfApplicable(filePath, tool) {
     const encodedPath = encodeProjectDir(projectDir);
     const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     if (filePath !== join(memoryDir, basename(filePath))) return;
-    let sid = getSessionId();
-    if (sid === 'unknown') sid = '';
-    appendMemoryWrite(pluginData, sid, basename(filePath));
+    appendMemoryWrite(pluginData, sessionId, basename(filePath));
   } catch (err) {
     logError('post-tool.recordMemoryWrite', err);
   }
@@ -109,7 +109,7 @@ const loadSnapshotOnce = () => (vaultSnapshot ??= loadVaultSnapshot(ctx.vaultRoo
 for (const pass of passes) {
   const isWriteEdit = pass.tool === 'Write' || pass.tool === 'Edit';
   if (isWriteEdit) {
-    recordMemoryWriteIfApplicable(pass.input.file_path, pass.tool);
+    recordMemoryWriteIfApplicable(pass.input.file_path, pass.tool, sessionIdFrom(raw));
     if (pass.vaultRoot && isVaultNote(pass.input.file_path, pass.vaultRoot)) {
       pass.snapshot = loadSnapshotOnce();
     }

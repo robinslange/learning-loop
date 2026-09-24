@@ -1,20 +1,17 @@
 #!/usr/bin/env node
 // Learning Loop — Stop hook
-// Nudges consolidation once if the session was substantial.
+// Nudges consolidation once per session if the session was substantial.
 
-import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
-import { home, resolvePluginData, readPayload, getSessionId } from './lib/common.mjs';
+import { home, resolvePluginData, readPayload } from './lib/common.mjs';
+import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { encodeProjectDir } from '../scripts/lib/paths.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
-
-const tmp = tmpdir();
 
 function now() {
   return Math.floor(Date.now() / 1000);
@@ -27,17 +24,14 @@ if (!hookData) process.exit(0);
 if (hookData.stop_hook_active) process.exit(0);
 
 const pluginData = resolvePluginData();
-
-// Prefer the hook-supplied session_id; fall back to the canonical marker
-// resolver. getSessionId() returns 'unknown' when no marker is usable; the
-// snapshot-path selection below treats that as "no session" (falsy).
-let sessionId = hookData.session_id || getSessionId();
-if (sessionId === 'unknown') sessionId = '';
+const sessionId = sessionIdFrom(hookData);
 
 // All dream/reflect markers live in plugin-data (MARKER_PATHS) — never tmp:
 // the skill's bash inherits $TMPDIR, hook subprocesses don't, so tmp-anchored
 // markers diverge across the boundary (the M1/M2 split-brain). Without
-// plugin-data nothing can have written markers either — skip cooldowns.
+// plugin-data and a session id there is nowhere to keep the once-guard, so
+// there is no nudge either.
+if (!pluginData || !sessionId) process.exit(0);
 
 // Usage probe: record what this session actually did with the notes it was
 // shown, before any of the nudge gates below can exit. Without this, usage
@@ -47,7 +41,7 @@ if (sessionId === 'unknown') sessionId = '';
 //
 // Runs on its own budget and swallows its own failures: telemetry must never
 // be the reason a session's Stop hook fails.
-if (pluginData && sessionId && hookData.transcript_path) {
+if (hookData.transcript_path) {
   try {
     const { runUsageProbe } = await import('../scripts/lib/usage-probe-run.mjs');
     runUsageProbe({
@@ -61,17 +55,27 @@ if (pluginData && sessionId && hookData.transcript_path) {
 }
 
 // Skip if /reflect was run recently (within last REFLECT_COOLDOWN_SECS).
-if (pluginData) {
-  const lastReflect = readMarker(MARKER_PATHS.lastReflect(pluginData), { ttlMs: Infinity });
-  if (typeof lastReflect === 'number' && now() - lastReflect < HookConfig.REFLECT_COOLDOWN_SECS) {
-    process.exit(0);
-  }
+const lastReflect = readMarker(MARKER_PATHS.lastReflect(pluginData), { ttlMs: Infinity });
+if (typeof lastReflect === 'number' && now() - lastReflect < HookConfig.REFLECT_COOLDOWN_SECS) {
+  process.exit(0);
+}
+
+// Once per session, whichever nudge fires first.
+const nudgedPath = MARKER_PATHS.stopNudged(pluginData, sessionId);
+if (readMarker(nudgedPath, { ttlMs: Infinity }) !== null) process.exit(0);
+
+// Nudge only when the once-guard persisted: emitting on a failed guard write
+// re-nudges on every later stop of the session. The miss is cheap (advisory
+// nudge) and writeMarker logs the failure itself.
+function nudge(reason) {
+  if (writeMarker(nudgedPath, now())) emitJson({ decision: 'block', reason });
+  process.exit(0);
 }
 
 // Check if many new memory files were created this session (dream nudge).
 const projectDir = env.CLAUDE_PROJECT_DIR;
 
-if (pluginData && projectDir) {
+if (projectDir) {
   // Count what THIS session wrote (post-tool's per-session write log),
   // intersected with files still on disk. Never a diff of the shared memory
   // dir: that conflated concurrent sessions and blamed one session for
@@ -83,44 +87,23 @@ if (pluginData && projectDir) {
   if (Array.isArray(writesArr)) {
     const encodedPath = encodeProjectDir(projectDir);
     const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
+    let newMemoryCount = 0;
     try {
       const onDisk = new Set(readdirSync(memoryDir).filter((f) => f.endsWith('.md')));
-      const newMemoryCount = new Set(writesArr.filter((f) => onDisk.has(f))).size;
-
-      if (newMemoryCount >= 3) {
-        // Skip if dream ran recently (last DREAM_COOLDOWN_SECS).
-        const lastDream = readMarker(MARKER_PATHS.lastDream(pluginData), { ttlMs: Infinity });
-        const dreamRecent =
-          typeof lastDream === 'number' && now() - lastDream < HookConfig.DREAM_COOLDOWN_SECS;
-
-        // Once-guard (M3): nudge at most once per session. Defensive:
-        // tolerate a bare-timestamp marker via the cooldown window.
-        const nudgedPath = MARKER_PATHS.dreamNudged(pluginData);
-        const nudged = readMarker(nudgedPath, { ttlMs: Infinity });
-        const nudgedTs = typeof nudged === 'number' ? nudged : nudged?.ts;
-        const alreadyNudged = nudged
-          ? sessionId && nudged?.session_id
-            ? nudged.session_id === sessionId
-            : typeof nudgedTs === 'number' && now() - nudgedTs < HookConfig.DREAM_COOLDOWN_SECS
-          : false;
-
-        // Nudge only when the once-guard persisted: emitting on a failed
-        // guard write re-nudges on every later stop of the session. The
-        // miss is cheap (advisory nudge; a plugin-data broken enough to
-        // fail this write couldn't have written the snapshot this branch
-        // needs either) and writeMarker logs the failure itself.
-        if (!dreamRecent && !alreadyNudged) {
-          if (writeMarker(nudgedPath, { ts: now(), session_id: sessionId })) {
-            emitJson({
-              decision: 'block',
-              reason: `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
-            });
-            process.exit(0);
-          }
-        }
-      }
+      newMemoryCount = new Set(writesArr.filter((f) => onDisk.has(f))).size;
     } catch (err) {
       logError('stop-nudge.memoryDiff', err);
+    }
+
+    // Skip if dream ran recently (last DREAM_COOLDOWN_SECS).
+    const lastDream = readMarker(MARKER_PATHS.lastDream(pluginData), { ttlMs: Infinity });
+    const dreamRecent =
+      typeof lastDream === 'number' && now() - lastDream < HookConfig.DREAM_COOLDOWN_SECS;
+
+    if (newMemoryCount >= 3 && !dreamRecent) {
+      nudge(
+        `This session created ${newMemoryCount} new memory files. Consider running /dream to consolidate before ending.`,
+      );
     }
   }
 }
@@ -128,11 +111,6 @@ if (pluginData && projectDir) {
 // Check transcript size as a proxy for session substance
 const transcriptPath = hookData.transcript_path || '';
 if (!transcriptPath || !existsSync(transcriptPath)) process.exit(0);
-
-// Skip if we already nudged this session (keyed by transcript path hash)
-const pathHash = createHash('md5').update(transcriptPath).digest('hex');
-const nudgeMarker = join(tmp, `learning-loop-stop-nudged-${pathHash}`);
-if (existsSync(nudgeMarker)) process.exit(0);
 
 // Trigger on size threshold OR message count (union: the characterisation
 // tests exercise the size arm with a plain-text buffer that has no JSONL
@@ -158,10 +136,7 @@ if (!trigger) {
 }
 
 if (trigger) {
-  writeFileSync(nudgeMarker, String(now()));
-  emitJson({
-    decision: 'block',
-    reason:
-      'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /learning-loop:reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
-  });
+  nudge(
+    'This was a substantial session. Before ending, consider whether there are learnings worth capturing. You can run /learning-loop:reflect to consolidate, or if nothing notable was learned, proceed to end the session.',
+  );
 }
