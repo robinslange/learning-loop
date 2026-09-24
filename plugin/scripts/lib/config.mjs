@@ -26,8 +26,10 @@ export function isTransientPath(p) {
   );
 }
 
+// A path that does not exist is never stamped either: the reader ignores it,
+// so writing it only clobbers a good marker.
 function persistMarker(p) {
-  if (isTransientPath(p)) return;
+  if (isTransientPath(p) || !existsSync(p)) return;
   try {
     if (existsSync(DATA_PATH_MARKER)) {
       const current = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
