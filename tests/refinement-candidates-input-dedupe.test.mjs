@@ -12,6 +12,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync, chmodSync, readFileSync 
 import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { skipOnWindows } from './helpers/platform.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = resolve(__dirname, '..', 'plugin/scripts/refinement-candidates.mjs');
@@ -58,50 +59,56 @@ function run(sb, pdDir, vault, args) {
   });
 }
 
-test('duplicate input paths produce each (new_note, candidate) pair once', () => {
-  if (process.platform === 'win32') return;
-  const sb = mkdtempSync(join(tmpdir(), 'll-refc-dedupe-'));
-  try {
-    const { vault, pdDir, noteA, noteB, callLog } = setup(sb);
+test(
+  'duplicate input paths produce each (new_note, candidate) pair once',
+  { skip: skipOnWindows('shebang stub: #!/bin/sh ll-search stub not executable on win32') },
+  () => {
+    const sb = mkdtempSync(join(tmpdir(), 'll-refc-dedupe-'));
+    try {
+      const { vault, pdDir, noteA, noteB, callLog } = setup(sb);
 
-    // The shape reflect-track.mjs actually writes: A appears 3x, B twice.
-    const r = run(sb, pdDir, vault, [noteA, noteA, noteB, noteA, noteB]);
-    assert.equal(r.status, 0, `script failed: ${r.stderr}`);
+      // The shape reflect-track.mjs actually writes: A appears 3x, B twice.
+      const r = run(sb, pdDir, vault, [noteA, noteA, noteB, noteA, noteB]);
+      assert.equal(r.status, 0, `script failed: ${r.stderr}`);
 
-    const pairs = JSON.parse(r.stdout);
-    const keys = pairs.map((p) => `${p.new_note}|${p.candidate}`);
-    assert.equal(new Set(keys).size, keys.length, 'every (new_note, candidate) must be unique');
-    assert.equal(pairs.length, 4, '2 distinct notes x 2 candidates');
+      const pairs = JSON.parse(r.stdout);
+      const keys = pairs.map((p) => `${p.new_note}|${p.candidate}`);
+      assert.equal(new Set(keys).size, keys.length, 'every (new_note, candidate) must be unique');
+      assert.equal(pairs.length, 4, '2 distinct notes x 2 candidates');
 
-    // One embedding query per distinct note, not per input line.
-    const calls = readFileSync(callLog, 'utf-8').trim().split('\n').length;
-    assert.equal(calls, 2, 'querySimilar runs once per distinct note');
+      // One embedding query per distinct note, not per input line.
+      const calls = readFileSync(callLog, 'utf-8').trim().split('\n').length;
+      assert.equal(calls, 2, 'querySimilar runs once per distinct note');
 
-    // The validator matches decisions to pairs by id; gaps or repeats break it.
-    assert.deepEqual(
-      pairs.map((p) => p.id),
-      [1, 2, 3, 4],
-    );
-  } finally {
-    rmSync(sb, { recursive: true, force: true });
-  }
-});
+      // The validator matches decisions to pairs by id; gaps or repeats break it.
+      assert.deepEqual(
+        pairs.map((p) => p.id),
+        [1, 2, 3, 4],
+      );
+    } finally {
+      rmSync(sb, { recursive: true, force: true });
+    }
+  },
+);
 
-test('paths differing only by resolution are the same note', () => {
-  if (process.platform === 'win32') return;
-  const sb = mkdtempSync(join(tmpdir(), 'll-refc-dedupe-rel-'));
-  try {
-    const { vault, pdDir, noteA } = setup(sb);
+test(
+  'paths differing only by resolution are the same note',
+  { skip: skipOnWindows('shebang stub: #!/bin/sh ll-search stub not executable on win32') },
+  () => {
+    const sb = mkdtempSync(join(tmpdir(), 'll-refc-dedupe-rel-'));
+    try {
+      const { vault, pdDir, noteA } = setup(sb);
 
-    // Same file, three spellings. Dedupe keys on the vault-relative path, so
-    // all three collapse.
-    const messy = join(vault, '0-inbox', '..', '0-inbox', 'note-a.md');
-    const r = run(sb, pdDir, vault, [noteA, messy, `${vault}/0-inbox/note-a.md`]);
-    assert.equal(r.status, 0, `script failed: ${r.stderr}`);
+      // Same file, three spellings. Dedupe keys on the vault-relative path, so
+      // all three collapse.
+      const messy = join(vault, '0-inbox', '..', '0-inbox', 'note-a.md');
+      const r = run(sb, pdDir, vault, [noteA, messy, `${vault}/0-inbox/note-a.md`]);
+      assert.equal(r.status, 0, `script failed: ${r.stderr}`);
 
-    const pairs = JSON.parse(r.stdout);
-    assert.equal(pairs.length, 2, 'one note x 2 candidates');
-  } finally {
-    rmSync(sb, { recursive: true, force: true });
-  }
-});
+      const pairs = JSON.parse(r.stdout);
+      assert.equal(pairs.length, 2, 'one note x 2 candidates');
+    } finally {
+      rmSync(sb, { recursive: true, force: true });
+    }
+  },
+);

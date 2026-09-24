@@ -19,13 +19,6 @@ const EMITTER = join(SCRIPTS, 'provenance.mjs');
 const MARKER_CACHE_URL = pathToFileURL(join(SCRIPTS, 'lib', 'marker-cache.mjs')).href;
 const CONFIG_URL = pathToFileURL(join(SCRIPTS, 'lib', 'config.mjs')).href;
 
-// migrateConfig only fires when the legacy repo-root config.json exists; it is
-// gitignored (real user config), so skip those tests on checkouts without it.
-const LEGACY_CONFIG = join(SCRIPTS, '..', 'config.json');
-const NO_LEGACY =
-  !existsSync(LEGACY_CONFIG) &&
-  'repo-root config.json (gitignored) absent — legacy migration cannot fire';
-
 function runModule(code, pluginData) {
   return spawnSync(process.execPath, ['--input-type=module', '-e', code], {
     env: { ...process.env, CLAUDE_PLUGIN_DATA: pluginData },
@@ -102,23 +95,21 @@ test('writeMarker still writes when plugin-data exists', () => {
 
 // --- migrateConfig (fires inside getConfig() in any detached worker) ---
 
+// migrateConfig fires only when the legacy config.json at the plugin root
+// exists. plugin/config.json is tracked, so it always does.
 const GET_CONFIG_CODE = `
 import { getConfig } from ${JSON.stringify(CONFIG_URL)};
 getConfig();
 `;
 
-test(
-  'getConfig legacy migration does not re-create a deleted plugin-data dir',
-  { skip: NO_LEGACY },
-  () => {
-    const root = goneDir('ll-config-gone-');
-    const result = runModule(GET_CONFIG_CODE, root);
-    assert.equal(result.status, 0, `getConfig must no-op cleanly, stderr: ${result.stderr}`);
-    assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
-  },
-);
+test('getConfig legacy migration does not re-create a deleted plugin-data dir', () => {
+  const root = goneDir('ll-config-gone-');
+  const result = runModule(GET_CONFIG_CODE, root);
+  assert.equal(result.status, 0, `getConfig must no-op cleanly, stderr: ${result.stderr}`);
+  assert.ok(!existsSync(root), 'deleted plugin-data must not be resurrected');
+});
 
-test('getConfig legacy migration still writes when plugin-data exists', { skip: NO_LEGACY }, () => {
+test('getConfig legacy migration still writes when plugin-data exists', () => {
   const root = mkdtempSync(join(tmpdir(), 'll-config-live-'));
   try {
     const result = runModule(GET_CONFIG_CODE, root);

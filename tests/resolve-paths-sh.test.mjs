@@ -11,64 +11,71 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { skipOnWindows } from './helpers/platform.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../plugin/scripts/resolve-paths.mjs', import.meta.url));
 
-test('--sh output is eval-safe and sets shell vars', () => {
-  // POSIX-only, same rationale as the shQuote test below: it round-trips
-  // through a real `sh -c "eval ..."`, and --sh exists for the reflect skill's
-  // bash fences. On Windows the two resolver spawns can also straddle a session
-  // id another test file left on disk, so the eval-vs-direct compare is racy
-  // there in a way it is not under the POSIX ordering.
-  if (process.platform === 'win32') return;
-  const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });
-  // every non-empty line is KEY='...'
-  for (const line of shOut.split('\n').filter(Boolean)) {
-    assert.match(line, /^[A-Z_]+='.*'$/, `not eval-safe: ${line}`);
-  }
-  // round-trip: eval it in a real shell, echo SESSION_ID back
-  const back = execFileSync(
-    'sh',
-    ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$SESSION_ID"`],
-    {
-      encoding: 'utf-8',
-    },
-  );
-  const direct = execFileSync('node', [SCRIPT, 'SESSION_ID'], { encoding: 'utf-8' }).trim();
-  assert.equal(back, direct, 'eval-set SESSION_ID matches the single-field resolve');
-});
+test(
+  '--sh output is eval-safe and sets shell vars',
+  { skip: skipOnWindows('POSIX-only: round-trips through a real sh eval') },
+  () => {
+    // POSIX-only, same rationale as the shQuote test below: it round-trips
+    // through a real `sh -c "eval ..."`, and --sh exists for the reflect skill's
+    // bash fences. On Windows the two resolver spawns can also straddle a session
+    // id another test file left on disk, so the eval-vs-direct compare is racy
+    // there in a way it is not under the POSIX ordering.
+    const shOut = execFileSync('node', [SCRIPT, '--sh'], { encoding: 'utf-8' });
+    // every non-empty line is KEY='...'
+    for (const line of shOut.split('\n').filter(Boolean)) {
+      assert.match(line, /^[A-Z_]+='.*'$/, `not eval-safe: ${line}`);
+    }
+    // round-trip: eval it in a real shell, echo SESSION_ID back
+    const back = execFileSync(
+      'sh',
+      ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$SESSION_ID"`],
+      {
+        encoding: 'utf-8',
+      },
+    );
+    const direct = execFileSync('node', [SCRIPT, 'SESSION_ID'], { encoding: 'utf-8' }).trim();
+    assert.equal(back, direct, 'eval-set SESSION_ID matches the single-field resolve');
+  },
+);
 
-test("the script's own shQuote survives an apostrophe in a real path", () => {
-  // Drive the REAL resolve-paths.mjs --sh with a single-quote VAULT (injected
-  // via VAULT_PATH, which getVaultPath() reads), eval its output in a real
-  // shell, and assert the value round-trips. This exercises the script's
-  // shQuote `.replace(/'/g, ...)` branch — a regression there would break the
-  // `eval "$(...--sh)"` that every reflect fence runs, mid-handshake. The
-  // earlier version re-implemented the escaping inline and never invoked the
-  // script's own, so deleting shQuote left it green.
-  // POSIX-only: this drives a real `sh -c "eval ..."` round-trip, and the
-  // --sh mode exists for the reflect skill's bash fences, which never run on
-  // Windows. VAULT_PATH is also resolved to an absolute native path there
-  // ('/tmp/x' becomes 'D:\tmp\x'), so the round-trip value could not match.
-  if (process.platform === 'win32') return;
-  const VALUE = "/tmp/wei'rd vault";
-  const shOut = execFileSync('node', [SCRIPT, '--sh'], {
-    encoding: 'utf-8',
-    env: { ...process.env, VAULT_PATH: VALUE },
-  });
-  const back = execFileSync(
-    'sh',
-    ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$VAULT"`],
-    {
+test(
+  "the script's own shQuote survives an apostrophe in a real path",
+  { skip: skipOnWindows('POSIX-only: round-trips through a real sh eval') },
+  () => {
+    // Drive the REAL resolve-paths.mjs --sh with a single-quote VAULT (injected
+    // via VAULT_PATH, which getVaultPath() reads), eval its output in a real
+    // shell, and assert the value round-trips. This exercises the script's
+    // shQuote `.replace(/'/g, ...)` branch — a regression there would break the
+    // `eval "$(...--sh)"` that every reflect fence runs, mid-handshake. The
+    // earlier version re-implemented the escaping inline and never invoked the
+    // script's own, so deleting shQuote left it green.
+    // POSIX-only: this drives a real `sh -c "eval ..."` round-trip, and the
+    // --sh mode exists for the reflect skill's bash fences, which never run on
+    // Windows. VAULT_PATH is also resolved to an absolute native path there
+    // ('/tmp/x' becomes 'D:\tmp\x'), so the round-trip value could not match.
+    const VALUE = "/tmp/wei'rd vault";
+    const shOut = execFileSync('node', [SCRIPT, '--sh'], {
       encoding: 'utf-8',
-    },
-  );
-  assert.equal(
-    back,
-    VALUE,
-    'apostrophe VAULT path must round-trip through the script shQuote + eval',
-  );
-});
+      env: { ...process.env, VAULT_PATH: VALUE },
+    });
+    const back = execFileSync(
+      'sh',
+      ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$VAULT"`],
+      {
+        encoding: 'utf-8',
+      },
+    );
+    assert.equal(
+      back,
+      VALUE,
+      'apostrophe VAULT path must round-trip through the script shQuote + eval',
+    );
+  },
+);
 
 test('--sh REFLECT_SCRATCH/SESSION_ID match the single-field resolver (mode agreement)', () => {
   // The two modes read the same `fields` object, so they must agree value-for-
