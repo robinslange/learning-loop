@@ -17,7 +17,7 @@ import {
   findEpisodicBinary,
   home,
   readStdin,
-  recordDetachedChild,
+  spawnDetached,
 } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
@@ -98,13 +98,13 @@ maybeSpawnOtelExport(ctx);
 try {
   const epBin = findEpisodicBinary();
   if (epBin) {
-    const { spawn } = await import('node:child_process');
-    const child = spawn(epBin, ['search', '--vector', '--limit', '1', 'warmup'], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-    recordDetachedChild(child.pid);
+    spawnDetached('session-start.episodic-prewarm', epBin, [
+      'search',
+      '--vector',
+      '--limit',
+      '1',
+      'warmup',
+    ]);
   } else {
     warnOnce(
       'episodic-unavailable',

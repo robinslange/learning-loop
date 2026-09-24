@@ -8,9 +8,11 @@ import {
   writeFileSync,
   unlinkSync,
   existsSync,
+  mkdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 
 describe('provenance dedupe', () => {
   let dataDir;
@@ -220,6 +222,40 @@ describe('readStdin', () => {
       /setTimeout\([\s\S]*?,\s*\d/,
       'readStdin must not hardcode a numeric timeout literal',
     );
+  });
+});
+
+describe('spawnDetached', () => {
+  it('logs a spawn failure under its label instead of killing the process', () => {
+    const root = mkdtempSync(join(tmpdir(), 'll-common-spawn-'));
+    try {
+      const pluginData = join(root, 'plugin-data');
+      mkdirSync(pluginData);
+      const commonUrl = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
+      const probe = `
+        import { spawnDetached } from ${JSON.stringify(commonUrl)};
+        spawnDetached('t', '/nonexistent/bin', []);
+        setTimeout(() => console.log('still alive'), 50);
+      `;
+      const res = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, HOME: root, CLAUDE_PLUGIN_DATA: pluginData },
+      });
+      assert.equal(res.status, 0, res.stderr);
+      assert.equal(res.stdout.trim(), 'still alive');
+      const logs = readdirSync(join(pluginData, 'logs')).flatMap((f) =>
+        readFileSync(join(pluginData, 'logs', f), 'utf8')
+          .trim()
+          .split('\n')
+          .map(JSON.parse),
+      );
+      assert.ok(
+        logs.some((r) => r.level === 'error' && r.scope === 't'),
+        JSON.stringify(logs),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
