@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { logError } from './lib/log.mjs';
 import { getPluginData } from './lib/config.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { flagValue } from './lib/cli-args.mjs';
 
 const pluginData = getPluginData();
 if (!pluginData) {
@@ -25,8 +26,8 @@ if (!existsSync(dir)) {
 }
 
 const args = process.argv.slice(2);
-const sessionFilter = args.includes('--session') ? args[args.indexOf('--session') + 1] : null;
-const monthFilter = args.includes('--month') ? args[args.indexOf('--month') + 1] : null;
+const sessionFilter = flagValue(args, '--session');
+const monthFilter = flagValue(args, '--month');
 
 const files = readdirSync(dir)
   .filter((f) => f.startsWith('cache-health-') && f.endsWith('.jsonl'))
