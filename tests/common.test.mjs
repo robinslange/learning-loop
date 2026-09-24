@@ -225,37 +225,64 @@ describe('readStdin', () => {
   });
 });
 
+// Run an ESM snippet with common.mjs imported as `common`, in a child node
+// process against a throwaway HOME and plugin-data dir.
+function runCommonProbe(body, input = '') {
+  const root = mkdtempSync(join(tmpdir(), 'll-common-probe-'));
+  try {
+    const pluginData = join(root, 'plugin-data');
+    mkdirSync(pluginData);
+    const commonUrl = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
+    const probe = `import * as common from ${JSON.stringify(commonUrl)};\n${body}`;
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+      input,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, CLAUDE_PLUGIN_DATA: pluginData },
+    });
+    const logs = join(pluginData, 'logs');
+    const errorScopes = existsSync(logs)
+      ? readdirSync(logs)
+          .flatMap((f) => readFileSync(join(logs, f), 'utf8').trim().split('\n'))
+          .map((l) => JSON.parse(l))
+          .filter((r) => r.level === 'error')
+          .map((r) => r.scope)
+      : [];
+    return { res, errorScopes };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
 describe('spawnDetached', () => {
   it('logs a spawn failure under its label instead of killing the process', () => {
-    const root = mkdtempSync(join(tmpdir(), 'll-common-spawn-'));
-    try {
-      const pluginData = join(root, 'plugin-data');
-      mkdirSync(pluginData);
-      const commonUrl = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
-      const probe = `
-        import { spawnDetached } from ${JSON.stringify(commonUrl)};
-        spawnDetached('t', '/nonexistent/bin', []);
-        setTimeout(() => console.log('still alive'), 50);
-      `;
-      const res = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH, HOME: root, CLAUDE_PLUGIN_DATA: pluginData },
-      });
-      assert.equal(res.status, 0, res.stderr);
-      assert.equal(res.stdout.trim(), 'still alive');
-      const logs = readdirSync(join(pluginData, 'logs')).flatMap((f) =>
-        readFileSync(join(pluginData, 'logs', f), 'utf8')
-          .trim()
-          .split('\n')
-          .map(JSON.parse),
-      );
-      assert.ok(
-        logs.some((r) => r.level === 'error' && r.scope === 't'),
-        JSON.stringify(logs),
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    const { res, errorScopes } = runCommonProbe(`
+      common.spawnDetached('t', '/nonexistent/bin', []);
+      setTimeout(() => console.log('still alive'), 50);
+    `);
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.stdout.trim(), 'still alive');
+    assert.deepEqual(errorScopes, ['t']);
+  });
+});
+
+describe('readPayload', () => {
+  const PRINT = `console.log(JSON.stringify(await common.readPayload('h')));`;
+
+  it('logs malformed JSON under <scope>.parseStdin and returns null', () => {
+    const { res, errorScopes } = runCommonProbe(PRINT, '{');
+    assert.equal(res.stdout.trim(), 'null', res.stderr);
+    assert.deepEqual(errorScopes, ['h.parseStdin']);
+  });
+
+  it('returns null for blank stdin without logging', () => {
+    const { res, errorScopes } = runCommonProbe(PRINT, ' \n');
+    assert.equal(res.stdout.trim(), 'null', res.stderr);
+    assert.deepEqual(errorScopes, []);
+  });
+
+  it('returns the parsed payload', () => {
+    const { res } = runCommonProbe(PRINT, '{"session_id":"s"}');
+    assert.deepEqual(JSON.parse(res.stdout), { session_id: 's' }, res.stderr);
   });
 });
 

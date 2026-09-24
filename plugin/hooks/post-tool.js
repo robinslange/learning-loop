@@ -6,7 +6,7 @@
 // fixed module order, per-module timeout isolation.
 
 import { basename, join } from 'node:path';
-import { home, readStdin, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
+import { home, readPayload, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 import { runAutolink } from './modules/autolink.mjs';
@@ -62,12 +62,8 @@ function withTimeout(p, ms, label) {
   return Promise.race([p.finally(() => clearTimeout(t)), timeout]);
 }
 
-let raw;
-try {
-  raw = JSON.parse(await readStdin());
-} catch {
-  process.exit(0);
-}
+const raw = await readPayload('post-tool');
+if (!raw) process.exit(0);
 
 const ctx = {
   tool: raw.tool_name,

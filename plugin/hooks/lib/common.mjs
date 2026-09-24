@@ -173,11 +173,25 @@ export function readStdin() {
   });
 }
 
-// Run a PostToolUse hook: read stdin, parse JSON, call handler with
-// { tool, input, response, raw }. Swallows errors silently.
-export async function runHook(handler) {
+// The harness payload, or null when there is none to act on. Blank stdin is
+// not an error: readStdin resolves '' both on an empty pipe and on timeout.
+export async function readPayload(scope) {
+  const raw = await readStdin();
+  if (!raw.trim()) return null;
   try {
-    const raw = JSON.parse(await readStdin());
+    return JSON.parse(raw);
+  } catch (err) {
+    logError(`${scope}.parseStdin`, err);
+    return null;
+  }
+}
+
+// Run a tool hook: read the payload, call handler with
+// { tool, input, response, raw }. Handler errors are logged, never thrown.
+export async function runHook(handler) {
+  const raw = await readPayload('common.runHook');
+  if (!raw) process.exit(0);
+  try {
     await handler({
       tool: raw.tool_name,
       input: raw.tool_input || {},
@@ -185,7 +199,7 @@ export async function runHook(handler) {
       raw,
     });
   } catch (err) {
-    logError('common.runHook', err);
+    logError('common.runHook.handler', err);
   }
 }
 
