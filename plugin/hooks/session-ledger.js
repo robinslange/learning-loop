@@ -16,7 +16,7 @@ import {
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  readStdin,
+  readPayload,
   resolveVaultPath,
   resolveConfig,
   resolvePluginData,
@@ -73,16 +73,8 @@ function sweepStaleTmp(dir, now = Date.now()) {
 }
 
 const t0 = Date.now();
-const input = await readStdin();
-if (!input.trim()) process.exit(0);
-
-let hookData;
-try {
-  hookData = JSON.parse(input);
-} catch (err) {
-  logError('session-ledger.parseStdin', err);
-  process.exit(0);
-}
+const hookData = await readPayload('session-ledger');
+if (!hookData) process.exit(0);
 if (hookData.stop_hook_active) process.exit(0);
 
 const isSessionEnd = hookData.hook_event_name === 'SessionEnd';

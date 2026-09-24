@@ -16,7 +16,7 @@ import {
   resolveVaultPath,
   findEpisodicBinary,
   home,
-  readStdin,
+  readPayload,
   spawnDetached,
 } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
@@ -66,16 +66,9 @@ const ctx = {
 // SessionStart payload: the harness writes { session_id, source, ... } on
 // stdin. The payload id is the canonical session key (M4) — prefer it over
 // $CLAUDE_CODE_SESSION_ID, which is absent in some hosts.
-try {
-  const raw = await readStdin();
-  if (raw.trim()) {
-    const payload = JSON.parse(raw);
-    if (payload && typeof payload.session_id === 'string') {
-      ctx.payloadSessionId = payload.session_id.trim();
-    }
-  }
-} catch (err) {
-  logError('session-start.payload', err);
+const payload = (await readPayload('session-start')) ?? {};
+if (typeof payload.session_id === 'string') {
+  ctx.payloadSessionId = payload.session_id.trim();
 }
 
 // Order matters: cache-cleanup before update-check (uses cache parent).

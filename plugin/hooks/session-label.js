@@ -12,7 +12,7 @@ import {
   resolvePluginData,
   emitRetrieval,
   readFileTail,
-  readStdin,
+  readPayload,
 } from './lib/common.mjs';
 import {
   buildInjection,
@@ -32,18 +32,9 @@ import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 
-const input = await readStdin();
-
-if (!input.trim()) process.exit(0);
-
-let parsed;
-try {
-  parsed = JSON.parse(input);
-} catch (err) {
-  logError('session-label.parseStdin', err);
-  process.exit(0);
-}
-const { session_id, prompt, transcript_path, cwd } = parsed;
+const payload = await readPayload('session-label');
+if (!payload) process.exit(0);
+const { session_id, prompt, transcript_path, cwd } = payload;
 if (!session_id || !prompt) process.exit(0);
 
 const labelFile = join(tmpdir(), `claude-session-label-${session_id}.txt`);

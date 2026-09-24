@@ -6,7 +6,7 @@ import { readFileSync, writeFileSync, existsSync, readdirSync, statSync } from '
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { home, resolvePluginData, readStdin, getSessionId } from './lib/common.mjs';
+import { home, resolvePluginData, readPayload, getSessionId } from './lib/common.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { encodeProjectDir } from '../scripts/lib/paths.mjs';
@@ -20,16 +20,8 @@ function now() {
   return Math.floor(Date.now() / 1000);
 }
 
-const input = await readStdin();
-
-if (!input.trim()) process.exit(0);
-
-let hookData;
-try {
-  hookData = JSON.parse(input);
-} catch {
-  process.exit(0);
-}
+const hookData = await readPayload('stop-nudge');
+if (!hookData) process.exit(0);
 
 // Check if stop hook is already active (prevent loops)
 if (hookData.stop_hook_active) process.exit(0);

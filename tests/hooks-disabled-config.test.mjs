@@ -272,4 +272,30 @@ describe('hooks.disabled', () => {
       });
     }
   });
+
+  describe('every shipped hook treats an empty stdin as no payload', () => {
+    for (const spec of SWEEP) {
+      it(`${spec.name}: exits 0 and logs no error`, { timeout: 20000 }, () => {
+        const r = runHook(join(HOOKS_DIR, `${spec.name}.js`), {
+          stdin: '',
+          env: { VAULT_PATH: VAULT, CLAUDE_PROJECT_DIR: '/tmp/ll-sweep-proj' },
+          seed: seedSandbox(null),
+        });
+        try {
+          assert.equal(r.exitCode, 0, `${spec.name} exited ${r.exitCode}: ${r.stderr}`);
+          const logs = join(r.pluginDataDir, 'logs');
+          const errors = existsSync(logs)
+            ? readdirSync(logs)
+                .flatMap((f) => readFileSync(join(logs, f), 'utf8').trim().split('\n'))
+                .filter(Boolean)
+                .map((l) => JSON.parse(l))
+                .filter((row) => row.level === 'error')
+            : [];
+          assert.deepEqual(errors, [], `${spec.name} logged an error for empty stdin`);
+        } finally {
+          r.cleanup();
+        }
+      });
+    }
+  });
 });
