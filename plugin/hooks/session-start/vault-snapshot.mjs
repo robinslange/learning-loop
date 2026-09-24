@@ -131,9 +131,8 @@ export async function run(ctx) {
   //       now-removed memory-snapshot-<sid> — both reaped here);
   //   (b) edges.db.<pid>.tmp orphans (crash between saveDb's write and
   //       rename) older than 1 hour;
-  //   (c) tmp per-session/legacy markers older than 7 days — session-label
-  //       files and the pre-v1.27 tmp marker names that nothing reads
-  //       anymore. NEVER the live learning-loop-session-id fallback;
+  //   (c) tmp session-label files older than 7 days. NEVER the live
+  //       learning-loop-session-id fallback;
   //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
   //   (e) retrieval/<prefix>-YYYY-MM.jsonl AND logs/log-YYYY-MM.jsonl logs
   //       older than the cutoff month, measured by age across all prefixes
@@ -236,16 +235,7 @@ export async function run(ctx) {
       );
       sweepRetrievalLogs(DATA_PATHS.logs(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
     }
-    const TMP_SWEEP_PATTERNS = [
-      /^claude-session-label-.+\.txt$/,
-      /^learning-loop-memory-snapshot/,
-      /^learning-loop-session-start-/,
-      /^learning-loop-last-dream$/,
-      /^learning-loop-last-reflect$/,
-      /^learning-loop-dream-nudged$/,
-      /^learning-loop-dream-lock$/,
-    ];
-    sweepDir(ctx.tmp, (f) => TMP_SWEEP_PATTERNS.some((re) => re.test(f)), weekCutoff);
+    sweepDir(ctx.tmp, (f) => /^claude-session-label-.+\.txt$/.test(f), weekCutoff);
     if (sweepMarker) writeMarker(sweepMarker, { ts: new Date().toISOString() });
   }
 }

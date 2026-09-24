@@ -20,6 +20,7 @@ const tmp = tmpdir();
 const PLUGIN_DATA = mkdtempSync(join(tmp, 'll-test-dream-plugin-data-'));
 const DREAM_MARKER = join(PLUGIN_DATA, 'retrieval', 'last-dream');
 const DREAM_LOCK = join(PLUGIN_DATA, 'markers', 'dream-lock');
+const GATE_MARKER = join(PLUGIN_DATA, 'session-start-cache', 'dream-gate.json');
 
 // Unique per-run project dir AND a sandboxed HOME: the gate resolves its
 // memory dir via home() (env.HOME first), so overriding HOME keeps the test
@@ -29,11 +30,11 @@ const FAKE_HOME = mkdtempSync(join(tmp, 'll-test-dream-home-'));
 const encodedPath = encodeProjectDir(FAKE_PROJECT_DIR);
 const memoryDir = join(FAKE_HOME, '.claude', 'projects', encodedPath, 'memory');
 
+// Run the gate and return the nudge it cached for the next session.
 function run() {
-  return execFileSync('node', [HOOK], {
-    encoding: 'utf-8',
+  execFileSync(process.execPath, [HOOK], {
     env: {
-      ...process.env,
+      PATH: process.env.PATH,
       HOME: FAKE_HOME,
       USERPROFILE: FAKE_HOME,
       CLAUDE_PROJECT_DIR: FAKE_PROJECT_DIR,
@@ -41,6 +42,7 @@ function run() {
     },
     timeout: 5000,
   });
+  return JSON.parse(readFileSync(GATE_MARKER, 'utf8')).nudge;
 }
 
 describe('dream-gate', () => {
@@ -52,6 +54,7 @@ describe('dream-gate', () => {
 
   beforeEach(() => {
     rmSync(DREAM_LOCK, { force: true });
+    rmSync(GATE_MARKER, { force: true });
   });
 
   after(() => {
@@ -60,18 +63,16 @@ describe('dream-gate', () => {
     rmSync(FAKE_PROJECT_DIR, { recursive: true, force: true });
   });
 
-  it('exits silently when lock file exists', () => {
+  it('caches no nudge when lock file exists', () => {
     writeFileSync(DREAM_LOCK, '1');
     rmSync(DREAM_MARKER, { force: true });
-    const out = run();
-    assert.equal(out, '');
+    assert.equal(run(), null);
   });
 
   it('creates marker and exits on first run (no existing marker)', () => {
     rmSync(DREAM_MARKER, { force: true });
 
-    const out = run();
-    assert.equal(out, '');
+    assert.equal(run(), null);
     assert.ok(existsSync(DREAM_MARKER), 'marker should be created');
 
     const ts = parseInt(readFileSync(DREAM_MARKER, 'utf8').trim(), 10);
@@ -79,15 +80,14 @@ describe('dream-gate', () => {
     assert.ok(Math.abs(nowSec - ts) < 5, 'marker timestamp should be close to now');
   });
 
-  it('exits silently when last dream was less than 24h ago', () => {
+  it('caches no nudge when last dream was less than 24h ago', () => {
     const recentTs = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
     writeFileSync(DREAM_MARKER, String(recentTs));
 
-    const out = run();
-    assert.equal(out, '');
+    assert.equal(run(), null);
   });
 
-  it('exits silently when fewer than 5 files modified since last dream', () => {
+  it('caches no nudge when fewer than 5 files modified since last dream', () => {
     const oldTs = Math.floor(Date.now() / 1000) - 90000; // 25 hours ago
     writeFileSync(DREAM_MARKER, String(oldTs));
 
@@ -102,11 +102,10 @@ describe('dream-gate', () => {
       utimesSync(f, futureTime, futureTime);
     }
 
-    const out = run();
-    assert.equal(out, '');
+    assert.equal(run(), null);
   });
 
-  it('outputs nudge when both gates pass (24h elapsed + 5+ modified files)', () => {
+  it('caches a nudge when both gates pass (24h elapsed + 5+ modified files)', () => {
     const oldTs = Math.floor(Date.now() / 1000) - 90000; // 25 hours ago
     writeFileSync(DREAM_MARKER, String(oldTs));
 
@@ -120,9 +119,9 @@ describe('dream-gate', () => {
       utimesSync(f, futureTime, futureTime);
     }
 
-    const out = run();
-    assert.match(out, /7 files modified/);
-    assert.match(out, /Run \/dream to consolidate/);
+    const nudge = run();
+    assert.match(nudge, /7 files modified/);
+    assert.match(nudge, /Run \/dream to consolidate/);
   });
 
   it('stale lock (old mtime, dead pid) does not silence the gate — M5', () => {
@@ -144,14 +143,13 @@ describe('dream-gate', () => {
   it('a last-dream stamp written by marker.mjs suppresses the 24h gate — M1', () => {
     const CLI = join(import.meta.dirname, '..', 'plugin', 'scripts', 'marker.mjs');
     rmSync(DREAM_MARKER, { force: true });
-    const stampedPath = execFileSync('node', [CLI, 'stamp', 'last-dream'], {
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
+    const stampedPath = execFileSync(process.execPath, [CLI, 'stamp', 'last-dream'], {
+      env: { PATH: process.env.PATH, CLAUDE_PLUGIN_DATA: PLUGIN_DATA },
     })
       .toString()
       .trim();
     assert.equal(stampedPath, DREAM_MARKER, 'stamp must land where the gate reads');
     assert.ok(existsSync(DREAM_MARKER), 'stamp must exist before the gate runs');
-    const out = run();
-    assert.equal(out.trim(), '', 'fresh dream stamp → no nudge');
+    assert.equal(run(), null, 'fresh dream stamp → no nudge');
   });
 });

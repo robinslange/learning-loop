@@ -3,12 +3,11 @@
 // Nudges consolidation once per session if the session was substantial.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import { home, resolvePluginData, readPayload } from './lib/common.mjs';
+import { resolvePluginData, readPayload } from './lib/common.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import { encodeProjectDir } from '../scripts/lib/paths.mjs';
+import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
@@ -73,9 +72,9 @@ function nudge(reason) {
 }
 
 // Check if many new memory files were created this session (dream nudge).
-const projectDir = env.CLAUDE_PROJECT_DIR;
+const memoryDir = resolveMemoryDir(env.CLAUDE_PROJECT_DIR);
 
-if (projectDir) {
+if (memoryDir) {
   // Count what THIS session wrote (post-tool's per-session write log),
   // intersected with files still on disk. Never a diff of the shared memory
   // dir: that conflated concurrent sessions and blamed one session for
@@ -85,8 +84,6 @@ if (projectDir) {
     ttlMs: Infinity,
   });
   if (Array.isArray(writesArr)) {
-    const encodedPath = encodeProjectDir(projectDir);
-    const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     let newMemoryCount = 0;
     try {
       const onDisk = new Set(readdirSync(memoryDir).filter((f) => f.endsWith('.md')));

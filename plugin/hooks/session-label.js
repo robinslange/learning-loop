@@ -19,11 +19,11 @@ import {
   enrichVaultHits,
   buildQueryParts,
   promptSpecificity,
-  emitHookOutput,
   runBackendsWithRaceCap,
   scrubSecrets,
   scrubForLog,
 } from './lib/inject.mjs';
+import { emitJson } from './lib/io.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -420,7 +420,9 @@ try {
   // One record shape for both modes — live injections stay visible to
   // review-shadow.mjs, so gate recalibration keeps its data after go-live.
   if (mode === 'live') {
-    emitHookOutput({ event: 'UserPromptSubmit', additionalContext: scrubbedContext });
+    emitJson({
+      hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: scrubbedContext },
+    });
   }
   logShadow({
     type: 'gate-pass-payload',

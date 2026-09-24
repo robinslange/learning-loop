@@ -1,6 +1,5 @@
 import { spawn as defaultSpawn } from 'node:child_process';
 import { findBinary } from './common.mjs';
-import { emitJson } from './io.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { SECRET_PATTERNS } from '../../scripts/lib/secret-patterns.mjs';
@@ -107,10 +106,6 @@ export function buildQueryParts({ prompt, messages = [], soloMinChars }) {
   // hands the thin-continuation counterfactual a query that was never padded.
   if (prior.length === 0) return { query: head, soloQuery: head, padded: false };
   return { query: [head, ...prior].join(' '), soloQuery: head, padded: true };
-}
-
-export function buildQuery(args) {
-  return buildQueryParts(args).query;
 }
 
 const DIRECTIVE =
@@ -276,10 +271,6 @@ export function buildInjection({ vaultHits, query, alreadyInjected }) {
     additionalContext: [DIRECTIVE, UNTRUSTED_NOTE, lines.join('\n')].join('\n\n'),
     injectedVault,
   };
-}
-
-export function emitHookOutput({ event, additionalContext }) {
-  emitJson({ hookSpecificOutput: { hookEventName: event, additionalContext } });
 }
 
 function spawnSearch(spawnFn, cmd, args, abortSignal, env) {

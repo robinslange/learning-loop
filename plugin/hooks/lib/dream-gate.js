@@ -1,15 +1,14 @@
 #!/usr/bin/env node
 // Learning Loop — Dream gate check
-// Called by session-start.js via detached spawn. With --session-start-refresh,
-// writes a marker so the next session reads from cache. Without it, emits a
-// nudge string to stdout (legacy synchronous path, kept for direct CLI use).
+// Called by session-start.js via detached spawn. Writes the nudge to the
+// dream-gate marker so the next session reads it from cache.
 // Conditions (dual-gate): 24+ hours AND 5+ memory files modified since last dream.
 
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { home, resolvePluginData } from './common.mjs';
+import { resolvePluginData } from './common.mjs';
 import { env } from '../../scripts/lib/env.mjs';
-import { encodeProjectDir } from '../../scripts/lib/paths.mjs';
+import { resolveMemoryDir } from '../../scripts/lib/memory-paths.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import {
   writeMarker,
@@ -27,8 +26,6 @@ if (!pluginData) process.exit(0);
 const DREAM_MARKER = MARKER_PATHS.lastDream(pluginData);
 const DREAM_RUNNING_MARKER = MARKER_PATHS.dreamLock(pluginData);
 
-const isSessionStartRefresh = process.argv.includes('--session-start-refresh');
-
 function now() {
   return Math.floor(Date.now() / 1000);
 }
@@ -39,7 +36,6 @@ function now() {
 // could not decide (lock held, env missing) — a prior real nudge stays
 // visible until the next computation succeeds.
 function writeMarkerIfNeeded(nudge, { computed = false } = {}) {
-  if (!isSessionStartRefresh) return;
   const markerPath = MARKER_PATHS.dreamGate(pluginData);
   if (nudge == null && !computed) {
     const existing = readMarker(markerPath);
@@ -83,14 +79,11 @@ if (typeof lastDreamTs === 'number') {
 }
 
 // Gate 3: Need CLAUDE_PROJECT_DIR to find memory dir.
-const projectDir = env.CLAUDE_PROJECT_DIR;
-if (!projectDir) {
+const memoryDir = resolveMemoryDir(env.CLAUDE_PROJECT_DIR);
+if (!memoryDir) {
   writeMarkerIfNeeded(null);
   process.exit(0);
 }
-
-const encodedPath = encodeProjectDir(projectDir);
-const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
 
 // Gate 4: Memory dir must exist.
 try {
@@ -120,8 +113,4 @@ if (modifiedCount >= 5) {
   nudge = `Auto-memory has ${modifiedCount} files modified since last dream (${dreamDate}). Run /dream to consolidate.`;
 }
 
-// Write marker (if --session-start-refresh) then emit nudge to stdout.
 writeMarkerIfNeeded(nudge, { computed: true });
-if (nudge) {
-  process.stdout.write(nudge);
-}

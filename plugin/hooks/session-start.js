@@ -45,10 +45,9 @@ const ctx = {
   pluginData,
   vaultRoot: resolveVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,
-  memoryDir: `${home()}/.claude/projects`,
+  home: home(),
   // Resolve tmp the same way the canonical readers do: bare tmpdir()
-  // (scripts/lib/session.mjs:getSessionId and hooks/stop-nudge.js both use
-  // `const tmp = tmpdir()`). vault-snapshot.mjs writes learning-loop-session-id
+  // (scripts/lib/session.mjs:getSessionId uses tmpdir() too). vault-snapshot.mjs writes learning-loop-session-id
   // under ctx.tmp; that is read only by other hook subprocesses, which — like
   // this one — don't inherit the interactive shell's $TMPDIR, so all agree on
   // /tmp. (The /reflect marker handshake, whose reader IS the interactive
