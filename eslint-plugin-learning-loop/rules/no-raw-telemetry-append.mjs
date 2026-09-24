@@ -23,6 +23,9 @@ const ALLOWED = new Set([
   // by log-rotate.mjs. Not a telemetry stream: converting it to JSON lines
   // would make it worse to read for no measurement benefit.
   'scripts/librarian/daemon.mjs',
+  // One-byte claim counter: the file size is the count, so O_APPEND is the
+  // whole concurrency story. Not telemetry.
+  'scripts/lib/fetch-budget.mjs',
 ]);
 
 export default {

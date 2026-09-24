@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { runGateway, UsageError } from '../../plugin/bin/source-gateway.mjs';
+import { readCount } from '../../plugin/scripts/lib/fetch-budget.mjs';
 
 describe('gateway search verb', () => {
   it('returns hits + source_used from the resolved source', async () => {
@@ -28,7 +32,8 @@ describe('gateway fetch verb', () => {
     };
     const out = await runGateway(['fetch', '--url', 'https://x'], {
       resolveSlot: () => fakeSource,
-      budgetStore: makeBudgetStore(),
+      sessionId: '',
+      pluginData: null,
     });
     assert.equal(out.source_used, 'raw');
     assert.equal(out.doc.ok, true);
@@ -89,63 +94,46 @@ describe('gateway research verb (full bundle)', () => {
   });
 });
 
-// Helper: in-memory budget store modelling a per-session file counter.
-// Shared across runGateway calls = same-session, different-process.
-function makeBudgetStore() {
-  let n = 0;
+function tmpSession() {
   return {
-    get n() {
-      return n;
-    },
-    bump() {
-      n += 1;
-    },
+    sessionId: 'gateway-test-session',
+    pluginData: mkdtempSync(join(tmpdir(), 'gateway-budget-')),
   };
 }
 
 describe('gateway fetch budget', () => {
-  it('refuses fetch past the budget, count survives across invocations sharing a store', async () => {
-    // Two runGateway calls with the SAME budgetStore model two separate node processes
-    // within one session. Budget 1 → first succeeds, second is refused.
-    const store = makeBudgetStore();
-    const fakeSource = {
-      id: 'raw',
-      capabilities: ['fetch'],
-      fetch: async () => ({ text: 'x', ok: true, reason: 'ok' }),
-    };
-    const deps = { resolveSlot: () => fakeSource, fetchBudget: 1, budgetStore: store };
-    const first = await runGateway(['fetch', '--url', 'https://a'], deps);
-    assert.equal(first.doc.ok, true);
-    const second = await runGateway(['fetch', '--url', 'https://b'], deps);
-    assert.equal(second.doc.ok, false);
-    assert.equal(second.doc.reason, 'fetch_budget_exceeded');
-    assert.equal(second.source_used, 'raw');
+  const okSource = { id: 'raw', fetch: async () => ({ text: 'x', ok: true, reason: 'ok' }) };
+
+  it('lets exactly `budget` fetches through per session, refusing the rest', async () => {
+    const session = tmpSession();
+    const deps = { resolveSlot: () => okSource, fetchBudget: 3, ...session };
+    const outs = [];
+    for (let i = 0; i < 6; i++) {
+      outs.push(await runGateway(['fetch', '--url', `https://example.com/${i}`], deps));
+    }
+    assert.deepEqual(
+      outs.map((o) => o.doc.ok),
+      [true, true, true, false, false, false],
+    );
+    assert.equal(outs[5].doc.reason, 'fetch_budget_exceeded');
+    assert.equal(outs[5].source_used, 'raw');
+    rmSync(session.pluginData, { recursive: true, force: true });
   });
+
   it('does not consume budget on search/research verbs', async () => {
-    const store = makeBudgetStore();
-    const fakeQuery = { id: 'brave', query: async () => [] };
+    const session = tmpSession();
     await runGateway(['search', '--q', 'x'], {
-      resolveSlot: () => fakeQuery,
-      fetchBudget: 1,
-      budgetStore: store,
+      resolveSlot: () => ({ id: 'brave', query: async () => [] }),
+      ...session,
     });
-    // budget untouched by search -> a subsequent fetch still succeeds
-    const fakeFetch = { id: 'raw', fetch: async () => ({ text: 'y', ok: true, reason: 'ok' }) };
-    const out = await runGateway(['fetch', '--url', 'https://a'], {
-      resolveSlot: () => fakeFetch,
-      fetchBudget: 1,
-      budgetStore: store,
-    });
-    assert.equal(out.doc.ok, true);
+    assert.equal(readCount(session.sessionId, session.pluginData), 0);
+    rmSync(session.pluginData, { recursive: true, force: true });
   });
-  it('gracefully skips enforcement when no budgetStore is provided (in-process fallback)', async () => {
-    // No budgetStore, no sessionId/pluginData → graceful degrade (no enforcement when store absent).
-    // Production code resolves sessionId + pluginData; in tests without those deps the store
-    // is absent and fetch must not throw.
-    const fakeSource = { id: 'raw', fetch: async () => ({ text: 'z', ok: true, reason: 'ok' }) };
-    const out = await runGateway(['fetch', '--url', 'https://c'], {
-      resolveSlot: () => fakeSource,
-      fetchBudget: 1,
+
+  it('skips enforcement when there is no session to count against', async () => {
+    const out = await runGateway(['fetch', '--url', 'https://example.com/c'], {
+      resolveSlot: () => okSource,
+      fetchBudget: 0,
       sessionId: '',
       pluginData: null,
     });

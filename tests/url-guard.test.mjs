@@ -6,6 +6,9 @@
 // scraped out of (attacker-authorable) note bodies.
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import {
   checkFetchUrl,
   checkRedirect,
@@ -13,6 +16,7 @@ import {
 } from '../plugin/scripts/lib/sources/url-guard.mjs';
 import { fetchText } from '../plugin/scripts/librarian/research/fetch.mjs';
 import { runGateway } from '../plugin/bin/source-gateway.mjs';
+import { readCount } from '../plugin/scripts/lib/fetch-budget.mjs';
 
 describe('checkFetchUrl', () => {
   const blocked = [
@@ -176,13 +180,21 @@ describe('source-gateway fetch verb', () => {
   });
 
   it('does not consume fetch budget on a blocked url', async () => {
-    let bumped = 0;
-    const store = { n: 0, bump: () => bumped++ };
-    await runGateway(['fetch', '--url', 'http://169.254.169.254/'], {
-      ...deps,
-      budgetStore: store,
-    });
-    assert.equal(bumped, 0, 'a rejected URL must not spend the session budget');
+    const pluginData = mkdtempSync(join(tmpdir(), 'url-guard-budget-'));
+    try {
+      await runGateway(['fetch', '--url', 'http://169.254.169.254/'], {
+        ...deps,
+        sessionId: 's1',
+        pluginData,
+      });
+      assert.equal(
+        readCount('s1', pluginData),
+        0,
+        'a rejected URL must not spend the session budget',
+      );
+    } finally {
+      rmSync(pluginData, { recursive: true, force: true });
+    }
   });
 
   it('still allows a public url through to the source', async () => {

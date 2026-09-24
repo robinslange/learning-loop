@@ -1,31 +1,43 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import { readCount, bumpCount } from '../../plugin/scripts/lib/fetch-budget.mjs';
 
+const MODULE_URL = new URL('../../plugin/scripts/lib/fetch-budget.mjs', import.meta.url).href;
 const sessionId = 'test-session-abc';
 let tmpPd;
 
 before(() => {
-  tmpPd = join(tmpdir(), `fetch-budget-test-${Date.now()}`);
-  mkdirSync(tmpPd, { recursive: true });
+  tmpPd = mkdtempSync(join(tmpdir(), 'fetch-budget-test-'));
 });
 
 after(() => {
   rmSync(tmpPd, { recursive: true, force: true });
 });
 
+function bumpInChild(sid, pd) {
+  const code = `import(${JSON.stringify(MODULE_URL)}).then((m) => m.bumpCount(${JSON.stringify(sid)}, ${JSON.stringify(pd)}))`;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', code], { stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('exit', (status) =>
+      status === 0 ? resolve() : reject(new Error(`child exited ${status}`)),
+    );
+  });
+}
+
 describe('fetch-budget readCount/bumpCount', () => {
   it('starts at 0 when no file exists', () => {
     assert.equal(readCount(sessionId, tmpPd), 0);
   });
 
-  it('bump increments across calls (models cross-process persistence)', () => {
-    bumpCount(sessionId, tmpPd);
+  it('bump returns the new count and persists it', () => {
+    assert.equal(bumpCount(sessionId, tmpPd), 1);
     assert.equal(readCount(sessionId, tmpPd), 1);
-    bumpCount(sessionId, tmpPd);
+    assert.equal(bumpCount(sessionId, tmpPd), 2);
     assert.equal(readCount(sessionId, tmpPd), 2);
   });
 
@@ -34,30 +46,12 @@ describe('fetch-budget readCount/bumpCount', () => {
     assert.equal(readCount(other, tmpPd), 0);
     bumpCount(other, tmpPd);
     assert.equal(readCount(other, tmpPd), 1);
-    assert.equal(readCount(sessionId, tmpPd), 2); // unchanged
+    assert.equal(readCount(sessionId, tmpPd), 2);
   });
 
-  it('gracefully returns 0 when pluginData is null', () => {
-    assert.equal(readCount(sessionId, null), 0);
-  });
-
-  it('gracefully no-ops bump when pluginData is null', () => {
-    assert.doesNotThrow(() => bumpCount(sessionId, null));
-  });
-
-  it('gracefully returns 0 when sessionId is empty', () => {
-    assert.equal(readCount('', tmpPd), 0);
-  });
-
-  it('gracefully no-ops bump when sessionId is empty', () => {
-    assert.doesNotThrow(() => bumpCount('', tmpPd));
-  });
-
-  it('gracefully returns 0 when sessionId is "unknown"', () => {
-    assert.equal(readCount('unknown', tmpPd), 0);
-  });
-
-  it('gracefully no-ops bump when sessionId is "unknown"', () => {
-    assert.doesNotThrow(() => bumpCount('unknown', tmpPd));
+  it('loses no bumps when 20 processes bump the same session at once', async () => {
+    const sid = 'concurrent-session';
+    await Promise.all(Array.from({ length: 20 }, () => bumpInChild(sid, tmpPd)));
+    assert.equal(readCount(sid, tmpPd), 20);
   });
 });

@@ -1,38 +1,33 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, statSync, mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
-// Per-session fetch budget counter backed by a single-integer file under
-// PLUGIN_DATA/fetch-budget/<sessionId>.count. Survives process boundaries
-// so the budget is real across the one-process-per-URL gateway invocation pattern.
+// Per-session fetch budget counter under PLUGIN_DATA/fetch-budget/<sessionId>.claims.
+// Each fetch appends one byte with O_APPEND, so the count is the file size: the
+// kernel serialises appends, which makes a bump from one of many concurrent
+// gateway processes a claim that can never be lost or reset by another.
 //
-// Graceful degradation: if pluginData is null OR sessionId is empty/unknown,
-// all operations are no-ops and readCount returns 0. A missing data dir never
-// throws — it must not break fetch in edge environments.
+// Callers own the no-session case; both functions assume a real session and
+// plugin data dir. Neither throws: a counter failure must not break fetch.
 
 function budgetFile(sessionId, pluginData) {
-  return join(pluginData, 'fetch-budget', `${sessionId}.count`);
+  return join(pluginData, 'fetch-budget', `${sessionId}.claims`);
 }
 
 export function readCount(sessionId, pluginData) {
-  if (!pluginData || !sessionId || sessionId === 'unknown') return 0;
-  const file = budgetFile(sessionId, pluginData);
-  if (!existsSync(file)) return 0;
   try {
-    const n = parseInt(readFileSync(file, 'utf8').trim(), 10);
-    return Number.isFinite(n) ? n : 0;
+    return statSync(budgetFile(sessionId, pluginData)).size;
   } catch {
     return 0;
   }
 }
 
 export function bumpCount(sessionId, pluginData) {
-  if (!pluginData || !sessionId || sessionId === 'unknown') return;
-  const dir = join(pluginData, 'fetch-budget');
+  const file = budgetFile(sessionId, pluginData);
   try {
-    mkdirSync(dir, { recursive: true });
-    const file = budgetFile(sessionId, pluginData);
-    const current = readCount(sessionId, pluginData);
-    writeFileSync(file, String(current + 1), 'utf8');
-    // eslint-disable-next-line learning-loop/no-empty-catch -- never throw, a write failure must not break fetch.
-  } catch {}
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, '.');
+    return statSync(file).size;
+  } catch {
+    return 0;
+  }
 }
