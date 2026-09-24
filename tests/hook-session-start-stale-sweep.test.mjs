@@ -153,7 +153,6 @@ test(
     const sessionTmp = mkdtempSync(join(realpathSync(tmpdir()), 'll-sweep-sid-'));
 
     const oldTmpFiles = [
-      'learning-loop-stop-nudged-deadbeef',
       'claude-session-label-oldsid.txt',
       'learning-loop-last-dream',
       'learning-loop-memory-snapshot-oldsid',
@@ -201,7 +200,7 @@ test(
       assert.deepEqual(
         readdirSync(isolatedTmp).sort(),
         ['learning-loop-session-id'],
-        'all four legacies swept; the 8-day-old session-id file must NEVER be swept',
+        'all three legacies swept; the 8-day-old session-id file must NEVER be swept',
       );
       assert.equal(
         readFileSync(join(isolatedTmp, 'learning-loop-session-id'), 'utf8'),
@@ -230,7 +229,7 @@ test('TTL sweep is gated to once per 24h — a stale marker survives a same-day 
     tmp: isolatedTmp,
     projectDir: null,
     memoryDir: join(fx.sandbox, 'memdir'),
-    payloadSessionId: 'gate-test-sid',
+    payload: { session_id: 'gate-test-sid' },
   };
 
   await withSandbox(fx, async () => {
@@ -288,7 +287,7 @@ test('sweep: retrieval logs older than the RETRIEVAL_LOG_KEEP_MONTHS cutoff are 
     tmp: isolatedTmp,
     projectDir: null,
     memoryDir: join(fx.sandbox, 'memdir'),
-    payloadSessionId: 'retention-test-sid',
+    payload: { session_id: 'retention-test-sid' },
   };
 
   await withSandbox(fx, async () => {
@@ -343,7 +342,7 @@ test('sweep: logs/log-YYYY-MM.jsonl is pruned with the same RETRIEVAL_LOG_KEEP_M
     tmp: isolatedTmp,
     projectDir: null,
     memoryDir: join(fx.sandbox, 'memdir'),
-    payloadSessionId: 'logs-retention-test-sid',
+    payload: { session_id: 'logs-retention-test-sid' },
   };
 
   await withSandbox(fx, async () => {
@@ -387,7 +386,7 @@ test('sweep: librarian queue.jsonl.bak.* older than 7 days removed, fresh backup
     tmp: isolatedTmp,
     projectDir: null,
     memoryDir: join(fx.sandbox, 'memdir'),
-    payloadSessionId: 'librarian-bak-test-sid',
+    payload: { session_id: 'librarian-bak-test-sid' },
   };
 
   await withSandbox(fx, async () => {
@@ -445,7 +444,7 @@ test('sweep: a prefix that stopped being written drains instead of keeping its l
       tmp: isolatedTmp,
       projectDir: null,
       memoryDir: join(fx.sandbox, 'memdir'),
-      payloadSessionId: 'dead-prefix-sid',
+      payload: { session_id: 'dead-prefix-sid' },
     });
     for (const month of deadMonths) {
       assert.equal(

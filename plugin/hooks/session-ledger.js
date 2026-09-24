@@ -20,10 +20,10 @@ import {
   resolveVaultPath,
   resolveConfig,
   resolvePluginData,
-  getSessionId,
   emitProvenance,
 } from './lib/common.mjs';
 import { env } from '../scripts/lib/env.mjs';
+import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
@@ -78,8 +78,8 @@ if (!hookData) process.exit(0);
 if (hookData.stop_hook_active) process.exit(0);
 
 const isSessionEnd = hookData.hook_event_name === 'SessionEnd';
-let sessionId = hookData.session_id || getSessionId();
-if (!sessionId || sessionId === 'unknown') process.exit(0);
+const sessionId = sessionIdFrom(hookData);
+if (!sessionId) process.exit(0);
 
 const vaultRoot = resolveVaultPath();
 const pluginData = resolvePluginData();

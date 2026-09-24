@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/post-tool.js', import.meta.url));
+const STOP_NUDGE = fileURLToPath(new URL('../plugin/hooks/stop-nudge.js', import.meta.url));
 const VAULT = fileURLToPath(new URL('./fixtures/vault-small', import.meta.url));
 
 // Read all provenance JSONL lines from pluginData.
@@ -165,6 +166,51 @@ test('post-tool Write into the memory dir records a session-scoped write-log ent
   } finally {
     r.cleanup();
     rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+// Writer and reader must key the write log on the same session. Some hosts do
+// not set $CLAUDE_CODE_SESSION_ID, and plugin-data/session/id then names
+// whichever session started last; the payload id is this session's own.
+test('post-tool files memory writes under the payload session, where stop-nudge counts them', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-pt-sid-'));
+  const pluginData = join(root, 'plugin-data');
+  const projectDir = join(root, 'project');
+  const memDir = join(root, '.claude', 'projects', encodeProjectDir(projectDir), 'memory');
+  mkdirSync(join(pluginData, 'session'), { recursive: true });
+  writeFileSync(join(pluginData, 'session', 'id'), 'last-started-session');
+  mkdirSync(memDir, { recursive: true });
+  const env = { HOME: root, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_PROJECT_DIR: projectDir };
+  const sid = 'this-session';
+  try {
+    for (const name of ['a.md', 'b.md', 'c.md']) {
+      writeFileSync(join(memDir, name), '# a memory');
+      const r = runHook(HOOK, {
+        env,
+        stdin: {
+          session_id: sid,
+          tool_name: 'Write',
+          tool_input: { file_path: join(memDir, name), content: '# a memory' },
+          tool_response: { success: true },
+        },
+      });
+      r.cleanup();
+      assert.equal(r.exitCode, 0, r.stderr);
+    }
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(pluginData, 'markers', `memory-writes-${sid}`), 'utf8')),
+      ['a.md', 'b.md', 'c.md'],
+    );
+
+    const stop = runHook(STOP_NUDGE, {
+      env,
+      stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
+    });
+    stop.cleanup();
+    assert.equal(stop.exitCode, 0, stop.stderr);
+    assert.match(JSON.parse(stop.stdout).reason, /created 3 new memory files/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

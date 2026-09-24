@@ -59,3 +59,13 @@ export function getSessionId() {
   }
   return 'unknown';
 }
+
+// The session a hook payload belongs to: the payload's own id first, since
+// the resolver above falls back to plugin-data/session/id, which names
+// whichever session started last. '' when nothing resolves.
+export function sessionIdFrom(payload) {
+  const own = String(payload?.session_id ?? '').trim();
+  if (own) return own;
+  const resolved = getSessionId();
+  return resolved === 'unknown' ? '' : resolved;
+}

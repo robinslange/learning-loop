@@ -139,8 +139,8 @@ export const DATA_PATHS = {
   // the stale files shadowed the real id — so the single unsuffixed file is all
   // that remains.
   session: (pd) => join(pd, 'session'),
-  // Dream/reflect handshake markers (last-reflect, dream-lock, dream-nudged,
-  // memory-snapshot-<sid>). Session-scoped; the SessionStart TTL sweep reaps
+  // Dream/reflect handshake markers (last-reflect, dream-lock, stop-nudged-<sid>,
+  // memory-writes-<sid>). Session-scoped; the SessionStart TTL sweep reaps
   // anything older than 7 days. last-dream is NOT here — it must persist
   // (the 24h dream gate compares against it) and existing installs already
   // carry it under retrieval/, so it stays there (see MARKER_PATHS.lastDream).
