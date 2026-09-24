@@ -642,10 +642,10 @@ export function checkSearchIndexExists({ vaultRoot } = {}) {
   }
 }
 
-export function checkNliSocketFresh({ pluginData } = {}) {
+export function checkDupScanSocketFresh({ pluginData } = {}) {
   if (!pluginData) {
     return makeCheck({
-      id: CHECK_IDS['nli-socket-fresh'],
+      id: CHECK_IDS['dup-scan-socket-fresh'],
       name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
@@ -653,10 +653,10 @@ export function checkNliSocketFresh({ pluginData } = {}) {
       fix: null,
     });
   }
-  const p = DATA_FILES.nliSocket(pluginData);
+  const p = DATA_FILES.dupScanSocket(pluginData);
   if (!existsSync(p)) {
     return makeCheck({
-      id: CHECK_IDS['nli-socket-fresh'],
+      id: CHECK_IDS['dup-scan-socket-fresh'],
       name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
@@ -668,7 +668,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
     const stat = statSync(p);
     if (!stat.isSocket()) {
       return makeCheck({
-        id: CHECK_IDS['nli-socket-fresh'],
+        id: CHECK_IDS['dup-scan-socket-fresh'],
         name: 'Duplicate-scan socket',
         status: SEVERITIES.fail,
         severity: SEVERITIES.warn,
@@ -677,7 +677,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
       });
     }
     return makeCheck({
-      id: CHECK_IDS['nli-socket-fresh'],
+      id: CHECK_IDS['dup-scan-socket-fresh'],
       name: 'Duplicate-scan socket',
       status: SEVERITIES.ok,
       severity: SEVERITIES.warn,
@@ -686,7 +686,7 @@ export function checkNliSocketFresh({ pluginData } = {}) {
     });
   } catch (err) {
     return makeCheck({
-      id: CHECK_IDS['nli-socket-fresh'],
+      id: CHECK_IDS['dup-scan-socket-fresh'],
       name: 'Duplicate-scan socket',
       status: SEVERITIES.fail,
       severity: SEVERITIES.warn,

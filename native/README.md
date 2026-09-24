@@ -101,7 +101,7 @@ src/
   preprocess.rs     markdown parsing, frontmatter
   preprocess/
     intentions.rs   frontmatter intentions parsing
-  nli_server.rs     UDS duplicate-scan server
+  dup_scan_server.rs     UDS duplicate-scan server
   model/            embedding model implementations
   sync/             federation sync, watch mode
 ```

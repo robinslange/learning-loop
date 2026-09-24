@@ -50,10 +50,6 @@ qrcode = { version = "0.14", default-features = false }
 signal-hook = "0.3"
 
 
-[build-dependencies]
-sha2 = "0.10"
-hex = "0.4"
-
 [dev-dependencies]
 tempfile = "3"
 # Test-only: mints the certificate the TLS mock hub serves, so the client's

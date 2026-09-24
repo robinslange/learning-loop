@@ -20,7 +20,7 @@ export const CHECK_IDS = Object.freeze({
   'installed-plugins-readable': 'installed-plugins-readable',
   'plugin-cache-version-present': 'plugin-cache-version-present',
   'search-index-exists': 'search-index-exists',
-  'nli-socket-fresh': 'nli-socket-fresh',
+  'dup-scan-socket-fresh': 'dup-scan-socket-fresh',
   'duplicate-gate-health': 'duplicate-gate-health',
   'hook-errors': 'hook-errors',
   'injection-shadow-gate': 'injection-shadow-gate',

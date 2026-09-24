@@ -160,7 +160,7 @@ test('pre-write-check composed worst case (daemon + subprocess) fits inside its 
 });
 
 // Regression: the budget has to fit a COLD start, not just a warm daemon. On a
-// platform with no socket transport there is no warm path at all (nli_server.rs
+// platform with no socket transport there is no warm path at all (dup_scan_server.rs
 // is `#![cfg(unix)]`), so every vault-note write pays a full ONNX model load. A
 // measured cold `ll-search query` on a Windows host with a 98-note vault took
 // 2905ms, against a 3000ms budget less a 300ms margin -- so the subprocess

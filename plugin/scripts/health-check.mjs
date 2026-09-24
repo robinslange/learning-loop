@@ -107,7 +107,7 @@ export async function runQuickChecks(ctx = {}) {
     quick.checkInstalledPluginsReadable({ home: c.home }),
     quick.checkPluginCacheVersionPresent({ home: c.home, installedVersion: c.installedVersion }),
     quick.checkSearchIndexExists({ vaultRoot: c.vaultRoot }),
-    quick.checkNliSocketFresh({ pluginData: c.pluginData }),
+    quick.checkDupScanSocketFresh({ pluginData: c.pluginData }),
     quick.checkDuplicateGateHealth({ pluginData: c.pluginData, platform: c.platform }),
     quick.checkFederationSyncHealth({ pluginData: c.pluginData }),
     quick.checkHookErrors({ pluginData: c.pluginData }),

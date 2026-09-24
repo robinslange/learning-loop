@@ -4,6 +4,10 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Removed
+
+- **What the NLI removal left behind (#113).** `ll-search`'s `build.rs` existed only to fetch the DeBERTa NLI model behind a `nli` cargo feature that v1.28 removed, so it never ran; it is deleted with its `sha2`/`hex` build-dependencies, and the DeBERTa entry goes from `provenance/models.json` and `NOTICE`, which credited a model no build ships. The duplicate-scan server keeps its behaviour and loses its NLI names: `nli_server.rs` is `dup_scan_server.rs`, `run_nli_server` is `run_dup_scan_server`, `DATA_FILES.nliSocket` is `dupScanSocket`, and the `nli-socket-fresh` health check is `dup-scan-socket-fresh`. The socket file stays `nli.sock`, so a daemon started before the upgrade still answers the new hook.
+
 ## v2.2.1
 
 ### Changed
