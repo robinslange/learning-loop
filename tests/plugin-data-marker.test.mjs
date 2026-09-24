@@ -18,10 +18,11 @@ import { tmpdir, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 
 const runId = randomBytes(4).toString('hex');
-// Deliberately outside any temp dir so persistMarker treats it as "real".
-// The path doesn't need to exist on disk — persistMarker only writes the
-// string into the marker file.
-const REAL_LIKE_PLUGIN_DATA = `/Users/ll-marker-test/${runId}/plugin-data`;
+// Outside any temp dir so persistMarker treats it as "real", and on disk,
+// because a path that does not exist is never stamped. Only the sandbox
+// marker ever records it.
+const REAL_LIKE_PLUGIN_DATA = import.meta.dirname;
+const MISSING_PLUGIN_DATA = `/Users/ll-marker-test/${runId}/plugin-data`;
 
 const REAL_MARKER = join(homedir(), '.claude', 'plugins', 'data', '.ll-data-path');
 
@@ -113,6 +114,19 @@ describe('plugin-data marker stomp guard', () => {
         REAL_LIKE_PLUGIN_DATA,
       );
       assert.equal(s.readMarker(), REAL_LIKE_PLUGIN_DATA, 'marker now points at the real path');
+    } finally {
+      s.cleanup();
+    }
+  });
+
+  it('does not stomp the marker with a path that does not exist', () => {
+    const s = sandbox();
+    try {
+      const sentinel = '/Users/test/sentinel-real-plugin-data-3';
+      writeFileSync(s.marker, sentinel, 'utf-8');
+
+      assert.equal(s.resolve(CONFIG, 'getPluginData', MISSING_PLUGIN_DATA), MISSING_PLUGIN_DATA);
+      assert.equal(s.readMarker(), sentinel, 'marker unchanged');
     } finally {
       s.cleanup();
     }

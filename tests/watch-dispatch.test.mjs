@@ -1,19 +1,29 @@
-import { describe, it } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const SCRIPT = join(import.meta.dirname, '..', 'plugin', 'scripts', 'watch.mjs');
+const HOME = mkdtempSync(join(tmpdir(), 'll-watch-dispatch-'));
 
 function runWatch(...args) {
-  return spawnSync('node', [SCRIPT, ...args], {
+  return spawnSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf-8',
     timeout: 5000,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: '/dev/null/should-not-be-read' },
+    env: {
+      PATH: process.env.PATH,
+      HOME,
+      USERPROFILE: HOME,
+      CLAUDE_PLUGIN_DATA: join(HOME, 'no-plugin-data'),
+    },
   });
 }
 
 describe('ll-watch dispatcher', () => {
+  after(() => rmSync(HOME, { recursive: true, force: true }));
+
   it('--help prints usage and exits 0', () => {
     const r = runWatch('--help');
     assert.equal(r.status, 0, `stderr: ${r.stderr}`);
