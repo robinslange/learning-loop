@@ -203,10 +203,10 @@ describe('getSessionId fallback chain', () => {
 });
 
 describe('readStdin', () => {
-  // The post-tool budget-composition test (lib-hook-config.test.mjs) sums
-  // HookConfig.STDIN_TIMEOUT_MS into the worst-case inner spend. readStdin
-  // must consume that constant — a hardcoded literal here would let the
-  // runtime drift from what the budget test measures.
+  // lib-hook-config.test.mjs checks every stdin-reading hook's hooks.json
+  // timeout against HookConfig.STDIN_TIMEOUT_MS. readStdin must consume that
+  // constant — a hardcoded literal here would let the runtime drift from what
+  // that test measures.
   it('uses HookConfig.STDIN_TIMEOUT_MS, not a hardcoded timeout', () => {
     const src = readFileSync(new URL('../plugin/hooks/lib/common.mjs', import.meta.url), 'utf8');
     assert.ok(src.includes('export function readStdin'), 'readStdin not found in common.mjs');
