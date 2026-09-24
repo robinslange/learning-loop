@@ -1,28 +1,32 @@
 import { writeFileSync, mkdirSync, renameSync } from 'fs';
-import { join, resolve } from 'path';
-import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { getPluginData } from '../config.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { withLock } from '../file-lock.mjs';
 import { logError } from '../log.mjs';
 
-const PLUGIN_DATA = getPluginData();
-const PLUGIN_DIR = resolve(fileURLToPath(import.meta.url), '../../../..');
-const DATA_DIR = PLUGIN_DATA ? join(PLUGIN_DATA, 'data') : join(PLUGIN_DIR, 'data');
-mkdirSync(DATA_DIR, { recursive: true });
+// Resolved per call: a path fixed at import binds whatever plugin data the
+// first importer saw, and a derived cache has no business in the install dir.
+function indexPath() {
+  const pd = getPluginData();
+  return pd ? join(pd, 'data', 'citation-index.json') : null;
+}
 
-const INDEX_PATH = join(DATA_DIR, 'citation-index.json');
-
-export function loadCitationIndex() {
-  const { value } = safeLoad(INDEX_PATH, { fallback: {} });
+function readIndex(path) {
+  const { value } = safeLoad(path, { fallback: {} });
   return value ?? {};
 }
 
-export function saveCitationIndex(index) {
-  mkdirSync(DATA_DIR, { recursive: true });
-  const tmp = INDEX_PATH + '.tmp';
+export function loadCitationIndex() {
+  const path = indexPath();
+  return path ? readIndex(path) : {};
+}
+
+function saveCitationIndex(path, index) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = path + '.tmp';
   writeFileSync(tmp, JSON.stringify(index, null, 2));
-  renameSync(tmp, INDEX_PATH);
+  renameSync(tmp, path);
 }
 
 // Within-process serialization queue prevents concurrent writes from the same process
@@ -34,9 +38,12 @@ export function updateCitationIndex(pmid, metadata, noteFilename) {
 }
 
 function _doUpdate(pmid, metadata, noteFilename) {
+  const path = indexPath();
+  if (!path) return;
+  mkdirSync(dirname(path), { recursive: true });
   try {
-    withLock(INDEX_PATH, { retries: 5, retryDelayMs: 30 }, () => {
-      const index = loadCitationIndex();
+    withLock(path, { retries: 5, retryDelayMs: 30 }, () => {
+      const index = readIndex(path);
       const key = `pmid:${pmid}`;
       if (!index[key]) {
         index[key] = {
@@ -49,7 +56,7 @@ function _doUpdate(pmid, metadata, noteFilename) {
       if (!index[key].cited_in.includes(noteFilename)) {
         index[key].cited_in.push(noteFilename);
       }
-      saveCitationIndex(index);
+      saveCitationIndex(path, index);
     });
   } catch (err) {
     // ELOCK_TIMEOUT here means every retry was contended. The previous

@@ -29,7 +29,7 @@ function verifyNoteOffline(body) {
     writeFileSync(notePath, body);
     const out = execFileSync(process.execPath, [RESOLVER, 'verify-note', notePath], {
       encoding: 'utf-8',
-      env: { ...process.env, LL_OFFLINE: '1' },
+      env: { ...process.env, LL_OFFLINE: '1', CLAUDE_PLUGIN_DATA: join(dir, 'plugin-data') },
     });
     return JSON.parse(out);
   } finally {
