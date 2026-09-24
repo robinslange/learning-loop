@@ -22,6 +22,12 @@ export function initRepo(dir, { branch = 'main' } = {}) {
   execFileSync('git', ['-C', dir, 'init', '-q', '-b', branch], gitOpts);
   execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t.local'], gitOpts);
   execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], gitOpts);
+  // These fixture repos must never depend on the developer's own signing
+  // setup: a local commit.gpgsign/tag.gpgsign false here overrides any
+  // global commit.gpgsign=true, for every later `git commit` against this
+  // same repo dir (this helper's, and the test files' own direct calls).
+  execFileSync('git', ['-C', dir, 'config', 'commit.gpgsign', 'false'], gitOpts);
+  execFileSync('git', ['-C', dir, 'config', 'tag.gpgsign', 'false'], gitOpts);
   writeFileSync(join(dir, 'a.txt'), 'a\n');
   execFileSync('git', ['-C', dir, 'add', 'a.txt'], gitOpts);
   execFileSync('git', ['-C', dir, 'commit', '-q', '-m', 'ledger commit'], gitOpts);

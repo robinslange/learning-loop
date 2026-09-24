@@ -84,6 +84,11 @@ test('git head captured even when origin missing', { skip: process.platform === 
     execFileSync('git', ['-C', dir, 'init', '-q'], gitOpts);
     execFileSync('git', ['-C', dir, 'config', 'user.email', 't@t.local'], gitOpts);
     execFileSync('git', ['-C', dir, 'config', 'user.name', 't'], gitOpts);
+    // --no-verify skips hooks, not commit signing: without this, the fixture
+    // still inherits the developer's global commit.gpgsign=true and depends
+    // on their signing setup (1Password, here) being reachable.
+    execFileSync('git', ['-C', dir, 'config', 'commit.gpgsign', 'false'], gitOpts);
+    execFileSync('git', ['-C', dir, 'config', 'tag.gpgsign', 'false'], gitOpts);
     writeFileSync(join(dir, 'a.txt'), 'x');
     execFileSync('git', ['-C', dir, 'add', '-A'], gitOpts);
     execFileSync('git', ['-C', dir, 'commit', '-q', '--no-verify', '-m', 'init'], gitOpts);
