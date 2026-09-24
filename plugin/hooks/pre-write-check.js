@@ -279,6 +279,8 @@ function noteExistsInIndex(name, noteIndex) {
   return false;
 }
 
+export const GATE_FLAG_REASON = 'pre-write gate scan';
+
 // True when a pending duplicate_flag already exists for this target, at any
 // age -- the dedupe check for the enqueue side, deliberately not TTL-bounded
 // like checkDuplicateFlagQueue's consultation: an unreviewed suggestion does
@@ -291,10 +293,9 @@ function hasPendingDuplicateFlag(items, relPath) {
 // Interpret a reflect-scan result envelope (same shape from the daemon and the
 // subprocess) into a warning string, or null when there's no above-threshold
 // non-self duplicate. When relPath is known and the librarian is enabled,
-// also enqueues the hit as a duplicate_flag so the librarian's async
-// classifier gets to judge a pair the gate found and it had not: this is what
-// closes the loop the other direction -- checkDuplicateFlagQueue reads that
-// same queue before the NEXT write to this path pays for a scan at all. Uses
+// also enqueues the hit as a duplicate_flag so /inbox review sees a pair the
+// gate found. checkDuplicateFlagQueue skips these entries (GATE_FLAG_REASON):
+// the next write to this path still scans. Uses
 // appendItem directly rather than submitDuplicateFlag: that helper also
 // loads/saves librarian state.json (a second file) for a counter the gate has
 // no use for, and the gate should touch as little as it needs to stay cheap.
@@ -319,7 +320,7 @@ function interpretScanResult(result, filePath, vaultRoot, relPath, pending) {
         target: relPath,
         duplicate_of: topResult.path,
         similarity: q.top_match_similarity,
-        reason: 'pre-write gate scan',
+        reason: GATE_FLAG_REASON,
         status: 'pending',
         created_at: new Date().toISOString(),
       });
@@ -337,11 +338,14 @@ function interpretScanResult(result, filePath, vaultRoot, relPath, pending) {
 // read, made once per gate run and shared with interpretScanResult's dedupe
 // check. A queue entry older than DUPLICATE_FLAG_TTL_MS is treated as if it
 // were absent: the librarian may have lagged the write, and a stale verdict
-// about the note's PREVIOUS content is worse than re-deriving.
+// about the note's PREVIOUS content is worse than re-deriving. The gate's own
+// enqueued hits are not verdicts: they are a raw similarity about content the
+// next write may already have changed, so only classifier flags count.
 export function checkDuplicateFlagQueue(relPath, items) {
   const now = Date.now();
   for (const item of items) {
     if (item.task !== 'duplicate_flag' || item.target !== relPath) continue;
+    if (item.reason === GATE_FLAG_REASON) continue;
     const ageMs = now - new Date(item.created_at).getTime();
     if (!(ageMs >= 0) || ageMs > HookConfig.DUPLICATE_FLAG_TTL_MS) continue;
     const pct = typeof item.similarity === 'number' ? Math.round(item.similarity * 100) : null;

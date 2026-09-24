@@ -194,7 +194,7 @@ export function checkOfflineMode({ offline } = {}) {
 // Frontmatter sits at the top of a note; 2KB covers every real one and keeps
 // this a bounded read per file rather than a full vault load.
 const FRONTMATTER_PROBE_BYTES = 2048;
-const INVALIDATED_RE = /^---\r?\n(?:[\s\S]*?\r?\n)?invalidated:/;
+const INVALIDATED_RE = /^---\r?\n(?:(?!---\r?\n)[^\n]*\n)*?invalidated:/;
 
 // Runner-side collector for checkInvalidatedAdoption: how many notes outside
 // the excluded dirs carry `invalidated:` in their frontmatter.
