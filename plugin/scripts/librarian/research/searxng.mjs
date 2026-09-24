@@ -68,6 +68,13 @@ export async function search(query, opts = {}) {
     return [];
   }
   const results = data.results || [];
+  const down = data.unresponsive_engines || [];
+  if (!results.length && down.length) {
+    warnOnce(
+      'searxng_engines_down',
+      `learning-loop: SearXNG returned no results; engines refused: ${down.map(([name, why]) => `${name}: ${why}`).join(', ')}.\n`,
+    );
+  }
   return results
     .slice(0, count)
     .map((r) => ({ url: r.url, title: r.title, snippet: r.content || '' }));

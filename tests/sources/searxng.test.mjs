@@ -104,6 +104,68 @@ describe('searxng query source', () => {
     assert.match(chunks.join(''), /Add `json` to `formats`/);
   });
 
+  // Every engine refusing looks like "no matches": 200, results []. The
+  // refusals ride in unresponsive_engines, so an empty page must name them.
+  it('names the unresponsive engines when no results come back', async () => {
+    resetForTests('searxng_engines_down');
+    const chunks = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (s) => {
+      chunks.push(s);
+      return true;
+    };
+    try {
+      const hits = await searxngSource.query('x', {
+        baseUrl,
+        fetchOverride: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            results: [],
+            unresponsive_engines: [
+              ['brave', 'too many requests'],
+              ['google cse', 'Suspended: too many requests'],
+            ],
+          }),
+        }),
+      });
+      assert.deepEqual(hits, []);
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.match(
+      chunks.join(''),
+      /brave: too many requests, google cse: Suspended: too many requests/,
+    );
+  });
+
+  it('stays quiet when some engines fail but results still arrive', async () => {
+    resetForTests('searxng_engines_down');
+    const chunks = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (s) => {
+      chunks.push(s);
+      return true;
+    };
+    try {
+      const hits = await searxngSource.query('x', {
+        baseUrl,
+        fetchOverride: async () => ({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            results: [{ url: 'https://a', title: 'A', content: 'snip' }],
+            unresponsive_engines: [['duckduckgo', 'CAPTCHA']],
+          }),
+        }),
+      });
+      assert.equal(hits.length, 1);
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.equal(chunks.join(''), '');
+  });
+
   it('reads the base url from sources.providers.searxng.url', () => {
     assert.equal(getBaseUrl({ providers: { searxng: { url: 'http://h:1' } } }), 'http://h:1');
     assert.equal(getBaseUrl({ providers: {} }), '');
