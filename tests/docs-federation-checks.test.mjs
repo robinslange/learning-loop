@@ -90,8 +90,9 @@ test('architecture does not present the reader-side filter as a boundary', () =>
 
 test('the changelog states the revocation gap rather than claiming it closed', () => {
   const doc = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8');
-  const unreleased = doc.slice(doc.indexOf('## Unreleased'), doc.indexOf('## v1.41.1'));
-  assert.ok(unreleased.includes('Federation v5'), 'the v5 entry belongs under Unreleased');
+  const start = doc.indexOf('\n## v2.0.0\n');
+  const section = doc.slice(start, doc.indexOf('\n## ', start + 1));
+  assert.ok(section.includes('### Federation v5'), 'the v5 entry belongs under v2.0.0');
 
   // The three facts. A changelog is what a person believes without checking,
   // so this is the one place an overstatement costs the most.
@@ -107,13 +108,13 @@ test('the changelog states the revocation gap rather than claiming it closed', (
     ],
     ['the reader-side check does not bound', /it is not a boundary/],
   ]) {
-    assert.match(flat(unreleased), pattern, `the changelog must state the gap: ${gap}`);
+    assert.match(flat(section), pattern, `the changelog must state the gap: ${gap}`);
   }
   // No lookahead games: the phrase is false for the main case whatever follows
   // it, and an assertion that only fires on one continuation is an assertion
   // with a hole shaped like every other continuation.
   assert.doesNotMatch(
-    flat(unreleased),
+    flat(section),
     /revocation (removes|deletes) local data/i,
     'a bare claim that revocation removes local data would be false for the main case',
   );
