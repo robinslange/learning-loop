@@ -52,6 +52,7 @@ export function resolveProvider(libCfg = {}, ctx = {}) {
   };
   const key = p.api_key_ref ? keyResolver(p.api_key_ref) : null;
   if (key) provider.apiKey = key;
+  if (p.price) provider.price = p.price;
   return provider;
 }
 

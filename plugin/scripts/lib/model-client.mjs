@@ -23,6 +23,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
  *   keepAlive?: string,
  *   timeoutMs?: number,
  *   fetchOverride?: typeof fetch,
+ *   budget?: { llm: Function },
  * }} params
  * @returns {Promise<object>} parsed JSON object from the model's response
  */
@@ -36,6 +37,7 @@ export async function chatJSON({
   keepAlive,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   fetchOverride,
+  budget,
 }) {
   const fetchFn = fetchOverride || globalThis.fetch;
   const messages = [
@@ -75,21 +77,25 @@ export async function chatJSON({
     throw new Error(`unknown provider kind: ${provider.kind}`);
   }
 
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(body),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
-
-  if (!res.ok) {
-    const err = new Error(`${provider.kind} HTTP ${res.status}`);
-    err.code = 'MODEL_HTTP_ERROR';
-    err.status = res.status;
-    throw err;
-  }
-
-  const data = await res.json();
+  const post = async (reqBody) => {
+    const res = await fetchFn(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(reqBody),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!res.ok) {
+      const err = new Error(`${provider.kind} HTTP ${res.status}`);
+      err.code = 'MODEL_HTTP_ERROR';
+      err.status = res.status;
+      throw err;
+    }
+    return res.json();
+  };
+  const data =
+    budget && provider.kind === 'openai'
+      ? await budget.llm(post, body, { price: provider.price })
+      : await post(body);
   const content =
     provider.kind === 'ollama' ? data.message?.content : data.choices?.[0]?.message?.content;
   return JSON.parse(content);

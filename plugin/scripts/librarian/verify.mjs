@@ -11,6 +11,8 @@
 import { isMainModule } from '../lib/is-main.mjs';
 import { chatJSON } from '../lib/model-client.mjs';
 import { loadLibrarianConfig } from './config.mjs';
+import { budgetScopeSegment } from '../lib/fetch-budget.mjs';
+import { getSessionId } from '../lib/session.mjs';
 
 const VOTES_PER_CLAIM = 3;
 const REFUTATIONS_REQUIRED = 2;
@@ -68,13 +70,13 @@ export function VERIFY_PROMPT(question, claim, v) {
  * Run 3 GLM votes for one claim. Rejects if any vote fails (caller/CLI maps that to the Claude fallback).
  * @param {string} question
  * @param {{claim:string, quote:string, url?:string, sourceUrl?:string, sourceQuality?:string}} claim
- * @param {{provider:object, keepAlive?:string, timeoutMs?:number, fetchOverride?:Function}} opts
+ * @param {{provider:object, keepAlive?:string, timeoutMs?:number, fetchOverride?:Function, budget?:{llm:Function}}} opts
  * @returns {Promise<{claim:string, verdicts:object[], survives:boolean, mode:'glm'}>}
  */
 export async function verifyClaimGlm(
   question,
   claim,
-  { provider, keepAlive, timeoutMs, fetchOverride },
+  { provider, keepAlive, timeoutMs, fetchOverride, budget },
 ) {
   const verdicts = await Promise.all(
     Array.from({ length: VOTES_PER_CLAIM }, (_, v) =>
@@ -87,6 +89,7 @@ export async function verifyClaimGlm(
         keepAlive,
         timeoutMs,
         fetchOverride,
+        budget,
       }),
     ),
   );
@@ -109,9 +112,18 @@ if (isMainModule(import.meta.url)) {
         console.error('no openai provider configured for GLM verify');
         process.exit(3);
       }
+      const seg = budgetScopeSegment(getSessionId());
+      const budget =
+        process.env.SOLENOID_KEY && seg
+          ? await import('../../vendor/solenoid/solenoid.mjs').then(async ({ solenoid }) => {
+              const { fileStore } = await import('../../vendor/solenoid/node.mjs');
+              return solenoid({ store: fileStore() }).at(`learning-loop/verify/${seg}`);
+            })
+          : undefined;
       const r = await verifyClaimGlm(question, claim, {
         provider: cfg.provider,
         keepAlive: cfg.keepAlive,
+        budget,
       });
       console.log(JSON.stringify(r));
       process.exit(0);
