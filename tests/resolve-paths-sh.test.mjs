@@ -65,7 +65,7 @@ test(
     });
     const back = execFileSync(
       'sh',
-      ['-c', `eval "${shOut.replace(/"/g, '\\"')}"; printf '%s' "$VAULT"`],
+      ['-c', `eval "${shOut.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"; printf '%s' "$VAULT"`],
       {
         encoding: 'utf-8',
       },
