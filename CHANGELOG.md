@@ -4,6 +4,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+## v2.2.1
+
 ### Changed
 
 - **One provenance emitter.** The hook copy of `emitProvenance` in `hooks/lib/common.mjs` had drifted from the skill copy in `scripts/provenance.mjs` (only the latter seeded the learned-patterns templates into plugin data). The skill copy is now the single emitter with the source as a parameter; the hook keeps a thin wrapper for its in-process dedupe. SessionStart's `run()` in `context-assembly.mjs` is split from one 288-line function into one function per section, with no change to the emitted context.
