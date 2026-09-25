@@ -1,33 +1,40 @@
-import { appendFileSync, statSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { closeSync, mkdirSync, openSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
-// Per-session fetch budget counter under PLUGIN_DATA/fetch-budget/<sessionId>.claims.
-// Each fetch appends one byte with O_APPEND, so the count is the file size: the
-// kernel serialises appends, which makes a bump from one of many concurrent
-// gateway processes a claim that can never be lost or reset by another.
+// Per-session fetch budget under PLUGIN_DATA/fetch-budget/<sessionId>/: one
+// file per granted fetch, named 1..budget. A claim is an exclusive create of
+// the first free slot, so of N concurrent gateway processes exactly
+// min(N, budget) win, and a refused claim writes nothing.
 //
-// Callers own the no-session case; both functions assume a real session and
-// plugin data dir. Neither throws: a counter failure must not break fetch.
+// Callers own the no-session case. Neither function throws: a counter failure
+// must not break fetch, so a claim that cannot reach its directory is granted.
 
-function budgetFile(sessionId, pluginData) {
-  return join(pluginData, 'fetch-budget', `${sessionId}.claims`);
+function slotDir(sessionId, pluginData) {
+  return join(pluginData, 'fetch-budget', sessionId);
 }
 
 export function readCount(sessionId, pluginData) {
   try {
-    return statSync(budgetFile(sessionId, pluginData)).size;
+    return readdirSync(slotDir(sessionId, pluginData)).length;
   } catch {
     return 0;
   }
 }
 
-export function bumpCount(sessionId, pluginData) {
-  const file = budgetFile(sessionId, pluginData);
+export function claimFetch(sessionId, pluginData, budget) {
+  const dir = slotDir(sessionId, pluginData);
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, '.');
-    return statSync(file).size;
+    mkdirSync(dir, { recursive: true });
   } catch {
-    return 0;
+    return true;
   }
+  for (let slot = 1; slot <= budget; slot++) {
+    try {
+      closeSync(openSync(join(dir, String(slot)), 'wx'));
+      return true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') return true;
+    }
+  }
+  return false;
 }
