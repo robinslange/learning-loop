@@ -15,9 +15,8 @@ import {
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { runHook } from './helpers/hook-runner.mjs';
-import { initRepo } from './helpers/git-fixture.mjs';
+import { initRepo, fixtureGitEnv } from './helpers/git-fixture.mjs';
 import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
-import { gitEnv } from '../plugin/scripts/lib/session-ledger.mjs';
 
 // realpathSync: on macOS tmpdir() sits behind a symlink (/tmp -> /private/tmp,
 // or a /var/folders/... alias), and `git rev-parse --show-toplevel` always
@@ -237,7 +236,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
   // ctx) has finished with it.
   execFileSync('git', ['-C', ctx.repo, 'commit', '--allow-empty', '-q', '-m', 'session commit'], {
     stdio: 'ignore',
-    env: gitEnv(),
+    env: fixtureGitEnv(),
   });
 
   const r2 = runHook(HOOK, {

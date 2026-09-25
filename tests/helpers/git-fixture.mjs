@@ -6,10 +6,24 @@
 
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gitEnv } from '../../plugin/scripts/lib/session-ledger.mjs';
 
-const gitOpts = { stdio: 'ignore', env: gitEnv() };
+/**
+ * gitEnv() plus no global or system git config. A developer's global config
+ * can sign commits (a 1Password or GPG prompt hangs the suite), run global
+ * hooks, or rewrite defaults. A missing GIT_CONFIG_GLOBAL file reads as empty.
+ */
+export function fixtureGitEnv() {
+  return {
+    ...gitEnv(),
+    GIT_CONFIG_GLOBAL: join(tmpdir(), `ll-no-gitconfig-${process.pid}`),
+    GIT_CONFIG_NOSYSTEM: '1',
+  };
+}
+
+const gitOpts = { stdio: 'ignore', env: fixtureGitEnv() };
 
 /**
  * Initialise a git repo at `dir` with one committed `a.txt`.
@@ -39,6 +53,6 @@ export function git(dir, ...args) {
   return execFileSync('git', ['-C', dir, ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
-    env: gitEnv(),
+    env: fixtureGitEnv(),
   }).trim();
 }

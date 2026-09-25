@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateProfile } from '../plugin/scripts/ingest-profile.mjs';
+import { fixtureGitEnv } from './helpers/git-fixture.mjs';
 
 test('generates profile for a tiny TS repo', () => {
   const dir = mkdtempSync(join(tmpdir(), 'profile-'));
@@ -65,17 +66,7 @@ test('falls back gracefully when no manifest', () => {
   }
 });
 
-// Strip GIT_* env vars so git operations stay scoped to `dir` even when the test
-// is launched from inside a parent repo's git hook (e.g. lefthook running `npm test`
-// on pre-commit). Without this, GIT_DIR/GIT_WORK_TREE inherited from the parent
-// process point git at the parent's .git directory, and commits land there.
-const isolatedGitEnv = (() => {
-  const env = {};
-  for (const [k, v] of Object.entries(process.env)) {
-    if (!k.startsWith('GIT_')) env[k] = v;
-  }
-  return env;
-})();
+const isolatedGitEnv = fixtureGitEnv();
 
 test('git head captured even when origin missing', { skip: process.platform === 'win32' }, () => {
   const dir = mkdtempSync(join(tmpdir(), 'profile-noorig-'));
