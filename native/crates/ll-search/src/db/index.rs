@@ -28,12 +28,15 @@ pub struct IndexResult {
     /// `(rel_path, colliding_id)` for every note reassigned a new id because
     /// another note already claimed its `id:`.
     pub duplicate_ids: Vec<(String, String)>,
+    /// `(rel_path, reason)` for every note left without a stable id because it
+    /// could not be read or the frontmatter guard refused the rewrite.
+    pub refused_ids: Vec<(String, String)>,
 }
 
 /// One fully-preprocessed note ready for database insertion.
 pub struct EmbedItem {
     pub path: String,
-    pub note_uuid: String,
+    pub note_uuid: Option<String>,
     pub title: String,
     pub tags: String,
     pub body: String,
@@ -309,7 +312,8 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
     // Every note gets a stable id, whether or not its content changed. Doing
     // this inside the per-file loop would skip unchanged notes, so an
     // incremental index would leave most of the vault unaddressable.
-    let (note_uuids, duplicate_ids) = resolve_note_uuids(Path::new(vault_path), &vault_files)?;
+    let ResolvedIds { ids: note_uuids, reassigned: duplicate_ids, refused: refused_ids } =
+        resolve_note_uuids(Path::new(vault_path), &vault_files);
 
     let moved = follow_moved_notes(conn, &vault_files, &note_uuids)?;
     if moved > 0 {
@@ -421,7 +425,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
             }
         }
 
-        let note_uuid = note_uuids[&file.rel_path].clone();
+        let note_uuid = note_uuids.get(&file.rel_path).cloned();
         to_embed.push(EmbedItem {
             note_uuid,
             path: file.rel_path.clone(),
@@ -530,6 +534,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
         deleted: to_delete.len(),
         total,
         duplicate_ids,
+        refused_ids,
     })
 }
 
@@ -552,56 +557,82 @@ pub fn ensure_note_uuid(vault_path: &Path, rel_path: &str) -> anyhow::Result<Str
         }
     }
 
+    write_new_uuid(&full, rel_path, &raw)
+}
+
+fn write_new_uuid(full: &Path, rel_path: &str, raw: &str) -> anyhow::Result<String> {
     let id = uuid::Uuid::now_v7().to_string();
-    let updated = crate::sync::frontmatter::upsert_key(&raw, "id", &id);
-    crate::sync::frontmatter::verify_upsert(&raw, &updated, "id", &id)
+    let updated = crate::sync::frontmatter::upsert_key(raw, "id", &id);
+    crate::sync::frontmatter::verify_upsert(raw, &updated, "id", &id)
         .map_err(|why| anyhow::anyhow!("refusing to rewrite {rel_path}: {why}"))?;
-    std::fs::write(&full, updated)?;
+    std::fs::write(full, updated)?;
     Ok(id)
 }
 
+pub struct ResolvedIds {
+    /// `rel_path -> note_uuid`.
+    pub ids: HashMap<String, String>,
+    /// `(rel_path, colliding_id)` of every note that had to be given a new id.
+    pub reassigned: Vec<(String, String)>,
+    /// `(rel_path, reason)` of every note that could not be read or that the
+    /// frontmatter guard would not let us rewrite.
+    pub refused: Vec<(String, String)>,
+}
+
 /// Resolve a stable id for every walked note, reassigning collisions.
-///
-/// Returns `(rel_path -> note_uuid, reassigned)` where `reassigned` lists the
-/// `(rel_path, colliding_id)` of every note that had to be given a new id.
 ///
 /// `id:` is user-visible frontmatter and travels when a note body is copied,
 /// so two notes sharing an id is a thing that happens, not a thing to assume
 /// away - silently collapsing them would point one resolver URL at two
 /// different notes. First writer keeps the id; the later note is reassigned on
 /// disk, so the collision is resolved rather than merely reported.
+///
+/// A refused note costs that note, not the run. It is left out of the map, so
+/// it is indexed with a NULL `note_uuid` and `export_index` skips it; it stays
+/// in the walk, so the deletion pass keeps its row. The next run tries again.
+/// Aborting instead took the whole vault's index down over one file.
 pub fn resolve_note_uuids(
     vault_path: &Path,
     entries: &[WalkEntry],
-) -> Result<(HashMap<String, String>, Vec<(String, String)>)> {
+) -> ResolvedIds {
     let mut ids: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
     let mut reassigned: Vec<(String, String)> = Vec::new();
+    let mut refused: Vec<(String, String)> = Vec::new();
 
     for entry in entries {
-        let mut id = ensure_note_uuid(vault_path, &entry.rel_path)?;
+        let resolved = ensure_note_uuid(vault_path, &entry.rel_path).and_then(|id| {
+            if seen.contains(&id) {
+                let full = vault_path.join(&entry.rel_path);
+                let raw = std::fs::read_to_string(&full)?;
+                let fresh = write_new_uuid(&full, &entry.rel_path, &raw)?;
+                eprintln!(
+                    "WARNING: duplicate note id {id} on {} - reassigned; first writer keeps it",
+                    entry.rel_path
+                );
+                reassigned.push((entry.rel_path.clone(), id));
+                Ok(fresh)
+            } else {
+                Ok(id)
+            }
+        });
 
-        if !seen.insert(id.clone()) {
-            eprintln!(
-                "WARNING: duplicate note id {id} on {} - reassigning; first writer keeps it",
-                entry.rel_path
-            );
-            reassigned.push((entry.rel_path.clone(), id.clone()));
-
-            let full = vault_path.join(&entry.rel_path);
-            let raw = std::fs::read_to_string(&full)?;
-            id = uuid::Uuid::now_v7().to_string();
-            let updated = crate::sync::frontmatter::upsert_key(&raw, "id", &id);
-            crate::sync::frontmatter::verify_upsert(&raw, &updated, "id", &id)
-                .map_err(|why| anyhow::anyhow!("refusing to rewrite {}: {why}", entry.rel_path))?;
-            std::fs::write(&full, updated)?;
-            seen.insert(id.clone());
+        match resolved {
+            Ok(id) => {
+                seen.insert(id.clone());
+                ids.insert(entry.rel_path.clone(), id);
+            }
+            Err(why) => {
+                eprintln!(
+                    "WARNING: {} has no stable id and will not be exported: {why:#}",
+                    entry.rel_path
+                );
+                refused.push((entry.rel_path.clone(), format!("{why:#}")));
+            }
         }
-
-        ids.insert(entry.rel_path.clone(), id);
     }
 
-    Ok((ids, reassigned))
+    ResolvedIds { ids, reassigned, refused }
 }
 
 pub fn walk_vault(vault_path: &str) -> Vec<WalkEntry> {
@@ -738,7 +769,7 @@ mod tests {
         std::fs::write(dir.path().join("b.md"), "---\ntitle: B\n---\n\nB.").unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let (ids, dupes) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        let ResolvedIds { ids, reassigned: dupes, .. } = resolve_note_uuids(dir.path(), &entries);
 
         assert_eq!(ids.len(), 2);
         assert!(dupes.is_empty());
@@ -759,7 +790,7 @@ mod tests {
         ).unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let (ids, dupes) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        let ResolvedIds { ids, reassigned: dupes, .. } = resolve_note_uuids(dir.path(), &entries);
 
         assert_eq!(dupes.len(), 1, "exactly one loser reported");
         assert_ne!(ids["a.md"], ids["b.md"], "collision resolved");
@@ -780,18 +811,40 @@ mod tests {
         std::fs::write(dir.path().join("b.md"), format!("---\nid: {shared}\n---\nB.")).unwrap();
 
         let entries = walk_vault(dir.path().to_str().unwrap());
-        let (first, dupes1) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        let ResolvedIds { ids: first, reassigned: dupes1, .. } = resolve_note_uuids(dir.path(), &entries);
         assert_eq!(dupes1.len(), 1);
 
-        let (second, dupes2) = resolve_note_uuids(dir.path(), &entries).unwrap();
+        let ResolvedIds { ids: second, reassigned: dupes2, .. } = resolve_note_uuids(dir.path(), &entries);
         assert!(dupes2.is_empty(), "a resolved collision must not re-report forever");
         assert_eq!(first, second, "ids stay put once assigned");
+    }
+
+    #[test]
+    fn a_refused_note_is_reported_and_the_rest_still_resolve() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.md"), "---\ntitle: A\n---\n\nA.").unwrap();
+        std::fs::write(dir.path().join("b.md"), b"---\ntitle: B\n---\n\n\xff\xfe").unwrap();
+        std::fs::write(dir.path().join("c.md"), "---\ntitle: C\n---\n\nC.").unwrap();
+
+        let entries = walk_vault(dir.path().to_str().unwrap());
+        let ResolvedIds { ids, reassigned: dupes, refused } = resolve_note_uuids(dir.path(), &entries);
+
+        assert!(dupes.is_empty());
+        assert_eq!(refused.len(), 1);
+        assert_eq!(refused[0].0, "b.md");
+        assert!(!ids.contains_key("b.md"), "a refused note gets no id");
+        assert!(ids.contains_key("a.md") && ids.contains_key("c.md"), "{ids:?}");
+        assert_eq!(
+            std::fs::read(dir.path().join("b.md")).unwrap(),
+            b"---\ntitle: B\n---\n\n\xff\xfe",
+            "a refused note is not written"
+        );
     }
 
     fn make_item(path: &str, title: &str, body: &str) -> EmbedItem {
         EmbedItem {
             path: path.to_string(),
-            note_uuid: uuid::Uuid::now_v7().to_string(),
+            note_uuid: Some(uuid::Uuid::now_v7().to_string()),
             title: title.to_string(),
             tags: String::new(),
             body: body.to_string(),
