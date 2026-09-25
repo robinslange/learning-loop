@@ -328,14 +328,56 @@ describe('session-label stdout contract', () => {
       .stdout;
   }
 
-  it('produces empty stdout in shadow mode', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'shadow' });
-    assert.equal(out, '');
+  // A vault with one note and a stub ll-search returning an above-threshold
+  // hit on it, so the live control below injects. Without it every mode would
+  // stop at gate-fail-no-vault and print nothing, and the mode tests would
+  // pass whatever the mode did.
+  function runWithHit(env) {
+    const base = mkdtempSync(join(tmpdir(), 'll-stdout-contract-'));
+    try {
+      const vault = join(base, 'vault');
+      const pluginData = join(base, 'plugin-data');
+      mkdirSync(join(vault, 'notes'), { recursive: true });
+      mkdirSync(join(pluginData, 'bin'), { recursive: true });
+      writeFileSync(
+        join(vault, 'notes', 'hook-injection.md'),
+        'Hooks inject the top note body before the prompt.\n',
+      );
+      const hit = JSON.stringify([
+        { path: 'notes/hook-injection.md', title: 'hook-injection', score: 0.99 },
+      ]);
+      writeFileSync(join(pluginData, 'bin', 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+        mode: 0o755,
+      });
+      return runCapturingStdout({
+        TMPDIR: base,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        VAULT_PATH: vault,
+        LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+        LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+        ...env,
+      });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }
+
+  const stub = {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  };
+
+  it('injects in live mode with a hit (control for the cases below)', stub, () => {
+    assert.ok(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'live' }).length > 0);
   });
 
-  it('produces empty stdout when mode is off', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'off' });
-    assert.equal(out, '');
+  it('produces empty stdout in shadow mode', stub, () => {
+    assert.equal(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'shadow' }), '');
+  });
+
+  it('produces empty stdout when mode is off', stub, () => {
+    assert.equal(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'off' }), '');
   });
 
   it('produces empty stdout on gate-fail path', () => {
@@ -354,9 +396,14 @@ describe('session-label stdout contract', () => {
     }
   });
 
-  it('produces empty stdout when pipeline throws', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_FORCE_ERROR: '1' });
-    assert.equal(out, '');
+  it('produces empty stdout when pipeline throws', stub, () => {
+    assert.equal(
+      runWithHit({
+        LEARNING_LOOP_INJECTION_MODE: 'live',
+        LEARNING_LOOP_INJECTION_FORCE_ERROR: '1',
+      }),
+      '',
+    );
   });
 });
 
