@@ -50,6 +50,15 @@ fn strip_bom(raw: &str) -> (&str, &str) {
     }
 }
 
+/// The terminator of `s`'s first line, so a block created above a CRLF body
+/// is CRLF too. A body with no newline at all gets `\n`.
+fn first_eol(s: &str) -> &'static str {
+    match s.find('\n') {
+        Some(i) if s[..i].ends_with('\r') => "\r\n",
+        _ => "\n",
+    }
+}
+
 /// Read a TOP-LEVEL frontmatter key.
 ///
 /// The match is on the raw line, so a key must start at column zero. An earlier
@@ -78,7 +87,8 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
     let prefix = format!("{key}:");
     let Some((bom, open, fm, tail)) = split(raw) else {
         let (bom, body) = strip_bom(raw);
-        return format!("{bom}---\n{key}: {value}\n---\n{body}");
+        let eol = first_eol(body);
+        return format!("{bom}---{eol}{key}: {value}{eol}---{eol}{body}");
     };
 
     let mut new_fm = String::with_capacity(fm.len() + key.len() + value.len() + 4);
@@ -142,7 +152,8 @@ pub fn verify_insertion(
     // A note with no frontmatter gains a whole block; the body must survive.
     if split(before).is_none() {
         let (bom, body) = strip_bom(before);
-        let expected = format!("{bom}---\n{entry}\n---\n{body}");
+        let eol = first_eol(body);
+        let expected = format!("{bom}---{eol}{entry}{eol}---{eol}{body}");
         return if after == expected {
             Ok(())
         } else {
@@ -367,6 +378,15 @@ mod tests {
         let out = upsert_key("Just a body.", "id", "019abc");
         assert!(out.starts_with("---\nid: 019abc\n---\n"));
         assert!(out.ends_with("Just a body."));
+    }
+
+    #[test]
+    fn upsert_creates_a_crlf_block_above_a_crlf_body() {
+        let raw = "\u{FEFF}# Title\r\n\r\nBody.\r\n";
+        let out = upsert_key(raw, "id", "019abc");
+        assert_eq!(out, "\u{FEFF}---\r\nid: 019abc\r\n---\r\n# Title\r\n\r\nBody.\r\n");
+        assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
     }
 
 
