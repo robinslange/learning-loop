@@ -4,7 +4,7 @@ import { resolveSlot as defaultResolveSlot } from '../scripts/lib/sources/regist
 import { orchestrateResearch as defaultOrchestrateResearch } from '../scripts/librarian/research.mjs';
 import { getSessionId } from '../scripts/lib/session.mjs';
 import { getPluginData } from '../scripts/lib/config.mjs';
-import { bumpCount } from '../scripts/lib/fetch-budget.mjs';
+import { claimFetch } from '../scripts/lib/fetch-budget.mjs';
 import { checkFetchUrl } from '../scripts/lib/sources/url-guard.mjs';
 
 const VERBS = new Set(['search', 'fetch', 'research']);
@@ -72,19 +72,17 @@ export async function runGateway(argv, deps = {}) {
   }
   const budget = fetchBudget ?? DEFAULT_FETCH_BUDGET;
   const source = resolveSlot('fetch');
-  if (claimFetch(sessionId, pluginData) > budget) {
+  if (!withinBudget(budget, sessionId, pluginData)) {
     return { doc: { ok: false, reason: 'fetch_budget_exceeded' }, source_used: source.id };
   }
   const doc = await source.fetch(args.url);
   return { doc, source_used: source.id };
 }
 
-// Append-then-check: the claim and the count come from one append, so N
-// concurrent gateway processes cannot all pass the check before any of them
-// bumps. No session to count against means no enforcement.
-function claimFetch(sid = getSessionId(), pd = getPluginData()) {
-  if (!pd || !sid || sid === 'unknown') return 0;
-  return bumpCount(sid, pd);
+// No session to count against means no enforcement.
+function withinBudget(budget, sid = getSessionId(), pd = getPluginData()) {
+  if (!pd || !sid || sid === 'unknown') return true;
+  return claimFetch(sid, pd, budget);
 }
 
 export { UsageError };
