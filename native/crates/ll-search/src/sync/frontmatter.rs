@@ -483,6 +483,44 @@ mod tests {
         assert!(out.contains("title: X\r\n"));
     }
 
+    /// The Claude Code memory writer rewrites a name-less note as `name: ""`
+    /// plus a `metadata:` block, nests the existing `id:` under it, and saves
+    /// with CRLF. `read_key` rightly sees no top-level id, so the writer
+    /// INSERTS one. `split` hands back a body that stops before the last key
+    /// line's `\r\n`; inserting with a bare `\n` re-terminated that line to LF,
+    /// `verify_insertion` refused, and the panic aborted the whole reindex.
+    #[test]
+    fn upsert_inserts_into_a_crlf_block_with_crlf_and_leaves_the_nested_id() {
+        let nested = "  id: 01a0c459-71da-7000-8000-000000000001\r\n";
+        let raw = format!(
+            "---\r\nname: \"\"\r\ndescription: \"\"\r\nmetadata:\r\n  node_type: memory\r\n\
+             {nested}  modified: 2026-09-24T00:00:00.000Z\r\n---\r\n\r\n# Project index\r\n"
+        );
+        assert_eq!(read_key(&raw, "id"), None, "precondition: nested is not read");
+
+        let out = upsert_key(&raw, "id", "019abc");
+
+        assert!(verify_upsert(&raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
+        assert!(out.contains(&format!("\r\n{nested}")), "nested id line changed: {out:?}");
+        assert_eq!(out.lines().filter(|l| l.starts_with("id:")).count(), 1);
+        assert!(
+            out.split_inclusive('\n').all(|l| l.ends_with("\r\n") || !l.ends_with('\n')),
+            "a line lost its CR: {out:?}"
+        );
+    }
+
+    /// An empty block's body is empty and its tail starts at the closing
+    /// fence, so the inserted line needs its own terminator, not a leading one.
+    #[test]
+    fn upsert_inserts_into_an_empty_block() {
+        for raw in ["---\n---\n\nBody.\n", "---\r\n---\r\n\r\nBody.\r\n"] {
+            let out = upsert_key(raw, "id", "019abc");
+            assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+            assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
+        }
+    }
+
     #[test]
     fn upsert_preserves_bom_and_is_idempotent() {
         let raw = "\u{FEFF}---\ntitle: X\n---\n\nBody.";
