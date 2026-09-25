@@ -557,14 +557,14 @@ pub fn ensure_note_uuid(vault_path: &Path, rel_path: &str) -> anyhow::Result<Str
         }
     }
 
-    write_new_uuid(&full, rel_path, &raw)
+    write_new_uuid(&full, &raw)
 }
 
-fn write_new_uuid(full: &Path, rel_path: &str, raw: &str) -> anyhow::Result<String> {
+fn write_new_uuid(full: &Path, raw: &str) -> anyhow::Result<String> {
     let id = uuid::Uuid::now_v7().to_string();
     let updated = crate::sync::frontmatter::upsert_key(raw, "id", &id);
     crate::sync::frontmatter::verify_upsert(raw, &updated, "id", &id)
-        .map_err(|why| anyhow::anyhow!("refusing to rewrite {rel_path}: {why}"))?;
+        .map_err(|why| anyhow::anyhow!("the frontmatter guard refused the rewrite: {why}"))?;
     std::fs::write(full, updated)?;
     Ok(id)
 }
@@ -588,9 +588,13 @@ pub struct ResolvedIds {
 /// disk, so the collision is resolved rather than merely reported.
 ///
 /// A refused note costs that note, not the run. It is left out of the map, so
-/// it is indexed with a NULL `note_uuid` and `export_index` skips it; it stays
-/// in the walk, so the deletion pass keeps its row. The next run tries again.
-/// Aborting instead took the whole vault's index down over one file.
+/// this run gives it no id: if it is readable and has no row yet, it is
+/// indexed with a NULL `note_uuid`, which `export_index` skips, and a row it
+/// already has keeps the id it had. It stays in the walk, so the deletion pass
+/// leaves its row alone, unless a note that moved onto its path displaces it.
+/// Then only the embedding is lost, since its `id:` on disk is still there.
+/// The next run tries again. Aborting instead took the whole vault's index
+/// down over one file.
 pub fn resolve_note_uuids(
     vault_path: &Path,
     entries: &[WalkEntry],
@@ -605,7 +609,7 @@ pub fn resolve_note_uuids(
             if seen.contains(&id) {
                 let full = vault_path.join(&entry.rel_path);
                 let raw = std::fs::read_to_string(&full)?;
-                let fresh = write_new_uuid(&full, &entry.rel_path, &raw)?;
+                let fresh = write_new_uuid(&full, &raw)?;
                 eprintln!(
                     "WARNING: duplicate note id {id} on {} - reassigned; first writer keeps it",
                     entry.rel_path
