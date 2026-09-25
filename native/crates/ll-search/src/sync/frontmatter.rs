@@ -105,8 +105,19 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
         }
     }
     if !replaced {
-        new_fm.push('\n');
-        new_fm.push_str(&format!("{key}: {value}"));
+        // `split` ends the body before the last key line's terminator and the
+        // tail carries it, so the inserted line takes that terminator from the
+        // tail -- a bare `\n` re-terminated a CRLF block's last line to LF and
+        // `verify_insertion` refused. An empty block's tail starts at the
+        // closing fence, so there the line takes the opening fence's
+        // terminator after itself instead of before.
+        if fm.is_empty() {
+            let eol = &open[3..];
+            new_fm.push_str(&format!("{key}: {value}{eol}"));
+        } else {
+            let eol = if tail.starts_with("\r\n") { "\r\n" } else { "\n" };
+            new_fm.push_str(&format!("{eol}{key}: {value}"));
+        }
     }
     format!("{bom}{open}{new_fm}{tail}")
 }
