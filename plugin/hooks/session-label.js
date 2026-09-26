@@ -3,7 +3,7 @@
 // Runs on every UserPromptSubmit. Updates as the session evolves.
 // Scores topics by recency (current prompt >> old messages).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { emitRetrieval, readFileTail, readPayload } from './lib/common.mjs';
@@ -25,6 +25,7 @@ import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
 import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
+import { writeFileAtomic } from '../scripts/lib/write-atomic.mjs';
 
 const payload = await readPayload('session-label');
 if (!payload) process.exit(0);
@@ -251,9 +252,7 @@ function persistDedupeState(sid, newEntries, ts) {
         byPath.set(path, { path, level: prior?.level === 'body' ? 'body' : level, ts });
       }
       const kept = [...byPath.values()];
-      const tmp = `${p}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(kept));
-      renameSync(tmp, p);
+      writeFileAtomic(p, JSON.stringify(kept));
     });
   } catch (err) {
     if (err.code === 'ELOCK_TIMEOUT') return;

@@ -5,13 +5,14 @@
 // hooks load in microseconds. Daemon-side rebuilds are bounded by a 30s TTL;
 // hook-side splice/remove keeps the cache fresh between rebuilds.
 
-import { readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
+import { readdirSync } from 'node:fs';
 import { join, basename, sep } from 'node:path';
 
 import { withLock, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { getPluginData } from '../../scripts/lib/config.mjs';
+import { writeFileAtomic } from '../../scripts/lib/write-atomic.mjs';
 
 export const SNAPSHOT_VERSION = 1;
 export const TTL_MS = 30_000;
@@ -61,9 +62,7 @@ function writeSnapshot(snap) {
   const path = snapshotPath();
   if (!path) return;
   const { relPathSet, ...serialisable } = snap;
-  const tmp = path + '.' + process.pid + '.tmp';
-  writeFileSync(tmp, JSON.stringify(serialisable));
-  renameSync(tmp, path);
+  writeFileAtomic(path, JSON.stringify(serialisable));
 }
 
 function writeSnapshotLocked(snap) {

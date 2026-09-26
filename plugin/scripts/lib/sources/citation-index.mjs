@@ -1,9 +1,10 @@
-import { writeFileSync, mkdirSync, renameSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { getPluginData } from '../config.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { withLock } from '../file-lock.mjs';
 import { logError } from '../log.mjs';
+import { writeFileAtomic } from '../write-atomic.mjs';
 
 // Resolved per call: a path fixed at import binds whatever plugin data the
 // first importer saw, and a derived cache has no business in the install dir.
@@ -24,9 +25,7 @@ export function loadCitationIndex() {
 
 function saveCitationIndex(path, index) {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = path + '.tmp';
-  writeFileSync(tmp, JSON.stringify(index, null, 2));
-  renameSync(tmp, path);
+  writeFileAtomic(path, JSON.stringify(index, null, 2));
 }
 
 // Within-process serialization queue prevents concurrent writes from the same process

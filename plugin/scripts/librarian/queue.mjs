@@ -12,15 +12,7 @@
 // truncates the queue or state file.
 // readQueue reads JSONL line-by-line without JSON.parse(readFileSync) monolith.
 
-import {
-  readFileSync,
-  writeFileSync,
-  existsSync,
-  mkdirSync,
-  unlinkSync,
-  statSync,
-  renameSync,
-} from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, unlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getPluginData } from '../lib/config.mjs';
@@ -29,6 +21,7 @@ import { withLock } from '../lib/file-lock.mjs';
 import { logError } from '../lib/log.mjs';
 import { DATA_PATHS } from '../lib/paths.mjs';
 import { appendJsonlLine } from '../lib/jsonl.mjs';
+import { writeFileAtomic } from '../lib/write-atomic.mjs';
 
 function librarianDir() {
   const pd = getPluginData();
@@ -48,12 +41,6 @@ function statePath() {
 
 export function ensureDir() {
   mkdirSync(librarianDir(), { recursive: true });
-}
-
-function writeFileAtomic(path, data) {
-  const tmp = path + '.tmp';
-  writeFileSync(tmp, data, 'utf-8');
-  renameSync(tmp, path);
 }
 
 export function appendItem(item) {

@@ -10,9 +10,7 @@
 // On any failure, value === opts.fallback (default null) and error is a string.
 // Callers may log the error via scripts/lib/log.mjs.
 //
-// The `atomic` option is intentionally absent: atomic *reads* on POSIX are
-// already atomic at the syscall level for files <= PIPE_BUF. Atomic *writes*
-// belong on a safeSave helper (out of scope for 0C).
+// Atomic writes are write-atomic.mjs's job.
 
 import { readFileSync, existsSync } from 'node:fs';
 
