@@ -77,14 +77,12 @@
 // of being read as a precision estimate. A per-rank precision over a handful of
 // sessions is a liveness check, not a measurement.
 
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 import { INJECTION_LAYOUT_EPOCH } from './lib/hook-config.mjs';
 import { BODY_SLOTS, POINTER_SLOTS } from '../hooks/lib/inject.mjs';
 import { loadNoteUsageEvents } from './lib/retrieval-usage.mjs';
-import { logError } from './lib/log.mjs';
 import { isMainModule } from './lib/is-main.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
 
@@ -93,14 +91,6 @@ import { hasFlag, flagValue } from './lib/cli-args.mjs';
 // a future change need not, and a hardcoded bound would silently truncate the
 // per-rank table instead of growing with the payload.
 const MAX_RANK = BODY_SLOTS + POINTER_SLOTS;
-
-function listFiles(dir) {
-  try {
-    return readdirSync(dir);
-  } catch {
-    return [];
-  }
-}
 
 // A burst no version of the shipped injector could have produced. Under the
 // current constants a payload holds at most BODY_SLOTS bodies and at most
@@ -129,42 +119,25 @@ function loadRankedInjections(pluginData, epochMs) {
   const dir = DATA_PATHS.retrieval(pluginData);
   const out = [];
   let foreignLayoutBursts = 0;
-  for (const f of listFiles(dir)) {
-    if (!f.startsWith('shadow-injection-') || !f.endsWith('.jsonl')) continue;
-    let raw;
-    try {
-      raw = readFileSync(join(dir, f), 'utf-8');
-    } catch (err) {
-      logError('injection-precision.loadRankedInjections', err);
+  for (const rec of readJsonlDir(dir, 'shadow-injection-')) {
+    if (rec.type !== 'gate-pass-payload') continue;
+    const t = Date.parse(rec.ts);
+    if (!Number.isFinite(t) || t < epochMs) continue;
+    const paths = rec.payload?.injected_paths;
+    if (!Array.isArray(paths) || paths.length === 0) continue;
+    if (isForeignLayout(paths)) {
+      foreignLayoutBursts++;
       continue;
     }
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (rec.type !== 'gate-pass-payload') continue;
-      const t = Date.parse(rec.ts);
-      if (!Number.isFinite(t) || t < epochMs) continue;
-      const paths = rec.payload?.injected_paths;
-      if (!Array.isArray(paths) || paths.length === 0) continue;
-      if (isForeignLayout(paths)) {
-        foreignLayoutBursts++;
-        continue;
-      }
-      paths.forEach((e, rank) => {
-        if (typeof e?.path !== 'string') return;
-        out.push({
-          session_id: rec.session_id,
-          path: e.path,
-          rank,
-          level: e.level === 'pointer' ? 'pointer' : 'body',
-        });
+    paths.forEach((e, rank) => {
+      if (typeof e?.path !== 'string') return;
+      out.push({
+        session_id: rec.session_id,
+        path: e.path,
+        rank,
+        level: e.level === 'pointer' ? 'pointer' : 'body',
       });
-    }
+    });
   }
   return { rows: out, foreignLayoutBursts };
 }
@@ -176,28 +149,11 @@ const VAULT_EDIT_ACTIONS = new Set(['vault-edit', 'vault-write']);
 function loadVaultEditEvents(pluginData) {
   const dir = DATA_PATHS.provenance(pluginData);
   const out = [];
-  for (const f of listFiles(dir)) {
-    if (!f.startsWith('events-') || !f.endsWith('.jsonl')) continue;
-    let raw;
-    try {
-      raw = readFileSync(join(dir, f), 'utf-8');
-    } catch (err) {
-      logError('injection-precision.loadVaultEditEvents', err);
-      continue;
-    }
-    for (const line of raw.split('\n')) {
-      if (!line.trim()) continue;
-      let rec;
-      try {
-        rec = JSON.parse(line);
-      } catch {
-        continue;
-      }
-      if (!VAULT_EDIT_ACTIONS.has(rec.action)) continue;
-      const path = rec.target;
-      if (typeof path !== 'string' || !path.endsWith('.md') || path.startsWith('peer:')) continue;
-      out.push({ path, ts: rec.ts, session_id: rec.session_id });
-    }
+  for (const rec of readJsonlDir(dir, 'events-')) {
+    if (!VAULT_EDIT_ACTIONS.has(rec.action)) continue;
+    const path = rec.target;
+    if (typeof path !== 'string' || !path.endsWith('.md') || path.startsWith('peer:')) continue;
+    out.push({ path, ts: rec.ts, session_id: rec.session_id });
   }
   return out;
 }

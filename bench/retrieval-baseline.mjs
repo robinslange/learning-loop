@@ -14,9 +14,10 @@
 //
 // Usage: node bench/retrieval-baseline.mjs [--all-epochs] [--with-fixtures] [--json]
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INJECTION_CALIBRATION_EPOCH } from '../plugin/scripts/lib/hook-config.mjs';
+import { jsonlShards, readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
 
 // Prompts hard-coded in tests/session-label.test.mjs reach the production log
 // because run()/runWithVault() invoke the real hook without overriding
@@ -48,32 +49,20 @@ const allEpochs = args.includes('--all-epochs');
 const withFixtures = args.includes('--with-fixtures');
 const epochMs = allEpochs ? 0 : Date.parse(INJECTION_CALIBRATION_EPOCH);
 
-const files = readdirSync(dir)
-  .filter((f) => f.startsWith('shadow-injection-') && f.endsWith('.jsonl'))
-  .sort();
-
+const files = jsonlShards(dir, 'shadow-injection-');
 const records = [];
 let droppedEpoch = 0;
 let droppedFixture = 0;
-for (const f of files) {
-  for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) {
-    if (!line) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue; // truncated tail line
-    }
-    if (Date.parse(r.ts) < epochMs) {
-      droppedEpoch++;
-      continue;
-    }
-    if (!withFixtures && isFixture(r)) {
-      droppedFixture++;
-      continue;
-    }
-    records.push(r);
+for (const r of readJsonlDir(dir, 'shadow-injection-')) {
+  if (Date.parse(r.ts) < epochMs) {
+    droppedEpoch++;
+    continue;
   }
+  if (!withFixtures && isFixture(r)) {
+    droppedFixture++;
+    continue;
+  }
+  records.push(r);
 }
 
 const pct = (n, d) => (d ? ((100 * n) / d).toFixed(1) + '%' : 'n/a');

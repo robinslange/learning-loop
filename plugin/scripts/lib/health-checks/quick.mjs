@@ -1,15 +1,7 @@
 // Quick health checks: file existence, version reads, no shell-outs.
 // Each function takes its inputs explicitly (for testability) and never throws.
 
-import {
-  closeSync,
-  existsSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  statSync,
-  mkdirSync,
-} from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync, statSync, mkdirSync } from 'node:fs';
 import { delimiter, join, dirname } from 'node:path';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import {
@@ -23,7 +15,7 @@ import {
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { resolveShimRoot } from '../shims.mjs';
-import { readTailBytes } from '../jsonl.mjs';
+import { readJsonl, readTailLines } from '../jsonl.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
 import { recentMonths, monthStr } from '../retrieval.mjs';
@@ -700,47 +692,12 @@ export function checkDupScanSocketFresh({ pluginData } = {}) {
 // permanently disabled on this machine" rather than a one-off slow write.
 const DUPLICATE_GATE_TIMEOUT_WARN_THRESHOLD = 3;
 
-// Count duplicate-gate-timeout and duplicate-gate-stale-daemon entries in a
-// single monthly hook-errors jsonl. Returns separate counts so the check can
-// give targeted fix advice — including how many timeouts came from the daemon
-// socket, which is what tells "no daemon" apart from "daemon too slow".
-// Tolerant of partial/corrupt lines (best-effort diagnostic, never throws).
-function countDuplicateGateIssues(path) {
-  const empty = { timeouts: 0, daemonTimeouts: 0, staleDaemon: 0, hardFailures: 0 };
-  if (!existsSync(path)) return empty;
-  let raw;
-  try {
-    raw = readFileSync(path, 'utf-8');
-  } catch {
-    return empty;
-  }
-  let timeouts = 0;
-  let daemonTimeouts = 0;
-  let staleDaemon = 0;
-  let hardFailures = 0;
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const obj = JSON.parse(line);
-      if (obj?.code === 'duplicate-gate-timeout') {
-        timeouts++;
-        if (obj?.source === 'daemon') daemonTimeouts++;
-        // A daemon timeout still falls through to the subprocess. Only a
-        // subprocess or budget failure means the write itself skipped the gate.
-        if (obj?.source === 'subprocess' || obj?.source === 'budget') hardFailures++;
-      } else if (obj?.code === 'duplicate-gate-stale-daemon') staleDaemon++;
-      // eslint-disable-next-line learning-loop/no-empty-catch -- skip a corrupt line, keep counting the rest.
-    } catch {}
-  }
-  return { timeouts, daemonTimeouts, staleDaemon, hardFailures };
+// Every record in the current and previous month's hook-errors logs
+// (`hook-errors-YYYY-MM.jsonl`). A corrupt line is skipped.
+function recentHookErrors(pluginData, now) {
+  return recentMonths(now).flatMap((m) => readJsonl(join(pluginData, `hook-errors-${m}.jsonl`)));
 }
 
-// Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
-// stale daemon. The pre-write duplicate gate fails OPEN on timeout (silent
-// pass), so a slow machine can permanently lose the gate with nothing surfaced
-// but log lines. A stale daemon binary (which lacks duplicate-scan support)
-// pays the round-trip + cold subprocess on every vault Write indefinitely.
-// Scans the current + previous UTC month files (`hook-errors-YYYY-MM.jsonl`),
 /**
  * Whether federation is still syncing.
  *
@@ -830,6 +787,13 @@ export function checkFederationSyncHealth({
   return ok(configured === 0 ? 'not configured' : 'syncing');
 }
 
+// Warn when recent hook-errors logs show repeated duplicate-gate timeouts or a
+// stale daemon. The pre-write duplicate gate fails OPEN on timeout (silent
+// pass), so a slow machine can permanently lose the gate with nothing surfaced
+// but log lines. A stale daemon binary (which lacks duplicate-scan support)
+// pays the round-trip + cold subprocess on every vault Write indefinitely.
+// Timeouts from the daemon socket are counted apart, since they are what tell
+// "no daemon" from "daemon too slow".
 export function checkDuplicateGateHealth({
   pluginData,
   now = new Date(),
@@ -845,20 +809,16 @@ export function checkDuplicateGateHealth({
       fix: null,
     });
   }
-  const months = recentMonths(now);
-  let totalTimeouts = 0;
-  let totalDaemonTimeouts = 0;
-  let totalStaleDaemon = 0;
-  let totalHardFailures = 0;
-  for (const month of months) {
-    const { timeouts, daemonTimeouts, staleDaemon, hardFailures } = countDuplicateGateIssues(
-      join(pluginData, `hook-errors-${month}.jsonl`),
-    );
-    totalTimeouts += timeouts;
-    totalDaemonTimeouts += daemonTimeouts;
-    totalStaleDaemon += staleDaemon;
-    totalHardFailures += hardFailures;
-  }
+  const rows = recentHookErrors(pluginData, now);
+  const timeouts = rows.filter((r) => r?.code === 'duplicate-gate-timeout');
+  const totalTimeouts = timeouts.length;
+  const totalDaemonTimeouts = timeouts.filter((r) => r.source === 'daemon').length;
+  // A daemon timeout still falls through to the subprocess. Only a subprocess
+  // or budget failure means the write itself skipped the gate.
+  const totalHardFailures = timeouts.filter(
+    (r) => r.source === 'subprocess' || r.source === 'budget',
+  ).length;
+  const totalStaleDaemon = rows.filter((r) => r?.code === 'duplicate-gate-stale-daemon').length;
   if (totalStaleDaemon > 0) {
     return makeCheck({
       id: CHECK_IDS['duplicate-gate-health'],
@@ -929,25 +889,6 @@ export function checkDuplicateGateHealth({
 // from checkDuplicateGateHealth which counts only specific gate-failure codes.
 const HOOK_ERROR_WARN_THRESHOLD = 5;
 
-function readHookErrorLines(path) {
-  if (!existsSync(path)) return [];
-  let raw;
-  try {
-    raw = readFileSync(path, 'utf-8');
-  } catch {
-    return [];
-  }
-  const result = [];
-  for (const line of raw.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      result.push(JSON.parse(line));
-      // eslint-disable-next-line learning-loop/no-empty-catch -- skip a corrupt line, keep counting the rest.
-    } catch {}
-  }
-  return result;
-}
-
 export function checkHookErrors({ pluginData, now = new Date() } = {}) {
   if (!pluginData) {
     return makeCheck({
@@ -959,15 +900,11 @@ export function checkHookErrors({ pluginData, now = new Date() } = {}) {
       fix: null,
     });
   }
-  const months = recentMonths(now);
-  let totalCount = 0;
+  const rows = recentHookErrors(pluginData, now);
+  const totalCount = rows.length;
   let latest = null;
-  for (const month of months) {
-    const lines = readHookErrorLines(join(pluginData, `hook-errors-${month}.jsonl`));
-    totalCount += lines.length;
-    for (const obj of lines) {
-      if (!latest || !latest.ts || (obj.ts && obj.ts > latest.ts)) latest = obj;
-    }
+  for (const obj of rows) {
+    if (!latest || !latest.ts || (obj.ts && obj.ts > latest.ts)) latest = obj;
   }
   if (totalCount > HOOK_ERROR_WARN_THRESHOLD) {
     const latestSummary = latest
@@ -1008,14 +945,6 @@ const SHADOW_GATE_MIN_PASS_RATE = 0.05;
 // tight time budget, so read only the tail of each month file. 2MB covers
 // hundreds of recent entries — far more than the gate criteria need.
 const SHADOW_LOG_TAIL_BYTES = 2 * 1024 * 1024;
-
-function readTailLines(path, maxBytes) {
-  const { text, truncated } = readTailBytes(path, maxBytes);
-  const lines = text.split('\n');
-  // The read may start mid-line when truncated -- drop that partial first line.
-  if (truncated) lines.shift();
-  return lines;
-}
 
 // Scan the current + previous local month shadow-injection logs (the same naming
 // session-label.js writes) and count healthy entries vs gate passes.

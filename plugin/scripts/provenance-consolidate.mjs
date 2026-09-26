@@ -1,32 +1,13 @@
 #!/usr/bin/env node
 
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { getPluginData } from './lib/config.mjs';
-import { logError } from './lib/log.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 import { isKnownAction } from './lib/provenance-vocabulary.mjs';
 
 const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
-
-function readEventLogs() {
-  const events = [];
-  if (!existsSync(PROVENANCE_DIR)) return events;
-
-  for (const file of readdirSync(PROVENANCE_DIR)) {
-    if (!file.startsWith('events-') || !file.endsWith('.jsonl')) continue;
-    const lines = readFileSync(join(PROVENANCE_DIR, file), 'utf-8').split('\n').filter(Boolean);
-    for (const line of lines) {
-      try {
-        events.push(JSON.parse(line));
-      } catch (err) {
-        logError('provenance-consolidate.parseLine', err);
-      }
-    }
-  }
-
-  return events;
-}
 
 // Per decision (b) in 1e-bis: `agent` is the primary dimension because it is
 // derivable at spawn points, while `skill` is absent from 80% of events
@@ -96,7 +77,7 @@ function aggregateByDay(events) {
   return result;
 }
 
-const events = readEventLogs();
+const events = readJsonlDir(PROVENANCE_DIR, 'events-');
 if (events.length === 0) {
   console.log(JSON.stringify({ summaries: [], event_count: 0 }));
 } else {
@@ -105,7 +86,7 @@ if (events.length === 0) {
   // including one with an action outside VALID_ACTIONS/LEGACY_ACTIONS (which
   // aggregateByDay skips from the per-day buckets above). Records that 1e's
   // emit-boundary validator rejects never reach disk at all, so they never
-  // enter readEventLogs() and never inflate this count; nothing to filter
+  // enter the event read and never inflate this count; nothing to filter
   // here for that case.
   const output = { summaries, event_count: events.length };
 

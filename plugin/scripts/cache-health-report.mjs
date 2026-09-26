@@ -6,12 +6,12 @@
 //
 // Reports: hit rate percentiles, total cost, session breakdown, 0%-hit events.
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { logError } from './lib/log.mjs';
 import { getPluginData } from './lib/config.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
 import { flagValue } from './lib/cli-args.mjs';
+import { jsonlShards, readJsonl } from './lib/jsonl.mjs';
 
 const pluginData = getPluginData();
 if (!pluginData) {
@@ -29,28 +29,10 @@ const args = process.argv.slice(2);
 const sessionFilter = flagValue(args, '--session');
 const monthFilter = flagValue(args, '--month');
 
-const files = readdirSync(dir)
-  .filter((f) => f.startsWith('cache-health-') && f.endsWith('.jsonl'))
-  .filter((f) => !monthFilter || f.includes(monthFilter));
-
-if (files.length === 0) {
-  console.log('No cache-health logs found.');
-  process.exit(0);
-}
-
-const rows = [];
-for (const f of files) {
-  for (const line of readFileSync(join(dir, f), 'utf8').trim().split('\n')) {
-    if (!line) continue;
-    try {
-      const r = JSON.parse(line);
-      if (sessionFilter && r.session_id !== sessionFilter) continue;
-      rows.push(r);
-    } catch (err) {
-      logError('cache-health-report.parseLine', err);
-    }
-  }
-}
+const files = jsonlShards(dir, `cache-health-${monthFilter ?? ''}`);
+const rows = files
+  .flatMap((f) => readJsonl(join(dir, f)))
+  .filter((r) => !sessionFilter || r.session_id === sessionFilter);
 
 if (rows.length === 0) {
   console.log('No matching rows.');

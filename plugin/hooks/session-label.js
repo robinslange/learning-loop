@@ -6,7 +6,8 @@
 import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { emitRetrieval, readFileTail, readPayload } from './lib/common.mjs';
+import { emitRetrieval, readPayload } from './lib/common.mjs';
+import { readTailLines } from '../scripts/lib/jsonl.mjs';
 import {
   buildInjection,
   enrichVaultHits,
@@ -41,13 +42,7 @@ function readUserMessages(transcriptPath) {
   const messages = [];
   if (!transcriptPath || !existsSync(transcriptPath)) return messages;
   try {
-    // filter(Boolean): when the transcript's final line exceeds the tail
-    // window, readFileTail returns '' — without the filter that becomes a
-    // single empty "line" that fails JSON.parse on every prompt.
-    const lines = readFileTail(transcriptPath, HookConfig.TRANSCRIPT_TAIL_BYTES)
-      .trim()
-      .split('\n')
-      .filter(Boolean);
+    const lines = readTailLines(transcriptPath, HookConfig.TRANSCRIPT_TAIL_BYTES);
     for (const line of lines.slice(-HookConfig.RECENT_MSG_WINDOW)) {
       try {
         const entry = JSON.parse(line);

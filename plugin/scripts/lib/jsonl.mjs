@@ -76,18 +76,21 @@ export function readJsonl(path) {
   return out;
 }
 
-// Every record in dir's <prefix>*.jsonl files, the monthly shards of one
-// stream. A missing directory reads as empty.
-export function readJsonlDir(dir, prefix) {
+// The names of dir's <prefix>*.jsonl files, the monthly shards of one stream,
+// sorted so months come oldest first. A missing directory has none.
+export function jsonlShards(dir, prefix) {
   let names;
   try {
     names = readdirSync(dir);
   } catch {
     return [];
   }
-  return names
-    .filter((f) => f.startsWith(prefix) && f.endsWith('.jsonl'))
-    .flatMap((f) => readJsonl(join(dir, f)));
+  return names.filter((f) => f.startsWith(prefix) && f.endsWith('.jsonl')).sort();
+}
+
+// Every record in a stream's shards, oldest month first.
+export function readJsonlDir(dir, prefix) {
+  return jsonlShards(dir, prefix).flatMap((f) => readJsonl(join(dir, f)));
 }
 
 // Read at most maxBytes from the end of a file, opened/seeked/closed once.
@@ -122,6 +125,17 @@ export function readTailBytes(path, maxBytes) {
       } catch {}
     }
   }
+}
+
+// The whole lines in the last maxBytes of a file. A read that starts mid-file
+// starts mid-line, so that partial first line is dropped: a window with no
+// newline in it holds no whole line and returns []. The drop also takes any
+// multi-byte character the window cut in half.
+export function readTailLines(path, maxBytes) {
+  const { text, truncated } = readTailBytes(path, maxBytes);
+  const lines = text.split('\n');
+  if (truncated) lines.shift();
+  return lines.filter(Boolean);
 }
 
 // Provenance files are append-only and can grow to multi-MB; this reads at
