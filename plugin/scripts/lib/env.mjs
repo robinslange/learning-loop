@@ -58,8 +58,6 @@ export const env = Object.freeze({
   // hooks. Claude Code sets only the CLAUDE_-prefixed pair. PLUGIN_ROOT is
   // therefore the discriminator. Read it via harness.mjs, not directly.
   PLUGIN_ROOT: pick('PLUGIN_ROOT', null),
-  PLUGIN_DATA: pick('PLUGIN_DATA', null),
-  CODEX_HOME: pick('CODEX_HOME', null),
   // Explicit harness name. Codex has no session marker in the shell env it
   // hands to commands, so install.sh writes this into
   // `shell_environment_policy.set` in ~/.codex/config.toml. That covers the

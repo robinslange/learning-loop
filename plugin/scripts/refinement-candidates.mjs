@@ -3,7 +3,7 @@
 //
 // Given a list of newly-written vault note paths (from /reflect or /ingest),
 // query ll-search similar for each, convert the transformed score back to raw
-// cosine, filter by the refinement band (0.78–0.92), apply pre-LLM filters
+// cosine, filter by the refinement band (HookConfig.COSINE_MIN..MAX), apply pre-LLM filters
 // (basename, folder, literature, new-new), cap per new note, and emit a flat
 // JSON array of {id, new_note, candidate, cosine} ready for the
 // refinement-proposer agent.
@@ -26,15 +26,10 @@ import { ortSpawnEnv, binaryPath } from './lib/binary.mjs';
 import { logError } from './lib/log.mjs';
 import { getVaultPath } from './lib/config.mjs';
 import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { HookConfig } from './lib/hook-config.mjs';
 
-// Refinement band: empirically tuned. Existing-vs-existing claim-touching pairs
-// cluster around 0.80-0.92 (see spike 3). But fresh notes often land lower
-// because new vocabulary (specific entities, sources) dilutes pure topical
-// cosine. The proxy-timeouts test note vs websocket-has-no-built-in-reconnection
-// is clearly a refinement and lands at 0.776. Lower threshold to 0.74 to catch
-// fresh-note refinements; the agent's triage filters precision.
-const COSINE_MIN = 0.74;
-const COSINE_MAX = 0.92;
+// The refinement band; see HookConfig for how it was tuned.
+const { COSINE_MIN, COSINE_MAX } = HookConfig;
 const TOP_K = 10;
 const PER_NOTE_CAP = 5;
 const EXCLUDE_FOLDERS = ['Excalidraw', '4-projects', '6-writing'];

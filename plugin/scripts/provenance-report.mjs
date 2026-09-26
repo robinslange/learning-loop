@@ -1,29 +1,12 @@
 #!/usr/bin/env node
 // provenance-report.mjs — Reads events + scores, computes 5 core metrics, outputs markdown report
 
-import { readdirSync, existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
-import { logError } from './lib/log.mjs';
-import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
 import { readJsonlDir } from './lib/jsonl.mjs';
 
 const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
-const SUMMARIES_DIR = join(PROVENANCE_DIR, 'summaries');
-
-function loadSummaries() {
-  if (!existsSync(SUMMARIES_DIR)) return [];
-  return readdirSync(SUMMARIES_DIR)
-    .filter((f) => f.endsWith('.json'))
-    .sort()
-    .map((f) => {
-      const { value, error } = safeLoad(join(SUMMARIES_DIR, f));
-      if (error) logError('provenance-report.loadSummary', error);
-      return value;
-    })
-    .filter(Boolean);
-}
 
 const events = readJsonlDir(PROVENANCE_DIR, 'events-');
 if (events.length === 0) {

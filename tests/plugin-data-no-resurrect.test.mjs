@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
-const EMITTER = join(SCRIPTS, 'provenance.mjs');
+const EMITTER = join(SCRIPTS, 'provenance-emit.js');
 const MARKER_CACHE_URL = pathToFileURL(join(SCRIPTS, 'lib', 'marker-cache.mjs')).href;
 const CONFIG_URL = pathToFileURL(join(SCRIPTS, 'lib', 'config.mjs')).href;
 
@@ -32,7 +32,7 @@ function goneDir(prefix) {
   return root;
 }
 
-// --- provenance emitter (CLI spawned detached by context-assembly) ---
+// --- provenance emitter, through its CLI (provenance-emit.js) ---
 
 function emit(pluginData) {
   return spawnSync(

@@ -21,7 +21,7 @@ const PROVENANCE = join(
   '..',
   'plugin',
   'scripts',
-  'provenance.mjs',
+  'provenance-emit.js',
 );
 
 function readEvents(root) {
@@ -100,11 +100,12 @@ test('rejection logs rather than throws, and nothing was appended', () => {
   const root = mkdtempSync(join(tmpdir(), 'll-prov-vocab-'));
   try {
     const result = emit({ agent: 'test', action: 'bogus' }, root);
-    // The CLI wrapper only exits non-zero on a thrown exception (see the
-    // try/catch around emitProvenance in provenance.mjs); a clean exit 0
-    // here proves the rejection returned rather than throwing.
+    // provenance-emit.js logs a thrown exception under its own scope and still
+    // exits 0, so the absence of that scope is what proves the rejection
+    // returned rather than threw.
     assert.strictEqual(result.status, 0);
     assert.match(result.stderr, /provenance\.invalidAction/);
+    assert.doesNotMatch(result.stderr, /"scope":"provenance-emit"/);
     assert.strictEqual(readEvents(root).length, 0);
   } finally {
     rmSync(root, { recursive: true, force: true });

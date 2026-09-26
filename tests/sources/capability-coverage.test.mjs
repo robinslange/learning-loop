@@ -1,12 +1,11 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { sourcesWith } from '../../plugin/scripts/lib/sources/registry.mjs';
-import { capabilityMethods } from '../../plugin/scripts/lib/sources/capabilities.mjs';
 
 describe('capability coverage — a source cannot lie about what it does', () => {
   it('every verify source exposes matches + verify', () => {
     for (const s of sourcesWith('verify')) {
-      for (const m of capabilityMethods.verify) {
+      for (const m of ['matches', 'verify']) {
         assert.equal(typeof s[m], 'function', `${s.id} declares verify but lacks ${m}()`);
       }
     }

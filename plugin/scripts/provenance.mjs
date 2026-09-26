@@ -1,12 +1,9 @@
-#!/usr/bin/env node
-// provenance.mjs — Append-only provenance event emitter
-// Usage as module: import { emitProvenance } from './provenance.mjs'
-// Usage as CLI:    node provenance.mjs '{"agent":"x","action":"create","target":"y.md"}'
+// provenance.mjs — Append-only provenance event emitter.
+// Import emitProvenance; the CLI is provenance-emit.js.
 
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { appendJsonlLineDeduped } from './lib/jsonl.mjs';
 import { join } from 'node:path';
-import { isMainModule } from './lib/is-main.mjs';
 import { getPluginData, pluginDataExists } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
@@ -84,14 +81,4 @@ export function emitProvenance(event, { source = 'skill' } = {}) {
     delete record.intent_kind;
   }
   appendJsonlLineDeduped(getCurrentMonthFile(), record);
-}
-
-const isMain = isMainModule(import.meta.url);
-if (isMain && process.argv[2]) {
-  try {
-    emitProvenance(JSON.parse(process.argv[2]));
-  } catch (e) {
-    console.error('provenance emit failed:', e.message);
-    process.exit(1);
-  }
 }

@@ -598,9 +598,10 @@ const ROUTE_SCHEMA = {
   },
 };
 
-// ── Verify decision logic — kept byte-faithful to plugin/scripts/librarian/verify-route.mjs
-// (the Workflow sandbox can't import it; a contract test asserts the copy matches). Two
-// invariants: never trust a transcribed survives scalar — recompute it from the verdicts;
+// ── Verify decision logic. It lives here because the Workflow sandbox can't import a
+// module; tests/librarian-verify-route.test.mjs extracts these functions and the quorum
+// constants above from this file and tests them. Two invariants: never trust a
+// transcribed survives scalar — recompute it from the verdicts;
 // and treat fewer-than-quorum valid votes as INCONCLUSIVE, never as an adversarial kill.
 function computeSurvives(validVotes) {
   const votes = validVotes || [];
