@@ -7,7 +7,12 @@ import { join, dirname } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
+import {
+  isProcessAlive,
+  acquireLock,
+  releaseLock,
+  syncSleep,
+} from '../../scripts/lib/file-lock.mjs';
 import { MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 
@@ -79,11 +84,6 @@ export async function run(ctx) {
     const pid = parseInt(raw, 10);
     if (!Number.isFinite(pid)) return { state: 'corrupt' };
     return isProcessAlive(pid) ? { state: 'alive', pid } : { state: 'dead', pid };
-  }
-
-  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
-  function syncSleep(ms) {
-    Atomics.wait(sleepBuf, 0, 0, ms);
   }
 
   let probe = checkAlive();
