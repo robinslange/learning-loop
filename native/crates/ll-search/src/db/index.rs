@@ -837,7 +837,10 @@ mod tests {
         assert_eq!(refused.len(), 1);
         assert_eq!(refused[0].0, "b.md");
         assert!(!ids.contains_key("b.md"), "a refused note gets no id");
-        assert!(ids.contains_key("a.md") && ids.contains_key("c.md"), "{ids:?}");
+        assert!(
+            ids.contains_key("a.md") && ids.contains_key("c.md"),
+            "expected valid notes to receive ids"
+        );
         assert_eq!(
             std::fs::read(dir.path().join("b.md")).unwrap(),
             b"---\ntitle: B\n---\n\n\xff\xfe",
