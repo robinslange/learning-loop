@@ -1081,7 +1081,7 @@ export function checkInjectionShadowGate({
 }
 
 export function checkAbiDrift({ abiDriftResult } = {}) {
-  // The caller is responsible for invoking detectAbiDrift from check-deps-impl.mjs.
+  // The caller is responsible for invoking detectAbiDrift from check-deps.mjs.
   // This check accepts the result so it stays in the quick library (no native module loads).
   if (!abiDriftResult || abiDriftResult.status === 'ok') {
     return makeCheck({

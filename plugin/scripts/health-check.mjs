@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { makeCheck, SEVERITIES } from './lib/health-checks/types.mjs';
-import { abiDriftSummary } from './check-deps-impl.mjs';
+import { abiDriftSummary } from './check-deps.mjs';
 import { getPluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
