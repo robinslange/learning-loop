@@ -8,6 +8,7 @@ import {
   appendJsonlLineSafe,
   appendJsonlLineDeduped,
   readTailBytes,
+  readJsonlDir,
   _dedupeStats,
   _resetDedupeCache,
   _lastWrittenSize,
@@ -318,4 +319,21 @@ test('readTailBytes: truncated is true when the read starts past byte 0', () => 
     assert.strictEqual(truncated, true);
     assert.ok(text.length <= 8);
   });
+});
+
+test('readJsonlDir: a torn line costs that record, not the rest of the file or the next file', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'queries-2026-08.jsonl'), '{"n":1}\n{"n":\n{"n":2}\n');
+    writeFileSync(join(dir, 'queries-2026-09.jsonl'), '{"n":3}\n{"n":4}\n');
+    writeFileSync(join(dir, 'reads-2026-09.jsonl'), '{"n":99}\n');
+    writeFileSync(join(dir, 'queries-notes.txt'), '{"n":98}\n');
+    const ns = readJsonlDir(dir, 'queries-')
+      .map((r) => r.n)
+      .sort();
+    assert.deepStrictEqual(ns, [1, 2, 3, 4]);
+  });
+});
+
+test('readJsonlDir: a missing directory reads as empty', () => {
+  assert.deepStrictEqual(readJsonlDir(join(tmpdir(), 'll-jsonl-no-such-dir'), 'x-'), []);
 });

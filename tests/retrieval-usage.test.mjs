@@ -697,6 +697,30 @@ test('retrieval-report --memory-reads emits per-file JSON', () => {
   }
 });
 
+// A torn line is normal in append-only telemetry (a hook killed mid-write). It
+// used to throw out of the whole directory loop, so one bad line dropped the
+// rest of its file and every later month.
+test('retrieval-report counts every valid query around a torn line', () => {
+  const home = mkdtempSync(join(tmpdir(), 'll-report-torn-'));
+  const pd = join(home, 'pd');
+  const dir = join(pd, 'retrieval');
+  mkdirSync(dir, { recursive: true });
+  const q = (n) =>
+    JSON.stringify({ ts: daysAgo(n), session_id: 's1', command: 'search', query: `q${n}` });
+  writeFileSync(join(dir, 'queries-2026-08.jsonl'), `${q(5)}\n{"ts":"2026-08-0\n${q(4)}\n`);
+  writeFileSync(join(dir, 'queries-2026-09.jsonl'), `${q(3)}\n${q(2)}\n`);
+  try {
+    const out = spawnSync(process.execPath, [REPORT], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_DATA: pd },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /Total queries:\s+4\n/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('memoryReadStats scopes by project and keeps legacy unstamped records', async () => {
   const { memoryReadStats } = await import(
     pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
