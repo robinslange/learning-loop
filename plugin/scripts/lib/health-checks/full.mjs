@@ -6,20 +6,7 @@
 import { openSync, readSync, closeSync } from 'node:fs';
 import { CHECK_IDS, SEVERITIES, makeCheck } from './types.mjs';
 import { listVaultNotes } from '../vault-walk.mjs';
-
-function semverGe(a, b) {
-  const pa = String(a)
-    .split('.')
-    .map((n) => parseInt(n, 10) || 0);
-  const pb = String(b)
-    .split('.')
-    .map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true;
-    if ((pa[i] || 0) < (pb[i] || 0)) return false;
-  }
-  return true;
-}
+import { semverCmp } from '../semver.mjs';
 
 export function checkNodeVersion({ nodeVersionOutput, minMajor } = {}) {
   if (!nodeVersionOutput) {
@@ -76,7 +63,7 @@ export function checkClaudeVersion({ claudeVersionOutput, minVersion } = {}) {
       fix: 'Reinstall Claude Code',
     });
   }
-  if (!semverGe(m[0], minVersion)) {
+  if (semverCmp(m[0], minVersion) < 0) {
     return makeCheck({
       id: CHECK_IDS['claude-version'],
       name: 'Claude Code',

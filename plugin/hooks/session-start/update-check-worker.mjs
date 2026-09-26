@@ -15,6 +15,7 @@ import { writeFileSync, readFileSync } from 'node:fs';
 import https from 'node:https';
 import http from 'node:http';
 import { logError } from '../../scripts/lib/log.mjs';
+import { semverCmp } from '../../scripts/lib/semver.mjs';
 
 const [
   cacheFile,
@@ -76,16 +77,11 @@ const req = mod.get(
         stampFailure();
         return;
       }
-      const cmp = (a, b) => {
-        const pa = a.split('.').map(Number);
-        const pb = b.split('.').map(Number);
-        return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
-      };
       try {
         writeFileSync(
           cacheFile,
           JSON.stringify({
-            update_available: cmp(latest, installed) > 0,
+            update_available: semverCmp(latest, installed) > 0,
             installed,
             latest,
             checked: Math.floor(Date.now() / 1000),

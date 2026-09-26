@@ -13,7 +13,7 @@ import {
   writeHealthCache,
   isCacheStale,
 } from '../../scripts/lib/health-checks/cache.mjs';
-import { abiDriftSummary } from '../../scripts/check-deps-impl.mjs';
+import { abiDriftSummary } from '../../scripts/check-deps.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { home } from '../../scripts/lib/paths.mjs';
 import { getConfig } from '../../scripts/lib/config.mjs';
