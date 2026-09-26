@@ -198,8 +198,7 @@ function reflectScanViaDaemon(socketPath, queries, top, candidates) {
 
 // Deny only on violations a write INTRODUCES, never on ones it inherits.
 // 2977 notes predate the contract; a gate that judged absolute state would
-// block every legitimate edit to them and get switched off within a day. Same
-// added-only delta rule the dash check uses.
+// block every legitimate edit to them and get switched off within a day.
 // `oldFm` is null when nothing precedes this write (a new note), which inherits
 // no excuses. Passing `{}` instead would read as "an existing note whose
 // frontmatter is empty" and hand every new note a free pass on all three
@@ -242,8 +241,8 @@ function findEmDashLines(body) {
 }
 
 // Count em/en-dashes on non-exempt lines (same Source:/Related: exemption as
-// findEmDashLines). Used to detect dashes ADDED by an Edit: a dash that exists
-// in both old_string and new_string is pre-existing and must not deny.
+// findEmDashLines). Used to detect dashes a write ADDS: a dash the note
+// already carries is pre-existing and must not deny.
 function countExposedDashes(text) {
   let count = 0;
   for (const line of text.split('\n')) {
@@ -500,6 +499,93 @@ function emitVerdict() {
   });
 }
 
+// The note before and after this write. A Write replaces the file, so before is
+// what is on disk (null for a new note). An Edit carries fragments, so the
+// post-edit note is rebuilt from disk and every check sees the same body-only
+// semantics as a Write: frontmatter excluded, Source:/Related: prefixes visible
+// even when the fragment omits them. When the file can't be read, or
+// old_string is empty, only the fragments can be judged, and `whole` is false:
+// a fragment carries no frontmatter to check. An Edit whose old_string is not
+// on disk fails in the Edit tool itself, so there is nothing to gate.
+function proposedChange(tool, input) {
+  const filePath = input.file_path;
+  if (tool === 'Write') {
+    return {
+      beforeText: existsSync(filePath) ? readFileSync(filePath, 'utf-8') : null,
+      afterText: input.content || '',
+      whole: true,
+    };
+  }
+  const oldString = input.old_string || '';
+  const newString = input.new_string || '';
+  if (oldString) {
+    let disk = null;
+    try {
+      disk = readFileSync(filePath, 'utf-8');
+    } catch {
+      disk = null;
+    }
+    if (disk !== null) {
+      // An apply_patch hunk carries the `@@` anchor it occurs strictly after.
+      // Searching from the anchor is what stops a hunk removing a body line
+      // from binding to an identical line in the frontmatter.
+      const anchor = input.context ? disk.indexOf(input.context) : -1;
+      const idx = disk.indexOf(oldString, anchor === -1 ? 0 : anchor + input.context.length);
+      if (idx === -1) return null;
+      const afterText = input.replace_all
+        ? disk.split(oldString).join(newString)
+        : disk.slice(0, idx) + newString + disk.slice(idx + oldString.length);
+      return { beforeText: disk, afterText, whole: true };
+    }
+  }
+  return { beforeText: oldString, afterText: newString, whole: false };
+}
+
+function duplicateTags(fm) {
+  return fm ? findDuplicateTags(parseTags(fm)) : [];
+}
+
+// Dash lines in `afterBody` that `beforeBody` doesn't already carry, matched
+// by text, so the denial names what this write added.
+function addedDashLines(beforeBody, afterBody) {
+  const carried = new Map();
+  for (const { text } of findEmDashLines(beforeBody)) {
+    carried.set(text, (carried.get(text) || 0) + 1);
+  }
+  return findEmDashLines(afterBody).filter(({ text }) => {
+    const n = carried.get(text) || 0;
+    if (n > 0) carried.set(text, n - 1);
+    return n === 0;
+  });
+}
+
+function dashDenial(lines) {
+  const list = lines.map((l) => `  line ${l.line}: ${l.text}`).join('\n');
+  return (
+    `This write adds em/en-dashes to body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
+    `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
+    `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`
+  );
+}
+
+// Wikilinks this write adds that name no note in the vault.
+function brokenLinkWarning(beforeBody, afterBody, vaultRoot) {
+  const carried = new Set(extractWikilinks(beforeBody));
+  const added = extractWikilinks(afterBody).filter((l) => !carried.has(l));
+  // Only pay for the snapshot load (a multi-hundred-KB JSON parse, or a full
+  // vault readdir on TTL expiry) when there are wikilinks to validate.
+  if (added.length === 0) return null;
+  const noteIndex = buildNoteIndex(vaultRoot);
+  const broken = added.filter((l) => {
+    const target = l.split('#')[0].trim();
+    return target && !noteExistsInIndex(target, noteIndex);
+  });
+  if (broken.length === 0) return null;
+  return `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`;
+}
+
+// Every check judges only what the write adds, for the reason frontmatterDenial
+// gives. A new note inherits nothing, so the contract applies to it in full.
 async function checkWrite(tool, input) {
   if (tool !== 'Write' && tool !== 'Edit') return;
 
@@ -509,173 +595,71 @@ async function checkWrite(tool, input) {
   const vaultRoot = getVaultPath();
   if (!isVaultNote(filePath, vaultRoot)) return;
 
-  // Edit payloads carry string fragments, not whole notes: recompute the
-  // post-edit note from disk so the dash delta runs on the SAME body-only
-  // semantics as the Write path (frontmatter excluded, Source:/Related: line
-  // prefixes visible even when the fragment omits them). Warn on broken
-  // wikilinks in the replacement text, and skip the duplicate-tag/
-  // duplicate-note checks (a fragment has no reliable title to judge).
-  if (tool === 'Edit') {
-    const oldString = input.old_string || '';
-    const newString = input.new_string || '';
+  const change = proposedChange(tool, input);
+  if (!change) return;
+  const { beforeText, afterText, whole } = change;
 
-    // Fallback when the file is unreadable: judge the raw fragments.
-    let oldText = oldString;
-    let newText = newString;
-    let skipDashCheck = false;
-    // An Edit fragment carries no frontmatter of its own; the schema delta is
-    // only knowable from the reconstructed post-edit note.
-    let schemaDenial = null;
-    if (oldString) {
-      let disk = null;
-      try {
-        disk = readFileSync(filePath, 'utf-8');
-      } catch {
-        disk = null;
-      }
-      if (disk !== null) {
-        // An apply_patch hunk carries the `@@` anchor it occurs strictly after.
-        // Searching from the anchor is what stops a hunk removing a body line
-        // from binding to an identical line in the frontmatter.
-        const anchor = input.context ? disk.indexOf(input.context) : -1;
-        const idx = disk.indexOf(oldString, anchor === -1 ? 0 : anchor + input.context.length);
-        if (idx === -1) {
-          // old_string not on disk: the Edit tool itself errors — nothing to gate.
-          skipDashCheck = true;
-        } else {
-          const postEdit = input.replace_all
-            ? disk.split(oldString).join(newString)
-            : disk.slice(0, idx) + newString + disk.slice(idx + oldString.length);
-          const before = parseFrontmatter(disk);
-          const after = parseFrontmatter(postEdit);
-          oldText = before.body;
-          newText = after.body;
-          schemaDenial = frontmatterDenial(before.fm, after.fm, filePath, vaultRoot);
-        }
-      }
-    }
+  let beforeBody = beforeText ?? '';
+  let afterBody = afterText;
+  if (whole) {
+    const before = beforeText === null ? null : parseFrontmatter(beforeText);
+    const after = parseFrontmatter(afterText);
+    beforeBody = before?.body ?? '';
+    afterBody = after.body;
 
-    if (schemaDenial) {
-      deny(schemaDenial);
-      return;
-    }
-
-    if (!skipDashCheck && countExposedDashes(newText) > countExposedDashes(oldText)) {
-      const offending = findEmDashLines(newString);
-      const lines = offending.length > 0 ? offending : findEmDashLines(newText);
-      const list = lines.map((l) => `  ${l.text}`).join('\n');
-      deny(
-        `This edit adds em/en-dashes to body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
-          `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
-          `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
-      );
-      return;
-    }
-
-    // Only pay for the snapshot load (a multi-hundred-KB JSON parse, or a full
-    // vault readdir on TTL expiry) when there are wikilinks to validate.
-    const editLinks = extractWikilinks(newString);
-    if (editLinks.length > 0) {
-      const noteIndex = buildNoteIndex(vaultRoot);
-      const broken = editLinks.filter((l) => {
-        const target = l.split('#')[0].trim();
-        return target && !noteExistsInIndex(target, noteIndex);
-      });
-      if (broken.length > 0) {
-        warn(
-          `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
-        );
-      }
-    }
-    return;
-  }
-
-  const content = input.content || '';
-  const { fm, body: fmBody } = parseFrontmatter(content);
-  if (Object.keys(fm).length > 0) {
-    const tags = parseTags(fm);
-    const dupes = findDuplicateTags(tags);
+    const carried = new Set(duplicateTags(before?.fm));
+    const dupes = duplicateTags(after.fm).filter((t) => !carried.has(t));
     if (dupes.length > 0) {
       deny(`Duplicate tags found: [${dupes.join(', ')}]. Remove duplicates before writing.`);
       return;
     }
+
+    const schemaDenial = frontmatterDenial(before?.fm ?? null, after.fm, filePath, vaultRoot);
+    if (schemaDenial) {
+      deny(schemaDenial);
+      return;
+    }
   }
 
-  // A new file inherits nothing, so every violation is introduced and the
-  // contract applies in full.
-  const onDiskFm = existsSync(filePath)
-    ? parseFrontmatter(readFileSync(filePath, 'utf-8')).fm
-    : null;
-  const schemaDenial = frontmatterDenial(onDiskFm, fm, filePath, vaultRoot);
-  if (schemaDenial) {
-    deny(schemaDenial);
+  if (countExposedDashes(afterBody) > countExposedDashes(beforeBody)) {
+    const added = addedDashLines(beforeBody, afterBody);
+    deny(dashDenial(added.length > 0 ? added : findEmDashLines(afterBody)));
     return;
   }
 
-  // Same added-only delta rule as the Edit path: a Write that rewrites an
-  // existing note (reflect refinement applies upstream edits via Write) must
-  // not be denied for dashes the note already carries on disk. New files keep
-  // the any-dash deny.
-  const emDashLines = findEmDashLines(fmBody);
-  if (emDashLines.length > 0) {
-    let dashAdded = true;
-    if (existsSync(filePath)) {
-      const { body: onDiskBody } = parseFrontmatter(readFileSync(filePath, 'utf-8'));
-      dashAdded = countExposedDashes(fmBody) > countExposedDashes(onDiskBody);
-    }
-    if (dashAdded) {
-      const list = emDashLines.map((l) => `  line ${l.line}: ${l.text}`).join('\n');
-      deny(
-        `Em/en-dashes in body prose (persona voice rule "no em dashes, no en dashes"):\n${list}\n` +
-          `Replace each with a comma, colon, or semicolon. If the dash is structural ` +
-          `annotation (reference + gloss), move it to a Source: or Related: line, which are exempt.`,
-      );
-      return;
-    }
-  }
-
   const warnings = [];
+  const linkWarning = brokenLinkWarning(beforeBody, afterBody, vaultRoot);
+  if (linkWarning) warnings.push(linkWarning);
 
-  const isNewFile = !existsSync(filePath);
-  const elapsedForStyle = Date.now() - HOOK_START_MS;
-  const budgetOkForStyle =
-    preWriteBudgetMs() - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
-  const styleAdvisory = checkFilenameStyle(
-    filePath,
-    vaultRoot,
-    getConfig(),
-    !isNewFile,
-    budgetOkForStyle,
-  );
-  if (styleAdvisory) warnings.push(styleAdvisory);
+  // Filename style and the duplicate-note scan judge a note by its name and
+  // title, which only a Write carries whole.
+  if (tool === 'Write') {
+    const elapsedForStyle = Date.now() - HOOK_START_MS;
+    const budgetOkForStyle =
+      preWriteBudgetMs() - elapsedForStyle > HookConfig.PRE_WRITE_SAFETY_MARGIN_MS;
+    const styleAdvisory = checkFilenameStyle(
+      filePath,
+      vaultRoot,
+      getConfig(),
+      beforeText !== null,
+      budgetOkForStyle,
+    );
+    if (styleAdvisory) warnings.push(styleAdvisory);
 
-  const links = extractWikilinks(fmBody);
-  if (links.length > 0) {
-    const noteIndex = buildNoteIndex(vaultRoot);
-    const broken = links.filter((l) => {
-      const target = l.split('#')[0].trim();
-      return target && !noteExistsInIndex(target, noteIndex);
-    });
-    if (broken.length > 0) {
-      warnings.push(
-        `Broken wikilinks: ${broken.map((l) => '[[' + l + ']]').join(', ')} not found in vault.`,
-      );
+    const titleMatch = afterText.match(/^#\s+(.+)$/m);
+    const title = titleMatch ? titleMatch[1].trim() : null;
+    const dupeResult = title ? await checkDuplicateNote(filePath, title, vaultRoot) : null;
+    if (dupeResult === SCAN_FAILED) {
+      if (preWriteFailMode(getConfig()) === 'closed') {
+        deny(
+          'Duplicate scan failed and pre_write_fail_mode is "closed"; blocking write. ' +
+            'Re-run when the scan infrastructure is available, or set pre_write_fail_mode to "open" to allow writes on scan failure.',
+        );
+        return;
+      }
+    } else if (dupeResult) {
+      warnings.push(dupeResult);
     }
-  }
-
-  const titleMatch = content.match(/^#\s+(.+)$/m);
-  const title = titleMatch ? titleMatch[1].trim() : null;
-  const dupeResult = title ? await checkDuplicateNote(filePath, title, vaultRoot) : null;
-  if (dupeResult === SCAN_FAILED) {
-    if (preWriteFailMode(getConfig()) === 'closed') {
-      deny(
-        'Duplicate scan failed and pre_write_fail_mode is "closed"; blocking write. ' +
-          'Re-run when the scan infrastructure is available, or set pre_write_fail_mode to "open" to allow writes on scan failure.',
-      );
-      return;
-    }
-  } else if (dupeResult) {
-    warnings.push(dupeResult);
   }
 
   if (warnings.length > 0) {
