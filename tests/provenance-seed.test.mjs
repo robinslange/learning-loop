@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin');
-const PROVENANCE = join(PLUGIN, 'scripts', 'provenance.mjs');
+const PROVENANCE = join(PLUGIN, 'scripts', 'provenance-emit.js');
 const COMMON = join(PLUGIN, 'hooks', 'lib', 'common.mjs');
 
 test('emitProvenance seeds both templates from inside plugin/ into PLUGIN_DATA/provenance', () => {
@@ -30,7 +30,7 @@ test('emitProvenance seeds both templates from inside plugin/ into PLUGIN_DATA/p
     assert.strictEqual(
       result.status,
       0,
-      `provenance.mjs exited ${result.status}: ${result.stderr}`,
+      `provenance-emit.js exited ${result.status}: ${result.stderr}`,
     );
 
     for (const name of ['learned-patterns.md', 'retired-patterns.md']) {
@@ -88,7 +88,7 @@ test(
       assert.strictEqual(
         result.status,
         0,
-        `provenance.mjs exited ${result.status}: ${result.stderr}`,
+        `provenance-emit.js exited ${result.status}: ${result.stderr}`,
       );
 
       const dir = join(root, 'provenance');

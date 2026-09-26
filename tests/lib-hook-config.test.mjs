@@ -25,7 +25,6 @@ test('all values are finite non-negative numbers', () => {
 
 test('timeout constants are in plausible ranges (ms)', () => {
   assert.ok(HookConfig.STDIN_TIMEOUT_MS >= 100 && HookConfig.STDIN_TIMEOUT_MS <= 30_000);
-  assert.ok(HookConfig.SNAPSHOT_TIMEOUT_MS >= 1000 && HookConfig.SNAPSHOT_TIMEOUT_MS <= 30_000);
   assert.ok(HookConfig.DAEMON_STARTUP_DEADLINE_MS >= 100);
   assert.ok(
     HookConfig.SESSION_SWEEP_TTL_MS > 24 * 3600 * 1000 &&

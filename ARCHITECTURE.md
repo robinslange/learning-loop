@@ -56,7 +56,7 @@ learning-loop/
         config.mjs      -- librarian config + provider resolution + research tier gate
         research.mjs    -- local research engine (Search -> Fetch -> Extract)
         research/       -- brave, fetch, extract, source-id
-        verify*.mjs     -- verify-route/-source decision logic (the /research Verify step)
+        verify*.mjs     -- source verification (the /research Verify step's mechanical branch)
       verify/           -- claim/note verification CLIs (check-claims, verify-note)
       vault-search.mjs  -- ll-search query wrapper
       watch.mjs         -- file watcher daemon
@@ -245,13 +245,13 @@ flowchart LR
   F --> G[research/extract.mjs<br/>local Gemma claim extraction]
   G --> H[claims bundle<br/>temp file or --json]
   H --> I[Verify router on Claude]
-  I --> J[verify-route.mjs decision logic]
+  I --> J[workflow.js decision logic]
   J --> K[Synthesize on Claude<br/>cited report]
 ```
 
 `scripts/librarian/research.mjs` (`runResearch`) drives Search -> dedup -> Fetch -> Extract and emits a claims bundle (`{question, angles, sources, claims, skipped}`). Collaborators (`searchFn`/`fetchTextFn`/`extractFn`) are injected with live defaults from `research/{brave,fetch,extract,source-id}.mjs`, so orchestration is testable without the network. The model-size tier gate lives at the CLI edge (`resolveModel` + `researchModelOk`): research **refuses on the e2b tier (exit 3)** rather than producing thin claims, and the `/research` skill falls back to Claude-native WebSearch when the librarian is unavailable or sub-tier.
 
-The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier _failure_ (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
+The **Verify** step runs back on Claude. The router's decision logic lives in `skills/research/workflow.js`, since the Workflow sandbox can't import a module, and `tests/librarian-verify-route.test.mjs` extracts it from that file to test it. Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier _failure_ (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
 
 ### web access path (source gateway)
 

@@ -19,13 +19,8 @@
 export const HookConfig = Object.freeze({
   // --- Timeouts (ms) ---
   DEPS_CHECK_TIMEOUT_MS: 5000,
-  SNAPSHOT_TIMEOUT_MS: 10000,
-  REINDEX_TIMEOUT_MS: 5000,
   DAEMON_STARTUP_DEADLINE_MS: 2000,
   DAEMON_CHECK_POLL_MS: 50,
-  DOWNLOAD_TIMEOUT_MS: 8000,
-  POST_TOOL_TIMEOUT_MS: 5000,
-  PROVENANCE_TIMEOUT_MS: 3000,
   INJECTION_RACE_CAP_MS: 1500,
   // Per-session suppression window for re-injecting a note already shown. The
   // window is the only thing standing between the payload and a note that keeps
@@ -33,7 +28,7 @@ export const HookConfig = Object.freeze({
   //
   // Calibration (2026-07-31): replay of fixture-free shadow-injection rows
   // 2026-05..07, n=5,347 injections over 404 sessions
-  // (scripts/dedupe-window-replay.mjs). 45.2% of injections re-showed a note
+  // (bench/dedupe-window-replay.mjs). 45.2% of injections re-showed a note
   // already injected earlier in the SAME session; 21% were back-to-back. The
   // repeat-gap distribution is short and heavy at the head: p25=18s, p50=66s,
   // p90=1823s. The prior 180_000 (3 min) caught only 66.5% of repeats, and
@@ -73,8 +68,6 @@ export const HookConfig = Object.freeze({
   WATCH_LOG_MAX_BYTES: 4_194_304, // 4 MiB
   AUTOLINK_ML_TIMEOUT_MS: 1000,
   STDIN_TIMEOUT_MS: 3000,
-  SWEEP_HOOK_TIMEOUT_MS: 15000,
-  NPM_INSTALL_TIMEOUT_MS: 10000,
 
   // --- Pre-write duplicate-gate budget (ms) ---
   // The OUTER deadline is deliberately absent from this file. It lives once,
@@ -257,6 +250,13 @@ export const HookConfig = Object.freeze({
   // ABOVE the current ceiling — do not merge that value without re-deriving it.
   INJECTION_THRESHOLD: 0.34,
   SIMILARITY_THRESHOLD: 0.85,
+  // Refinement band for refinement-candidates.mjs, empirically tuned.
+  // Existing-vs-existing claim-touching pairs cluster around 0.80-0.92 (see
+  // spike 3). Fresh notes often land lower, because new vocabulary (specific
+  // entities, sources) dilutes pure topical cosine: the proxy-timeouts test note
+  // against websocket-has-no-built-in-reconnection is clearly a refinement and
+  // lands at 0.776. The floor sits at 0.74 to catch fresh-note refinements; the
+  // agent's triage filters for precision.
   COSINE_MIN: 0.74,
   COSINE_MAX: 0.92,
   // How long a librarian duplicate_flag verdict is trusted by the pre-write

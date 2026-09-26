@@ -12,12 +12,10 @@
 // The second one shipped. pre-write-check's guard was false under a symlink,
 // so the write gate admitted every contract violation and reported success.
 //
-// The three spellings this replaces, for anyone auditing the rest of the tree:
-// scripts/codex/generate-agents.mjs realpaths both sides (correct);
-// scripts/provenance.mjs realpaths only argv[1] and compares it against a
-// non-realpathed import.meta.url (still wrong under a symlink); and most of
-// scripts/ realpaths neither. Converting those is a separate pass -- there the
-// failure is a silent no-op rather than a disabled guard.
+// The spellings this replaces, for anyone auditing the rest of the tree:
+// scripts/codex/generate-agents.mjs realpaths both sides (correct), and most
+// of scripts/ realpaths neither. Converting those is a separate pass -- there
+// the failure is a silent no-op rather than a disabled guard.
 
 import { realpathSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';

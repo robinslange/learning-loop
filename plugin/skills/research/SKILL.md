@@ -92,8 +92,8 @@ authored verbatim — the offload and the fallback are the point; do not
   claude-fallback is already Claude.
 - **Always report `verifyEngine` like `gatherMode`.** Surface whether verification
   ran on GLM, mechanically, or on Claude, so an off-Claude offload is never
-  invisible. Same reason as the engine field above. The tested source of truth
-  for the routing table is `scripts/librarian/verify-route.mjs`.
+  invisible. Same reason as the engine field above. The routing table lives in
+  `workflow.js`, and `tests/librarian-verify-route.test.mjs` tests it there.
 - This is the first skill to offload to the librarian; `scripts/librarian/research/`
   is built to be reused once it earns trust. See
   `scripts/librarian/research/README.md`.
