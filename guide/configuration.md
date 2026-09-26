@@ -182,7 +182,7 @@ Each reducer's cumulative start time is the earliest timestamp still on disk acr
 | `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`                  | Metrics-specific endpoint override, takes precedence over the base URL above                                                                                                                                                                                   |
 | `OTEL_RESOURCE_ATTRIBUTES`                             | Comma-separated `key=value` resource attributes; filtered through the allowlist in [OTEL export](#otel-export)                                                                                                                                                 |
 
-`LL_SID`, `LL_REFLECT_SID`, `LL_CHILD_PID_FILE`, `LL_SESSION_TMP_DIR` and `LL_AUTOLINK_ML_TIMEOUT_MS` are internal handshake and test seams between plugin-owned processes; none of them is meant to be set by hand.
+`LL_SID`, `LL_REFLECT_SID`, `LL_CHILD_PID_FILE`, `LL_SESSION_TMP_DIR`, `LL_AUTOLINK_ML_TIMEOUT_MS` and `LL_LEDGER_GIT_BUDGET_MS` are internal handshake and test seams between plugin-owned processes; none of them is meant to be set by hand.
 
 ## Vault librarian
 

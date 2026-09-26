@@ -18,14 +18,15 @@ const CONFIG_DOC_PATH = fileURLToPath(new URL('../guide/configuration.md', impor
 // so one part of the code can tell "the operator set this" from "we defaulted
 // it", not to be set directly. LL_REFLECT_SID and LL_CHILD_PID_FILE are
 // session/test handshakes between plugin-owned processes, never something an
-// operator is meant to set by hand. LL_SESSION_TMP_DIR and
-// LL_AUTOLINK_ML_TIMEOUT_MS are marked "Test seam ... unset in production" in
-// env.mjs itself.
+// operator is meant to set by hand. LL_SESSION_TMP_DIR,
+// LL_AUTOLINK_ML_TIMEOUT_MS and LL_LEDGER_GIT_BUDGET_MS are marked "Test seam
+// ... unset in production" in env.mjs itself.
 const INTERNAL = new Set([
   'LL_REFLECT_SID',
   'LL_CHILD_PID_FILE',
   'LL_SESSION_TMP_DIR',
   'LL_AUTOLINK_ML_TIMEOUT_MS',
+  'LL_LEDGER_GIT_BUDGET_MS',
 ]);
 
 function envMjsVarNames() {

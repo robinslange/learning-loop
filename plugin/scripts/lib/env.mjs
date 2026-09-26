@@ -113,6 +113,14 @@ export const env = Object.freeze({
   // production.
   LL_AUTOLINK_ML_TIMEOUT_MS: pick('LL_AUTOLINK_ML_TIMEOUT_MS', ''),
 
+  // --- Test seam ---
+  // Replaces both the session ledger's per-call git timeout and its shared
+  // git budget (HookConfig.LEDGER_GIT_TIMEOUT_MS / LEDGER_GIT_BUDGET_MS, 300ms
+  // and 900ms). A contended full-suite run can spend 300ms spawning one git,
+  // so the ledger renders with no repo and no commits. The ledger tests set a
+  // generous value. Unset in production.
+  LL_LEDGER_GIT_BUDGET_MS: pick('LL_LEDGER_GIT_BUDGET_MS', ''),
+
   // --- Reflect new-notes handshake ---
   // Explicit session id for the /reflect new-notes marker. Set by the reflect
   // skill (and sweep-hook-replay, which forwards it) so a replayed Write appends
