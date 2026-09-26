@@ -1,25 +1,17 @@
 // hooks/lib/common.mjs — Shared utilities for all learning-loop hooks
-// Plugin-data resolution and the transient-path guard live in
-// scripts/lib/config.mjs as the single source of truth; this module re-exports
-// `resolvePluginData` for backward compatibility with hook callers.
 
 import { existsSync, appendFileSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
-import { resolvePluginData, getVaultPath, getConfig } from '../../scripts/lib/config.mjs';
+import { getPluginData, getConfig } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { emitProvenance as emitProvenanceCanonical } from '../../scripts/provenance.mjs';
-import { getSessionId } from '../../scripts/lib/session.mjs';
 import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
 import { relativeToVault, home } from '../../scripts/lib/paths.mjs';
-
-export { resolvePluginData, getSessionId, home };
-export const resolveVaultPath = getVaultPath;
-export const resolveConfig = getConfig;
 
 export function findBinary() {
   const bin = binaryPath();
@@ -227,7 +219,7 @@ export function emitRetrieval(prefix, event) {
   // join keys off. Any other caller should use the explicit slot (e.g.
   // `query: ...`) rather than through event.
   writeRetrieval({
-    pluginData: resolvePluginData(),
+    pluginData: getPluginData(),
     prefix,
     command: event.type || event.command || prefix,
     query: event.query || event.file || '',

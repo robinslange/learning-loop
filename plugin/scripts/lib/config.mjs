@@ -64,10 +64,6 @@ export function getPluginData() {
   return null;
 }
 
-// Alias retained for hooks/lib/common.mjs compatibility — same function,
-// historical naming difference.
-export const resolvePluginData = getPluginData;
-
 /**
  * Never resurrect a deleted plugin-data: session-start spawns detached
  * workers (provenance emitter, intentions refresh, dream-gate) that can

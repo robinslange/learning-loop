@@ -6,7 +6,7 @@
 
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { resolvePluginData } from './common.mjs';
+
 import { env } from '../../scripts/lib/env.mjs';
 import { resolveMemoryDir } from '../../scripts/lib/memory-paths.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
@@ -16,8 +16,9 @@ import {
   MARKER_PATHS,
   dreamLockHeld,
 } from '../../scripts/lib/marker-cache.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
 
-const pluginData = resolvePluginData();
+const pluginData = getPluginData();
 // Without plugin-data there is nowhere to read or write markers (the skill
 // writers are plugin-data-only too) — the gate is inert. Bare-CLI/test
 // invocations set CLAUDE_PLUGIN_DATA.

@@ -3,16 +3,17 @@
 // and annotate results when the query matches a superseded pattern.
 
 import { existsSync } from 'node:fs';
-import { runHook, emitRetrieval, resolvePluginData } from './lib/common.mjs';
+import { runHook, emitRetrieval } from './lib/common.mjs';
 import { loadSupersessionsCached, matchSupersessions } from '../scripts/lib/edges.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { scrubForLog } from './lib/inject.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { DATA_FILES } from '../scripts/lib/paths.mjs';
+import { getPluginData } from '../scripts/lib/config.mjs';
 
 async function checkSupersessions(query) {
-  const pluginData = resolvePluginData();
+  const pluginData = getPluginData();
   if (!pluginData) return null;
   const dbPath = DATA_FILES.edgesDb(pluginData);
   if (!existsSync(dbPath)) return null;

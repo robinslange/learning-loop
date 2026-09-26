@@ -17,7 +17,7 @@ import * as quick from './lib/health-checks/quick.mjs';
 import * as full from './lib/health-checks/full.mjs';
 import { makeCheck, SEVERITIES } from './lib/health-checks/types.mjs';
 import { abiDriftSummary } from './check-deps-impl.mjs';
-import { resolvePluginData, getVaultPath, getConfig } from './lib/config.mjs';
+import { getPluginData, getVaultPath, getConfig } from './lib/config.mjs';
 import { pluginVersion } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
@@ -404,7 +404,7 @@ if (isMain) {
   const wantJson = args.includes('--json');
 
   const home = env.HOME;
-  const pluginData = resolvePluginData();
+  const pluginData = getPluginData();
   const installedVersion = readInstalledPluginVersion(home) || '0.0.0';
   const ctx = {
     pluginData,

@@ -67,7 +67,6 @@ function sandbox() {
 }
 
 const CONFIG = new URL('../plugin/scripts/lib/config.mjs', import.meta.url).href;
-const COMMON = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
 
 describe('plugin-data marker stomp guard', () => {
   after(() => {
@@ -127,20 +126,6 @@ describe('plugin-data marker stomp guard', () => {
 
       assert.equal(s.resolve(CONFIG, 'getPluginData', MISSING_PLUGIN_DATA), MISSING_PLUGIN_DATA);
       assert.equal(s.readMarker(), sentinel, 'marker unchanged');
-    } finally {
-      s.cleanup();
-    }
-  });
-
-  it('hooks/lib/common.mjs resolvePluginData applies the same guard', () => {
-    const s = sandbox();
-    try {
-      const sentinel = '/Users/test/sentinel-hooks';
-      writeFileSync(s.marker, sentinel, 'utf-8');
-      const tempPluginData = join(s.home, 'plugin-data');
-
-      assert.equal(s.resolve(COMMON, 'resolvePluginData', tempPluginData), tempPluginData);
-      assert.equal(s.readMarker(), sentinel, 'hooks variant preserves marker too');
     } finally {
       s.cleanup();
     }

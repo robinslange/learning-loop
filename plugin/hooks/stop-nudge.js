@@ -3,7 +3,7 @@
 // Nudges consolidation once per session if the session was substantial.
 
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
-import { resolvePluginData, readPayload } from './lib/common.mjs';
+import { readPayload } from './lib/common.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -11,6 +11,7 @@ import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { emitJson } from './lib/io.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
+import { getPluginData } from '../scripts/lib/config.mjs';
 
 function now() {
   return Math.floor(Date.now() / 1000);
@@ -22,7 +23,7 @@ if (!hookData) process.exit(0);
 // Check if stop hook is already active (prevent loops)
 if (hookData.stop_hook_active) process.exit(0);
 
-const pluginData = resolvePluginData();
+const pluginData = getPluginData();
 const sessionId = sessionIdFrom(hookData);
 
 // All dream/reflect markers live in plugin-data (MARKER_PATHS) — never tmp:

@@ -6,14 +6,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  resolveVaultPath,
-  resolveConfig,
-  resolvePluginData,
-  emitRetrieval,
-  readFileTail,
-  readPayload,
-} from './lib/common.mjs';
+import { emitRetrieval, readFileTail, readPayload } from './lib/common.mjs';
 import {
   buildInjection,
   enrichVaultHits,
@@ -31,6 +24,7 @@ import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
+import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
 
 const payload = await readPayload('session-label');
 if (!payload) process.exit(0);
@@ -103,7 +97,7 @@ const topicPatterns = [
 // bad regex is skipped (logged), never fatal — labels degrade, hooks don't.
 function configTopicPatterns() {
   try {
-    const raw = resolveConfig().label_topics;
+    const raw = getConfig().label_topics;
     if (!Array.isArray(raw)) return [];
     const out = [];
     for (const t of raw) {
@@ -123,7 +117,7 @@ function configTopicPatterns() {
 
 function instanceTopicPatterns() {
   try {
-    const vaultRoot = resolveVaultPath();
+    const vaultRoot = getVaultPath();
     if (!vaultRoot) return [];
     const slugs = listProjectSlugs(readVaultProjectIndexSync(vaultRoot));
     return slugs.map((slug) => {
@@ -208,7 +202,7 @@ if (label.length > HookConfig.LABEL_MAX_LENGTH) {
 }
 
 function dedupeStatePath(sid) {
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   if (!pd) return null;
   const dir = DATA_PATHS.retrievalSessionDedupe(pd);
   mkdirSync(dir, { recursive: true });
@@ -301,7 +295,7 @@ try {
   // Mode cascade: env (if set) > config > default 'shadow'.
   const mode = env.LEARNING_LOOP_INJECTION_MODE_SET
     ? env.LEARNING_LOOP_INJECTION_MODE
-    : resolveConfig().injection_mode || 'shadow';
+    : getConfig().injection_mode || 'shadow';
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
@@ -320,8 +314,7 @@ try {
   // change what happens next.
   const specificityFloor = env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY_SET
     ? env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY
-    : (resolveConfig().injection_min_prompt_specificity ??
-      HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY);
+    : (getConfig().injection_min_prompt_specificity ?? HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY);
   const specificity = promptSpecificity(prompt);
   if (specificity < specificityFloor) {
     logShadow({
@@ -337,7 +330,7 @@ try {
     soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS,
   });
 
-  const vaultRoot = resolveVaultPath();
+  const vaultRoot = getVaultPath();
   if (!vaultRoot) {
     logShadow({ type: 'gate-fail-no-vault', gate: { passed: false, error: 'no_vault_path' } });
     process.exit(0);
@@ -358,7 +351,7 @@ try {
   // Threshold cascade: env (if set) > config > HookConfig default.
   const gateThreshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
     ? env.LEARNING_LOOP_INJECTION_THRESHOLD
-    : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
+    : (getConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
   // Padding is load-bearing when the padded query cleared the gate but the
   // prompt alone would not have. STEP 2 will suppress these; for now it is
   // recorded on gate-pass records only (a suppression target is a note that

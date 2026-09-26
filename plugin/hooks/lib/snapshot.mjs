@@ -7,10 +7,11 @@
 
 import { readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join, basename, sep } from 'node:path';
-import { resolvePluginData } from './common.mjs';
+
 import { withLock, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
 
 export const SNAPSHOT_VERSION = 1;
 export const TTL_MS = 30_000;
@@ -38,7 +39,7 @@ const EDGE_PRIORITY_DIRS = [
 ];
 
 function snapshotPath() {
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   if (!pd) return null;
   return join(pd, 'vault-snapshot.json');
 }

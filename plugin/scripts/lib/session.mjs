@@ -32,7 +32,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { logError } from './log.mjs';
-import { resolvePluginData } from './config.mjs';
+import { getPluginData } from './config.mjs';
 import { DATA_PATHS } from './paths.mjs';
 
 export function getSessionId() {
@@ -40,7 +40,7 @@ export function getSessionId() {
   if (harness) return harness;
 
   const candidates = [];
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   if (pd) candidates.push(join(DATA_PATHS.session(pd), 'id'));
   // Test seam: the tmp candidate is machine-global (a live session's marker).
   // LL_SESSION_TMP_DIR points tests at a private dir so they never read or

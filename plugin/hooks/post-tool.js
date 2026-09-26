@@ -6,7 +6,7 @@
 // fixed module order, per-module failure isolation.
 
 import { basename, join } from 'node:path';
-import { readPayload, resolveVaultPath, isVaultNote } from './lib/common.mjs';
+import { readPayload, isVaultNote } from './lib/common.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
@@ -14,7 +14,7 @@ import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
-import { getPluginData } from '../scripts/lib/config.mjs';
+import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
 import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -74,7 +74,7 @@ const ctx = {
   //     marker. The skill sets it; the replay forwards it; we honor it here as
   //     the explicit override reflect-track.mjs already supports.
   sessionId: env.LL_REFLECT_SID || null,
-  vaultRoot: resolveVaultPath(),
+  vaultRoot: getVaultPath(),
   snapshot: null,
 };
 
