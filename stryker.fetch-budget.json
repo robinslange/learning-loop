@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "testRunner": "command",
+  "commandRunner": {
+    "command": "node --test --test-force-exit tests/gateway/fetch-budget.test.mjs tests/gateway/solenoid-budget.test.mjs"
+  },
+  "mutate": ["plugin/scripts/lib/fetch-budget.mjs"],
+  "thresholds": { "high": 95, "low": 90, "break": 90 },
+  "reporters": ["clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/fetch-budget.json" },
+  "concurrency": 4,
+  "timeoutMS": 20000,
+  "coverageAnalysis": "off",
+  "tempDirName": ".stryker-tmp"
+}

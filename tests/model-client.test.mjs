@@ -39,8 +39,10 @@ describe('chatJSON — ollama provider', () => {
     });
     assert.deepEqual(out, { label: 'claim' });
 
-    const { url, body, headers } = fetchOverride.calls[0];
+    const { url, init, body, headers } = fetchOverride.calls[0];
     assert.equal(url, 'http://localhost:11434/api/chat');
+    assert.equal(init.method, 'POST');
+    assert.equal(headers['Content-Type'], 'application/json');
     assert.equal(body.model, 'gemma3:12b');
     assert.equal(body.stream, false);
     assert.deepEqual(body.format, SCHEMA); // Ollama: `format`
@@ -81,6 +83,68 @@ describe('chatJSON — ollama provider', () => {
   });
 });
 
+describe('chatJSON — malformed model responses (defensive optional chaining)', () => {
+  it('ollama: a response with no message field rejects parsing the (absent) content, not a property-read crash', async () => {
+    const provider = { kind: 'ollama', baseUrl: 'http://localhost:11434' };
+    const fetchOverride = captureFetch({});
+    await assert.rejects(
+      () =>
+        chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, fetchOverride }),
+      (e) => e instanceof SyntaxError,
+    );
+  });
+
+  const openaiProvider = { kind: 'openai', baseUrl: 'http://x', apiKey: 'k' };
+
+  it('openai: no choices field rejects the same way', async () => {
+    const fetchOverride = captureFetch({});
+    await assert.rejects(
+      () =>
+        chatJSON({
+          provider: openaiProvider,
+          model: 'm',
+          system: 's',
+          user: 'u',
+          schema: SCHEMA,
+          fetchOverride,
+        }),
+      (e) => e instanceof SyntaxError,
+    );
+  });
+
+  it('openai: an empty choices array rejects the same way', async () => {
+    const fetchOverride = captureFetch({ choices: [] });
+    await assert.rejects(
+      () =>
+        chatJSON({
+          provider: openaiProvider,
+          model: 'm',
+          system: 's',
+          user: 'u',
+          schema: SCHEMA,
+          fetchOverride,
+        }),
+      (e) => e instanceof SyntaxError,
+    );
+  });
+
+  it('openai: a choice with no message field rejects the same way', async () => {
+    const fetchOverride = captureFetch({ choices: [{}] });
+    await assert.rejects(
+      () =>
+        chatJSON({
+          provider: openaiProvider,
+          model: 'm',
+          system: 's',
+          user: 'u',
+          schema: SCHEMA,
+          fetchOverride,
+        }),
+      (e) => e instanceof SyntaxError,
+    );
+  });
+});
+
 describe('chatJSON — openai provider', () => {
   const provider = {
     kind: 'openai',
@@ -108,8 +172,45 @@ describe('chatJSON — openai provider', () => {
     assert.equal(body.stream, false);
     assert.equal(body.format, undefined); // not Ollama-shaped
     assert.equal(body.response_format.type, 'json_schema'); // OpenAI: response_format
+    assert.equal(body.response_format.json_schema.name, 'response');
     assert.deepEqual(body.response_format.json_schema.schema, SCHEMA);
     assert.equal(headers.Authorization, 'Bearer sk-test');
+  });
+
+  it('sends no Authorization header when the provider has no apiKey', async () => {
+    const fetchOverride = captureFetch({
+      choices: [{ message: { content: '{"label":"topic"}' } }],
+    });
+    await chatJSON({
+      provider: { kind: 'openai', baseUrl: 'https://api.fireworks.ai/inference' },
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      fetchOverride,
+    });
+    assert.equal(fetchOverride.calls[0].headers.Authorization, undefined);
+  });
+
+  it('lifts every sampling param the caller sets, and no others, to the openai body top level', async () => {
+    const fetchOverride = captureFetch({
+      choices: [{ message: { content: '{"label":"topic"}' } }],
+    });
+    await chatJSON({
+      provider,
+      model: 'm',
+      system: 's',
+      user: 'u',
+      schema: SCHEMA,
+      options: { temperature: 0.4, top_p: 0.9, top_k: 40, max_tokens: 512, seed: 7 },
+      fetchOverride,
+    });
+    const { body } = fetchOverride.calls[0];
+    assert.equal(body.temperature, 0.4);
+    assert.equal(body.top_p, 0.9);
+    assert.equal(body.top_k, 40);
+    assert.equal(body.max_tokens, 512);
+    assert.equal(body.seed, 7);
   });
 
   it('drops keep_alive for openai (not a valid field)', async () => {
@@ -149,12 +250,17 @@ describe('chatJSON — openai provider', () => {
 describe('chatJSON — errors', () => {
   const provider = { kind: 'ollama', baseUrl: 'http://localhost:11434' };
 
-  it('throws on non-2xx HTTP', async () => {
+  it('throws on non-2xx HTTP, tagged MODEL_HTTP_ERROR with the status', async () => {
     const fetchOverride = captureFetch({}, 500);
     await assert.rejects(
       () =>
         chatJSON({ provider, model: 'm', system: 's', user: 'u', schema: SCHEMA, fetchOverride }),
-      /HTTP 500/,
+      (e) => {
+        assert.match(e.message, /HTTP 500/);
+        assert.equal(e.code, 'MODEL_HTTP_ERROR');
+        assert.equal(e.status, 500);
+        return true;
+      },
     );
   });
 

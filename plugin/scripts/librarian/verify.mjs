@@ -8,11 +8,15 @@
 // rejects, so the CLI exits 1 and the router defers the claim to the Claude fallback
 // rather than half-verifying it. (Exit 3 means no GLM provider is configured.)
 
+import { join } from 'node:path';
 import { isMainModule } from '../lib/is-main.mjs';
 import { chatJSON } from '../lib/model-client.mjs';
 import { loadLibrarianConfig } from './config.mjs';
 import { budgetScopeSegment } from '../lib/fetch-budget.mjs';
 import { getSessionId } from '../lib/session.mjs';
+import { getPluginData } from '../lib/config.mjs';
+import { solenoid } from '../../vendor/solenoid/solenoid.mjs';
+import { fileStore } from '../../vendor/solenoid/node.mjs';
 
 const VOTES_PER_CLAIM = 3;
 const REFUTATIONS_REQUIRED = 2;
@@ -104,6 +108,20 @@ async function readStdin() {
   return JSON.parse(s);
 }
 
+// Solenoid budget for the CLI's GLM calls, at learning-loop/verify/<session>.
+// Mirrors buildSolenoidStore() in fetch-budget.mjs: with a known pluginData,
+// the outage-mode cache lives under it rather than the shared machine-wide
+// ~/.cache/solenoid, so one caller's outage state (tests, another plugin
+// data dir) can't leak into another's. Returns undefined (no budget, no
+// enforcement) when there's no key or the session id can't form a scope
+// segment — chatJSON's `budget &&` check treats that as "spend unmetered".
+export function buildVerifyBudget(sessionId, pluginData) {
+  const seg = budgetScopeSegment(sessionId);
+  if (!process.env.SOLENOID_KEY || !seg) return undefined;
+  const store = pluginData ? fileStore(join(pluginData, 'solenoid')) : fileStore();
+  return solenoid({ store }).at(`learning-loop/verify/${seg}`);
+}
+
 if (isMainModule(import.meta.url)) {
   readStdin()
     .then(async ({ question, claim }) => {
@@ -112,14 +130,7 @@ if (isMainModule(import.meta.url)) {
         console.error('no openai provider configured for GLM verify');
         process.exit(3);
       }
-      const seg = budgetScopeSegment(getSessionId());
-      const budget =
-        process.env.SOLENOID_KEY && seg
-          ? await import('../../vendor/solenoid/solenoid.mjs').then(async ({ solenoid }) => {
-              const { fileStore } = await import('../../vendor/solenoid/node.mjs');
-              return solenoid({ store: fileStore() }).at(`learning-loop/verify/${seg}`);
-            })
-          : undefined;
+      const budget = buildVerifyBudget(getSessionId(), getPluginData());
       const r = await verifyClaimGlm(question, claim, {
         provider: cfg.provider,
         keepAlive: cfg.keepAlive,

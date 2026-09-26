@@ -48,4 +48,30 @@ describe('chatJSON budget', () => {
       { ok: true },
     );
   });
+
+  it('never routes an ollama call through budget.llm, even when a budget is given', async () => {
+    const ollamaProvider = { kind: 'ollama', baseUrl: 'http://localhost:11434' };
+    const ollamaReply = { message: { content: '{"ok":true}' } };
+    let budgetCalled = false;
+    const budget = {
+      llm: async (call, req) => {
+        budgetCalled = true;
+        return call(req);
+      },
+    };
+    const fetchOverride = async () => new Response(JSON.stringify(ollamaReply));
+    assert.deepEqual(
+      await chatJSON({
+        provider: ollamaProvider,
+        model: 'x',
+        system: 's',
+        user: 'u',
+        schema: {},
+        fetchOverride,
+        budget,
+      }),
+      { ok: true },
+    );
+    assert.equal(budgetCalled, false);
+  });
 });
