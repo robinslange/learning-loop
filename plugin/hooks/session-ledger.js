@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync 
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readPayload, emitProvenance } from './lib/common.mjs';
-import { env } from '../scripts/lib/env.mjs';
+import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
@@ -112,10 +112,12 @@ let git = {
   commitsSource: 'since',
 };
 try {
-  const gitBudget = { remaining: HookConfig.LEDGER_GIT_BUDGET_MS };
+  const seam = coerceNumber(env.LL_LEDGER_GIT_BUDGET_MS, 0);
+  const gitBudget = { remaining: seam || HookConfig.LEDGER_GIT_BUDGET_MS };
+  const gitTimeoutMs = seam || HookConfig.LEDGER_GIT_TIMEOUT_MS;
   const budgeted = budgetedGit(execGit, gitBudget);
-  project = resolveProject(cwd, config, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS);
-  git = gitFacts(project.worktreeRoot, startedTs, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS, {
+  project = resolveProject(cwd, config, budgeted, gitTimeoutMs);
+  git = gitFacts(project.worktreeRoot, startedTs, budgeted, gitTimeoutMs, {
     startedHead: marker?.started_head,
   });
 } catch (err) {

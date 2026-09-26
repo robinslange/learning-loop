@@ -23,6 +23,9 @@ import { encodeProjectDir } from '../plugin/scripts/lib/paths.mjs';
 // resolves it. Building repo/vault paths under the unresolved tmpdir() makes
 // collectFacts' relative() walk out of the worktree on every edit path.
 const TMP = realpathSync(tmpdir());
+// The production git budget (900ms) is the hook's real SessionEnd limit, but
+// a contended full-suite run can spend 300ms spawning one git.
+const GIT_BUDGET_MS = '10000';
 
 const HOOK = fileURLToPath(new URL('../plugin/hooks/session-ledger.js', import.meta.url));
 let r2ctx;
@@ -113,7 +116,7 @@ function run({
   const result = runHook(HOOK, {
     // Match TMPDIR to this process's resolved tmpdir so the hook's tmpdir()
     // finds the label file the seed callback writes.
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       vault = makeVault(sandboxRoot);
       repo = makeRepo(sandboxRoot);
@@ -173,7 +176,7 @@ test('Stop reaps a stale .tmp in the ledger dir but leaves a fresh one', () => {
   const sid = randomUUID();
   let ctx;
   const r = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
@@ -208,7 +211,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
   const sid = randomUUID();
   let ctx;
   const r1 = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
@@ -240,7 +243,7 @@ test('a later Stop credits only commits made since the recorded HEAD, not the wh
   });
 
   const r2 = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir) => {
       seedConfig(pluginDataDir, ctx.vault);
       mkdirSync(join(pluginDataDir, 'markers'), { recursive: true });
@@ -281,7 +284,7 @@ test('a marker with a started_head that is no longer an ancestor falls back to -
   const sid = randomUUID();
   let ctx;
   const r = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
@@ -331,7 +334,7 @@ test('a second Stop overwrites the same note and does not re-emit inside the int
   r1.cleanup();
 
   const r2 = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
@@ -377,7 +380,7 @@ test('the marker seeded before Stop wins the pin: both path and started_head sur
   const seededPath = '4-projects/my-repo/ledger/2020-01-01-seeded-session-aaaaaaaa.md';
   const seededHead = 'a'.repeat(40);
   const r = runHook(HOOK, {
-    env: { TMPDIR: TMP },
+    env: { TMPDIR: TMP, LL_LEDGER_GIT_BUDGET_MS: GIT_BUDGET_MS },
     seed: (pluginDataDir, sandboxRoot) => {
       const vault = makeVault(sandboxRoot);
       const repo = makeRepo(sandboxRoot);
