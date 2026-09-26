@@ -1,4 +1,4 @@
-// scripts/lib/jsonl.mjs : single-writer JSONL append helper.
+// scripts/lib/jsonl.mjs : JSONL append and read helpers.
 //
 // Atomic-ish line append for line-buffered telemetry files. Uses openSync('a')
 // + writeSync + closeSync so the kernel writes the full line in one syscall.
@@ -13,8 +13,17 @@
 // markdown body appends in vault notes; those have different consistency
 // requirements (handled by snapshot.mjs and the daemon).
 
-import { openSync, writeSync, readSync, closeSync, mkdirSync, fstatSync } from 'node:fs';
-import { dirname } from 'node:path';
+import {
+  openSync,
+  writeSync,
+  readSync,
+  closeSync,
+  mkdirSync,
+  fstatSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export function appendJsonlLine(path, obj) {
   const line = JSON.stringify(obj) + '\n';
@@ -43,6 +52,42 @@ export function appendJsonlLineSafe(path, obj) {
   } catch {
     return false;
   }
+}
+
+// Every parseable record in a JSONL file. A torn line, from a writer killed
+// mid-append, costs that one record and never the rest of the file. An
+// unreadable file reads as empty, as in readTailBytes below. (No logError:
+// log.mjs appends through this module.)
+export function readJsonl(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+      // eslint-disable-next-line learning-loop/no-empty-catch -- a torn telemetry line; skip it, keep the rest.
+    } catch {}
+  }
+  return out;
+}
+
+// Every record in dir's <prefix>*.jsonl files, the monthly shards of one
+// stream. A missing directory reads as empty.
+export function readJsonlDir(dir, prefix) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((f) => f.startsWith(prefix) && f.endsWith('.jsonl'))
+    .flatMap((f) => readJsonl(join(dir, f)));
 }
 
 // Read at most maxBytes from the end of a file, opened/seeked/closed once.
