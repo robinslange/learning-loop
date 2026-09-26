@@ -12,7 +12,7 @@ import {
 } from './lib/shadow-gate.mjs';
 import { assessGateReachability } from './lib/gate-reachability.mjs';
 import { INJECTION_CALIBRATION_EPOCH, HookConfig } from './lib/hook-config.mjs';
-import { getConfig, getPluginData } from './lib/config.mjs';
+import { getPluginData, injectionSetting } from './lib/config.mjs';
 
 const pd = getPluginData();
 if (!pd) {
@@ -76,13 +76,14 @@ const vaultLat = healthy
   .filter((v) => typeof v === 'number');
 const racedOut = healthy.filter((e) => e.backends?.vault?.raced_out).length;
 
-// Match the live cascade in session-label.js: env (only when explicitly set) >
-// config.json > the shipped constant. Reading the env var alone reported a pass
-// rate against a threshold the gate was not using whenever `injection_threshold`
-// was set in config.
-const threshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
-  ? env.LEARNING_LOOP_INJECTION_THRESHOLD
-  : (getConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
+// The same cascade the live gate in session-label.js uses. Reading the env
+// var alone reported a pass rate against a threshold the gate was not using
+// whenever `injection_threshold` was set in config.
+const threshold = injectionSetting(
+  env.LEARNING_LOOP_INJECTION_THRESHOLD,
+  'injection_threshold',
+  HookConfig.INJECTION_THRESHOLD,
+);
 
 console.log('# Shadow injection review\n');
 console.log(`Total entries: ${total}`);

@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { skipOnWindows } from './helpers/platform.mjs';
 import { runHook } from './helpers/hook-runner.mjs';
+import { composeLabel, topicPatterns } from '../plugin/hooks/session-label.js';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.js');
 // mkdtemp, not a fixed name: parallel test runs sharing one dir flake when
@@ -56,17 +57,131 @@ function run(sessionId, prompt, transcriptPath, cwd = '/tmp', env = {}) {
   return labelOf(sessionId);
 }
 
-describe('session-label', () => {
+// Messages oldest first, current prompt last, as the hook passes them.
+function label(messages, { labelTopics = [], projectSlugs = [], cwd = '/tmp' } = {}) {
+  return composeLabel(messages, topicPatterns(labelTopics, projectSlugs), cwd);
+}
+
+describe('composeLabel', () => {
   it('produces a label for a clear topic', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript(['I need to fix the GraphQL subscriptions', 'the websocket keeps dropping']),
+    const l = label([
+      'I need to fix the GraphQL subscriptions',
+      'the websocket keeps dropping',
+      'can you check the GraphQL subscription config?',
+    ]);
+    assert.ok(/GraphQL|GQL/.test(l), `label should mention GraphQL, got: ${l}`);
+  });
+
+  it('falls back to cwd basename when no patterns match', () => {
+    const l = label(['what is the weather like today', 'just chatting about nothing specific'], {
+      cwd: '/Users/robin/myproject',
+    });
+    assert.equal(l, 'myproject');
+  });
+
+  it('detects action patterns like debug', () => {
+    const l = label([
+      'I need to debug the failing tests in the MCP server',
+      'fix the error in the mcp handler',
+    ]);
+    assert.ok(l.includes('MCP'), `label should mention MCP, got: ${l}`);
+    assert.ok(l.includes('debugging'), `label should mention debugging, got: ${l}`);
+  });
+
+  it('detects review action', () => {
+    const l = label(['review this PR for the auth flow', 'review the changes']);
+    assert.ok(l.includes('auth'), `expected auth, got: ${l}`);
+    assert.ok(l.includes('review'), `expected review, got: ${l}`);
+  });
+
+  it('truncates labels longer than 35 characters', () => {
+    const l = label([
+      'refactor the GraphQL subscriptions in the frontend component',
+      'also review the authentication flow',
+      'refactor the GraphQL subscription auth layer',
+    ]);
+    assert.ok(l.length <= 35, `label should be <= 35 chars, got ${l.length}: "${l}"`);
+    assert.ok(l.endsWith('…'), `a cut label ends in an ellipsis, got: "${l}"`);
+  });
+
+  it('current prompt scores higher than a single old message', () => {
+    const l = label(['working on the vault notes', 'switch to the MCP server']);
+    assert.ok(l.startsWith('MCP'), `current prompt topic should rank first, got: ${l}`);
+  });
+
+  it('derives an instance topic from a 4-projects/ slug', () => {
+    const l = label(['fix the widget-co build'], { projectSlugs: ['widget-co'] });
+    assert.ok(/widget[\s-]co/i.test(l), `expected widget-co topic, got: ${l}`);
+  });
+
+  it('ranks an instance project above a built-in topic matching the same words', () => {
+    const l = label(['fix the graphql-api schema'], { projectSlugs: ['graphql-api'] });
+    assert.ok(l.startsWith('Graphql Api GraphQL'), `instance topic should rank first, got: ${l}`);
+  });
+
+  it('loads owner topic patterns from config label_topics', () => {
+    const l = label(['fix the kayak roll technique please'], {
+      labelTopics: [{ match: '\\bkayak\\b', label: 'kayaking' }],
+    });
+    assert.ok(l.includes('kayaking'), `config label_topics should drive label, got: ${l}`);
+  });
+
+  it('skips an invalid label_topics regex and keeps its valid siblings', () => {
+    const l = label(['fix the kayak roll technique please'], {
+      labelTopics: [
+        { match: '([', label: 'broken' },
+        { match: '\\bkayak\\b', label: 'kayaking' },
+        'not-an-object',
+      ],
+    });
+    assert.ok(l.includes('kayaking'), `valid patterns must survive a bad sibling, got: ${l}`);
+  });
+});
+
+describe('session-label', () => {
+  // Owner-specific life/project patterns belong in the instance config
+  // (label_topics), never in the public source.
+  it('source carries no personal topic patterns', () => {
+    assert.doesNotMatch(
+      readFileSync(HOOK, 'utf8'),
+      /eczema|\\btsw\\b|dermat|nootropic|supplement|autis|audhd|neurodiv|circadian|melatonin|grid.bot|trading|coaching|resto.druid|mythic|\\bwow\\b|kin-\\d|oh.my.claude/i,
     );
-    const label = run(sid, 'can you check the GraphQL subscription config?', transcript);
-    assert.ok(label, 'label file should exist');
-    assert.ok(/GraphQL|GQL/.test(label), `label should mention GraphQL, got: ${label}`);
+  });
+
+  it('reads label_topics from config.json', () => {
+    const sid = randomUUID();
+    hook(
+      {
+        session_id: sid,
+        prompt: 'fix the kayak roll technique please',
+        transcript_path: '',
+        cwd: '/tmp',
+      },
+      {
+        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
+        seed: (pluginData) =>
+          writeFileSync(
+            join(pluginData, 'config.json'),
+            JSON.stringify({ label_topics: [{ match: '\\bkayak\\b', label: 'kayaking' }] }),
+          ),
+      },
+    );
+    assert.ok(labelOf(sid)?.includes('kayaking'), `got: ${labelOf(sid)}`);
+  });
+
+  it('reads project slugs from the vault 4-projects/ folder', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'll-label-vault-'));
+    try {
+      mkdirSync(join(vault, '4-projects'), { recursive: true });
+      writeFileSync(join(vault, '4-projects', 'widget-co.md'), '# widget-co');
+      const sid = randomUUID();
+      const l = run(sid, 'fix the widget-co build', '/nonexistent.jsonl', '/tmp', {
+        VAULT_PATH: vault,
+      });
+      assert.ok(l && /widget[\s-]co/i.test(l), `expected widget-co topic, got: ${l}`);
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+    }
   });
 
   it('handles empty transcript', () => {
@@ -75,42 +190,6 @@ describe('session-label', () => {
     writeFileSync(transcript, '');
     const label = run(sid, 'hello', transcript);
     assert.ok(label !== null, 'label file should exist');
-  });
-
-  it('falls back to cwd basename when no patterns match', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['what is the weather like today']));
-    const label = run(
-      sid,
-      'just chatting about nothing specific',
-      transcript,
-      '/Users/robin/myproject',
-    );
-    assert.ok(label !== null, 'label file should exist');
-    assert.equal(label, 'myproject');
-  });
-
-  it('detects action patterns like debug', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript(['I need to debug the failing tests in the MCP server']),
-    );
-    const label = run(sid, 'fix the error in the mcp handler', transcript);
-    assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('MCP'), `label should mention MCP, got: ${label}`);
-    assert.ok(label.includes('debugging'), `label should mention debugging, got: ${label}`);
-  });
-
-  it('detects review action', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['review this PR for the auth flow']));
-    const label = run(sid, 'review the changes', transcript);
-    assert.ok(label.includes('auth'), `expected auth, got: ${label}`);
-    assert.ok(label.includes('review'), `expected review, got: ${label}`);
   });
 
   it('does not crash on malformed transcript lines', () => {
@@ -159,20 +238,6 @@ describe('session-label', () => {
     assert.ok(label.includes('frontend'), `expected frontend, got: ${label}`);
   });
 
-  it('truncates labels longer than 35 characters', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript([
-        'refactor the GraphQL subscriptions in the frontend component',
-        'also review the authentication flow',
-      ]),
-    );
-    const label = run(sid, 'refactor the GraphQL subscription auth layer', transcript);
-    assert.ok(label.length <= 35, `label should be <= 35 chars, got ${label.length}: "${label}"`);
-  });
-
   it('exits cleanly with empty stdin', () => {
     const { stdout } = hook('');
     assert.equal(stdout.trim(), '');
@@ -198,26 +263,6 @@ describe('session-label', () => {
     assert.ok(label.includes('deploying'), `expected deploying, got: ${label}`);
   });
 
-  it('current prompt scores higher than a single old message', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['working on the vault notes']));
-    const label = run(sid, 'switch to the MCP server', transcript);
-    assert.ok(label.startsWith('MCP'), `current prompt topic should rank first, got: ${label}`);
-  });
-
-  it('derives an instance topic from a 4-projects/ slug', () => {
-    const vault = mkdtempSync(join(tmpdir(), 'll-label-vault-'));
-    mkdirSync(join(vault, '4-projects'), { recursive: true });
-    writeFileSync(join(vault, '4-projects', 'widget-co.md'), '# widget-co');
-    const sid = randomUUID();
-    const label = run(sid, 'fix the widget-co build', '/nonexistent.jsonl', '/tmp', {
-      VAULT_PATH: vault,
-    });
-    assert.ok(label && /widget[\s-]co/i.test(label), `expected widget-co topic, got: ${label}`);
-    rmSync(vault, { recursive: true, force: true });
-  });
-
   // Regression: the hook must read only the transcript TAIL
   // (TRANSCRIPT_TAIL_BYTES), not the whole file — transcripts reach tens of
   // MB and this runs on every prompt inside a 3s outer timeout. A giant early
@@ -240,84 +285,6 @@ describe('session-label', () => {
     assert.ok(
       !/GraphQL|GQL/.test(label),
       `content outside the tail window must not score topics, got: ${label}`,
-    );
-  });
-
-  it('source carries no hardcoded instance-name topic patterns', () => {
-    const src = readFileSync(HOOK, 'utf8');
-    assert.match(
-      src,
-      /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
-      'instance-topic derivation from 4-projects/ missing',
-    );
-    assert.match(
-      src,
-      /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
-      'instance patterns must be spread first into allTopicPatterns',
-    );
-    // Owner-specific life/project patterns belong in the instance config
-    // (label_topics), never in the public source.
-    assert.doesNotMatch(
-      src,
-      /eczema|\\btsw\\b|dermat|nootropic|supplement|autis|audhd|neurodiv|circadian|melatonin|grid.bot|trading|coaching|resto.druid|mythic|\\bwow\\b|kin-\\d|oh.my.claude/i,
-      'personal topic patterns must live in instance config (label_topics), not source',
-    );
-  });
-
-  it('loads owner topic patterns from config label_topics', () => {
-    const sid = randomUUID();
-    hook(
-      {
-        session_id: sid,
-        prompt: 'fix the kayak roll technique please',
-        transcript_path: '',
-        cwd: '/tmp',
-      },
-      {
-        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
-        seed: (pluginData) =>
-          writeFileSync(
-            join(pluginData, 'config.json'),
-            JSON.stringify({
-              label_topics: [{ match: '\\bkayak\\b', label: 'kayaking' }],
-            }),
-          ),
-      },
-    );
-    const label = labelOf(sid);
-    assert.ok(label !== null, 'label file should exist');
-    assert.ok(label.includes('kayaking'), `config label_topics should drive label, got: ${label}`);
-  });
-
-  it('an invalid label_topics regex is skipped without crashing the hook', () => {
-    const sid = randomUUID();
-    hook(
-      {
-        session_id: sid,
-        prompt: 'fix the kayak roll technique please',
-        transcript_path: '',
-        cwd: '/tmp',
-      },
-      {
-        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
-        seed: (pluginData) =>
-          writeFileSync(
-            join(pluginData, 'config.json'),
-            JSON.stringify({
-              label_topics: [
-                { match: '([', label: 'broken' },
-                { match: '\\bkayak\\b', label: 'kayaking' },
-                'not-an-object',
-              ],
-            }),
-          ),
-      },
-    );
-    const label = labelOf(sid);
-    assert.ok(label !== null, 'label file should exist despite the bad pattern');
-    assert.ok(
-      label.includes('kayaking'),
-      `valid patterns must survive a bad sibling, got: ${label}`,
     );
   });
 });

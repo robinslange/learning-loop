@@ -4,7 +4,6 @@ import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
 import { expandHome } from './paths.mjs';
 import { safeLoad } from './safe-load.mjs';
-import { env } from './env.mjs';
 import { logError } from './log.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -177,6 +176,13 @@ function migrateConfig(from, to) {
   mkdirSync(dirname(to), { recursive: true });
   copyFileSync(from, to);
   process.stderr.write(`[config] Migrated config to ${to}\n`);
+}
+
+// An injection setting: the env var when set, then config.json, then the
+// shipped default. The env side must be null when unset (see env.mjs) or
+// config is never reached.
+export function injectionSetting(envValue, configKey, fallback) {
+  return envValue ?? getConfig()[configKey] ?? fallback;
 }
 
 export function getVaultPath() {
