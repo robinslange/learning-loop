@@ -33,11 +33,11 @@ const DEFAULT_DELAY_MS = 20;
 // than a few hundred ms; one minute is a deliberately conservative floor.
 const DEFAULT_STALE_MS = 60_000;
 
-// SharedArrayBuffer-backed sync sleep — same pattern as hooks/lib/snapshot.mjs.
-// Atomics.wait suspends the thread without spinning; works in any Node context
-// that has SharedArrayBuffer available (Node 22+ always does).
+// SharedArrayBuffer-backed sync sleep. Atomics.wait suspends the thread without
+// spinning; works in any Node context that has SharedArrayBuffer available
+// (Node 22+ always does).
 const _sleepBuf = new Int32Array(new SharedArrayBuffer(4));
-function syncSleep(ms) {
+export function syncSleep(ms) {
   if (ms > 0) Atomics.wait(_sleepBuf, 0, 0, ms);
 }
 

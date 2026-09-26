@@ -55,10 +55,21 @@ test('concurrent writers on one path each finish, and readers never see a torn f
 
     let done = false;
     let reads = 0;
+    // Windows can refuse a read while a rename replaces the file. A refused
+    // read is not a torn one, so only content that was read is judged.
     const reader = (async () => {
       while (!done) {
-        assertWhole(readFileSync(target, 'utf8'));
-        reads++;
+        let text = null;
+        try {
+          text = readFileSync(target, 'utf8');
+        } catch (err) {
+          if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(err.code))
+            throw err;
+        }
+        if (text !== null) {
+          assertWhole(text);
+          reads++;
+        }
         await new Promise((r) => setImmediate(r));
       }
     })();
