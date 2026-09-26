@@ -423,6 +423,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
   // may already have burned its timer, and an execFileSync that outlives the
   // hooks.json timeout gets the whole hook SIGKILLed (losing the already-
   // computed warnings), which is strictly worse than skipping the scan.
+  let subprocessT0;
   try {
     const binary = findBinaryShared();
     if (!binary) return SCAN_FAILED;
@@ -441,7 +442,7 @@ async function checkDuplicateNote(filePath, title, vaultRoot) {
       return SCAN_FAILED;
     }
 
-    const subprocessT0 = Date.now();
+    subprocessT0 = Date.now();
     const out = execFileSync(
       binary.bin,
       ['reflect-scan', dbPath, title, '--top', '1', '--candidates', '5'],
