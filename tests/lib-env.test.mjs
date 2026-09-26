@@ -151,7 +151,12 @@ test('injectionSetting takes the env var, then config.json, then the default (su
     mkdirSync(pluginData);
     writeFileSync(
       join(pluginData, 'config.json'),
-      JSON.stringify({ injection_threshold: 0.4, injection_mode: 'live' }),
+      // An empty config value counts as unset, so the floor falls to the default.
+      JSON.stringify({
+        injection_threshold: 0.4,
+        injection_mode: 'live',
+        injection_min_prompt_specificity: '',
+      }),
     );
     const read = (extra) => {
       const out = spawnSync(
@@ -192,6 +197,11 @@ test('injectionSetting takes the env var, then config.json, then the default (su
       }),
       { threshold: 0, mode: 'off', floor: 0 },
       'an env var set to 0 still wins over config and the default',
+    );
+    assert.deepEqual(
+      read({ LEARNING_LOOP_INJECTION_MODE: '', LEARNING_LOOP_INJECTION_THRESHOLD: 'abc' }),
+      { threshold: 0.4, mode: 'live', floor: 2 },
+      'an empty or non-numeric env var counts as unset, so config applies',
     );
   } finally {
     rmSync(home, { recursive: true, force: true });

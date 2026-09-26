@@ -100,7 +100,7 @@ function configTopicPatterns(labelTopics) {
   if (!Array.isArray(labelTopics)) return [];
   const out = [];
   for (const t of labelTopics) {
-    if (!t || typeof t.match !== 'string' || typeof t.label !== 'string') continue;
+    if (!t || typeof t.match !== 'string' || typeof t.label !== 'string' || !t.label) continue;
     try {
       out.push([new RegExp(t.match, 'i'), t.label]);
     } catch (err) {
