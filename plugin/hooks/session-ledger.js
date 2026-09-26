@@ -3,16 +3,7 @@
 // Writes the session ledger: one 4-projects note per session, overwritten on
 // every flush, and a throttled session-summary provenance record. Never prints.
 
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readPayload, emitProvenance } from './lib/common.mjs';
@@ -39,6 +30,7 @@ import {
   localDateStr,
 } from '../scripts/lib/session-ledger.mjs';
 import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
+import { writeFileAtomic } from '../scripts/lib/write-atomic.mjs';
 
 const STALE_TMP_MS = 60 * 60 * 1000;
 
@@ -212,9 +204,8 @@ try {
   const abs = join(vaultRoot, pin.path);
   mkdirSync(dirname(abs), { recursive: true });
   sweepStaleTmp(dirname(abs));
-  const tmp = `${abs}.${process.pid}.tmp`;
-  writeFileSync(
-    tmp,
+  writeFileAtomic(
+    abs,
     renderLedger({
       project: project.project,
       label,
@@ -234,7 +225,6 @@ try {
       rangeFellBack: Boolean(latest?.started_head) && git.commitsSource === 'since',
     }),
   );
-  renameSync(tmp, abs);
   wrote = true;
 } catch (err) {
   logError('session-ledger.write', err);

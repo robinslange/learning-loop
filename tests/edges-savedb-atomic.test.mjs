@@ -20,9 +20,10 @@ test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () =
   );
 });
 
-test('saveDb uses rename, not a direct writeFileSync to the db path', () => {
+test('saveDb writes through writeFileAtomic, not a direct writeFileSync to the db path', () => {
   const src = readFileSync(new URL('../plugin/scripts/lib/edges.mjs', import.meta.url), 'utf8');
   const fn = src.slice(src.indexOf('export function saveDb'));
   const body = fn.slice(0, fn.indexOf('\n}') + 2);
-  assert.match(body, /renameSync/);
+  assert.match(body, /writeFileAtomic\(dbPath,/);
+  assert.doesNotMatch(body, /writeFileSync/);
 });
