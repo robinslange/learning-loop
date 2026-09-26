@@ -526,16 +526,28 @@ function proposedChange(tool, input) {
       disk = null;
     }
     if (disk !== null) {
-      // An apply_patch hunk carries the `@@` anchor it occurs strictly after.
+      // An apply_patch hunk (the only entry with a `context` key) is wrapped in
+      // newlines so it matches whole lines, but a file's first line has no
+      // newline before it, and its last line none after it when the file has
+      // no final newline. So the hunk is located in the file padded with a
+      // newline on each side, and the padding comes off the result.
+      const pad = 'context' in input ? '\n' : '';
+      const text = pad + disk + pad;
+      // The hunk also carries the `@@` anchor it occurs strictly after.
       // Searching from the anchor is what stops a hunk removing a body line
       // from binding to an identical line in the frontmatter.
-      const anchor = input.context ? disk.indexOf(input.context) : -1;
-      const idx = disk.indexOf(oldString, anchor === -1 ? 0 : anchor + input.context.length);
+      const anchor = input.context ? text.indexOf(input.context) : -1;
+      const idx = text.indexOf(oldString, anchor === -1 ? 0 : anchor + input.context.length);
       if (idx === -1) return null;
-      const afterText = input.replace_all
-        ? disk.split(oldString).join(newString)
-        : disk.slice(0, idx) + newString + disk.slice(idx + oldString.length);
-      return { beforeText: disk, afterText, whole: true };
+      if (input.replace_all) {
+        return { beforeText: disk, afterText: disk.split(oldString).join(newString), whole: true };
+      }
+      const edited = text.slice(0, idx) + newString + text.slice(idx + oldString.length);
+      return {
+        beforeText: disk,
+        afterText: edited.slice(pad.length, edited.length - pad.length),
+        whole: true,
+      };
     }
   }
   return { beforeText: oldString, afterText: newString, whole: false };

@@ -422,6 +422,62 @@ describe('pre-write-check', () => {
     assert.equal(result, null);
   });
 
+  // tool-payload.mjs wraps each hunk in newlines so it matches whole lines.
+  // The first line of a file has no newline before it, so a hunk there has to
+  // be located against the file with one prepended, or the gate falls open.
+  function runPatch(relPath, hunkLines) {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'apply_patch',
+        tool_input: {
+          command: [
+            '*** Begin Patch',
+            `*** Update File: ${relPath}`,
+            '@@',
+            ...hunkLines,
+            '*** End Patch',
+          ].join('\n'),
+        },
+        cwd: VAULT,
+      },
+      env: { VAULT_PATH: VAULT },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      return out ? JSON.parse(out) : null;
+    } finally {
+      r.cleanup();
+    }
+  }
+
+  it('denies a Codex hunk at the start of a note that adds a duplicate tag', () => {
+    writeFileSync(
+      join(VAULT, '3-permanent', 'patch-top-note.md'),
+      '---\ntags: [alpha, beta]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.\n',
+    );
+    const result = runPatch('3-permanent/patch-top-note.md', [
+      ' ---',
+      '-tags: [alpha, beta]',
+      '+tags: [alpha, beta, alpha]',
+    ]);
+    assert.equal(result?.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /alpha/);
+  });
+
+  it('warns on a broken wikilink a Codex hunk adds at the end of a note with no final newline', () => {
+    writeFileSync(
+      join(VAULT, '3-permanent', 'patch-tail-note.md'),
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nLast line.',
+    );
+    const result = runPatch('3-permanent/patch-tail-note.md', [
+      '-Last line.',
+      '+Last line, see [[nowhere-note]].',
+    ]);
+    assert.match(result?.hookSpecificOutput?.additionalContext ?? '', /nowhere-note/);
+  });
+
   it('denies an Edit that adds a duplicate tag to an on-disk note', () => {
     const p = join(VAULT, '3-permanent', 'tag-edit-note.md');
     writeFileSync(p, '---\ntags: [alpha, beta]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.\n');
