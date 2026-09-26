@@ -4,12 +4,21 @@ All notable changes to this project are documented here. The format is based on 
 
 ## Unreleased
 
+### Changed
+
+- **The pre-write gate judges Write and Edit the same way, by what they add (#87).** One pipeline now checks both tools against the note before and after the change. An Edit that adds a duplicate tag to a note is denied, as a Write always was. A rewrite that keeps a duplicate tag the note already had is allowed, and so is one that keeps a broken wikilink it already had, which is no longer re-warned on every write. A new note still has every duplicate tag denied. The dash denial names only the lines the write added.
+- **Session labels and injection settings (#88).** `session-label.js` exports its label composition, which is now tested directly instead of by spawning the hook. `LEARNING_LOOP_INJECTION_MODE`, `_THRESHOLD`, `_MIN_SPECIFICITY` and `_RACE_CAP_MS` go through one cascade: the env var when set, then `config.json`, then the shipped default. The race cap's default now comes from `HookConfig.INJECTION_RACE_CAP_MS`.
+- **Hook helpers come from where they live (#79), and every replace-by-rename write goes through one `writeFileAtomic` (#90).** Its tmp file carries the pid and a random suffix, and it is removed when the write fails.
+
 ### Removed
 
 - **What the NLI removal left behind (#113).** `ll-search`'s `build.rs` existed only to fetch the DeBERTa NLI model behind a `nli` cargo feature that v1.28 removed, so it never ran; it is deleted with its `sha2`/`hex` build-dependencies, and the DeBERTa entry goes from `provenance/models.json` and `NOTICE`, which credited a model no build ships. The duplicate-scan server keeps its behaviour and loses its NLI names: `nli_server.rs` is `dup_scan_server.rs`, `run_nli_server` is `run_dup_scan_server`, `DATA_FILES.nliSocket` is `dupScanSocket`, and the `nli-socket-fresh` health check is `dup-scan-socket-fresh`. The socket file stays `nli.sock`, so a daemon started before the upgrade still answers the new hook.
 
 ### Fixed
 
+- **The pre-write gate checks Codex hunks at the start and end of a note.** A hunk on a note's first line, which is every frontmatter hunk, or on the last line of a note without a final newline, never matched, so the gate let it through unchecked.
+- **A timed-out duplicate scan is logged instead of throwing.** When the pre-write gate's subprocess fallback hit its timeout, the gate threw a ReferenceError before it could log the timeout. So `/doctor` never saw those timeouts, and `pre_write_fail_mode: "closed"` never blocked the write.
+- **`npm test` reports every test file.** `--test-force-exit` let the runner exit before some files had reported under a loaded parallel run, and it dropped up to 61 tests with `fail 0`. The flag is gone from `npm test` and the Stryker runners, and the CI test step has a 10-minute timeout instead. The session-ledger hook tests also no longer fail on a loaded machine: they raise the hook's git budget through a new test seam, `LL_LEDGER_GIT_BUDGET_MS`.
 - **`ll-core` builds without warnings.** When `FusionWeights` was added it landed between `add_ranked_rrf` and its doc comment, so the struct's doc opened with the function's text and the function had none. The comment is back on `add_ranked_rrf`, which now calls `add_weighted_rrf` with weight 1.0 instead of repeating its loop, and the fusion weights and their fields are documented. No API change.
 
 ## v2.2.1
