@@ -126,6 +126,13 @@ describe('composeLabel', () => {
     assert.ok(l.includes('kayaking'), `config label_topics should drive label, got: ${l}`);
   });
 
+  it('skips a label_topics entry with an empty label', () => {
+    const l = label(['the graphql thing', 'kayak review'], {
+      labelTopics: [{ match: '\\bkayak\\b', label: '' }],
+    });
+    assert.equal(l, 'GraphQL review');
+  });
+
   it('skips an invalid label_topics regex and keeps its valid siblings', () => {
     const l = label(['fix the kayak roll technique please'], {
       labelTopics: [

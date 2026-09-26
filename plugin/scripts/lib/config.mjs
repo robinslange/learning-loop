@@ -180,9 +180,11 @@ function migrateConfig(from, to) {
 
 // An injection setting: the env var when set, then config.json, then the
 // shipped default. The env side must be null when unset (see env.mjs) or
-// config is never reached.
+// config is never reached. An empty string in config is unset too, as it is
+// in the environment; 0 is a value.
 export function injectionSetting(envValue, configKey, fallback) {
-  return envValue ?? getConfig()[configKey] ?? fallback;
+  const fromConfig = getConfig()[configKey];
+  return envValue ?? (fromConfig === '' ? null : fromConfig) ?? fallback;
 }
 
 export function getVaultPath() {
