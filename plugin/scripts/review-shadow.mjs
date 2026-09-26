@@ -12,16 +12,13 @@ import {
 } from './lib/shadow-gate.mjs';
 import { assessGateReachability } from './lib/gate-reachability.mjs';
 import { INJECTION_CALIBRATION_EPOCH, HookConfig } from './lib/hook-config.mjs';
-import { getConfig } from './lib/config.mjs';
+import { getConfig, getPluginData } from './lib/config.mjs';
 
-function resolvePluginData() {
-  const fromEnv = env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) return fromEnv;
+const pd = getPluginData();
+if (!pd) {
   console.error('CLAUDE_PLUGIN_DATA not set');
   process.exit(1);
 }
-
-const pd = resolvePluginData();
 const dir = join(pd, 'retrieval');
 if (!existsSync(dir)) {
   console.log('No retrieval directory yet. Run learning-loop in shadow mode first.');

@@ -5,9 +5,6 @@ import { execFileSync } from 'node:child_process';
 import { createConnection } from 'node:net';
 import {
   runHook,
-  resolvePluginData,
-  resolveVaultPath,
-  resolveConfig,
   findBinary as findBinaryShared,
   isVaultNote,
   vaultRelPath,
@@ -22,7 +19,7 @@ import {
   formatViolations,
 } from '../scripts/lib/frontmatter-schema.mjs';
 import { HookConfig, preWriteFailMode, librarianEnabled } from '../scripts/lib/hook-config.mjs';
-import { getConfig } from '../scripts/lib/config.mjs';
+import { getConfig, getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
 import { pendingItems, appendItem, newItemId } from '../scripts/librarian/queue.mjs';
 import { env, coerceNumber } from '../scripts/lib/env.mjs';
 import { ortSpawnEnv } from '../scripts/lib/binary.mjs';
@@ -358,7 +355,7 @@ export function checkDuplicateFlagQueue(relPath, items) {
 }
 
 async function checkDuplicateNote(filePath, title, vaultRoot) {
-  const pluginData = resolvePluginData();
+  const pluginData = getPluginData();
   const dbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
   if (!existsSync(dbPath)) return null;
 
@@ -508,7 +505,7 @@ async function checkWrite(tool, input) {
   const filePath = input.file_path;
   if (!filePath) return;
 
-  const vaultRoot = resolveVaultPath();
+  const vaultRoot = getVaultPath();
   if (!isVaultNote(filePath, vaultRoot)) return;
 
   // Edit payloads carry string fragments, not whole notes: recompute the
@@ -645,7 +642,7 @@ async function checkWrite(tool, input) {
   const styleAdvisory = checkFilenameStyle(
     filePath,
     vaultRoot,
-    resolveConfig(),
+    getConfig(),
     !isNewFile,
     budgetOkForStyle,
   );

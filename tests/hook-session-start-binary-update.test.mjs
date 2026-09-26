@@ -79,7 +79,7 @@ function makeFixture({ installedVersion, runningVersion }) {
 
 test('cache-cleanup: matching versions do NOT spawn downloader', async () => {
   const fx = makeFixture({ installedVersion: 'v1.25.1', runningVersion: '1.25.1' });
-  // Point the hook at our sandbox plugin-data; it reads via resolvePluginData()
+  // Point the hook at our sandbox plugin-data; it reads via getPluginData()
   // which honours CLAUDE_PLUGIN_DATA.
   const prev = process.env.CLAUDE_PLUGIN_DATA;
   process.env.CLAUDE_PLUGIN_DATA = fx.ctx.pluginData;

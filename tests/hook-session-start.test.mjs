@@ -38,7 +38,7 @@ function seedUpdateCheck(pluginDataDir, opts = {}) {
   writeFileSync(join(pluginDataDir, 'update-check.json'), JSON.stringify(payload));
 }
 
-// Seed a config.json in pluginData with no vault_path so resolveVaultPath() returns null.
+// Seed a config.json in pluginData with no vault_path so getVaultPath() returns null.
 function seedNoVaultConfig(pluginDataDir) {
   writeFileSync(join(pluginDataDir, 'config.json'), JSON.stringify({ vault_path: null }));
 }
@@ -171,7 +171,7 @@ test(
 test('session-start no vault: additionalContext empty, exit 0', { timeout: 12000 }, () => {
   const r = runHook(HOOK, {
     stdin: { session_id: 'no-vault-session-001' },
-    // No VAULT_PATH; seed config with null vault_path so resolveVaultPath() returns null.
+    // No VAULT_PATH; seed config with null vault_path so getVaultPath() returns null.
     seed: (pd) => {
       seedUpdateCheck(pd);
       seedNoVaultConfig(pd);

@@ -61,7 +61,7 @@ test('writeRetrieval handles non-array results gracefully', () => {
 
 test('writeRetrieval is a no-op when pluginData is missing', () => {
   // Silent no-op rather than throw — same pattern as emitRetrieval (returns
-  // early if resolvePluginData() returns null). Hooks fire in environments
+  // early if getPluginData() returns null). Hooks fire in environments
   // where plugin-data may not be resolved yet; logging would create noise.
   assert.doesNotThrow(() =>
     writeRetrieval({

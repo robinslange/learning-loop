@@ -15,13 +15,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  readPayload,
-  resolveVaultPath,
-  resolveConfig,
-  resolvePluginData,
-  emitProvenance,
-} from './lib/common.mjs';
+import { readPayload, emitProvenance } from './lib/common.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
@@ -44,6 +38,7 @@ import {
   shouldEmitSummary,
   localDateStr,
 } from '../scripts/lib/session-ledger.mjs';
+import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
 
 const STALE_TMP_MS = 60 * 60 * 1000;
 
@@ -81,10 +76,10 @@ const isSessionEnd = hookData.hook_event_name === 'SessionEnd';
 const sessionId = sessionIdFrom(hookData);
 if (!sessionId) process.exit(0);
 
-const vaultRoot = resolveVaultPath();
-const pluginData = resolvePluginData();
+const vaultRoot = getVaultPath();
+const pluginData = getPluginData();
 if (!vaultRoot || !pluginData || !existsSync(join(vaultRoot, '4-projects'))) process.exit(0);
-const config = resolveConfig() || {};
+const config = getConfig() || {};
 const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : null;
 if (!cwd) process.exit(0);
 

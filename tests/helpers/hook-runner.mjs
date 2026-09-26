@@ -17,7 +17,7 @@ import {
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { resolvePluginData } from '../../plugin/scripts/lib/config.mjs';
+import { getPluginData } from '../../plugin/scripts/lib/config.mjs';
 
 const PKG_VERSION = JSON.parse(
   readFileSync(new URL('../../plugin/.claude-plugin/plugin.json', import.meta.url), 'utf8'),
@@ -84,7 +84,7 @@ function resolveRealBinary() {
   realBinaryResolved = true;
   const candidates = [];
   try {
-    const pd = resolvePluginData();
+    const pd = getPluginData();
     if (pd) candidates.push(join(pd, 'bin', 'll-search'));
   } catch {}
   candidates.push(fileURLToPath(new URL('../../native/target/release/ll-search', import.meta.url)));
@@ -277,7 +277,7 @@ export function runHook(hookPath, opts = {}) {
       USERPROFILE: sandboxRoot,
       // Silence debug output by default.
       LL_HOOK_DEBUG: '0',
-      // Inject plugin data dir so resolvePluginData() finds it.
+      // Inject plugin data dir so getPluginData() finds it.
       CLAUDE_PLUGIN_DATA: pluginDataDir,
       // Detached children record their pids here so cleanup() can reap them
       // before rmSync — otherwise their writes race the walk (ENOTEMPTY).

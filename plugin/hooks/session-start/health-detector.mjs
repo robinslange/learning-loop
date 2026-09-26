@@ -6,7 +6,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from '../../scripts/lib/log.mjs';
-import { home, resolveConfig } from '../lib/common.mjs';
+
 import { runQuickChecks, formatMissingDeps } from '../../scripts/health-check.mjs';
 import {
   readHealthCache,
@@ -15,6 +15,8 @@ import {
 } from '../../scripts/lib/health-checks/cache.mjs';
 import { abiDriftSummary } from '../../scripts/check-deps-impl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
+import { home } from '../../scripts/lib/paths.mjs';
+import { getConfig } from '../../scripts/lib/config.mjs';
 
 const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
 
@@ -65,8 +67,8 @@ export async function run(ctx) {
         pluginVersion: ctx.pluginVersion,
         templateVersion: readTemplateVersion(ctx.pluginDir),
         abiDriftResult: abiDriftSummary(),
-        injectionMode: resolveConfig().injection_mode,
-        injectionNudge: resolveConfig().injection_nudge,
+        injectionMode: getConfig().injection_mode,
+        injectionNudge: getConfig().injection_nudge,
       };
 
       result = await runQuickChecks(checkCtx);

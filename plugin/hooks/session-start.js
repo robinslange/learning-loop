@@ -11,14 +11,7 @@ import { warnOnce } from '../scripts/lib/warn-once.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import {
-  resolvePluginData,
-  resolveVaultPath,
-  findEpisodicBinary,
-  home,
-  readPayload,
-  spawnDetached,
-} from './lib/common.mjs';
+import { findEpisodicBinary, readPayload, spawnDetached } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
 import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
@@ -31,10 +24,12 @@ import {
 } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
 import { maybeSpawnOtelExport } from './session-start/otel-export.mjs';
+import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
+import { home } from '../scripts/lib/paths.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
-const pluginData = resolvePluginData();
+const pluginData = getPluginData();
 const updateCacheFile = pluginData ? join(pluginData, 'update-check.json') : null;
 
 const ctx = {
@@ -43,7 +38,7 @@ const ctx = {
     safeLoad(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, { fallback: { version: '0.0.0' } }).value
       ?.version || '0.0.0',
   pluginData,
-  vaultRoot: resolveVaultPath(),
+  vaultRoot: getVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,
   home: home(),
   // Resolve tmp the same way the canonical readers do: bare tmpdir()
