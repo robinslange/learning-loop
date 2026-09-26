@@ -611,7 +611,7 @@ pub fn resolve_note_uuids(
                 let raw = std::fs::read_to_string(&full)?;
                 let fresh = write_new_uuid(&full, &raw)?;
                 eprintln!(
-                    "WARNING: duplicate note id {id} on {} - reassigned; first writer keeps it",
+                    "WARNING: duplicate note id on {} - reassigned; first writer keeps it",
                     entry.rel_path
                 );
                 reassigned.push((entry.rel_path.clone(), id));
