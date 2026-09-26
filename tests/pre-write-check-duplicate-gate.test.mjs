@@ -725,6 +725,42 @@ describe('pre-write-check duplicate-note gate', { skip: SKIP }, () => {
     }
   });
 
+  it('a subprocess that outlives its budget is logged as a subprocess timeout', () => {
+    // The budget reaches the subprocess floor with room to spare, and the stub
+    // never answers, so execFileSync's own timeout is what ends the scan.
+    // `exec` so that timeout's SIGTERM lands on the sleep, not a parent shell.
+    const r = runHook(HOOK, {
+      timeoutMs: 30000,
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Write',
+        tool_input: { file_path: join(VAULT, '0-inbox', 'new-note.md'), content: NOTE },
+      },
+      env: { VAULT_PATH: VAULT, LL_PRE_WRITE_BUDGET_MS: '5000' },
+      seed: (pluginDataDir) => {
+        const binDir = join(pluginDataDir, 'bin');
+        mkdirSync(binDir, { recursive: true });
+        writeFileSync(join(binDir, 'll-search'), '#!/bin/sh\nexec sleep 30\n');
+        chmodSync(join(binDir, 'll-search'), 0o755);
+      },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const records = readdirSync(r.pluginDataDir)
+        .filter((n) => n.startsWith('hook-errors-') && n.endsWith('.jsonl'))
+        .flatMap((n) =>
+          readFileSync(join(r.pluginDataDir, n), 'utf-8').trim().split('\n').filter(Boolean),
+        )
+        .map((l) => JSON.parse(l));
+      assert.ok(
+        records.some((e) => e.code === 'duplicate-gate-timeout' && e.source === 'subprocess'),
+        `expected a subprocess duplicate-gate-timeout record; got: ${JSON.stringify(records)}`,
+      );
+    } finally {
+      r.cleanup();
+    }
+  });
+
   it('socket timeout: logs the distinct duplicate-gate-timeout code, then falls back to subprocess', () => {
     const { result, timeoutCount, gateHealth } = runWithSocket(
       'hang',
