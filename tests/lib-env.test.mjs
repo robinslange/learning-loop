@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { isTruthy, coerceNumber, env, isOffline } from '../plugin/scripts/lib/env.mjs';
-import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 const MOD = JSON.stringify(new URL('../plugin/scripts/lib/env.mjs', import.meta.url).href);
 
@@ -92,6 +94,8 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
       delete process.env.LL_HOOK_DEBUG;
       delete process.env.LEARNING_LOOP_INJECTION_THRESHOLD;
       delete process.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS;
+      delete process.env.LEARNING_LOOP_INJECTION_MODE;
+      delete process.env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY;
       delete process.env.OLLAMA_URL;
       delete process.env.MODEL;
       delete process.env.LL_REPO;
@@ -100,6 +104,8 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
         debug: m.env.LL_HOOK_DEBUG,
         threshold: m.env.LEARNING_LOOP_INJECTION_THRESHOLD,
         raceCap: m.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS,
+        mode: m.env.LEARNING_LOOP_INJECTION_MODE,
+        minSpecificity: m.env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY,
         ollama: m.env.OLLAMA_URL,
         model: m.env.MODEL,
         repo: m.env.LL_REPO,
@@ -113,6 +119,8 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
         LL_HOOK_DEBUG: undefined,
         LEARNING_LOOP_INJECTION_THRESHOLD: undefined,
         LEARNING_LOOP_INJECTION_RACE_CAP_MS: undefined,
+        LEARNING_LOOP_INJECTION_MODE: undefined,
+        LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: undefined,
         OLLAMA_URL: undefined,
         MODEL: undefined,
         LL_REPO: undefined,
@@ -123,14 +131,71 @@ test('env exposes documented defaults when env vars absent (subprocess)', () => 
   assert.equal(out.status, 0, out.stderr.toString());
   const parsed = JSON.parse(out.stdout.toString());
   assert.equal(parsed.debug, false);
-  assert.equal(parsed.threshold, HookConfig.INJECTION_THRESHOLD);
-  assert.equal(parsed.raceCap, 1500);
-  // null, not the default: consumers layer `librarian.ollama_url` between the
-  // env var and DEFAULT_OLLAMA_URL, which a pre-defaulted value would shadow.
+  // null, not the default: consumers layer config.json between the env var
+  // and the default (`injection_threshold`, `librarian.ollama_url`), which a
+  // pre-defaulted value would shadow.
+  assert.equal(parsed.threshold, null);
+  assert.equal(parsed.raceCap, null);
+  assert.equal(parsed.mode, null);
+  assert.equal(parsed.minSpecificity, null);
   assert.equal(parsed.ollama, null);
   assert.equal(parsed.model, null);
   assert.equal(parsed.repo, 'robinslange/learning-loop');
   assert.equal(parsed.forceError, false);
+});
+
+test('injectionSetting takes the env var, then config.json, then the default (subprocess)', () => {
+  const home = mkdtempSync(join(tmpdir(), 'll-injection-setting-'));
+  try {
+    const pluginData = join(home, 'plugin-data');
+    mkdirSync(pluginData);
+    writeFileSync(
+      join(pluginData, 'config.json'),
+      JSON.stringify({ injection_threshold: 0.4, injection_mode: 'live' }),
+    );
+    const read = (extra) => {
+      const out = spawnSync(
+        process.execPath,
+        [
+          '--input-type=module',
+          '-e',
+          `
+          const { env } = await import(${MOD});
+          const { injectionSetting } = await import(${JSON.stringify(new URL('../plugin/scripts/lib/config.mjs', import.meta.url).href)});
+          console.log(JSON.stringify({
+            threshold: injectionSetting(env.LEARNING_LOOP_INJECTION_THRESHOLD, 'injection_threshold', 0.9),
+            mode: injectionSetting(env.LEARNING_LOOP_INJECTION_MODE, 'injection_mode', 'shadow'),
+            floor: injectionSetting(env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY, 'injection_min_prompt_specificity', 2),
+          }));
+        `,
+        ],
+        {
+          env: {
+            PATH: process.env.PATH,
+            HOME: home,
+            USERPROFILE: home,
+            CLAUDE_PLUGIN_DATA: pluginData,
+            ...extra,
+          },
+        },
+      );
+      assert.equal(out.status, 0, out.stderr.toString());
+      return JSON.parse(out.stdout.toString());
+    };
+
+    assert.deepEqual(read({}), { threshold: 0.4, mode: 'live', floor: 2 });
+    assert.deepEqual(
+      read({
+        LEARNING_LOOP_INJECTION_THRESHOLD: '0',
+        LEARNING_LOOP_INJECTION_MODE: 'off',
+        LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+      }),
+      { threshold: 0, mode: 'off', floor: 0 },
+      'an env var set to 0 still wins over config and the default',
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 test('env reflects overrides from process.env (subprocess)', () => {

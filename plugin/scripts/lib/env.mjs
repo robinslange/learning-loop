@@ -13,8 +13,6 @@
 // read from process.env by the plugin itself.
 
 import { homedir } from 'node:os';
-import { DEFAULT_OLLAMA_URL } from './defaults.mjs';
-import { HookConfig } from './hook-config.mjs';
 
 /**
  * Returns true for the canonical truthy env-var strings.
@@ -134,21 +132,22 @@ export const env = Object.freeze({
   LEARNING_LOOP_ALWAYS_INJECT_MEMORY: isTruthy(process.env.LEARNING_LOOP_ALWAYS_INJECT_MEMORY),
 
   // --- Injection feature flags ---
+  // null when unset, like OLLAMA_URL below: config.json sits between these and
+  // the HookConfig defaults, and config.mjs's injectionSetting() does the
+  // layering.
   LEARNING_LOOP_INJECTION_FORCE_ERROR: isTruthy(process.env.LEARNING_LOOP_INJECTION_FORCE_ERROR),
   LEARNING_LOOP_INJECTION_MODE: pick('LEARNING_LOOP_INJECTION_MODE', null),
   LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: coerceNumber(
     process.env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY,
-    HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY,
+    null,
   ),
-  LEARNING_LOOP_INJECTION_MIN_SPECIFICITY_SET:
-    process.env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY !== undefined,
   LEARNING_LOOP_INJECTION_RACE_CAP_MS: coerceNumber(
     process.env.LEARNING_LOOP_INJECTION_RACE_CAP_MS,
-    1500,
+    null,
   ),
   LEARNING_LOOP_INJECTION_THRESHOLD: coerceNumber(
     process.env.LEARNING_LOOP_INJECTION_THRESHOLD,
-    HookConfig.INJECTION_THRESHOLD,
+    null,
   ),
   // Marks shadow-injection telemetry written by synthetic/calibration
   // sessions (e.g. a fixed prompt cycle run to exercise the gate) so
@@ -185,13 +184,6 @@ export const env = Object.freeze({
   // Spec-standard per-signal override. Used verbatim when set, for a receiver
   // not mounted where appending /v1/metrics to the base would reach it.
   OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: pick('OTEL_EXPORTER_OTLP_METRICS_ENDPOINT', null),
-
-  // --- Cascade-detection sentinels ---
-  // True only when the var was explicitly set in the environment (not defaulted).
-  // Used by callers that need to distinguish "user set this" from "we defaulted it".
-  LEARNING_LOOP_INJECTION_THRESHOLD_SET:
-    process.env.LEARNING_LOOP_INJECTION_THRESHOLD !== undefined,
-  LEARNING_LOOP_INJECTION_MODE_SET: process.env.LEARNING_LOOP_INJECTION_MODE !== undefined,
 });
 
 /**
