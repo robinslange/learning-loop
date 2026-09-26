@@ -1,37 +1,16 @@
 #!/usr/bin/env node
 // provenance-report.mjs — Reads events + scores, computes 5 core metrics, outputs markdown report
 
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readdirSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { getPluginData } from './lib/config.mjs';
 import { logError } from './lib/log.mjs';
 import { safeLoad } from './lib/safe-load.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 
 const PROVENANCE_DIR = DATA_PATHS.provenance(getPluginData());
 const SUMMARIES_DIR = join(PROVENANCE_DIR, 'summaries');
-
-function readAllEvents() {
-  if (!existsSync(PROVENANCE_DIR)) return [];
-  const files = readdirSync(PROVENANCE_DIR)
-    .filter((f) => f.startsWith('events-') && f.endsWith('.jsonl'))
-    .sort();
-  const events = [];
-  for (const file of files) {
-    const lines = readFileSync(join(PROVENANCE_DIR, file), 'utf8')
-      .trim()
-      .split('\n')
-      .filter(Boolean);
-    for (const line of lines) {
-      try {
-        events.push(JSON.parse(line));
-      } catch (err) {
-        logError('provenance-report.parseLine', err);
-      }
-    }
-  }
-  return events;
-}
 
 function loadSummaries() {
   if (!existsSync(SUMMARIES_DIR)) return [];
@@ -46,7 +25,7 @@ function loadSummaries() {
     .filter(Boolean);
 }
 
-const events = readAllEvents();
+const events = readJsonlDir(PROVENANCE_DIR, 'events-');
 if (events.length === 0) {
   console.log('No provenance events recorded yet.');
   process.exit(0);

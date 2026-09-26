@@ -217,9 +217,8 @@ describe('session-label', () => {
   });
 
   // Regression: when the transcript's final line exceeds the 256KB tail
-  // window, readFileTail returns '' (no newline inside the window). The parse
-  // loop must skip empty lines instead of JSON.parse('') failing and logging
-  // a parseTranscriptLine error on EVERY prompt.
+  // window, the tail holds no whole line. The parse loop must not be handed
+  // an empty one and log a parseTranscriptLine error on EVERY prompt.
   it('does not log a parse error when the final transcript line exceeds the tail window', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);

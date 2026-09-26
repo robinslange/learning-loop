@@ -1,6 +1,6 @@
 // hooks/lib/common.mjs — Shared utilities for all learning-loop hooks
 
-import { existsSync, appendFileSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import { existsSync, appendFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
 import { getPluginData, getConfig } from '../../scripts/lib/config.mjs';
@@ -107,30 +107,6 @@ export function classifyVaultPath(relPath) {
   if (p.startsWith('5-maps/')) return 'map';
   if (p.startsWith('_system/')) return 'system';
   return 'other';
-}
-
-// Read at most the last maxBytes of a file as UTF-8 text. When the read
-// starts mid-file, everything up to and including the first newline is
-// dropped: the leading fragment is an incomplete line (and may start on a
-// broken multi-byte boundary). Lets per-prompt hooks consume the tail of
-// multi-MB transcripts at O(maxBytes) cost instead of reading the whole file.
-export function readFileTail(path, maxBytes) {
-  const fd = openSync(path, 'r');
-  try {
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
-    const len = size - start;
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, start);
-    let text = buf.toString('utf8');
-    if (start > 0) {
-      const nl = text.indexOf('\n');
-      text = nl === -1 ? '' : text.slice(nl + 1);
-    }
-    return text;
-  } finally {
-    closeSync(fd);
-  }
 }
 
 // Per-component disable: `hooks.disabled: ["session-label", ...]` in

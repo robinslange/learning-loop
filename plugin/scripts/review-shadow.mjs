@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from './lib/env.mjs';
-import { logError } from './lib/log.mjs';
 import {
   isVaultOk,
   isHealthy,
@@ -13,6 +12,7 @@ import {
 import { assessGateReachability } from './lib/gate-reachability.mjs';
 import { INJECTION_CALIBRATION_EPOCH, HookConfig } from './lib/hook-config.mjs';
 import { getPluginData, injectionSetting } from './lib/config.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 
 const pd = getPluginData();
 if (!pd) {
@@ -25,24 +25,10 @@ if (!existsSync(dir)) {
   process.exit(0);
 }
 
-const files = readdirSync(dir).filter(
-  (f) => f.startsWith('shadow-injection-') && f.endsWith('.jsonl'),
-);
-if (files.length === 0) {
+const entries = readJsonlDir(dir, 'shadow-injection-');
+if (entries.length === 0) {
   console.log('No shadow-injection logs found.');
   process.exit(0);
-}
-
-const entries = [];
-for (const f of files) {
-  for (const line of readFileSync(join(dir, f), 'utf8').trim().split('\n')) {
-    if (!line) continue;
-    try {
-      entries.push(JSON.parse(line));
-    } catch (err) {
-      logError('review-shadow.parseLine', err);
-    }
-  }
 }
 
 const total = entries.length;
