@@ -70,7 +70,10 @@ jobs:
         run: |
           node -e "import('./plugin/scripts/lib/binary.mjs').then(b => { if (!b.hasBinary()) { console.error('ERROR: ll-search binary installed but findBinary() does not resolve it — gated suites would skip silently'); process.exit(1); } console.log('ll-search resolves at', b.binaryPath()); })"
 
+      # A leaked child handle hangs the runner at end-of-suite instead of
+      # failing it; the suite takes under a minute, so ten is a hang.
       - name: Run tests
+        timeout-minutes: 10
         run: npm test
 
   cargo:
