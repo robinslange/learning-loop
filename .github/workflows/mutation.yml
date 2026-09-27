@@ -1,9 +1,8 @@
 name: Mutation
 
-# A full run takes far longer than the per-push suite, so it runs weekly and on
-# demand. The job fails when any target in stryker.config.mjs drops below its
-# break threshold. Those thresholds were measured without the ll-search binary,
-# so this job doesn't install it and its binary-gated tests skip here too.
+# A full run takes far longer than the per-push suite (pre-write-check alone is
+# about 70 minutes), so it runs weekly and on demand. The job fails when any
+# target in bench/mutation-targets.mjs drops below its break threshold.
 on:
   schedule:
     - cron: '0 14 * * 0'
