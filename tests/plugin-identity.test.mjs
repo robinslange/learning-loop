@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 import { renderShim } from '../plugin/scripts/lib/shims.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 import {
@@ -35,6 +36,22 @@ function releasedCrateVersions() {
       return [c, section.match(/^version\s*=\s*"([^"]+)"/m)?.[1]];
     });
 }
+
+const MARKETPLACE_LITERAL = 'learning-loop-marketplace';
+const tracked = (...pathspecs) =>
+  execFileSync('git', ['ls-files', '-z', '--', ...pathspecs], { cwd: ROOT, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean);
+const spells = (file) => readFileSync(join(ROOT, file), 'utf8').includes(MARKETPLACE_LITERAL);
+
+describe('the marketplace name is spelled once', () => {
+  test('no plugin or bench code outside plugin-meta spells it', () => {
+    const offenders = tracked('plugin/*.js', 'plugin/*.mjs', 'plugin/*.cjs', 'bench/*.mjs')
+      .filter((f) => f !== 'plugin/scripts/lib/plugin-meta.mjs')
+      .filter(spells);
+    assert.deepEqual(offenders, []);
+  });
+});
 
 describe('shim text', () => {
   // Installed shims are rewritten whenever this text changes, so a refactor

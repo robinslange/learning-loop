@@ -17,11 +17,11 @@
 import { join } from 'node:path';
 import { INJECTION_CALIBRATION_EPOCH } from '../plugin/scripts/lib/hook-config.mjs';
 import { jsonlShards, readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
+import { DATA_DIR_NAME } from '../plugin/scripts/lib/plugin-meta.mjs';
 import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
 
 const pluginData =
-  process.env.CLAUDE_PLUGIN_DATA ||
-  join(process.env.HOME, '.claude/plugins/data/learning-loop-learning-loop-marketplace');
+  process.env.CLAUDE_PLUGIN_DATA || join(process.env.HOME, '.claude/plugins/data', DATA_DIR_NAME);
 const dir = join(pluginData, 'retrieval');
 
 const args = process.argv.slice(2);

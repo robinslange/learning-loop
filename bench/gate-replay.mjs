@@ -21,6 +21,7 @@ import { promisify } from 'node:util';
 import { buildQueryParts } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 import { readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
+import { DATA_DIR_NAME } from '../plugin/scripts/lib/plugin-meta.mjs';
 import { CONTROL_PROMPTS } from './control-prompts.mjs';
 import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
 
@@ -34,8 +35,7 @@ const CONCURRENCY = Number(arg('--concurrency', '4'));
 const LIVE_ONLY = argv.includes('--live-only');
 
 const pluginData =
-  process.env.CLAUDE_PLUGIN_DATA ||
-  join(process.env.HOME, '.claude/plugins/data/learning-loop-learning-loop-marketplace');
+  process.env.CLAUDE_PLUGIN_DATA || join(process.env.HOME, '.claude/plugins/data', DATA_DIR_NAME);
 const BIN = arg('--bin', join(import.meta.dirname, '..', 'native/target/release/ll-search'));
 const DB = arg('--db', join(process.env.HOME, 'brain/brain/.vault-search/vault-index.db'));
 

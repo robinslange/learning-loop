@@ -22,14 +22,14 @@
 
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
+import { DATA_DIR_NAME } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 const argv = process.argv.slice(2);
 const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
 const OUT = arg('--out', join(import.meta.dirname, 'baselines/recall-labels.json'));
 const PROJECTS = arg('--projects', join(process.env.HOME, '.claude/projects'));
 const pluginData =
-  process.env.CLAUDE_PLUGIN_DATA ||
-  join(process.env.HOME, '.claude/plugins/data/learning-loop-learning-loop-marketplace');
+  process.env.CLAUDE_PLUGIN_DATA || join(process.env.HOME, '.claude/plugins/data', DATA_DIR_NAME);
 
 // Shortest slug prefix that may be treated as identifying a note. Titles get
 // truncated ("a-judge-flips-eighty-four-percent...") and reworded, so exact

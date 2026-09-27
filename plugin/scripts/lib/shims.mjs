@@ -29,7 +29,13 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeLoad } from './safe-load.mjs';
-import { INSTALL_KEY } from './plugin-meta.mjs';
+import {
+  INSTALL_KEY,
+  PLUGIN_NAME,
+  MARKETPLACE_NAME,
+  DATA_DIR_NAME,
+  cacheRoot,
+} from './plugin-meta.mjs';
 
 const LOCATE = [
   "const fs=require('node:fs'),path=require('node:path'),home=require('node:os').homedir();",
@@ -37,7 +43,7 @@ const LOCATE = [
   "function newest(base){try{const v=fs.readdirSync(base).filter((d)=>/^\\d+\\.\\d+\\.\\d+$/.test(d)).sort((a,b)=>a.localeCompare(b,'en',{numeric:true})).pop();return v?path.join(base,v):null}catch{return null}}",
   'let installed;',
   "try{const j=JSON.parse(fs.readFileSync(path.join(home,'.claude','plugins','installed_plugins.json'),'utf8'));installed=(j.plugins||j)[key][0].installPath}catch{}",
-  "const candidates=[installed,newest(path.join(home,'.claude','plugins','cache','learning-loop-marketplace','learning-loop')),newest(path.join(home,'.codex','plugins','cache','learning-loop-marketplace','learning-loop'))];",
+  `const candidates=[installed,newest(path.join(home,'.claude','plugins','cache','${MARKETPLACE_NAME}','${PLUGIN_NAME}')),newest(path.join(home,'.codex','plugins','cache','${MARKETPLACE_NAME}','${PLUGIN_NAME}'))];`,
   "const root=candidates.find((r)=>r&&fs.existsSync(path.join(r,'scripts','shim.mjs')));",
   "if(!root){console.error('learning-loop is not installed. Run: claude plugin install '+key);process.exit(1)}",
   "const shim=path.join(root,'scripts','shim.mjs');",
@@ -67,9 +73,6 @@ function newestVersionDir(base) {
     return null;
   }
 }
-
-const cacheRoot = (home, dot) =>
-  join(home, dot, 'plugins', 'cache', 'learning-loop-marketplace', 'learning-loop');
 
 /**
  * The roots a shim tries, in order: the installed_plugins.json record, the
@@ -110,7 +113,7 @@ export function resolveShimRoot(home) {
 const SEARCH_SH = [
   'm=',
   '[ -r "$HOME/.claude/plugins/data/.ll-data-path" ] && read -r m < "$HOME/.claude/plugins/data/.ll-data-path"',
-  'for pd in "${CLAUDE_PLUGIN_DATA:-}" "$m" "$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace"; do',
+  'for pd in "${CLAUDE_PLUGIN_DATA:-}" "$m" "$HOME/.claude/plugins/data/' + DATA_DIR_NAME + '"; do',
   '  if [ -n "$pd" ] && [ -x "$pd/bin/ll-search" ]; then',
   '    dir="$pd/bin"',
   '    for lib in "$dir"/libonnxruntime*; do',
@@ -121,7 +124,9 @@ const SEARCH_SH = [
   '  fi',
   'done',
   'echo "error: ll-search binary not found" >&2',
-  'echo "  Tried: \\$CLAUDE_PLUGIN_DATA, \\$HOME/.claude/plugins/data/.ll-data-path, \\$HOME/.claude/plugins/data/learning-loop-learning-loop-marketplace" >&2',
+  'echo "  Tried: \\$CLAUDE_PLUGIN_DATA, \\$HOME/.claude/plugins/data/.ll-data-path, \\$HOME/.claude/plugins/data/' +
+    DATA_DIR_NAME +
+    '" >&2',
   'echo "  Run /learning-loop:init to install." >&2',
   'exit 1',
 ];
@@ -130,6 +135,10 @@ const SEARCH_SH = [
 // header (below), so this is the body only -- install-shims.mjs used to own
 // the whole file including that header. The "Tried ..." diagnostic mirrors
 // SEARCH_SH's.
+//
+// Built outside SEARCH_CMD: inside String.raw, `\${` is an escaped `$`, not a substitution.
+const WIN_DEFAULT_DATA = String.raw`%USERPROFILE%\.claude\plugins\data` + '\\' + DATA_DIR_NAME;
+
 const SEARCH_CMD = String.raw`setlocal enabledelayedexpansion
 set "BIN="
 if defined CLAUDE_PLUGIN_DATA (
@@ -147,14 +156,14 @@ if "!BIN!"=="" (
   )
 )
 if "!BIN!"=="" (
-  set "DEFAULT=%USERPROFILE%\.claude\plugins\data\learning-loop-learning-loop-marketplace"
+  set "DEFAULT=${WIN_DEFAULT_DATA}"
   if exist "!DEFAULT!\bin\ll-search.exe" (
     set "BIN=!DEFAULT!\bin\ll-search.exe"
   )
 )
 if "!BIN!"=="" (
   echo error: ll-search binary not found 1>&2
-  echo   Tried: %CLAUDE_PLUGIN_DATA%, %USERPROFILE%\.claude\plugins\data\.ll-data-path, %USERPROFILE%\.claude\plugins\data\learning-loop-learning-loop-marketplace 1>&2
+  echo   Tried: %CLAUDE_PLUGIN_DATA%, %USERPROFILE%\.claude\plugins\data\.ll-data-path, ${WIN_DEFAULT_DATA} 1>&2
   echo   Run /learning-loop:init to install. 1>&2
   exit /b 1
 )

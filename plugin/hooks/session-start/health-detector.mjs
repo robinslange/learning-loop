@@ -16,6 +16,7 @@ import {
 import { abiDriftSummary } from '../../scripts/check-deps.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { home } from '../../scripts/lib/paths.mjs';
+import { INSTALL_KEY } from '../../scripts/lib/plugin-meta.mjs';
 import { getConfig } from '../../scripts/lib/config.mjs';
 
 const TEMPLATE_VERSION_PATH = 'templates/claudemd-section.version';
@@ -34,7 +35,7 @@ function readInstalledVersion(homeDir) {
     if (!existsSync(p)) return '0.0.0';
     const data = JSON.parse(readFileSync(p, 'utf-8'));
     const plugins = data?.plugins || data || {};
-    const entries = plugins['learning-loop@learning-loop-marketplace'];
+    const entries = plugins[INSTALL_KEY];
     return entries?.[0]?.version || '0.0.0';
   } catch {
     return '0.0.0';
