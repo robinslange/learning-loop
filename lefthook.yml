@@ -23,12 +23,10 @@ pre-commit:
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
-    # CI runs `eslint .`, so bench/ and the root configs are linted here too.
+    # CI runs `eslint .`, so every staged JS file is linted here too. lefthook's
+    # `*` matches at any depth.
     eslint:
-      glob:
-        - "*.mjs"
-        - "{plugin/hooks,plugin/scripts,plugin/plugins,bench}/*.{js,mjs}"
-        - "{plugin/hooks,plugin/scripts,plugin/plugins,bench}/**/*.{js,mjs}"
+      glob: "*.{js,mjs}"
       run: npx eslint {staged_files}
 
     # npm test globs tests/ only, so a rule edit never ran its own tests until
