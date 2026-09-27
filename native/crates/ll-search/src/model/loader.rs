@@ -69,29 +69,24 @@ fn verified(path: &Path, min_bytes: u64, expected_sha256: &str) -> bool {
 
 /// LL_MODELS_DIR lets an air-gapped box pre-stage model files outside
 /// `~/.learning-loop/models` (e.g. a read-only mount baked into the image).
-fn resolve_models_dir(override_dir: Option<&str>) -> PathBuf {
+fn resolve_models_dir(override_dir: Option<&str>) -> Result<PathBuf> {
     match override_dir.filter(|d| !d.is_empty()) {
-        Some(d) => PathBuf::from(d),
-        None => dirs_next::home_dir()
-            .expect("could not determine home directory")
+        Some(d) => Ok(PathBuf::from(d)),
+        None => Ok(dirs_next::home_dir()
+            .context("could not determine home directory; set LL_MODELS_DIR")?
             .join(".learning-loop")
-            .join("models"),
+            .join("models")),
     }
 }
 
-fn models_dir() -> PathBuf {
-    let dir = resolve_models_dir(std::env::var("LL_MODELS_DIR").ok().as_deref());
-    fs::create_dir_all(&dir).expect("failed to create models directory");
-    dir
-}
-
-fn model_dir(model: &KnownModel) -> PathBuf {
+fn model_dir(model: &KnownModel) -> Result<PathBuf> {
     let name = match model {
         KnownModel::BgeSmallEnV15 => "bge-small-en-v1.5",
     };
-    let dir = models_dir().join(name);
-    fs::create_dir_all(&dir).expect("failed to create model directory");
-    dir
+    let dir = resolve_models_dir(std::env::var("LL_MODELS_DIR").ok().as_deref())?.join(name);
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create model directory {}", dir.display()))?;
+    Ok(dir)
 }
 
 fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) -> Result<()> {
@@ -136,7 +131,7 @@ fn download(url: &str, dest: &Path, min_bytes: u64, expected_sha256: &str) -> Re
 }
 
 pub fn ensure_model(model: &KnownModel) -> Result<(PathBuf, PathBuf)> {
-    let dir = model_dir(model);
+    let dir = model_dir(model)?;
     match model {
         KnownModel::BgeSmallEnV15 => {
             let model_path = dir.join("model_quantized.onnx");
@@ -245,14 +240,14 @@ mod tests {
     #[test]
     fn test_models_dir_honors_override() {
         let target = "/some/staged/models";
-        assert_eq!(resolve_models_dir(Some(target)), PathBuf::from(target));
+        assert_eq!(resolve_models_dir(Some(target)).unwrap(), PathBuf::from(target));
     }
 
     #[test]
     fn test_models_dir_empty_override_falls_back_to_home() {
-        let resolved = resolve_models_dir(Some(""));
+        let resolved = resolve_models_dir(Some("")).unwrap();
         assert!(resolved.ends_with(".learning-loop/models"));
-        let none = resolve_models_dir(None);
+        let none = resolve_models_dir(None).unwrap();
         assert!(none.ends_with(".learning-loop/models"));
     }
 }
