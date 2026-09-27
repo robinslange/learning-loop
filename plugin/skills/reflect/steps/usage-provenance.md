@@ -3,8 +3,8 @@
 Close the surfacing→use loop: for every vault note that retrieval surfaced to
 this session, record whether the session actually used it — either by acting on
 the note or by drawing on its content. These
-events are what `/health`'s surfaced-vs-used check and the injection-precision
-join aggregate — without them the telemetry can only count surfacing, and a
+events are what `/health`'s surfaced-vs-used check and the
+`bench/injection-precision.mjs` join aggregate — without them the telemetry can only count surfacing, and a
 note nobody ever judged is indistinguishable from one that was judged useless.
 
 Run this step on every `/reflect`, even when Step 4.6 was skipped (a session

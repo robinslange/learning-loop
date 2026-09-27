@@ -91,8 +91,8 @@ console.log(
   `\n${strong} strong, ${weak} weak, ${failures} covered (of ${CONTROL_PROMPTS.length}).`,
 );
 
-// gate-ab.mjs reports the headline false-positive rate on the strong set, so
-// the declared split has to match what the vault actually says today. Drifting
+// The headline false-positive rate is reported on the strong set, so the
+// declared split has to match what the vault actually says today. Drifting
 // apart would silently move the number without anyone editing it.
 const declared = [...WEAK_CONTROLS].sort();
 const computed = [...computedWeak].sort();

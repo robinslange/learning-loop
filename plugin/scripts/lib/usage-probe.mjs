@@ -1,7 +1,7 @@
 // scripts/lib/usage-probe.mjs : mechanical end-of-session usage evidence.
 //
 // Usage ground truth otherwise exists only for sessions that ran /reflect,
-// which injection-precision.mjs's own comments call a small, self-selected
+// which bench/injection-precision.mjs's own comments call a small, self-selected
 // slice. Every retrieval-quality claim in this repo is graded against that
 // sample. This probe runs from the Stop hook on every session instead, and
 // reads the transcript for evidence that the session ACTED on a note it was
@@ -23,7 +23,7 @@
 // where it landed, which is a model's job and stays with /reflect Step 4.7.
 // The probe sees only `engaged`: read, edited, linked.
 //
-// `edited` overlaps a signal that already exists: injection-precision.mjs
+// `edited` overlaps a signal that already exists: bench/injection-precision.mjs
 // unions `vault-edit`/`vault-write` provenance, which every session emits for
 // free whether or not it ran /reflect. That union is keyed by
 // (session_id, path) and first-writer-wins, so the overlap costs nothing and
