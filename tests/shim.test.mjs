@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderShim } from '../plugin/scripts/lib/shims.mjs';
-import { INSTALL_KEY } from '../plugin/scripts/lib/plugin-meta.mjs';
+import { INSTALL_KEY, cacheRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 import { checkShimsExist } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
@@ -184,14 +184,7 @@ test(
   () => {
     const s = sandbox();
     try {
-      const cache = join(
-        s.home,
-        '.codex',
-        'plugins',
-        'cache',
-        'learning-loop-marketplace',
-        'learning-loop',
-      );
+      const cache = cacheRoot(s.home, '.codex');
       mkdirSync(join(cache, '1.9.0'), { recursive: true });
       symlinkSync(REPO_PLUGIN, join(cache, '1.10.0'));
       const r = s.run('ll-paths', ['PLUGIN']);
@@ -207,14 +200,7 @@ test('a stale installed_plugins.json record falls through to the Claude cache', 
   const s = sandbox();
   try {
     s.installClaude(join(s.home, 'gone', 'nowhere'));
-    const cache = join(
-      s.home,
-      '.claude',
-      'plugins',
-      'cache',
-      'learning-loop-marketplace',
-      'learning-loop',
-    );
+    const cache = cacheRoot(s.home, '.claude');
     mkdirSync(join(cache, '1.2.3'), { recursive: true });
     symlinkSync(REPO_PLUGIN, join(cache, '9.9.9'));
     const r = s.run('ll-paths', ['PLUGIN']);
@@ -249,14 +235,7 @@ test('the health check and the shim agree on whether an install resolves', posix
     assert.equal(checkShimsExist({ home: s.home }).status, 'fail');
 
     // A root that resolves: the shim answers, so the check must say ready.
-    const cache = join(
-      s.home,
-      '.claude',
-      'plugins',
-      'cache',
-      'learning-loop-marketplace',
-      'learning-loop',
-    );
+    const cache = cacheRoot(s.home, '.claude');
     mkdirSync(cache, { recursive: true });
     symlinkSync(REPO_PLUGIN, join(cache, '9.9.9'));
 

@@ -14,7 +14,7 @@ import {
 } from '../plugin/scripts/lib/health-checks/full.mjs';
 import { monthStr, recentMonths } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
-import { pluginVersion } from '../plugin/scripts/lib/plugin-meta.mjs';
+import { pluginVersion, cacheRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 import {
   checkVaultPath,
   checkVaultFolders,
@@ -58,7 +58,7 @@ import { INJECTION_CALIBRATION_EPOCH } from '../plugin/scripts/lib/hook-config.m
 // ~/.local/bin describes the state 2.0.7 shipped — four correct shims, every one
 // of them exiting 1 — and is not what "a healthy install" looks like.
 function stageResolvableRoot(home, version = '9.9.9') {
-  const root = join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop', version);
+  const root = join(cacheRoot(home, '.claude'), version);
   mkdirSync(join(root, 'scripts'), { recursive: true });
   writeFileSync(join(root, 'scripts', 'shim.mjs'), '// stub\n');
   return root;
@@ -399,7 +399,7 @@ test(
       chmodSync(join(home, '.local/bin', s), 0o755);
     }
     // A cache root that exists but ships no scripts/shim.mjs: exactly 2.0.7.
-    mkdirSync(join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop/2.0.7'), {
+    mkdirSync(join(cacheRoot(home, '.claude'), '2.0.7'), {
       recursive: true,
     });
 
@@ -556,7 +556,7 @@ test('checkInstalledPluginsReadable: fail on bad JSON', () => {
 
 test('checkPluginCacheVersionPresent: ok when version dir exists', () => {
   const home = mkdtempSync(join(tmpdir(), 'health-cache-'));
-  const verDir = join(home, '.claude/plugins/cache/learning-loop-marketplace/learning-loop/1.22.0');
+  const verDir = join(cacheRoot(home, '.claude'), '1.22.0');
   mkdirSync(verDir, { recursive: true });
   const result = checkPluginCacheVersionPresent({ home, installedVersion: '1.22.0' });
   assert.equal(result.status, 'ok');

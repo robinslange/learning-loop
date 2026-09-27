@@ -17,7 +17,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { INSTALL_KEY } from '../plugin/scripts/lib/plugin-meta.mjs';
+import { INSTALL_KEY, cacheRoot } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 const REPO_PLUGIN = fileURLToPath(new URL('../plugin', import.meta.url));
 const PROBE =
@@ -31,14 +31,7 @@ let current;
 before(() => {
   // realpath: import.meta.dirname is resolved, and macOS tmpdir() is a symlink.
   home = realpathSync(mkdtempSync(join(tmpdir(), 'll-hook-run-')));
-  const parent = join(
-    home,
-    '.claude',
-    'plugins',
-    'cache',
-    'learning-loop-marketplace',
-    'learning-loop',
-  );
+  const parent = cacheRoot(home, '.claude');
   old = join(parent, '2.0.6');
   current = join(parent, '2.0.7');
   cpSync(REPO_PLUGIN, old, { recursive: true });

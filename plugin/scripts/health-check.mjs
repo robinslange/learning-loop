@@ -18,7 +18,7 @@ import * as full from './lib/health-checks/full.mjs';
 import { checker } from './lib/health-checks/types.mjs';
 import { abiDriftSummary } from './check-deps.mjs';
 import { getPluginData, getVaultPath, getConfig } from './lib/config.mjs';
-import { pluginVersion } from './lib/plugin-meta.mjs';
+import { pluginVersion, INSTALL_KEY, PLUGIN_NAME, MARKETPLACE_NAME } from './lib/plugin-meta.mjs';
 import { isProcessAlive } from './lib/file-lock.mjs';
 import { env, isOffline } from './lib/env.mjs';
 import { DATA_FILES, binaryFileName } from './lib/paths.mjs';
@@ -75,7 +75,7 @@ function readInstalledPluginVersion(home) {
   const p = join(home, '.claude/plugins/installed_plugins.json');
   const data = readJsonSafe(p);
   const plugins = data?.plugins || data || {};
-  const entries = plugins['learning-loop@learning-loop-marketplace'];
+  const entries = plugins[INSTALL_KEY];
   return entries?.[0]?.version || null;
 }
 
@@ -275,8 +275,8 @@ export async function runFullChecks(ctx = {}) {
       installedPlugins,
     }),
     full.checkPluginInstalled({
-      pluginName: 'learning-loop',
-      marketplace: 'learning-loop-marketplace',
+      pluginName: PLUGIN_NAME,
+      marketplace: MARKETPLACE_NAME,
       installedPlugins,
     }),
     full.checkBinaryRuns({ binaryVersionOutput, exitCode: binaryExitCode }),

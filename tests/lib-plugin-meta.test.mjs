@@ -10,6 +10,7 @@ import {
   pluginId,
   activeRoot,
   INSTALL_KEY,
+  cacheRoot,
 } from '../plugin/scripts/lib/plugin-meta.mjs';
 
 test('pluginRoot resolves to the plugin root', () => {
@@ -38,14 +39,7 @@ test('pluginId formats as name@version', () => {
 
 function cacheFixture() {
   const home = mkdtempSync(join(tmpdir(), 'll-active-root-'));
-  const parent = join(
-    home,
-    '.claude',
-    'plugins',
-    'cache',
-    'learning-loop-marketplace',
-    'learning-loop',
-  );
+  const parent = cacheRoot(home, '.claude');
   const old = join(parent, '2.0.6');
   const current = join(parent, '2.0.7');
   for (const root of [old, current]) {
@@ -92,15 +86,7 @@ test('activeRoot stays on its own version for a file the installed version dropp
 test('activeRoot ignores an install that is not a sibling (Codex cache, --plugin-dir)', () => {
   const fx = cacheFixture();
   try {
-    const elsewhere = join(
-      fx.home,
-      '.codex',
-      'plugins',
-      'cache',
-      'learning-loop-marketplace',
-      'learning-loop',
-      '2.0.7',
-    );
+    const elsewhere = join(cacheRoot(fx.home, '.codex'), '2.0.7');
     mkdirSync(join(elsewhere, 'hooks'), { recursive: true });
     writeFileSync(join(elsewhere, 'hooks', 'stop-nudge.js'), '');
     fx.install(elsewhere);

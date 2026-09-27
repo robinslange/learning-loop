@@ -15,6 +15,7 @@ import {
 } from '../paths.mjs';
 import { safeLoad } from '../safe-load.mjs';
 import { resolveShimRoot } from '../shims.mjs';
+import { INSTALL_KEY, cacheRoot } from '../plugin-meta.mjs';
 import { readJsonl, readTailLines } from '../jsonl.mjs';
 import { semverCmp, isPlainSemver } from '../semver.mjs';
 import { HookConfig, INJECTION_CALIBRATION_EPOCH } from '../hook-config.mjs';
@@ -305,16 +306,9 @@ export function checkPluginCacheVersionPresent({ home, installedVersion } = {}) 
   if (!home || !installedVersion) {
     return c.fail('missing inputs', 'Internal: caller should pass installedVersion');
   }
-  const verDir = join(
-    home,
-    '.claude/plugins/cache/learning-loop-marketplace/learning-loop',
-    installedVersion,
-  );
+  const verDir = join(cacheRoot(home, '.claude'), installedVersion);
   if (!existsSync(verDir)) {
-    return c.fail(
-      `missing: ${verDir}`,
-      `Run: claude plugin install learning-loop@learning-loop-marketplace`,
-    );
+    return c.fail(`missing: ${verDir}`, `Run: claude plugin install ${INSTALL_KEY}`);
   }
   return c.ok(verDir);
 }

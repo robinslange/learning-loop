@@ -14,7 +14,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from './env.mjs';
-import { pluginId } from './plugin-meta.mjs';
+import { pluginId, PLUGIN_NAME } from './plugin-meta.mjs';
 import { appendJsonlLine } from './jsonl.mjs';
 import { DATA_PATHS } from './paths.mjs';
 
@@ -70,7 +70,7 @@ function safePluginId() {
   try {
     return pluginId();
   } catch {
-    return 'learning-loop@unknown';
+    return `${PLUGIN_NAME}@unknown`;
   }
 }
 
