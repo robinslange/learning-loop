@@ -102,16 +102,17 @@ fn sha256_hex(path: &Path) -> std::io::Result<String> {
 
 /// `LL_ORT_DIR` lets an air-gapped box pre-stage the runtime outside
 /// `~/.learning-loop/lib` (e.g. a read-only mount baked into the image).
-fn ort_dir() -> PathBuf {
+fn ort_dir() -> Result<PathBuf> {
     let dir = match std::env::var("LL_ORT_DIR").ok().filter(|d| !d.is_empty()) {
         Some(d) => PathBuf::from(d),
         None => dirs_next::home_dir()
-            .expect("could not determine home directory")
+            .context("could not determine home directory; set LL_ORT_DIR")?
             .join(".learning-loop")
             .join("lib"),
     };
-    fs::create_dir_all(&dir).expect("failed to create runtime library directory");
-    dir
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create runtime library directory {}", dir.display()))?;
+    Ok(dir)
 }
 
 /// Ensure `ORT_DYLIB_PATH` points at a verified ONNX Runtime shared library,
@@ -133,7 +134,7 @@ pub fn ensure_dylib() -> Result<PathBuf> {
         return Ok(resolved);
     }
 
-    let dir = ort_dir();
+    let dir = ort_dir()?;
     let lib_path = dir.join(TARGET.staged_name);
     // Verify on every run, not just first stage: a pre-staged file (LL_ORT_DIR
     // air-gap path) has never been hashed, and a previously-staged file may have
