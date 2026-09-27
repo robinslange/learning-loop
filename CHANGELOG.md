@@ -26,6 +26,8 @@ All notable changes to this project are documented here. The format is based on 
 
 ### Fixed
 
+- **`ll-search` reports errors instead of panicking (#110).** A mistyped database path, an unresolvable vault scope or a failed sync used to print a Rust panic banner and backtrace hint and exit 101. Every command now prints the same diagnostic as one line on stderr and exits 1. `recover` still exits 2 when it cannot read the phrase. A pre-1970 clock reads as 1970 in `status` too, instead of panicking.
+- **Embedding failures are errors, not panics (#111, partial).** A failed or uninitialised embedding model now surfaces as an error on every search path. The watch daemon's duplicate scan reports the cause to the pre-write hook instead of "scan task panicked".
 - **`retrieval-report` counts every record around a torn line.** One malformed line threw out of the whole read, so the rest of that month and every later month were dropped, and the report printed the partial totals as complete. On a fixture of four queries around one torn line it said 1; it now says 4.
 - **The pre-write gate checks Codex hunks at the start and end of a note.** A hunk on a note's first line, which is every frontmatter hunk, or on the last line of a note without a final newline, never matched, so the gate let it through unchecked.
 - **A timed-out duplicate scan is logged instead of throwing.** When the pre-write gate's subprocess fallback hit its timeout, the gate threw a ReferenceError before it could log the timeout. So `/doctor` never saw those timeouts, and `pre_write_fail_mode: "closed"` never blocked the write.
