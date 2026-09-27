@@ -51,6 +51,19 @@ describe('the marketplace name is spelled once', () => {
       .filter(spells);
     assert.deepEqual(offenders, []);
   });
+
+  for (const script of ['install.sh', 'release.sh']) {
+    test(`${script} spells it only on its readonly line, with values matching plugin-meta`, () => {
+      const lines = readFileSync(join(ROOT, script), 'utf8').split('\n');
+      const spelled = lines.filter((l) => l.includes(MARKETPLACE_LITERAL));
+      assert.deepEqual(
+        spelled.map((l) => l.trim()),
+        [`readonly LL_MARKETPLACE="${MARKETPLACE_NAME}"`],
+      );
+      const plugin = lines.map((l) => l.match(/^\s*readonly LL_PLUGIN="([^"]*)"$/)?.[1]).find(Boolean);
+      assert.equal(plugin, PLUGIN_NAME);
+    });
+  }
 });
 
 describe('shim text', () => {
