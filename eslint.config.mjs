@@ -1,8 +1,8 @@
 // eslint.config.mjs -- flat config for learning-loop (ESLint 9+).
 //
 // Two custom rules are still registered but configured "off": running them at
-// "error" still reports violations in hooks/ and scripts/ (18x process.env,
-// 8x direct JSON.parse as of W4). Flip each rule to "error" once its
+// "error" still reports violations in hooks/ and scripts/ (process.env reads
+// and direct JSON.parse). Flip each rule to "error" once its
 // consumers migrate to scripts/lib/{env,safe-load}.mjs.
 // no-raw-lockfile, no-url-pathname, no-handwritten-trust-envelope,
 // no-raw-telemetry-append and no-empty-catch are at "error": each had zero
