@@ -4,12 +4,15 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:f
 import { skipOnWindows } from './helpers/platform.mjs';
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import { CHECK_IDS, SEVERITIES, makeCheck } from '../plugin/scripts/lib/health-checks/types.mjs';
+import { CHECK_IDS, checker } from '../plugin/scripts/lib/health-checks/types.mjs';
+import * as quickChecks from '../plugin/scripts/lib/health-checks/quick.mjs';
+import * as fullChecks from '../plugin/scripts/lib/health-checks/full.mjs';
+import * as healthCheckCli from '../plugin/scripts/health-check.mjs';
 import {
   collectInvalidatedAdoption,
   checkInvalidatedAdoption,
 } from '../plugin/scripts/lib/health-checks/full.mjs';
-import { monthStr } from '../plugin/scripts/lib/retrieval.mjs';
+import { monthStr, recentMonths } from '../plugin/scripts/lib/retrieval.mjs';
 import { SHIM_NAMES } from '../plugin/scripts/lib/paths.mjs';
 import { pluginVersion } from '../plugin/scripts/lib/plugin-meta.mjs';
 import {
@@ -33,7 +36,6 @@ import {
   checkAbiDrift,
   checkOtelExportStatus,
   checkOtelErrorLog,
-  recentMonths,
 } from '../plugin/scripts/lib/health-checks/quick.mjs';
 import {
   checkNodeVersion,
@@ -62,47 +64,55 @@ function stageResolvableRoot(home, version = '9.9.9') {
   return root;
 }
 
-test('CHECK_IDS exports the documented quick + full check IDs', () => {
-  const quick = [
-    'vault-path',
-    'vault-folders',
-    'vault-system-files',
-    'binary-exists',
-    'binary-version-file',
-    'shims-exist',
-    'local-bin-on-path',
-    'claudemd-section-present',
-    'claudemd-section-current',
-    'installed-plugins-readable',
-    'plugin-cache-version-present',
-    'search-index-exists',
-    'dup-scan-socket-fresh',
-    'duplicate-gate-health',
-    'hook-errors',
-    'injection-shadow-gate',
-    'abi-drift',
-    'otel-export-status',
-    'otel-error-log',
-  ];
-  const full = [
-    'node-version',
-    'claude-version',
-    'episodic-memory-installed',
-    'learning-loop-installed',
-    'binary-runs',
-    'watch-daemon-status',
-    'offline-mode',
-    'edges-backfill',
-  ];
-  for (const id of [...quick, ...full]) {
-    assert.ok(CHECK_IDS[id] === id, `missing id: ${id}`);
+test('every check returns the shared shape on empty input, with fix null exactly when it passed', () => {
+  const checks = Object.entries({ ...quickChecks, ...fullChecks, ...healthCheckCli }).filter(
+    ([name, fn]) => /^check[A-Z]/.test(name) && typeof fn === 'function',
+  );
+  const seen = new Set();
+  for (const [name, fn] of checks) {
+    const r = fn({});
+    seen.add(r.id);
+    assert.ok(CHECK_IDS.has(r.id), `${name}: id ${r.id} is not in CHECK_IDS`);
+    assert.ok(['warn', 'fail'].includes(r.severity), `${name}: severity ${r.severity}`);
+    assert.ok(['ok', 'fail'].includes(r.status), `${name}: status ${r.status}`);
+    assert.equal(typeof r.detail, 'string', `${name}: detail`);
+    if (r.status === 'ok') assert.equal(r.fix, null, `${name}: a passing check carries a fix`);
+    else assert.equal(typeof r.fix, 'string', `${name}: a failing check has no fix`);
   }
+  // Two ids come from one function, so only the plugin pair can be unseen.
+  const unseen = [...CHECK_IDS].filter((id) => !seen.has(id));
+  assert.deepEqual(unseen, ['episodic-memory-installed']);
+});
+
+test('checker refuses an id outside CHECK_IDS, and a severity outside warn/fail', () => {
+  assert.throws(() => checker('nope', 'Nope', 'warn'), /unknown health-check id: nope/);
+  assert.throws(() => checker('vault-path', 'Vault path', 'ok'), /severity must be warn or fail/);
+});
+
+test('checker binds id, name and severity once for both outcomes', () => {
+  const c = checker('vault-path', 'Vault path', 'fail');
+  assert.deepEqual(c.ok('present'), {
+    id: 'vault-path',
+    name: 'Vault path',
+    status: 'ok',
+    severity: 'fail',
+    detail: 'present',
+    fix: null,
+  });
+  assert.deepEqual(c.fail('directory missing', 'Run /learning-loop:init'), {
+    id: 'vault-path',
+    name: 'Vault path',
+    status: 'fail',
+    severity: 'fail',
+    detail: 'directory missing',
+    fix: 'Run /learning-loop:init',
+  });
 });
 
 test('checkOfflineMode: ok status, ON detail when offline', () => {
   const c = checkOfflineMode({ offline: true });
   assert.equal(c.id, 'offline-mode');
-  assert.equal(c.status, SEVERITIES.ok);
+  assert.equal(c.status, 'ok');
   assert.match(c.detail, /^ON —/);
   assert.match(c.detail, /update checks/);
   assert.equal(c.fix, null);
@@ -110,45 +120,8 @@ test('checkOfflineMode: ok status, ON detail when offline', () => {
 
 test('checkOfflineMode: ok status, off detail when not offline', () => {
   const c = checkOfflineMode({ offline: false });
-  assert.equal(c.status, SEVERITIES.ok);
+  assert.equal(c.status, 'ok');
   assert.match(c.detail, /off/);
-  assert.equal(c.fix, null);
-});
-
-test('SEVERITIES has ok, warn, fail', () => {
-  assert.equal(SEVERITIES.ok, 'ok');
-  assert.equal(SEVERITIES.warn, 'warn');
-  assert.equal(SEVERITIES.fail, 'fail');
-});
-
-test('makeCheck returns the expected shape', () => {
-  const c = makeCheck({
-    id: 'vault-path',
-    name: 'Vault path',
-    status: 'fail',
-    severity: 'fail',
-    detail: 'directory missing',
-    fix: 'Run /learning-loop:init',
-  });
-  assert.deepEqual(c, {
-    id: 'vault-path',
-    name: 'Vault path',
-    status: 'fail',
-    severity: 'fail',
-    detail: 'directory missing',
-    fix: 'Run /learning-loop:init',
-  });
-});
-
-test('makeCheck status=ok forces fix=null', () => {
-  const c = makeCheck({
-    id: 'vault-path',
-    name: 'Vault path',
-    status: 'ok',
-    severity: 'fail',
-    detail: 'present',
-    fix: 'irrelevant',
-  });
   assert.equal(c.fix, null);
 });
 
@@ -1996,9 +1969,9 @@ test('invalidated-adoption: counts notes whose frontmatter carries invalidated:,
     const counts = collectInvalidatedAdoption(vault);
     assert.deepEqual(counts, { total: 4, invalidated: 1 });
     const result = checkInvalidatedAdoption(counts);
-    assert.equal(result.id, CHECK_IDS['invalidated-adoption']);
-    assert.equal(result.status, SEVERITIES.ok);
-    assert.equal(result.severity, SEVERITIES.warn);
+    assert.equal(result.id, 'invalidated-adoption');
+    assert.equal(result.status, 'ok');
+    assert.equal(result.severity, 'warn');
     assert.match(result.detail, /1 of 4 notes/);
   } finally {
     rmSync(vault, { recursive: true, force: true });
