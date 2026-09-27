@@ -582,9 +582,12 @@ pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
              (3, 'other.md',  'h', 0.0, 'Other',  '', '01926d7e-0000-7000-8000-000000000003');
          INSERT INTO notes_content (id, title, tags, body) VALUES
              (1, 'Shared', '', 'Links [[secret]] and [[other]].'),
-             (2, 'Secret', '', 'Private body.'),
+             (2, 'Secret', '', 'Private body linking [[other]].'),
              (3, 'Other',  '', 'Other body.');
-         INSERT INTO links (source_id, target_path) VALUES (1, 'secret'), (1, 'other');",
+         -- (2, 'other') is the edge OUT of the withheld note: its target is
+         -- exported, so only the source half of the link rule holds it back.
+         INSERT INTO links (source_id, target_path) VALUES
+             (1, 'secret'), (1, 'other'), (2, 'other');",
     )
     .unwrap();
     std::fs::create_dir_all(vault).unwrap();
@@ -595,7 +598,7 @@ pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
     .unwrap();
     std::fs::write(
         vault.join("secret.md"),
-        "---\ntitle: Secret\n---\n\nPrivate body.",
+        "---\ntitle: Secret\n---\n\nPrivate body linking [[other]].",
     )
     .unwrap();
     std::fs::write(
@@ -895,6 +898,54 @@ mod tests {
         assert!(
             targets.iter().any(|t| t == "other"),
             "a link between two exported notes must still be carried: {targets:?}"
+        );
+    }
+
+    /// The other half of the same rule, and the half nothing tested.
+    ///
+    /// `a_link_whose_target_is_withheld_is_not_exported` covers a published
+    /// note pointing at a withheld one. This covers a WITHHELD note pointing at
+    /// a published one — where the target check passes on its own, so only the
+    /// source check holds the row back. Deleting
+    /// `disclosed.get(source_id).is_some_and(|d| d.links)` left the whole
+    /// suite green: the export would then carry an edge out of a note it had
+    /// just decided not to send, disclosing both that the note exists and what
+    /// it points at.
+    #[test]
+    fn a_link_whose_source_is_withheld_is_not_exported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("source.db");
+        let out = tmp.path().join("export.db");
+        let vault = tmp.path().join("vault");
+        build_linked_source_db(&source, &vault);
+
+        let config = FederationConfig::test_fixture(
+            "listed",
+            vec![("**/secret*".to_string(), "private".to_string())],
+        );
+        let result = export_index(&source, &vault, &out, &config).unwrap();
+        assert_eq!(result.skipped, 1, "secret is withheld");
+
+        let c = Connection::open(&out).unwrap();
+        let rows: Vec<(i64, String)> = c
+            .prepare("SELECT source_id, target_path FROM links")
+            .unwrap()
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let withheld_id = 2;
+        assert!(
+            !rows.iter().any(|(src, _)| *src == withheld_id),
+            "an edge out of the withheld note left the machine: {rows:?}"
+        );
+        // Not vacuous: the surviving edge has the same target, so a filter
+        // that dropped every row pointing at `other` would pass the assertion
+        // above without the source rule doing any of the work.
+        assert!(
+            rows.iter().any(|(src, tgt)| *src == 1 && tgt == "other"),
+            "the published note's edge to the same target must survive: {rows:?}"
         );
     }
 
