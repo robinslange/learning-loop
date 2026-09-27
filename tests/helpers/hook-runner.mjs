@@ -23,6 +23,16 @@ const PKG_VERSION = JSON.parse(
   readFileSync(new URL('../../plugin/.claude-plugin/plugin.json', import.meta.url), 'utf8'),
 ).version;
 
+/**
+ * Stryker switches a mutant on through this one variable. A child spawned
+ * with a minimal env drops it and runs the unmutated code, so every mutant
+ * only that child exercises survives. Spread this into any minimal env.
+ */
+export function strykerEnv() {
+  const active = process.env.__STRYKER_ACTIVE_MUTANT__;
+  return active === undefined ? {} : { __STRYKER_ACTIVE_MUTANT__: active };
+}
+
 const SANDBOX_PREFIX = 'll-hook-sb-';
 const STALE_SANDBOX_MS = 60 * 60 * 1000;
 
@@ -282,6 +292,7 @@ export function runHook(hookPath, opts = {}) {
       // Detached children record their pids here so cleanup() can reap them
       // before rmSync — otherwise their writes race the walk (ENOTEMPTY).
       LL_CHILD_PID_FILE: childPidFile,
+      ...strykerEnv(),
       // Consumer-provided overrides (VAULT_PATH, CLAUDE_PROJECT_DIR, etc.).
       ...env,
       // os.tmpdir() reads $TMPDIR on POSIX but %TEMP%/%TMP% on Windows. Mirror
