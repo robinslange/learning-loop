@@ -12,7 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { tryRemoveIfStale, releaseLock } from '../plugin/scripts/lib/file-lock.mjs';
@@ -208,6 +208,103 @@ test('releaseLock: EBADF on close is silent; other codes surface', () => {
     /file-lock\.releaseLock\.close/,
     `EIO on close must surface; got stderr: ${loudStderr.slice(0, 200)}`,
   );
+});
+
+test('tryRemoveIfStale: ENOENT on unlink (dead-PID branch) means a racing waiter already reclaimed it', () => {
+  // F-7b: two waiters can both decide the same lockfile is reclaimable (dead
+  // PID) and race the unlink. The loser must treat the other's ENOENT as
+  // success — the lock is gone either way — not let it escape uncaught.
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-unlink-race-'));
+  const lockPath = join(sb, 'target.lock');
+  writeFileSync(lockPath, '99999999'); // impossibly high PID: dead
+
+  let calls = 0;
+  const unlinkFn = () => {
+    calls++;
+    const err = new Error("ENOENT: no such file or directory, unlink '" + lockPath + "'");
+    err.code = 'ENOENT';
+    throw err;
+  };
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = tryRemoveIfStale(lockPath, 60_000, { unlinkFn });
+  });
+
+  try {
+    assert.equal(calls, 1, 'unlinkFn must actually be called on the dead-PID branch');
+    assert.equal(result, true, 'a racing ENOENT must be treated as reclaimed, not a failure');
+    assert.equal(stderr, '', `ENOENT on unlink must be silent; got: ${stderr.slice(0, 200)}`);
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
+
+test('tryRemoveIfStale: non-ENOENT unlink failure (dead-PID branch) propagates', () => {
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-unlink-fail-'));
+  const lockPath = join(sb, 'target.lock');
+  writeFileSync(lockPath, '99999999'); // impossibly high PID: dead
+
+  const unlinkFn = () => {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  };
+
+  try {
+    assert.throws(() => tryRemoveIfStale(lockPath, 60_000, { unlinkFn }), /EACCES/);
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
+
+test('tryRemoveIfStale: ENOENT on unlink (mtime branch) means a racing waiter already reclaimed it', () => {
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-unlink-race-mtime-'));
+  const lockPath = join(sb, 'target.lock');
+  writeFileSync(lockPath, ''); // empty: unparseable PID, routes to mtime fallback
+
+  let calls = 0;
+  const unlinkFn = () => {
+    calls++;
+    const err = new Error("ENOENT: no such file or directory, unlink '" + lockPath + "'");
+    err.code = 'ENOENT';
+    throw err;
+  };
+  // Stale by mtime: real statFn on the file we just wrote, backdated staleMs
+  // beyond its age, forces the "stale" branch without needing real elapsed time.
+  const statFn = () => ({ mtimeMs: Date.now() - 120_000 });
+
+  let result;
+  const stderr = withStderrCapture(() => {
+    result = tryRemoveIfStale(lockPath, 60_000, { statFn, unlinkFn });
+  });
+
+  try {
+    assert.equal(calls, 1, 'unlinkFn must actually be called on the mtime branch');
+    assert.equal(result, true, 'a racing ENOENT must be treated as reclaimed, not a failure');
+    assert.equal(stderr, '', `ENOENT on unlink must be silent; got: ${stderr.slice(0, 200)}`);
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
+});
+
+test('tryRemoveIfStale: non-ENOENT unlink failure (mtime branch) propagates', () => {
+  const sb = mkdtempSync(join(tmpdir(), 'll-lock-unlink-fail-mtime-'));
+  const lockPath = join(sb, 'target.lock');
+  writeFileSync(lockPath, '');
+
+  const unlinkFn = () => {
+    const err = new Error('EACCES: permission denied');
+    err.code = 'EACCES';
+    throw err;
+  };
+  const statFn = () => ({ mtimeMs: Date.now() - 120_000 });
+
+  try {
+    assert.throws(() => tryRemoveIfStale(lockPath, 60_000, { statFn, unlinkFn }), /EACCES/);
+  } finally {
+    rmSync(sb, { recursive: true, force: true });
+  }
 });
 
 test('tryRemoveIfStale: default statFn is fs.statSync (no behaviour change for real callers)', () => {

@@ -65,37 +65,66 @@ export function isProcessAlive(pid) {
   }
 }
 
+// Unlink a lockfile this call has decided is reclaimable. Two waiters can
+// reach that same decision about the same lockfile at once (same dead PID,
+// same stale mtime — nothing about the decision is exclusive), and only one
+// unlinkSync wins the race; the other gets ENOENT. That's not a failure — the
+// lock is gone either way, so the caller may retry the open immediately.
+//
+// Anything else (EACCES, EBUSY, EPERM, ...) propagates instead of being
+// logged-and-swallowed the way releaseLock treats the same codes. The two
+// are not the same situation: releaseLock runs after the critical section
+// has already completed, with no one left to hand a failure to but a log
+// line. removeLock runs mid-acquire, with acquireLock/withLock/tryBump still
+// on the stack and a real decision to make (retry? give up? fail closed?) —
+// swallowing the error here would let them retry blind against a lockfile
+// whose state is now unknown, or report success when nothing was reclaimed.
+// Don't collapse this back to releaseLock's swallow-and-log shape.
+function removeLock(lockPath, unlinkFn) {
+  try {
+    unlinkFn(lockPath);
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  return true;
+}
+
 /**
  * Attempts to remove a lockfile if its recorded PID is no longer alive.
  * Falls back to mtime-based staleness when the PID is unreadable.
  *
  * @param {string} lockPath
  * @param {number} staleMs
- * @param {{ statFn?: (path: string) => { mtimeMs: number }, nowFn?: () => number }} [deps]
- *   Optional dependency injection; defaults to fs.statSync / Date.now. Tests
- *   pass stubs to exercise the mtime-fallback failure path without engineering
- *   a filesystem race between readFileSync and statSync, and to pin the clock
- *   so exact-boundary assertions don't flake on wall-time drift.
- * @returns {boolean} true if the lock was removed and the caller may retry.
+ * @param {{ statFn?: (path: string) => { mtimeMs: number }, nowFn?: () => number, unlinkFn?: (path: string) => void }} [deps]
+ *   Optional dependency injection; defaults to fs.statSync / Date.now /
+ *   fs.unlinkSync. Tests pass stubs to exercise the mtime-fallback failure
+ *   path and the cross-waiter unlink race without engineering a real
+ *   filesystem race, and to pin the clock so exact-boundary assertions don't
+ *   flake on wall-time drift.
+ * @returns {boolean} true if the lock was removed (by this call or a racing
+ *   one) and the caller may retry.
  */
-export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync, nowFn = Date.now } = {}) {
+export function tryRemoveIfStale(
+  lockPath,
+  staleMs,
+  { statFn = statSync, nowFn = Date.now, unlinkFn = unlinkSync } = {},
+) {
   // mtime backstop: used whenever the PID can't prove the owner is alive —
   // whether the read threw, or it succeeded but held an empty/garbage PID.
   // An unreadable-but-fresh lock is left alone; only an old one is reclaimed.
   const removeIfMtimeStale = () => {
+    let stale;
     try {
       const { mtimeMs } = statFn(lockPath);
-      if (nowFn() - mtimeMs > staleMs) {
-        unlinkSync(lockPath);
-        return true;
-      }
+      stale = nowFn() - mtimeMs > staleMs;
     } catch (err) {
       // ENOENT means the lockfile vanished (a concurrent recovery). Expected
       // race, not a failure. Anything else is genuinely unusual — worth
       // surfacing.
       if (err.code !== 'ENOENT') logError('file-lock.mtimeFallback', err, { lockPath });
+      return false;
     }
-    return false;
+    return stale ? removeLock(lockPath, unlinkFn) : false;
   };
 
   let raw;
@@ -109,8 +138,7 @@ export function tryRemoveIfStale(lockPath, staleMs, { statFn = statSync, nowFn =
   const pid = parseInt(raw, 10);
   if (Number.isFinite(pid) && pid > 0) {
     if (!isProcessAlive(pid)) {
-      unlinkSync(lockPath);
-      return true;
+      return removeLock(lockPath, unlinkFn);
     }
     // Owner is alive — do not remove.
     return false;
