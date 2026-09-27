@@ -462,7 +462,7 @@ pub fn reindex(conn: &Connection, vault_path: &str, force: bool) -> Result<Index
             .iter()
             .map(|item| item.text.clone())
             .collect();
-        let vecs = embed_documents(&texts);
+        let vecs = embed_documents(&texts)?;
         embedded_vecs.extend(vecs);
         eprintln!("  Embedded {}/{}", batch_end, to_embed.len());
     }

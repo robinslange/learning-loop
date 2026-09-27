@@ -193,7 +193,7 @@ fn score_ranking(results: &[String], relevant: &HashSet<String>, source_path: &s
     (recall_5, recall_10, ndcg_10, mrr, hit_1)
 }
 
-pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) -> EvalResult {
+pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) -> anyhow::Result<EvalResult> {
     let queries = build_eval_set(conn, min_links);
     let ctx = SearchContext::build(conn);
 
@@ -223,7 +223,7 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
         let n = queries.len() as f64;
 
         for q in &queries {
-            let qvec = embed_query(&q.title);
+            let qvec = embed_query(&q.title)?;
             let results = eval_ranking(&ctx, conn, &qvec, &q.title, &q.path, params.as_ref());
             let (r5, r10, ndcg, mrr, h1) = score_ranking(&results, &q.relevant, &q.path);
             total_r5 += r5;
@@ -245,11 +245,11 @@ pub fn eval_prf(conn: &Connection, _store: &EmbeddingStore, min_links: usize) ->
         eprintln!("  {} done", label);
     }
 
-    EvalResult {
+    Ok(EvalResult {
         num_queries: queries.len(),
         min_links,
         configs,
-    }
+    })
 }
 
 /// Run the funnel-ablation eval: each stage added cumulatively, scored on the
@@ -268,7 +268,7 @@ pub fn eval_funnel(
     _store: &EmbeddingStore,
     min_links: usize,
     limit: Option<usize>,
-) -> EvalResult {
+) -> anyhow::Result<EvalResult> {
     let mut queries = build_eval_set(conn, min_links);
     if let Some(cap) = limit {
         if queries.len() > cap {
@@ -296,7 +296,7 @@ pub fn eval_funnel(
     let mut n_long = 0usize;
 
     for (qi, q) in queries.iter().enumerate() {
-        let qvec = embed_query(&q.title);
+        let qvec = embed_query(&q.title)?;
         let signals = ctx.compute_signals_holdout(conn, &qvec, &q.title, &q.path);
 
         for (ci, (_, flags)) in cascade.iter().enumerate() {
@@ -308,7 +308,7 @@ pub fn eval_funnel(
 
         if let Some(long_query) = &q.long_query {
             n_long += 1;
-            let long_vec = embed_query(long_query);
+            let long_vec = embed_query(long_query)?;
             let long_signals = ctx.compute_signals_holdout(conn, &long_vec, long_query, &q.path);
 
             for (ci, (_, flags)) in cascade.iter().enumerate() {
@@ -353,11 +353,11 @@ pub fn eval_funnel(
         }));
     }
 
-    EvalResult {
+    Ok(EvalResult {
         num_queries: queries.len(),
         min_links,
         configs,
-    }
+    })
 }
 
 fn funnel_with_signals(
@@ -518,7 +518,7 @@ pub fn tune_weights(
     _store: &EmbeddingStore,
     min_links: usize,
     limit: Option<usize>,
-) -> Vec<(FusionWeights, f64, f64)> {
+) -> anyhow::Result<Vec<(FusionWeights, f64, f64)>> {
     let mut queries = build_eval_set(conn, min_links);
     if let Some(cap) = limit {
         if queries.len() > cap {
@@ -559,7 +559,7 @@ pub fn tune_weights(
     let mut cached: Vec<Cached> = Vec::new();
     for (i, q) in queries.iter().enumerate() {
         let text = q.title.as_str();
-        let qvec = embed_query(text);
+        let qvec = embed_query(text)?;
         cached.push(Cached {
             signals: ctx.compute_signals_holdout(conn, &qvec, text, &q.path),
             relevant: q.relevant.clone(),
@@ -613,7 +613,7 @@ pub fn tune_weights(
         }
     }
     results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    results
+    Ok(results)
 }
 
 /// Per-lane, per-query statistics for the two query distributions that differ
@@ -648,14 +648,14 @@ fn top_gap_spread(scores: &[f64]) -> (f64, f64, f64) {
     (top, gap, (top - last).abs())
 }
 
-pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) -> Vec<LaneStat> {
+pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) -> anyhow::Result<Vec<LaneStat>> {
     let ctx = SearchContext::build(conn);
     let mut out = Vec::new();
     for (set, gold_path, text) in probes {
         if text.trim().is_empty() {
             continue;
         }
-        let qvec = embed_query(text);
+        let qvec = embed_query(text)?;
         let sig = ctx.compute_signals(conn, &qvec, text);
 
         let vec_scores: Vec<f64> = sig.vec_scored.iter().map(|(_, s)| *s).take(10).collect();
@@ -684,5 +684,5 @@ pub fn lane_diagnostics(conn: &Connection, probes: &[(String, String, String)]) 
                 .unwrap_or(-1),
         });
     }
-    out
+    Ok(out)
 }

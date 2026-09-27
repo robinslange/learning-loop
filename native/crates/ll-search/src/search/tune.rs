@@ -109,7 +109,7 @@ pub fn tune_prf(
     conn: &rusqlite::Connection,
     queries: &[String],
     _store: &EmbeddingStore,
-) -> TuneResult {
+) -> anyhow::Result<TuneResult> {
     let ctx = SearchContext::build(conn);
 
     type StrategyFn = fn(&SearchContext, &rusqlite::Connection, &[f32], &str, &PrfParams) -> Vec<(String, f64)>;
@@ -121,13 +121,13 @@ pub fn tune_prf(
     ];
 
     let baseline: Vec<QueryResult> = queries.iter().map(|q| {
-        let qvec = embed_query(q);
+        let qvec = embed_query(q)?;
         let signals = ctx.compute_signals(conn, &qvec, q);
         let rrf = ctx.rrf_from_signals(&signals, None);
         let results = finalize_rrf(rrf, 10);
         let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
-        QueryResult { query: q.clone(), top10 }
-    }).collect();
+        Ok(QueryResult { query: q.clone(), top10 })
+    }).collect::<anyhow::Result<_>>()?;
 
     let param_grid = vec![
         PrfParams { alpha: 0.5, beta: 0.5, k: 1 },
@@ -143,11 +143,11 @@ pub fn tune_prf(
     for (name, func) in &strategy_fns {
         for params in &param_grid {
             let query_results: Vec<QueryResult> = queries.iter().map(|q| {
-                let qvec = embed_query(q);
+                let qvec = embed_query(q)?;
                 let results = func(&ctx, conn, &qvec, q, params);
                 let top10: Vec<String> = results.iter().map(|(p, _)| p.clone()).collect();
-                QueryResult { query: q.clone(), top10 }
-            }).collect();
+                Ok(QueryResult { query: q.clone(), top10 })
+            }).collect::<anyhow::Result<_>>()?;
 
             let n = queries.len() as f64;
             let mut total_new_5 = 0.0;
@@ -186,5 +186,5 @@ pub fn tune_prf(
         }
     }
 
-    TuneResult { baseline, strategies }
+    Ok(TuneResult { baseline, strategies })
 }
