@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { strykerEnv } from './helpers/hook-runner.mjs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const REPORT = join(SCRIPTS, 'retrieval-report.mjs');
@@ -712,7 +713,13 @@ test('retrieval-report counts every valid query around a torn line', () => {
   try {
     const out = spawnSync(process.execPath, [REPORT], {
       encoding: 'utf8',
-      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_DATA: pd },
+      env: {
+        PATH: process.env.PATH,
+        HOME: home,
+        USERPROFILE: home,
+        CLAUDE_PLUGIN_DATA: pd,
+        ...strykerEnv(),
+      },
     });
     assert.equal(out.status, 0, out.stderr);
     assert.match(out.stdout, /Total queries:\s+4\n/);
