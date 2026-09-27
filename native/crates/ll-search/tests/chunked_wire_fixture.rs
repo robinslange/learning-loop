@@ -16,7 +16,7 @@
 //! so agreeing with it is evidence about the protocol, not about either repo's
 //! own code agreeing with itself.
 
-use ll_search::sync::protocol::{manifest_root, ChunkedFrame};
+use ll_search::sync::protocol::{chunked_frames, manifest_root, ChunkedFrame};
 use sha2::{Digest, Sha256};
 
 /// Changing this without changing sync-hub's copy in the same breath is the
@@ -115,8 +115,9 @@ fn the_client_decodes_and_reproduces_every_frame_in_the_fixture() {
 }
 
 /// The direction that matters in production: this client is the one that
-/// *sends* chunks. Cutting the same body the same way must yield the fixture's
-/// bytes, not merely bytes this client can read back.
+/// *sends* chunks. `chunked_frames` is what the upload loop sends, so the
+/// frames it cuts from the same body must be the fixture's bytes, not merely
+/// bytes this client can read back.
 #[test]
 fn the_client_produces_the_fixtures_bytes_from_the_same_body() {
     let f = load();
@@ -127,11 +128,11 @@ fn the_client_produces_the_fixtures_bytes_from_the_same_body() {
         "the rule this test rebuilds the body from is the one the fixture used"
     );
 
-    let cut: Vec<&[u8]> = body.chunks(FIXTURE_CHUNK_BYTES).collect();
-    assert_eq!(cut.len() as u32, f.chunks);
-    for (seq, chunk) in cut.iter().enumerate() {
-        let frame = ChunkedFrame::from_body(seq as u32, f.chunks, chunk.to_vec())
-            .expect("every chunk is within the frame ceiling");
+    let frames: Vec<ChunkedFrame> = chunked_frames(&body, FIXTURE_CHUNK_BYTES)
+        .collect::<Result<_, _>>()
+        .expect("every chunk is within the frame ceiling");
+    assert_eq!(frames.len() as u32, f.chunks);
+    for (seq, frame) in frames.iter().enumerate() {
         assert_eq!(
             &frame.encode(),
             &f.frames[seq],

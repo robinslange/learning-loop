@@ -97,6 +97,19 @@ impl ChunkedFrame {
     }
 }
 
+/// The frames a chunked upload sends for `body`, in seq order: `chunk_bytes`
+/// at a time, each carrying the total. The client's send loop sends exactly
+/// these, so a test over this function is a test of what goes on the wire.
+pub fn chunked_frames(
+    body: &[u8],
+    chunk_bytes: usize,
+) -> impl Iterator<Item = std::result::Result<ChunkedFrame, SyncError>> + '_ {
+    let total = body.len().div_ceil(chunk_bytes) as u32;
+    body.chunks(chunk_bytes)
+        .enumerate()
+        .map(move |(seq, c)| ChunkedFrame::from_body(seq as u32, total, c.to_vec()))
+}
+
 /// Flat manifest root: sha256 of the concatenated per-chunk sha256s in seq order.
 ///
 /// Not a merkle tree; we ship all chunk hashes alongside the upload, so a flat
