@@ -1,45 +1,43 @@
-// Contract test for the canonical PLUGIN_DATA path constants.
-// Pins the shape so call sites can rely on stable names; renaming a folder
-// here means changing one line that every caller follows.
-
+// The JS hooks and the native binary share one plugin-data directory, and each
+// side spells the file names it reads on its own. This pins the contract
+// between them: every name paths.mjs resolves for a file the Rust side also
+// reads must appear as a string literal in the shipped Rust source (inline
+// `#[cfg(test)] mod` blocks stripped), so a rename on either side goes red here.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
-import { DATA_PATHS, FEDERATION_PATHS, DATA_FILES } from '../plugin/scripts/lib/paths.mjs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { DATA_FILES, FEDERATION_PATHS } from '../plugin/scripts/lib/paths.mjs';
 
-test('DATA_PATHS resolves PLUGIN_DATA subdirectories', () => {
-  const pd = '/tmp/test-pd';
-  assert.equal(DATA_PATHS.bin(pd), join(pd, 'bin'));
-  assert.equal(DATA_PATHS.convergence(pd), join(pd, 'convergence'));
-  assert.equal(DATA_PATHS.librarian(pd), join(pd, 'librarian'));
-  assert.equal(DATA_PATHS.librarianQueue(pd), join(pd, 'librarian', 'queue.jsonl'));
-  assert.equal(DATA_PATHS.retrieval(pd), join(pd, 'retrieval'));
-  assert.equal(DATA_PATHS.retrievalSessionDedupe(pd), join(pd, 'retrieval', 'session-dedupe'));
-  assert.equal(DATA_PATHS.provenance(pd), join(pd, 'provenance'));
-  assert.equal(DATA_PATHS.federation(pd), join(pd, 'federation'));
-  assert.equal(DATA_PATHS.sessionStartCache(pd), join(pd, 'session-start-cache'));
-});
+const CRATES = join(import.meta.dirname, '..', 'native', 'crates');
 
-test('FEDERATION_PATHS resolves federation subtree', () => {
-  const pd = '/tmp/test-pd';
-  assert.equal(FEDERATION_PATHS.root(pd), join(pd, 'federation'));
-  assert.equal(FEDERATION_PATHS.config(pd), join(pd, 'federation', 'config.json'));
-  assert.equal(FEDERATION_PATHS.seedMeta(pd), join(pd, 'federation', '.seed-meta.json'));
-  assert.equal(FEDERATION_PATHS.seedNoticeShown(pd), join(pd, 'federation', '.seed-notice-shown'));
-  assert.equal(FEDERATION_PATHS.outbox(pd), join(pd, 'federation', 'outbox'));
-  assert.equal(FEDERATION_PATHS.peersDir(pd), join(pd, 'federation', 'data', 'peers'));
-  assert.equal(
-    FEDERATION_PATHS.peerDb(pd, 'abc123'),
-    join(pd, 'federation', 'data', 'peers', 'abc123', 'index.db'),
-  );
-  assert.equal(FEDERATION_PATHS.syncState(pd), join(pd, 'federation', 'sync-state.json'));
-  assert.equal(FEDERATION_PATHS.readableVaults(pd), join(pd, 'federation', 'readable-vaults.json'));
-  assert.equal(FEDERATION_PATHS.vaultRegistry(pd), join(pd, 'vaults.json'));
-});
+const rustSource = readdirSync(CRATES)
+  .flatMap((crate) =>
+    readdirSync(join(CRATES, crate, 'src'), { recursive: true })
+      .filter((f) => f.endsWith('.rs'))
+      .map((f) => join(CRATES, crate, 'src', f)),
+  )
+  .map((f) => readFileSync(f, 'utf8').split(/^#\[cfg\(test\)\]\s*\nmod /m)[0])
+  .join('\n');
 
-test('DATA_FILES resolves standalone data files', () => {
-  const pd = '/tmp/test-pd';
-  assert.equal(DATA_FILES.edgesDb(pd), join(pd, 'edges.db'));
-  assert.equal(DATA_FILES.dupScanSocket(pd), join(pd, 'nli.sock'));
-  assert.equal(DATA_FILES.binVersion(pd), join(pd, 'bin', '.version'));
-});
+const pd = join('/', 'plugin-data');
+const SHARED = {
+  'FEDERATION_PATHS.config': FEDERATION_PATHS.config(pd),
+  'FEDERATION_PATHS.seedMeta': FEDERATION_PATHS.seedMeta(pd),
+  'FEDERATION_PATHS.peersDir': FEDERATION_PATHS.peersDir(pd),
+  'FEDERATION_PATHS.peerDb': FEDERATION_PATHS.peerDb(pd, 'vault-id'),
+  'FEDERATION_PATHS.syncState': FEDERATION_PATHS.syncState(pd),
+  'FEDERATION_PATHS.readableVaults': FEDERATION_PATHS.readableVaults(pd),
+  'FEDERATION_PATHS.vaultRegistry': FEDERATION_PATHS.vaultRegistry(pd),
+  'DATA_FILES.dupScanSocket': DATA_FILES.dupScanSocket(pd),
+};
+
+for (const [helper, path] of Object.entries(SHARED)) {
+  const name = basename(path);
+  test(`${helper} names a file the Rust side also reads (${name})`, () => {
+    assert.ok(
+      rustSource.includes(`"${name}"`),
+      `"${name}" from ${helper} does not appear in native/crates/*/src`,
+    );
+  });
+}

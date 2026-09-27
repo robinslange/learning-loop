@@ -12,7 +12,8 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
 
 describe('emitProvenance intent hardening', () => {
   let dataDir;
@@ -156,24 +157,63 @@ describe('getSessionId fallback chain', () => {
 describe('readStdin', () => {
   // lib-hook-config.test.mjs checks every stdin-reading hook's hooks.json
   // timeout against HookConfig.STDIN_TIMEOUT_MS. readStdin must consume that
-  // constant — a hardcoded literal here would let the runtime drift from what
-  // that test measures.
-  it('uses HookConfig.STDIN_TIMEOUT_MS, not a hardcoded timeout', () => {
-    const src = readFileSync(new URL('../plugin/hooks/lib/common.mjs', import.meta.url), 'utf8');
-    assert.ok(src.includes('export function readStdin'), 'readStdin not found in common.mjs');
-    assert.ok(
-      src.includes('HookConfig.STDIN_TIMEOUT_MS'),
-      'readStdin timeout must come from HookConfig.STDIN_TIMEOUT_MS',
-    );
-    // Guard: a bounded slice around readStdin must not contain a numeric setTimeout literal.
-    const fnStart = src.indexOf('export function readStdin');
-    const fnSlice = src.slice(fnStart, fnStart + 500);
-    assert.doesNotMatch(
-      fnSlice,
-      /setTimeout\([\s\S]*?,\s*\d/,
-      'readStdin must not hardcode a numeric timeout literal',
-    );
-  });
+  // constant, and give up on a pipe the harness never closes. The child times
+  // its own readStdin() call, so slow process startup (Windows CI) only eats
+  // into HARD_MS, never into the resolve budget.
+  const TIMEOUT = HookConfig.STDIN_TIMEOUT_MS;
+  const SLACK_MS = 2000;
+  const HARD_MS = TIMEOUT + 20000;
+
+  it(
+    'resolves empty after STDIN_TIMEOUT_MS while stdin is held open',
+    { timeout: HARD_MS + 5000 },
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'll-common-stdin-'));
+      try {
+        const pluginData = join(root, 'plugin-data');
+        mkdirSync(pluginData);
+        const commonUrl = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
+        const probe = `import { readStdin } from ${JSON.stringify(commonUrl)};
+          const t0 = performance.now();
+          const data = await readStdin();
+          console.log(JSON.stringify({ data, ms: performance.now() - t0 }));
+          process.exit(0);`;
+        const stdout = await new Promise((resolve, reject) => {
+          const child = spawn(process.execPath, ['--input-type=module', '-e', probe], {
+            stdio: 'pipe',
+            env: {
+              PATH: process.env.PATH,
+              HOME: root,
+              USERPROFILE: root,
+              CLAUDE_PLUGIN_DATA: pluginData,
+            },
+          });
+          let out = '';
+          let err = '';
+          child.stdout.on('data', (c) => (out += c));
+          child.stderr.on('data', (c) => (err += c));
+          const hard = setTimeout(() => {
+            child.kill();
+            reject(new Error(`readStdin still pending after ${HARD_MS}ms`));
+          }, HARD_MS);
+          child.on('close', (code) => {
+            clearTimeout(hard);
+            if (code === 0) resolve(out);
+            else reject(new Error(`probe exited ${code}: ${err}`));
+          });
+        });
+        const { data, ms } = JSON.parse(stdout);
+        assert.equal(data, '');
+        assert.ok(ms >= TIMEOUT - 50, `resolved after ${ms}ms, before the ${TIMEOUT}ms timeout`);
+        assert.ok(
+          ms <= TIMEOUT + SLACK_MS,
+          `resolved after ${ms}ms, over ${TIMEOUT}+${SLACK_MS}ms`,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });
 
 // Run an ESM snippet with common.mjs imported as `common`, in a child node

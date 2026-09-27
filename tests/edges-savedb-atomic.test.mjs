@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb, getEdgesFrom } from '../plugin/scripts/lib/edges.mjs';
+import { skipOnWindows } from './helpers/platform.mjs';
 
 test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));
@@ -20,10 +21,19 @@ test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () =
   );
 });
 
-test('saveDb writes through writeFileAtomic, not a direct writeFileSync to the db path', () => {
-  const src = readFileSync(new URL('../plugin/scripts/lib/edges.mjs', import.meta.url), 'utf8');
-  const fn = src.slice(src.indexOf('export function saveDb'));
-  const body = fn.slice(0, fn.indexOf('\n}') + 2);
-  assert.match(body, /writeFileAtomic\(dbPath,/);
-  assert.doesNotMatch(body, /writeFileSync/);
-});
+// win32 file ids depend on the filesystem and can read back as 0, so an
+// unchanged ino there proves nothing.
+test(
+  'saveDb replaces the db file instead of rewriting it in place',
+  { skip: skipOnWindows('statSync().ino is not a reliable file identity on win32') },
+  async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));
+    const dbPath = join(dir, 'edges.db');
+    const db = await openEdgeDb(dbPath);
+    saveDb(db, dbPath);
+    const before = statSync(dbPath).ino;
+    addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for' });
+    saveDb(db, dbPath);
+    assert.notEqual(statSync(dbPath).ino, before, 'db file was rewritten in place');
+  },
+);

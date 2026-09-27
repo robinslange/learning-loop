@@ -549,42 +549,72 @@ describe('buildQueryParts', () => {
   });
 });
 
+// A fake ll-search child. `spec` is the call's options, or a function of
+// (cmd, args) returning them, run once per spawn. A `hang` child never settles
+// on its own; kill() reports the signal to `onKill` and closes it with 143.
+function makeMockSpawn(spec = {}) {
+  return (cmd, args) => {
+    const {
+      stdout = '',
+      stderr = '',
+      exitCode = 0,
+      errorEvent = null,
+      hang = false,
+      onKill = () => {},
+    } = typeof spec === 'function' ? spec(cmd, args) : spec;
+    const closeCallbacks = [];
+    const errorCallbacks = [];
+    const stdoutCallbacks = [];
+    const stderrCallbacks = [];
+    const child = {
+      killed: false,
+      kill: (sig) => {
+        child.killed = true;
+        onKill(sig);
+        setTimeout(() => {
+          for (const cb of closeCallbacks) cb(143);
+        }, 5);
+      },
+      stdout: {
+        on: (evt, cb) => {
+          if (evt === 'data') stdoutCallbacks.push(cb);
+        },
+      },
+      stderr: {
+        on: (evt, cb) => {
+          if (evt === 'data') stderrCallbacks.push(cb);
+        },
+      },
+      on: (evt, cb) => {
+        if (evt === 'close') closeCallbacks.push(cb);
+        if (evt === 'error') errorCallbacks.push(cb);
+      },
+    };
+    if (hang) return child;
+    setTimeout(() => {
+      if (errorEvent) {
+        for (const cb of errorCallbacks) cb(errorEvent);
+        return;
+      }
+      for (const cb of stdoutCallbacks) cb(stdout);
+      for (const cb of stderrCallbacks) cb(stderr);
+      for (const cb of closeCallbacks) cb(exitCode);
+    }, 5);
+    return child;
+  };
+}
+
 describe('runBackendsWithRaceCap vault-only', () => {
   it('returns raced_out: false on successful parse', async () => {
     const vaultJson = JSON.stringify([
       { title: 'Test', path: 'test.md', body: 'Body.', score: 0.9 },
     ]);
 
-    const mockSpawn = (cmd, _args, _opts) => {
-      const closeCallbacks = [];
-      const dataCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') dataCallbacks.push(cb);
-          },
-        },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      setTimeout(() => {
-        for (const cb of dataCallbacks) cb(cmd === 'll-search' ? vaultJson : '');
-        for (const cb of closeCallbacks) cb(0);
-      }, 5);
-      return child;
-    };
-
     const results = await runBackendsWithRaceCap({
       query: 'test',
       vaultDbPath: '/nonexistent',
       raceCapMs: 2000,
-      _spawnFn: mockSpawn,
+      _spawnFn: makeMockSpawn((cmd) => ({ stdout: cmd === 'll-search' ? vaultJson : '' })),
     });
 
     assert.equal(results.vault.raced_out, false);
@@ -593,37 +623,15 @@ describe('runBackendsWithRaceCap vault-only', () => {
 
   it('returns { vault } only and spawns exactly one child', async () => {
     let spawnCount = 0;
-    const mockSpawn = (cmd, _args, _opts) => {
-      spawnCount++;
-      const closeCallbacks = [];
-      const dataCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') dataCallbacks.push(cb);
-          },
-        },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      setTimeout(() => {
-        for (const cb of dataCallbacks) cb('[]');
-        for (const cb of closeCallbacks) cb(0);
-      }, 5);
-      return child;
-    };
 
     const results = await runBackendsWithRaceCap({
       query: 'test',
       vaultDbPath: '/nonexistent',
       raceCapMs: 2000,
-      _spawnFn: mockSpawn,
+      _spawnFn: makeMockSpawn(() => {
+        spawnCount++;
+        return { stdout: '[]' };
+      }),
     });
 
     assert.equal(spawnCount, 1, 'only the vault backend should be spawned');
@@ -636,41 +644,20 @@ describe('runBackendsWithRaceCap vault-only', () => {
     const scoreFor = (q) => (q === 'padded blended query' ? 0.6 : 0.2);
     let spawnCount = 0;
     const seenQueries = [];
-    const mockSpawn = (_cmd, args) => {
-      spawnCount++;
-      const q = args[args.length - 1];
-      seenQueries.push(q);
-      const json = JSON.stringify([{ title: 'T', path: 't.md', body: 'b', score: scoreFor(q) }]);
-      const dataCallbacks = [];
-      const closeCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') dataCallbacks.push(cb);
-          },
-        },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      setTimeout(() => {
-        for (const cb of dataCallbacks) cb(json);
-        for (const cb of closeCallbacks) cb(0);
-      }, 5);
-      return child;
-    };
 
     const results = await runBackendsWithRaceCap({
       query: 'padded blended query',
       soloQuery: 'prompt alone',
       vaultDbPath: '/nonexistent',
       raceCapMs: 2000,
-      _spawnFn: mockSpawn,
+      _spawnFn: makeMockSpawn((_cmd, args) => {
+        spawnCount++;
+        const q = args[args.length - 1];
+        seenQueries.push(q);
+        return {
+          stdout: JSON.stringify([{ title: 'T', path: 't.md', body: 'b', score: scoreFor(q) }]),
+        };
+      }),
     });
 
     assert.equal(spawnCount, 2, 'padded + solo queries each spawn a search');
@@ -681,82 +668,21 @@ describe('runBackendsWithRaceCap vault-only', () => {
 
   it('soloQuery equal to query does not spawn a second search', async () => {
     let spawnCount = 0;
-    const mockSpawn = () => {
-      spawnCount++;
-      const dataCallbacks = [];
-      const closeCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') dataCallbacks.push(cb);
-          },
-        },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      setTimeout(() => {
-        for (const cb of dataCallbacks) cb('[]');
-        for (const cb of closeCallbacks) cb(0);
-      }, 5);
-      return child;
-    };
 
     const results = await runBackendsWithRaceCap({
       query: 'same',
       soloQuery: 'same',
       vaultDbPath: '/nonexistent',
       raceCapMs: 2000,
-      _spawnFn: mockSpawn,
+      _spawnFn: makeMockSpawn(() => {
+        spawnCount++;
+        return { stdout: '[]' };
+      }),
     });
 
     assert.equal(spawnCount, 1, 'identical solo query must not add a spawn');
     assert.deepEqual(Object.keys(results), ['vault'], 'no vaultSolo when solo == padded');
   });
-
-  function makeMockSpawn({ stdout = '', stderr = '', exitCode = 0, errorEvent = null }) {
-    return () => {
-      const closeCallbacks = [];
-      const errorCallbacks = [];
-      const stdoutCallbacks = [];
-      const stderrCallbacks = [];
-      const child = {
-        killed: false,
-        kill: () => {
-          child.killed = true;
-        },
-        stdout: {
-          on: (evt, cb) => {
-            if (evt === 'data') stdoutCallbacks.push(cb);
-          },
-        },
-        stderr: {
-          on: (evt, cb) => {
-            if (evt === 'data') stderrCallbacks.push(cb);
-          },
-        },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-          if (evt === 'error') errorCallbacks.push(cb);
-        },
-      };
-      setTimeout(() => {
-        if (errorEvent) {
-          for (const cb of errorCallbacks) cb(errorEvent);
-          return;
-        }
-        for (const cb of stdoutCallbacks) cb(stdout);
-        for (const cb of stderrCallbacks) cb(stderr);
-        for (const cb of closeCallbacks) cb(exitCode);
-      }, 5);
-      return child;
-    };
-  }
 
   it('a non-zero exit code produces an error result carrying the exit code, not a false ok', async () => {
     const results = await runBackendsWithRaceCap({
@@ -809,31 +735,11 @@ describe('runBackendsWithRaceCap zombie kill', () => {
   it('sends SIGTERM to the slow vault backend on race timeout', async () => {
     const signals = { 'll-search': null };
 
-    const mockSpawn = (cmd, _args, _opts) => {
-      const closeCallbacks = [];
-      const child = {
-        killed: false,
-        kill: (sig) => {
-          child.killed = true;
-          signals[cmd] = sig;
-          setTimeout(() => {
-            for (const cb of closeCallbacks) cb(143);
-          }, 5);
-        },
-        stdout: { on: () => {} },
-        stderr: { on: () => {} },
-        on: (evt, cb) => {
-          if (evt === 'close') closeCallbacks.push(cb);
-        },
-      };
-      return child;
-    };
-
     await runBackendsWithRaceCap({
       query: 'q',
       vaultDbPath: '/nonexistent',
       raceCapMs: 30,
-      _spawnFn: mockSpawn,
+      _spawnFn: makeMockSpawn((cmd) => ({ hang: true, onKill: (sig) => (signals[cmd] = sig) })),
     });
 
     assert.equal(signals['ll-search'], 'SIGTERM', 'll-search should be killed with SIGTERM');
