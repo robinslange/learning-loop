@@ -102,6 +102,11 @@ jobs:
       - name: Run cargo test
         run: cargo test --workspace --locked
 
+      # `cargo test` builds no bench target, so a bench broken by an API change
+      # stayed green here and was caught only by lefthook's cargo-check-benches.
+      - name: Check benches compile
+        run: cargo check --benches --workspace --locked
+
   # Retrieval-quality regression gate: runs ll-search eval-funnel against a
   # seeded fixture vault and hard-fails on a >25% relative drop in recall@10 /
   # ndcg@10 / hits@1 versus the committed baseline (bench/baselines/quality.json).

@@ -25,9 +25,15 @@ pre-commit:
 
     eslint:
       glob:
-        - "{plugin/hooks,plugin/scripts}/*.{js,mjs}"
-        - "{plugin/hooks,plugin/scripts}/**/*.{js,mjs}"
+        - "{plugin/hooks,plugin/scripts,plugin/plugins}/*.{js,mjs}"
+        - "{plugin/hooks,plugin/scripts,plugin/plugins}/**/*.{js,mjs}"
       run: npx eslint {staged_files}
+
+    # npm test globs tests/ only, so a rule edit never ran its own tests until
+    # CI's lint job.
+    eslint-rules:
+      glob: "eslint-plugin-learning-loop/**"
+      run: node --test eslint-plugin-learning-loop/rules/*.test.mjs
 
     test:
       glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native}/**"
