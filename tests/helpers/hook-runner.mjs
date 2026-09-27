@@ -18,20 +18,11 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { getPluginData } from '../../plugin/scripts/lib/config.mjs';
+import { strykerEnv } from './stryker-env.mjs';
 
 const PKG_VERSION = JSON.parse(
   readFileSync(new URL('../../plugin/.claude-plugin/plugin.json', import.meta.url), 'utf8'),
 ).version;
-
-/**
- * Stryker switches a mutant on through this one variable. A child spawned
- * with a minimal env drops it and runs the unmutated code, so every mutant
- * only that child exercises survives. Spread this into any minimal env.
- */
-export function strykerEnv() {
-  const active = process.env.__STRYKER_ACTIVE_MUTANT__;
-  return active === undefined ? {} : { __STRYKER_ACTIVE_MUTANT__: active };
-}
 
 const SANDBOX_PREFIX = 'll-hook-sb-';
 const STALE_SANDBOX_MS = 60 * 60 * 1000;

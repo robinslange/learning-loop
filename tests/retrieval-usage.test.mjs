@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { strykerEnv } from './helpers/hook-runner.mjs';
+import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const REPORT = join(SCRIPTS, 'retrieval-report.mjs');
