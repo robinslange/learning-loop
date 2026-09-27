@@ -1,5 +1,9 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { HttpResponse, http, startMockNetwork } from '../helpers/msw.mjs';
+
+const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/:tool';
+const server = startMockNetwork();
 
 const PUBMED_SEARCH_RESPONSE = { esearchresult: { idlist: ['12345678'] } };
 const PUBMED_FETCH_XML = `<?xml version="1.0"?>
@@ -29,16 +33,10 @@ const PUBMED_FETCH_XML = `<?xml version="1.0"?>
 </PubmedArticleSet>`;
 
 describe('registry', () => {
-  let originalFetch;
   let registry;
 
   before(async () => {
-    originalFetch = globalThis.fetch;
     registry = await import('../../plugin/scripts/lib/sources/registry.mjs');
-  });
-
-  after(() => {
-    globalThis.fetch = originalFetch;
   });
 
   it('findAdapter returns pubmed adapter for src with pmid', () => {
@@ -82,17 +80,19 @@ describe('registry', () => {
   });
 
   it('resolveSource short-circuits on PubMed hit', async () => {
-    let fetchCalls = 0;
-    globalThis.fetch = async (url) => {
-      fetchCalls++;
-      if (url.includes('esearch')) return { ok: true, json: async () => PUBMED_SEARCH_RESPONSE };
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_XML };
-      return { ok: false };
-    };
+    // Only PubMed's two endpoints are registered. Under
+    // `onUnhandledRequest: 'error'` a call to any later provider is a failure,
+    // which is the actual claim in the test's name -- the old version computed
+    // an unused boolean and then asserted `result.resolved` twice.
+    server.use(
+      http.get(EUTILS, ({ params }) =>
+        params.tool.startsWith('esearch')
+          ? HttpResponse.json(PUBMED_SEARCH_RESPONSE)
+          : HttpResponse.xml(PUBMED_FETCH_XML),
+      ),
+    );
     const result = await registry.resolveSource('Smith 2020 test paper');
     assert.equal(result.resolved, true);
     assert.equal(result.source, 'pubmed');
-    const europePmcCalled = fetchCalls === 0 || !String(fetchCalls).includes('europepmc');
-    assert.ok(result.resolved);
   });
 });

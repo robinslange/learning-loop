@@ -52,11 +52,11 @@ export async function fetchText(url, opts = {}) {
   // We only extract prose, then slice to ~12k chars downstream. Reject binaries and
   // oversized bodies by their headers BEFORE buffering, so a hostile/large response
   // can't exhaust the heap.
-  const contentType = resp.headers?.get?.('content-type');
+  const contentType = resp.headers.get('content-type');
   if (contentType && !/text\/|\+xml|application\/(xhtml|xml|json)/i.test(contentType)) {
     return { text: '', ok: false, reason: 'non_html' };
   }
-  const declaredLength = Number(resp.headers?.get?.('content-length'));
+  const declaredLength = Number(resp.headers.get('content-length'));
   if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
     return { text: '', ok: false, reason: 'too_large' };
   }

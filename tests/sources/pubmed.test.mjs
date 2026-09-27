@@ -1,5 +1,9 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { HttpResponse, http, startMockNetwork } from '../helpers/msw.mjs';
+
+const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/:tool';
+const server = startMockNetwork();
 
 const PUBMED_FETCH_RESPONSE = `<?xml version="1.0" encoding="utf-8"?>
 <PubmedArticleSet>
@@ -47,23 +51,24 @@ const PUBMED_FETCH_RESPONSE = `<?xml version="1.0" encoding="utf-8"?>
 </PubmedArticleSet>`;
 
 describe('pubmed adapter', () => {
-  let originalFetch;
   let adapter;
 
+  /** efetch answers the article; every other eutils tool is unavailable. */
+  const efetchAnswers = () =>
+    server.use(
+      http.get(EUTILS, ({ params }) =>
+        params.tool.startsWith('efetch')
+          ? HttpResponse.xml(PUBMED_FETCH_RESPONSE)
+          : new HttpResponse('', { status: 503 }),
+      ),
+    );
+
   before(async () => {
-    originalFetch = globalThis.fetch;
     adapter = (await import('../../plugin/scripts/lib/sources/adapters/pubmed.mjs')).default;
   });
 
-  after(() => {
-    globalThis.fetch = originalFetch;
-  });
-
   it('pubmedFetch returns metadata on success', async () => {
-    globalThis.fetch = async (url) => {
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_RESPONSE };
-      return { ok: false };
-    };
+    efetchAnswers();
     const data = await adapter.fetchById('12345678');
     assert.equal(data.source, 'pubmed');
     assert.equal(data.pmid, '12345678');
@@ -73,16 +78,13 @@ describe('pubmed adapter', () => {
   });
 
   it('pubmedFetch returns null on 404', async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    server.use(http.get(EUTILS, () => new HttpResponse('', { status: 404 })));
     const data = await adapter.fetchById('99999999');
     assert.equal(data, null);
   });
 
   it('verify returns verified:true on correct first author', async () => {
-    globalThis.fetch = async (url) => {
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_RESPONSE };
-      return { ok: false };
-    };
+    efetchAnswers();
     const result = await adapter.verify({
       pmid: '12345678',
       claimedAuthor: 'Vaswani',
@@ -93,10 +95,7 @@ describe('pubmed adapter', () => {
   });
 
   it('verify returns wrong_author issue for wrong first author', async () => {
-    globalThis.fetch = async (url) => {
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_RESPONSE };
-      return { ok: false };
-    };
+    efetchAnswers();
     const result = await adapter.verify({
       pmid: '12345678',
       claimedAuthor: 'Hinton',
@@ -109,10 +108,7 @@ describe('pubmed adapter', () => {
   });
 
   it('verify returns author_not_first for non-first author', async () => {
-    globalThis.fetch = async (url) => {
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_RESPONSE };
-      return { ok: false };
-    };
+    efetchAnswers();
     const result = await adapter.verify({
       pmid: '12345678',
       claimedAuthor: 'Shazeer',
@@ -125,10 +121,7 @@ describe('pubmed adapter', () => {
   });
 
   it('verify returns wrong_year issue for wrong year', async () => {
-    globalThis.fetch = async (url) => {
-      if (url.includes('efetch')) return { ok: true, text: async () => PUBMED_FETCH_RESPONSE };
-      return { ok: false };
-    };
+    efetchAnswers();
     const result = await adapter.verify({
       pmid: '12345678',
       claimedAuthor: 'Vaswani',
@@ -140,7 +133,7 @@ describe('pubmed adapter', () => {
   });
 
   it('verify returns error on 404', async () => {
-    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    server.use(http.get(EUTILS, () => new HttpResponse('', { status: 404 })));
     const result = await adapter.verify({
       pmid: '99999999',
       claimedAuthor: 'Smith',

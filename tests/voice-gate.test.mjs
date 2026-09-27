@@ -1,9 +1,16 @@
-import { describe, it, before, after, mock } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import {
+  chat,
+  httpError,
+  startOllamaMock,
+  structured,
+  unstructured,
+} from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-voice-gate-${runId}`);
@@ -44,13 +51,12 @@ function resetState() {
 }
 
 describe('voice-gate structured-output classification', () => {
-  let originalFetch;
+  const server = startOllamaMock();
 
   before(() => {
     mkdirSync(join(TEMP_VAULT, '0-inbox'), { recursive: true });
     mkdirSync(LIBRARIAN_DIR, { recursive: true });
     process.env.CLAUDE_PLUGIN_DATA = TEMP_DATA;
-    originalFetch = globalThis.fetch;
 
     writeFileSync(
       join(TEMP_VAULT, '0-inbox', 'some-topic-title.md'),
@@ -63,20 +69,13 @@ describe('voice-gate structured-output classification', () => {
   });
 
   after(() => {
-    globalThis.fetch = originalFetch;
     delete process.env.CLAUDE_PLUGIN_DATA;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
   });
 
   it('queues voice_flag when model returns "topic"', async () => {
     resetState();
-
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ label: 'topic' }) },
-      }),
-    }));
+    server.use(chat(() => structured({ label: 'topic' })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=topic-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
@@ -94,15 +93,7 @@ describe('voice-gate structured-output classification', () => {
 
   it('does not queue when model returns "claim"', async () => {
     resetState();
-
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({ label: 'claim' }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ label: 'claim' })));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=claim-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/cached-array-references-mutate-through-reverse.md');
@@ -113,13 +104,7 @@ describe('voice-gate structured-output classification', () => {
 
   it('does not crash on malformed response', async () => {
     resetState();
-
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: 'not valid json at all' },
-      }),
-    }));
+    server.use(chat(() => unstructured('not valid json at all')));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=malformed-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
@@ -130,11 +115,7 @@ describe('voice-gate structured-output classification', () => {
 
   it('skips gracefully on HTTP error from ollama', async () => {
     resetState();
-
-    globalThis.fetch = mock.fn(async () => ({
-      ok: false,
-      status: 500,
-    }));
+    server.use(chat(() => httpError(500)));
 
     const mod = await import(`../plugin/scripts/librarian.mjs?bust=http-error-${runId}`);
     await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
@@ -143,17 +124,42 @@ describe('voice-gate structured-output classification', () => {
     assert.equal(items.length, 0, 'expected no queue items on HTTP error');
   });
 
-  it('logs timeout and skips submission when fetch aborts', async () => {
+  it('classifies on the model reply, not on whatever the first request returns', async () => {
+    // The old stub answered every request identically, so a voiceCheck that
+    // called the wrong endpoint -- or called it twice and read the first answer
+    // -- still classified correctly. MSW matches on method and path, so a
+    // request that is not exactly one POST to /api/chat cannot be served.
     resetState();
+    const seen = [];
+    server.use(
+      chat(({ request }) => {
+        seen.push(request.method + ' ' + new URL(request.url).pathname);
+        return structured({ label: 'topic' });
+      }),
+    );
 
-    globalThis.fetch = mock.fn(async () => {
-      throw Object.assign(new Error('aborted'), { name: 'TimeoutError' });
-    });
+    const mod = await import(`../plugin/scripts/librarian.mjs?bust=one-call-${runId}`);
+    await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
+
+    assert.deepEqual(seen, ['POST /api/chat']);
+    assert.equal(readQueue().length, 1);
+  });
+
+  it('logs timeout and skips submission when fetch aborts', async () => {
+    // Not served through MSW: voiceCheck hardcodes a 15s client budget, and a
+    // network mock cannot make a request time out sooner than the caller asked.
+    // The injected rejection is the exact value undici produces when
+    // AbortSignal.timeout fires, so the branch under test sees what production
+    // sees.
+    resetState();
+    const timingOut = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
 
     const mod = await import(
       `../plugin/scripts/librarian.mjs?bust=timeout-${runId}-${randomBytes(4).toString('hex')}`
     );
-    await mod.__test__.voiceCheck('0-inbox/some-topic-title.md');
+    await mod.__test__.voiceCheck('0-inbox/some-topic-title.md', { fetchOverride: timingOut });
 
     assert.equal(readQueue().length, 0, 'expected no queue items on timeout');
   });

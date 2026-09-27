@@ -1,11 +1,12 @@
 // tests/librarian-tools-duplicate.test.mjs : unit tests for scripts/librarian/tools/duplicate.mjs
 
-import { describe, it, before, after, beforeEach, mock } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
+import { chat, httpError, startOllamaMock, structured } from './helpers/ollama-mock.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-tools-dup-' + runId);
@@ -29,8 +30,9 @@ function readQueue() {
 }
 
 describe('librarian-tools-duplicate', () => {
+  const server = startOllamaMock();
   let duplicateCheck, submitDuplicateFlag;
-  let origFetch;
+  let calls;
 
   before(async () => {
     mkdirSync(join(TEMP_VAULT, '3-permanent'), { recursive: true });
@@ -42,11 +44,9 @@ describe('librarian-tools-duplicate', () => {
     const mod = await import('../plugin/scripts/librarian/tools/duplicate.mjs?bust=dup-' + runId);
     duplicateCheck = mod.duplicateCheck;
     submitDuplicateFlag = mod.submitDuplicateFlag;
-    origFetch = globalThis.fetch;
   });
 
   after(() => {
-    globalThis.fetch = origFetch;
     rmSync(TEMP_ROOT, { recursive: true, force: true });
     delete process.env.CLAUDE_PLUGIN_DATA;
     delete process.env.VAULT_PATH;
@@ -59,7 +59,11 @@ describe('librarian-tools-duplicate', () => {
       sp,
       JSON.stringify({ visited: [], notes_visited: 0, duplicate_flags: 0, counters: {} }) + '\n',
     );
-    globalThis.fetch = origFetch;
+    calls = 0;
+    server.events.removeAllListeners();
+    server.events.on('request:start', () => {
+      calls += 1;
+    });
   });
 
   it('submitDuplicateFlag enqueues a duplicate_flag item', async () => {
@@ -87,18 +91,10 @@ describe('librarian-tools-duplicate', () => {
   });
 
   it('duplicateCheck queues duplicate_flag when model says "duplicate"', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({ relationship: 'duplicate', duplicate_of: NEIGHBOUR_A }),
-        },
-      }),
-    }));
+    server.use(chat(() => structured({ relationship: 'duplicate', duplicate_of: NEIGHBOUR_A })));
     await duplicateCheck(TARGET, {
       bodyOverride: 'Some claim body.',
       neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
     });
     const items = readQueue();
     assert.equal(items.length, 1);
@@ -106,98 +102,54 @@ describe('librarian-tools-duplicate', () => {
   });
 
   it('duplicateCheck does not queue when model says "same_topic"', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ relationship: 'same_topic', duplicate_of: null }) },
-      }),
-    }));
-    await duplicateCheck(TARGET, {
-      bodyOverride: 'body',
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(chat(() => structured({ relationship: 'same_topic', duplicate_of: null })));
+    await duplicateCheck(TARGET, { bodyOverride: 'body', neighboursOverride: NEIGHBOURS });
     assert.equal(readQueue().length, 0);
   });
 
   it('duplicateCheck skips when model names a non-neighbour', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({
-            relationship: 'duplicate',
-            duplicate_of: '3-permanent/ghost.md',
-          }),
-        },
-      }),
-    }));
-    await duplicateCheck(TARGET, {
-      bodyOverride: 'body',
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(
+      chat(() => structured({ relationship: 'duplicate', duplicate_of: '3-permanent/ghost.md' })),
+    );
+    await duplicateCheck(TARGET, { bodyOverride: 'body', neighboursOverride: NEIGHBOURS });
     assert.equal(readQueue().length, 0);
   });
 
   it('duplicateCheck accepts neighbour identified by basename slug', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: {
-          content: JSON.stringify({ relationship: 'duplicate', duplicate_of: 'neighbour-a' }),
-        },
-      }),
-    }));
-    await duplicateCheck(TARGET, {
-      bodyOverride: 'body',
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(chat(() => structured({ relationship: 'duplicate', duplicate_of: 'neighbour-a' })));
+    await duplicateCheck(TARGET, { bodyOverride: 'body', neighboursOverride: NEIGHBOURS });
     const items = readQueue();
     assert.equal(items.length, 1);
     assert.equal(items[0].duplicate_of, NEIGHBOUR_A);
   });
 
   it('duplicateCheck returns early when no body', async () => {
-    let called = false;
-    globalThis.fetch = mock.fn(async () => {
-      called = true;
-      return {};
-    });
-    await duplicateCheck(TARGET, {
-      bodyOverride: null,
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
-    assert.equal(called, false);
+    await duplicateCheck(TARGET, { bodyOverride: null, neighboursOverride: NEIGHBOURS });
+    assert.equal(calls, 0, 'a note with no body must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 
   it('duplicateCheck skips gracefully on HTTP error', async () => {
-    globalThis.fetch = mock.fn(async () => ({ ok: false, status: 500 }));
-    await duplicateCheck(TARGET, {
-      bodyOverride: 'body',
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
+    server.use(chat(() => httpError(500)));
+    await duplicateCheck(TARGET, { bodyOverride: 'body', neighboursOverride: NEIGHBOURS });
     assert.equal(readQueue().length, 0);
   });
 
   it('duplicateCheck reads note body from VAULT_PATH when bodyOverride not set', async () => {
-    globalThis.fetch = mock.fn(async () => ({
-      ok: true,
-      json: async () => ({
-        message: { content: JSON.stringify({ relationship: 'same_topic', duplicate_of: null }) },
+    let body;
+    server.use(
+      chat(async ({ request }) => {
+        body = await request.json();
+        return structured({ relationship: 'same_topic', duplicate_of: null });
       }),
-    }));
+    );
     // TARGET file exists in TEMP_VAULT with content
-    await duplicateCheck(TARGET, {
-      neighboursOverride: NEIGHBOURS,
-      fetchOverride: globalThis.fetch,
-    });
-    // Should reach ollama (body was read), model returned same_topic so no queue item
-    assert.equal(globalThis.fetch.mock.callCount(), 1);
+    await duplicateCheck(TARGET, { neighboursOverride: NEIGHBOURS });
+    // The point of the test is that the body came off disk, so assert the disk
+    // content actually reached ollama -- a request count alone would pass on a
+    // prompt built from an empty string.
+    assert.equal(calls, 1);
+    assert.match(body.messages.map((m) => m.content).join('\n'), /Some claim body\./);
     assert.equal(readQueue().length, 0);
   });
 });
