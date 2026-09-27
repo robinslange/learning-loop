@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bench/mutation.mjs : run the Stryker targets in stryker.config.mjs.
+// bench/mutation.mjs : run the Stryker targets in bench/mutation-targets.mjs.
 //
 // Usage: node bench/mutation.mjs [target ...]   (default: every target)
 //
@@ -9,13 +9,13 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { TARGETS } from '../stryker.config.mjs';
+import { TARGETS } from './mutation-targets.mjs';
 
 const root = join(import.meta.dirname, '..');
 const stryker = join(root, 'node_modules', '@stryker-mutator', 'core', 'bin', 'stryker.js');
 
 const names = process.argv.slice(2);
-const unknown = names.filter((n) => !(n in TARGETS));
+const unknown = names.filter((n) => !Object.hasOwn(TARGETS, n));
 if (unknown.length > 0) {
   console.error(
     `unknown target(s): ${unknown.join(', ')}; known: ${Object.keys(TARGETS).join(', ')}`,
