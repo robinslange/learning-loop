@@ -23,10 +23,12 @@ pre-commit:
       run: npx --no-install prettier --check {staged_files}
       stage_fixed: true
 
+    # CI runs `eslint .`, so bench/ and the root configs are linted here too.
     eslint:
       glob:
-        - "{plugin/hooks,plugin/scripts,plugin/plugins}/*.{js,mjs}"
-        - "{plugin/hooks,plugin/scripts,plugin/plugins}/**/*.{js,mjs}"
+        - "*.mjs"
+        - "{plugin/hooks,plugin/scripts,plugin/plugins,bench}/*.{js,mjs}"
+        - "{plugin/hooks,plugin/scripts,plugin/plugins,bench}/**/*.{js,mjs}"
       run: npx eslint {staged_files}
 
     # npm test globs tests/ only, so a rule edit never ran its own tests until
@@ -36,7 +38,7 @@ pre-commit:
       run: node --test eslint-plugin-learning-loop/rules/*.test.mjs
 
     test:
-      glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native}/**"
+      glob: "{plugin/hooks,plugin/scripts,tests,plugin/agents,plugin/skills,native,bench}/**"
       run: npm test --silent
 
     cargo-test:
