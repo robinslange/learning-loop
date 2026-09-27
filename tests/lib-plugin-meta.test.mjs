@@ -1,7 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join, isAbsolute, basename } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { join, isAbsolute } from 'node:path';
 import { existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
@@ -9,13 +8,9 @@ import {
   pluginRoot,
   pluginVersion,
   pluginId,
-  dataDir,
-  cacheDir,
   activeRoot,
   INSTALL_KEY,
 } from '../plugin/scripts/lib/plugin-meta.mjs';
-
-const MOD = JSON.stringify(new URL('../plugin/scripts/lib/plugin-meta.mjs', import.meta.url).href);
 
 test('pluginRoot resolves to the plugin root', () => {
   const root = pluginRoot().replace(/\\/g, '/');
@@ -39,60 +34,6 @@ test('pluginVersion reads version from .claude-plugin/plugin.json', () => {
 test('pluginId formats as name@version', () => {
   const id = pluginId();
   assert.match(id, /^learning-loop@\d+\.\d+\.\d+/);
-});
-
-test('dataDir honours CLAUDE_PLUGIN_DATA env var (subprocess)', () => {
-  const out = spawnSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      `
-      const m = await import(${MOD});
-      console.log(m.dataDir());
-    `,
-    ],
-    { env: { ...process.env, CLAUDE_PLUGIN_DATA: '/tmp/llcustom' } },
-  );
-  assert.equal(out.status, 0, out.stderr.toString());
-  assert.equal(out.stdout.toString().trim(), '/tmp/llcustom');
-});
-
-test('dataDir defaults to ~/.claude/plugins/data/learning-loop (subprocess)', () => {
-  const out = spawnSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      `
-      const m = await import(${MOD});
-      console.log(m.dataDir());
-    `,
-    ],
-    { env: { ...process.env, CLAUDE_PLUGIN_DATA: undefined } },
-  );
-  assert.equal(out.status, 0, out.stderr.toString());
-  assert.match(
-    out.stdout.toString().trim().replace(/\\/g, '/'),
-    /\.claude\/plugins\/data\/learning-loop$/,
-  );
-});
-
-test('cacheDir is dataDir + /cache', () => {
-  const d = dataDir();
-  const c = cacheDir();
-  if (d !== null) {
-    assert.equal(c, join(d, 'cache'));
-  } else {
-    assert.equal(c, null);
-  }
-});
-
-test('cacheDir ends with /cache', () => {
-  const c = cacheDir();
-  if (c !== null) {
-    assert.equal(basename(c), 'cache');
-  }
 });
 
 function cacheFixture() {

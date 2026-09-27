@@ -5,18 +5,28 @@
 // (getPluginRoot), and hooks/lib/inject.mjs. Reads from scripts/lib/env.mjs
 // rather than process.env directly -- this is the canonical example of how a
 // new primitive should consume the env module.
-//
-// config.mjs already exports getPluginRoot() and getPluginData(). Those stay
-// unchanged in phase 0; consumers migrate in phase 1I. The two co-exist.
 
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { homedir } from 'node:os';
 import { env } from './env.mjs';
 import { safeLoad } from './safe-load.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+export const PLUGIN_NAME = 'learning-loop';
+export const MARKETPLACE_NAME = 'learning-loop-marketplace';
+
+/** Key of this plugin's entry in ~/.claude/plugins/installed_plugins.json. */
+export const INSTALL_KEY = `${PLUGIN_NAME}@${MARKETPLACE_NAME}`;
+
+// Claude Code names CLAUDE_PLUGIN_DATA after the install id, with every
+// character outside [A-Za-z0-9_-] replaced by '-'.
+export const DATA_DIR_NAME = INSTALL_KEY.replace(/[^A-Za-z0-9_-]/g, '-');
+
+/** Where Claude Code ('.claude') or Codex ('.codex') caches installed versions. */
+export const cacheRoot = (home, dot) =>
+  join(home, dot, 'plugins', 'cache', MARKETPLACE_NAME, PLUGIN_NAME);
 
 let _pkg = null;
 
@@ -60,36 +70,8 @@ export function pluginVersion() {
  */
 export function pluginId() {
   const pkg = readPkg();
-  return `${pkg.name || 'learning-loop'}@${pkg.version || ''}`;
+  return `${pkg.name || PLUGIN_NAME}@${pkg.version || ''}`;
 }
-
-/**
- * Plugin-data directory. Uses `CLAUDE_PLUGIN_DATA` env var when set, falling
- * back to `~/.claude/plugins/data/learning-loop`. Returns null only when no
- * home directory can be resolved and CLAUDE_PLUGIN_DATA is unset.
- *
- * @returns {string | null}
- */
-export function dataDir() {
-  if (env.CLAUDE_PLUGIN_DATA) return env.CLAUDE_PLUGIN_DATA;
-  const home = env.HOME || homedir();
-  if (!home) return null;
-  return join(home, '.claude', 'plugins', 'data', 'learning-loop');
-}
-
-/**
- * Plugin cache directory under dataDir().
- * Returns null when dataDir() returns null.
- *
- * @returns {string | null}
- */
-export function cacheDir() {
-  const d = dataDir();
-  return d ? join(d, 'cache') : null;
-}
-
-/** Key of this plugin's entry in ~/.claude/plugins/installed_plugins.json. */
-export const INSTALL_KEY = 'learning-loop@learning-loop-marketplace';
 
 /**
  * Root of the install Claude Code has active, when that install ships `need`.
