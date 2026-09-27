@@ -13,6 +13,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { extname, join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const PLUGIN = join(import.meta.dirname, '..', 'plugin');
 const SCAN_DIRS = ['skills', 'agents', 'skills-shared', 'agents-shared'];
@@ -34,29 +35,39 @@ const IMPORT_RE = new RegExp(
   'g',
 );
 
+// Each use is the whole property chain, so m.DATA_FILES.harvestDenylist checks
+// harvestDenylist too, not only DATA_FILES.
 function callSites() {
   const sites = [];
   for (const file of SCAN_DIRS.flatMap((d) => walk(join(PLUGIN, d)))) {
     for (const [, modulePath, body] of readFileSync(file, 'utf-8').matchAll(IMPORT_RE)) {
-      for (const [, name] of body.matchAll(/\bm\.([A-Za-z_$][\w$]*)/g)) {
-        sites.push({ file: relative(PLUGIN, file), modulePath, name });
+      for (const [, chain] of body.matchAll(/\bm\.([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/g)) {
+        sites.push({
+          file: relative(PLUGIN, file),
+          modulePath,
+          url: pathToFileURL(join(PLUGIN, modulePath)).href,
+          chain,
+        });
       }
     }
   }
   return sites;
 }
 
-// Loaded in a child with a throwaway HOME and plugin data, because some of
-// these modules resolve paths from the environment when they load.
-function exportsOf(modulePaths) {
+// Resolved in a child with a throwaway HOME and plugin data, because some of
+// these modules resolve paths from the environment when they load. Prints the
+// sites whose chain comes out undefined.
+function unresolved(sites) {
   const root = mkdtempSync(join(tmpdir(), 'll-md-imports-'));
   try {
     const script = `
-      const out = {};
-      for (const p of ${JSON.stringify(modulePaths)}) {
-        out[p] = Object.keys(await import(${JSON.stringify(PLUGIN)} + p));
+      const missing = [];
+      for (const s of ${JSON.stringify(sites)}) {
+        let v = await import(s.url);
+        for (const key of s.chain.split('.')) v = v?.[key];
+        if (v === undefined) missing.push(s.file + ': ' + s.modulePath + ' has no ' + s.chain);
       }
-      console.log(JSON.stringify(out));
+      console.log(JSON.stringify(missing));
     `;
     const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
       env: { PATH: process.env.PATH, HOME: root, USERPROFILE: root, CLAUDE_PLUGIN_DATA: root },
@@ -72,9 +83,5 @@ function exportsOf(modulePaths) {
 test('every scripts/ export a skill or agent imports exists', () => {
   const sites = callSites();
   assert.ok(sites.length >= 10, `expected the known call sites, found ${sites.length}`);
-  const exported = exportsOf([...new Set(sites.map((s) => s.modulePath))]);
-  const missing = sites
-    .filter((s) => !exported[s.modulePath].includes(s.name))
-    .map((s) => `${s.file}: ${s.modulePath} has no export ${s.name}`);
-  assert.deepEqual(missing, []);
+  assert.deepEqual(unresolved(sites), []);
 });
