@@ -17,7 +17,7 @@
 // recognise them as known rather than treating them as garbage.
 
 export const VALID_ACTIONS = new Set([
-  // Statically visible (25)
+  // Statically visible (27)
   'abstract',
   'auto-link',
   'batch-promote',
@@ -26,6 +26,7 @@ export const VALID_ACTIONS = new Set([
   'compress',
   'create',
   'deepen',
+  'ingest',
   'link',
   'merge',
   'normalize',
