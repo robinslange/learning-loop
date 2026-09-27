@@ -20,7 +20,7 @@ use super::grants;
 use super::handshake::SyncReadyPayload;
 use super::key_id::KeyId;
 use super::protocol::{
-    manifest_root, ChunkedFrame, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP, HUB_INBOUND_FRAME_CAP,
+    chunked_frames, manifest_root, CHUNK_MAX_BODY_SIZE, HUB_INBOUND_CAP, HUB_INBOUND_FRAME_CAP,
 };
 use super::protocol_v5::{
     sanitise_hub_text, ChunkedBody, ChunkedUploadLimits, ClientMsg, HubMsg, VaultState,
@@ -839,10 +839,8 @@ async fn upload_index(
     match plan {
         UploadPlan::SingleFrame => send_binary(ws, prepared.bytes.clone()).await?,
         UploadPlan::Chunked { chunk_bytes } => {
-            let total = prepared.bytes.len().div_ceil(chunk_bytes) as u32;
-            for (seq, body) in prepared.bytes.chunks(chunk_bytes).enumerate() {
-                let frame = ChunkedFrame::from_body(seq as u32, total, body.to_vec())?;
-                send_binary(ws, frame.encode()).await?;
+            for frame in chunked_frames(&prepared.bytes, chunk_bytes) {
+                send_binary(ws, frame?.encode()).await?;
             }
         }
     }
@@ -2050,12 +2048,12 @@ mod tests {
 
         // Every frame the loop will send is within what was declared, and the
         // seq range covers the whole body exactly once.
-        let frames: Vec<_> = body
-            .chunks(1000)
-            .enumerate()
-            .map(|(i, c)| ChunkedFrame::from_body(i as u32, d.chunks, c.to_vec()).unwrap())
-            .collect();
+        let frames: Vec<_> = chunked_frames(&body, 1000).map(Result::unwrap).collect();
         assert_eq!(frames.len(), d.chunks as usize);
+        assert!(
+            frames.iter().all(|f| f.total == d.chunks),
+            "every frame carries the declared total"
+        );
         assert!(frames.iter().all(|f| f.size <= d.chunk_size_max));
         let rejoined: Vec<u8> = frames.iter().flat_map(|f| f.body.clone()).collect();
         assert_eq!(rejoined, body, "the chunks are the body, in order");

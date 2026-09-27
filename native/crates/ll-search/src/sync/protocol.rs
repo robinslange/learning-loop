@@ -8,7 +8,7 @@
 
 mod frame;
 
-pub use frame::{manifest_root, ChunkedFrame};
+pub use frame::{chunked_frames, manifest_root, ChunkedFrame};
 
 /// The largest single WebSocket frame payload the hub will read.
 ///
