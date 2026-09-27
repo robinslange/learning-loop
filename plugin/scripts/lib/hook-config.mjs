@@ -292,9 +292,9 @@ export const INJECTION_CALIBRATION_EPOCH = '2026-08-04T00:00:00.000Z';
 // denominated in a payload shape that no longer ships.
 //
 // Two epochs rather than one, because the two measurements ask different
-// questions. injection-precision.mjs windows on THIS constant: it reports which
-// slot a note landed in and whether the session used it, so the slot split is
-// its unit. The shadow-gate readiness check and review-shadow keep using
+// questions. bench/injection-precision.mjs windows on THIS constant: it reports
+// which slot a note landed in and whether the session used it, so the slot
+// split is its unit. The shadow-gate readiness check and review-shadow keep using
 // INJECTION_CALIBRATION_EPOCH: they count gate decisions, and neither
 // INJECTION_THRESHOLD (0.34) nor the fusion weights moved in v2.1.0, so scores
 // either side of this date remain commensurable. Bumping one shared constant
@@ -306,7 +306,7 @@ export const INJECTION_CALIBRATION_EPOCH = '2026-08-04T00:00:00.000Z';
 // hook it loaded, so old-layout bursts keep arriving after this date -- a
 // 1-body/4-pointer payload was recorded 20 hours past it, 12% of the window at
 // the time. So the implication only runs one way: everything BEFORE the epoch is
-// old-layout, and that is all the epoch is good for. injection-precision.mjs
+// old-layout, and that is all the epoch is good for. bench/injection-precision.mjs
 // therefore also drops any burst whose shape is unreachable under the shipped
 // BODY_SLOTS/POINTER_SLOTS (hooks/lib/inject.mjs); read that as the load-bearing
 // filter and this constant as the coarse bound around it.

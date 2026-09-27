@@ -14,29 +14,10 @@
 //
 // Usage: node bench/retrieval-baseline.mjs [--all-epochs] [--with-fixtures] [--json]
 
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INJECTION_CALIBRATION_EPOCH } from '../plugin/scripts/lib/hook-config.mjs';
 import { jsonlShards, readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
-
-// Prompts hard-coded in tests/session-label.test.mjs reach the production log
-// because run()/runWithVault() invoke the real hook without overriding
-// CLAUDE_PLUGIN_DATA. Derive the list from the test source rather than copying
-// it — a hand-maintained copy silently rots as tests are added, and this filter
-// is load-bearing for every number below.
-function fixturePrompts() {
-  const testFile = join(import.meta.dirname, '..', 'tests', 'session-label.test.mjs');
-  const src = readFileSync(testFile, 'utf8');
-  const out = new Set();
-  for (const m of src.matchAll(/['"`]([^'"`\n]{15,200})['"`]/g)) {
-    const s = m[1];
-    if (/^[/.~]/.test(s) || /^[A-Z_]+$/.test(s) || s.includes('${')) continue;
-    out.add(s.slice(0, 40));
-  }
-  return [...out];
-}
-const FIXTURE_PROMPTS = fixturePrompts();
-const isFixture = (r) => FIXTURE_PROMPTS.some((p) => (r.prompt || '').startsWith(p));
+import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
 
 const pluginData =
   process.env.CLAUDE_PLUGIN_DATA ||
@@ -50,10 +31,22 @@ const withFixtures = args.includes('--with-fixtures');
 const epochMs = allEpochs ? 0 : Date.parse(INJECTION_CALIBRATION_EPOCH);
 
 const files = jsonlShards(dir, 'shadow-injection-');
+const all = [...readJsonlDir(dir, 'shadow-injection-')];
+const sessionPrompts = new Map();
+for (const r of all) {
+  if (!r.session_id || !r.prompt) continue;
+  if (!sessionPrompts.has(r.session_id)) sessionPrompts.set(r.session_id, []);
+  sessionPrompts.get(r.session_id).push(r.prompt);
+}
+const fixtureSessions = new Set(
+  [...sessionPrompts].filter(([, prompts]) => isFixtureSession(prompts)).map(([sid]) => sid),
+);
+const isFixture = (r) => isFixturePrompt(r.prompt) || fixtureSessions.has(r.session_id);
+
 const records = [];
 let droppedEpoch = 0;
 let droppedFixture = 0;
-for (const r of readJsonlDir(dir, 'shadow-injection-')) {
+for (const r of all) {
   if (Date.parse(r.ts) < epochMs) {
     droppedEpoch++;
     continue;

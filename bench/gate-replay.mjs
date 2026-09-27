@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // gate-replay.mjs — re-score real logged prompts with today's binary.
 //
-// Produces the raw material for the gate A/B: for each prompt, the RRF fusion
-// score the live gate reads and the cross-encoder score of the same query's
-// best candidate. Nothing is judged here; scoring and analysis are separate so
-// the expensive half runs once.
+// For each prompt, records the RRF fusion score the live gate reads and the
+// top-ranked paths. Nothing is judged here; scoring and analysis are separate
+// so the expensive half runs once.
 //
 // The query is rebuilt with the hook's OWN buildQueryParts, including the
 // prior-message padding it applies to short prompts, reconstructed from the
@@ -31,7 +30,6 @@ const argv = process.argv.slice(2);
 const arg = (k, d) => (argv.includes(k) ? argv[argv.indexOf(k) + 1] : d);
 const SAMPLE = Number(arg('--sample', 400));
 const OUT = arg('--out', 'bench/baselines/replay.jsonl');
-const CANDIDATES = Number(arg('--candidates', '20'));
 const CONCURRENCY = Number(arg('--concurrency', '4'));
 const LIVE_ONLY = argv.includes('--live-only');
 
@@ -132,20 +130,6 @@ async function scoreOne(item) {
     out.rrf_order = hits.map((h) => h.path);
   } catch (err) {
     out.rrf_error = err.code ?? String(err.message).slice(0, 80);
-  }
-
-  try {
-    const { stdout } = await execFileP(
-      BIN,
-      ['rerank', DB, query, '--top', '5', '--candidates', String(CANDIDATES)],
-      { env },
-    );
-    const j = JSON.parse(stdout);
-    out.ce = j[0]?.score ?? null;
-    out.ce_top = j[0]?.path ?? null;
-    out.ce_order = j.map((h) => h.path);
-  } catch (err) {
-    out.ce_error = err.code ?? String(err.message).slice(0, 80);
   }
   return out;
 }

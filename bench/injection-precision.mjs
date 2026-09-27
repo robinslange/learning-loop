@@ -5,7 +5,7 @@
 //   injected side  retrieval/shadow-injection-*.jsonl, type 'gate-pass-payload'
 //                  → payload.injected_paths = [{path, level}] in rank order:
 //                    BODY_SLOTS bodies first, then POINTER_SLOTS pointers
-//                    (hooks/lib/inject.mjs). WHICH ranks are bodies moves with
+//                    (plugin/hooks/lib/inject.mjs). WHICH ranks are bodies moves with
 //                    the layout, so the slot is read from each row's own
 //                    `level` and never inferred from the rank index.
 //   used side      provenance/events-*.jsonl, two sources unioned:
@@ -77,14 +77,14 @@
 // of being read as a precision estimate. A per-rank precision over a handful of
 // sessions is a liveness check, not a measurement.
 
-import { getPluginData } from './lib/config.mjs';
-import { DATA_PATHS } from './lib/paths.mjs';
-import { readJsonlDir } from './lib/jsonl.mjs';
-import { INJECTION_LAYOUT_EPOCH } from './lib/hook-config.mjs';
-import { BODY_SLOTS, POINTER_SLOTS } from '../hooks/lib/inject.mjs';
-import { loadNoteUsageEvents } from './lib/retrieval-usage.mjs';
-import { isMainModule } from './lib/is-main.mjs';
-import { hasFlag, flagValue } from './lib/cli-args.mjs';
+import { getPluginData } from '../plugin/scripts/lib/config.mjs';
+import { DATA_PATHS } from '../plugin/scripts/lib/paths.mjs';
+import { readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
+import { INJECTION_LAYOUT_EPOCH } from '../plugin/scripts/lib/hook-config.mjs';
+import { BODY_SLOTS, POINTER_SLOTS } from '../plugin/hooks/lib/inject.mjs';
+import { loadNoteUsageEvents } from '../plugin/scripts/lib/retrieval-usage.mjs';
+import { isMainModule } from '../plugin/scripts/lib/is-main.mjs';
+import { hasFlag, flagValue } from '../plugin/scripts/lib/cli-args.mjs';
 
 // Derived from the injector's own constants rather than restated as 5: the
 // total has survived the layout change (v2.1.0 traded a pointer for a body) but
@@ -385,7 +385,7 @@ function printReport(report) {
   // nothing. The comparison that isolates format is within-note — the notes that
   // appeared at BOTH levels on different turns, each compared against itself.
   // That measurement lives with the change it justified, in the BODY_SLOTS
-  // comment in `hooks/lib/inject.mjs`, rather than being restated here as frozen
+  // comment in `plugin/hooks/lib/inject.mjs`, rather than being restated here as frozen
   // prose beside a table this script recomputes every run.
   console.log();
   console.log('  Note: by-level is confounded by rank. See the comment above');

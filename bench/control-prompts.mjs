@@ -1,5 +1,5 @@
 // Control prompts: substantive, well-formed questions in domains this vault
-// holds nothing on. They are the objective half of the gate A/B — for a real
+// holds nothing on. They are the objective half of a gate replay — for a real
 // prompt "should this have been injected?" is a judgment call, but for a
 // control the answer is known: there is nothing useful to inject, so any
 // admission is a false positive.
@@ -46,8 +46,8 @@ export const CONTROL_PROMPTS = [
 // false-positive rate is reported on the complement of this set.
 //
 // This is the output of verify-controls.mjs against the current vault, kept
-// here so gate-ab.mjs has one source of truth. verify-controls.mjs asserts the
-// two agree and fails if the vault has grown into a control.
+// here as the one source of truth. verify-controls.mjs asserts the two agree
+// and fails if the vault has grown into a control.
 export const WEAK_CONTROLS = new Set([
   'how long should concrete fence posts cure in cold weather',
   'how to replace the escapement in a fusee pocket watch',

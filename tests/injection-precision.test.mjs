@@ -5,9 +5,10 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+const SCRIPTS = join(ROOT, 'plugin', 'scripts');
 const { injectionPrecision } = await import(
-  pathToFileURL(join(SCRIPTS, 'injection-precision.mjs')).href
+  pathToFileURL(join(ROOT, 'bench', 'injection-precision.mjs')).href
 );
 
 const EPOCH = '2026-07-16T00:00:00.000Z';

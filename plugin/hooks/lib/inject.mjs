@@ -218,10 +218,10 @@ export function enrichVaultHits(hits, vaultRoot) {
 // on. Total stays at five notes: this trades a pointer for a body, so format
 // is the only variable.
 //
-// Exported because injection-precision.mjs needs the shipped layout to tell a
-// burst this code produced from one an older version produced: the two are not
-// commensurable, and a second copy of these two numbers would drift from this
-// one, which is the bug that measurement tool exists to avoid.
+// Exported because bench/injection-precision.mjs needs the shipped layout to
+// tell a burst this code produced from one an older version produced: the two
+// are not commensurable, and a second copy of these two numbers would drift
+// from this one, which is the bug that measurement tool exists to avoid.
 export const BODY_SLOTS = 2;
 export const POINTER_SLOTS = 3;
 
