@@ -550,9 +550,11 @@ pub(crate) fn build_source_db(path: &Path, note_uuid: Option<&str>) {
 }
 
 #[cfg(test)]
-/// Two addressable notes and one link between them. `shared.md` is published
-/// by the caller's rules; `secret.md` is withheld. `shared` links to both, so
-/// the export must carry the link to `other` and drop the link to `secret`.
+/// Three addressable notes and three links. `shared.md` and `other.md` are
+/// published by the caller's rules; `secret.md` is withheld. `shared` links to
+/// both others and `secret` links to `other`, so the export must carry only
+/// `shared`'s link to `other`: one dropped edge points at the withheld note,
+/// the other comes out of it.
 pub(crate) fn build_linked_source_db(path: &Path, vault: &Path) {
     let c = Connection::open(path).unwrap();
     c.execute_batch(
