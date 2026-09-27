@@ -329,13 +329,10 @@ enum VaultCommand {
     },
 }
 
-fn parse_model(s: &str) -> ll_search::model::KnownModel {
+fn parse_model(s: &str) -> anyhow::Result<ll_search::model::KnownModel> {
     match s {
-        "bge-small" | "bge" | "bge-small-en-v1.5" => ll_search::model::KnownModel::BgeSmallEnV15,
-        other => {
-            eprintln!("Unknown model: '{}'. Available: bge-small", other);
-            std::process::exit(1);
-        }
+        "bge-small" | "bge" | "bge-small-en-v1.5" => Ok(ll_search::model::KnownModel::BgeSmallEnV15),
+        other => anyhow::bail!("Unknown model: '{other}'. Available: bge-small"),
     }
 }
 
@@ -343,8 +340,15 @@ fn init_embedding() {
     ll_search::embed::init_provider(&ll_search::model::KnownModel::BgeSmallEnV15);
 }
 
-fn out<T: serde::Serialize>(data: &T) {
-    ll_search::app::emit(data, true).expect("emit");
+fn out<T: serde::Serialize>(data: &T) -> anyhow::Result<()> {
+    ll_search::app::emit(data, true)
+}
+
+/// The read side opens an existing index only. Its error already says which
+/// file is missing and how to build it.
+fn open_db(db_path: &str) -> anyhow::Result<rusqlite::Connection> {
+    use anyhow::Context as _;
+    ll_search::db::open_db(db_path).context("failed to open database")
 }
 
 /// What the joining machine puts on its screen. The six words go to stderr
@@ -534,10 +538,10 @@ fn recover(
     Ok(RecoverOutcome { key_id: key_id.as_str().to_string(), backend, replaced })
 }
 
-/// Wall-clock seconds, for the one caller in this file that needs to hand a
-/// point in time to the library. A clock before 1970 reads as 1970 rather
-/// than panicking: this is on the query path, and every grant expiry then
-/// compares as lapsed, which is the fail-closed direction.
+/// Wall-clock seconds, for every point in time this file hands the library. A
+/// clock before 1970 reads as 1970 rather than failing: on the query path every
+/// grant expiry then compares as lapsed, which is the fail-closed direction,
+/// and `status` reports ages from 1970, which is wrong in a way anyone can see.
 fn unix_now() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -545,8 +549,9 @@ fn unix_now() -> i64 {
         .unwrap_or(0)
 }
 
-fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app::AppState {
-    ll_search::app::AppState::from_db(db_path, config_dir).expect("failed to build AppState")
+fn build_app_state(db_path: &str, config_dir: Option<String>) -> anyhow::Result<ll_search::app::AppState> {
+    use anyhow::Context as _;
+    ll_search::app::AppState::from_db(db_path, config_dir).context("failed to build AppState")
 }
 
 /// Resolve which vault(s) a query's federation lookups may read, then collect
@@ -566,19 +571,20 @@ fn build_app_state(db_path: &str, config_dir: Option<String>) -> ll_search::app:
 ///   correctly, not a fallback rescuing an error.
 /// - It does → genuinely multi-vault, so guessing which one the caller meant
 ///   is exactly the case where being wrong leaks across vaults. Resolution
-///   failures here fail loud (panic with an actionable message) rather than
-///   widening the search — scoping must never fail open.
+///   failures here are errors with an actionable message, never a wider
+///   search — scoping must never fail open.
 fn resolve_peers(
     conn: &rusqlite::Connection,
     config_dir: Option<String>,
     vault_path: Option<String>,
     all: bool,
-) -> Vec<(String, rusqlite::Connection)> {
+) -> anyhow::Result<Vec<(String, rusqlite::Connection)>> {
+    use anyhow::Context as _;
     let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
     let has_registry = plugin_data.join("vaults.json").exists();
     let federated = has_registry || plugin_data.join("federation").join("config.json").exists();
     if !federated {
-        return Vec::new();
+        return Ok(Vec::new());
     }
     let model_id: String = match conn.query_row(
         "SELECT value FROM meta WHERE key = 'model_id'",
@@ -586,31 +592,31 @@ fn resolve_peers(
         |r| r.get(0),
     ) {
         Ok(id) => id,
-        Err(_) => return Vec::new(),
+        Err(_) => return Ok(Vec::new()),
     };
 
     let scope = if !has_registry {
         ll_search::search::QueryScope { config_dirs: vec![plugin_data.clone()] }
     } else if all {
         ll_search::search::query_scope(&plugin_data, std::path::Path::new(""), true)
-            .expect("failed to load the vault registry for --all")
+            .context("failed to load the vault registry for --all")?
     } else {
         let vault = vault_path
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var("VAULT_PATH").ok().map(std::path::PathBuf::from))
-            .expect(
+            .context(
                 "multiple vaults are registered; set $VAULT_PATH (or pass --vault-path, \
                  if this is `ll query`) to say which one this query scopes to",
-            );
+            )?;
         ll_search::search::query_scope(&plugin_data, &vault, false)
-            .unwrap_or_else(|e| panic!("failed to resolve vault scope: {e}"))
+            .context("failed to resolve vault scope")?
     };
 
     // The reader's grant check is a point in time, and `unix_now` is where
     // this process gets one. Threaded rather than read inside the search path
     // for the same reason `render_status` takes it: an expiry boundary that
     // cannot be moved cannot be tested from both sides.
-    ll_search::search::discover_peer_dbs_for(&scope, &model_id, unix_now())
+    Ok(ll_search::search::discover_peer_dbs_for(&scope, &model_id, unix_now()))
 }
 
 fn vault_add(plugin_data: &std::path::Path, vault_path: &std::path::Path, id: &str) -> anyhow::Result<()> {
@@ -628,18 +634,44 @@ fn vault_add(plugin_data: &std::path::Path, vault_path: &std::path::Path, id: &s
     Ok(())
 }
 
+/// A recovery phrase that could not be read at all, as opposed to one that was
+/// read and refused. `recover` exits 2 for this and 1 for everything else.
+#[derive(Debug)]
+struct PhraseUnreadable(anyhow::Error);
+
+impl std::fmt::Display for PhraseUnreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#}", self.0)
+    }
+}
+
+impl std::error::Error for PhraseUnreadable {}
+
+/// Every failure reaches the user as one line on stderr and a nonzero exit,
+/// never a panic banner: a mistyped path is not a crash.
 #[tokio::main(flavor = "multi_thread")]
-async fn main() {
-    let cli = Cli::parse();
+async fn main() -> std::process::ExitCode {
+    match run(Cli::parse()).await {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e:#}");
+            let code = if e.chain().any(|c| c.is::<PhraseUnreadable>()) { 2 } else { 1 };
+            std::process::ExitCode::from(code)
+        }
+    }
+}
+
+async fn run(cli: Cli) -> anyhow::Result<()> {
+    use anyhow::Context as _;
     match cli.command {
         Commands::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
         }
         Commands::Index { vault_path, db_path, force, sync, config_dir, .. } => {
             init_embedding();
-            let conn = ll_search::db::open_or_create_db(&db_path).expect("failed to open database");
-            let result = ll_search::db::reindex(&conn, &vault_path, force).expect("reindex failed");
-            out(&result);
+            let conn = ll_search::db::open_or_create_db(&db_path).context("failed to open database")?;
+            let result = ll_search::db::reindex(&conn, &vault_path, force).context("reindex failed")?;
+            out(&result)?;
             if sync {
                 let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
                 if let Ok(config) = ll_search::sync::config::load_config(&config_dir) {
@@ -657,9 +689,9 @@ async fn main() {
             }
         }
         Commands::Query { db_path, text, top, config_dir, vault_path, all, recency, after, before, session, project, threshold } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
-            let app = build_app_state(&db_path, config_dir.clone());
+            let app = build_app_state(&db_path, config_dir.clone())?;
             let ctx = app.ensure_search_context(&conn);
             let temporal = ll_search::search::TemporalParams {
                 recency_days: recency,
@@ -668,100 +700,96 @@ async fn main() {
                 session_id: session,
                 project_tag: project,
             };
-            let peers = resolve_peers(&conn, config_dir, vault_path, all);
+            let peers = resolve_peers(&conn, config_dir, vault_path, all)?;
             let results = if peers.is_empty() {
                 ll_search::search::hybrid_query_with_ctx(&ctx, &conn, &text, top, &temporal)
             } else {
                 ll_search::search::hybrid_query_federated_with_ctx(&ctx, &conn, &text, top, &peers, &temporal)
             };
             let response = ll_search::search::build_query_response(text, results, &conn, threshold);
-            out(&response);
+            out(&response)?;
         }
         Commands::Similar { db_path, note_path, top } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::similar_notes(&conn, &note_path, top, &store);
-            out(&results);
+            out(&results)?;
         }
         Commands::Cluster { db_path, threshold } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::cluster_notes(&conn, threshold, &store);
-            out(&results);
+            out(&results)?;
         }
         Commands::Discriminate { db_path, threshold, paths } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::discriminate_pairs(&conn, &paths, threshold, &store);
-            out(&results);
+            out(&results)?;
         }
         Commands::ReflectScan { db_path, queries, top, candidates, threshold, config_dir } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
-            let peers = resolve_peers(&conn, config_dir, None, false);
+            let peers = resolve_peers(&conn, config_dir, None, false)?;
             let result = if peers.is_empty() {
                 ll_search::search::reflect_scan(&conn, &queries, top, candidates, threshold, &store)
             } else {
                 ll_search::search::reflect_scan_federated(&conn, &queries, top, candidates, threshold, &peers, &store)
             };
-            out(&result);
+            out(&result)?;
         }
         Commands::Embed { text } => {
             init_embedding();
             let vec = ll_search::embed::embed_query(&text);
-            out(&vec);
+            out(&vec)?;
         }
         Commands::Status { config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock is before 1970")
-                .as_secs() as i64;
-            let text = ll_search::sync::status::render_status(&config_dir, now)
-                .expect("failed to read federation status");
+            let text = ll_search::sync::status::render_status(&config_dir, unix_now())
+                .context("failed to read federation status")?;
             print!("{text}");
         }
         Commands::IndexStatus { db_path, vault_path } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             let status = ll_search::db::get_status(&conn, &vault_path);
-            out(&status);
+            out(&status)?;
         }
         Commands::Tags { db_path, min_count } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             let tags = ll_search::db::list_tags(&conn, min_count);
-            out(&tags);
+            out(&tags)?;
         }
         Commands::Intentions { db_path, context } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             match context {
-                Some(ctx) => out(&ll_search::db::list_intentions_for_context(&conn, &ctx)),
-                None => out(&ll_search::db::list_intentions_summary(&conn)),
+                Some(ctx) => out(&ll_search::db::list_intentions_for_context(&conn, &ctx))?,
+                None => out(&ll_search::db::list_intentions_summary(&conn))?,
             }
         }
         Commands::Sessions { db_path, min_notes } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             let sessions = ll_search::db::list_sessions(&conn, min_notes);
-            out(&sessions);
+            out(&sessions)?;
         }
         Commands::LinkStats { db_path, folder, orphans } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             let result = ll_search::db::link_stats(&conn, folder.as_deref(), orphans);
-            out(&result);
+            out(&result)?;
         }
         Commands::VisibilityBackfill { vault_path, config_dir, dry_run } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let config = ll_search::sync::config::load_config(&config_dir)
-                .expect("failed to load federation config");
+                .context("failed to load federation config")?;
             let report = ll_search::sync::backfill::backfill_public(
                 std::path::Path::new(&vault_path),
                 &config,
                 dry_run,
             )
-            .expect("backfill failed");
+            .context("backfill failed")?;
             eprintln!(
                 "{} {} of {} scanned ({} already explicit)",
                 if dry_run { "Would write" } else { "Wrote" },
@@ -773,26 +801,26 @@ async fn main() {
         Commands::Export { db_path, output, vault_path, config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let config = ll_search::sync::config::load_config(&config_dir)
-                .expect("failed to load federation config");
+                .context("failed to load federation config")?;
             let result = ll_search::sync::export::export_index(
                 std::path::Path::new(&db_path),
                 std::path::Path::new(&vault_path),
                 std::path::Path::new(&output),
                 &config,
             )
-            .expect("export failed");
-            out(&result);
+            .context("export failed")?;
+            out(&result)?;
         }
         Commands::Sync { db_path, vault_path, config_dir, hub_endpoint } => {
             let hub_override = hub_endpoint
                 .or_else(|| std::env::var("LL_HUB_ENDPOINT").ok());
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let mut config = ll_search::sync::config::load_config(&config_dir)
-                .expect("failed to load federation config");
+                .context("failed to load federation config")?;
             if let Some(endpoint) = hub_override {
                 config.hub.endpoint = endpoint;
             }
-            config.validate().expect("invalid federation config");
+            config.validate().context("invalid federation config")?;
             init_embedding();
             let result = ll_search::sync::client::sync_all_async(
                 std::path::Path::new(&db_path),
@@ -800,121 +828,86 @@ async fn main() {
                 &config_dir,
                 &config,
             )
-            .await;
-            let result = match result {
-                Ok(result) => result,
-                // Every failure here is the user's to act on -- a wrong db
-                // path, an unbuilt index, a hub that refused. A panic buries
-                // that under a backtrace note.
-                Err(e) => {
-                    eprintln!("sync failed: {e:#}");
-                    std::process::exit(1);
-                }
-            };
-            out(&result);
+            .await
+            .context("sync failed")?;
+            out(&result)?;
         }
         Commands::Join { hub, invite, vault_path, config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            let outcome = ll_search::sync::join::join(
+            let o = ll_search::sync::join::join(
                 &config_dir,
                 &hub,
                 &invite,
                 std::path::Path::new(&vault_path),
                 &mut ll_search::sync::join::TtyConfirm,
             )
-            .await;
-            match outcome {
-                Ok(o) => {
-                    eprintln!("Joined. Run `ll-search sync` to upload this vault's index.");
-                    // No recovery_phrase here. TtyConfirm already showed it once;
-                    // putting it on stdout would put it in every log and pipe that
-                    // captures this command's output.
-                    out(&serde_json::json!({
-                        "key_id": o.key_id,
-                        "vault_id": o.vault_id,
-                        "hub_key_id": o.hub_key_id,
-                        "hub_fingerprint": o.hub_fingerprint,
-                        "recovery_key_id": o.recovery_key_id,
-                    }));
-                }
-                Err(e) => {
-                    eprintln!("join failed: {e:#}");
-                    std::process::exit(1);
-                }
-            }
+            .await
+            .context("join failed")?;
+            eprintln!("Joined. Run `ll-search sync` to upload this vault's index.");
+            // No recovery_phrase here. TtyConfirm already showed it once;
+            // putting it on stdout would put it in every log and pipe that
+            // captures this command's output.
+            out(&serde_json::json!({
+                "key_id": o.key_id,
+                "vault_id": o.vault_id,
+                "hub_key_id": o.hub_key_id,
+                "hub_fingerprint": o.hub_fingerprint,
+                "recovery_key_id": o.recovery_key_id,
+            }))?;
         }
         Commands::Identity { config_dir } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             let result = ll_search::sync::seed_store::load_or_create(&config_dir)
-                .expect("failed to load or create seed");
+                .context("failed to load or create seed")?;
             out(&serde_json::json!({
                 "pubkey_b64": ll_search::sync::auth::pubkey_b64(&result.signing_key),
                 "backend": result.backend.to_string(),
                 "created": result.created,
-            }));
+            }))?;
         }
         Commands::Recover { phrase, force, config_dir } => {
             let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
             if phrase.is_none() && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
                 eprintln!("Recovery phrase (24 words). It is not echoed to your shell history:");
             }
-            let phrase = match read_phrase(phrase.as_deref(), &mut std::io::stdin().lock()) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("recover failed: {e:#}");
-                    std::process::exit(2);
-                }
-            };
-            match recover(&dir, &phrase, force) {
-                Ok(o) => {
-                    match &o.replaced {
-                        Some(old) => eprintln!(
-                            "Replaced {old}. Every grant naming it is now inert — the peers \
-                             that hold them have to be re-linked.",
-                        ),
-                        None => eprintln!("Recovered {}.", o.key_id),
-                    }
-                    out(&serde_json::json!({
-                        "key_id": o.key_id,
-                        "backend": o.backend.to_string(),
-                        "replaced": o.replaced,
-                    }));
-                }
-                Err(e) => {
-                    eprintln!("recover failed: {e:#}");
-                    std::process::exit(1);
-                }
+            let phrase = read_phrase(phrase.as_deref(), &mut std::io::stdin().lock())
+                .map_err(|e| anyhow::Error::new(PhraseUnreadable(e)).context("recover failed"))?;
+            let o = recover(&dir, &phrase, force).context("recover failed")?;
+            match &o.replaced {
+                Some(old) => eprintln!(
+                    "Replaced {old}. Every grant naming it is now inert — the peers \
+                     that hold them have to be re-linked.",
+                ),
+                None => eprintln!("Recovered {}.", o.key_id),
             }
+            out(&serde_json::json!({
+                "key_id": o.key_id,
+                "backend": o.backend.to_string(),
+                "replaced": o.replaced,
+            }))?;
         }
         Commands::MigrateSeed { config_dir, rollback } => {
             let config_dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-            if rollback {
-                let result = ll_search::sync::seed_migrate::migrate_rollback(&config_dir)
-                    .expect("seed migration rollback failed");
-                out(&serde_json::json!({
-                    "from": result.from.to_string(),
-                    "to": result.to.to_string(),
-                    "plaintext_removed": result.plaintext_removed,
-                    "already_migrated": result.already_migrated,
-                }));
+            let result = if rollback {
+                ll_search::sync::seed_migrate::migrate_rollback(&config_dir)
+                    .context("seed migration rollback failed")?
             } else {
-                let result = ll_search::sync::seed_migrate::migrate(&config_dir)
-                    .expect("seed migration failed");
-                out(&serde_json::json!({
-                    "from": result.from.to_string(),
-                    "to": result.to.to_string(),
-                    "plaintext_removed": result.plaintext_removed,
-                    "already_migrated": result.already_migrated,
-                }));
-            }
+                ll_search::sync::seed_migrate::migrate(&config_dir).context("seed migration failed")?
+            };
+            out(&serde_json::json!({
+                "from": result.from.to_string(),
+                "to": result.to.to_string(),
+                "plaintext_removed": result.plaintext_removed,
+                "already_migrated": result.already_migrated,
+            }))?;
         }
         Commands::Rerank { db_path, query, top, candidates, config_dir } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
-            let peers = resolve_peers(&conn, config_dir, None, false);
+            let peers = resolve_peers(&conn, config_dir, None, false)?;
             let scored = ll_search::rerank::run(&conn, &peers, &query, top, candidates, &store);
-            out(&scored);
+            out(&scored)?;
         }
         Commands::Watch { vault_path, db_path, sync_interval, config_dir, pid_file, librarian_script } => {
             init_embedding();
@@ -924,8 +917,7 @@ async fn main() {
                 .unwrap_or_else(|| config_dir.join("watch.pid"));
 
             if ll_search::sync::watch::is_watch_running(&pid_file) {
-                eprintln!("Watch already running (PID file: {})", pid_file.display());
-                std::process::exit(1);
+                anyhow::bail!("Watch already running (PID file: {})", pid_file.display());
             }
 
             let cfg = ll_search::sync::watch::WatchConfig {
@@ -936,45 +928,46 @@ async fn main() {
                 sync_interval: std::time::Duration::from_secs(sync_interval),
                 librarian_script: librarian_script.map(std::path::PathBuf::from),
             };
-            ll_search::sync::watch::run_watch_async(cfg).await.expect("watch failed");
+            ll_search::sync::watch::run_watch_async(cfg).await.context("watch failed")?;
         }
         Commands::Migrate { db_path, model, drop_old } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             if drop_old {
                 ll_search::db::drop_old_embeddings(&conn);
                 eprintln!("Dropped old embeddings table.");
             } else {
-                let target = parse_model(&model);
+                let target = parse_model(&model)?;
                 let provider = ll_search::model::loader::load_provider(&target)
-                    .expect("failed to load model");
+                    .context("failed to load model")?;
                 let result = ll_search::db::migrate_embeddings(&conn, provider.as_ref());
-                out(&result);
+                out(&result)?;
             }
         }
         Commands::EvalPrf { db_path, min_links } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_prf(&conn, &store, min_links);
-            out(&result);
+            out(&result)?;
         }
         Commands::EvalFunnel { db_path, min_links, limit } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::eval_funnel(&conn, &store, min_links, limit);
-            out(&result);
+            out(&result)?;
         }
         Commands::LaneDiag { db_path, probes } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
-            let raw = std::fs::read_to_string(&probes).expect("read probes");
+            let raw = std::fs::read_to_string(&probes)
+                .with_context(|| format!("failed to read probes from {probes}"))?;
             let triples: Vec<(String, String, String)> =
-                serde_json::from_str(&raw).expect("parse probes");
-            out(&ll_search::search::lane_diagnostics(&conn, &triples));
+                serde_json::from_str(&raw).context("failed to parse probes")?;
+            out(&ll_search::search::lane_diagnostics(&conn, &triples))?;
         }
         Commands::TuneWeights { db_path, min_links, limit } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let results = ll_search::search::tune_weights(&conn, &store, min_links, limit);
@@ -996,21 +989,21 @@ async fn main() {
             );
         }
         Commands::TunePrf { db_path, queries } => {
-            let conn = ll_search::db::open_db(&db_path).expect("failed to open database");
+            let conn = open_db(&db_path)?;
             init_embedding();
             let store = ll_search::search::store::load_store(&conn);
             let result = ll_search::search::tune_prf(&conn, &queries, &store);
-            out(&result);
+            out(&result)?;
         }
 
         Commands::Vault { command } => match command {
             VaultCommand::Add { vault_path, id, config_dir } => {
                 let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                vault_add(&plugin_data, std::path::Path::new(&vault_path), &id).expect("vault add failed");
+                vault_add(&plugin_data, std::path::Path::new(&vault_path), &id).context("vault add failed")?;
             }
             VaultCommand::List { config_dir } => {
                 let plugin_data = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                let profiles = ll_search::sync::registry::load(&plugin_data).expect("failed to load vault registry");
+                let profiles = ll_search::sync::registry::load(&plugin_data).context("failed to load vault registry")?;
                 for p in profiles {
                     let configured = p.config_dir.join("federation").join("config.json").exists();
                     println!(
@@ -1023,94 +1016,90 @@ async fn main() {
                 }
             }
         },
-        Commands::Link { command } => {
-            use ll_search::sync::link;
-            let fail = |e: anyhow::Error| -> ! {
-                eprintln!("link failed: {e:#}");
-                std::process::exit(1);
-            };
-            match command {
-                LinkCommand::Code { config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    show_pending(&link::pending_offline(&dir).unwrap_or_else(|e| fail(e)));
-                }
-                LinkCommand::Request { hub, vault_path, config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    let pending = link::request(
-                        &dir,
-                        &hub,
-                        std::path::Path::new(&vault_path),
-                        &mut link::TtyApprove,
-                    )
-                    .await
-                    .unwrap_or_else(|e| fail(e));
-                    show_pending(&pending);
-                }
-                LinkCommand::Approve { code, offline, config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    if offline {
-                        let blob = link::approve_offline(&dir, &code, &mut link::TtyApprove)
-                            .unwrap_or_else(|e| fail(e));
-                        eprintln!();
-                        eprintln!("Give this to the new machine — `ll-search link accept <grant>`:");
-                        eprintln!();
-                        println!("{blob}");
-                    } else {
-                        link::approve(&dir, &code, &mut link::TtyApprove)
-                            .await
-                            .unwrap_or_else(|e| fail(e));
-                        eprintln!("Admitted. The new machine collects the grant on its next sync.");
-                    }
-                }
-                LinkCommand::Accept { grant, config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    let accepted = link::accept_offline(&dir, &grant).unwrap_or_else(|e| fail(e));
-                    eprintln!("Linked. This machine is now one of yours.");
-                    if !accepted.can_reach_the_hub {
-                        // Saying this here rather than letting the next `sync`
-                        // fail with "no vault_id in this federation config",
-                        // which names a field instead of the missing step.
-                        eprintln!();
-                        eprintln!("This machine still has no hub. The link does not carry one —");
-                        eprintln!("it names the machine that signed it, not an endpoint, and a");
-                        eprintln!("hub key cannot be pinned without reaching the hub.");
-                        eprintln!();
-                        eprintln!("  ll-search link request <hub-endpoint> <vault-path>");
-                        eprintln!();
-                        eprintln!("Run that once this machine can reach the hub. It pins the hub");
-                        eprintln!("and writes the config; the link you just accepted stands, so");
-                        eprintln!("the pairing code it prints needs no second approval.");
-                    }
-                }
-                LinkCommand::List { config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    out(&link::list(&dir).unwrap_or_else(|e| fail(e)));
-                }
-                LinkCommand::Revoke { key_id, config_dir } => {
-                    let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
-                    let other = ll_search::sync::key_id::KeyId::parse(&key_id)
-                        .unwrap_or_else(|e| fail(e.context(
-                            "that is not a key id. `ll-search link list` prints the key id of \
-                             every machine this one is linked to",
-                        )));
-                    let done = link::revoke(&dir, &other).await.unwrap_or_else(|e| fail(e));
-                    eprint!("{}", revoke_report(&done, &other));
-                }
-            }
-        }
+        Commands::Link { command } => run_link(command).await.context("link failed")?,
         Commands::Benchmark { db_path, model_a, model_b, queries } => {
-            let ma = parse_model(&model_a);
-            let mb = parse_model(&model_b);
+            let ma = parse_model(&model_a)?;
+            let mb = parse_model(&model_b)?;
             let result = ll_search::model::benchmark::run_benchmark(
                 std::path::Path::new(&db_path),
                 &ma,
                 &mb,
                 &queries,
             )
-            .expect("benchmark failed");
-            out(&result);
+            .context("benchmark failed")?;
+            out(&result)?;
         }
     }
+    Ok(())
+}
+
+async fn run_link(command: LinkCommand) -> anyhow::Result<()> {
+    use anyhow::Context as _;
+    use ll_search::sync::link;
+    match command {
+        LinkCommand::Code { config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            show_pending(&link::pending_offline(&dir)?);
+        }
+        LinkCommand::Request { hub, vault_path, config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let pending = link::request(
+                &dir,
+                &hub,
+                std::path::Path::new(&vault_path),
+                &mut link::TtyApprove,
+            )
+            .await?;
+            show_pending(&pending);
+        }
+        LinkCommand::Approve { code, offline, config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            if offline {
+                let blob = link::approve_offline(&dir, &code, &mut link::TtyApprove)?;
+                eprintln!();
+                eprintln!("Give this to the new machine — `ll-search link accept <grant>`:");
+                eprintln!();
+                println!("{blob}");
+            } else {
+                link::approve(&dir, &code, &mut link::TtyApprove).await?;
+                eprintln!("Admitted. The new machine collects the grant on its next sync.");
+            }
+        }
+        LinkCommand::Accept { grant, config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let accepted = link::accept_offline(&dir, &grant)?;
+            eprintln!("Linked. This machine is now one of yours.");
+            if !accepted.can_reach_the_hub {
+                // Saying this here rather than letting the next `sync`
+                // fail with "no vault_id in this federation config",
+                // which names a field instead of the missing step.
+                eprintln!();
+                eprintln!("This machine still has no hub. The link does not carry one —");
+                eprintln!("it names the machine that signed it, not an endpoint, and a");
+                eprintln!("hub key cannot be pinned without reaching the hub.");
+                eprintln!();
+                eprintln!("  ll-search link request <hub-endpoint> <vault-path>");
+                eprintln!();
+                eprintln!("Run that once this machine can reach the hub. It pins the hub");
+                eprintln!("and writes the config; the link you just accepted stands, so");
+                eprintln!("the pairing code it prints needs no second approval.");
+            }
+        }
+        LinkCommand::List { config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            out(&link::list(&dir)?)?;
+        }
+        LinkCommand::Revoke { key_id, config_dir } => {
+            let dir = ll_search::sync::config::resolve_config_dir_opt(config_dir);
+            let other = ll_search::sync::key_id::KeyId::parse(&key_id).context(
+                "that is not a key id. `ll-search link list` prints the key id of \
+                 every machine this one is linked to",
+            )?;
+            let done = link::revoke(&dir, &other).await?;
+            eprint!("{}", revoke_report(&done, &other));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1212,7 +1201,7 @@ mod tests {
     fn resolve_peers_returns_empty_when_nothing_is_federated() {
         let d = tempfile::tempdir().unwrap();
         let conn = conn_with_model("model-x");
-        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false);
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false).unwrap();
         assert!(peers.is_empty());
         assert!(!d.path().join("vaults.json").exists(),
             "a plain, never-federated query must not create a registry — reading is never a write");
@@ -1230,7 +1219,8 @@ mod tests {
             Some(d.path().to_string_lossy().to_string()),
             Some("/v/personal".to_string()),
             false,
-        );
+        )
+        .unwrap();
         assert!(peers.is_empty(), "personal has no peer cache of its own — work's must not leak in");
     }
 
@@ -1241,7 +1231,7 @@ mod tests {
         seed_peer(&d.path().join("work"), "v-someone", "model-x");
         let conn = conn_with_model("model-x");
 
-        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, true);
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, true).unwrap();
         assert_eq!(peers.len(), 1, "--all must surface the work profile's peer cache too");
         assert_eq!(peers[0].0, "v-someone");
     }
@@ -1251,19 +1241,20 @@ mod tests {
     /// so an unresolvable vault must fail loud, never silently widen or
     /// silently return nothing that could be mistaken for "no peers exist".
     #[test]
-    #[should_panic(expected = "no vault profile")]
     fn resolve_peers_fails_loud_rather_than_search_the_wrong_vault() {
         let d = tempfile::tempdir().unwrap();
         two_vault_profiles(d.path());
         seed_peer(&d.path().join("work"), "v-someone", "model-x");
         let conn = conn_with_model("model-x");
 
-        let _ = resolve_peers(
+        let err = resolve_peers(
             &conn,
             Some(d.path().to_string_lossy().to_string()),
             Some("/v/unregistered".to_string()),
             false,
-        );
+        )
+        .expect_err("an unregistered vault must be an error, not an empty scope");
+        assert!(format!("{err:#}").contains("no vault profile"), "{err:#}");
     }
 
     /// The branch this whole correction exists for: an unmigrated, real-shaped
@@ -1277,7 +1268,7 @@ mod tests {
         seed_peer(d.path(), "v-someone", "model-x");
         let conn = conn_with_model("model-x");
 
-        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false);
+        let peers = resolve_peers(&conn, Some(d.path().to_string_lossy().to_string()), None, false).unwrap();
         assert_eq!(peers.len(), 1, "an unmigrated single-vault install must still find its own peers");
         assert_eq!(peers[0].0, "v-someone");
         assert!(!d.path().join("vaults.json").exists(),
