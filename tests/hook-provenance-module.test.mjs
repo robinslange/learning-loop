@@ -25,12 +25,15 @@ function readProvenance(pluginDataDir) {
   return lines;
 }
 
-test('provenance module and hooks.json target the real subagent tool name Task', () => {
-  const hooksJson = readFileSync(join(ROOT, 'hooks.json'), 'utf8');
-  const provenance = readFileSync(join(ROOT, 'modules', 'provenance.mjs'), 'utf8');
-  assert.match(hooksJson, /Task/, 'PostToolUse matcher must include Task');
-  assert.doesNotMatch(hooksJson, /\|Agent\|/, 'stale Agent matcher must be gone');
-  assert.match(provenance, /===\s*'Task'/, 'provenance module must check for Task');
+test('hooks.json routes Task, Agent and Skill calls to post-tool.js', () => {
+  const hooksJson = JSON.parse(readFileSync(join(ROOT, 'hooks.json'), 'utf8'));
+  const group = hooksJson.hooks.PostToolUse.find((g) =>
+    g.hooks.some((h) => h.command.includes('hooks/post-tool.js')),
+  );
+  assert.ok(group, 'no PostToolUse entry runs post-tool.js');
+  for (const tool of ['Task', 'Agent', 'Skill']) {
+    assert.ok(new RegExp(group.matcher).test(tool), `matcher ${group.matcher} must match ${tool}`);
+  }
 });
 
 test('post-tool Task tool: emits agent-spawn provenance event', () => {

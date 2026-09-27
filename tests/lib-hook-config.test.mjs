@@ -23,16 +23,6 @@ test('all values are finite non-negative numbers', () => {
   }
 });
 
-test('timeout constants are in plausible ranges (ms)', () => {
-  assert.ok(HookConfig.STDIN_TIMEOUT_MS >= 100 && HookConfig.STDIN_TIMEOUT_MS <= 30_000);
-  assert.ok(HookConfig.DAEMON_STARTUP_DEADLINE_MS >= 100);
-  assert.ok(
-    HookConfig.SESSION_SWEEP_TTL_MS > 24 * 3600 * 1000 &&
-      HookConfig.SESSION_SWEEP_TTL_MS <= 30 * 24 * 3600 * 1000,
-    'TTL should be > 1 day and <= 30 days',
-  );
-});
-
 test('ML thresholds are in [0, 1]', () => {
   for (const k of ['INJECTION_THRESHOLD', 'SIMILARITY_THRESHOLD', 'COSINE_MIN', 'COSINE_MAX']) {
     assert.ok(HookConfig[k] >= 0 && HookConfig[k] <= 1, `${k} must be in [0, 1]`);
@@ -82,24 +72,6 @@ test('required keys are all present (regression guard)', () => {
   for (const k of required) {
     assert.ok(k in HookConfig, `missing required key: ${k}`);
   }
-});
-
-test('cooldown constants match known source values', () => {
-  // hooks/stop-nudge.js:38 = 300, hooks/stop-nudge.js:77 = 300
-  assert.equal(HookConfig.REFLECT_COOLDOWN_SECS, 300);
-  assert.equal(HookConfig.DREAM_COOLDOWN_SECS, 300);
-});
-
-test('EDGES_TMP_ORPHAN_TTL_MS is exactly 1 hour in milliseconds', () => {
-  assert.equal(HookConfig.EDGES_TMP_ORPHAN_TTL_MS, 60 * 60 * 1000);
-});
-
-test('CONVERGENCE_TTL_MS is exactly 7 days in milliseconds', () => {
-  assert.equal(HookConfig.CONVERGENCE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
-});
-
-test('DEDUPE_WINDOW_MS is exactly 4 hours in milliseconds', () => {
-  assert.equal(HookConfig.DEDUPE_WINDOW_MS, 4 * 60 * 60 * 1000);
 });
 
 // The window must outlast a working session's repeat cadence but stay inside

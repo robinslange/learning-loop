@@ -33,11 +33,11 @@ const OLD = new Date(Date.now() - 90 * 86400 * 1000);
 
 // IMPORTANT: this test file is COMMITTED AND PUBLIC. It must never contain the
 // actual instance-specific names being removed (that would re-leak them — the
-// exact thing this fix exists for). Assert the structure, not the names:
-test('no hardcoded slug list: slugs must derive from 4-projects/', { skip: SKIP }, () => {
+// exact thing this fix exists for). A literal slug list next to the derivation
+// would pass every behaviour test below, so this one guard reads the source:
+test('no hardcoded slug list in the public script', { skip: SKIP }, () => {
   const src = readFileSync(SCRIPT, 'utf8');
   assert.doesNotMatch(src, /PROJECT_SLUGS="[^"]*\|/, 'pipe-delimited literal slug list found');
-  assert.match(src, /4-projects/, 'slug derivation from project index notes missing');
 });
 
 test('stale note matching a 4-projects slug is reported STALE', { skip: SKIP }, () => {
