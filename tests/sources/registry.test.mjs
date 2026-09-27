@@ -80,8 +80,8 @@ describe('registry', () => {
   });
 
   it('resolveSource short-circuits on PubMed hit', async () => {
-    // Only PubMed's two endpoints are registered. Under
-    // `onUnhandledRequest: 'error'` a call to any later provider is a failure,
+    // Only PubMed's two endpoints are registered. The mock network fails any
+    // test that calls a provider it did not declare,
     // which is the actual claim in the test's name -- the old version computed
     // an unused boolean and then asserted `result.resolved` twice.
     server.use(

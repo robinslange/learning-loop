@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import { chat, httpError, startOllamaMock, structured } from './helpers/ollama-mock.mjs';
+import { countRequests } from './helpers/msw.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), 'll-tools-dup-' + runId);
@@ -32,7 +33,7 @@ function readQueue() {
 describe('librarian-tools-duplicate', () => {
   const server = startOllamaMock();
   let duplicateCheck, submitDuplicateFlag;
-  let calls;
+  let requests;
 
   before(async () => {
     mkdirSync(join(TEMP_VAULT, '3-permanent'), { recursive: true });
@@ -59,11 +60,7 @@ describe('librarian-tools-duplicate', () => {
       sp,
       JSON.stringify({ visited: [], notes_visited: 0, duplicate_flags: 0, counters: {} }) + '\n',
     );
-    calls = 0;
-    server.events.removeAllListeners();
-    server.events.on('request:start', () => {
-      calls += 1;
-    });
+    requests = countRequests();
   });
 
   it('submitDuplicateFlag enqueues a duplicate_flag item', async () => {
@@ -125,7 +122,7 @@ describe('librarian-tools-duplicate', () => {
 
   it('duplicateCheck returns early when no body', async () => {
     await duplicateCheck(TARGET, { bodyOverride: null, neighboursOverride: NEIGHBOURS });
-    assert.equal(calls, 0, 'a note with no body must not reach ollama');
+    assert.equal(requests(), 0, 'a note with no body must not reach ollama');
     assert.equal(readQueue().length, 0);
   });
 
@@ -148,7 +145,7 @@ describe('librarian-tools-duplicate', () => {
     // The point of the test is that the body came off disk, so assert the disk
     // content actually reached ollama -- a request count alone would pass on a
     // prompt built from an empty string.
-    assert.equal(calls, 1);
+    assert.equal(requests(), 1);
     assert.match(body.messages.map((m) => m.content).join('\n'), /Some claim body\./);
     assert.equal(readQueue().length, 0);
   });

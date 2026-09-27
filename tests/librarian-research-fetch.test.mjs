@@ -3,7 +3,13 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchText } from '../plugin/scripts/librarian/research/fetch.mjs';
 import { htmlToText } from '../plugin/scripts/lib/html-text.mjs';
-import { HttpResponse, countRequests, http, startMockNetwork } from './helpers/msw.mjs';
+import {
+  HttpResponse,
+  countRequests,
+  http,
+  lazyResponse,
+  startMockNetwork,
+} from './helpers/msw.mjs';
 
 const server = startMockNetwork();
 
@@ -75,34 +81,27 @@ describe('fetchText', () => {
   });
 
   it('short-circuits a non-text Content-Type to ok:false reason:non_html (no body read)', async () => {
-    let bodyRead = false;
-    server.use(
-      http.get('https://x.com/paper.pdf', () => {
-        bodyRead = true;
-        return HttpResponse.arrayBuffer(new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer, {
-          headers: { 'Content-Type': 'application/pdf' },
-        });
-      }),
-    );
-    const out = await fetchText('https://x.com/paper.pdf');
+    const { response, bodyRead } = lazyResponse({ 'Content-Type': 'application/pdf' });
+    const out = await fetchText('https://x.com/paper.pdf', { fetchOverride: async () => response });
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'non_html');
     assert.equal(out.text, '', 'a rejected content type must yield no text');
-    assert.ok(bodyRead, 'the server did answer; the client is what must not buffer it');
+    assert.equal(bodyRead(), false, 'must not buffer a binary body');
   });
 
   it('rejects an oversized body by Content-Length before reading it', async () => {
-    server.use(
-      http.get('https://x.com/huge', () =>
-        HttpResponse.html('x', {
-          headers: { 'Content-Length': String(50 * 1024 * 1024) },
-        }),
-      ),
-    );
-    const out = await fetchText('https://x.com/huge', { maxBytes: 5 * 1024 * 1024 });
+    const { response, bodyRead } = lazyResponse({
+      'Content-Type': 'text/html',
+      'Content-Length': String(50 * 1024 * 1024),
+    });
+    const out = await fetchText('https://x.com/huge', {
+      maxBytes: 5 * 1024 * 1024,
+      fetchOverride: async () => response,
+    });
     assert.equal(out.ok, false);
     assert.equal(out.reason, 'too_large');
     assert.equal(out.text, '');
+    assert.equal(bodyRead(), false, 'must not buffer a body declared too large');
   });
 
   it('rejects an oversized body that lied about its Content-Length', async () => {
@@ -116,7 +115,7 @@ describe('fetchText', () => {
   });
 
   it('issues exactly one request for a terminal response', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(http.get('https://good.com/', () => HttpResponse.html('<p>Hi.</p>')));
     const out = await fetchText('https://good.com/');
     assert.equal(out.ok, true);

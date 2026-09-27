@@ -5,16 +5,9 @@
 // The lifecycle wiring lives in ./msw.mjs; see its header for why these are
 // real Responses rather than hand-written object literals.
 
-import { http, HttpResponse, delay } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { startMockNetwork } from './msw.mjs';
 import { DEFAULT_OLLAMA_URL } from '../../plugin/scripts/lib/defaults.mjs';
-
-/**
- * The base URL the librarian reaches when nothing overrides it. Imported
- * rather than restated so a change to the default cannot leave the handlers
- * silently matching an address nothing calls.
- */
-export const OLLAMA_URL = DEFAULT_OLLAMA_URL;
 
 /** @see startMockNetwork — re-exported under the name the ollama suites read. */
 export const startOllamaMock = startMockNetwork;
@@ -25,7 +18,7 @@ export const startOllamaMock = startMockNetwork;
  * @param {import('msw').HttpResponseResolver} resolver
  * @param {{ base?: string }} [opts]
  */
-export function chat(resolver, { base = OLLAMA_URL } = {}) {
+export function chat(resolver, { base = DEFAULT_OLLAMA_URL } = {}) {
   return http.post(`${base}/api/chat`, resolver);
 }
 
@@ -35,7 +28,7 @@ export function chat(resolver, { base = OLLAMA_URL } = {}) {
  * @param {import('msw').HttpResponseResolver} resolver
  * @param {{ base?: string }} [opts]
  */
-export function tags(resolver, { base = OLLAMA_URL } = {}) {
+export function tags(resolver, { base = DEFAULT_OLLAMA_URL } = {}) {
   return http.get(`${base}/api/tags`, resolver);
 }
 
@@ -72,15 +65,4 @@ export function httpError(status, message = 'mock ollama failure') {
   return HttpResponse.json({ error: message }, { status });
 }
 
-/**
- * A response that never arrives in time, for exercising a caller's
- * AbortSignal.timeout. `ms` must exceed the timeout under test.
- *
- * @param {number} ms
- */
-export async function tooSlow(ms) {
-  await delay(ms);
-  return HttpResponse.json({});
-}
-
-export { HttpResponse, delay, http };
+export { HttpResponse };

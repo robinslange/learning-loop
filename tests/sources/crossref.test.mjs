@@ -71,7 +71,7 @@ describe('crossref adapter', () => {
   });
 
   it('verify falls back to bioRxiv for 10.1101/ DOI on 404', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get(CROSSREF_WORK, () => new HttpResponse('', { status: 404 })),
       http.get(BIORXIV_DETAILS, () => HttpResponse.json(BIORXIV_RESPONSE)),

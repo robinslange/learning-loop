@@ -11,6 +11,7 @@ import {
   structured,
   unstructured,
 } from './helpers/ollama-mock.mjs';
+import { countRequests } from './helpers/msw.mjs';
 
 const runId = randomBytes(4).toString('hex');
 const TEMP_ROOT = join(tmpdir(), `ll-tag-classifier-${runId}`);
@@ -55,7 +56,7 @@ function resetState() {
 
 describe('tag classifier structured-output suggestion', () => {
   const server = startOllamaMock();
-  let calls;
+  let requests;
 
   before(() => {
     mkdirSync(TEMP_VAULT, { recursive: true });
@@ -65,11 +66,7 @@ describe('tag classifier structured-output suggestion', () => {
   });
 
   beforeEach(() => {
-    calls = 0;
-    server.events.removeAllListeners();
-    server.events.on('request:start', () => {
-      calls += 1;
-    });
+    requests = countRequests();
   });
 
   after(() => {
@@ -213,7 +210,7 @@ describe('tag classifier structured-output suggestion', () => {
       vocabularyOverride: VOCAB,
     });
 
-    assert.equal(calls, 0, 'should short-circuit before fetch');
+    assert.equal(requests(), 0, 'should short-circuit before fetch');
     assert.equal(readQueue().length, 0);
   });
 });

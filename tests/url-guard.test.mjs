@@ -128,7 +128,7 @@ describe('fetchPageText redirect loop', () => {
     // a test can produce -- so it proved the workaround, not the loop. A real
     // 200 proves the loop against what a server actually sends.
     const { fetchPageText } = await import('../plugin/scripts/lib/sources/web-fetch.mjs');
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://example.com/a', () =>
         HttpResponse.html('<html><body><p>hello</p></body></html>'),
@@ -213,7 +213,7 @@ describe('source-gateway fetch verb', () => {
 // both entry points now drive.
 describe('fetchGuarded — every hop, not just the origin', () => {
   it('blocks a public origin that redirects into loopback', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://public.example.com/a', () => redirectTo('http://127.0.0.1:8791/secret')),
       http.get('http://127.0.0.1:8791/secret', () => HttpResponse.text('LOOPBACK SECRET')),
@@ -276,7 +276,7 @@ describe('fetchGuarded — every hop, not just the origin', () => {
     // redirect. Without the status gate the loop follows it, spends a hop, and
     // hands the caller the wrong body. Removing the gate breaks nothing else,
     // so this is the only assertion standing between it and a silent deletion.
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://a.example.com/', () =>
         HttpResponse.text('CREATED', {
@@ -298,7 +298,7 @@ describe('fetchGuarded — every hop, not just the origin', () => {
     // A redirect status without a target is not a redirect anyone can follow.
     // The loop must return it, not spin -- and this is the only remaining
     // shape that reaches that branch now the status-less stub is gone.
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(http.get('https://a.example.com/', () => new HttpResponse(null, { status: 304 })));
 
     const out = await fetchGuarded('https://a.example.com/', oneHop);
@@ -310,7 +310,7 @@ describe('fetchGuarded — every hop, not just the origin', () => {
 
 describe('fetchText (source-gateway fetch slot) validates hops', () => {
   it('blocks a 302 into loopback instead of returning its body', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(
       http.get('https://public.example.com/a', () => redirectTo('http://127.0.0.1:9/x')),
       http.get('http://127.0.0.1:9/x', () => HttpResponse.html('<p>SECRET</p>')),
@@ -324,7 +324,7 @@ describe('fetchText (source-gateway fetch slot) validates hops', () => {
   });
 
   it('rejects a loopback origin outright', async () => {
-    const requests = countRequests(server);
+    const requests = countRequests();
     server.use(http.get('http://127.0.0.1:11434/api/tags', () => HttpResponse.text('x')));
 
     const out = await fetchText('http://127.0.0.1:11434/api/tags');
