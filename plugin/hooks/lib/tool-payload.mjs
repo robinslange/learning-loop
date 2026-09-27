@@ -38,9 +38,9 @@ function parseApplyPatch(patch, cwd) {
   // `https://example.com/beta-notes`). Wrapping both sides in newlines makes
   // the match line-anchored, and `context` carries the `@@` anchor so a
   // consumer can start its search past the ambiguity the anchor exists to
-  // resolve. A hunk at the very start or end of a file will not match and the
-  // consumer falls open, which is the pre-existing behaviour for an
-  // unlocatable fragment.
+  // resolve. A hunk at the very start of a file, or at the end of one with no
+  // final newline, has no newline there to match; pre-write-check pads the
+  // file with one on each side to locate it.
   const flushHunk = () => {
     if (!hunk || !file) return;
     out.push({

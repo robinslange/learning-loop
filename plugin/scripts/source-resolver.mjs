@@ -16,20 +16,16 @@
 //   source-resolver.mjs lookup-compound <name>              Look up a compound in ChEMBL
 //   source-resolver.mjs search-pubmed "query" [--mesh]      Structured PubMed search with optional MeSH terms
 
-import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { resolve, join } from 'path';
 import { isMainModule } from './lib/is-main.mjs';
 import { getPluginData } from './lib/config.mjs';
 
-const PLUGIN_DATA = getPluginData();
-const PLUGIN_DIR = resolve(import.meta.dirname, '..');
-const DATA_DIR = PLUGIN_DATA ? join(PLUGIN_DATA, 'data') : join(PLUGIN_DIR, 'data');
-mkdirSync(DATA_DIR, { recursive: true });
-
-const CONFIG_PATH = join(DATA_DIR, 'resolver-config.json');
-
 function loadResolverConfig() {
-  const { value, error } = safeLoad(CONFIG_PATH, { fallback: {} });
+  const pluginData = getPluginData();
+  if (!pluginData) return {};
+  const { value, error } = safeLoad(join(pluginData, 'data', 'resolver-config.json'), {
+    fallback: {},
+  });
   if (error) logError('source-resolver.loadResolverConfig', error);
   return value ?? {};
 }

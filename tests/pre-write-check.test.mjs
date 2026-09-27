@@ -411,13 +411,116 @@ describe('pre-write-check', () => {
     assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
   });
 
-  it('Edit payloads skip the duplicate-tags deny even when new_string carries duplicated tags', () => {
+  // With no note on disk the Edit can't be rebuilt, so only its fragments are
+  // judged, and a fragment's frontmatter is not the note's.
+  it('a fragment-only Edit (note not on disk) skips the duplicate-tags deny', () => {
     const result = runEdit(
       join(VAULT, '0-inbox', 'test.md'),
       '---\ntags: [sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody text.',
       '---\ntags: [sleep, circadian, sleep]\ndate: 2026-08-03\nsource: synthesis\n---\nBody text.',
     );
     assert.equal(result, null);
+  });
+
+  // tool-payload.mjs wraps each hunk in newlines so it matches whole lines.
+  // The first line of a file has no newline before it, so a hunk there has to
+  // be located against the file with one prepended, or the gate falls open.
+  function runPatch(relPath, hunkLines) {
+    const r = runHook(HOOK, {
+      stdin: {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'apply_patch',
+        tool_input: {
+          command: [
+            '*** Begin Patch',
+            `*** Update File: ${relPath}`,
+            '@@',
+            ...hunkLines,
+            '*** End Patch',
+          ].join('\n'),
+        },
+        cwd: VAULT,
+      },
+      env: { VAULT_PATH: VAULT },
+    });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const out = r.stdout.trim();
+      return out ? JSON.parse(out) : null;
+    } finally {
+      r.cleanup();
+    }
+  }
+
+  it('denies a Codex hunk at the start of a note that adds a duplicate tag', () => {
+    writeFileSync(
+      join(VAULT, '3-permanent', 'patch-top-note.md'),
+      '---\ntags: [alpha, beta]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.\n',
+    );
+    const result = runPatch('3-permanent/patch-top-note.md', [
+      ' ---',
+      '-tags: [alpha, beta]',
+      '+tags: [alpha, beta, alpha]',
+    ]);
+    assert.equal(result?.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /alpha/);
+  });
+
+  it('warns on a broken wikilink a Codex hunk adds at the end of a note with no final newline', () => {
+    writeFileSync(
+      join(VAULT, '3-permanent', 'patch-tail-note.md'),
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nLast line.',
+    );
+    const result = runPatch('3-permanent/patch-tail-note.md', [
+      '-Last line.',
+      '+Last line, see [[nowhere-note]].',
+    ]);
+    assert.match(result?.hookSpecificOutput?.additionalContext ?? '', /nowhere-note/);
+  });
+
+  it('denies an Edit that adds a duplicate tag to an on-disk note', () => {
+    const p = join(VAULT, '3-permanent', 'tag-edit-note.md');
+    writeFileSync(p, '---\ntags: [alpha, beta]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.\n');
+    const result = runEdit(p, 'tags: [alpha, beta]', 'tags: [alpha, beta, alpha]');
+    assert.equal(result?.hookSpecificOutput?.permissionDecision, 'deny');
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /alpha/);
+  });
+
+  it('allows an Edit to a note that already carries a duplicate tag and adds none', () => {
+    const p = join(VAULT, '3-permanent', 'tag-carried-note.md');
+    writeFileSync(
+      p,
+      '---\ntags: [alpha, beta, alpha]\ndate: 2026-08-03\nsource: synthesis\n---\nBody.\n',
+    );
+    const result = runEdit(p, 'Body.', 'Body, reworded.');
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('allows a Write that carries an on-disk duplicate tag unchanged', () => {
+    const p = join(VAULT, '3-permanent', 'tag-carried-write.md');
+    const fm = '---\ntags: [alpha, beta, alpha]\ndate: 2026-08-03\nsource: synthesis\n---\n';
+    writeFileSync(p, `${fm}Body.\n`);
+    const result = run('Write', p, `${fm}Body, rewritten.\n`);
+    assert.notEqual(result?.hookSpecificOutput?.permissionDecision, 'deny');
+  });
+
+  it('names only the dash line a Write adds, not the ones the note carries', () => {
+    const result = run(
+      'Write',
+      join(VAULT, '3-permanent', 'dashed-note.md'),
+      '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\nThe gate is policy — not aspiration.\nA second dash — added now.\n',
+    );
+    const reason = result?.hookSpecificOutput?.permissionDecisionReason ?? '';
+    assert.match(reason, /line 2: A second dash/);
+    assert.doesNotMatch(reason, /not aspiration/);
+  });
+
+  it('does not warn about a broken wikilink the note already carries', () => {
+    const p = join(VAULT, '3-permanent', 'carried-link-note.md');
+    const fm = '---\ntags: [test]\ndate: 2026-08-03\nsource: synthesis\n---\n';
+    writeFileSync(p, `${fm}See [[long-gone-note]].\n`);
+    const result = run('Write', p, `${fm}See [[long-gone-note]]. Now with more words.\n`);
+    assert.doesNotMatch(result?.hookSpecificOutput?.additionalContext ?? '', /long-gone-note/);
   });
 });
 

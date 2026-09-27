@@ -3,20 +3,20 @@
 //
 // Single Node entry replacing the four PostToolUse hooks
 // (provenance, reflect-track, autolink, edge-infer). One stdin read, one snapshot load,
-// fixed module order, per-module timeout isolation.
+// fixed module order, per-module failure isolation.
 
 import { basename, join } from 'node:path';
-import { home, readStdin, resolveVaultPath, getSessionId, isVaultNote } from './lib/common.mjs';
+import { readPayload, isVaultNote } from './lib/common.mjs';
+import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { loadVaultSnapshot } from './lib/snapshot.mjs';
 import { normalizeWrites } from './lib/tool-payload.mjs';
 import { runAutolink } from './modules/autolink.mjs';
 import { runEdgeInfer } from './modules/edge-infer.mjs';
 import { runProvenance } from './modules/provenance.mjs';
 import { runReflectTrack } from './modules/reflect-track.mjs';
-import { getPluginData } from '../scripts/lib/config.mjs';
-import { encodeProjectDir } from '../scripts/lib/paths.mjs';
+import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
+import { resolveMemoryDir } from '../scripts/lib/memory-paths.mjs';
 import { appendMemoryWrite } from '../scripts/lib/marker-cache.mjs';
-import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { env } from '../scripts/lib/env.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 
@@ -35,39 +35,24 @@ import { logError } from '../scripts/lib/log.mjs';
 // creation. PostToolUse fires after the write, so existsSync cannot tell the
 // two apart, and the session-start memory snapshot that could have was removed
 // when the concurrent-session conflation was fixed.
-function recordMemoryWriteIfApplicable(filePath, tool) {
+function recordMemoryWriteIfApplicable(filePath, tool, sessionId) {
   try {
+    if (!sessionId) return;
     if (tool !== 'Write') return;
     if (!filePath || !filePath.endsWith('.md')) return;
-    const projectDir = env.CLAUDE_PROJECT_DIR;
-    if (!projectDir) return;
+    const memoryDir = resolveMemoryDir(env.CLAUDE_PROJECT_DIR);
+    if (!memoryDir) return;
     const pluginData = getPluginData();
     if (!pluginData) return;
-    const encodedPath = encodeProjectDir(projectDir);
-    const memoryDir = join(home(), '.claude', 'projects', encodedPath, 'memory');
     if (filePath !== join(memoryDir, basename(filePath))) return;
-    let sid = getSessionId();
-    if (sid === 'unknown') sid = '';
-    appendMemoryWrite(pluginData, sid, basename(filePath));
+    appendMemoryWrite(pluginData, sessionId, basename(filePath));
   } catch (err) {
     logError('post-tool.recordMemoryWrite', err);
   }
 }
 
-function withTimeout(p, ms, label) {
-  let t;
-  const timeout = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new Error(`${label} timeout after ${ms}ms`)), ms);
-  });
-  return Promise.race([p.finally(() => clearTimeout(t)), timeout]);
-}
-
-let raw;
-try {
-  raw = JSON.parse(await readStdin());
-} catch {
-  process.exit(0);
-}
+const raw = await readPayload('post-tool');
+if (!raw) process.exit(0);
 
 const ctx = {
   tool: raw.tool_name,
@@ -89,7 +74,7 @@ const ctx = {
   //     marker. The skill sets it; the replay forwards it; we honor it here as
   //     the explicit override reflect-track.mjs already supports.
   sessionId: env.LL_REFLECT_SID || null,
-  vaultRoot: resolveVaultPath(),
+  vaultRoot: getVaultPath(),
   snapshot: null,
 };
 
@@ -113,7 +98,7 @@ const loadSnapshotOnce = () => (vaultSnapshot ??= loadVaultSnapshot(ctx.vaultRoo
 for (const pass of passes) {
   const isWriteEdit = pass.tool === 'Write' || pass.tool === 'Edit';
   if (isWriteEdit) {
-    recordMemoryWriteIfApplicable(pass.input.file_path, pass.tool);
+    recordMemoryWriteIfApplicable(pass.input.file_path, pass.tool, sessionIdFrom(raw));
     if (pass.vaultRoot && isVaultNote(pass.input.file_path, pass.vaultRoot)) {
       pass.snapshot = loadSnapshotOnce();
     }
@@ -132,11 +117,7 @@ for (const pass of passes) {
 
   for (const mod of modules) {
     try {
-      await withTimeout(
-        Promise.resolve(mod(pass)),
-        HookConfig.POST_TOOL_MODULE_TIMEOUT_MS,
-        mod.name,
-      );
+      await mod(pass);
     } catch (err) {
       logError(`post-tool.${mod.name}`, err, { code: 'module_failed' });
       if (env.LL_HOOK_DEBUG) {

@@ -8,7 +8,7 @@ import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { DATA_PATHS, FEDERATION_PATHS } from '../../scripts/lib/paths.mjs';
-import { getSessionId } from '../../scripts/lib/session.mjs';
+import { sessionIdFrom } from '../../scripts/lib/session.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { monthStr } from '../../scripts/lib/retrieval.mjs';
@@ -92,14 +92,9 @@ export async function run(ctx) {
   }
 
   // Session id preference: hook payload → $CLAUDE_CODE_SESSION_ID → persisted
-  // marker (getSessionId covers both) → randomBytes only as terminal fallback
-  // for bare hosts. The payload id is what stop-nudge keys its snapshot diff
-  // on (M4) — a fabricated id makes that diff permanently dead.
-  const resolved = getSessionId();
-  const sessionId =
-    ctx.payloadSessionId ||
-    (resolved !== 'unknown' ? resolved : '') ||
-    randomBytes(4).toString('hex');
+  // marker (sessionIdFrom covers all three) → randomBytes only as terminal
+  // fallback for bare hosts.
+  const sessionId = sessionIdFrom(ctx.payload) || randomBytes(4).toString('hex');
   ctx.sessionId = sessionId;
 
   // Session ID — single env-independent stamp in plugin-data. getSessionId()
@@ -136,9 +131,7 @@ export async function run(ctx) {
   //       now-removed memory-snapshot-<sid> — both reaped here);
   //   (b) edges.db.<pid>.tmp orphans (crash between saveDb's write and
   //       rename) older than 1 hour;
-  //   (c) tmp per-session/legacy markers older than 7 days — stop-nudged
-  //       transcript-dedupe, session-label files, and the pre-v1.27 tmp
-  //       marker names that nothing reads anymore. NEVER the live
+  //   (c) tmp session-label files older than 7 days. NEVER the live
   //       learning-loop-session-id fallback;
   //   (d) librarian/queue.jsonl.bak.* backups older than 7 days;
   //   (e) retrieval/<prefix>-YYYY-MM.jsonl AND logs/log-YYYY-MM.jsonl logs
@@ -242,17 +235,7 @@ export async function run(ctx) {
       );
       sweepRetrievalLogs(DATA_PATHS.logs(ctx.pluginData), HookConfig.RETRIEVAL_LOG_KEEP_MONTHS);
     }
-    const TMP_SWEEP_PATTERNS = [
-      /^learning-loop-stop-nudged-/,
-      /^claude-session-label-.+\.txt$/,
-      /^learning-loop-memory-snapshot/,
-      /^learning-loop-session-start-/,
-      /^learning-loop-last-dream$/,
-      /^learning-loop-last-reflect$/,
-      /^learning-loop-dream-nudged$/,
-      /^learning-loop-dream-lock$/,
-    ];
-    sweepDir(ctx.tmp, (f) => TMP_SWEEP_PATTERNS.some((re) => re.test(f)), weekCutoff);
+    sweepDir(ctx.tmp, (f) => /^claude-session-label-.+\.txt$/.test(f), weekCutoff);
     if (sweepMarker) writeMarker(sweepMarker, { ts: new Date().toISOString() });
   }
 }

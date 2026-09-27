@@ -1,12 +1,9 @@
-#!/usr/bin/env node
-// provenance.mjs — Append-only provenance event emitter
-// Usage as module: import { emitProvenance } from './provenance.mjs'
-// Usage as CLI:    node provenance.mjs '{"agent":"x","action":"create","target":"y.md"}'
+// provenance.mjs — Append-only provenance event emitter.
+// Import emitProvenance; the CLI is provenance-emit.js.
 
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { appendJsonlLineDeduped } from './lib/jsonl.mjs';
 import { join } from 'node:path';
-import { isMainModule } from './lib/is-main.mjs';
 import { getPluginData, pluginDataExists } from './lib/config.mjs';
 import { getSessionId } from './lib/session.mjs';
 import { DATA_PATHS } from './lib/paths.mjs';
@@ -42,7 +39,12 @@ function seedTemplates() {
   _seeded = true;
 }
 
-export function emitProvenance(event) {
+// Canonical emitter for both the skill/CLI path (source: 'skill') and the
+// hook path (source: 'hook', hooks/lib/common.mjs's thin wrapper). Whichever
+// path emits first seeds the provenance templates (seedTemplates copies
+// learned-patterns.md/retired-patterns.md into PLUGIN_DATA); seedTemplates'
+// _seeded guard makes that a once-per-process no-op on every call after.
+export function emitProvenance(event, { source = 'skill' } = {}) {
   // Reject unknown actions at the boundary instead of letting the unchecked
   // spread below shape the schema. Legacy spellings are readable but not
   // emittable. Now a counted rejection: log.mjs's error sink persists this
@@ -58,7 +60,7 @@ export function emitProvenance(event) {
   const record = {
     ts: new Date().toISOString(),
     session_id: getSessionId(),
-    source: 'skill',
+    source,
     ...event,
   };
   deriveSkill(record, getPluginData(), pluginRoot());
@@ -79,14 +81,4 @@ export function emitProvenance(event) {
     delete record.intent_kind;
   }
   appendJsonlLineDeduped(getCurrentMonthFile(), record);
-}
-
-const isMain = isMainModule(import.meta.url);
-if (isMain && process.argv[2]) {
-  try {
-    emitProvenance(JSON.parse(process.argv[2]));
-  } catch (e) {
-    console.error('provenance emit failed:', e.message);
-    process.exit(1);
-  }
 }

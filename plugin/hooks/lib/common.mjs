@@ -1,40 +1,17 @@
 // hooks/lib/common.mjs — Shared utilities for all learning-loop hooks
-// Plugin-data resolution and the transient-path guard live in
-// scripts/lib/config.mjs as the single source of truth; this module re-exports
-// `resolvePluginData` for backward compatibility with hook callers.
 
-import {
-  mkdirSync,
-  existsSync,
-  appendFileSync,
-  openSync,
-  readSync,
-  closeSync,
-  fstatSync,
-} from 'node:fs';
+import { existsSync, appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { join, dirname, basename } from 'node:path';
-import {
-  resolvePluginData,
-  getVaultPath,
-  getConfig,
-  pluginDataExists,
-} from '../../scripts/lib/config.mjs';
+import { getPluginData, getConfig } from '../../scripts/lib/config.mjs';
 import { binaryPath } from '../../scripts/lib/binary.mjs';
-import { appendJsonlLineDeduped } from '../../scripts/lib/jsonl.mjs';
 import { env } from '../../scripts/lib/env.mjs';
 import { safeLoad } from '../../scripts/lib/safe-load.mjs';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { VALID_ACTIONS, INTENT_KINDS } from '../../scripts/lib/provenance-vocabulary.mjs';
-import { deriveSkill } from '../../scripts/lib/provenance-skill.mjs';
-import { pluginRoot } from '../../scripts/lib/plugin-meta.mjs';
-import { getSessionId } from '../../scripts/lib/session.mjs';
-import { writeRetrieval, monthStr } from '../../scripts/lib/retrieval.mjs';
-import { DATA_PATHS, relativeToVault, home } from '../../scripts/lib/paths.mjs';
-
-export { resolvePluginData, getSessionId, home };
-export const resolveVaultPath = getVaultPath;
-export const resolveConfig = getConfig;
+import { emitProvenance as emitProvenanceCanonical } from '../../scripts/provenance.mjs';
+import { writeRetrieval } from '../../scripts/lib/retrieval.mjs';
+import { relativeToVault, home } from '../../scripts/lib/paths.mjs';
 
 export function findBinary() {
   const bin = binaryPath();
@@ -66,13 +43,27 @@ export function findEpisodicBinary() {
 // every detached child pid so the harness can reap them before it removes
 // the sandbox — a child mkdir-ing mid-rmSync-walk resurrects just-deleted
 // dirs and fails cleanup with ENOTEMPTY. No-op in production (var unset).
-export function recordDetachedChild(pid) {
+function recordDetachedChild(pid) {
   const file = env.LL_CHILD_PID_FILE;
   if (!file || !pid) return;
   try {
     appendFileSync(file, `${pid}\n`);
     // eslint-disable-next-line learning-loop/no-empty-catch -- best-effort: a lost record only means the harness can't reap early.
   } catch {}
+}
+
+// Fire-and-forget child. A spawn failure (ENOENT, EACCES) arrives as an async
+// 'error' event, not a throw, and an unlistened 'error' event kills the hook
+// on the next tick, after it has already written its stdout.
+export function spawnDetached(label, cmd, args, opts) {
+  try {
+    const child = spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true, ...opts });
+    child.on('error', (err) => logError(label, err));
+    child.unref();
+    recordDetachedChild(child.pid);
+  } catch (err) {
+    logError(label, err);
+  }
 }
 
 // Vault-relative path, or null if the file is outside the vault.
@@ -118,30 +109,6 @@ export function classifyVaultPath(relPath) {
   return 'other';
 }
 
-// Read at most the last maxBytes of a file as UTF-8 text. When the read
-// starts mid-file, everything up to and including the first newline is
-// dropped: the leading fragment is an incomplete line (and may start on a
-// broken multi-byte boundary). Lets per-prompt hooks consume the tail of
-// multi-MB transcripts at O(maxBytes) cost instead of reading the whole file.
-export function readFileTail(path, maxBytes) {
-  const fd = openSync(path, 'r');
-  try {
-    const size = fstatSync(fd).size;
-    const start = Math.max(0, size - maxBytes);
-    const len = size - start;
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, start);
-    let text = buf.toString('utf8');
-    if (start > 0) {
-      const nl = text.indexOf('\n');
-      text = nl === -1 ? '' : text.slice(nl + 1);
-    }
-    return text;
-  } finally {
-    closeSync(fd);
-  }
-}
-
 // Per-component disable: `hooks.disabled: ["session-label", ...]` in
 // config.json, matched against the hook script's basename. The gate lives in
 // readStdin() because that is the one call every hook makes before it does
@@ -173,11 +140,25 @@ export function readStdin() {
   });
 }
 
-// Run a PostToolUse hook: read stdin, parse JSON, call handler with
-// { tool, input, response, raw }. Swallows errors silently.
-export async function runHook(handler) {
+// The harness payload, or null when there is none to act on. Blank stdin is
+// not an error: readStdin resolves '' both on an empty pipe and on timeout.
+export async function readPayload(scope) {
+  const raw = await readStdin();
+  if (!raw.trim()) return null;
   try {
-    const raw = JSON.parse(await readStdin());
+    return JSON.parse(raw);
+  } catch (err) {
+    logError(`${scope}.parseStdin`, err);
+    return null;
+  }
+}
+
+// Run a tool hook: read the payload, call handler with
+// { tool, input, response, raw }. Handler errors are logged, never thrown.
+export async function runHook(handler) {
+  const raw = await readPayload('common.runHook');
+  if (!raw) process.exit(0);
+  try {
     await handler({
       tool: raw.tool_name,
       input: raw.tool_input || {},
@@ -185,56 +166,16 @@ export async function runHook(handler) {
       raw,
     });
   } catch (err) {
-    logError('common.runHook', err);
+    logError('common.runHook.handler', err);
   }
 }
 
 // --- Emission helpers ---
 
-const provenanceDedupeKeys = new Set();
-
+// Thin adapter: delegate the canonical record shape to scripts/provenance.mjs,
+// same pattern as emitRetrieval below.
 export function emitProvenance(event) {
-  // Same boundary check as scripts/provenance.mjs: the unchecked spread below
-  // would otherwise let an unknown action shape the schema. This path carries
-  // most of the volume (vault-write, agent-spawn, agent-result, skill-invoke),
-  // so validating only the CLI path would leave the larger half open.
-  // Now a counted rejection: log.mjs's error sink persists this scope
-  // durably, and the phase 2 reducer counts records by scope.
-  if (!event || !VALID_ACTIONS.has(event.action)) {
-    logError('provenance.invalidAction', new Error(`unknown action: ${event && event.action}`));
-    return;
-  }
-  const key = `${event.session_id || ''}|${event.agent_id || ''}|${event.path || ''}`;
-  if (key !== '||' && provenanceDedupeKeys.has(key)) return;
-  provenanceDedupeKeys.add(key);
-  if (!pluginDataExists()) return;
-  const pd = resolvePluginData();
-  if (!pd) return;
-  const dir = DATA_PATHS.provenance(pd);
-  mkdirSync(dir, { recursive: true });
-  const record = {
-    ts: new Date().toISOString(),
-    session_id: getSessionId(),
-    source: 'hook',
-    ...event,
-  };
-  deriveSkill(record, pd, pluginRoot());
-  // Same free-text-intent guard as scripts/provenance.mjs: drop the offending
-  // field, keep the rest of the record. Now a counted drop: log.mjs's error
-  // sink persists this scope durably, and the phase 2 reducer counts records
-  // by scope.
-  if ('intent' in record) {
-    logError('provenance.freeTextIntent', new Error(`dropping free-text intent: ${record.intent}`));
-    delete record.intent;
-  }
-  if ('intent_kind' in record && !INTENT_KINDS.has(record.intent_kind)) {
-    logError(
-      'provenance.freeTextIntent',
-      new Error(`dropping unbounded intent_kind: ${record.intent_kind}`),
-    );
-    delete record.intent_kind;
-  }
-  appendJsonlLineDeduped(join(dir, `events-${monthStr()}.jsonl`), record);
+  emitProvenanceCanonical(event, { source: 'hook' });
 }
 
 export function emitRetrieval(prefix, event) {
@@ -254,7 +195,7 @@ export function emitRetrieval(prefix, event) {
   // join keys off. Any other caller should use the explicit slot (e.g.
   // `query: ...`) rather than through event.
   writeRetrieval({
-    pluginData: resolvePluginData(),
+    pluginData: getPluginData(),
     prefix,
     command: event.type || event.command || prefix,
     query: event.query || event.file || '',

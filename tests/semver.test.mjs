@@ -20,6 +20,23 @@ test('semverCmp handles double-digit components without lexical-order bugs', () 
   assert.ok(semverCmp('10.0.0', '9.99.99') > 0);
 });
 
+// check-deps reports an installed version of 'unknown' or '1.0' against a
+// `>=1.0.0` constraint as outdated, which relies on this.
+test('semverCmp fails every comparison once it reaches a non-numeric component', () => {
+  for (const [a, b] of [
+    ['unknown', '1.0.0'],
+    ['1.0', '1.0.0'],
+    ['v1.0.0', '2.0.0'],
+    ['v2.0.0', '2.0.0'],
+    ['1.x.5', '1.0.0'],
+  ]) {
+    const c = semverCmp(a, b);
+    assert.ok(!(c < 0) && !(c >= 0) && !(c > 0), `${a} vs ${b} gave ${c}`);
+  }
+  // Components before the unreadable one still decide it.
+  assert.ok(semverCmp('2.3.0-beta', '2.2.0') > 0);
+});
+
 test('isPlainSemver accepts only X.Y.Z form', () => {
   assert.strictEqual(isPlainSemver('1.16.13'), true);
   assert.strictEqual(isPlainSemver('0.0.1'), true);

@@ -10,13 +10,11 @@ import {
   buildInjection,
   enrichVaultHits,
   scrubForLog,
-  buildQuery,
   buildQueryParts,
   promptSpecificity,
-  emitHookOutput,
   runBackendsWithRaceCap,
 } from '../plugin/hooks/lib/inject.mjs';
-import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { supersedeNoteFile } from '../plugin/scripts/supersede-note.mjs';
 
 const INJECT_SRC = fileURLToPath(new URL('../plugin/hooks/lib/inject.mjs', import.meta.url));
 const REDACT_SCAN_SRC = fileURLToPath(
@@ -460,7 +458,7 @@ describe('buildInjection vault Related notes header', () => {
   });
 });
 
-describe('buildQuery', () => {
+describe('buildQueryParts query', () => {
   it('long prompts search alone; short prompts blend prior context', () => {
     const messages = [
       'we were discussing GraphQL subscriptions',
@@ -469,25 +467,25 @@ describe('buildQuery', () => {
     ];
     const longPrompt = 'p'.repeat(120);
     assert.equal(
-      buildQuery({ prompt: longPrompt, messages, soloMinChars: 80 }),
+      buildQueryParts({ prompt: longPrompt, messages, soloMinChars: 80 }).query,
       longPrompt.slice(0, 400),
     );
     const shortPrompt = 'fix the flaky one';
-    const q = buildQuery({ prompt: shortPrompt, messages, soloMinChars: 80 });
+    const q = buildQueryParts({ prompt: shortPrompt, messages, soloMinChars: 80 }).query;
     assert.ok(q.includes('GraphQL subscriptions'), 'short prompt must blend prior context');
   });
 
   it('a prompt exactly at soloMinChars searches alone (boundary is inclusive)', () => {
     const messages = ['unrelated prior context that must not appear', 'PROMPT'];
     const prompt = 'p'.repeat(80);
-    const q = buildQuery({ prompt, messages, soloMinChars: 80 });
+    const q = buildQueryParts({ prompt, messages, soloMinChars: 80 }).query;
     assert.equal(q, prompt);
     assert.ok(!q.includes('unrelated'), 'exactly-at-threshold prompt must not blend prior context');
   });
 
   it('blends only the two messages immediately before the last one', () => {
     const messages = ['too old to include', 'second to last', 'last before prompt', 'PROMPT'];
-    const q = buildQuery({ prompt: 'short', messages, soloMinChars: 80 });
+    const q = buildQueryParts({ prompt: 'short', messages, soloMinChars: 80 }).query;
     assert.ok(
       !q.includes('too old to include'),
       'must not include messages older than the last two',
@@ -497,8 +495,11 @@ describe('buildQuery', () => {
   });
 
   it('a short prompt with no messages returns the prompt head, does not throw', () => {
-    assert.equal(buildQuery({ prompt: 'short', messages: undefined, soloMinChars: 80 }), 'short');
-    assert.equal(buildQuery({ prompt: 'short', soloMinChars: 80 }), 'short');
+    assert.equal(
+      buildQueryParts({ prompt: 'short', messages: undefined, soloMinChars: 80 }).query,
+      'short',
+    );
+    assert.equal(buildQueryParts({ prompt: 'short', soloMinChars: 80 }).query, 'short');
   });
 });
 
@@ -519,11 +520,6 @@ describe('buildQueryParts', () => {
     assert.ok(parts.query.includes('GraphQL'), 'padded query blends prior context');
     assert.equal(parts.soloQuery, 'fix the flaky one');
     assert.ok(!parts.soloQuery.includes('GraphQL'), 'soloQuery must be the prompt alone');
-  });
-
-  it('buildQuery stays a thin wrapper returning parts.query', () => {
-    const args = { prompt: 'short', messages, soloMinChars: 80 };
-    assert.equal(buildQuery(args), buildQueryParts(args).query);
   });
 
   // `padded` drives the thin-continuation counterfactual and the padded-rate
@@ -809,47 +805,6 @@ describe('runBackendsWithRaceCap vault-only', () => {
   });
 });
 
-describe('emitHookOutput', () => {
-  function captureStdout(fn) {
-    const chunks = [];
-    const original = process.stdout.write;
-    process.stdout.write = (data) => {
-      chunks.push(data);
-      return true;
-    };
-    try {
-      fn();
-    } finally {
-      process.stdout.write = original;
-    }
-    return chunks.join('');
-  }
-
-  it('writes valid JSON envelope to stdout', () => {
-    const out = captureStdout(() =>
-      emitHookOutput({ event: 'NotificationSubagentStart', additionalContext: 'test context' }),
-    );
-    const parsed = JSON.parse(out);
-    assert.ok(parsed.hookSpecificOutput);
-    assert.equal(parsed.hookSpecificOutput.hookEventName, 'NotificationSubagentStart');
-    assert.equal(parsed.hookSpecificOutput.additionalContext, 'test context');
-  });
-
-  it('oversized additionalContext still emits valid JSON under the cap', () => {
-    const big = 'α'.repeat(20000); // multibyte: ~2 bytes/char utf8
-    const out = captureStdout(() =>
-      emitHookOutput({ event: 'UserPromptSubmit', additionalContext: big }),
-    );
-    assert.ok(
-      Buffer.byteLength(out, 'utf8') <= HookConfig.HOOK_STDOUT_MAX_BYTES,
-      'output must fit HOOK_STDOUT_MAX_BYTES',
-    );
-    const parsed = JSON.parse(out);
-    assert.equal(parsed.hookSpecificOutput.hookEventName, 'UserPromptSubmit');
-    assert.match(parsed.hookSpecificOutput.additionalContext, /…\[truncated\]$/);
-  });
-});
-
 describe('runBackendsWithRaceCap zombie kill', () => {
   it('sends SIGTERM to the slow vault backend on race timeout', async () => {
     const signals = { 'll-search': null };
@@ -1000,6 +955,27 @@ describe('enrichVaultHits', () => {
     );
     const out = enrichVaultHits([{ path: 'stale.md', title: 'S', score: 0.9 }], vault);
     assert.equal(out.length, 0, 'an invalidated note is not served as current');
+  });
+
+  it('drops a note after supersede-note.mjs stamps it (the writer and the reader agree)', async () => {
+    writeFileSync(
+      join(vault, 'superseded-live.md'),
+      '---\ntags: [a]\ndate: 2026-01-01\nsource: synthesis\n---\n\nOld claim, still readable.\n',
+    );
+    const { changed } = await supersedeNoteFile(join(vault, 'superseded-live.md'), {
+      date: '2026-09-22',
+      replacementPath: 'new-note.md',
+    });
+    assert.equal(changed, true);
+    const out = enrichVaultHits(
+      [{ path: 'superseded-live.md', title: 'Old claim', score: 0.9 }],
+      vault,
+    );
+    assert.equal(
+      out.length,
+      0,
+      'a note stamped by supersede-note.mjs must not be served as current',
+    );
   });
 
   it('keeps a note whose invalidation date has not arrived yet', () => {

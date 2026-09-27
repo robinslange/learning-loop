@@ -8,28 +8,28 @@ A prompt asks Claude to verify sources. An agent forces it. The difference: agen
 
 ## Agent roster
 
-| Agent | Purpose | Model |
-|---|---|---|
-| discovery-researcher | Deep web research with source verification | Sonnet |
-| discovery-vault-scout | Search vault + episodic memory for existing knowledge | Haiku |
-| gap-analyser | Socratic analysis of claim quality and coverage | Sonnet |
-| inbox-organiser | Batch triage with clustering, promotion, fleeting sweep | Sonnet |
-| literature-capturer | Capture external sources as literature notes | Sonnet |
-| note-deepener | Strengthen a single note with scaled research | Sonnet |
-| note-scorer | Batch quality assessment | Haiku |
-| note-verifier | Source verification and claim checking | Sonnet |
-| note-writer | Write atomic notes in persona voice | Sonnet |
-| correction-analyser | Trace sole-justification dependents of a retracted belief for `/rewrite` impact maps | Sonnet |
-| refinement-proposer | Propose upstream refinements when a new note touches an existing claim | Sonnet |
-| ingest-context | Extract insights from pasted text | Haiku |
-| ingest-linear | Pull and extract from Linear tickets | Haiku |
-| ingest-repo | Scan repo surface for architecture insights | Haiku |
-| ingest-mapper-arch | Map architectural layers, data flow, abstractions, and entry points during repo ingest | Sonnet |
+| Agent                     | Purpose                                                                                               | Model  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------- | ------ |
+| discovery-researcher      | Deep web research with source verification                                                            | Sonnet |
+| discovery-vault-scout     | Search vault + episodic memory for existing knowledge                                                 | Haiku  |
+| gap-analyser              | Socratic analysis of claim quality and coverage                                                       | Sonnet |
+| inbox-organiser           | Batch triage with clustering, promotion, fleeting sweep                                               | Sonnet |
+| literature-capturer       | Capture external sources as literature notes                                                          | Sonnet |
+| note-deepener             | Strengthen a single note with scaled research                                                         | Sonnet |
+| note-scorer               | Batch quality assessment                                                                              | Haiku  |
+| note-verifier             | Source verification and claim checking                                                                | Sonnet |
+| note-writer               | Write atomic notes in persona voice                                                                   | Sonnet |
+| correction-analyser       | Trace sole-justification dependents of a retracted belief for `/rewrite` impact maps                  | Sonnet |
+| refinement-proposer       | Propose upstream refinements when a new note touches an existing claim                                | Sonnet |
+| ingest-context            | Extract insights from pasted text                                                                     | Haiku  |
+| ingest-linear             | Pull and extract from Linear tickets                                                                  | Haiku  |
+| ingest-repo               | Scan repo surface for architecture insights                                                           | Haiku  |
+| ingest-mapper-arch        | Map architectural layers, data flow, abstractions, and entry points during repo ingest                | Sonnet |
 | ingest-mapper-conventions | Map coding conventions, naming patterns, import organization, and testing patterns during repo ingest | Sonnet |
-| ingest-mapper-domain | Map the problem space, core assumptions, mental model, and anti-goals during repo ingest | Sonnet |
-| ingest-mapper-stack | Map tech stack, dependencies, integrations, and runtime config during repo ingest | Sonnet |
-| ingest-mapper-state | Capture ephemeral project state (branch, commits, in-flight work) during repo ingest | Haiku |
-| ingest-synthesizer | Merge mapper docs into confirmed_insights JSON for the route-output pipeline | Opus |
+| ingest-mapper-domain      | Map the problem space, core assumptions, mental model, and anti-goals during repo ingest              | Sonnet |
+| ingest-mapper-stack       | Map tech stack, dependencies, integrations, and runtime config during repo ingest                     | Sonnet |
+| ingest-mapper-state       | Capture ephemeral project state (branch, commits, in-flight work) during repo ingest                  | Haiku  |
+| ingest-synthesizer        | Merge mapper docs into confirmed_insights JSON for the route-output pipeline                          | Opus   |
 
 Twenty working agents.
 
@@ -37,13 +37,13 @@ Twenty working agents.
 
 A separate tier runs outside of Claude entirely. The vault librarian (`scripts/librarian.mjs`, delegating to `scripts/librarian/daemon.mjs`) uses a local Ollama model, chosen by RAM tier (`gemma3:12b` on 32GB+, `gemma4:e2b` on 16-32GB; see [resource-usage.md](resource-usage.md)), for continuous background classification. It dispatches up to four model tasks per visited note (one tool-use loop plus three single-call structured-output classifiers), and additionally runs a heuristic staleness check that needs no model call. The benchmark numbers below were measured on the `gemma4:e2b` tier.
 
-| Task | Mode | Trigger | Output |
-|---|---|---|---|
-| Link investigation | Tool-use loop, 10 tools backed by `ll-search` and SQL | Notes with no INBOUND links (outbound links are not consulted) | `link_suggestion` queue entry per candidate |
-| Voice gate | Single structured-output call | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag` |
-| Tag suggestion | Single structured-output call | Notes with 0 or 1 tags | `tag_suggestion` with up to 2 tags |
-| Duplicate detection | Single structured-output call | Every visited note | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |
-| Staleness flagging | Heuristic (regex + mtime, no model call) | Notes older than 60 days carrying version and specificity signals | `staleness_suspect` |
+| Task                | Mode                                                  | Trigger                                                                         | Output                                                                    |
+| ------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Link investigation  | Tool-use loop, 10 tools backed by `ll-search` and SQL | Notes with no INBOUND links (outbound links are not consulted)                  | `link_suggestion` queue entry per candidate                               |
+| Voice gate          | Single structured-output call                         | Inbox or fleeting notes whose title looks topic-style rather than insight-style | `voice_flag`                                                              |
+| Tag suggestion      | Single structured-output call                         | Notes with 0 or 1 tags                                                          | `tag_suggestion` with up to 2 tags                                        |
+| Duplicate detection | Single structured-output call                         | Every visited note                                                              | `duplicate_flag` with a 3-way enum (`duplicate`/`same_topic`/`unrelated`) |
+| Staleness flagging  | Heuristic (regex + mtime, no model call)              | Notes older than 60 days carrying version and specificity signals               | `staleness_suspect`                                                       |
 
 The structured-output classifiers all follow the same shape: pre-fetch context, one schema-bound call, no tool-use. Specifics:
 
@@ -53,10 +53,10 @@ The structured-output classifiers all follow the same shape: pre-fetch context, 
 
 All five task types write observations to `PLUGIN_DATA/librarian/queue.jsonl` with a distinct `task` field. A separate `state.json` tracks visited notes and resets after a full pass. Claude reviews the queue on demand via `/health --librarian`.
 
-| Agent | Engine | Tasks | Speed |
-|---|---|---|---|
-| librarian | Local Ollama model, RAM-tiered (`gemma3:12b` / `gemma4:e2b`) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note |
-| Claude (on-demand) | Opus or Sonnet (via `/health --librarian`) | Code verification, web research, claim validation | Human-initiated |
+| Agent              | Engine                                                       | Tasks                                                                                | Speed           |
+| ------------------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ | --------------- |
+| librarian          | Local Ollama model, RAM-tiered (`gemma3:12b` / `gemma4:e2b`) | Link validation, voice gate, tag suggestion, duplicate detection, staleness flagging | ~15s/note       |
+| Claude (on-demand) | Opus or Sonnet (via `/health --librarian`)                   | Code verification, web research, claim validation                                    | Human-initiated |
 
 The small local models are good at classification with evidence (measured on `gemma4:e2b`: 90% link accuracy, voice gate F1 0.78, tag suggester precision 0.78 to 0.84, duplicate detector ~3% false-positive with body context) and weak at open-ended investigation. The architecture splits accordingly. On a 32GB+ machine the `gemma3:12b` tier additionally powers local web research for `/learning-loop:research`.
 
@@ -115,7 +115,7 @@ See `agents-shared/capture-rules.md` for the full shape rules and `agents/note-w
 
 ## Subagent writes and hook replay
 
-PostToolUse hooks do not fire on Write or Edit calls made inside a subagent. Notes written by `note-writer`, `literature-capturer`, `note-deepener`, and the other write-capable agents bypass the structural backlink and typed-edge passes by default. The coalesced `hooks/post-tool.js` dispatcher fans the autolink, edge-infer, provenance, and reflect-track modules out in a fixed order with per-module timeout isolation, but only when the parent session triggers it.
+PostToolUse hooks do not fire on Write or Edit calls made inside a subagent. Notes written by `note-writer`, `literature-capturer`, `note-deepener`, and the other write-capable agents bypass the structural backlink and typed-edge passes by default. The coalesced `hooks/post-tool.js` dispatcher fans the autolink, edge-infer, provenance, and reflect-track modules out in a fixed order with per-module failure isolation, but only when the parent session triggers it.
 
 Skills that dispatch write-capable subagents replay the hook chain explicitly via `scripts/sweep-hook-replay.mjs`. The script accepts vault paths on stdin or as positional args, runs the post-tool module chain against each, and emits a JSON summary. Modules are idempotent, so replaying on already-hooked notes is safe.
 

@@ -60,7 +60,7 @@ superseded_by: 3-permanent/the-note-that-replaces-it.md
 ---
 ```
 
-The JIT injector drops an invalidated note rather than serving it as current (`enrichVaultHits`). `superseded_by` is optional and is a pointer for a reader, not something retrieval acts on.
+The JIT injector drops an invalidated note rather than serving it as current (`enrichVaultHits`). `superseded_by` is optional and is a pointer for a reader, not something retrieval acts on. An invalidated note stays at its original path and in the vault-search index (the Rust indexer only skips `_`-prefixed directories), so it still occupies a candidate slot before `enrichVaultHits` drops it post-hoc.
 
 Invalidate, do not delete. The note stays on disk and stays readable, so "what did I believe in June, and what changed it" is still answerable. That history is most of what a Zettelkasten is for, which is why the operation is a field and not an `rm`.
 

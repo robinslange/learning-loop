@@ -61,6 +61,21 @@ export function hasBinary() {
   return binaryPath() !== null;
 }
 
+// Called by the /health skill (Step 1, item 9), not by any script.
+export function binaryVersion() {
+  const bin = binaryPath();
+  if (!bin) return null;
+  try {
+    return execFileSync(bin, ['version'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      env: ortSpawnEnv(dirname(bin)),
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
 export function run(args, { maxBuffer = 50 * 1024 * 1024 } = {}) {
   const bin = binaryPath();
   if (!bin) {

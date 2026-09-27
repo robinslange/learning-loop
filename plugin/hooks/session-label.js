@@ -3,27 +3,21 @@
 // Runs on every UserPromptSubmit. Updates as the session evolves.
 // Scores topics by recency (current prompt >> old messages).
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
+import { writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  resolveVaultPath,
-  resolveConfig,
-  resolvePluginData,
-  emitRetrieval,
-  readFileTail,
-  readStdin,
-} from './lib/common.mjs';
+import { emitRetrieval, readPayload } from './lib/common.mjs';
+import { readTailLines } from '../scripts/lib/jsonl.mjs';
 import {
   buildInjection,
   enrichVaultHits,
   buildQueryParts,
   promptSpecificity,
-  emitHookOutput,
   runBackendsWithRaceCap,
   scrubSecrets,
   scrubForLog,
 } from './lib/inject.mjs';
+import { emitJson } from './lib/io.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { withLock } from '../scripts/lib/file-lock.mjs';
 import { env } from '../scripts/lib/env.mjs';
@@ -31,37 +25,24 @@ import { DATA_PATHS } from '../scripts/lib/paths.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readVaultProjectIndexSync, listProjectSlugs } from '../scripts/route-project-artefact.mjs';
-
-const input = await readStdin();
-
-if (!input.trim()) process.exit(0);
-
-let parsed;
-try {
-  parsed = JSON.parse(input);
-} catch (err) {
-  logError('session-label.parseStdin', err);
-  process.exit(0);
-}
-const { session_id, prompt, transcript_path, cwd } = parsed;
-if (!session_id || !prompt) process.exit(0);
-
-const labelFile = join(tmpdir(), `claude-session-label-${session_id}.txt`);
+import {
+  getVaultPath,
+  getConfig,
+  getPluginData,
+  injectionSetting,
+} from '../scripts/lib/config.mjs';
+import { writeFileAtomic } from '../scripts/lib/write-atomic.mjs';
+import { isMainModule } from '../scripts/lib/is-main.mjs';
 
 // Collect user messages from transcript, most recent last. Transcripts grow
 // to tens of MB (full tool outputs); only the tail is ever used, so read just
 // the last TRANSCRIPT_TAIL_BYTES instead of the whole file — this hook runs
 // on every UserPromptSubmit inside a hard outer timeout.
-let messages = [];
-if (transcript_path && existsSync(transcript_path)) {
+function readUserMessages(transcriptPath) {
+  const messages = [];
+  if (!transcriptPath || !existsSync(transcriptPath)) return messages;
   try {
-    // filter(Boolean): when the transcript's final line exceeds the tail
-    // window, readFileTail returns '' — without the filter that becomes a
-    // single empty "line" that fails JSON.parse on every prompt.
-    const lines = readFileTail(transcript_path, HookConfig.TRANSCRIPT_TAIL_BYTES)
-      .trim()
-      .split('\n')
-      .filter(Boolean);
+    const lines = readTailLines(transcriptPath, HookConfig.TRANSCRIPT_TAIL_BYTES);
     for (const line of lines.slice(-HookConfig.RECENT_MSG_WINDOW)) {
       try {
         const entry = JSON.parse(line);
@@ -82,11 +63,11 @@ if (transcript_path && existsSync(transcript_path)) {
   } catch (err) {
     logError('session-label.readTranscript', err);
   }
+  return messages;
 }
-messages.push(prompt);
 
 // --- Topic patterns ---
-const topicPatterns = [
+const BUILTIN_TOPICS = [
   [/\bgraphql\b.*\bsubscription|\bsubscription\b.*\bgraphql/, 'GQL subscriptions'],
   [/\bgraphql\b|\bgql\b/, 'GraphQL'],
   [/\bsse\b/, 'SSE'],
@@ -110,46 +91,58 @@ const topicPatterns = [
 // Owner-specific topics come from config `label_topics`:
 // [{ "match": "\\bkayak\\b", "label": "kayaking" }, ...]. An entry with a
 // bad regex is skipped (logged), never fatal — labels degrade, hooks don't.
-function configTopicPatterns() {
-  try {
-    const raw = resolveConfig().label_topics;
-    if (!Array.isArray(raw)) return [];
-    const out = [];
-    for (const t of raw) {
-      if (!t || typeof t.match !== 'string' || typeof t.label !== 'string') continue;
-      try {
-        out.push([new RegExp(t.match, 'i'), t.label]);
-      } catch (err) {
-        logError('session-label.configTopicPattern', err);
-      }
+function configTopicPatterns(labelTopics) {
+  if (!Array.isArray(labelTopics)) return [];
+  const out = [];
+  for (const t of labelTopics) {
+    if (!t || typeof t.match !== 'string' || typeof t.label !== 'string' || !t.label) continue;
+    try {
+      out.push([new RegExp(t.match, 'i'), t.label]);
+    } catch (err) {
+      logError('session-label.configTopicPattern', err);
     }
-    return out;
+  }
+  return out;
+}
+
+function instanceTopicPatterns(projectSlugs) {
+  return projectSlugs.map((slug) => {
+    const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const label = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    return [new RegExp(`\\b${escaped}\\b`), label];
+  });
+}
+
+// Instance projects first, then config topics, then the built-ins: topN keeps
+// pattern order on a tied score, so a project slug outranks a generic topic
+// that matched the same words.
+export function topicPatterns(labelTopics, projectSlugs) {
+  return [
+    ...instanceTopicPatterns(projectSlugs),
+    ...configTopicPatterns(labelTopics),
+    ...BUILTIN_TOPICS,
+  ];
+}
+
+function readTopicSources() {
+  let labelTopics = [];
+  let projectSlugs = [];
+  try {
+    labelTopics = getConfig().label_topics;
   } catch (err) {
     logError('session-label.configTopicPatterns', err);
-    return [];
   }
-}
-
-function instanceTopicPatterns() {
   try {
-    const vaultRoot = resolveVaultPath();
-    if (!vaultRoot) return [];
-    const slugs = listProjectSlugs(readVaultProjectIndexSync(vaultRoot));
-    return slugs.map((slug) => {
-      const escaped = slug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const label = slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-      return [new RegExp(`\\b${escaped}\\b`), label];
-    });
+    const vaultRoot = getVaultPath();
+    if (vaultRoot) projectSlugs = listProjectSlugs(readVaultProjectIndexSync(vaultRoot));
   } catch (err) {
     logError('session-label.instanceTopicPatterns', err);
-    return [];
   }
+  return { labelTopics, projectSlugs };
 }
 
-const allTopicPatterns = [...instanceTopicPatterns(), ...configTopicPatterns(), ...topicPatterns];
-
 // --- Action patterns ---
-const actionPatterns = [
+const ACTION_PATTERNS = [
   [/\breview\b/, 'review'],
   [/\bdebug\b|\bfix\b.*(?:fail|error|broken|crash)/, 'debugging'],
   [/\brefactor\b/, 'refactoring'],
@@ -166,7 +159,7 @@ const actionPatterns = [
   [/\bclean.?up\b/, 'cleanup'],
 ];
 
-// Get top 2 topics and top action
+// The n highest-scoring labels, only those that matched at all.
 function topN(patterns, textBlocks, n) {
   const scores = new Map();
   for (let i = 0; i < textBlocks.length; i++) {
@@ -190,103 +183,63 @@ function topN(patterns, textBlocks, n) {
     .map(([label]) => label);
 }
 
-const topics = topN(allTopicPatterns, messages, 2);
-const actions = topN(actionPatterns, messages, 1);
-const topic = topics[0] || '';
-const topic2 = topics[1] || '';
-const action = actions[0] || '';
-
-// --- Compose label ---
-let label;
-if (topic && topic2 && action) {
-  label = `${topic} ${topic2} ${action}`;
-} else if (topic && action) {
-  label = `${topic} ${action}`;
-} else if (topic && topic2) {
-  label = `${topic} ${topic2}`;
-} else if (topic) {
-  label = topic;
-} else if (action) {
-  label = action;
-} else {
-  label = basename(cwd || 'session');
-}
-
-if (label.length > HookConfig.LABEL_MAX_LENGTH) {
-  label = label.slice(0, HookConfig.LABEL_MAX_LENGTH - 1) + '\u2026';
+// Top two topics and the top action, the current prompt last in `messages`.
+export function composeLabel(messages, patterns, cwd) {
+  const label =
+    [...topN(patterns, messages, 2), ...topN(ACTION_PATTERNS, messages, 1)].join(' ') ||
+    basename(cwd || 'session');
+  return label.length > HookConfig.LABEL_MAX_LENGTH
+    ? label.slice(0, HookConfig.LABEL_MAX_LENGTH - 1) + '…'
+    : label;
 }
 
 function dedupeStatePath(sid) {
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   if (!pd) return null;
   const dir = DATA_PATHS.retrievalSessionDedupe(pd);
   mkdirSync(dir, { recursive: true });
   return join(dir, `${sid}.json`);
 }
 
-// Returns Map of path -> 'body' | 'pointer'. Entries persisted before the
-// level field existed are treated as 'body' (conservative: they may have
-// carried content). Body wins when both levels are present.
+// The dedupe file's rows inside the window, one per path. Body beats pointer,
+// and a row persisted before the level field existed counts as body
+// (conservative: it may have carried content).
+function readDedupeRows(p) {
+  const { value } = safeLoad(p, { fallback: [] });
+  const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
+  const rows = new Map();
+  for (const e of Array.isArray(value) ? value : []) {
+    if (new Date(e.ts).getTime() < cutoff) continue;
+    if (rows.get(e.path)?.level === 'body') continue;
+    rows.set(e.path, { path: e.path, level: e.level === 'pointer' ? 'pointer' : 'body', ts: e.ts });
+  }
+  return rows;
+}
+
+// Map of path -> 'body' | 'pointer'.
 function loadDedupeState(sid) {
   const p = dedupeStatePath(sid);
   if (!p) return new Map();
-  const { value } = safeLoad(p, { fallback: [] });
-  const arr = Array.isArray(value) ? value : [];
-  const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
-  const map = new Map();
-  for (const e of arr) {
-    if (new Date(e.ts).getTime() < cutoff) continue;
-    const level = e.level === 'pointer' ? 'pointer' : 'body';
-    if (map.get(e.path) !== 'body') map.set(e.path, level);
-  }
-  return map;
+  return new Map([...readDedupeRows(p)].map(([path, row]) => [path, row.level]));
 }
 
+// Rewrites the file with one row per path, so it grows with distinct notes
+// rather than with turns (4h of a busy session was ~2.6k rows).
 function persistDedupeState(sid, newEntries, ts) {
   const p = dedupeStatePath(sid);
   if (!p) return;
   try {
     withLock(p, { retries: 1, retryDelayMs: 5 }, () => {
-      const { value } = safeLoad(p, { fallback: [] });
-      const existing = Array.isArray(value) ? value : [];
-      const cutoff = Date.now() - HookConfig.DEDUPE_WINDOW_MS;
-      // One row per path: loadDedupeState only ever reads the newest entry for
-      // a path, so keeping every timestamped repeat grows the file with the
-      // window (4h of a busy session is ~2.6k rows) for no lookup benefit.
-      // Collapsing on write bounds it by distinct notes instead of turns. Body
-      // beats pointer, matching loadDedupeState's precedence.
-      const byPath = new Map();
-      for (const e of existing) {
-        if (new Date(e.ts).getTime() < cutoff) continue;
-        const prior = byPath.get(e.path);
-        if (!prior || prior.level !== 'body') byPath.set(e.path, e);
-      }
+      const rows = readDedupeRows(p);
       for (const { path, level } of newEntries) {
-        const prior = byPath.get(path);
-        byPath.set(path, { path, level: prior?.level === 'body' ? 'body' : level, ts });
+        const prior = rows.get(path);
+        rows.set(path, { path, level: prior?.level === 'body' ? 'body' : level, ts });
       }
-      const kept = [...byPath.values()];
-      const tmp = `${p}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(kept));
-      renameSync(tmp, p);
+      writeFileAtomic(p, JSON.stringify([...rows.values()]));
     });
   } catch (err) {
     if (err.code === 'ELOCK_TIMEOUT') return;
     logError('session-label.persistDedupeState', err);
-  }
-}
-
-function logShadow(record) {
-  try {
-    emitRetrieval('shadow-injection', {
-      session_label: label,
-      prompt: scrubForLog(prompt, HookConfig.PROMPT_SLICE_CHARS),
-      prompt_length: (prompt || '').length,
-      ...(env.LEARNING_LOOP_SYNTHETIC ? { synthetic: true } : {}),
-      ...record,
-    });
-  } catch (err) {
-    logError('session-label.logShadow', err);
   }
 }
 
@@ -302,15 +255,24 @@ function summarizeBackends(results) {
   };
 }
 
-writeFileSync(labelFile, label);
+async function inject({ session_id, prompt, messages, label }) {
+  function logShadow(record) {
+    try {
+      emitRetrieval('shadow-injection', {
+        session_label: label,
+        prompt: scrubForLog(prompt, HookConfig.PROMPT_SLICE_CHARS),
+        prompt_length: (prompt || '').length,
+        ...(env.LEARNING_LOOP_SYNTHETIC ? { synthetic: true } : {}),
+        ...record,
+      });
+    } catch (err) {
+      logError('session-label.logShadow', err);
+    }
+  }
 
-try {
   if (env.LEARNING_LOOP_INJECTION_FORCE_ERROR) throw new Error('forced error for test');
 
-  // Mode cascade: env (if set) > config > default 'shadow'.
-  const mode = env.LEARNING_LOOP_INJECTION_MODE_SET
-    ? env.LEARNING_LOOP_INJECTION_MODE
-    : resolveConfig().injection_mode || 'shadow';
+  const mode = injectionSetting(env.LEARNING_LOOP_INJECTION_MODE, 'injection_mode', 'shadow');
   if (mode === 'off') process.exit(0);
 
   const trimmed = (prompt || '').trim().replace(/[.!?,:;]+$/, '');
@@ -327,10 +289,11 @@ try {
   // The fast path above catches literal "ok"/"yes"; this catches the wider
   // class of turns carrying too little subject of their own for any note to
   // change what happens next.
-  const specificityFloor = env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY_SET
-    ? env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY
-    : (resolveConfig().injection_min_prompt_specificity ??
-      HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY);
+  const specificityFloor = injectionSetting(
+    env.LEARNING_LOOP_INJECTION_MIN_SPECIFICITY,
+    'injection_min_prompt_specificity',
+    HookConfig.INJECTION_MIN_PROMPT_SPECIFICITY,
+  );
   const specificity = promptSpecificity(prompt);
   if (specificity < specificityFloor) {
     logShadow({
@@ -346,14 +309,14 @@ try {
     soloMinChars: HookConfig.QUERY_SOLO_MIN_CHARS,
   });
 
-  const vaultRoot = resolveVaultPath();
+  const vaultRoot = getVaultPath();
   if (!vaultRoot) {
     logShadow({ type: 'gate-fail-no-vault', gate: { passed: false, error: 'no_vault_path' } });
     process.exit(0);
   }
   const vaultDbPath = join(vaultRoot, '.vault-search', 'vault-index.db');
 
-  const raceCapMs = env.LEARNING_LOOP_INJECTION_RACE_CAP_MS;
+  const raceCapMs = env.LEARNING_LOOP_INJECTION_RACE_CAP_MS ?? HookConfig.INJECTION_RACE_CAP_MS;
   const results = await runBackendsWithRaceCap({ query, soloQuery, vaultDbPath, raceCapMs });
 
   const vaultTop = results.vault?.hits?.[0]?.score || 0;
@@ -364,10 +327,11 @@ try {
   // was load-bearing — the candidate suppression target.
   const soloTop = padded ? results.vaultSolo?.hits?.[0]?.score || 0 : vaultTop;
 
-  // Threshold cascade: env (if set) > config > HookConfig default.
-  const gateThreshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
-    ? env.LEARNING_LOOP_INJECTION_THRESHOLD
-    : (resolveConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
+  const gateThreshold = injectionSetting(
+    env.LEARNING_LOOP_INJECTION_THRESHOLD,
+    'injection_threshold',
+    HookConfig.INJECTION_THRESHOLD,
+  );
   // Padding is load-bearing when the padded query cleared the gate but the
   // prompt alone would not have. STEP 2 will suppress these; for now it is
   // recorded on gate-pass records only (a suppression target is a note that
@@ -429,7 +393,9 @@ try {
   // One record shape for both modes — live injections stay visible to
   // review-shadow.mjs, so gate recalibration keeps its data after go-live.
   if (mode === 'live') {
-    emitHookOutput({ event: 'UserPromptSubmit', additionalContext: scrubbedContext });
+    emitJson({
+      hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: scrubbedContext },
+    });
   }
   logShadow({
     type: 'gate-pass-payload',
@@ -454,6 +420,22 @@ try {
     would_inject: scrubbedContext,
   });
   persistDedupeState(session_id, injection.injectedVault, injectedAt);
-} catch (err) {
-  process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);
+}
+
+if (isMainModule(import.meta.url)) {
+  const payload = await readPayload('session-label');
+  if (!payload) process.exit(0);
+  const { session_id, prompt, transcript_path, cwd } = payload;
+  if (!session_id || !prompt) process.exit(0);
+
+  const messages = [...readUserMessages(transcript_path), prompt];
+  const { labelTopics, projectSlugs } = readTopicSources();
+  const label = composeLabel(messages, topicPatterns(labelTopics, projectSlugs), cwd);
+  writeFileSync(join(tmpdir(), `claude-session-label-${session_id}.txt`), label);
+
+  try {
+    await inject({ session_id, prompt, messages, label });
+  } catch (err) {
+    process.stderr.write(`[learning-loop] injection pipeline error: ${err?.message || err}\n`);
+  }
 }

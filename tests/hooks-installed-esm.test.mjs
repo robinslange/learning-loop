@@ -44,7 +44,19 @@ test('every hooks.json hook loads as ESM through run.mjs from an installed-layou
     const res = spawnSync(
       process.execPath,
       ['--no-experimental-detect-module', join(installedPlugin, 'hooks', 'run.mjs'), file],
-      { input: '{}', cwd: sandbox, encoding: 'utf8', timeout: 15000 },
+      {
+        input: '{}',
+        cwd: sandbox,
+        encoding: 'utf8',
+        timeout: 15000,
+        env: {
+          PATH: process.env.PATH,
+          HOME: sandbox,
+          USERPROFILE: sandbox,
+          CLAUDE_PLUGIN_DATA: join(sandbox, 'plugin-data'),
+          LL_OFFLINE: '1',
+        },
+      },
     );
     assert.ok(
       !MODULE_LOAD_WARNING.test(res.stderr),

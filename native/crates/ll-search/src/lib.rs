@@ -5,7 +5,7 @@ pub mod model;
 pub mod db;
 pub mod search;
 pub mod rerank;
-pub mod nli_server;
+pub mod dup_scan_server;
 pub mod sync;
 pub mod app;
 pub mod config;

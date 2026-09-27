@@ -8,12 +8,11 @@ import {
   resolveProject,
   gitFacts,
   execGit,
-  gitEnv,
   budgetedGit,
 } from '../plugin/scripts/lib/session-ledger.mjs';
-import { initRepo, git } from './helpers/git-fixture.mjs';
+import { initRepo, git, fixtureGitEnv } from './helpers/git-fixture.mjs';
 
-const gitOpts = { stdio: 'ignore', env: gitEnv() };
+const gitOpts = { stdio: 'ignore', env: fixtureGitEnv() };
 function withTmp(fn) {
   const root = mkdtempSync(join(tmpdir(), 'll-ledger-'));
   try {

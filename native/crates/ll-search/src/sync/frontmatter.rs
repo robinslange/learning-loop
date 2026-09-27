@@ -50,6 +50,15 @@ fn strip_bom(raw: &str) -> (&str, &str) {
     }
 }
 
+/// The terminator of `s`'s first line, so a block created above a CRLF body
+/// is CRLF too. A body with no newline at all gets `\n`.
+fn first_eol(s: &str) -> &'static str {
+    match s.find('\n') {
+        Some(i) if s[..i].ends_with('\r') => "\r\n",
+        _ => "\n",
+    }
+}
+
 /// Read a TOP-LEVEL frontmatter key.
 ///
 /// The match is on the raw line, so a key must start at column zero. An earlier
@@ -78,7 +87,8 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
     let prefix = format!("{key}:");
     let Some((bom, open, fm, tail)) = split(raw) else {
         let (bom, body) = strip_bom(raw);
-        return format!("{bom}---\n{key}: {value}\n---\n{body}");
+        let eol = first_eol(body);
+        return format!("{bom}---{eol}{key}: {value}{eol}---{eol}{body}");
     };
 
     let mut new_fm = String::with_capacity(fm.len() + key.len() + value.len() + 4);
@@ -105,8 +115,19 @@ pub fn upsert_key(raw: &str, key: &str, value: &str) -> String {
         }
     }
     if !replaced {
-        new_fm.push('\n');
-        new_fm.push_str(&format!("{key}: {value}"));
+        // `split` ends the body before the last key line's terminator and the
+        // tail carries it, so the inserted line takes that terminator from the
+        // tail -- a bare `\n` re-terminated a CRLF block's last line to LF and
+        // `verify_insertion` refused. An empty block's tail starts at the
+        // closing fence, so there the line takes the opening fence's
+        // terminator after itself instead of before.
+        if fm.is_empty() {
+            let eol = &open[3..];
+            new_fm.push_str(&format!("{key}: {value}{eol}"));
+        } else {
+            let eol = if tail.starts_with("\r\n") { "\r\n" } else { "\n" };
+            new_fm.push_str(&format!("{eol}{key}: {value}"));
+        }
     }
     format!("{bom}{open}{new_fm}{tail}")
 }
@@ -131,7 +152,8 @@ pub fn verify_insertion(
     // A note with no frontmatter gains a whole block; the body must survive.
     if split(before).is_none() {
         let (bom, body) = strip_bom(before);
-        let expected = format!("{bom}---\n{entry}\n---\n{body}");
+        let eol = first_eol(body);
+        let expected = format!("{bom}---{eol}{entry}{eol}---{eol}{body}");
         return if after == expected {
             Ok(())
         } else {
@@ -358,6 +380,15 @@ mod tests {
         assert!(out.ends_with("Just a body."));
     }
 
+    #[test]
+    fn upsert_creates_a_crlf_block_above_a_crlf_body() {
+        let raw = "\u{FEFF}# Title\r\n\r\nBody.\r\n";
+        let out = upsert_key(raw, "id", "019abc");
+        assert_eq!(out, "\u{FEFF}---\r\nid: 019abc\r\n---\r\n# Title\r\n\r\nBody.\r\n");
+        assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
+    }
+
 
 
     #[test]
@@ -481,6 +512,44 @@ mod tests {
         let out = upsert_key(raw, "id", "new");
         assert!(out.contains("id: new\r\n"), "terminator not preserved: {out:?}");
         assert!(out.contains("title: X\r\n"));
+    }
+
+    /// The Claude Code memory writer rewrites a name-less note as `name: ""`
+    /// plus a `metadata:` block, nests the existing `id:` under it, and saves
+    /// with CRLF. `read_key` rightly sees no top-level id, so the writer
+    /// INSERTS one. `split` hands back a body that stops before the last key
+    /// line's `\r\n`; inserting with a bare `\n` re-terminated that line to LF,
+    /// `verify_insertion` refused, and the panic aborted the whole reindex.
+    #[test]
+    fn upsert_inserts_into_a_crlf_block_with_crlf_and_leaves_the_nested_id() {
+        let nested = "  id: 01a0c459-71da-7000-8000-000000000001\r\n";
+        let raw = format!(
+            "---\r\nname: \"\"\r\ndescription: \"\"\r\nmetadata:\r\n  node_type: memory\r\n\
+             {nested}  modified: 2026-09-24T00:00:00.000Z\r\n---\r\n\r\n# Project index\r\n"
+        );
+        assert_eq!(read_key(&raw, "id"), None, "precondition: nested is not read");
+
+        let out = upsert_key(&raw, "id", "019abc");
+
+        assert!(verify_upsert(&raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+        assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
+        assert!(out.contains(&format!("\r\n{nested}")), "nested id line changed: {out:?}");
+        assert_eq!(out.lines().filter(|l| l.starts_with("id:")).count(), 1);
+        assert!(
+            out.split_inclusive('\n').all(|l| l.ends_with("\r\n") || !l.ends_with('\n')),
+            "a line lost its CR: {out:?}"
+        );
+    }
+
+    /// An empty block's body is empty and its tail starts at the closing
+    /// fence, so the inserted line needs its own terminator, not a leading one.
+    #[test]
+    fn upsert_inserts_into_an_empty_block() {
+        for raw in ["---\n---\n\nBody.\n", "---\r\n---\r\n\r\nBody.\r\n"] {
+            let out = upsert_key(raw, "id", "019abc");
+            assert!(verify_upsert(raw, &out, "id", "019abc").is_ok(), "guard refused: {out:?}");
+            assert_eq!(read_key(&out, "id").as_deref(), Some("019abc"));
+        }
     }
 
     #[test]

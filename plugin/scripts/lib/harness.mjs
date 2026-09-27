@@ -29,8 +29,3 @@ export function harness() {
   if (env.LL_HARNESS === CODEX || env.LL_HARNESS === CLAUDE_CODE) return env.LL_HARNESS;
   return env.PLUGIN_ROOT ? CODEX : CLAUDE_CODE;
 }
-
-/** @returns {boolean} */
-export function isCodex() {
-  return harness() === CODEX;
-}

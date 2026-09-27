@@ -15,12 +15,13 @@
 //
 // Usage: node bench/gate-replay.mjs --sample 400 --out bench/baselines/replay.jsonl
 
-import { readFileSync, readdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { buildQueryParts } from '../plugin/hooks/lib/inject.mjs';
 import { HookConfig } from '../plugin/scripts/lib/hook-config.mjs';
+import { readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
 import { CONTROL_PROMPTS } from './control-prompts.mjs';
 import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
 
@@ -43,28 +44,17 @@ const DB = arg('--db', join(process.env.HOME, 'brain/brain/.vault-search/vault-i
 // --- corpus: per-session prompt sequences, in order ------------------------
 const dir = join(pluginData, 'retrieval');
 const sessions = new Map();
-for (const f of readdirSync(dir)
-  .filter((x) => x.startsWith('shadow-injection-'))
-  .sort()) {
-  for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) {
-    if (!line) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!r.session_id || !r.prompt) continue;
-    if (!sessions.has(r.session_id)) sessions.set(r.session_id, []);
-    // Fast-path-skipped prompts are kept: they are real user turns and the
-    // hook's padding draws on them, even though they never reach the gate.
-    sessions.get(r.session_id).push({
-      ts: r.ts,
-      prompt: r.prompt,
-      type: r.type,
-      live: r.mode === 'live' && r.type === 'gate-pass-payload',
-    });
-  }
+for (const r of readJsonlDir(dir, 'shadow-injection-')) {
+  if (!r.session_id || !r.prompt) continue;
+  if (!sessions.has(r.session_id)) sessions.set(r.session_id, []);
+  // Fast-path-skipped prompts are kept: they are real user turns and the
+  // hook's padding draws on them, even though they never reach the gate.
+  sessions.get(r.session_id).push({
+    ts: r.ts,
+    prompt: r.prompt,
+    type: r.type,
+    live: r.mode === 'live' && r.type === 'gate-pass-payload',
+  });
 }
 for (const seq of sessions.values()) seq.sort((a, b) => (a.ts < b.ts ? -1 : 1));
 

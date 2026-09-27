@@ -53,7 +53,7 @@ export function recentMonths(now = new Date()) {
  * @param {string} opts.pluginData  Plugin-data root. Caller resolves; writer
  *                                  does not guess. Null/undefined is a silent
  *                                  no-op (matches the previous emitRetrieval
- *                                  early-return when resolvePluginData() is
+ *                                  early-return when getPluginData() is
  *                                  unset — hooks can fire before plugin-data
  *                                  is resolved).
  * @param {string} opts.prefix      File prefix (queries / reads /

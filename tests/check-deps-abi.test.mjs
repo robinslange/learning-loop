@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { detectAbiDrift } from '../plugin/scripts/check-deps.mjs';
-import { newestVersionDir } from '../plugin/scripts/check-deps-impl.mjs';
+import { detectAbiDrift, newestVersionDir } from '../plugin/scripts/check-deps.mjs';
 
 test('detectAbiDrift returns ok when no error is supplied', () => {
   const result = detectAbiDrift({ nativeModulePath: null, currentAbi: process.versions.modules });

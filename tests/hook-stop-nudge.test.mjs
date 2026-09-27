@@ -1,12 +1,5 @@
 // tests/hook-stop-nudge.test.mjs
 // Characterisation tests for hooks/stop-nudge.js
-//
-// Note: r.tmpKeys is unreliable under concurrent node --test workers — the
-// before/after directory diff in hook-runner.mjs races against cleanup() from
-// sibling test files, so a marker the hook *did* write can be missing from
-// tmpKeys. We assert on stdout shape instead, which is captured by spawnSync
-// and unaffected by cross-file /tmp races. Matches the pattern applied to
-// hook-session-start.test.mjs in commit 2965635.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -112,8 +105,7 @@ test('stop-nudge short transcript: exits 0, empty stdout, no nudge marker', () =
   try {
     assert.equal(r.exitCode, 0);
     assert.equal(r.stdout.trim(), '', 'short transcript should produce no stdout');
-    // No need to assert on tmpKeys: empty stdout proves the hook hit an
-    // early-exit path before reaching the writeFileSync(nudgeMarker) site.
+    // Empty stdout proves the hook exited before writing the once-guard.
   } finally {
     r.cleanup();
     rmSync(transcriptPath, { force: true });
@@ -139,59 +131,26 @@ test('stop-nudge stop_hook_active=true: immediate exit 0, no output', () => {
 });
 
 test('stop-nudge already-nudged: no second block output', () => {
-  // Run the hook TWICE with the same transcript path.
-  // The first call creates the nudge marker; the second call sees the marker and exits
-  // without producing a second block. The dedup is the load-bearing assertion;
-  // we verify it via the SECOND call's empty stdout, not via tmpKeys on the first
-  // (tmpKeys races against sibling-file cleanup under parallel test workers).
-  //
-  // Both invocations share an isolated TMPDIR so the nudge marker (which the hook
-  // writes to its tmpdir()) lives outside /tmp. Without this, sibling test files'
-  // cleanup() — which sweeps /tmp/learning-loop-* files appearing during their
-  // run — can delete our marker between r1 and r2 under concurrent test workers.
-  const isolatedTmp = mkdtempSync(join(tmpdir(), 'll-stop-nudge-iso-'));
-  const transcriptPath = join(isolatedTmp, `transcript-dedup-${Date.now()}.txt`);
+  // Both Stops share one plugin-data dir, where the once-guard lives.
+  const pluginData = mkdtempSync(join(tmpdir(), 'll-stop-nudge-dedup-'));
+  const transcriptPath = join(pluginData, 'transcript.txt');
   writeTranscript(transcriptPath, 600_000);
-
-  // First call: should block and write the nudge marker.
-  const r1 = runHook(HOOK, {
-    env: { TMPDIR: isolatedTmp },
-    stdin: {
-      session_id: 'test-dedup-first',
-      transcript_path: transcriptPath,
-      stop_hook_active: false,
-    },
-  });
+  const stop = () =>
+    runHook(HOOK, {
+      env: { CLAUDE_PLUGIN_DATA: pluginData },
+      stdin: { session_id: 'test-dedup', transcript_path: transcriptPath, stop_hook_active: false },
+    });
   try {
-    assert.equal(r1.exitCode, 0);
-    const out1 = r1.stdout.trim();
-    assert.ok(out1.length > 0, 'first call must produce a block decision');
-    assert.equal(JSON.parse(out1).decision, 'block');
-  } catch (err) {
+    const r1 = stop();
     r1.cleanup();
-    rmSync(isolatedTmp, { recursive: true, force: true });
-    throw err;
-  }
-  // Do NOT call r1.cleanup() yet — leave the nudge marker in isolatedTmp.
-
-  // Second call with the same transcript path: marker exists → no second block.
-  // This empty-stdout assertion implicitly proves the marker file was written
-  // by r1; if it had not been, r2 would have emitted a second block.
-  const r2 = runHook(HOOK, {
-    env: { TMPDIR: isolatedTmp },
-    stdin: {
-      session_id: 'test-dedup-second',
-      transcript_path: transcriptPath,
-      stop_hook_active: false,
-    },
-  });
-  try {
-    assert.equal(r2.exitCode, 0);
+    assert.equal(r1.exitCode, 0, r1.stderr);
+    assert.equal(JSON.parse(r1.stdout).decision, 'block', 'first call must block');
+    const r2 = stop();
+    r2.cleanup();
+    assert.equal(r2.exitCode, 0, r2.stderr);
     assert.equal(r2.stdout.trim(), '', 'second call must not produce a second block (dedup)');
   } finally {
-    r1.cleanup();
-    r2.cleanup();
-    rmSync(isolatedTmp, { recursive: true, force: true });
+    rmSync(pluginData, { recursive: true, force: true });
   }
 });
 
@@ -253,46 +212,44 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
     assert.equal(parsed.decision, 'block');
     assert.match(parsed.reason, /\/dream/);
     assert.ok(
-      existsSync(join(r1.pluginDataDir, 'markers', 'dream-nudged')),
+      existsSync(join(r1.pluginDataDir, 'markers', `stop-nudged-${sid}`)),
       'first nudge must write the once-guard marker',
     );
   } finally {
     r1.cleanup();
   }
 
-  // Second run: pre-existing dream-nudged marker for the SAME session id must
-  // suppress the nudge (M3 — the marker is finally read). transcript_path
-  // /nonexistent makes the fallback transcript check exit silently.
+  // Second run: a once-guard for the SAME session id must suppress the nudge.
+  // transcript_path /nonexistent makes the fallback transcript check exit
+  // silently.
   const r2 = runHook(HOOK, {
     env: { CLAUDE_PROJECT_DIR: projectDir },
     stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
     seed: (pluginDataDir, sandboxRoot) => {
       seed(pluginDataDir, sandboxRoot);
       writeFileSync(
-        join(pluginDataDir, 'markers', 'dream-nudged'),
-        JSON.stringify({ ts: Math.floor(Date.now() / 1000), session_id: sid }),
+        join(pluginDataDir, 'markers', `stop-nudged-${sid}`),
+        String(Math.floor(Date.now() / 1000)),
       );
     },
   });
   try {
     assert.equal(r2.exitCode, 0, r2.stderr);
-    assert.equal(r2.stdout.trim(), '', 'dream-nudged once-guard must suppress the second nudge');
+    assert.equal(r2.stdout.trim(), '', 'the once-guard must suppress the second nudge');
   } finally {
     r2.cleanup();
   }
 
-  // Third run: a fresh dream-nudged marker from a DIFFERENT session must NOT
-  // suppress — the guard is once-per-SESSION, not once-per-cooldown-window. A
-  // mutant that ignores session_id and suppresses on the ts cooldown alone
-  // would pass r1/r2 but fail here.
+  // Third run: a fresh once-guard from a DIFFERENT session must NOT suppress
+  // — the guard is once per session.
   const r3 = runHook(HOOK, {
     env: { CLAUDE_PROJECT_DIR: projectDir },
     stdin: { session_id: sid, transcript_path: '/nonexistent', stop_hook_active: false },
     seed: (pluginDataDir, sandboxRoot) => {
       seed(pluginDataDir, sandboxRoot);
       writeFileSync(
-        join(pluginDataDir, 'markers', 'dream-nudged'),
-        JSON.stringify({ ts: Math.floor(Date.now() / 1000), session_id: 'other-session' }),
+        join(pluginDataDir, 'markers', 'stop-nudged-other-session'),
+        String(Math.floor(Date.now() / 1000)),
       );
     },
   });
@@ -301,7 +258,7 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
     const out3 = r3.stdout.trim();
     assert.ok(
       out3.length > 0,
-      "another session's dream-nudged marker must not suppress this session's nudge",
+      "another session's once-guard must not suppress this session's nudge",
     );
     const parsed3 = JSON.parse(out3);
     assert.equal(parsed3.decision, 'block');
@@ -309,6 +266,43 @@ test('dream nudge fires on >=3 new memories, then respects its once-guard — M3
   } finally {
     r3.cleanup();
     rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
+// With two sessions open, each Stop used to overwrite one shared dream-nudged
+// file with its own id, so the other session's next Stop saw a foreign id and
+// nudged again. And the dream nudge never set the substantial-session guard,
+// so one session could be nudged twice. Once means once per session.
+test('two sessions alternating Stops are each nudged exactly once', () => {
+  const root = mkdtempSync(join(tmpdir(), 'll-sn-alternate-'));
+  const pluginData = join(root, 'plugin-data');
+  const projectDir = join(root, 'project');
+  const memDir = join(root, '.claude', 'projects', encodeProjectDir(projectDir), 'memory');
+  mkdirSync(join(pluginData, 'markers'), { recursive: true });
+  mkdirSync(memDir, { recursive: true });
+  const transcriptPath = join(root, 'transcript.txt');
+  writeTranscript(transcriptPath, 600_000);
+  for (const sid of ['A', 'B']) {
+    const names = ['1', '2', '3'].map((n) => `${sid}-${n}.md`);
+    for (const n of names) writeFileSync(join(memDir, n), '# x');
+    writeFileSync(join(pluginData, 'markers', `memory-writes-${sid}`), JSON.stringify(names));
+  }
+  const stop = (sid) => {
+    const r = runHook(HOOK, {
+      env: { HOME: root, CLAUDE_PLUGIN_DATA: pluginData, CLAUDE_PROJECT_DIR: projectDir },
+      stdin: { session_id: sid, transcript_path: transcriptPath, stop_hook_active: false },
+    });
+    r.cleanup();
+    assert.equal(r.exitCode, 0, r.stderr);
+    return r.stdout.trim() ? JSON.parse(r.stdout).reason : null;
+  };
+  try {
+    const reasons = ['A', 'B', 'A', 'B'].map(stop);
+    assert.match(reasons[0], /\/dream/);
+    assert.match(reasons[1], /\/dream/);
+    assert.deepEqual(reasons.slice(2), [null, null]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -444,8 +438,7 @@ test('stop-nudge empty stdin: exits 0 silently', () => {
   try {
     assert.equal(r.exitCode, 0);
     assert.equal(r.stdout.trim(), '');
-    // Empty stdin exits at line 24 before any file I/O. Empty stdout proves
-    // the hook never reached the writeFileSync site.
+    // Empty stdin exits before any file I/O.
   } finally {
     r.cleanup();
   }

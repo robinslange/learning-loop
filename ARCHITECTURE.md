@@ -56,7 +56,7 @@ learning-loop/
         config.mjs      -- librarian config + provider resolution + research tier gate
         research.mjs    -- local research engine (Search -> Fetch -> Extract)
         research/       -- brave, fetch, extract, source-id
-        verify*.mjs     -- verify-route/-source decision logic (the /research Verify step)
+        verify*.mjs     -- source verification (the /research Verify step's mechanical branch)
       verify/           -- claim/note verification CLIs (check-claims, verify-note)
       vault-search.mjs  -- ll-search query wrapper
       watch.mjs         -- file watcher daemon
@@ -245,13 +245,13 @@ flowchart LR
   F --> G[research/extract.mjs<br/>local Gemma claim extraction]
   G --> H[claims bundle<br/>temp file or --json]
   H --> I[Verify router on Claude]
-  I --> J[verify-route.mjs decision logic]
+  I --> J[workflow.js decision logic]
   J --> K[Synthesize on Claude<br/>cited report]
 ```
 
 `scripts/librarian/research.mjs` (`runResearch`) drives Search -> dedup -> Fetch -> Extract and emits a claims bundle (`{question, angles, sources, claims, skipped}`). Collaborators (`searchFn`/`fetchTextFn`/`extractFn`) are injected with live defaults from `research/{brave,fetch,extract,source-id}.mjs`, so orchestration is testable without the network. The model-size tier gate lives at the CLI edge (`resolveModel` + `researchModelOk`): research **refuses on the e2b tier (exit 3)** rather than producing thin claims, and the `/research` skill falls back to Claude-native WebSearch when the librarian is unavailable or sub-tier.
 
-The **Verify** step runs back on Claude. `scripts/librarian/verify-route.mjs` is the tested source of truth for the router's decision logic (the router itself runs inside the Workflow sandbox and inlines a faithful copy; a contract test asserts the copy matches). Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier _failure_ (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
+The **Verify** step runs back on Claude. The router's decision logic lives in `skills/research/workflow.js`, since the Workflow sandbox can't import a module, and `tests/librarian-verify-route.test.mjs` extracts it from that file to test it. Two invariants it enforces: a `survives` verdict is never trusted from a transcribed subagent result (it is recomputed from the votes -- `computeSurvives`, `VOTES_PER_CLAIM = 3`, `REFUTATIONS_REQUIRED = 2`); and verifier _failure_ (fewer than quorum valid votes) is **inconclusive, not a kill**, so a well-sourced claim is never shipped as a refutation just because the verifier couldn't run.
 
 ### web access path (source gateway)
 
@@ -326,7 +326,7 @@ Turning any of these on is a cleanup task in its own right, because each current
 
 **New contributor.** Read `CONTRIBUTING.md` first (local checks, CI, commit style). Then read the convention doc for the subsystem you're touching (`docs/baseline/rust.md` or `docs/baseline/plugin.md`). Run `npm test` and `cd native && cargo test --workspace` before pushing. `ARCHITECTURE.md` (this file) gives the big picture; the baseline docs have the rules.
 
-**Hook surface.** The ten hook handlers across seven Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` wraps per-module work in `Promise.race` against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`; other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
+**Hook surface.** The ten hook handlers across seven Claude Code event types are in `hooks/`. Timeouts operate at two levels: `hooks/hooks.json` declares a `timeout` field per hook (Claude Code SIGKILLs the process at that deadline), and `scripts/lib/hook-config.mjs` exports `HookConfig.*_TIMEOUT_MS` constants consumed by specific hook bodies. `post-tool.js` has no inner deadline of its own: each module runs inside a `try/catch` that isolates its failures, the only deadline is the `hooks.json` SIGKILL, and autolink's one slow call carries its own `execFileSync` timeout. Other hooks enforce their inner budgets inline. Read `docs/baseline/plugin.md` and `guide/configuration.md` for context injection architecture. The session-start, post-tool, stop-nudge, and web-guard hooks are covered by characterisation tests (`tests/hook-session-start.test.mjs`, `hook-post-tool.test.mjs`, `hook-stop-nudge.test.mjs`, `hook-web-guard.test.mjs`) that lock down current behaviour.
 
 `session-start.js` is a ~116 LOC entry point: the phase 1I split moved its logic into the `hooks/session-start/` submodules (context-assembly, watch-daemon, vault-snapshot, cache-cleanup, health-detector, update-check), with `tests/hook-session-start.test.mjs` pinning the behaviour.
 
@@ -350,7 +350,7 @@ A running learning-loop deployment has three long-lived processes and several tr
 | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | ll-search daemon            | `native/crates/ll-search`                                                                                                 | Launched by `session-start.js` on first use; stays up until machine restart or explicit kill                                                                                                                                                                                                                                                                              |
 | librarian daemon            | `scripts/librarian.mjs` -> `scripts/librarian/daemon.mjs`                                                                 | Launched as a child of `ll-search watch` (both `watch-daemon.mjs` and `ll-watch` pass `--librarian-script`); investigates notes needing attention via the local Ollama model (`voice_gate`, `tag_suggest`, `duplicate_check`, and an agentic `link_check` loop); exits with the watcher. The on-demand `/research` engine is separate (CLI shell-out, not a daemon task). |
-| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only.                                                                                                                                                                                  |
+| UDS server (duplicate-scan) | inside `ll-search watch` — `native/crates/ll-search/src/dup_scan_server.rs` | Tokio task spawned alongside the fs-watcher; listens at `<plugin-data>/nli.sock` (legacy socket name); serves duplicate-scan requests from the `/reflect` and hook pipelines. Unix-only.                                                                                                                                                                                  |
 | Claude Code host            | (Claude Code itself)                                                                                                      | Manages hook invocations                                                                                                                                                                                                                                                                                                                                                  |
 
 Transient:
@@ -361,7 +361,7 @@ Transient:
 
 Queries go through `vault-search.mjs`, one `ll-search` subprocess per call (see "read path" above for the canonical statement).
 
-The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/nli_server.rs` (legacy filename — now serves duplicate-scan only) for the wire protocol.
+The long-running watcher (`ll-search watch`) is separate from the per-call query path. It is spawned once at SessionStart by `hooks/session-start/watch-daemon.mjs`, watches the vault filesystem, reindexes incrementally as notes change, and hosts a UDS server for duplicate-scan requests over a unix domain socket at `<plugin-data>/nli.sock` (legacy socket name). See `native/crates/ll-search/src/dup_scan_server.rs` for the wire protocol.
 
 ---
 
@@ -440,7 +440,7 @@ On session open, hooks fire in this order:
 8. On each subagent finishing: `subagent-stop.js` -- emits an `agent-result` provenance record
 9. On Stop (each assistant turn end, not just session close): `stop-nudge.js` -- reflection prompt (does not reindex; reindexing is continuous via `ll-search watch`)
 
-Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` uses a `Promise.race` wrapper against `HookConfig.POST_TOOL_MODULE_TIMEOUT_MS`, while other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races its vault queries — the padded query, plus a concurrent query on the bare prompt when the two differ — against `env.LEARNING_LOOP_INJECTION_RACE_CAP_MS` (which defaults to `HookConfig.INJECTION_RACE_CAP_MS`) and emits results for whichever finishes within the cap.
+Each hook has an outer timeout declared in `hooks/hooks.json` (Claude Code SIGKILLs on overrun). Inner per-operation budgets are in `scripts/lib/hook-config.mjs` as `HookConfig.*_TIMEOUT_MS` constants; `post-tool.js` has none: its only deadline is the `hooks.json` SIGKILL, and autolink bounds its `execFileSync` call with that call's own `timeout`. Other hooks enforce their inner budgets inline. Context injection (`session-label.js`) races its vault queries — the padded query, plus a concurrent query on the bare prompt when the two differ — against `env.LEARNING_LOOP_INJECTION_RACE_CAP_MS` (which defaults to `HookConfig.INJECTION_RACE_CAP_MS`) and emits results for whichever finishes within the cap.
 
 ---
 
@@ -605,7 +605,7 @@ Optional stages:
 
 ### provenance JSONL
 
-Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `hooks/lib/common.mjs`:
+Each hook appends one line per action to `$CLAUDE_PLUGIN_DATA/provenance/events-YYYY-MM.jsonl` (monthly files, not per-day). The base record shape is built by `emitProvenance` in `scripts/provenance.mjs`, the one emitter for both the skill/CLI path and the hooks; `hooks/lib/common.mjs` wraps it with the hook's in-process dedupe and tags `source: hook`:
 
 ```json
 {

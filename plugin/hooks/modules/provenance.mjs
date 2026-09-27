@@ -3,18 +3,14 @@
 // (no subprocess) to keep the post-tool hot path under 60ms. Vault-less:
 // runs without ctx.vaultRoot for Task/Skill events.
 
-import {
-  emitProvenance,
-  vaultRelPath,
-  classifyVaultPath,
-  resolvePluginData,
-  getSessionId,
-} from '../lib/common.mjs';
+import { emitProvenance, vaultRelPath, classifyVaultPath } from '../lib/common.mjs';
 import { parseFrontmatter, parseTags } from '../../scripts/lib/markdown-parse.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { writeMarker, MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { normaliseSkill, normaliseAgent } from '../../scripts/lib/provenance-skill.mjs';
 import { pluginRoot } from '../../scripts/lib/plugin-meta.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
+import { getSessionId } from '../../scripts/lib/session.mjs';
 
 export async function runProvenance(ctx) {
   try {
@@ -61,7 +57,7 @@ export async function runProvenance(ctx) {
         skill: input.skill || '',
         args: input.args || '',
       });
-      const pluginData = resolvePluginData();
+      const pluginData = getPluginData();
       const sid = getSessionId();
       if (pluginData && sid && sid !== 'unknown') {
         const normalised = normaliseSkill(input.skill, pluginRoot());

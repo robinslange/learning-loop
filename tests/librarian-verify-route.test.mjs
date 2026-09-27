@@ -1,11 +1,43 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  computeSurvives,
-  normalizeMechanical,
-  normalizeGlm,
-  auditOutcome,
-} from '../plugin/scripts/librarian/verify-route.mjs';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+// The Verify router lives inline in skills/research/workflow.js, because the
+// Workflow sandbox can't import a module. These cases run against that copy,
+// with the quorum constants read from the same file, so the tested code is
+// the code that runs.
+const WORKFLOW = fileURLToPath(new URL('../plugin/skills/research/workflow.js', import.meta.url));
+const src = readFileSync(WORKFLOW, 'utf8');
+
+function extract(name) {
+  const start = src.indexOf('function ' + name + '(');
+  assert.notEqual(start, -1, `workflow.js must define ${name} inline`);
+  let depth = 0;
+  for (let j = src.indexOf('{', start); j < src.length; j++) {
+    if (src[j] === '{') depth++;
+    else if (src[j] === '}' && --depth === 0) return src.slice(start, j + 1);
+  }
+  throw new Error(`unbalanced braces extracting ${name}`);
+}
+
+function constant(name) {
+  const m = src.match(new RegExp(`^const ${name} = (\\d+);$`, 'm'));
+  assert.ok(m, `workflow.js must declare ${name}`);
+  return m[0];
+}
+
+const { computeSurvives, normalizeMechanical, normalizeGlm, auditOutcome } = new Function(
+  [
+    constant('REFUTATIONS_REQUIRED'),
+    constant('VOTES_PER_CLAIM'),
+    extract('computeSurvives'),
+    extract('normalizeMechanical'),
+    extract('normalizeGlm'),
+    extract('auditOutcome'),
+    'return { computeSurvives, normalizeMechanical, normalizeGlm, auditOutcome };',
+  ].join('\n'),
+)();
 
 // ─── computeSurvives: quorum-aware, distinguishes refuted from "no quorum" ───
 
@@ -42,9 +74,17 @@ test('computeSurvives: one valid REFUTING vote (2 failed) -> still inconclusive 
 
 // ─── normalizeMechanical: only a recognized verdict short-circuits ───
 
-test('normalizeMechanical: clean pass with boolean survives short-circuits', () => {
-  const r = normalizeMechanical({ exitCode: 0, result: { verdict: 'pass', survives: true } });
-  assert.deepEqual(r, { shortCircuit: true, survives: true, verdict: 'pass' });
+test('normalizeMechanical: clean pass with boolean survives short-circuits, carrying its evidence', () => {
+  const r = normalizeMechanical({
+    exitCode: 0,
+    result: { verdict: 'pass', survives: true, evidence: 'PMID 123 abstract matches' },
+  });
+  assert.deepEqual(r, {
+    shortCircuit: true,
+    survives: true,
+    verdict: 'pass',
+    evidence: 'PMID 123 abstract matches',
+  });
 });
 
 test('normalizeMechanical: defer falls through to GLM', () => {

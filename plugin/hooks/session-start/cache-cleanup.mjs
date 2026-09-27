@@ -7,13 +7,19 @@
 // previous version and forced a reload in all of them.
 
 import { readdirSync, readFileSync, mkdirSync, existsSync, statSync, unlinkSync } from 'node:fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { logError, debug } from '../../scripts/lib/log.mjs';
-import { home, recordDetachedChild } from '../lib/common.mjs';
-import { DATA_FILES, DATA_PATHS, SHIM_NAMES, shimFileName } from '../../scripts/lib/paths.mjs';
-import { resolvePluginData } from '../../scripts/lib/config.mjs';
+import { spawnDetached } from '../lib/common.mjs';
+import {
+  DATA_FILES,
+  DATA_PATHS,
+  SHIM_NAMES,
+  shimFileName,
+  home,
+} from '../../scripts/lib/paths.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
 import { spawnEnv, isOffline } from '../../scripts/lib/env.mjs';
 import { renderShim } from '../../scripts/lib/shims.mjs';
 
@@ -55,7 +61,7 @@ export async function run(ctx) {
   //      session telemetry. The knowledge it produced already lives in the vault.
   // Best-effort: any failure is logged and skipped, never blocks session-start.
   try {
-    const pluginData = resolvePluginData();
+    const pluginData = getPluginData();
     if (pluginData) {
       const binDir = DATA_PATHS.bin(pluginData);
       try {
@@ -104,7 +110,7 @@ export async function run(ctx) {
   // the pre-fix leak shape and surfaced the gap.
   if (isOffline()) return;
   try {
-    const pluginData = resolvePluginData();
+    const pluginData = getPluginData();
     if (!pluginData) return;
     const versionFile = DATA_FILES.binVersion(pluginData);
     const installedRaw = existsSync(versionFile) ? readFileSync(versionFile, 'utf-8').trim() : '';
@@ -117,14 +123,9 @@ export async function run(ctx) {
     // must see CLAUDE_PLUGIN_DATA. Relying on default inheritance is implicit
     // and a future spawn-option change could silently drop it, re-creating the
     // stuck-auto-update loop (the child throws on null plugin-data).
-    const child = spawn(process.execPath, [downloader], {
-      detached: true,
-      stdio: 'ignore',
+    spawnDetached('session-start.binary-update', process.execPath, [downloader], {
       env: spawnEnv({ CLAUDE_PLUGIN_DATA: pluginData }),
     });
-    child.on('error', () => {});
-    child.unref();
-    recordDetachedChild(child.pid);
   } catch (err) {
     logError('session-start.binary-update', err);
   }

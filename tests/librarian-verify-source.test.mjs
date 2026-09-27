@@ -127,31 +127,12 @@ test('resolver throws (true network failure) -> rethrows for CLI exit 1', async 
   );
 });
 
-test('CLI reads sourceId from inside claim (router contract)', (t) => {
-  const payload = JSON.stringify({
-    question: 'q',
-    claim: {
-      claim: 'c',
-      quote: 'q',
-      url: 'u',
-      sourceId: { kind: 'pmid', id: '37541198', author: null, year: null },
-    },
+test('CLI reads sourceId from inside claim (router contract)', () => {
+  const out = execFileSync(process.execPath, [CLI], {
+    input: JSON.stringify({ claim: { claim: 'c', sourceId: { kind: 'bogus', id: 'x' } } }),
+    encoding: 'utf8',
   });
-  let out;
-  try {
-    out = execFileSync(process.execPath, [CLI], {
-      input: payload,
-      encoding: 'utf8',
-      timeout: 20000,
-    });
-  } catch (e) {
-    if (e.code !== 0 && /ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/.test(e.stderr || '')) {
-      t.skip('no network for live pubmed resolve');
-      return;
-    }
-    throw e;
-  }
   const r = JSON.parse(out);
-  assert.ok(['pass', 'kill', 'defer'].includes(r.verdict));
-  assert.equal(r.mode, 'mechanical');
+  assert.equal(r.verdict, 'defer');
+  assert.match(r.evidence, /bogus:x/);
 });

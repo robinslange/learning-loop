@@ -4,7 +4,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { resolvePluginData, isVaultNote, vaultRelPath } from '../lib/common.mjs';
+import { isVaultNote, vaultRelPath } from '../lib/common.mjs';
 import { buildVaultIndexFromSnapshot } from '../lib/snapshot.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
 import { splitRawFrontmatter } from '../../scripts/lib/markdown-parse.mjs';
@@ -18,6 +18,7 @@ import {
 } from '../../scripts/lib/edges.mjs';
 import { classifyNoteEdges, makeResolver } from '../../scripts/lib/edge-classifier.mjs';
 import { DATA_FILES } from '../../scripts/lib/paths.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
 
 const EDGE_TYPE_TO_FRONTMATTER_KEY = {
   evidence_for: 'evidence-for',
@@ -157,7 +158,7 @@ export async function runEdgeInfer(ctx) {
   if (!isVaultNote(filePath, vaultRoot)) return;
   if (!snapshot) return;
 
-  const pluginData = resolvePluginData();
+  const pluginData = getPluginData();
   if (!pluginData) return;
 
   const dbPath = DATA_FILES.edgesDb(pluginData);

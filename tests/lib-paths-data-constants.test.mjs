@@ -40,6 +40,6 @@ test('FEDERATION_PATHS resolves federation subtree', () => {
 test('DATA_FILES resolves standalone data files', () => {
   const pd = '/tmp/test-pd';
   assert.equal(DATA_FILES.edgesDb(pd), join(pd, 'edges.db'));
-  assert.equal(DATA_FILES.nliSocket(pd), join(pd, 'nli.sock'));
+  assert.equal(DATA_FILES.dupScanSocket(pd), join(pd, 'nli.sock'));
   assert.equal(DATA_FILES.binVersion(pd), join(pd, 'bin', '.version'));
 });

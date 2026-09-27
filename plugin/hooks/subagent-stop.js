@@ -1,21 +1,12 @@
 #!/usr/bin/env node
 // subagent-stop.js — Emit agent-result provenance when a subagent stops.
 
-import { readStdin, emitProvenance } from './lib/common.mjs';
-import { logError } from '../scripts/lib/log.mjs';
+import { readPayload, emitProvenance } from './lib/common.mjs';
 
-const raw = await readStdin();
-if (!raw.trim()) process.exit(0);
+const payload = await readPayload('subagent-stop');
+if (!payload) process.exit(0);
 
-let parsed;
-try {
-  parsed = JSON.parse(raw);
-} catch (err) {
-  logError('subagent-stop.parseStdin', err);
-  process.exit(0);
-}
-
-const { session_id, transcript_path } = parsed;
+const { session_id, transcript_path } = payload;
 
 emitProvenance({
   action: 'agent-result',

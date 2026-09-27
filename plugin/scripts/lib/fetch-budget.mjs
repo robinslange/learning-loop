@@ -1,66 +1,49 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { withLock } from './file-lock.mjs';
 import { solenoid, LimitExceeded, SolenoidUnavailable } from '../../vendor/solenoid/solenoid.mjs';
 import { fileStore } from '../../vendor/solenoid/node.mjs';
 
-// Per-session fetch budget counter backed by a single-integer file under
-// PLUGIN_DATA/fetch-budget/<sessionId>.count. Survives process boundaries
-// so the budget is real across the one-process-per-URL gateway invocation pattern.
+// Per-session fetch budget under PLUGIN_DATA/fetch-budget/<sessionId>/: one
+// file per granted fetch, named 1..budget. A claim is an exclusive create of
+// the first free slot, so of N concurrent gateway processes exactly
+// min(N, budget) win, and a refused claim writes nothing.
 //
-// Graceful degradation: if pluginData is null OR sessionId is empty/unknown,
-// all operations are no-ops and readCount returns 0. A missing data dir never
-// throws — it must not break fetch in edge environments.
+// Callers own the no-session case. Neither function throws. A claim that
+// cannot reach its directory is granted: nothing has been enforced yet, so
+// there is nothing to protect by refusing. Past that point we are inside the
+// enforcement itself, and a slot create that fails for any reason but EEXIST
+// leaves no record of the grant. The budget is a cap, not a best-effort
+// counter: refusing this one fetch costs a retry, while granting it unrecorded
+// lets the cap be exceeded.
 
-function budgetFile(sessionId, pluginData) {
-  return join(pluginData, 'fetch-budget', `${sessionId}.count`);
+function slotDir(sessionId, pluginData) {
+  return join(pluginData, 'fetch-budget', sessionId);
 }
 
 export function readCount(sessionId, pluginData) {
-  if (!pluginData || !sessionId || sessionId === 'unknown') return 0;
-  const file = budgetFile(sessionId, pluginData);
-  if (!existsSync(file)) return 0;
   try {
-    const n = parseInt(readFileSync(file, 'utf8').trim(), 10);
-    return Number.isFinite(n) ? n : 0;
+    return readdirSync(slotDir(sessionId, pluginData)).length;
   } catch {
     return 0;
   }
 }
 
-// Reserve one fetch atomically across processes. Reading the count and writing
-// count + 1 separately let parallel research subagents fetch past the budget.
-//
-// A missing/unwritable data dir still fails open (mkdirSync's own catch) —
-// that's the edge-environment escape hatch the module comment above promises,
-// and it fires before any lock is even attempted: nothing has been enforced,
-// so there is nothing to protect by refusing.
-//
-// Past that point we're inside the enforcement itself, and any failure there
-// — a lock timeout, a lock-file race in file-lock's stale-owner reclaim
-// (unlinkSync loses a race and throws ENOENT), a write failure — leaves us
-// unable to tell whether the budget was actually recorded. The budget is a
-// cap, not a best-effort counter: refusing this one fetch costs a retry,
-// while failing it open risks the cap being exceeded, which is exactly the
-// failure mode the lock exists to prevent.
-export function tryBump(sessionId, pluginData, budget) {
-  if (!pluginData || !sessionId || sessionId === 'unknown') return true;
-  const file = budgetFile(sessionId, pluginData);
+export function claimFetch(sessionId, pluginData, budget) {
+  const dir = slotDir(sessionId, pluginData);
   try {
-    mkdirSync(join(pluginData, 'fetch-budget'), { recursive: true });
+    mkdirSync(dir, { recursive: true });
   } catch {
     return true;
   }
-  try {
-    return withLock(file, { retries: 400, retryDelayMs: 5 }, () => {
-      const n = readCount(sessionId, pluginData);
-      if (n >= budget) return false;
-      writeFileSync(file, String(n + 1), 'utf8');
+  for (let slot = 1; slot <= budget; slot++) {
+    try {
+      closeSync(openSync(join(dir, String(slot)), 'wx'));
       return true;
-    });
-  } catch {
-    return false;
+    } catch (err) {
+      if (err.code !== 'EEXIST') return false;
+    }
   }
+  return false;
 }
 
 export function budgetScopeSegment(sessionId) {
@@ -80,7 +63,7 @@ export function budgetScopeSegment(sessionId) {
 // and rethrows anything else (an unrelated limit, a bad key, ...).
 //
 // fileStore() persists the outage mode across processes on this machine, the
-// same one-process-per-fetch pattern readCount/tryBump above are built for.
+// same one-process-per-fetch pattern readCount/claimFetch above are built for.
 // With a known pluginData, the cache lives under it rather than the shared
 // machine-wide ~/.cache/solenoid — keeps one caller's outage state (tests,
 // another plugin data dir) from leaking into another's.

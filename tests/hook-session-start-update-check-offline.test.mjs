@@ -40,7 +40,15 @@ function runOffline(offlineVal) {
       console.log(JSON.stringify({ stamped: existsSync(${JSON.stringify(cacheFile)}) }));
     `,
     ],
-    { env: { ...process.env, LL_OFFLINE: offlineVal } },
+    {
+      env: {
+        PATH: process.env.PATH,
+        HOME: dir,
+        USERPROFILE: dir,
+        CLAUDE_PLUGIN_DATA: join(dir, 'plugin-data'),
+        LL_OFFLINE: offlineVal,
+      },
+    },
   );
   assert.equal(out.status, 0, out.stderr.toString());
   const { stamped } = JSON.parse(out.stdout.toString());

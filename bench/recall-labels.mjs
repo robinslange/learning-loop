@@ -39,6 +39,7 @@ const pluginData =
 const MIN_PREFIX = 25;
 
 import { isFixturePrompt, isFixtureSession } from './fixtures.mjs';
+import { readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
 
 const slugify = (s) =>
   s
@@ -50,34 +51,25 @@ const slugify = (s) =>
 const dir = join(pluginData, 'retrieval');
 const raw = [];
 const promptsBySession = new Map();
-for (const f of readdirSync(dir).filter((x) => x.startsWith('shadow-injection-'))) {
-  for (const line of readFileSync(join(dir, f), 'utf8').split('\n')) {
-    if (!line) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!r.session_id) continue;
-    if (r.prompt) {
-      if (!promptsBySession.has(r.session_id)) promptsBySession.set(r.session_id, []);
-      promptsBySession.get(r.session_id).push(r.prompt);
-    }
-    // Shadow-mode records never reached the model, so they cannot be recalled
-    // and must not dilute the denominator.
-    if (r.mode !== 'live' || r.type !== 'gate-pass-payload') continue;
-    for (const p of r.payload?.injected_paths || []) {
-      raw.push({
-        session_id: r.session_id,
-        path: p.path,
-        level: p.level,
-        rank: r.payload.injected_paths.indexOf(p),
-        ts: r.ts,
-        rrf: r.gate?.vault_top_score ?? null,
-        prompt: r.prompt || '',
-      });
-    }
+for (const r of readJsonlDir(dir, 'shadow-injection-')) {
+  if (!r.session_id) continue;
+  if (r.prompt) {
+    if (!promptsBySession.has(r.session_id)) promptsBySession.set(r.session_id, []);
+    promptsBySession.get(r.session_id).push(r.prompt);
+  }
+  // Shadow-mode records never reached the model, so they cannot be recalled
+  // and must not dilute the denominator.
+  if (r.mode !== 'live' || r.type !== 'gate-pass-payload') continue;
+  for (const p of r.payload?.injected_paths || []) {
+    raw.push({
+      session_id: r.session_id,
+      path: p.path,
+      level: p.level,
+      rank: r.payload.injected_paths.indexOf(p),
+      ts: r.ts,
+      rrf: r.gate?.vault_top_score ?? null,
+      prompt: r.prompt || '',
+    });
   }
 }
 

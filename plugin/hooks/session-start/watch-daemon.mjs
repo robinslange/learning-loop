@@ -4,18 +4,22 @@
 
 import { readFileSync, writeFileSync, statSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { spawn } from 'node:child_process';
 import { HookConfig } from '../../scripts/lib/hook-config.mjs';
 import { ortSpawnEnv } from '../../scripts/lib/binary.mjs';
 import { logError } from '../../scripts/lib/log.mjs';
-import { isProcessAlive, acquireLock, releaseLock } from '../../scripts/lib/file-lock.mjs';
+import {
+  isProcessAlive,
+  acquireLock,
+  releaseLock,
+  syncSleep,
+} from '../../scripts/lib/file-lock.mjs';
 import { MARKER_PATHS } from '../../scripts/lib/marker-cache.mjs';
 import { DATA_FILES } from '../../scripts/lib/paths.mjs';
 
 export async function run(ctx) {
   const { pluginDir, pluginData, vaultRoot } = ctx;
 
-  const { findBinary: findBinaryShared, recordDetachedChild } = await import('../lib/common.mjs');
+  const { findBinary: findBinaryShared, spawnDetached } = await import('../lib/common.mjs');
   const binary = findBinaryShared();
 
   const DB_PATH = join(vaultRoot, '.vault-search', 'vault-index.db');
@@ -82,11 +86,6 @@ export async function run(ctx) {
     return isProcessAlive(pid) ? { state: 'alive', pid } : { state: 'dead', pid };
   }
 
-  const sleepBuf = new Int32Array(new SharedArrayBuffer(4));
-  function syncSleep(ms) {
-    Atomics.wait(sleepBuf, 0, 0, ms);
-  }
-
   let probe = checkAlive();
   if (probe.state === 'writer-in-progress') {
     syncSleep(HookConfig.DAEMON_CHECK_POLL_MS);
@@ -151,31 +150,22 @@ export async function run(ctx) {
       } catch (err) {
         logError('session-start.watch-daemon.writeFingerprint', err);
       }
-      try {
-        const watchArgs = [
-          'watch',
-          vaultRoot,
-          DB_PATH,
-          '--config-dir',
-          pluginData,
-          '--pid-file',
-          pidPath,
-        ];
-        const librarianScript = join(pluginDir, 'scripts', 'librarian.mjs');
-        if (existsSync(librarianScript)) {
-          watchArgs.push('--librarian-script', librarianScript);
-        }
-        const child = spawn(binary.bin, watchArgs, {
-          detached: true,
-          stdio: 'ignore',
-          windowsHide: true,
-          env: ortSpawnEnv(binary.binDir),
-        });
-        child.unref();
-        recordDetachedChild(child.pid);
-      } catch (err) {
-        logError('session-start.watch-daemon.spawn', err);
+      const watchArgs = [
+        'watch',
+        vaultRoot,
+        DB_PATH,
+        '--config-dir',
+        pluginData,
+        '--pid-file',
+        pidPath,
+      ];
+      const librarianScript = join(pluginDir, 'scripts', 'librarian.mjs');
+      if (existsSync(librarianScript)) {
+        watchArgs.push('--librarian-script', librarianScript);
       }
+      spawnDetached('session-start.watch-daemon.spawn', binary.bin, watchArgs, {
+        env: ortSpawnEnv(binary.binDir),
+      });
     } finally {
       releaseLock(handle);
     }
@@ -193,13 +183,9 @@ export async function run(ctx) {
     if (!existsSync(marker) && !existsSync(edgesDb)) {
       mkdirSync(dirname(marker), { recursive: true });
       writeFileSync(marker, new Date().toISOString());
-      const child = spawn('node', [join(pluginDir, 'scripts', 'backfill-edges.mjs')], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      child.unref();
-      recordDetachedChild(child.pid);
+      spawnDetached('session-start.watch-daemon.edgesBackfill', process.execPath, [
+        join(pluginDir, 'scripts', 'backfill-edges.mjs'),
+      ]);
     }
   } catch (err) {
     logError('session-start.watch-daemon.edgesBackfill', err);

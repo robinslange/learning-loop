@@ -222,7 +222,7 @@ test('--help lists the --scan-vault mode', () => {
 // the reflect-track header warns about.
 
 // Marker files must land in a dir this suite owns, not the developer's real
-// plugin-data. `reflectNewNotesPath` resolves through `resolvePluginData()`,
+// plugin-data. `reflectNewNotesPath` resolves through `getPluginData()`,
 // which reads $CLAUDE_PLUGIN_DATA or a persisted marker, so without this
 // override the suite wrote into
 // ~/.claude/plugins/data/.../reflect-scratch/ — a directory nothing ever

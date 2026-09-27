@@ -8,58 +8,11 @@ import {
   writeFileSync,
   unlinkSync,
   existsSync,
+  mkdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-
-describe('provenance dedupe', () => {
-  let dataDir;
-  let fakeHome;
-  let savedHome;
-  before(() => {
-    fakeHome = mkdtempSync(join(tmpdir(), 'll-common-home-'));
-    savedHome = process.env.HOME;
-    process.env.HOME = fakeHome;
-
-    dataDir = mkdtempSync(join(tmpdir(), 'll-common-test-'));
-    process.env.CLAUDE_PLUGIN_DATA = dataDir;
-  });
-  after(() => {
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(fakeHome, { recursive: true, force: true });
-    delete process.env.CLAUDE_PLUGIN_DATA;
-    if (savedHome !== undefined) process.env.HOME = savedHome;
-    else delete process.env.HOME;
-  });
-
-  it('writes one provenance line per unique (session_id, agent_id, path)', async () => {
-    const mod = await import('../plugin/hooks/lib/common.mjs?bust=1');
-    mod.emitProvenance({
-      session_id: 's1',
-      agent_id: 'a1',
-      path: '0-inbox/a.md',
-      action: 'vault-write',
-    });
-    mod.emitProvenance({
-      session_id: 's1',
-      agent_id: 'a1',
-      path: '0-inbox/a.md',
-      action: 'vault-write',
-    });
-    mod.emitProvenance({
-      session_id: 's1',
-      agent_id: 'a1',
-      path: '0-inbox/b.md',
-      action: 'vault-write',
-    });
-    const files = readdirSync(join(dataDir, 'provenance')).filter((f) => f.startsWith('events-'));
-    assert.equal(files.length, 1);
-    const lines = readFileSync(join(dataDir, 'provenance', files[0]), 'utf8')
-      .trim()
-      .split('\n');
-    assert.equal(lines.length, 2, 'expected 2 records (duplicate dropped)');
-  });
-});
+import { spawnSync } from 'node:child_process';
 
 describe('emitProvenance intent hardening', () => {
   let dataDir;
@@ -164,7 +117,7 @@ describe('getSessionId fallback chain', () => {
   it('returns "unknown" silently when no session-id files exist', async () => {
     if (existsSync(legacyPath)) unlinkSync(legacyPath);
 
-    const mod = await import('../plugin/hooks/lib/common.mjs?bust=2');
+    const mod = await import('../plugin/scripts/lib/session.mjs?bust=2');
     const errs = [];
     const origErr = console.error;
     console.error = (...args) => errs.push(args.join(' '));
@@ -186,7 +139,7 @@ describe('getSessionId fallback chain', () => {
     writeFileSync(legacyPath, 'legacy-session');
     process.env.CLAUDE_CODE_SESSION_ID = 'harness-session';
     try {
-      const mod = await import('../plugin/hooks/lib/common.mjs?bust=3');
+      const mod = await import('../plugin/scripts/lib/session.mjs?bust=3');
       assert.equal(mod.getSessionId(), 'harness-session');
     } finally {
       delete process.env.CLAUDE_CODE_SESSION_ID;
@@ -195,16 +148,16 @@ describe('getSessionId fallback chain', () => {
 
   it('falls back to the legacy file when the env var is absent', async () => {
     writeFileSync(legacyPath, 'legacy-only');
-    const mod = await import('../plugin/hooks/lib/common.mjs?bust=4');
+    const mod = await import('../plugin/scripts/lib/session.mjs?bust=4');
     assert.equal(mod.getSessionId(), 'legacy-only');
   });
 });
 
 describe('readStdin', () => {
-  // The post-tool budget-composition test (lib-hook-config.test.mjs) sums
-  // HookConfig.STDIN_TIMEOUT_MS into the worst-case inner spend. readStdin
-  // must consume that constant — a hardcoded literal here would let the
-  // runtime drift from what the budget test measures.
+  // lib-hook-config.test.mjs checks every stdin-reading hook's hooks.json
+  // timeout against HookConfig.STDIN_TIMEOUT_MS. readStdin must consume that
+  // constant — a hardcoded literal here would let the runtime drift from what
+  // that test measures.
   it('uses HookConfig.STDIN_TIMEOUT_MS, not a hardcoded timeout', () => {
     const src = readFileSync(new URL('../plugin/hooks/lib/common.mjs', import.meta.url), 'utf8');
     assert.ok(src.includes('export function readStdin'), 'readStdin not found in common.mjs');
@@ -223,47 +176,64 @@ describe('readStdin', () => {
   });
 });
 
-describe('readFileTail', () => {
-  let dir;
-  let readFileTail;
-  before(async () => {
-    dir = mkdtempSync(join(tmpdir(), 'll-common-tail-'));
-    ({ readFileTail } = await import('../plugin/hooks/lib/common.mjs?bust=5'));
+// Run an ESM snippet with common.mjs imported as `common`, in a child node
+// process against a throwaway HOME and plugin-data dir.
+function runCommonProbe(body, input = '') {
+  const root = mkdtempSync(join(tmpdir(), 'll-common-probe-'));
+  try {
+    const pluginData = join(root, 'plugin-data');
+    mkdirSync(pluginData);
+    const commonUrl = new URL('../plugin/hooks/lib/common.mjs', import.meta.url).href;
+    const probe = `import * as common from ${JSON.stringify(commonUrl)};\n${body}`;
+    const res = spawnSync(process.execPath, ['--input-type=module', '-e', probe], {
+      input,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: root, CLAUDE_PLUGIN_DATA: pluginData },
+    });
+    const logs = join(pluginData, 'logs');
+    const errorScopes = existsSync(logs)
+      ? readdirSync(logs)
+          .flatMap((f) => readFileSync(join(logs, f), 'utf8').trim().split('\n'))
+          .map((l) => JSON.parse(l))
+          .filter((r) => r.level === 'error')
+          .map((r) => r.scope)
+      : [];
+    return { res, errorScopes };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+describe('spawnDetached', () => {
+  it('logs a spawn failure under its label instead of killing the process', () => {
+    const { res, errorScopes } = runCommonProbe(`
+      common.spawnDetached('t', '/nonexistent/bin', []);
+      setTimeout(() => console.log('still alive'), 50);
+    `);
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(res.stdout.trim(), 'still alive');
+    assert.deepEqual(errorScopes, ['t']);
   });
-  after(() => {
-    rmSync(dir, { recursive: true, force: true });
+});
+
+describe('readPayload', () => {
+  const PRINT = `console.log(JSON.stringify(await common.readPayload('h')));`;
+
+  it('logs malformed JSON under <scope>.parseStdin and returns null', () => {
+    const { res, errorScopes } = runCommonProbe(PRINT, '{');
+    assert.equal(res.stdout.trim(), 'null', res.stderr);
+    assert.deepEqual(errorScopes, ['h.parseStdin']);
   });
 
-  it('returns the whole file unchanged when smaller than maxBytes', () => {
-    const p = join(dir, 'small.jsonl');
-    writeFileSync(p, 'line one\nline two\nline three');
-    assert.equal(readFileTail(p, 1024), 'line one\nline two\nline three');
+  it('returns null for blank stdin without logging', () => {
+    const { res, errorScopes } = runCommonProbe(PRINT, ' \n');
+    assert.equal(res.stdout.trim(), 'null', res.stderr);
+    assert.deepEqual(errorScopes, []);
   });
 
-  it('drops the partial first line when the read starts mid-file', () => {
-    const p = join(dir, 'big.jsonl');
-    const lines = [];
-    for (let i = 0; i < 100; i++) lines.push(`{"n":${i},"pad":"${'x'.repeat(50)}"}`);
-    writeFileSync(p, lines.join('\n'));
-    const tail = readFileTail(p, 300);
-    const got = tail.split('\n');
-    assert.ok(got.length >= 2, 'tail should contain complete lines');
-    for (const l of got) JSON.parse(l); // every surviving line is complete JSON
-    assert.equal(got[got.length - 1], lines[lines.length - 1]);
-  });
-
-  it('returns empty string when no newline falls inside the tail window', () => {
-    const p = join(dir, 'one-giant-line.jsonl');
-    writeFileSync(p, 'a'.repeat(10_000));
-    assert.equal(readFileTail(p, 100), '');
-  });
-
-  it('cannot leak a torn multi-byte char: drop-through-newline removes the fragment', () => {
-    const p = join(dir, 'multibyte.jsonl');
-    // 4-byte emoji repeated; window lands mid-emoji on the first (dropped) line.
-    writeFileSync(p, `${'\u{1F600}'.repeat(100)}\nfinal line`);
-    const tail = readFileTail(p, 17); // 'final line' is 10 bytes; 17 starts mid-emoji
-    assert.equal(tail, 'final line');
+  it('returns the parsed payload', () => {
+    const { res } = runCommonProbe(PRINT, '{"session_id":"s"}');
+    assert.deepEqual(JSON.parse(res.stdout), { session_id: 's' }, res.stderr);
   });
 });
 

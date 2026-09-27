@@ -1,4 +1,2 @@
 /target/
 /model-cache/
-/crates/ll-search/model/*.onnx
-/crates/ll-search/model/*.json

@@ -9,10 +9,9 @@
 //                                project, JSON-only output (consumed by /dream)
 //                                (consumed by /reflect Step 4.7)
 
-import { readFileSync, readdirSync } from 'fs';
 import { join, sep } from 'path';
 import { getPluginData, getVaultPath } from './lib/config.mjs';
-import { logError } from './lib/log.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 import {
   sessionSurfaced,
   usageReport,
@@ -167,26 +166,9 @@ if (args.includes('--usage')) {
   process.exit(0);
 }
 
-function loadJsonl(prefix) {
-  const results = [];
-  try {
-    for (const f of readdirSync(dir)) {
-      if (!f.startsWith(prefix) || !f.endsWith('.jsonl')) continue;
-      const lines = readFileSync(join(dir, f), 'utf-8').trim().split('\n');
-      for (const line of lines) {
-        if (!line) continue;
-        results.push(JSON.parse(line));
-      }
-    }
-  } catch (err) {
-    logError('retrieval-report.loadJsonl', err);
-  }
-  return results;
-}
-
-const vaultQueries = loadJsonl('queries-');
-const memoryReads = loadJsonl('reads-');
-const episodicQueries = loadJsonl('episodic-queries-');
+const vaultQueries = readJsonlDir(dir, 'queries-');
+const memoryReads = readJsonlDir(dir, 'reads-');
+const episodicQueries = readJsonlDir(dir, 'episodic-queries-');
 
 if (vaultQueries.length === 0 && memoryReads.length === 0 && episodicQueries.length === 0) {
   console.log('No retrieval data yet.');

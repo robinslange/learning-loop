@@ -3,27 +3,12 @@
 // Writes the session ledger: one 4-projects note per session, overwritten on
 // every flush, and a throttled session-summary provenance record. Never prints.
 
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  readStdin,
-  resolveVaultPath,
-  resolveConfig,
-  resolvePluginData,
-  getSessionId,
-  emitProvenance,
-} from './lib/common.mjs';
-import { env } from '../scripts/lib/env.mjs';
+import { readPayload, emitProvenance } from './lib/common.mjs';
+import { env, coerceNumber } from '../scripts/lib/env.mjs';
+import { sessionIdFrom } from '../scripts/lib/session.mjs';
 import { HookConfig } from '../scripts/lib/hook-config.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { readMarker, writeMarker, MARKER_PATHS } from '../scripts/lib/marker-cache.mjs';
@@ -44,6 +29,8 @@ import {
   shouldEmitSummary,
   localDateStr,
 } from '../scripts/lib/session-ledger.mjs';
+import { getVaultPath, getConfig, getPluginData } from '../scripts/lib/config.mjs';
+import { writeFileAtomic } from '../scripts/lib/write-atomic.mjs';
 
 const STALE_TMP_MS = 60 * 60 * 1000;
 
@@ -73,26 +60,18 @@ function sweepStaleTmp(dir, now = Date.now()) {
 }
 
 const t0 = Date.now();
-const input = await readStdin();
-if (!input.trim()) process.exit(0);
-
-let hookData;
-try {
-  hookData = JSON.parse(input);
-} catch (err) {
-  logError('session-ledger.parseStdin', err);
-  process.exit(0);
-}
+const hookData = await readPayload('session-ledger');
+if (!hookData) process.exit(0);
 if (hookData.stop_hook_active) process.exit(0);
 
 const isSessionEnd = hookData.hook_event_name === 'SessionEnd';
-let sessionId = hookData.session_id || getSessionId();
-if (!sessionId || sessionId === 'unknown') process.exit(0);
+const sessionId = sessionIdFrom(hookData);
+if (!sessionId) process.exit(0);
 
-const vaultRoot = resolveVaultPath();
-const pluginData = resolvePluginData();
+const vaultRoot = getVaultPath();
+const pluginData = getPluginData();
 if (!vaultRoot || !pluginData || !existsSync(join(vaultRoot, '4-projects'))) process.exit(0);
-const config = resolveConfig() || {};
+const config = getConfig() || {};
 const cwd = typeof hookData.cwd === 'string' && hookData.cwd ? hookData.cwd : null;
 if (!cwd) process.exit(0);
 
@@ -133,10 +112,12 @@ let git = {
   commitsSource: 'since',
 };
 try {
-  const gitBudget = { remaining: HookConfig.LEDGER_GIT_BUDGET_MS };
+  const seam = coerceNumber(env.LL_LEDGER_GIT_BUDGET_MS, 0);
+  const gitBudget = { remaining: seam || HookConfig.LEDGER_GIT_BUDGET_MS };
+  const gitTimeoutMs = seam || HookConfig.LEDGER_GIT_TIMEOUT_MS;
   const budgeted = budgetedGit(execGit, gitBudget);
-  project = resolveProject(cwd, config, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS);
-  git = gitFacts(project.worktreeRoot, startedTs, budgeted, HookConfig.LEDGER_GIT_TIMEOUT_MS, {
+  project = resolveProject(cwd, config, budgeted, gitTimeoutMs);
+  git = gitFacts(project.worktreeRoot, startedTs, budgeted, gitTimeoutMs, {
     startedHead: marker?.started_head,
   });
 } catch (err) {
@@ -225,9 +206,8 @@ try {
   const abs = join(vaultRoot, pin.path);
   mkdirSync(dirname(abs), { recursive: true });
   sweepStaleTmp(dirname(abs));
-  const tmp = `${abs}.${process.pid}.tmp`;
-  writeFileSync(
-    tmp,
+  writeFileAtomic(
+    abs,
     renderLedger({
       project: project.project,
       label,
@@ -247,7 +227,6 @@ try {
       rangeFellBack: Boolean(latest?.started_head) && git.commitsSource === 'since',
     }),
   );
-  renameSync(tmp, abs);
   wrote = true;
 } catch (err) {
   logError('session-ledger.write', err);

@@ -197,6 +197,52 @@ test('loadSurfacedEvents collapses a live injection recorded on both dedupe stat
   }
 });
 
+// Rows written before the writers shared a timestamp sit a few ms apart and
+// are never pruned, so the join cannot depend on the ts matching exactly.
+test('loadSurfacedEvents collapses a pre-upgrade live injection whose two records are ms apart', () => {
+  const base = NOW - 86_400_000;
+  const liveRecord = (ts) => ({
+    ts,
+    session_id: 's1',
+    type: 'gate-pass-payload',
+    mode: 'live',
+    payload: { injected_paths: [{ path: '3-permanent/dup.md', level: 'body' }] },
+  });
+  const pd = makePluginData({
+    dedupe: {
+      s1: [{ path: '3-permanent/dup.md', level: 'body', ts: new Date(base).toISOString() }],
+    },
+    shadowInjections: [liveRecord(new Date(base + 4).toISOString())],
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/dup.md');
+    assert.strictEqual(entry.surfaced, 1, 'one injection seen by two writers is one event');
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+test('loadSurfacedEvents counts a re-injection after the dedupe window as a second event', () => {
+  const base = NOW - 2 * 86_400_000;
+  const pd = makePluginData({
+    shadowInjections: [0, 5 * 3_600_000].map((offset) => ({
+      ts: new Date(base + offset).toISOString(),
+      session_id: 's1',
+      type: 'gate-pass-payload',
+      mode: 'live',
+      payload: { injected_paths: [{ path: '3-permanent/again.md', level: 'body' }] },
+    })),
+  });
+  try {
+    const r = usageReport(pd, { now: NOW, minSurfaced: 1 });
+    const entry = r.surfaced_unevaluated.find((n) => n.path === '3-permanent/again.md');
+    assert.strictEqual(entry.surfaced, 2);
+  } finally {
+    rmSync(pd, { recursive: true, force: true });
+  }
+});
+
 test('usageReport: surfaced-never-used excludes used notes, counts explicit ignores', () => {
   const surfaceTimes = [daysAgo(1), daysAgo(2), daysAgo(3)];
   const pd = makePluginData({
@@ -648,6 +694,30 @@ test('retrieval-report --memory-reads emits per-file JSON', () => {
     assert.deepEqual(parsed.reads, [{ file: 'feedback_a.md', reads: 1, last_read: daysAgo(1) }]);
   } finally {
     rmSync(pd, { recursive: true, force: true });
+  }
+});
+
+// A torn line is normal in append-only telemetry (a hook killed mid-write). It
+// used to throw out of the whole directory loop, so one bad line dropped the
+// rest of its file and every later month.
+test('retrieval-report counts every valid query around a torn line', () => {
+  const home = mkdtempSync(join(tmpdir(), 'll-report-torn-'));
+  const pd = join(home, 'pd');
+  const dir = join(pd, 'retrieval');
+  mkdirSync(dir, { recursive: true });
+  const q = (n) =>
+    JSON.stringify({ ts: daysAgo(n), session_id: 's1', command: 'search', query: `q${n}` });
+  writeFileSync(join(dir, 'queries-2026-08.jsonl'), `${q(5)}\n{"ts":"2026-08-0\n${q(4)}\n`);
+  writeFileSync(join(dir, 'queries-2026-09.jsonl'), `${q(3)}\n${q(2)}\n`);
+  try {
+    const out = spawnSync(process.execPath, [REPORT], {
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_DATA: pd },
+    });
+    assert.equal(out.status, 0, out.stderr);
+    assert.match(out.stdout, /Total queries:\s+4\n/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

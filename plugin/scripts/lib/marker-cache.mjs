@@ -37,17 +37,17 @@ export const MARKER_PATHS = {
   // stay untouched.
   otelExport: (pluginData) => join(DATA_PATHS.markers(pluginData), 'otel-export'),
   dreamLock: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-lock'),
-  dreamNudged: (pluginData) => join(DATA_PATHS.markers(pluginData), 'dream-nudged'),
+  // stop-nudge's once-per-session guard, shared by the dream nudge and the
+  // substantial-session nudge.
+  stopNudged: (pluginData, sessionId) =>
+    join(DATA_PATHS.markers(pluginData), `stop-nudged-${sessionId}`),
   // Session-scoped log of memory files THIS session wrote (post-tool appends
   // on each Write/Edit into the auto-memory dir). stop-nudge counts this,
   // intersected with files still on disk, never a diff of the shared dir,
   // which conflated concurrent sessions' writes and blamed one session for
   // another's files.
   memoryWrites: (pluginData, sessionId) =>
-    join(
-      DATA_PATHS.markers(pluginData),
-      sessionId ? `memory-writes-${sessionId}` : 'memory-writes',
-    ),
+    join(DATA_PATHS.markers(pluginData), `memory-writes-${sessionId}`),
   // Session-scoped ledger state: the note path chosen at first flush (the
   // session label drifts between prompts, so the filename has to be pinned),
   // the transcript's first timestamp (the git --since anchor), and the last

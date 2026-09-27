@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { env } from './lib/env.mjs';
-import { logError } from './lib/log.mjs';
 import {
   isVaultOk,
   isHealthy,
@@ -12,40 +11,24 @@ import {
 } from './lib/shadow-gate.mjs';
 import { assessGateReachability } from './lib/gate-reachability.mjs';
 import { INJECTION_CALIBRATION_EPOCH, HookConfig } from './lib/hook-config.mjs';
-import { getConfig } from './lib/config.mjs';
+import { getPluginData, injectionSetting } from './lib/config.mjs';
+import { readJsonlDir } from './lib/jsonl.mjs';
 
-function resolvePluginData() {
-  const fromEnv = env.CLAUDE_PLUGIN_DATA;
-  if (fromEnv) return fromEnv;
+const pd = getPluginData();
+if (!pd) {
   console.error('CLAUDE_PLUGIN_DATA not set');
   process.exit(1);
 }
-
-const pd = resolvePluginData();
 const dir = join(pd, 'retrieval');
 if (!existsSync(dir)) {
   console.log('No retrieval directory yet. Run learning-loop in shadow mode first.');
   process.exit(0);
 }
 
-const files = readdirSync(dir).filter(
-  (f) => f.startsWith('shadow-injection-') && f.endsWith('.jsonl'),
-);
-if (files.length === 0) {
+const entries = readJsonlDir(dir, 'shadow-injection-');
+if (entries.length === 0) {
   console.log('No shadow-injection logs found.');
   process.exit(0);
-}
-
-const entries = [];
-for (const f of files) {
-  for (const line of readFileSync(join(dir, f), 'utf8').trim().split('\n')) {
-    if (!line) continue;
-    try {
-      entries.push(JSON.parse(line));
-    } catch (err) {
-      logError('review-shadow.parseLine', err);
-    }
-  }
 }
 
 const total = entries.length;
@@ -79,13 +62,14 @@ const vaultLat = healthy
   .filter((v) => typeof v === 'number');
 const racedOut = healthy.filter((e) => e.backends?.vault?.raced_out).length;
 
-// Match the live cascade in session-label.js: env (only when explicitly set) >
-// config.json > the shipped constant. Reading the env var alone reported a pass
-// rate against a threshold the gate was not using whenever `injection_threshold`
-// was set in config.
-const threshold = env.LEARNING_LOOP_INJECTION_THRESHOLD_SET
-  ? env.LEARNING_LOOP_INJECTION_THRESHOLD
-  : (getConfig().injection_threshold ?? HookConfig.INJECTION_THRESHOLD);
+// The same cascade the live gate in session-label.js uses. Reading the env
+// var alone reported a pass rate against a threshold the gate was not using
+// whenever `injection_threshold` was set in config.
+const threshold = injectionSetting(
+  env.LEARNING_LOOP_INJECTION_THRESHOLD,
+  'injection_threshold',
+  HookConfig.INJECTION_THRESHOLD,
+);
 
 console.log('# Shadow injection review\n');
 console.log(`Total entries: ${total}`);

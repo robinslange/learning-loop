@@ -1,4 +1,4 @@
-// scripts/lib/jsonl.mjs : single-writer JSONL append helper.
+// scripts/lib/jsonl.mjs : JSONL append and read helpers.
 //
 // Atomic-ish line append for line-buffered telemetry files. Uses openSync('a')
 // + writeSync + closeSync so the kernel writes the full line in one syscall.
@@ -13,8 +13,17 @@
 // markdown body appends in vault notes; those have different consistency
 // requirements (handled by snapshot.mjs and the daemon).
 
-import { openSync, writeSync, readSync, closeSync, mkdirSync, fstatSync } from 'node:fs';
-import { dirname } from 'node:path';
+import {
+  openSync,
+  writeSync,
+  readSync,
+  closeSync,
+  mkdirSync,
+  fstatSync,
+  readFileSync,
+  readdirSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
 
 export function appendJsonlLine(path, obj) {
   const line = JSON.stringify(obj) + '\n';
@@ -43,6 +52,45 @@ export function appendJsonlLineSafe(path, obj) {
   } catch {
     return false;
   }
+}
+
+// Every parseable record in a JSONL file. A torn line, from a writer killed
+// mid-append, costs that one record and never the rest of the file. An
+// unreadable file reads as empty, as in readTailBytes below. (No logError:
+// log.mjs appends through this module.)
+export function readJsonl(path) {
+  let raw;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const line of raw.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      out.push(JSON.parse(line));
+      // eslint-disable-next-line learning-loop/no-empty-catch -- a torn telemetry line; skip it, keep the rest.
+    } catch {}
+  }
+  return out;
+}
+
+// The names of dir's <prefix>*.jsonl files, the monthly shards of one stream,
+// sorted so months come oldest first. A missing directory has none.
+export function jsonlShards(dir, prefix) {
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names.filter((f) => f.startsWith(prefix) && f.endsWith('.jsonl')).sort();
+}
+
+// Every record in a stream's shards, oldest month first.
+export function readJsonlDir(dir, prefix) {
+  return jsonlShards(dir, prefix).flatMap((f) => readJsonl(join(dir, f)));
 }
 
 // Read at most maxBytes from the end of a file, opened/seeked/closed once.
@@ -77,6 +125,17 @@ export function readTailBytes(path, maxBytes) {
       } catch {}
     }
   }
+}
+
+// The whole lines in the last maxBytes of a file. A read that starts mid-file
+// starts mid-line, so that partial first line is dropped: a window with no
+// newline in it holds no whole line and returns []. The drop also takes any
+// multi-byte character the window cut in half.
+export function readTailLines(path, maxBytes) {
+  const { text, truncated } = readTailBytes(path, maxBytes);
+  const lines = text.split('\n');
+  if (truncated) lines.shift();
+  return lines.filter(Boolean);
 }
 
 // Provenance files are append-only and can grow to multi-MB; this reads at

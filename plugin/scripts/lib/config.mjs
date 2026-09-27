@@ -4,7 +4,6 @@ import { fileURLToPath } from 'url';
 import { homedir, tmpdir } from 'os';
 import { expandHome } from './paths.mjs';
 import { safeLoad } from './safe-load.mjs';
-import { env } from './env.mjs';
 import { logError } from './log.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -26,8 +25,10 @@ export function isTransientPath(p) {
   );
 }
 
+// A path that does not exist is never stamped either: the reader ignores it,
+// so writing it only clobbers a good marker.
 function persistMarker(p) {
-  if (isTransientPath(p)) return;
+  if (isTransientPath(p) || !existsSync(p)) return;
   try {
     if (existsSync(DATA_PATH_MARKER)) {
       const current = readFileSync(DATA_PATH_MARKER, 'utf-8').trim();
@@ -61,10 +62,6 @@ export function getPluginData() {
 
   return null;
 }
-
-// Alias retained for hooks/lib/common.mjs compatibility — same function,
-// historical naming difference.
-export const resolvePluginData = getPluginData;
 
 /**
  * Never resurrect a deleted plugin-data: session-start spawns detached
@@ -179,6 +176,15 @@ function migrateConfig(from, to) {
   mkdirSync(dirname(to), { recursive: true });
   copyFileSync(from, to);
   process.stderr.write(`[config] Migrated config to ${to}\n`);
+}
+
+// An injection setting: the env var when set, then config.json, then the
+// shipped default. The env side must be null when unset (see env.mjs) or
+// config is never reached. An empty string in config is unset too, as it is
+// in the environment; 0 is a value.
+export function injectionSetting(envValue, configKey, fallback) {
+  const fromConfig = getConfig()[configKey];
+  return envValue ?? (fromConfig === '' ? null : fromConfig) ?? fallback;
 }
 
 export function getVaultPath() {

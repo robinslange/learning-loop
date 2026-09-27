@@ -11,14 +11,7 @@ import { warnOnce } from '../scripts/lib/warn-once.mjs';
 import { logError } from '../scripts/lib/log.mjs';
 import { safeLoad } from '../scripts/lib/safe-load.mjs';
 import { env } from '../scripts/lib/env.mjs';
-import {
-  resolvePluginData,
-  resolveVaultPath,
-  findEpisodicBinary,
-  home,
-  readStdin,
-  recordDetachedChild,
-} from './lib/common.mjs';
+import { findEpisodicBinary, readPayload, spawnDetached } from './lib/common.mjs';
 import { emitJson } from './lib/io.mjs';
 
 import { run as runCacheCleanup } from './session-start/cache-cleanup.mjs';
@@ -31,10 +24,12 @@ import {
 } from './session-start/context-assembly.mjs';
 import { run as runWatchDaemon } from './session-start/watch-daemon.mjs';
 import { maybeSpawnOtelExport } from './session-start/otel-export.mjs';
+import { getPluginData, getVaultPath } from '../scripts/lib/config.mjs';
+import { home } from '../scripts/lib/paths.mjs';
 
 const PLUGIN_DIR = resolve(import.meta.dirname, '..');
 
-const pluginData = resolvePluginData();
+const pluginData = getPluginData();
 const updateCacheFile = pluginData ? join(pluginData, 'update-check.json') : null;
 
 const ctx = {
@@ -43,12 +38,11 @@ const ctx = {
     safeLoad(`${PLUGIN_DIR}/.claude-plugin/plugin.json`, { fallback: { version: '0.0.0' } }).value
       ?.version || '0.0.0',
   pluginData,
-  vaultRoot: resolveVaultPath(),
+  vaultRoot: getVaultPath(),
   projectDir: env.CLAUDE_PROJECT_DIR,
-  memoryDir: `${home()}/.claude/projects`,
+  home: home(),
   // Resolve tmp the same way the canonical readers do: bare tmpdir()
-  // (scripts/lib/session.mjs:getSessionId and hooks/stop-nudge.js both use
-  // `const tmp = tmpdir()`). vault-snapshot.mjs writes learning-loop-session-id
+  // (scripts/lib/session.mjs:getSessionId uses tmpdir() too). vault-snapshot.mjs writes learning-loop-session-id
   // under ctx.tmp; that is read only by other hook subprocesses, which — like
   // this one — don't inherit the interactive shell's $TMPDIR, so all agree on
   // /tmp. (The /reflect marker handshake, whose reader IS the interactive
@@ -60,23 +54,11 @@ const ctx = {
   depsMissing: '',
   updateCacheFile,
   sessionId: null,
-  payloadSessionId: '',
+  // SessionStart payload: the harness writes { session_id, source, ... } on
+  // stdin. The payload id is the canonical session key (M4) — prefer it over
+  // $CLAUDE_CODE_SESSION_ID, which is absent in some hosts.
+  payload: (await readPayload('session-start')) ?? {},
 };
-
-// SessionStart payload: the harness writes { session_id, source, ... } on
-// stdin. The payload id is the canonical session key (M4) — prefer it over
-// $CLAUDE_CODE_SESSION_ID, which is absent in some hosts.
-try {
-  const raw = await readStdin();
-  if (raw.trim()) {
-    const payload = JSON.parse(raw);
-    if (payload && typeof payload.session_id === 'string') {
-      ctx.payloadSessionId = payload.session_id.trim();
-    }
-  }
-} catch (err) {
-  logError('session-start.payload', err);
-}
 
 // Order matters: cache-cleanup before update-check (uses cache parent).
 await runCacheCleanup(ctx);
@@ -98,13 +80,13 @@ maybeSpawnOtelExport(ctx);
 try {
   const epBin = findEpisodicBinary();
   if (epBin) {
-    const { spawn } = await import('node:child_process');
-    const child = spawn(epBin, ['search', '--vector', '--limit', '1', 'warmup'], {
-      detached: true,
-      stdio: 'ignore',
-    });
-    child.unref();
-    recordDetachedChild(child.pid);
+    spawnDetached('session-start.episodic-prewarm', epBin, [
+      'search',
+      '--vector',
+      '--limit',
+      '1',
+      'warmup',
+    ]);
   } else {
     warnOnce(
       'episodic-unavailable',

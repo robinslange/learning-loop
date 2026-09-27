@@ -28,20 +28,6 @@
         "model_quantized.onnx": "e9d8ebf845c413e981c175bfe49a3bfa9b3dcce2a3ba54875ee5df5a58639fbe",
         "tokenizer.json": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
       }
-    },
-    {
-      "id": "DeBERTa-v3-base-mnli-fever-anli",
-      "role": "NLI faithfulness classifier (build-time optional, `nli` cargo feature)",
-      "source": "https://huggingface.co/Xenova/DeBERTa-v3-base-mnli-fever-anli",
-      "revision": "main",
-      "license": "MIT",
-      "upstream": "MoritzLaurer/DeBERTa-v3-base-mnli-fever-anli (ONNX export by Xenova)",
-      "fetch": "build-time when `nli` feature enabled (currently disabled)",
-      "verified_in": "native/crates/ll-search/build.rs",
-      "artifacts": {
-        "model_quantized.onnx": "ab9da76bb06054ea6b921560c1ecf5683a9e4d96f0ea73d78d3b4a8990aea882",
-        "tokenizer.json": "a86f883318afa11c8c10466f1bf4efaeb6ded28a52cbe57217a8fa0d0a2a87df"
-      }
     }
   ]
 }

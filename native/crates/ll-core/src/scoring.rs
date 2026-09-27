@@ -256,10 +256,6 @@ pub fn try_fts_bm25_query(
     run_fts_query(conn, &or_escaped, limit, config).map_err(crate::Error::from)
 }
 
-/// Accumulate RRF scores for a ranked list of document paths.
-///
-/// Call once per retrieval system (e.g. vector, FTS, graph). Documents that
-/// appear in multiple lists accumulate scores from each.
 /// Per-lane fusion weights.
 ///
 /// Unweighted RRF gives every list the same vote, so a lane that knows nothing
@@ -277,10 +273,15 @@ pub fn try_fts_bm25_query(
 /// On that measurement these weights beat equal weighting 24 paired to 2.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FusionWeights {
+    /// Vector (embedding similarity) lane.
     pub vec: f64,
+    /// Lexical BM25/FTS lane.
     pub bm25: f64,
+    /// Personalized PageRank graph lane.
     pub ppr: f64,
+    /// Tag-expansion graph lane.
     pub tag: f64,
+    /// Rocchio pseudo-relevance feedback lane.
     pub prf: f64,
 }
 
@@ -290,13 +291,17 @@ impl Default for FusionWeights {
     }
 }
 
+/// Default weight of the vector lane.
 pub const VEC_WEIGHT: f64 = 1.0;
+/// Default weight of the BM25 lane.
 pub const BM25_WEIGHT: f64 = 1.0;
 /// Graph lanes vote at a twentieth of the retrieval lanes: statistically tied
 /// with the sweep's optimum (zero) on both splits, while still placing their
 /// candidates in the pool the reranker judges.
 pub const PPR_WEIGHT: f64 = 0.05;
+/// Default weight of the tag-expansion lane; see [`PPR_WEIGHT`].
 pub const TAG_WEIGHT: f64 = 0.05;
+/// Default weight of the PRF lane.
 pub const PRF_WEIGHT: f64 = 0.5;
 
 /// Add a ranked list to the fusion map, scaled by the lane's weight.
@@ -311,10 +316,12 @@ pub fn add_weighted_rrf<'a>(
     }
 }
 
+/// Accumulate unweighted RRF scores for a ranked list of document paths.
+///
+/// Call once per retrieval system (e.g. vector, FTS, graph). Documents that
+/// appear in multiple lists accumulate scores from each.
 pub fn add_ranked_rrf<'a>(rrf_scores: &mut HashMap<String, f64>, items: impl Iterator<Item = &'a str>) {
-    for (rank, path) in items.enumerate() {
-        *rrf_scores.entry(path.to_string()).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
-    }
+    add_weighted_rrf(rrf_scores, 1.0, items);
 }
 
 /// Sort and truncate an RRF score map to `top_n` results.

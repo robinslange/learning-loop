@@ -31,6 +31,7 @@ import { resolve, dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isMainModule } from './lib/is-main.mjs';
+import { hasFlag, flagValue, UsageError } from './lib/cli-args.mjs';
 import { parseFrontmatter } from './lib/markdown-parse.mjs';
 import { listVaultNotes } from './lib/vault-walk.mjs';
 import { stripReflectSid } from './strip-reflect-sid.mjs';
@@ -246,22 +247,14 @@ success, 1 if any file failed, 2 on usage error.
   // Non-zero only on a --scan-vault run: the other entry points are given an
   // explicit path list and have no vault to sweep for leaks.
   let abandonedStripped = 0;
-  if (args.includes('--scan-vault')) {
-    const root = args[args.indexOf('--scan-vault') + 1];
-    const sidIdx = args.indexOf('--sid');
-    const sid = sidIdx >= 0 ? args[sidIdx + 1] : '';
-    if (!root || root.startsWith('--')) {
-      process.stderr.write('--scan-vault requires a vault root path (got none or a flag)\n');
-      process.exit(2);
-    }
-    if (sidIdx >= 0 && (!sid || sid.startsWith('--'))) {
-      process.stderr.write('--sid requires a session id (got none or a flag)\n');
-      process.exit(2);
-    }
-    const scan = scanVaultCandidates(resolve(root), sid);
+  if (hasFlag(args, '--scan-vault')) {
+    const scan = scanVaultCandidates(
+      resolve(flagValue(args, '--scan-vault')),
+      flagValue(args, '--sid', ''),
+    );
     paths = scan.candidates;
     abandonedStripped = stripAbandonedStamps(scan.abandoned);
-  } else if (args.includes('--stdin')) {
+  } else if (hasFlag(args, '--stdin')) {
     paths = readStdinPaths();
   } else {
     paths = args.filter((a) => !a.startsWith('--'));
@@ -299,5 +292,9 @@ success, 1 if any file failed, 2 on usage error.
 }
 
 if (isMainModule(import.meta.url)) {
-  await main();
+  await main().catch((err) => {
+    if (!(err instanceof UsageError)) throw err;
+    process.stderr.write(`${err.message}\n`);
+    process.exit(2);
+  });
 }

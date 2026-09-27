@@ -1,0 +1,183 @@
+#!/usr/bin/env node
+// dedupe-window-replay.mjs — replay shadow-injection telemetry against candidate
+// dedupe windows and report what each would have suppressed.
+//
+// The JIT dedupe (session-label.js loadDedupeState) drops a note from the
+// payload when the same path was already injected inside DEDUPE_WINDOW_MS. The
+// window is per-session, so "what should it be" is answerable from the logs
+// alone: every gate-pass row carries session_id, ts, and the retrieved
+// top_path. Replaying those triples under a candidate window counts the repeats
+// it would have caught, without shipping anything.
+//
+// Reported metric is suppression VOLUME, not usefulness. A suppressed repeat is
+// a token saving with a known denominator; whether the freed budget buys a
+// better answer needs the judged-usefulness join, which is underpowered at
+// current n. Do not read these numbers as a quality claim.
+//
+// Usage:
+//   node bench/dedupe-window-replay.mjs
+//   node bench/dedupe-window-replay.mjs --windows 180,1800,14400
+//   node bench/dedupe-window-replay.mjs --json
+
+import { isMainModule } from '../plugin/scripts/lib/is-main.mjs';
+import { getPluginData } from '../plugin/scripts/lib/config.mjs';
+import { flagValue, hasFlag } from '../plugin/scripts/lib/cli-args.mjs';
+import { DATA_PATHS } from '../plugin/scripts/lib/paths.mjs';
+import { readJsonlDir } from '../plugin/scripts/lib/jsonl.mjs';
+
+const DEFAULT_WINDOWS_S = [180, 900, 1800, 3600, 14400, 86400];
+
+// Verbatim prompts from tests/session-label.test.mjs as of the 2026-07-28
+// telemetry-isolation fix. Rows written before that fix carry no `synthetic`
+// flag, so historical fixtures are only removable by exact prompt match.
+const FIXTURE_PROMPTS = new Set([
+  'just chatting about nothing specific',
+  'continue the mobile work please',
+  'test question about hooks and injection',
+  'fix the error in the mcp handler',
+  'refactor the GraphQL subscription auth layer',
+  'switch to the MCP server',
+  'continue with the plugin',
+  'can you check the GraphQL subscription config?',
+  'fix the widget-co build',
+  'keep working on the mobile ios build',
+  'continue with the hook work',
+  'obscure nonsense that will not match anything in any vault anywhere xyzzy',
+  'tell me about hook injection ordering and budgets',
+]);
+
+function isSyntheticRow(row) {
+  if (!row) return false;
+  if (row.synthetic === true || row.synthetic === 'true') return true;
+  return FIXTURE_PROMPTS.has((row.prompt || '').trim());
+}
+
+// Historical rows serialized `gate`/`backends`/`payload` via a Python-style
+// repr (single-quoted keys, True/False/None), so JSON.parse alone loses them.
+function parseEmbedded(value) {
+  if (value == null) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    try {
+      return JSON.parse(
+        String(value)
+          .replace(/'/g, '"')
+          .replace(/\bTrue\b/g, 'true')
+          .replace(/\bFalse\b/g, 'false')
+          .replace(/\bNone\b/g, 'null'),
+      );
+    } catch {
+      return {};
+    }
+  }
+}
+
+export function loadRows(dir) {
+  const rows = [];
+  for (const row of readJsonlDir(dir, 'shadow-injection-')) {
+    if (row.type !== 'gate-pass-payload' || isSyntheticRow(row)) continue;
+    const topPath = (parseEmbedded(row.backends).vault || {}).top_path;
+    const ts = Date.parse(row.ts);
+    if (!topPath || !Number.isFinite(ts)) continue;
+    rows.push({
+      ts,
+      sid: row.session_id || '',
+      path: topPath,
+      tokens: Number(parseEmbedded(row.payload).tokens_estimated) || 0,
+    });
+  }
+  rows.sort((a, b) => a.ts - b.ts);
+  return rows;
+}
+
+// A repeat is a (session, path) pair seen before. Under a window of W seconds
+// it is suppressed when the gap since that pair's previous injection is <= W.
+export function replay(rows, windowsS) {
+  const gaps = [];
+  const last = new Map();
+  for (const r of rows) {
+    const key = `${r.sid}\u0000${r.path}`;
+    const prev = last.get(key);
+    if (prev !== undefined) gaps.push({ gap: (r.ts - prev) / 1000, tokens: r.tokens });
+    last.set(key, r.ts);
+  }
+  const sortedGaps = gaps.map((g) => g.gap).sort((a, b) => a - b);
+  return {
+    injections: rows.length,
+    sessions: new Set(rows.map((r) => r.sid)).size,
+    repeats: gaps.length,
+    total_tokens: rows.reduce((n, r) => n + r.tokens, 0),
+    gap_percentiles: [10, 25, 50, 75, 90].map((p) => ({
+      p,
+      seconds: sortedGaps.length
+        ? Math.round(sortedGaps[Math.floor((sortedGaps.length * p) / 100)])
+        : 0,
+    })),
+    windows: windowsS.map((w) => {
+      const hit = gaps.filter((g) => g.gap <= w);
+      return {
+        window_s: w,
+        suppressed: hit.length,
+        pct_of_repeats: gaps.length ? (hit.length / gaps.length) * 100 : 0,
+        pct_of_injections: rows.length ? (hit.length / rows.length) * 100 : 0,
+        tokens_saved: hit.reduce((n, g) => n + g.tokens, 0),
+      };
+    }),
+  };
+}
+
+function formatWindow(s) {
+  if (s >= 3600) return `${s / 3600}h`;
+  return `${s / 60}min`;
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  const raw = flagValue(args, '--windows');
+  const windowsS = raw
+    ? raw
+        .split(',')
+        .map((s) => Number(s.trim()))
+        .filter((n) => Number.isFinite(n) && n > 0)
+    : DEFAULT_WINDOWS_S;
+
+  const pd = getPluginData();
+  if (!pd) {
+    console.error('CLAUDE_PLUGIN_DATA not set');
+    process.exit(1);
+  }
+  const rows = loadRows(DATA_PATHS.retrieval(pd));
+  if (!rows.length) {
+    console.error('dedupe-window-replay: no real gate-pass rows found');
+    process.exit(1);
+  }
+  const out = replay(rows, windowsS);
+
+  if (hasFlag(args, '--json')) {
+    console.log(JSON.stringify(out, null, 2));
+    return;
+  }
+
+  const repeatPct = ((out.repeats / out.injections) * 100).toFixed(1);
+  console.log(`real injections: ${out.injections} across ${out.sessions} sessions`);
+  console.log(`repeats (same session + same note): ${out.repeats} (${repeatPct}%)`);
+  console.log(
+    `gap percentiles (s): ${out.gap_percentiles.map((g) => `p${g.p}=${g.seconds}`).join('  ')}`,
+  );
+  console.log('');
+  console.log('window      suppressed  of repeats  of injections  tokens saved');
+  for (const w of out.windows) {
+    console.log(
+      `${formatWindow(w.window_s).padEnd(10)}  ${String(w.suppressed).padStart(10)}  ${w.pct_of_repeats.toFixed(1).padStart(9)}%  ${w.pct_of_injections.toFixed(1).padStart(12)}%  ${String(w.tokens_saved).padStart(12)}`,
+    );
+  }
+  console.log('');
+  console.log('Suppression volume only. Not a usefulness claim.');
+}
+
+// isMainModule realpaths both sides, so this survives a symlinked install as
+// well as a repo path holding spaces or non-ASCII. The concatenated `file://`
+// form failed both, and main() silently did not run.
+if (isMainModule(import.meta.url)) main();

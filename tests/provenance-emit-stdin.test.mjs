@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -133,6 +133,37 @@ test('stdin accepts several newline-separated events, the batching case', () => 
       events.map((e) => e.target),
       ['a.md', 'b.md', 'c.md'],
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('stdin accepts one pretty-printed event, not only one event per line', () => {
+  // /ingest pastes mapper acks and the synthesizer result into its heredoc,
+  // and an agent will happily pretty-print them. Split per line, every line
+  // of that payload failed to parse and the run record was silently lost.
+  const root = mkdtempSync(join(tmpdir(), 'll-prov-pretty-'));
+  try {
+    const home = join(root, 'home');
+    const data = join(root, 'data');
+    mkdirSync(home);
+    mkdirSync(data);
+    const run = {
+      agent: 'ingest',
+      skill: 'ingest',
+      action: 'ingest',
+      slug: 'foo-abcdef',
+      mapper_summary: [{ mapper: 'arch', ok: true }],
+    };
+    const result = spawnSync('node', [EMIT, '-'], {
+      input: JSON.stringify(run, null, 2),
+      env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, CLAUDE_PLUGIN_DATA: data },
+      encoding: 'utf-8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const events = readEvents(data);
+    assert.equal(events.length, 1);
+    assert.deepEqual(events[0].mapper_summary, run.mapper_summary);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

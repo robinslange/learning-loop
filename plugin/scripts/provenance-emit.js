@@ -39,20 +39,28 @@ function takeTextFlag(args) {
   };
 }
 
+// The payload is one event, possibly pretty-printed across lines, or several
+// one-line events (the batching case). Only when it fails to parse whole is it
+// read as one event per line.
+function parseEvents(payload) {
+  try {
+    return [JSON.parse(payload)];
+  } catch {
+    return payload
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => JSON.parse(l));
+  }
+}
+
 try {
   const { args, field, value } = takeTextFlag(argv);
   const arg = args[0];
   if (!arg) process.exit(0);
   const payload = arg === '-' ? readFileSync(0, 'utf-8') : arg;
 
-  // Stdin may carry several newline-separated events (the batching case).
-  const lines = payload
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean);
-
-  for (const line of lines) {
-    const event = JSON.parse(line);
+  for (const event of parseEvents(payload)) {
     if (field && value !== null) event[field] = value;
     emitProvenance(event);
   }

@@ -395,6 +395,7 @@ pub fn migrate_embeddings(
         total,
         // Migration path: no walk happened, so no ids were resolved.
         duplicate_ids: Vec::new(),
+        refused_ids: Vec::new(),
     }
 }
 

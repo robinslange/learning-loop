@@ -1,36 +1,39 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomBytes } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  loadCitationIndex,
+  updateCitationIndex,
+} from '../../plugin/scripts/lib/sources/citation-index.mjs';
 
-const runId = randomBytes(8).toString('hex');
-const TEMP_ROOT = join(tmpdir(), `ll-citation-index-${runId}`);
+const MODULE = resolve(
+  fileURLToPath(import.meta.url),
+  '../../../plugin/scripts/lib/sources/citation-index.mjs',
+);
+const PLUGIN_ROOT = resolve(MODULE, '../../../..');
 
 describe('citation-index', () => {
-  before(() => {
-    mkdirSync(TEMP_ROOT, { recursive: true });
-    process.env.CLAUDE_PLUGIN_DATA = TEMP_ROOT;
+  let pd;
+
+  beforeEach(() => {
+    pd = mkdtempSync(join(tmpdir(), 'll-citation-index-'));
+    process.env.CLAUDE_PLUGIN_DATA = pd;
   });
 
-  after(() => {
+  afterEach(() => {
     delete process.env.CLAUDE_PLUGIN_DATA;
-    rmSync(TEMP_ROOT, { recursive: true, force: true });
+    rmSync(pd, { recursive: true, force: true });
   });
 
-  it('loadCitationIndex returns {} when no file exists', async () => {
-    const { loadCitationIndex } = await import(
-      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${runId}`
-    );
-    const index = loadCitationIndex();
-    assert.deepEqual(index, {});
+  it('loadCitationIndex returns {} when no file exists', () => {
+    assert.deepEqual(loadCitationIndex(), {});
   });
 
   it('updateCitationIndex creates entry and adds noteFilename', async () => {
-    const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${runId}2`
-    );
     await updateCitationIndex(
       '12345678',
       { authors: ['Smith A'], title: 'Test', year: 2020 },
@@ -42,30 +45,56 @@ describe('citation-index', () => {
   });
 
   it('5 parallel updateCitationIndex calls all persist', async () => {
-    const bust = runId + 'parallel';
-    const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${bust}`
-    );
     const metadata = { authors: ['Jones B'], title: 'Parallel Test', year: 2021 };
-    const promises = Array.from({ length: 5 }, (_, i) =>
-      updateCitationIndex('99999999', metadata, `note${i}.md`),
+    await Promise.all(
+      Array.from({ length: 5 }, (_, i) => updateCitationIndex('99999999', metadata, `note${i}.md`)),
     );
-    await Promise.all(promises);
-    const index = loadCitationIndex();
-    assert.ok(index['pmid:99999999']);
-    assert.equal(index['pmid:99999999'].cited_in.length, 5, 'all 5 notes should be recorded');
+    assert.equal(loadCitationIndex()['pmid:99999999'].cited_in.length, 5);
   });
 
   it('duplicate noteFilename not added twice', async () => {
-    const bust = runId + 'dedup';
-    const { updateCitationIndex, loadCitationIndex } = await import(
-      `../../plugin/scripts/lib/sources/citation-index.mjs?bust=${bust}`
-    );
     const metadata = { authors: ['Lee C'], title: 'Dedup Test', year: 2022 };
     await updateCitationIndex('55555555', metadata, 'same-note.md');
     await updateCitationIndex('55555555', metadata, 'same-note.md');
-    const index = loadCitationIndex();
-    const cited = index['pmid:55555555'].cited_in;
+    const cited = loadCitationIndex()['pmid:55555555'].cited_in;
     assert.equal(cited.filter((n) => n === 'same-note.md').length, 1);
+  });
+
+  it('resolves the plugin data dir on each call, not at import', async () => {
+    await updateCitationIndex('11111111', { title: 'A' }, 'a.md');
+    assert.ok(existsSync(join(pd, 'data', 'citation-index.json')));
+
+    const other = mkdtempSync(join(tmpdir(), 'll-citation-index-other-'));
+    try {
+      process.env.CLAUDE_PLUGIN_DATA = other;
+      assert.deepEqual(loadCitationIndex(), {});
+      await updateCitationIndex('22222222', { title: 'B' }, 'b.md');
+      assert.deepEqual(Object.keys(loadCitationIndex()), ['pmid:22222222']);
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  it('writes nothing, anywhere, when no plugin data dir resolves', () => {
+    const home = mkdtempSync(join(tmpdir(), 'll-citation-index-home-'));
+    try {
+      const script = `
+        const m = await import(${JSON.stringify(pathToFileURL(MODULE).href)});
+        await m.updateCitationIndex('33333333', { title: 'C' }, 'c.md');
+        console.log(JSON.stringify(m.loadCitationIndex()));
+      `;
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
+        env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home },
+        encoding: 'utf8',
+      });
+      assert.equal(r.status, 0, r.stderr);
+      assert.equal(r.stdout.trim(), '{}');
+      assert.ok(
+        !existsSync(join(PLUGIN_ROOT, 'data')),
+        'must not write into the plugin install dir',
+      );
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

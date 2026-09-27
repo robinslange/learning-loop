@@ -66,15 +66,20 @@ const highSeverity = (result) =>
 
 describe('verifyNote grades a bare author-year mention by what it asserts', () => {
   let originalFetch;
+  let originalPluginData;
   let dir;
 
   beforeEach(() => {
     originalFetch = globalThis.fetch;
+    originalPluginData = process.env.CLAUDE_PLUGIN_DATA;
     dir = mkdtempSync(join(tmpdir(), 'll-bare-citation-'));
+    process.env.CLAUDE_PLUGIN_DATA = join(dir, 'plugin-data');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    if (originalPluginData === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
+    else process.env.CLAUDE_PLUGIN_DATA = originalPluginData;
     rmSync(dir, { recursive: true, force: true });
   });
 

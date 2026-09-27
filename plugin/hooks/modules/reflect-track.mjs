@@ -37,8 +37,10 @@
 import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getSessionId, resolvePluginData, vaultRelPath } from '../lib/common.mjs';
+import { vaultRelPath } from '../lib/common.mjs';
 import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
+import { getSessionId } from '../../scripts/lib/session.mjs';
+import { getPluginData } from '../../scripts/lib/config.mjs';
 
 // Mirror the exact path expansion used by skills/reflect/SKILL.md Step 4.
 // Any drift here silently breaks the handshake: the hook would write to
@@ -62,13 +64,13 @@ import { DATA_PATHS } from '../../scripts/lib/paths.mjs';
 // for tests/direct callers; getSessionId() returns the 'unknown' sentinel
 // outside a Claude Code session.
 export function reflectScratchDir() {
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   return pd ? DATA_PATHS.reflectScratch(pd) : tmpdir();
 }
 
 export function reflectNewNotesPath(sessionId) {
   const sid = sessionId || getSessionId();
-  const pd = resolvePluginData();
+  const pd = getPluginData();
   const stem = pd ? DATA_PATHS.reflectPrefix(pd, sid) : join(tmpdir(), `ll-${sid}-reflect`);
   return `${stem}-new-notes.txt`;
 }

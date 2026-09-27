@@ -33,11 +33,11 @@ const DEFAULT_DELAY_MS = 20;
 // than a few hundred ms; one minute is a deliberately conservative floor.
 const DEFAULT_STALE_MS = 60_000;
 
-// SharedArrayBuffer-backed sync sleep — same pattern as hooks/lib/snapshot.mjs.
-// Atomics.wait suspends the thread without spinning; works in any Node context
-// that has SharedArrayBuffer available (Node 22+ always does).
+// SharedArrayBuffer-backed sync sleep. Atomics.wait suspends the thread without
+// spinning; works in any Node context that has SharedArrayBuffer available
+// (Node 22+ always does).
 const _sleepBuf = new Int32Array(new SharedArrayBuffer(4));
-function syncSleep(ms) {
+export function syncSleep(ms) {
   if (ms > 0) Atomics.wait(_sleepBuf, 0, 0, ms);
 }
 
@@ -75,7 +75,7 @@ export function isProcessAlive(pid) {
 // logged-and-swallowed the way releaseLock treats the same codes. The two
 // are not the same situation: releaseLock runs after the critical section
 // has already completed, with no one left to hand a failure to but a log
-// line. removeLock runs mid-acquire, with acquireLock/withLock/tryBump still
+// line. removeLock runs mid-acquire, with acquireLock/withLock still
 // on the stack and a real decision to make (retry? give up? fail closed?) —
 // swallowing the error here would let them retry blind against a lockfile
 // whose state is now unknown, or report success when nothing was reclaimed.

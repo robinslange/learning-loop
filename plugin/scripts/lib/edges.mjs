@@ -1,8 +1,9 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync, statSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync, statSync } from 'fs';
 import { dirname } from 'path';
 import { initSQL } from './sqljs.mjs';
 import { acquireLock as _acquireFileLock, releaseLock as _releaseFileLock } from './file-lock.mjs';
 import { logError } from './log.mjs';
+import { writeFileAtomic } from './write-atomic.mjs';
 
 // Path-keyed lock wrapper. Preserves the existing acquireLock(dbPath) /
 // releaseLock(dbPath) public contract used by edge-infer.mjs and edges-cli.mjs
@@ -160,6 +161,21 @@ export function removeEdgesByNote(db, notePath) {
 
 export function removeOutgoingEdges(db, notePath) {
   db.run("DELETE FROM edges WHERE from_path = ? AND source_graph != 'archived'", [notePath]);
+}
+
+// Marks a note's outgoing edges source_graph='archived' rather than deleting
+// them: a supersedeNoteFile-driven retirement leaves the note in place, so
+// its edges should stop counting as live justification (getDownstream /
+// getSoleJustificationDependents exclude 'archived') without losing the
+// history getSoleJustificationDependentsSymmetric still traces. Mirrors
+// removeOutgoingEdges' don't-touch-already-special-rows filter, widened to
+// also skip nli/comention rows (an advisory or breadth-only edge should not
+// be relabelled archived just because its source note was retired).
+export function archiveOutgoingEdges(db, notePath) {
+  db.run(
+    "UPDATE edges SET source_graph = 'archived' WHERE from_path = ? AND source_graph NOT IN ('archived', 'nli', 'comention')",
+    [notePath],
+  );
 }
 
 function rowsToObjects(result) {
@@ -483,9 +499,7 @@ export async function loadSupersessionsCached(dbPath) {
     db = await openEdgeDb(dbPath);
     const rows = rowsToObjects(db.exec('SELECT * FROM supersessions'));
     try {
-      const tmp = `${sidecar}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(rows));
-      renameSync(tmp, sidecar);
+      writeFileAtomic(sidecar, JSON.stringify(rows));
     } catch (err) {
       logError('edges.loadSupersessionsCached.write', err);
     }
@@ -501,7 +515,5 @@ export function saveDb(db, dbPath) {
   // Full-image rewrite on every vault write: a crash mid-write must not
   // corrupt the whole justification graph. Write-then-rename is atomic on
   // the same filesystem.
-  const tmp = `${dbPath}.${process.pid}.tmp`;
-  writeFileSync(tmp, Buffer.from(data));
-  renameSync(tmp, dbPath);
+  writeFileAtomic(dbPath, Buffer.from(data));
 }

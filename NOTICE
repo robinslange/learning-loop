@@ -32,12 +32,6 @@ licenses, and integrity hashes are recorded in:
 - bge-small-en-v1.5 (embeddings, downloaded at runtime) — MIT
 - ms-marco-MiniLM-L-6-v2 (reranker, embedded at build time) — Apache-2.0
 
-A third is referenced by the build but is NOT fetched by any shipped build:
-its `nli` cargo feature has been removed. Attribution is retained because the
-build script still carries its URLs and hashes.
-
-- DeBERTa-v3-base-mnli-fever-anli (NLI, behind a removed build feature) — MIT
-
 ONNX Runtime
 ------------
 The search binary loads the ONNX Runtime native library dynamically at runtime

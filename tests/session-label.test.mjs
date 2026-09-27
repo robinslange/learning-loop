@@ -1,6 +1,5 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
 import {
   writeFileSync,
   readFileSync,
@@ -14,58 +13,37 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { skipOnWindows } from './helpers/platform.mjs';
+import { runHook } from './helpers/hook-runner.mjs';
+import { composeLabel, topicPatterns } from '../plugin/hooks/session-label.js';
 
 const HOOK = join(import.meta.dirname, '..', 'plugin', 'hooks', 'session-label.js');
 // mkdtemp, not a fixed name: parallel test runs sharing one dir flake when
-// one run's after() rmSync deletes another run's live transcripts.
+// one run's after() rmSync deletes another run's live transcripts. It is also
+// the hook's TMPDIR, so label files land here instead of the shared OS tmp.
 const TMP = mkdtempSync(join(tmpdir(), 'session-label-test-'));
+after(() => rmSync(TMP, { recursive: true, force: true }));
 
-// Every hook run logs a shadow-injection record to CLAUDE_PLUGIN_DATA. Leaving
-// it unset does NOT mean "no telemetry": getPluginData falls through to the
-// ~/.claude/plugins/data/.ll-data-path marker, which points at the developer's
-// real install. Test prompts then land in the production stream carrying no
-// mark that distinguishes them from real traffic, and the injection gate is
-// calibrated on the mixture.
-const SANDBOX = mkdtempSync(join(tmpdir(), 'session-label-data-'));
-
-// The single spawn seam for this file. CLAUDE_PLUGIN_DATA is applied AFTER the
-// caller's env so an ambient value can never win, and it is a named option
-// rather than an env key so "use my own plugin-data dir" is a deliberate
-// argument instead of something a `...process.env` spread does by accident.
-// Sandbox paths live under tmpdir(), which isTransientPath excludes from the
-// marker file, so tests cannot stomp the real install's saved path either.
-function hookEnv({ env = {}, pluginData = SANDBOX } = {}) {
-  return {
-    ...process.env,
-    // The impact gate would drop most fixture prompts before retrieval. These
-    // tests exercise dedupe, scrubbing and telemetry, not the gate, so pin the
-    // floor off here and let the impact-gate tests own that behaviour. Placed
-    // before ...env so a caller can still override it.
-    LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
-    ...env,
-    CLAUDE_PLUGIN_DATA: pluginData,
-  };
+// Every spawn goes through hook-runner: a minimal env with a fresh HOME and
+// CLAUDE_PLUGIN_DATA per call, so nothing the developer's shell exports
+// (VAULT_PATH, LEARNING_LOOP_*) reaches the hook unless a case passes it here.
+// The impact gate would drop most fixture prompts before retrieval. These
+// tests exercise dedupe, scrubbing and telemetry, not the gate, so the floor
+// is pinned off unless a case overrides it.
+function hook(stdin, { env, seed, timeoutMs } = {}) {
+  const r = runHook(HOOK, {
+    stdin,
+    seed,
+    timeoutMs,
+    env: { TMPDIR: TMP, LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0', ...env },
+  });
+  r.cleanup();
+  assert.equal(r.exitCode, 0, `hook exited ${r.exitCode}: ${r.stderr}`);
+  return r;
 }
 
-function runHook({ env, pluginData, ...opts } = {}) {
-  return execFileSync('node', [HOOK], {
-    encoding: 'utf-8',
-    timeout: 5000,
-    ...opts,
-    env: hookEnv({ env, pluginData }),
-  });
-}
-
-// spawnSync variant for the tests that need exit status and stderr rather than
-// stdout. Same env discipline; a second spawn primitive is exactly how the
-// first leak survived review.
-function spawnHook({ env, pluginData, ...opts } = {}) {
-  return spawnSync('node', [HOOK], {
-    encoding: 'utf-8',
-    timeout: 5000,
-    ...opts,
-    env: hookEnv({ env, pluginData }),
-  });
+function labelOf(sessionId) {
+  const labelFile = join(TMP, `claude-session-label-${sessionId}.txt`);
+  return existsSync(labelFile) ? readFileSync(labelFile, 'utf8') : null;
 }
 
 function makeTranscript(userMessages) {
@@ -74,50 +52,143 @@ function makeTranscript(userMessages) {
     .join('\n');
 }
 
-function run(sessionId, prompt, transcriptPath, cwd = '/tmp') {
-  const input = JSON.stringify({
-    session_id: sessionId,
-    prompt,
-    transcript_path: transcriptPath,
-    cwd,
-  });
-  runHook({ input });
-  const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
-  if (existsSync(labelFile)) return readFileSync(labelFile, 'utf8');
-  return null;
+function run(sessionId, prompt, transcriptPath, cwd = '/tmp', env = {}) {
+  hook({ session_id: sessionId, prompt, transcript_path: transcriptPath, cwd }, { env });
+  return labelOf(sessionId);
 }
 
-function runWithVault(sessionId, prompt, transcriptPath, vaultPath) {
-  const input = JSON.stringify({
-    session_id: sessionId,
-    prompt,
-    transcript_path: transcriptPath,
-    cwd: '/tmp',
-  });
-  runHook({ input, env: { VAULT_PATH: vaultPath } });
-  const labelFile = join(tmpdir(), `claude-session-label-${sessionId}.txt`);
-  return existsSync(labelFile) ? readFileSync(labelFile, 'utf8') : null;
+// Messages oldest first, current prompt last, as the hook passes them.
+function label(messages, { labelTopics = [], projectSlugs = [], cwd = '/tmp' } = {}) {
+  return composeLabel(messages, topicPatterns(labelTopics, projectSlugs), cwd);
 }
+
+describe('composeLabel', () => {
+  it('produces a label for a clear topic', () => {
+    const l = label([
+      'I need to fix the GraphQL subscriptions',
+      'the websocket keeps dropping',
+      'can you check the GraphQL subscription config?',
+    ]);
+    assert.ok(/GraphQL|GQL/.test(l), `label should mention GraphQL, got: ${l}`);
+  });
+
+  it('falls back to cwd basename when no patterns match', () => {
+    const l = label(['what is the weather like today', 'just chatting about nothing specific'], {
+      cwd: '/Users/robin/myproject',
+    });
+    assert.equal(l, 'myproject');
+  });
+
+  it('detects action patterns like debug', () => {
+    const l = label([
+      'I need to debug the failing tests in the MCP server',
+      'fix the error in the mcp handler',
+    ]);
+    assert.ok(l.includes('MCP'), `label should mention MCP, got: ${l}`);
+    assert.ok(l.includes('debugging'), `label should mention debugging, got: ${l}`);
+  });
+
+  it('detects review action', () => {
+    const l = label(['review this PR for the auth flow', 'review the changes']);
+    assert.ok(l.includes('auth'), `expected auth, got: ${l}`);
+    assert.ok(l.includes('review'), `expected review, got: ${l}`);
+  });
+
+  it('truncates labels longer than 35 characters', () => {
+    const l = label([
+      'refactor the GraphQL subscriptions in the frontend component',
+      'also review the authentication flow',
+      'refactor the GraphQL subscription auth layer',
+    ]);
+    assert.ok(l.length <= 35, `label should be <= 35 chars, got ${l.length}: "${l}"`);
+    assert.ok(l.endsWith('…'), `a cut label ends in an ellipsis, got: "${l}"`);
+  });
+
+  it('current prompt scores higher than a single old message', () => {
+    const l = label(['working on the vault notes', 'switch to the MCP server']);
+    assert.ok(l.startsWith('MCP'), `current prompt topic should rank first, got: ${l}`);
+  });
+
+  it('derives an instance topic from a 4-projects/ slug', () => {
+    const l = label(['fix the widget-co build'], { projectSlugs: ['widget-co'] });
+    assert.ok(/widget[\s-]co/i.test(l), `expected widget-co topic, got: ${l}`);
+  });
+
+  it('ranks an instance project above a built-in topic matching the same words', () => {
+    const l = label(['fix the graphql-api schema'], { projectSlugs: ['graphql-api'] });
+    assert.ok(l.startsWith('Graphql Api GraphQL'), `instance topic should rank first, got: ${l}`);
+  });
+
+  it('loads owner topic patterns from config label_topics', () => {
+    const l = label(['fix the kayak roll technique please'], {
+      labelTopics: [{ match: '\\bkayak\\b', label: 'kayaking' }],
+    });
+    assert.ok(l.includes('kayaking'), `config label_topics should drive label, got: ${l}`);
+  });
+
+  it('skips a label_topics entry with an empty label', () => {
+    const l = label(['the graphql thing', 'kayak review'], {
+      labelTopics: [{ match: '\\bkayak\\b', label: '' }],
+    });
+    assert.equal(l, 'GraphQL review');
+  });
+
+  it('skips an invalid label_topics regex and keeps its valid siblings', () => {
+    const l = label(['fix the kayak roll technique please'], {
+      labelTopics: [
+        { match: '([', label: 'broken' },
+        { match: '\\bkayak\\b', label: 'kayaking' },
+        'not-an-object',
+      ],
+    });
+    assert.ok(l.includes('kayaking'), `valid patterns must survive a bad sibling, got: ${l}`);
+  });
+});
 
 describe('session-label', () => {
-  before(() => {
-    mkdirSync(TMP, { recursive: true });
-  });
-
-  after(() => {
-    rmSync(TMP, { recursive: true, force: true });
-  });
-
-  it('produces a label for a clear topic', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript(['I need to fix the GraphQL subscriptions', 'the websocket keeps dropping']),
+  // Owner-specific life/project patterns belong in the instance config
+  // (label_topics), never in the public source.
+  it('source carries no personal topic patterns', () => {
+    assert.doesNotMatch(
+      readFileSync(HOOK, 'utf8'),
+      /eczema|\\btsw\\b|dermat|nootropic|supplement|autis|audhd|neurodiv|circadian|melatonin|grid.bot|trading|coaching|resto.druid|mythic|\\bwow\\b|kin-\\d|oh.my.claude/i,
     );
-    const label = run(sid, 'can you check the GraphQL subscription config?', transcript);
-    assert.ok(label, 'label file should exist');
-    assert.ok(/GraphQL|GQL/.test(label), `label should mention GraphQL, got: ${label}`);
+  });
+
+  it('reads label_topics from config.json', () => {
+    const sid = randomUUID();
+    hook(
+      {
+        session_id: sid,
+        prompt: 'fix the kayak roll technique please',
+        transcript_path: '',
+        cwd: '/tmp',
+      },
+      {
+        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
+        seed: (pluginData) =>
+          writeFileSync(
+            join(pluginData, 'config.json'),
+            JSON.stringify({ label_topics: [{ match: '\\bkayak\\b', label: 'kayaking' }] }),
+          ),
+      },
+    );
+    assert.ok(labelOf(sid)?.includes('kayaking'), `got: ${labelOf(sid)}`);
+  });
+
+  it('reads project slugs from the vault 4-projects/ folder', () => {
+    const vault = mkdtempSync(join(tmpdir(), 'll-label-vault-'));
+    try {
+      mkdirSync(join(vault, '4-projects'), { recursive: true });
+      writeFileSync(join(vault, '4-projects', 'widget-co.md'), '# widget-co');
+      const sid = randomUUID();
+      const l = run(sid, 'fix the widget-co build', '/nonexistent.jsonl', '/tmp', {
+        VAULT_PATH: vault,
+      });
+      assert.ok(l && /widget[\s-]co/i.test(l), `expected widget-co topic, got: ${l}`);
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+    }
   });
 
   it('handles empty transcript', () => {
@@ -126,42 +197,6 @@ describe('session-label', () => {
     writeFileSync(transcript, '');
     const label = run(sid, 'hello', transcript);
     assert.ok(label !== null, 'label file should exist');
-  });
-
-  it('falls back to cwd basename when no patterns match', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['what is the weather like today']));
-    const label = run(
-      sid,
-      'just chatting about nothing specific',
-      transcript,
-      '/Users/robin/myproject',
-    );
-    assert.ok(label !== null, 'label file should exist');
-    assert.equal(label, 'myproject');
-  });
-
-  it('detects action patterns like debug', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript(['I need to debug the failing tests in the MCP server']),
-    );
-    const label = run(sid, 'fix the error in the mcp handler', transcript);
-    assert.ok(label, 'label file should exist');
-    assert.ok(label.includes('MCP'), `label should mention MCP, got: ${label}`);
-    assert.ok(label.includes('debugging'), `label should mention debugging, got: ${label}`);
-  });
-
-  it('detects review action', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['review this PR for the auth flow']));
-    const label = run(sid, 'review the changes', transcript);
-    assert.ok(label.includes('auth'), `expected auth, got: ${label}`);
-    assert.ok(label.includes('review'), `expected review, got: ${label}`);
   });
 
   it('does not crash on malformed transcript lines', () => {
@@ -182,28 +217,24 @@ describe('session-label', () => {
   });
 
   // Regression: when the transcript's final line exceeds the 256KB tail
-  // window, readFileTail returns '' (no newline inside the window). The parse
-  // loop must skip empty lines instead of JSON.parse('') failing and logging
-  // a parseTranscriptLine error on EVERY prompt.
+  // window, the tail holds no whole line. The parse loop must not be handed
+  // an empty one and log a parseTranscriptLine error on EVERY prompt.
   it('does not log a parse error when the final transcript line exceeds the tail window', () => {
     const sid = randomUUID();
     const transcript = join(TMP, `${sid}.jsonl`);
     const giant = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(300_000) } });
     writeFileSync(transcript, makeTranscript(['fix the hooks please']) + '\n' + giant);
-    const input = JSON.stringify({
+    const result = hook({
       session_id: sid,
       prompt: 'continue with the hook work',
       transcript_path: transcript,
       cwd: '/tmp',
     });
-    const result = spawnHook({ input });
-    assert.equal(result.status, 0, `hook exited ${result.status}: ${result.stderr}`);
     assert.ok(
       !result.stderr.includes('parseTranscriptLine'),
       `empty tail must not be parsed as a transcript line; stderr:\n${result.stderr}`,
     );
-    const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
-    assert.ok(existsSync(labelFile), 'label file should still be written from the prompt alone');
+    assert.ok(labelOf(sid) !== null, 'label file should still be written from the prompt alone');
   });
 
   it('does not crash when transcript file is missing', () => {
@@ -213,28 +244,14 @@ describe('session-label', () => {
     assert.ok(label.includes('frontend'), `expected frontend, got: ${label}`);
   });
 
-  it('truncates labels longer than 35 characters', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(
-      transcript,
-      makeTranscript([
-        'refactor the GraphQL subscriptions in the frontend component',
-        'also review the authentication flow',
-      ]),
-    );
-    const label = run(sid, 'refactor the GraphQL subscription auth layer', transcript);
-    assert.ok(label.length <= 35, `label should be <= 35 chars, got ${label.length}: "${label}"`);
-  });
-
   it('exits cleanly with empty stdin', () => {
-    const result = runHook({ input: '' });
-    assert.equal(result.trim(), '');
+    const { stdout } = hook('');
+    assert.equal(stdout.trim(), '');
   });
 
   it('exits cleanly with no session_id', () => {
-    const result = runHook({ input: JSON.stringify({ prompt: 'hello' }) });
-    assert.equal(result.trim(), '');
+    const { stdout } = hook({ prompt: 'hello' });
+    assert.equal(stdout.trim(), '');
   });
 
   it('handles array content blocks in transcript', () => {
@@ -250,24 +267,6 @@ describe('session-label', () => {
     const label = run(sid, 'ship it', transcript);
     assert.ok(label.includes('infra'), `expected infra, got: ${label}`);
     assert.ok(label.includes('deploying'), `expected deploying, got: ${label}`);
-  });
-
-  it('current prompt scores higher than a single old message', () => {
-    const sid = randomUUID();
-    const transcript = join(TMP, `${sid}.jsonl`);
-    writeFileSync(transcript, makeTranscript(['working on the vault notes']));
-    const label = run(sid, 'switch to the MCP server', transcript);
-    assert.ok(label.startsWith('MCP'), `current prompt topic should rank first, got: ${label}`);
-  });
-
-  it('derives an instance topic from a 4-projects/ slug', () => {
-    const vault = mkdtempSync(join(tmpdir(), 'll-label-vault-'));
-    mkdirSync(join(vault, '4-projects'), { recursive: true });
-    writeFileSync(join(vault, '4-projects', 'widget-co.md'), '# widget-co');
-    const sid = randomUUID();
-    const label = runWithVault(sid, 'fix the widget-co build', '/nonexistent.jsonl', vault);
-    assert.ok(label && /widget[\s-]co/i.test(label), `expected widget-co topic, got: ${label}`);
-    rmSync(vault, { recursive: true, force: true });
   });
 
   // Regression: the hook must read only the transcript TAIL
@@ -294,127 +293,64 @@ describe('session-label', () => {
       `content outside the tail window must not score topics, got: ${label}`,
     );
   });
-
-  it('source carries no hardcoded instance-name topic patterns', () => {
-    const src = readFileSync(HOOK, 'utf8');
-    assert.match(
-      src,
-      /4-projects|listProjectSlugs|readVaultProjectIndexSync/,
-      'instance-topic derivation from 4-projects/ missing',
-    );
-    assert.match(
-      src,
-      /allTopicPatterns\s*=\s*\[\s*\.\.\.instanceTopicPatterns\(\)/,
-      'instance patterns must be spread first into allTopicPatterns',
-    );
-    // Owner-specific life/project patterns belong in the instance config
-    // (label_topics), never in the public source.
-    assert.doesNotMatch(
-      src,
-      /eczema|\\btsw\\b|dermat|nootropic|supplement|autis|audhd|neurodiv|circadian|melatonin|grid.bot|trading|coaching|resto.druid|mythic|\\bwow\\b|kin-\\d|oh.my.claude/i,
-      'personal topic patterns must live in instance config (label_topics), not source',
-    );
-  });
-
-  it('loads owner topic patterns from config label_topics', () => {
-    const base = mkdtempSync(join(tmpdir(), 'll-label-config-'));
-    try {
-      const pluginData = join(base, 'plugin-data');
-      mkdirSync(pluginData, { recursive: true });
-      writeFileSync(
-        join(pluginData, 'config.json'),
-        JSON.stringify({
-          label_topics: [{ match: '\\bkayak\\b', label: 'kayaking' }],
-        }),
-      );
-      const sid = randomUUID();
-      runHook({
-        input: JSON.stringify({
-          session_id: sid,
-          prompt: 'fix the kayak roll technique please',
-          transcript_path: '',
-          cwd: '/tmp',
-        }),
-        pluginData,
-        env: { LEARNING_LOOP_INJECTION_MODE: 'off' },
-      });
-      const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
-      assert.ok(existsSync(labelFile), 'label file should exist');
-      const label = readFileSync(labelFile, 'utf8');
-      assert.ok(
-        label.includes('kayaking'),
-        `config label_topics should drive label, got: ${label}`,
-      );
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
-  });
-
-  it('an invalid label_topics regex is skipped without crashing the hook', () => {
-    const base = mkdtempSync(join(tmpdir(), 'll-label-badcfg-'));
-    try {
-      const pluginData = join(base, 'plugin-data');
-      mkdirSync(pluginData, { recursive: true });
-      writeFileSync(
-        join(pluginData, 'config.json'),
-        JSON.stringify({
-          label_topics: [
-            { match: '([', label: 'broken' },
-            { match: '\\bkayak\\b', label: 'kayaking' },
-            'not-an-object',
-          ],
-        }),
-      );
-      const sid = randomUUID();
-      const result = spawnSync('node', [HOOK], {
-        input: JSON.stringify({
-          session_id: sid,
-          prompt: 'fix the kayak roll technique please',
-          transcript_path: '',
-          cwd: '/tmp',
-        }),
-        encoding: 'utf-8',
-        timeout: 5000,
-        env: {
-          ...process.env,
-          LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
-          CLAUDE_PLUGIN_DATA: pluginData,
-          LEARNING_LOOP_INJECTION_MODE: 'off',
-        },
-      });
-      assert.equal(result.status, 0, `hook exited ${result.status}: ${result.stderr}`);
-      const labelFile = join(tmpdir(), `claude-session-label-${sid}.txt`);
-      assert.ok(existsSync(labelFile), 'label file should exist despite the bad pattern');
-      const label = readFileSync(labelFile, 'utf8');
-      assert.ok(
-        label.includes('kayaking'),
-        `valid patterns must survive a bad sibling, got: ${label}`,
-      );
-    } finally {
-      rmSync(base, { recursive: true, force: true });
-    }
-  });
 });
 
 describe('session-label stdout contract', () => {
   function runCapturingStdout(env, prompt = 'test question about hooks and injection') {
-    const input = JSON.stringify({
-      session_id: randomUUID(),
-      prompt,
-      transcript_path: '',
-      cwd: '/tmp',
-    });
-    return runHook({ input, env });
+    return hook({ session_id: randomUUID(), prompt, transcript_path: '', cwd: '/tmp' }, { env })
+      .stdout;
   }
 
-  it('produces empty stdout in shadow mode', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'shadow' });
-    assert.equal(out, '');
+  // A vault with one note and a stub ll-search returning an above-threshold
+  // hit on it, so the live control below injects. Without it every mode would
+  // stop at gate-fail-no-vault and print nothing, and the mode tests would
+  // pass whatever the mode did.
+  function runWithHit(env) {
+    const base = mkdtempSync(join(tmpdir(), 'll-stdout-contract-'));
+    try {
+      const vault = join(base, 'vault');
+      const pluginData = join(base, 'plugin-data');
+      mkdirSync(join(vault, 'notes'), { recursive: true });
+      mkdirSync(join(pluginData, 'bin'), { recursive: true });
+      writeFileSync(
+        join(vault, 'notes', 'hook-injection.md'),
+        'Hooks inject the top note body before the prompt.\n',
+      );
+      const hit = JSON.stringify([
+        { path: 'notes/hook-injection.md', title: 'hook-injection', score: 0.99 },
+      ]);
+      writeFileSync(join(pluginData, 'bin', 'll-search'), `#!/bin/sh\nprintf '%s' '${hit}'\n`, {
+        mode: 0o755,
+      });
+      return runCapturingStdout({
+        TMPDIR: base,
+        CLAUDE_PLUGIN_DATA: pluginData,
+        VAULT_PATH: vault,
+        LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+        LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+        ...env,
+      });
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  }
+
+  const stub = {
+    skip: skipOnWindows(
+      'shebang stub: #!/bin/sh ll-search stub is not an executable ll-search.exe on win32',
+    ),
+  };
+
+  it('injects in live mode with a hit (control for the cases below)', stub, () => {
+    assert.ok(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'live' }).length > 0);
   });
 
-  it('produces empty stdout when mode is off', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_MODE: 'off' });
-    assert.equal(out, '');
+  it('produces empty stdout in shadow mode', stub, () => {
+    assert.equal(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'shadow' }), '');
+  });
+
+  it('produces empty stdout when mode is off', stub, () => {
+    assert.equal(runWithHit({ LEARNING_LOOP_INJECTION_MODE: 'off' }), '');
   });
 
   it('produces empty stdout on gate-fail path', () => {
@@ -433,9 +369,14 @@ describe('session-label stdout contract', () => {
     }
   });
 
-  it('produces empty stdout when pipeline throws', () => {
-    const out = runCapturingStdout({ LEARNING_LOOP_INJECTION_FORCE_ERROR: '1' });
-    assert.equal(out, '');
+  it('produces empty stdout when pipeline throws', stub, () => {
+    assert.equal(
+      runWithHit({
+        LEARNING_LOOP_INJECTION_MODE: 'live',
+        LEARNING_LOOP_INJECTION_FORCE_ERROR: '1',
+      }),
+      '',
+    );
   });
 });
 
@@ -457,10 +398,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -490,8 +429,6 @@ describe(
 
         const sid = randomUUID();
         const env = {
-          ...process.env,
-          HOME: home,
           TMPDIR: base,
           LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
@@ -501,12 +438,13 @@ describe(
           LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
         };
         const runPrompt = (prompt) =>
-          execFileSync('node', [HOOK], {
-            input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
-            encoding: 'utf-8',
-            timeout: 30000,
-            env,
-          });
+          hook(
+            { session_id: sid, prompt, transcript_path: '', cwd: '/tmp' },
+            {
+              timeoutMs: 30000,
+              env,
+            },
+          ).stdout;
 
         const out1 = runPrompt('tell me about hook injection ordering and budgets');
         assert.ok(out1.includes('Alpha note body'), 'prompt 1 must body-inject the top hit');
@@ -532,10 +470,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -550,8 +486,6 @@ describe(
 
         const sid = randomUUID();
         const env = {
-          ...process.env,
-          HOME: home,
           TMPDIR: base,
           LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
@@ -561,12 +495,13 @@ describe(
           LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
         };
         const runPrompt = (prompt) =>
-          execFileSync('node', [HOOK], {
-            input: JSON.stringify({ session_id: sid, prompt, transcript_path: '', cwd: '/tmp' }),
-            encoding: 'utf-8',
-            timeout: 30000,
-            env,
-          });
+          hook(
+            { session_id: sid, prompt, transcript_path: '', cwd: '/tmp' },
+            {
+              timeoutMs: 30000,
+              env,
+            },
+          ).stdout;
 
         const out1 = runPrompt('tell me about hook injection ordering and budgets');
         assert.ok(out1.includes('Solo note body'), 'prompt 1 must body-inject the hit');
@@ -589,10 +524,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(join(vault, 'notes', 'alpha.md'), 'Alpha body about budgets.\n');
@@ -608,8 +541,6 @@ describe(
 
         const sid = randomUUID();
         const env = {
-          ...process.env,
-          HOME: home,
           TMPDIR: base,
           LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
           CLAUDE_PLUGIN_DATA: pluginData,
@@ -619,17 +550,18 @@ describe(
           LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
         };
         for (let i = 0; i < 4; i++) {
-          execFileSync('node', [HOOK], {
-            input: JSON.stringify({
+          hook(
+            {
               session_id: sid,
               prompt: `budgets question number ${i} about hook injection ordering`,
               transcript_path: '',
               cwd: '/tmp',
-            }),
-            encoding: 'utf-8',
-            timeout: 30000,
-            env,
-          });
+            },
+            {
+              timeoutMs: 30000,
+              env,
+            },
+          );
         }
 
         const statePath = join(pluginData, 'retrieval', 'session-dedupe', `${sid}.json`);
@@ -660,10 +592,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -682,19 +612,15 @@ describe(
           mode: 0o755,
         });
 
-        const input = JSON.stringify({
+        const input = {
           session_id: randomUUID(),
           prompt: 'how should we rotate the AWS deploy key for the worker',
           transcript_path: '',
           cwd: '/tmp',
-        });
-        const out = execFileSync('node', [HOOK], {
-          input,
-          encoding: 'utf-8',
-          timeout: 30000,
+        };
+        const out = hook(input, {
+          timeoutMs: 30000,
           env: {
-            ...process.env,
-            HOME: home,
             TMPDIR: base,
             LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
             CLAUDE_PLUGIN_DATA: pluginData,
@@ -705,7 +631,7 @@ describe(
             // abort the stub backend before it answers, failing the gate.
             LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
           },
-        });
+        }).stdout;
 
         assert.ok(
           out.length > 0,
@@ -736,10 +662,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -751,27 +675,26 @@ describe(
           mode: 0o755,
         });
 
-        const out = execFileSync('node', [HOOK], {
-          input: JSON.stringify({
+        const out = hook(
+          {
             session_id: randomUUID(),
             prompt: 'what do we know about race caps and injection telemetry',
             transcript_path: '',
             cwd: '/tmp',
-          }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: {
-            ...process.env,
-            HOME: home,
-            TMPDIR: base,
-            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
-            CLAUDE_PLUGIN_DATA: pluginData,
-            VAULT_PATH: vault,
-            LEARNING_LOOP_INJECTION_MODE: 'live',
-            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
           },
-        });
+          {
+            timeoutMs: 30000,
+            env: {
+              TMPDIR: base,
+              LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+              CLAUDE_PLUGIN_DATA: pluginData,
+              VAULT_PATH: vault,
+              LEARNING_LOOP_INJECTION_MODE: 'live',
+              LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+              LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+            },
+          },
+        ).stdout;
         assert.ok(out.length > 0, 'gate did not pass — stub arrangement broken');
 
         const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -812,10 +735,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -828,27 +749,26 @@ describe(
         });
 
         const sid = randomUUID();
-        execFileSync('node', [HOOK], {
-          input: JSON.stringify({
+        hook(
+          {
             session_id: sid,
             prompt: 'what do we know about shared timestamps and dedupe joins',
             transcript_path: '',
             cwd: '/tmp',
-          }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: {
-            ...process.env,
-            HOME: home,
-            TMPDIR: base,
-            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
-            CLAUDE_PLUGIN_DATA: pluginData,
-            VAULT_PATH: vault,
-            LEARNING_LOOP_INJECTION_MODE: 'live',
-            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
           },
-        });
+          {
+            timeoutMs: 30000,
+            env: {
+              TMPDIR: base,
+              LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+              CLAUDE_PLUGIN_DATA: pluginData,
+              VAULT_PATH: vault,
+              LEARNING_LOOP_INJECTION_MODE: 'live',
+              LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+              LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+            },
+          },
+        );
 
         const statePath = join(pluginData, 'retrieval', 'session-dedupe', `${sid}.json`);
         const state = JSON.parse(readFileSync(statePath, 'utf-8'));
@@ -889,10 +809,8 @@ describe(
       try {
         const vault = join(base, 'vault');
         const pluginData = join(base, 'plugin-data');
-        const home = join(base, 'home');
         const stubBin = join(pluginData, 'bin');
         mkdirSync(join(vault, 'notes'), { recursive: true });
-        mkdirSync(home, { recursive: true });
         mkdirSync(stubBin, { recursive: true });
 
         writeFileSync(
@@ -904,28 +822,27 @@ describe(
           mode: 0o755,
         });
 
-        const out = execFileSync('node', [HOOK], {
-          input: JSON.stringify({
+        const out = hook(
+          {
             session_id: randomUUID(),
             prompt: 'what do we know about synthetic calibration tagging',
             transcript_path: '',
             cwd: '/tmp',
-          }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: {
-            ...process.env,
-            HOME: home,
-            TMPDIR: base,
-            LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
-            CLAUDE_PLUGIN_DATA: pluginData,
-            VAULT_PATH: vault,
-            LEARNING_LOOP_INJECTION_MODE: 'shadow',
-            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
-            ...(synthetic ? { LEARNING_LOOP_SYNTHETIC: '1' } : {}),
           },
-        });
+          {
+            timeoutMs: 30000,
+            env: {
+              TMPDIR: base,
+              LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0',
+              CLAUDE_PLUGIN_DATA: pluginData,
+              VAULT_PATH: vault,
+              LEARNING_LOOP_INJECTION_MODE: 'shadow',
+              LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+              LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+              ...(synthetic ? { LEARNING_LOOP_SYNTHETIC: '1' } : {}),
+            },
+          },
+        ).stdout;
         assert.ok(out.length === 0, 'shadow mode must stay silent on stdout');
 
         const month = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
@@ -955,57 +872,105 @@ describe(
   },
 );
 
-// Every hook spawn must name the plugin-data dir it writes to. Left unset, the
-// hook resolves the ~/.claude/plugins/data/.ll-data-path marker and logs into
-// the developer's real install, where fixture prompts are indistinguishable
-// from real traffic — 70% of one calibration window was test runs before this
-// was caught. Asserted against this file's own source because the invariant is
-// about how spawns are written, and a spawn that forgets it looks correct at
-// every other layer.
+// Every hook spawn must be blind to the developer's shell. Inheriting
+// CLAUDE_PLUGIN_DATA (or leaving it unset, which resolves the real install's
+// .ll-data-path marker) logs fixture prompts into production telemetry: 70% of
+// one calibration window was test runs before this was caught. Inheriting
+// VAULT_PATH or LEARNING_LOOP_SYNTHETIC retrieves against the real vault and
+// mislabels records. Asserted on where records land and what they carry.
 describe('session-label test isolation', () => {
-  it('no hook spawn omits CLAUDE_PLUGIN_DATA', () => {
-    const src = readFileSync(new URL(import.meta.url), 'utf8');
-    const offenders = [];
-    const spawnRe = /(?:execFileSync|spawnSync)\(\s*'node',\s*\[HOOK\][\s\S]*?\n(\s*)\}\);/g;
-    for (const m of src.matchAll(spawnRe)) {
-      const call = m[0];
-      // Sanctioned forms: the hookEnv() seam, an inline key, or an `env`
-      // identifier whose object literal above defines one (the shared-env
-      // sites build `const env = {...}` once and reuse it).
-      const viaSeam = call.includes('hookEnv(');
-      const inline = call.includes('CLAUDE_PLUGIN_DATA');
-      const viaSharedEnv = /\n\s*env,\n/.test(call) && /CLAUDE_PLUGIN_DATA:/.test(src);
-      if (!viaSeam && !inline && !viaSharedEnv) {
-        offenders.push(call.slice(0, 120).replace(/\s+/g, ' '));
+  function withParentEnv(vars, fn) {
+    const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, vars);
+    try {
+      return fn();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
       }
     }
-    assert.deepEqual(
-      offenders,
-      [],
-      `hook spawns must set CLAUDE_PLUGIN_DATA (use runHook):\n${offenders.join('\n')}`,
+  }
+
+  function shadowRecords(pluginData) {
+    const retrieval = join(pluginData, 'retrieval');
+    if (!existsSync(retrieval)) return [];
+    return readdirSync(retrieval)
+      .filter((f) => f.startsWith('shadow-injection-'))
+      .flatMap((f) =>
+        readFileSync(join(retrieval, f), 'utf8')
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((l) => JSON.parse(l)),
+      );
+  }
+
+  function runIsolated(parentEnv, seed) {
+    return withParentEnv(parentEnv, () =>
+      runHook(HOOK, {
+        stdin: {
+          session_id: randomUUID(),
+          prompt: 'a prompt long enough to clear the fast path gate for isolation',
+          transcript_path: '',
+          cwd: '/tmp',
+        },
+        env: { TMPDIR: TMP, LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: '0' },
+        seed,
+      }),
     );
+  }
+
+  it('an ambient CLAUDE_PLUGIN_DATA cannot redirect telemetry out of the sandbox', () => {
+    const ambient = mkdtempSync(join(tmpdir(), 'll-ambient-data-'));
+    const r = runIsolated({ CLAUDE_PLUGIN_DATA: ambient });
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      // Assert on where the telemetry actually landed, not only on the absence
+      // of a path: "the ambient dir stayed empty" would also pass if the hook
+      // simply never logged, which is the failure this exists to catch.
+      assert.ok(shadowRecords(r.pluginDataDir).length > 0, 'the sandbox must hold the record');
+      assert.deepEqual(readdirSync(ambient), [], 'nothing may land in the ambient dir');
+    } finally {
+      r.cleanup();
+      rmSync(ambient, { recursive: true, force: true });
+    }
   });
 
-  it('runHook applies the sandbox after the caller env, so ambient values cannot win', () => {
-    const sid = randomUUID();
-    runHook({
-      input: JSON.stringify({
-        session_id: sid,
-        prompt: 'a prompt long enough to clear the fast path gate for isolation',
-        transcript_path: '',
-        cwd: '/tmp',
-      }),
-      env: { CLAUDE_PLUGIN_DATA: '/should/be/overridden' },
-    });
-    // Assert on where the telemetry actually landed, not on the absence of a
-    // path: "the bogus dir wasn't created" would also pass if the hook simply
-    // never logged, which is the failure this test exists to catch.
-    const retrieval = join(SANDBOX, 'retrieval');
-    assert.ok(existsSync(retrieval), 'the hook must have logged into the sandbox');
-    assert.ok(
-      readdirSync(retrieval).some((f) => f.startsWith('shadow-injection-')),
-      'sandbox must hold the shadow-injection record',
+  it('an ambient VAULT_PATH and LEARNING_LOOP_SYNTHETIC do not reach the hook', () => {
+    const parentVault = mkdtempSync(join(tmpdir(), 'll-parent-vault-'));
+    mkdirSync(join(parentVault, 'notes'));
+    writeFileSync(join(parentVault, 'notes', 'x.md'), 'Parent vault note about isolation.\n');
+    // A stub that records every invocation: retrieval against any vault, the
+    // parent's included, has to go through it.
+    const r = runIsolated({ VAULT_PATH: parentVault, LEARNING_LOOP_SYNTHETIC: '1' }, (pluginData) =>
+      writeFileSync(
+        join(pluginData, 'bin', 'll-search'),
+        `#!/bin/sh\necho "$*" >> ${JSON.stringify(join(pluginData, 'll-args.log'))}\nprintf '[]'\n`,
+        { mode: 0o755 },
+      ),
     );
+    try {
+      assert.equal(r.exitCode, 0, r.stderr);
+      const records = shadowRecords(r.pluginDataDir);
+      assert.ok(records.length > 0, 'the hook must have logged a record');
+      assert.ok(
+        records.every((rec) => !('synthetic' in rec)),
+        `records must carry no synthetic field; got ${JSON.stringify(records)}`,
+      );
+      assert.deepEqual(
+        records.map((rec) => rec.type),
+        ['gate-fail-no-vault'],
+        'the hook must see no vault at all',
+      );
+      assert.ok(
+        !existsSync(join(r.pluginDataDir, 'll-args.log')),
+        'no retrieval may run against the parent vault',
+      );
+    } finally {
+      r.cleanup();
+      rmSync(parentVault, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1015,9 +980,8 @@ describe('session-label test isolation', () => {
 // its own is a continuation or a reaction, and no note helps on those turns —
 // so the check runs BEFORE retrieval and a hopeless turn costs no search spawn.
 //
-// This spawns directly rather than through hookEnv(), which pins the floor to 0
-// for the rest of the file; pinning it here would disable the behaviour under
-// test. The inline CLAUDE_PLUGIN_DATA keeps the isolation guard satisfied.
+// hook() pins the floor to 0 for the rest of the file; pinning it here would
+// disable the behaviour under test, so this case unsets it.
 describe(
   'session-label impact gate',
   { skip: skipOnWindows('the stub ll-search is a #!/bin/sh script, not an .exe') },
@@ -1030,7 +994,6 @@ describe(
         const vault = join(base, 'vault');
         mkdirSync(join(vault, 'notes'), { recursive: true });
         mkdirSync(stubBin, { recursive: true });
-        mkdirSync(join(base, 'home'), { recursive: true });
         writeFileSync(join(vault, 'notes', 'x.md'), 'Body text about deployment.\n');
         // A stub that clears any threshold if it is ever consulted. If the
         // impact gate works, it never is.
@@ -1039,26 +1002,26 @@ describe(
           '#!/bin/sh\nprintf \'%s\' \'[{"path":"notes/x.md","title":"x","score":0.99}]\'\n',
           { mode: 0o755 },
         );
-        const out = execFileSync('node', [HOOK], {
-          input: JSON.stringify({
+        const out = hook(
+          {
             session_id: randomUUID(),
             prompt: 'ah right ok so what do you think about that then',
             transcript_path: '',
             cwd: '/tmp',
-          }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: {
-            ...process.env,
-            HOME: join(base, 'home'),
-            TMPDIR: base,
-            CLAUDE_PLUGIN_DATA: pluginData,
-            VAULT_PATH: vault,
-            LEARNING_LOOP_SYNTHETIC: '1',
-            LEARNING_LOOP_INJECTION_MODE: 'live',
-            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
           },
-        });
+          {
+            timeoutMs: 30000,
+            env: {
+              TMPDIR: base,
+              CLAUDE_PLUGIN_DATA: pluginData,
+              VAULT_PATH: vault,
+              LEARNING_LOOP_SYNTHETIC: '1',
+              LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: undefined,
+              LEARNING_LOOP_INJECTION_MODE: 'live',
+              LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+            },
+          },
+        ).stdout;
         assert.equal(out, '', 'a low-impact turn must inject nothing');
 
         // Scan the bucket files rather than computing the month: the writer
@@ -1109,7 +1072,6 @@ describe(
         const argsLog = join(base, 'll-args.log');
         mkdirSync(join(vault, 'notes'), { recursive: true });
         mkdirSync(stubBin, { recursive: true });
-        mkdirSync(join(base, 'home'), { recursive: true });
         writeFileSync(join(vault, 'notes', 'gamma.md'), 'Gamma note body about dedupe windows.\n');
 
         // The stub records every argv it is called with, which is the only way
@@ -1121,28 +1083,29 @@ describe(
           { mode: 0o755 },
         );
 
-        const out = execFileSync('node', [HOOK], {
-          input: JSON.stringify({
+        const out = hook(
+          {
             session_id: randomUUID(),
             prompt:
               'walk me through the dedupe window behaviour for injected pointer notes in this session',
             transcript_path: '',
             cwd: '/tmp',
-          }),
-          encoding: 'utf-8',
-          timeout: 30000,
-          env: {
-            ...process.env,
-            HOME: join(base, 'home'),
-            TMPDIR: base,
-            CLAUDE_PLUGIN_DATA: pluginData,
-            VAULT_PATH: vault,
-            LEARNING_LOOP_SYNTHETIC: '1',
-            LEARNING_LOOP_INJECTION_MODE: 'live',
-            LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
-            LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
           },
-        });
+          {
+            timeoutMs: 30000,
+            env: {
+              TMPDIR: base,
+              CLAUDE_PLUGIN_DATA: pluginData,
+              VAULT_PATH: vault,
+              LEARNING_LOOP_SYNTHETIC: '1',
+              // The real floor: this prompt clears the impact gate on its own.
+              LEARNING_LOOP_INJECTION_MIN_SPECIFICITY: undefined,
+              LEARNING_LOOP_INJECTION_MODE: 'live',
+              LEARNING_LOOP_INJECTION_THRESHOLD: '0.1',
+              LEARNING_LOOP_INJECTION_RACE_CAP_MS: '20000',
+            },
+          },
+        ).stdout;
 
         // Negative control: without this, the assertion below would also pass
         // if the gate never opened and the binary was never consulted at all.

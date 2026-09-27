@@ -8,6 +8,8 @@ import {
   appendJsonlLineSafe,
   appendJsonlLineDeduped,
   readTailBytes,
+  readJsonlDir,
+  readTailLines,
   _dedupeStats,
   _resetDedupeCache,
   _lastWrittenSize,
@@ -318,4 +320,59 @@ test('readTailBytes: truncated is true when the read starts past byte 0', () => 
     assert.strictEqual(truncated, true);
     assert.ok(text.length <= 8);
   });
+});
+
+test('readTailLines: returns every line when the file fits in maxBytes', () => {
+  withTempDir((dir) => {
+    const p = join(dir, 'small.jsonl');
+    writeFileSync(p, 'line one\nline two\nline three');
+    assert.deepStrictEqual(readTailLines(p, 1024), ['line one', 'line two', 'line three']);
+  });
+});
+
+test('readTailLines: drops the partial first line when the read starts mid-file', () => {
+  withTempDir((dir) => {
+    const p = join(dir, 'big.jsonl');
+    const lines = [];
+    for (let i = 0; i < 100; i++) lines.push(`{"n":${i},"pad":"${'x'.repeat(50)}"}`);
+    writeFileSync(p, lines.join('\n'));
+    const got = readTailLines(p, 300);
+    assert.ok(got.length >= 2, 'tail should contain complete lines');
+    for (const l of got) JSON.parse(l);
+    assert.strictEqual(got[got.length - 1], lines[lines.length - 1]);
+  });
+});
+
+test('readTailLines: a window with no newline in it holds no whole line', () => {
+  withTempDir((dir) => {
+    const p = join(dir, 'one-giant-line.jsonl');
+    writeFileSync(p, 'a'.repeat(10_000));
+    assert.deepStrictEqual(readTailLines(p, 100), []);
+  });
+});
+
+test('readTailLines: a multi-byte character the window cuts goes with the dropped line', () => {
+  withTempDir((dir) => {
+    const p = join(dir, 'multibyte.jsonl');
+    writeFileSync(p, `${'\u{1F600}'.repeat(100)}\nfinal line`);
+    // 'final line' is 10 bytes; a 17-byte window starts mid-emoji.
+    assert.deepStrictEqual(readTailLines(p, 17), ['final line']);
+  });
+});
+
+test('readJsonlDir: a torn line costs that record, not the rest of the file or the next file', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'queries-2026-08.jsonl'), '{"n":1}\n{"n":\n{"n":2}\n');
+    writeFileSync(join(dir, 'queries-2026-09.jsonl'), '{"n":3}\n{"n":4}\n');
+    writeFileSync(join(dir, 'reads-2026-09.jsonl'), '{"n":99}\n');
+    writeFileSync(join(dir, 'queries-notes.txt'), '{"n":98}\n');
+    const ns = readJsonlDir(dir, 'queries-')
+      .map((r) => r.n)
+      .sort();
+    assert.deepStrictEqual(ns, [1, 2, 3, 4]);
+  });
+});
+
+test('readJsonlDir: a missing directory reads as empty', () => {
+  assert.deepStrictEqual(readJsonlDir(join(tmpdir(), 'll-jsonl-no-such-dir'), 'x-'), []);
 });
