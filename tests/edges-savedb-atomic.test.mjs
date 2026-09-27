@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openEdgeDb, addEdge, saveDb, getEdgesFrom } from '../plugin/scripts/lib/edges.mjs';
 import { skipOnWindows } from './helpers/platform.mjs';
 
-test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () => {
+test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const dbPath = join(dir, 'edges.db');
   const db = await openEdgeDb(dbPath);
   addEdge(db, { fromPath: 'a.md', toPath: 'b.md', edgeType: 'evidence_for' });
@@ -26,8 +27,9 @@ test('saveDb round-trips via tmp+rename: db reopens, no tmp residue', async () =
 test(
   'saveDb replaces the db file instead of rewriting it in place',
   { skip: skipOnWindows('statSync().ino is not a reliable file identity on win32') },
-  async () => {
+  async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'll-edges-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
     const dbPath = join(dir, 'edges.db');
     const db = await openEdgeDb(dbPath);
     saveDb(db, dbPath);

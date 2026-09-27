@@ -9,6 +9,19 @@ import { strykerEnv } from './helpers/stryker-env.mjs';
 
 const SCRIPTS = join(dirname(fileURLToPath(import.meta.url)), '..', 'plugin', 'scripts');
 const REPORT = join(SCRIPTS, 'retrieval-report.mjs');
+
+// The report CLI's env: nothing from the real HOME, so neither the
+// developer's plugin data nor their vault config can leak into a run.
+function cliEnv(home, extra = {}) {
+  return {
+    PATH: process.env.PATH,
+    HOME: home,
+    USERPROFILE: home,
+    CLAUDE_PLUGIN_DATA: home,
+    ...strykerEnv(),
+    ...extra,
+  };
+}
 const { sessionSurfaced, usageReport, loadNoteUsageEvents, loadUnevidencedInformed } = await import(
   pathToFileURL(join(SCRIPTS, 'lib', 'retrieval-usage.mjs')).href
 );
@@ -391,7 +404,7 @@ test('CLI --session-surfaced prints JSON for the session', () => {
   });
   try {
     const result = spawnSync('node', [REPORT, '--session-surfaced', 'sX'], {
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: pd },
+      env: cliEnv(pd),
       encoding: 'utf-8',
     });
     assert.strictEqual(result.status, 0, result.stderr);
@@ -412,7 +425,7 @@ test('CLI default report survives non-string query records and reaches the usage
   );
   try {
     const result = spawnSync('node', [REPORT], {
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: pd, VAULT_PATH: join(pd, 'no-vault') },
+      env: cliEnv(pd, { VAULT_PATH: join(pd, 'no-vault') }),
       encoding: 'utf-8',
     });
     assert.strictEqual(result.status, 0, result.stderr);
@@ -510,7 +523,7 @@ test('CLI --usage --json emits the aggregation; text mode carries the honesty la
   writeFileSync(join(vault, '3-permanent', 'hot.md'), '# hot');
   writeFileSync(join(vault, '3-permanent', 'cold.md'), '# cold');
   try {
-    const env = { ...process.env, CLAUDE_PLUGIN_DATA: pd, VAULT_PATH: vault };
+    const env = cliEnv(pd, { VAULT_PATH: vault });
     const json = spawnSync('node', [REPORT, '--usage', '--json'], { env, encoding: 'utf-8' });
     assert.strictEqual(json.status, 0, json.stderr);
     const parsed = JSON.parse(json.stdout);
@@ -687,7 +700,7 @@ test('retrieval-report --memory-reads emits per-file JSON', () => {
   try {
     const out = spawnSync(process.execPath, [REPORT, '--memory-reads', '--json'], {
       encoding: 'utf8',
-      env: { ...process.env, CLAUDE_PLUGIN_DATA: pd },
+      env: cliEnv(pd),
     });
     assert.equal(out.status, 0, out.stderr);
     const parsed = JSON.parse(out.stdout);
@@ -713,13 +726,7 @@ test('retrieval-report counts every valid query around a torn line', () => {
   try {
     const out = spawnSync(process.execPath, [REPORT], {
       encoding: 'utf8',
-      env: {
-        PATH: process.env.PATH,
-        HOME: home,
-        USERPROFILE: home,
-        CLAUDE_PLUGIN_DATA: pd,
-        ...strykerEnv(),
-      },
+      env: cliEnv(home, { CLAUDE_PLUGIN_DATA: pd }),
     });
     assert.equal(out.status, 0, out.stderr);
     assert.match(out.stdout, /Total queries:\s+4\n/);
