@@ -85,13 +85,13 @@ for (const file of files) {
 }
 
 test('the scanner finds every provenance-emit.js call site, both shapes', () => {
-  // Ground truth: 35 inline + 3 heredoc = 38, minus dream/SKILL.md's one
+  // Ground truth: 35 inline + 4 heredoc = 39, minus dream/SKILL.md's one
   // ACTION-placeholder template line that documents the pattern rather than
   // emitting.
   assert.strictEqual(
     callSites.length,
-    37,
-    `expected 37 real call sites, found ${callSites.length}`,
+    38,
+    `expected 38 real call sites, found ${callSites.length}`,
   );
 
   const heredocSites = callSites.filter((c) => !c.raw.startsWith("'"));

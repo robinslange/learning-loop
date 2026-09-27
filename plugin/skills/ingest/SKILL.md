@@ -259,9 +259,12 @@ The agent returns `confirmed_insights` JSON. Skip to Step 3.
 Append a run entry at the start of Step 5.5 — every ingest path reaches that step, including memory-only runs whose vault worklist is `none` (those skip Step 5a entirely) — or on any abort path:
 
 ```bash
-PLUGIN="$(ll-paths PLUGIN)"
-node -e "import('$PLUGIN/scripts/ingest-provenance.mjs').then(m => m.appendIngestEvent(process.env.CLAUDE_PLUGIN_DATA, { slug: '${SLUG}', tier: '${TIER}', gate_reason: '${REASON}', override: '${OVERRIDE:-null}', mapper_summary: <ACK_JSONS>, synthesizer: <SYNTH_RESULT>, duration_seconds: <ELAPSED>, ygrep_used: <BOOL>, audit_ok: <BOOL>, git_diff_outside: <ARRAY> }))"
+ll-run provenance-emit.js - <<'JSON'
+{"agent":"ingest","skill":"ingest","action":"ingest","slug":"<slug>","tier":"single|parallel","gate_reason":"<reason>","override":"<override>","mapper_summary":<ACK_JSONS>,"synthesizer":<SYNTH_RESULT>,"duration_seconds":N,"ygrep_used":true|false,"audit_ok":true|false,"git_diff_outside":<ARRAY>}
+JSON
 ```
+
+Fill every placeholder with its real value before running, and write `"override":null` when no override was given. The heredoc is quoted, so the shell expands nothing inside it.
 
 ### Step 3: Preview
 
