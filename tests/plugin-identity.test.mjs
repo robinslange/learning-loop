@@ -60,7 +60,9 @@ describe('the marketplace name is spelled once', () => {
         spelled.map((l) => l.trim()),
         [`readonly LL_MARKETPLACE="${MARKETPLACE_NAME}"`],
       );
-      const plugin = lines.map((l) => l.match(/^\s*readonly LL_PLUGIN="([^"]*)"$/)?.[1]).find(Boolean);
+      const plugin = lines
+        .map((l) => l.match(/^\s*readonly LL_PLUGIN="([^"]*)"$/)?.[1])
+        .find(Boolean);
       assert.equal(plugin, PLUGIN_NAME);
     });
   }
@@ -69,6 +71,8 @@ describe('the marketplace name is spelled once', () => {
 describe('shim text', () => {
   // Installed shims are rewritten whenever this text changes, so a refactor
   // that moves where the text comes from must not move a single byte.
+  // After an intentional shim change, regenerate the fixture from the repo root:
+  // node --input-type=module -e "import{writeFileSync}from'node:fs';import{renderShim}from'./plugin/scripts/lib/shims.mjs';import{SHIM_NAMES}from'./plugin/scripts/lib/paths.mjs';const s={};for(const p of['linux','win32'])for(const n of SHIM_NAMES)s[n+'.'+p]=renderShim(n,p);writeFileSync('tests/fixtures/shim-snapshots.json',JSON.stringify(s,null,2)+'\n')"
   const snapshots = readJson('tests/fixtures/shim-snapshots.json');
   for (const platform of ['linux', 'win32']) {
     for (const name of SHIM_NAMES) {
