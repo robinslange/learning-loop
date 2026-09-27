@@ -80,6 +80,18 @@ function unresolved(sites) {
   }
 }
 
+// A call in a shape IMPORT_RE doesn't know, such as .then(({ x }) => ...),
+// would otherwise be skipped without a word.
+test('every plugin import in skill and agent markdown is one this test can check', () => {
+  const unmatched = SCAN_DIRS.flatMap((d) => walk(join(PLUGIN, d))).flatMap((file) => {
+    const text = readFileSync(file, 'utf-8');
+    const imports = text.match(new RegExp(PLUGIN_IMPORT, 'g'))?.length ?? 0;
+    const checked = [...text.matchAll(IMPORT_RE)].length;
+    return imports === checked ? [] : [`${relative(PLUGIN, file)}: ${imports - checked} unchecked`];
+  });
+  assert.deepEqual(unmatched, []);
+});
+
 test('every scripts/ export a skill or agent imports exists', () => {
   const sites = callSites();
   assert.ok(sites.length >= 10, `expected the known call sites, found ${sites.length}`);
